@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- 背景圆形 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,54m-40,0a40,40 0,1 1,80 0a40,40 0,1 1,-80 0"/>
+    
+    <!-- 字幕图标 - 类似 CC 标志 -->
+    <path
+        android:fillColor="#1976D2"
+        android:pathData="M42,42h8v4h-4v16h4v4h-8V42z"/>
+    
+    <path
+        android:fillColor="#1976D2"
+        android:pathData="M58,42h8v4h-4v16h4v4h-8V42z"/>
+    
+    <!-- 时间轴线条 -->
+    <path
+        android:fillColor="#1976D2"
+        android:pathData="M34,54h40v4h-40z"/>
+    
+    <!-- 播放三角形 -->
+    <path
+        android:fillColor="#1976D2"
+        android:pathData="M76,54l10,6l-10,6V54z"/>
+    
+</vector>

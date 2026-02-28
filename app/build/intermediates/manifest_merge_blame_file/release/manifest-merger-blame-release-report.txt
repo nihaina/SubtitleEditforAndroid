@@ -1,0 +1,195 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.subtitleedit"
+4    android:versionCode="1"
+5    android:versionName="1.0" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="33"
+9        android:targetSdkVersion="34" />
+10
+11    <!-- 存储权限 -->
+12    <uses-permission
+12-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:6:5-7:38
+13        android:name="android.permission.READ_EXTERNAL_STORAGE"
+13-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:6:22-77
+14        android:maxSdkVersion="32" />
+14-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:7:9-35
+15    <uses-permission
+15-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:8:5-10:40
+16        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+16-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:8:22-78
+17        android:maxSdkVersion="32" />
+17-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:9:9-35
+18    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+18-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:11:5-12:40
+18-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:11:22-79
+19
+20    <!-- 网络权限 -->
+21    <uses-permission android:name="android.permission.INTERNET" />
+21-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:15:5-67
+21-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:15:22-64
+22    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+22-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:16:5-79
+22-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:16:22-76
+23
+24    <permission
+24-->[androidx.core:core:1.13.0] C:\Users\z1336\.gradle\caches\transforms-3\5658cee5c5807342015e6c72cf46f426\transformed\core-1.13.0\AndroidManifest.xml:22:5-24:47
+25        android:name="com.subtitleedit.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+25-->[androidx.core:core:1.13.0] C:\Users\z1336\.gradle\caches\transforms-3\5658cee5c5807342015e6c72cf46f426\transformed\core-1.13.0\AndroidManifest.xml:23:9-81
+26        android:protectionLevel="signature" />
+26-->[androidx.core:core:1.13.0] C:\Users\z1336\.gradle\caches\transforms-3\5658cee5c5807342015e6c72cf46f426\transformed\core-1.13.0\AndroidManifest.xml:24:9-44
+27
+28    <uses-permission android:name="com.subtitleedit.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+28-->[androidx.core:core:1.13.0] C:\Users\z1336\.gradle\caches\transforms-3\5658cee5c5807342015e6c72cf46f426\transformed\core-1.13.0\AndroidManifest.xml:26:5-97
+28-->[androidx.core:core:1.13.0] C:\Users\z1336\.gradle\caches\transforms-3\5658cee5c5807342015e6c72cf46f426\transformed\core-1.13.0\AndroidManifest.xml:26:22-94
+29
+30    <application
+30-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:18:5-64:19
+31        android:allowBackup="true"
+31-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:19:9-35
+32        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+32-->[androidx.core:core:1.13.0] C:\Users\z1336\.gradle\caches\transforms-3\5658cee5c5807342015e6c72cf46f426\transformed\core-1.13.0\AndroidManifest.xml:28:18-86
+33        android:extractNativeLibs="false"
+34        android:icon="@mipmap/ic_launcher"
+34-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:20:9-43
+35        android:label="@string/app_name"
+35-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:21:9-41
+36        android:requestLegacyExternalStorage="true"
+36-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:25:9-52
+37        android:roundIcon="@mipmap/ic_launcher_round"
+37-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:22:9-54
+38        android:supportsRtl="true"
+38-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:23:9-35
+39        android:theme="@style/Theme.SubtitleEditforAndroid" >
+39-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:24:9-60
+40        <activity
+40-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:28:9-36:20
+41            android:name="com.subtitleedit.MainActivity"
+41-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:29:13-41
+42            android:exported="true"
+42-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:30:13-36
+43            android:theme="@style/Theme.SubtitleEditforAndroid" >
+43-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:31:13-64
+44            <intent-filter>
+44-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:32:13-35:29
+45                <action android:name="android.intent.action.MAIN" />
+45-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:33:17-69
+45-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:33:25-66
+46
+47                <category android:name="android.intent.category.LAUNCHER" />
+47-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:34:17-77
+47-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:34:27-74
+48            </intent-filter>
+49        </activity>
+50        <activity
+50-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:38:9-42:90
+51            android:name="com.subtitleedit.EditorActivity"
+51-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:39:13-43
+52            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+52-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:42:13-87
+53            android:exported="false"
+53-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:40:13-37
+54            android:theme="@style/Theme.SubtitleEditforAndroid" />
+54-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:41:13-64
+55        <activity
+55-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:44:9-47:67
+56            android:name="com.subtitleedit.BatchConvertActivity"
+56-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:45:13-49
+57            android:exported="false"
+57-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:46:13-37
+58            android:theme="@style/Theme.SubtitleEditforAndroid" />
+58-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:47:13-64
+59        <activity
+59-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:49:9-52:67
+60            android:name="com.subtitleedit.DraftsActivity"
+60-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:50:13-43
+61            android:exported="false"
+61-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:51:13-37
+62            android:theme="@style/Theme.SubtitleEditforAndroid" />
+62-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:52:13-64
+63        <activity
+63-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:54:9-57:67
+64            android:name="com.subtitleedit.SettingsActivity"
+64-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:55:13-45
+65            android:exported="false"
+65-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:56:13-37
+66            android:theme="@style/Theme.SubtitleEditforAndroid" />
+66-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:57:13-64
+67        <activity
+67-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:59:9-62:67
+68            android:name="com.subtitleedit.ToolsActivity"
+68-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:60:13-42
+69            android:exported="false"
+69-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:61:13-37
+70            android:theme="@style/Theme.SubtitleEditforAndroid" />
+70-->D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:62:13-64
+71
+72        <provider
+72-->[androidx.emoji2:emoji2:1.2.0] C:\Users\z1336\.gradle\caches\transforms-3\6f6fec51fc0bf858d6900b90dd62d6da\transformed\emoji2-1.2.0\AndroidManifest.xml:24:9-32:20
+73            android:name="androidx.startup.InitializationProvider"
+73-->[androidx.emoji2:emoji2:1.2.0] C:\Users\z1336\.gradle\caches\transforms-3\6f6fec51fc0bf858d6900b90dd62d6da\transformed\emoji2-1.2.0\AndroidManifest.xml:25:13-67
+74            android:authorities="com.subtitleedit.androidx-startup"
+74-->[androidx.emoji2:emoji2:1.2.0] C:\Users\z1336\.gradle\caches\transforms-3\6f6fec51fc0bf858d6900b90dd62d6da\transformed\emoji2-1.2.0\AndroidManifest.xml:26:13-68
+75            android:exported="false" >
+75-->[androidx.emoji2:emoji2:1.2.0] C:\Users\z1336\.gradle\caches\transforms-3\6f6fec51fc0bf858d6900b90dd62d6da\transformed\emoji2-1.2.0\AndroidManifest.xml:27:13-37
+76            <meta-data
+76-->[androidx.emoji2:emoji2:1.2.0] C:\Users\z1336\.gradle\caches\transforms-3\6f6fec51fc0bf858d6900b90dd62d6da\transformed\emoji2-1.2.0\AndroidManifest.xml:29:13-31:52
+77                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+77-->[androidx.emoji2:emoji2:1.2.0] C:\Users\z1336\.gradle\caches\transforms-3\6f6fec51fc0bf858d6900b90dd62d6da\transformed\emoji2-1.2.0\AndroidManifest.xml:30:17-75
+78                android:value="androidx.startup" />
+78-->[androidx.emoji2:emoji2:1.2.0] C:\Users\z1336\.gradle\caches\transforms-3\6f6fec51fc0bf858d6900b90dd62d6da\transformed\emoji2-1.2.0\AndroidManifest.xml:31:17-49
+79            <meta-data
+79-->[androidx.lifecycle:lifecycle-process:2.7.0] C:\Users\z1336\.gradle\caches\transforms-3\de0aab144c5a415a89446dd83fe34e27\transformed\lifecycle-process-2.7.0\AndroidManifest.xml:29:13-31:52
+80                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
+80-->[androidx.lifecycle:lifecycle-process:2.7.0] C:\Users\z1336\.gradle\caches\transforms-3\de0aab144c5a415a89446dd83fe34e27\transformed\lifecycle-process-2.7.0\AndroidManifest.xml:30:17-78
+81                android:value="androidx.startup" />
+81-->[androidx.lifecycle:lifecycle-process:2.7.0] C:\Users\z1336\.gradle\caches\transforms-3\de0aab144c5a415a89446dd83fe34e27\transformed\lifecycle-process-2.7.0\AndroidManifest.xml:31:17-49
+82            <meta-data
+82-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:29:13-31:52
+83                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
+83-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:30:17-85
+84                android:value="androidx.startup" />
+84-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:31:17-49
+85        </provider>
+86
+87        <receiver
+87-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:34:9-52:20
+88            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+88-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:35:13-76
+89            android:directBootAware="false"
+89-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:36:13-44
+90            android:enabled="true"
+90-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:37:13-35
+91            android:exported="true"
+91-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:38:13-36
+92            android:permission="android.permission.DUMP" >
+92-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:39:13-57
+93            <intent-filter>
+93-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:40:13-42:29
+94                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
+94-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:41:17-91
+94-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:41:25-88
+95            </intent-filter>
+96            <intent-filter>
+96-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:43:13-45:29
+97                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
+97-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:44:17-85
+97-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:44:25-82
+98            </intent-filter>
+99            <intent-filter>
+99-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:46:13-48:29
+100                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
+100-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:47:17-88
+100-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:47:25-85
+101            </intent-filter>
+102            <intent-filter>
+102-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:49:13-51:29
+103                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
+103-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:50:17-95
+103-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\z1336\.gradle\caches\transforms-3\90a5c045bb237d34bfde7528c354fcd3\transformed\profileinstaller-1.3.0\AndroidManifest.xml:50:25-92
+104            </intent-filter>
+105        </receiver>
+106    </application>
+107
+108</manifest>

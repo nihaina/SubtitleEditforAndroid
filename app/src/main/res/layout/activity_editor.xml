@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true"
+    tools:context=".EditorActivity">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fitsSystemWindows="true">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:navigationIcon="@drawable/ic_back"
+            app:title="@string/app_name" />
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <!-- 搜索条 -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/searchBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="8dp"
+            app:cardCornerRadius="8dp"
+            app:cardElevation="4dp"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:padding="8dp">
+
+                <!-- 搜索输入框 -->
+                <EditText
+                    android:id="@+id/etSearch"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:hint="@string/search_hint"
+                    android:inputType="text"
+                    android:maxLines="1"
+                    android:background="@null"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:importantForAutofill="no" />
+
+                <!-- 上一项按钮 -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSearchPrevious"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/search_previous"
+                    android:textSize="12sp"
+                    android:layout_marginEnd="4dp" />
+
+                <!-- 下一项按钮 -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSearchNext"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/search_next"
+                    android:textSize="12sp"
+                    android:layout_marginEnd="4dp" />
+
+                <!-- 关闭按钮 -->
+                <ImageButton
+                    android:id="@+id/btnSearchClose"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@drawable/ic_close"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/search_close" />
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- 顶部工具栏 -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="8dp"
+            app:cardCornerRadius="8dp"
+            app:cardElevation="2dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <!-- 文件信息和格式 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/tvFileName"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp"
+                        android:maxLines="1"
+                        android:ellipsize="middle"
+                        tools:text="example.srt" />
+
+                </LinearLayout>
+
+                <!-- 格式信息 -->
+                <TextView
+                    android:id="@+id/tvFormatInfo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="@color/on_surface"
+                    android:textSize="12sp"
+                    tools:text="格式：SRT | 条目数：50" />
+                
+                <!-- 选中提示 -->
+                <TextView
+                    android:id="@+id/tvSelectedCount"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="@color/primary"
+                    android:textSize="12sp"
+                    android:visibility="gone"
+                    tools:text="已选择 3 项" />
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- 字幕列表 -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvSubtitles"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:padding="8dp"
+            tools:listitem="@layout/item_subtitle" />
+
+        <!-- 源视图编辑器（用于 TXT 文件或手动切换） -->
+        <ScrollView
+            android:id="@+id/svSourceView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:scrollbars="vertical"
+            android:fadeScrollbars="false"
+            android:scrollbarSize="6dp"
+            android:scrollbarThumbVertical="@android:color/darker_gray"
+            android:overScrollMode="always"
+            android:visibility="gone">
+
+            <EditText
+                android:id="@+id/etSourceView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="top|start"
+                android:padding="12dp"
+                android:textSize="14sp"
+                android:fontFamily="monospace"
+                android:inputType="textMultiLine|textNoSuggestions"
+                android:scrollbars="none"
+                android:importantForAutofill="no"
+                android:background="@null"
+                android:isScrollContainer="false"
+                tools:text="Line 1\nLine 2\nLine 3" />
+
+        </ScrollView>
+
+    </LinearLayout>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

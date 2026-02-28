@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">字幕编辑</string>
+    <string name="file_browser">文件浏览</string>
+    <string name="batch_convert">批量转换</string>
+    <string name="select_file">选择文件</string>
+    <string name="open_file">打开文件</string>
+    <string name="save_file">保存文件</string>
+    <string name="encoding">编码</string>
+    <string name="time_offset">时间偏移</string>
+    <string name="insert_before">向前插入</string>
+    <string name="insert_after">向后插入</string>
+    <string name="delete">删除</string>
+    <string name="convert_format">转换格式</string>
+    <string name="source_format">源格式</string>
+    <string name="target_format">目标格式</string>
+    <string name="start_convert">开始转换</string>
+    <string name="file_name">文件名</string>
+    <string name="file_path">路径</string>
+    <string name="no_files">没有找到文件</string>
+    <string name="loading">加载中...</string>
+    <string name="error">错误</string>
+    <string name="success">成功</string>
+    <string name="cancel">取消</string>
+    <string name="confirm">确认</string>
+    <string name="subtitle_text">字幕文本</string>
+    <string name="start_time">开始时间</string>
+    <string name="end_time">结束时间</string>
+    <string name="offset_ms">偏移 (毫秒)</string>
+    <string name="all_subtitles">全部字幕</string>
+    <string name="selected_subtitle">选中字幕</string>
+    <string name="auto_detect">自动识别</string>
+    
+    <!-- 菜单项 -->
+    <string name="menu_file">文件</string>
+    <string name="menu_edit">编辑</string>
+    <string name="menu_encoding">编码</string>
+    <string name="menu_new">新建</string>
+    <string name="menu_open">打开</string>
+    <string name="menu_save">保存</string>
+    <string name="menu_save_as">另存为</string>
+    <string name="menu_undo">撤销</string>
+    <string name="menu_redo">重做</string>
+    <string name="menu_cancel_selection">取消选择</string>
+    <string name="menu_select_range">快速选择</string>
+    <string name="menu_source_view">源视图</string>
+    <string name="menu_search">搜索</string>
+    <string name="menu_save_draft">保存草稿</string>
+    <string name="menu_drafts">草稿箱</string>
+    <string name="drafts">草稿箱</string>
+    <string name="save_draft_confirm">确定要保存草稿吗？</string>
+    <string name="draft_saved">草稿已保存</string>
+    <string name="draft_loaded">草稿已加载</string>
+    <string name="no_drafts">没有草稿</string>
+    <string name="delete_draft_confirm">确定要删除此草稿吗？</string>
+    <string name="draft_deleted">草稿已删除</string>
+    
+    <!-- 搜索相关 -->
+    <string name="search_hint">搜索字幕文本或时间...</string>
+    <string name="search_previous">上一项</string>
+    <string name="search_next">下一项</string>
+    <string name="search_close">关闭</string>
+    <string name="search_no_results">未找到匹配项</string>
+    <string name="search_result_count">找到 %1$d 项，第 %2$d 项</string>
+</resources>

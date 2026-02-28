@@ -1,0 +1,134 @@
+[
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\drawable_ic_delete.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\drawable\\ic_delete.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\drawable_ic_arrow_right.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\drawable\\ic_arrow_right.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\layout_activity_tools.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\layout\\activity_tools.xml"
+    },
+    {
+        "merged": "com.subtitleedit.app-merged_res-38:/layout_activity_editor.xml.flat",
+        "source": "com.subtitleedit.app-main-39:/layout/activity_editor.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\drawable_ic_convert.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\drawable\\ic_convert.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\mipmap-anydpi-v26_ic_launcher.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\mipmap-anydpi-v26\\ic_launcher.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\drawable_bg_index.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\drawable\\bg_index.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\layout_item_draft.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\layout\\item_draft.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\drawable_ic_file.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\drawable\\ic_file.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\drawable_ic_settings.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\drawable\\ic_settings.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\mipmap-anydpi-v26_ic_launcher_round.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\mipmap-anydpi-v26\\ic_launcher_round.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\drawable_ic_more.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\drawable\\ic_more.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\menu_menu_drafts.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\menu\\menu_drafts.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\drawable_ic_tools.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\drawable\\ic_tools.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\layout_activity_main.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\layout\\activity_main.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\layout_activity_batch_convert.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\layout\\activity_batch_convert.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\drawable_ic_check.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\drawable\\ic_check.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\drawable_bg_icon_circle.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\drawable\\bg_icon_circle.xml"
+    },
+    {
+        "merged": "com.subtitleedit.app-merged_res-38:/menu_menu_editor.xml.flat",
+        "source": "com.subtitleedit.app-main-39:/menu/menu_editor.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\drawable_ic_back.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\drawable\\ic_back.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\layout_item_file.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\layout\\item_file.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\drawable_bg_extension_tag.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\drawable\\bg_extension_tag.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\layout_item_convert_file.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\layout\\item_convert_file.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\menu_menu_editor.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\menu\\menu_editor.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\drawable_ic_launcher_foreground.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\drawable\\ic_launcher_foreground.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\drawable_ic_save.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\drawable\\ic_save.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\layout_activity_drafts.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\layout\\activity_drafts.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\layout_activity_editor.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\layout\\activity_editor.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\layout_activity_settings.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\layout\\activity_settings.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\menu_menu_main.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\menu\\menu_main.xml"
+    },
+    {
+        "merged": "com.subtitleedit.app-merged_res-38:/layout_activity_batch_convert.xml.flat",
+        "source": "com.subtitleedit.app-main-39:/layout/activity_batch_convert.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\drawable_ic_folder.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\drawable\\ic_folder.xml"
+    },
+    {
+        "merged": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-merged_res-38:\\layout_item_subtitle.xml.flat",
+        "source": "C:\\Users\\z1336\\.gradle\\daemon\\8.2\\com.subtitleedit.app-main-39:\\layout\\item_subtitle.xml"
+    }
+]

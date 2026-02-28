@@ -1,0 +1,924 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<incidents format="6" by="lint 8.2.0" type="incidents">
+
+    <incident
+        id="VectorPath"
+        severity="warning"
+        message="Very long vector path (905 characters), which is bad for performance. Considering reducing precision, removing minor details or rasterizing vector.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/drawable/ic_settings.xml"
+            line="9"
+            column="27"
+            startOffset="319"
+            endLine="9"
+            endColumn="932"
+            endOffset="1224"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;转换设置&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_batch_convert.xml"
+            line="48"
+            column="21"
+            startOffset="1907"
+            endLine="48"
+            endColumn="40"
+            endOffset="1926"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;选择输出目录&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_batch_convert.xml"
+            line="83"
+            column="21"
+            startOffset="3473"
+            endLine="83"
+            endColumn="42"
+            endOffset="3494"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;输出目录：Download/SubtitleEdit/Convert（默认）&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_batch_convert.xml"
+            line="92"
+            column="21"
+            startOffset="3870"
+            endLine="92"
+            endColumn="74"
+            endOffset="3923"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;待转换文件&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_batch_convert.xml"
+            line="123"
+            column="25"
+            startOffset="5065"
+            endLine="123"
+            endColumn="45"
+            endOffset="5085"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;添加文件&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_batch_convert.xml"
+            line="132"
+            column="25"
+            startOffset="5528"
+            endLine="132"
+            endColumn="44"
+            endOffset="5547"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;上一级&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_main.xml"
+            line="97"
+            column="17"
+            startOffset="3702"
+            endLine="97"
+            endColumn="35"
+            endOffset="3720"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;默认编码&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_settings.xml"
+            line="31"
+            column="17"
+            startOffset="1167"
+            endLine="31"
+            endColumn="36"
+            endOffset="1186"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;AI 翻译设置（硅基流动平台）&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_settings.xml"
+            line="46"
+            column="17"
+            startOffset="1740"
+            endLine="46"
+            endColumn="47"
+            endOffset="1770"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;API Key&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_settings.xml"
+            line="54"
+            column="17"
+            startOffset="2102"
+            endLine="54"
+            endColumn="39"
+            endOffset="2124"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;模型名称&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_settings.xml"
+            line="67"
+            column="17"
+            startOffset="2738"
+            endLine="67"
+            endColumn="36"
+            endOffset="2757"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;deepseek-ai/DeepSeek-V3.2-Exp&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_settings.xml"
+            line="74"
+            column="21"
+            startOffset="3070"
+            endLine="74"
+            endColumn="65"
+            endOffset="3114"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;源语言（留空自动检测）&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_settings.xml"
+            line="80"
+            column="17"
+            startOffset="3382"
+            endLine="80"
+            endColumn="43"
+            endOffset="3408"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;自动检测&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_settings.xml"
+            line="87"
+            column="21"
+            startOffset="3730"
+            endLine="87"
+            endColumn="40"
+            endOffset="3749"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;目标语言&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_settings.xml"
+            line="93"
+            column="17"
+            startOffset="4017"
+            endLine="93"
+            endColumn="36"
+            endOffset="4036"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;中文&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_settings.xml"
+            line="100"
+            column="21"
+            startOffset="4358"
+            endLine="100"
+            endColumn="38"
+            endOffset="4375"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;保存设置&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_settings.xml"
+            line="107"
+            column="17"
+            startOffset="4647"
+            endLine="107"
+            endColumn="36"
+            endOffset="4666"/>
+    </incident>
+
+    <incident
+        id="UselessParent"
+        severity="warning"
+        message="This `ScrollView` layout or its `LinearLayout` parent is unnecessary">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_tools.xml"
+            line="32"
+            column="10"
+            startOffset="1221"
+            endLine="32"
+            endColumn="20"
+            endOffset="1231"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;批量转换&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_tools.xml"
+            line="66"
+            column="29"
+            startOffset="2753"
+            endLine="66"
+            endColumn="62"
+            endOffset="2786"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;批量转换&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_tools.xml"
+            line="80"
+            column="33"
+            startOffset="3452"
+            endLine="80"
+            endColumn="52"
+            endOffset="3471"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;批量转换字幕格式（SRT/LRC）&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_tools.xml"
+            line="89"
+            column="33"
+            startOffset="3938"
+            endLine="89"
+            endColumn="65"
+            endOffset="3970"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;进入&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_tools.xml"
+            line="100"
+            column="29"
+            startOffset="4440"
+            endLine="100"
+            endColumn="60"
+            endOffset="4471"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;其他功能&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_tools.xml"
+            line="130"
+            column="29"
+            startOffset="5780"
+            endLine="130"
+            endColumn="62"
+            endOffset="5813"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;其他功能&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_tools.xml"
+            line="144"
+            column="33"
+            startOffset="6480"
+            endLine="144"
+            endColumn="52"
+            endOffset="6499"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;更多实用功能敬请期待&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_tools.xml"
+            line="153"
+            column="33"
+            startOffset="6966"
+            endLine="153"
+            endColumn="58"
+            endOffset="6991"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;进入&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/activity_tools.xml"
+            line="164"
+            column="29"
+            startOffset="7461"
+            endLine="164"
+            endColumn="60"
+            endOffset="7492"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;删除&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/item_convert_file.xml"
+            line="67"
+            column="13"
+            startOffset="2492"
+            endLine="67"
+            endColumn="44"
+            endOffset="2523"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;→&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/item_subtitle.xml"
+            line="63"
+            column="21"
+            startOffset="2400"
+            endLine="63"
+            endColumn="37"
+            endOffset="2416"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;selected&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/item_subtitle.xml"
+            line="105"
+            column="13"
+            startOffset="4081"
+            endLine="105"
+            endColumn="50"
+            endOffset="4118"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;返回根目录&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/menu/menu_drafts.xml"
+            line="7"
+            column="9"
+            startOffset="230"
+            endLine="7"
+            endColumn="30"
+            endOffset="251"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;工具&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/menu/menu_main.xml"
+            line="7"
+            column="9"
+            startOffset="223"
+            endLine="7"
+            endColumn="27"
+            endOffset="241"/>
+    </incident>
+
+    <incident
+        id="HardcodedText"
+        severity="warning"
+        message="Hardcoded string &quot;设置&quot;, should use `@string` resource">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/menu/menu_main.xml"
+            line="13"
+            column="9"
+            startOffset="386"
+            endLine="13"
+            endColumn="27"
+            endOffset="404"/>
+    </incident>
+
+    <incident
+        id="ObsoleteSdkInt"
+        severity="warning"
+        message="This folder configuration (`v26`) is unnecessary; `minSdkVersion` is 33. Merge all the resources in this folder into `mipmap-anydpi`.">
+        <fix-data file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/mipmap-anydpi-v26" folderName="mipmap-anydpi" requiresApi="33"/>
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/mipmap-anydpi-v26"/>
+    </incident>
+
+    <incident
+        id="MonochromeLauncherIcon"
+        severity="warning"
+        message="The application adaptive icon is missing a monochrome tag">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/mipmap-anydpi-v26/ic_launcher.xml"
+            line="2"
+            column="1"
+            startOffset="40"
+            endLine="5"
+            endColumn="17"
+            endOffset="256"/>
+    </incident>
+
+    <incident
+        id="MonochromeLauncherIcon"
+        severity="warning"
+        message="The application adaptive roundIcon is missing a monochrome tag">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/mipmap-anydpi-v26/ic_launcher_round.xml"
+            line="2"
+            column="1"
+            startOffset="40"
+            endLine="5"
+            endColumn="17"
+            endOffset="256"/>
+    </incident>
+
+    <incident
+        id="TypographyEllipsis"
+        severity="warning"
+        message="Replace &quot;...&quot; with ellipsis character (…, &amp;#8230;) ?">
+        <fix-replace
+            description="Replace with …"
+            oldString="..."
+            replacement="…"/>
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/values/strings.xml"
+            line="21"
+            column="28"
+            startOffset="895"
+            endLine="21"
+            endColumn="34"
+            endOffset="901"/>
+    </incident>
+
+    <incident
+        id="NotifyDataSetChanged"
+        severity="warning"
+        message="It will always be more efficient to use more specific change events if you can. Rely on `notifyDataSetChanged` as a last resort.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/subtitleedit/adapter/SubtitleAdapter.kt"
+            line="79"
+            column="9"
+            startOffset="2405"
+            endLine="79"
+            endColumn="31"
+            endOffset="2427"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/subtitleedit/BatchConvertActivity.kt"
+            line="64"
+            column="40"
+            startOffset="2299"
+            endLine="64"
+            endColumn="52"
+            endOffset="2311"/>
+    </incident>
+
+    <incident
+        id="NotifyDataSetChanged"
+        severity="warning"
+        message="It will always be more efficient to use more specific change events if you can. Rely on `notifyDataSetChanged` as a last resort.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/subtitleedit/DraftsActivity.kt"
+            line="333"
+            column="13"
+            startOffset="11114"
+            endLine="333"
+            endColumn="35"
+            endOffset="11136"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/subtitleedit/EditorActivity.kt"
+            line="231"
+            column="44"
+            startOffset="7260"
+            endLine="231"
+            endColumn="58"
+            endOffset="7274"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="String literal in `setText` can not be translated. Use Android resources instead.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/subtitleedit/EditorActivity.kt"
+            line="1052"
+            column="38"
+            startOffset="35216"
+            endLine="1052"
+            endColumn="52"
+            endOffset="35230"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/subtitleedit/EditorActivity.kt"
+            line="1191"
+            column="20"
+            startOffset="40220"
+            endLine="1191"
+            endColumn="38"
+            endOffset="40238"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/subtitleedit/EditorActivity.kt"
+            line="1208"
+            column="20"
+            startOffset="40829"
+            endLine="1208"
+            endColumn="38"
+            endOffset="40847"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/subtitleedit/EditorActivity.kt"
+            line="1647"
+            column="37"
+            startOffset="56522"
+            endLine="1647"
+            endColumn="66"
+            endOffset="56551"/>
+    </incident>
+
+    <incident
+        id="ObsoleteSdkInt"
+        severity="warning"
+        message="Unnecessary; SDK_INT is always >= 33">
+        <fix-data conditional="true"/>
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/subtitleedit/MainActivity.kt"
+            line="122"
+            column="13"
+            startOffset="3622"
+            endLine="122"
+            endColumn="59"
+            endOffset="3668"/>
+    </incident>
+
+    <incident
+        id="ObsoleteSdkInt"
+        severity="warning"
+        message="Unnecessary; SDK_INT is always >= 33">
+        <fix-data conditional="true"/>
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/subtitleedit/MainActivity.kt"
+            line="129"
+            column="20"
+            startOffset="3940"
+            endLine="129"
+            endColumn="66"
+            endOffset="3986"/>
+    </incident>
+
+    <incident
+        id="ObsoleteSdkInt"
+        severity="warning"
+        message="Unnecessary; SDK_INT is always >= 33">
+        <fix-data conditional="true"/>
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/subtitleedit/MainActivity.kt"
+            line="150"
+            column="13"
+            startOffset="4740"
+            endLine="150"
+            endColumn="59"
+            endOffset="4786"/>
+    </incident>
+
+    <incident
+        id="OldTargetApi"
+        severity="warning"
+        message="Not targeting the latest versions of Android; compatibility modes apply. Consider testing and updating this version. Consult the android.os.Build.VERSION_CODES javadoc for details.">
+        <fix-replace
+            description="Update targetSdkVersion to 36"
+            oldString="34"
+            replacement="36"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="13"
+            column="9"
+            startOffset="243"
+            endLine="13"
+            endColumn="23"
+            endOffset="257"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.core:core-ktx than 1.12.0 is available: 1.17.0">
+        <fix-replace
+            description="Change to 1.17.0"
+            family="Update versions"
+            oldString="1.12.0"
+            replacement="1.17.0"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="42"
+            column="21"
+            startOffset="909"
+            endLine="42"
+            endColumn="50"
+            endOffset="938"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.appcompat:appcompat than 1.6.1 is available: 1.7.1">
+        <fix-replace
+            description="Change to 1.7.1"
+            family="Update versions"
+            oldString="1.6.1"
+            replacement="1.7.1"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="43"
+            column="21"
+            startOffset="961"
+            endLine="43"
+            endColumn="55"
+            endOffset="995"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of com.google.android.material:material than 1.12.0 is available: 1.13.0">
+        <fix-replace
+            description="Change to 1.13.0"
+            family="Update versions"
+            oldString="1.12.0"
+            replacement="1.13.0"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="44"
+            column="21"
+            startOffset="1018"
+            endLine="44"
+            endColumn="64"
+            endOffset="1061"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.constraintlayout:constraintlayout than 2.1.4 is available: 2.2.1">
+        <fix-replace
+            description="Change to 2.2.1"
+            family="Update versions"
+            oldString="2.1.4"
+            replacement="2.2.1"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="45"
+            column="21"
+            startOffset="1084"
+            endLine="45"
+            endColumn="69"
+            endOffset="1132"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.lifecycle:lifecycle-runtime-ktx than 2.7.0 is available: 2.10.0">
+        <fix-replace
+            description="Change to 2.10.0"
+            family="Update versions"
+            oldString="2.7.0"
+            replacement="2.10.0"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="46"
+            column="21"
+            startOffset="1155"
+            endLine="46"
+            endColumn="67"
+            endOffset="1201"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.activity:activity-ktx than 1.8.2 is available: 1.12.4">
+        <fix-replace
+            description="Change to 1.12.4"
+            family="Update versions"
+            oldString="1.8.2"
+            replacement="1.12.4"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="47"
+            column="21"
+            startOffset="1224"
+            endLine="47"
+            endColumn="57"
+            endOffset="1260"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.recyclerview:recyclerview than 1.3.2 is available: 1.4.0">
+        <fix-replace
+            description="Change to 1.4.0"
+            family="Update versions"
+            oldString="1.3.2"
+            replacement="1.4.0"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="50"
+            column="21"
+            startOffset="1308"
+            endLine="50"
+            endColumn="61"
+            endOffset="1348"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.documentfile:documentfile than 1.0.1 is available: 1.1.0">
+        <fix-replace
+            description="Change to 1.1.0"
+            family="Update versions"
+            oldString="1.0.1"
+            replacement="1.1.0"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="53"
+            column="21"
+            startOffset="1442"
+            endLine="53"
+            endColumn="61"
+            endOffset="1482"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.lifecycle:lifecycle-viewmodel-ktx than 2.7.0 is available: 2.10.0">
+        <fix-replace
+            description="Change to 2.10.0"
+            family="Update versions"
+            oldString="2.7.0"
+            replacement="2.10.0"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="62"
+            column="21"
+            startOffset="1703"
+            endLine="62"
+            endColumn="69"
+            endOffset="1751"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.lifecycle:lifecycle-livedata-ktx than 2.7.0 is available: 2.10.0">
+        <fix-replace
+            description="Change to 2.10.0"
+            family="Update versions"
+            oldString="2.7.0"
+            replacement="2.10.0"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="63"
+            column="21"
+            startOffset="1774"
+            endLine="63"
+            endColumn="68"
+            endOffset="1821"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.test.ext:junit than 1.1.5 is available: 1.3.0">
+        <fix-replace
+            description="Change to 1.3.0"
+            family="Update versions"
+            oldString="1.1.5"
+            replacement="1.3.0"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="66"
+            column="32"
+            startOffset="1905"
+            endLine="66"
+            endColumn="61"
+            endOffset="1934"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.test.espresso:espresso-core than 3.5.1 is available: 3.7.0">
+        <fix-replace
+            description="Change to 3.7.0"
+            family="Update versions"
+            oldString="3.5.1"
+            replacement="3.7.0"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="67"
+            column="32"
+            startOffset="1968"
+            endLine="67"
+            endColumn="74"
+            endOffset="2010"/>
+    </incident>
+
+    <incident
+        id="Overdraw"
+        severity="warning"
+        message="Possible overdraw: Root element paints background `?attr/selectableItemBackground` with a theme that also paints a background (inferred theme is `@style/Theme_SubtitleEditforAndroid`)">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/layout/item_draft.xml"
+            line="8"
+            column="5"
+            startOffset="319"
+            endLine="8"
+            endColumn="56"
+            endOffset="370"/>
+    </incident>
+
+</incidents>

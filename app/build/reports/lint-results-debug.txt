@@ -1,0 +1,448 @@
+D:\Work\VS Code\SubtitleEditforAndroid\app\build.gradle.kts:13: Warning: Not targeting the latest versions of Android; compatibility modes apply. Consider testing and updating this version. Consult the android.os.Build.VERSION_CODES javadoc for details. [OldTargetApi]
+        targetSdk = 34
+        ~~~~~~~~~~~~~~
+
+   Explanation for issues of type "OldTargetApi":
+   When your application runs on a version of Android that is more recent than
+   your targetSdkVersion specifies that it has been tested with, various
+   compatibility modes kick in. This ensures that your application continues
+   to work, but it may look out of place. For example, if the targetSdkVersion
+   is less than 14, your app may get an option button in the UI.
+
+   To fix this issue, set the targetSdkVersion to the highest available value.
+   Then test your app to make sure everything works correctly. You may want to
+   consult the compatibility notes to see what changes apply to each version
+   you are adding support for:
+   https://developer.android.com/reference/android/os/Build.VERSION_CODES.html
+   as well as follow this guide:
+   https://developer.android.com/distribute/best-practices/develop/target-sdk.
+   html
+
+   https://developer.android.com/distribute/best-practices/develop/target-sdk.html
+
+D:\Work\VS Code\SubtitleEditforAndroid\app\build.gradle.kts:42: Warning: A newer version of androidx.core:core-ktx than 1.12.0 is available: 1.17.0 [GradleDependency]
+    implementation("androidx.core:core-ktx:1.12.0")
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\build.gradle.kts:43: Warning: A newer version of androidx.appcompat:appcompat than 1.6.1 is available: 1.7.1 [GradleDependency]
+    implementation("androidx.appcompat:appcompat:1.6.1")
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\build.gradle.kts:44: Warning: A newer version of com.google.android.material:material than 1.12.0 is available: 1.13.0 [GradleDependency]
+    implementation("com.google.android.material:material:1.12.0")
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\build.gradle.kts:45: Warning: A newer version of androidx.constraintlayout:constraintlayout than 2.1.4 is available: 2.2.1 [GradleDependency]
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\build.gradle.kts:46: Warning: A newer version of androidx.lifecycle:lifecycle-runtime-ktx than 2.7.0 is available: 2.10.0 [GradleDependency]
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\build.gradle.kts:47: Warning: A newer version of androidx.activity:activity-ktx than 1.8.2 is available: 1.12.4 [GradleDependency]
+    implementation("androidx.activity:activity-ktx:1.8.2")
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\build.gradle.kts:50: Warning: A newer version of androidx.recyclerview:recyclerview than 1.3.2 is available: 1.4.0 [GradleDependency]
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\build.gradle.kts:53: Warning: A newer version of androidx.documentfile:documentfile than 1.0.1 is available: 1.1.0 [GradleDependency]
+    implementation("androidx.documentfile:documentfile:1.0.1")
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\build.gradle.kts:62: Warning: A newer version of androidx.lifecycle:lifecycle-viewmodel-ktx than 2.7.0 is available: 2.10.0 [GradleDependency]
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\build.gradle.kts:63: Warning: A newer version of androidx.lifecycle:lifecycle-livedata-ktx than 2.7.0 is available: 2.10.0 [GradleDependency]
+    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.7.0")
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\build.gradle.kts:66: Warning: A newer version of androidx.test.ext:junit than 1.1.5 is available: 1.3.0 [GradleDependency]
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\build.gradle.kts:67: Warning: A newer version of androidx.test.espresso:espresso-core than 3.5.1 is available: 3.7.0 [GradleDependency]
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "GradleDependency":
+   This detector looks for usages of libraries where the version you are using
+   is not the current stable release. Using older versions is fine, and there
+   are cases where you deliberately want to stick with an older version.
+   However, you may simply not be aware that a more recent version is
+   available, and that is what this lint check helps find.
+
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\AndroidManifest.xml:19: Warning: The attribute android:allowBackup is deprecated from Android 12 and the default allows backup [DataExtractionRules]
+        android:allowBackup="true"
+                             ~~~~
+
+   Explanation for issues of type "DataExtractionRules":
+   Before Android 12, the attributes android:allowBackup and
+   android:fullBackupContent were used to configure all forms of backup,
+   including cloud backups, device-to-device transfers and adb backup.
+
+   In Android 12 and higher, these attributes have been deprecated and will
+   only apply to cloud backups. You should instead use the attribute
+   android:dataExtractionRules, specifying an @xml resource that configures
+   which files to back up, for cloud backups and for device-to-device
+   transfers, separately. If your minSdkVersion supports older versions,
+   you'll still want to specify an android:fullBackupContent resource if the
+   default behavior is not right for your app.
+
+   https://developer.android.com/about/versions/12/backup-restore#xml-changes
+   https://goo.gle/DataExtractionRules
+
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\java\com\subtitleedit\DraftsActivity.kt:333: Warning: It will always be more efficient to use more specific change events if you can. Rely on notifyDataSetChanged as a last resort. [NotifyDataSetChanged]
+            notifyDataSetChanged()
+            ~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\java\com\subtitleedit\adapter\SubtitleAdapter.kt:79: Warning: It will always be more efficient to use more specific change events if you can. Rely on notifyDataSetChanged as a last resort. [NotifyDataSetChanged]
+        notifyDataSetChanged()
+        ~~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "NotifyDataSetChanged":
+   The RecyclerView adapter's onNotifyDataSetChanged method does not specify
+   what about the data set has changed, forcing any observers to assume that
+   all existing items and structure may no longer be valid. `LayoutManager`s
+   will be forced to fully rebind and relayout all visible views.
+
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\java\com\subtitleedit\MainActivity.kt:122: Warning: Unnecessary; SDK_INT is always >= 33 [ObsoleteSdkInt]
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\java\com\subtitleedit\MainActivity.kt:129: Warning: Unnecessary; SDK_INT is always >= 33 [ObsoleteSdkInt]
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\java\com\subtitleedit\MainActivity.kt:150: Warning: Unnecessary; SDK_INT is always >= 33 [ObsoleteSdkInt]
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\mipmap-anydpi-v26: Warning: This folder configuration (v26) is unnecessary; minSdkVersion is 33. Merge all the resources in this folder into mipmap-anydpi. [ObsoleteSdkInt]
+
+   Explanation for issues of type "ObsoleteSdkInt":
+   This check flags version checks that are not necessary, because the
+   minSdkVersion (or surrounding known API level) is already at least as high
+   as the version checked for.
+
+   Similarly, it also looks for resources in -vNN folders, such as values-v14
+   where the version qualifier is less than or equal to the minSdkVersion,
+   where the contents should be merged into the best folder.
+
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\drawable\ic_settings.xml:9: Warning: Very long vector path (905 characters), which is bad for performance. Considering reducing precision, removing minor details or rasterizing vector. [VectorPath]
+        android:pathData="M19.14,12.94c0.04,-0.31 0.06,-0.63 0.06,-0.94c0,-0.31 -0.02,-0.63 -0.06,-0.94l2.03,-1.58c0.18,-0.14 0.23,-0.41 0.12,-0.61l-1.92,-3.32c-0.12,-0.22 -0.37,-0.29 -0.59,-0.22l-2.39,0.96c-0.5,-0.38 -1.03,-0.7 -1.62,-0.94L14.4,2.81c-0.04,-0.24 -0.24,-0.41 -0.48,-0.41h-3.84c-0.24,0 -0.43,0.17 -0.47,0.41L9.25,5.35C8.66,5.59 8.12,5.92 7.63,6.29L5.24,5.33c-0.22,-0.08 -0.47,0 -0.59,0.22L2.74,8.87C2.62,9.08 2.66,9.34 2.86,9.48l2.03,1.58C4.84,11.37 4.8,11.69 4.8,12s0.02,0.63 0.06,0.94l-2.03,1.58c-0.18,0.14 -0.23,0.41 -0.12,0.61l1.92,3.32c0.12,0.22 0.37,0.29 0.59,0.22l2.39,-0.96c0.5,0.38 1.03,0.7 1.62,0.94l0.36,2.54c0.05,0.24 0.24,0.41 0.48,0.41h3.84c0.24,0 0.44,-0.17 0.47,-0.41l0.36,-2.54c0.59,-0.24 1.13,-0.56 1.62,-0.94l2.39,0.96c0.22,0.08 0.47,0 0.59,-0.22l1.92,-3.32c0.12,-0.22 0.07,-0.47 -0.12,-0.61L19.14,12.94zM12,15.6c-1.98,0 -3.6,-1.62 -3.6,-3.6s1.62,-3.6 3.6,-3.6s3.6,1.62 3.6,3.6S13.98,15.6 12,15.6z"/>
+                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "VectorPath":
+   Using long vector paths is bad for performance. There are several ways to
+   make the pathData shorter:
+   * Using less precision
+   * Removing some minor details
+   * Using the Android Studio vector conversion tool
+   * Rasterizing the image (converting to PNG)
+
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\item_draft.xml:8: Warning: Possible overdraw: Root element paints background ?attr/selectableItemBackground with a theme that also paints a background (inferred theme is @style/Theme_SubtitleEditforAndroid) [Overdraw]
+    android:background="?attr/selectableItemBackground"
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "Overdraw":
+   If you set a background drawable on a root view, then you should use a
+   custom theme where the theme background is null. Otherwise, the theme
+   background will be painted first, only to have your custom background
+   completely cover it; this is called "overdraw".
+
+   NOTE: This detector relies on figuring out which layouts are associated
+   with which activities based on scanning the Java code, and it's currently
+   doing that using an inexact pattern matching algorithm. Therefore, it can
+   incorrectly conclude which activity the layout is associated with and then
+   wrongly complain that a background-theme is hidden.
+
+   If you want your custom background on multiple pages, then you should
+   consider making a custom theme with your custom background and just using
+   that theme instead of a root element background.
+
+   Of course it's possible that your custom drawable is translucent and you
+   want it to be mixed with the background. However, you will get better
+   performance if you pre-mix the background with your drawable and use that
+   resulting image or color as a custom theme background instead.
+
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\colors.xml:11: Warning: The resource R.color.surface appears to be unused [UnusedResources]
+    <color name="surface">#FFFFFF</color>
+           ~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\colors.xml:16: Warning: The resource R.color.on_error appears to be unused [UnusedResources]
+    <color name="on_error">#FFFFFF</color>
+           ~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\drawable\ic_save.xml:2: Warning: The resource R.drawable.ic_save appears to be unused [UnusedResources]
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+^
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:4: Warning: The resource R.string.file_browser appears to be unused [UnusedResources]
+    <string name="file_browser">文件浏览</string>
+            ~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:6: Warning: The resource R.string.select_file appears to be unused [UnusedResources]
+    <string name="select_file">选择文件</string>
+            ~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:7: Warning: The resource R.string.open_file appears to be unused [UnusedResources]
+    <string name="open_file">打开文件</string>
+            ~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:8: Warning: The resource R.string.save_file appears to be unused [UnusedResources]
+    <string name="save_file">保存文件</string>
+            ~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:9: Warning: The resource R.string.encoding appears to be unused [UnusedResources]
+    <string name="encoding">编码</string>
+            ~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:10: Warning: The resource R.string.time_offset appears to be unused [UnusedResources]
+    <string name="time_offset">时间偏移</string>
+            ~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:11: Warning: The resource R.string.insert_before appears to be unused [UnusedResources]
+    <string name="insert_before">向前插入</string>
+            ~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:12: Warning: The resource R.string.insert_after appears to be unused [UnusedResources]
+    <string name="insert_after">向后插入</string>
+            ~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:14: Warning: The resource R.string.convert_format appears to be unused [UnusedResources]
+    <string name="convert_format">转换格式</string>
+            ~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:15: Warning: The resource R.string.source_format appears to be unused [UnusedResources]
+    <string name="source_format">源格式</string>
+            ~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:19: Warning: The resource R.string.file_path appears to be unused [UnusedResources]
+    <string name="file_path">路径</string>
+            ~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:21: Warning: The resource R.string.loading appears to be unused [UnusedResources]
+    <string name="loading">加载中...</string>
+            ~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:23: Warning: The resource R.string.success appears to be unused [UnusedResources]
+    <string name="success">成功</string>
+            ~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:26: Warning: The resource R.string.subtitle_text appears to be unused [UnusedResources]
+    <string name="subtitle_text">字幕文本</string>
+            ~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:27: Warning: The resource R.string.start_time appears to be unused [UnusedResources]
+    <string name="start_time">开始时间</string>
+            ~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:28: Warning: The resource R.string.end_time appears to be unused [UnusedResources]
+    <string name="end_time">结束时间</string>
+            ~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:29: Warning: The resource R.string.offset_ms appears to be unused [UnusedResources]
+    <string name="offset_ms">偏移 (毫秒)</string>
+            ~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:30: Warning: The resource R.string.all_subtitles appears to be unused [UnusedResources]
+    <string name="all_subtitles">全部字幕</string>
+            ~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:31: Warning: The resource R.string.selected_subtitle appears to be unused [UnusedResources]
+    <string name="selected_subtitle">选中字幕</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:32: Warning: The resource R.string.auto_detect appears to be unused [UnusedResources]
+    <string name="auto_detect">自动识别</string>
+            ~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:42: Warning: The resource R.string.menu_undo appears to be unused [UnusedResources]
+    <string name="menu_undo">撤销</string>
+            ~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:43: Warning: The resource R.string.menu_redo appears to be unused [UnusedResources]
+    <string name="menu_redo">重做</string>
+            ~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:50: Warning: The resource R.string.save_draft_confirm appears to be unused [UnusedResources]
+    <string name="save_draft_confirm">确定要保存草稿吗？</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:51: Warning: The resource R.string.draft_saved appears to be unused [UnusedResources]
+    <string name="draft_saved">草稿已保存</string>
+            ~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:52: Warning: The resource R.string.draft_loaded appears to be unused [UnusedResources]
+    <string name="draft_loaded">草稿已加载</string>
+            ~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "UnusedResources":
+   Unused resources make applications larger and slow down builds.
+
+
+   The unused resource check can ignore tests. If you want to include
+   resources that are only referenced from tests, consider packaging them in a
+   test source set instead.
+
+   You can include test sources in the unused resource check by setting the
+   system property lint.unused-resources.include-tests =true, and to exclude
+   them (usually for performance reasons), use
+   lint.unused-resources.exclude-tests =true.
+   ,
+
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_tools.xml:32: Warning: This ScrollView layout or its LinearLayout parent is unnecessary [UselessParent]
+        <ScrollView
+         ~~~~~~~~~~
+
+   Explanation for issues of type "UselessParent":
+   A layout with children that has no siblings, is not a scrollview or a root
+   layout, and does not have a background, can be removed and have its
+   children moved directly into the parent for a flatter and more efficient
+   layout hierarchy.
+
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\values\strings.xml:21: Warning: Replace "..." with ellipsis character (…, &#8230;) ? [TypographyEllipsis]
+    <string name="loading">加载中...</string>
+                           ~~~~~~
+
+   Explanation for issues of type "TypographyEllipsis":
+   You can replace the string "..." with a dedicated ellipsis character,
+   ellipsis character (u2026, &#8230;). This can help make the text more
+   readable.
+
+   https://en.wikipedia.org/wiki/Ellipsis
+
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\mipmap-anydpi-v26\ic_launcher.xml:2: Warning: The application adaptive icon is missing a monochrome tag [MonochromeLauncherIcon]
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+^
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\mipmap-anydpi-v26\ic_launcher_round.xml:2: Warning: The application adaptive roundIcon is missing a monochrome tag [MonochromeLauncherIcon]
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+^
+
+   Explanation for issues of type "MonochromeLauncherIcon":
+   If android:roundIcon and android:icon are both in your manifest, you must
+   either remove the reference to android:roundIcon if it is not needed; or,
+   supply the monochrome icon in the drawable defined by the android:roundIcon
+   and android:icon attribute.
+
+   For example, if android:roundIcon and android:icon are both in the
+   manifest, a launcher might choose to use android:roundIcon over
+   android:icon to display the adaptive app icon. Therefore, your themed
+   application iconwill not show if your monochrome attribute is not also
+   specified in android:roundIcon.
+
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_editor.xml:112: Warning: Missing accessibility label: provide either a view with an android:labelFor that references this view or provide an android:hint [LabelFor]
+            <EditText
+             ~~~~~~~~
+
+   Explanation for issues of type "LabelFor":
+   Editable text fields should provide an android:hint or, provided your
+   minSdkVersion is at least 17, they may be referenced by a view with a
+   android:labelFor attribute.
+
+   When using android:labelFor, be sure to provide an android:text or an
+   android:contentDescription.
+
+   If your view is labeled but by a label in a different layout which includes
+   this one, just suppress this warning from lint.
+
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\java\com\subtitleedit\BatchConvertActivity.kt:64: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+            binding.tvOutputDir.text = "输出目录：$path"
+                                       ~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\java\com\subtitleedit\EditorActivity.kt:231: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+            binding.tvSelectedCount.text = "已选择 $count 项"
+                                           ~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\java\com\subtitleedit\EditorActivity.kt:1052: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+        binding.tvFormatInfo.text = "格式：SRT | 条目数：0"
+                                     ~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\java\com\subtitleedit\EditorActivity.kt:1191: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+            text = " (1-$totalCount)"
+                   ~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\java\com\subtitleedit\EditorActivity.kt:1208: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+            text = " (1-$totalCount)"
+                   ~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\java\com\subtitleedit\EditorActivity.kt:1647: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+        binding.tvFormatInfo.text = "格式：$formatName | $countInfo"
+                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "SetTextI18n":
+   When calling TextView#setText
+   * Never call Number#toString() to format numbers; it will not handle
+   fraction separators and locale-specific digits properly. Consider using
+   String#format with proper format specifications (%d or %f) instead.
+   * Do not pass a string literal (e.g. "Hello") to display text. Hardcoded
+   text can not be properly translated to other languages. Consider using
+   Android resource strings instead.
+   * Do not build messages by concatenating text chunks. Such messages can not
+   be properly translated.
+
+   https://developer.android.com/guide/topics/resources/localization.html
+
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_batch_convert.xml:48: Warning: Hardcoded string "转换设置", should use @string resource [HardcodedText]
+                    android:text="转换设置"
+                    ~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_batch_convert.xml:83: Warning: Hardcoded string "选择输出目录", should use @string resource [HardcodedText]
+                    android:text="选择输出目录" />
+                    ~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_batch_convert.xml:92: Warning: Hardcoded string "输出目录：Download/SubtitleEdit/Convert（默认）", should use @string resource [HardcodedText]
+                    android:text="输出目录：Download/SubtitleEdit/Convert（默认）" />
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_batch_convert.xml:123: Warning: Hardcoded string "待转换文件", should use @string resource [HardcodedText]
+                        android:text="待转换文件"
+                        ~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_batch_convert.xml:132: Warning: Hardcoded string "添加文件", should use @string resource [HardcodedText]
+                        android:text="添加文件"
+                        ~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_main.xml:97: Warning: Hardcoded string "上一级", should use @string resource [HardcodedText]
+                android:text="上一级" />
+                ~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_settings.xml:31: Warning: Hardcoded string "默认编码", should use @string resource [HardcodedText]
+                android:text="默认编码"
+                ~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_settings.xml:46: Warning: Hardcoded string "AI 翻译设置（硅基流动平台）", should use @string resource [HardcodedText]
+                android:text="AI 翻译设置（硅基流动平台）"
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_settings.xml:54: Warning: Hardcoded string "API Key", should use @string resource [HardcodedText]
+                android:hint="API Key"
+                ~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_settings.xml:67: Warning: Hardcoded string "模型名称", should use @string resource [HardcodedText]
+                android:hint="模型名称"
+                ~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_settings.xml:74: Warning: Hardcoded string "deepseek-ai/DeepSeek-V3.2-Exp", should use @string resource [HardcodedText]
+                    android:text="deepseek-ai/DeepSeek-V3.2-Exp" />
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_settings.xml:80: Warning: Hardcoded string "源语言（留空自动检测）", should use @string resource [HardcodedText]
+                android:hint="源语言（留空自动检测）"
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_settings.xml:87: Warning: Hardcoded string "自动检测", should use @string resource [HardcodedText]
+                    android:text="自动检测" />
+                    ~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_settings.xml:93: Warning: Hardcoded string "目标语言", should use @string resource [HardcodedText]
+                android:hint="目标语言"
+                ~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_settings.xml:100: Warning: Hardcoded string "中文", should use @string resource [HardcodedText]
+                    android:text="中文" />
+                    ~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_settings.xml:107: Warning: Hardcoded string "保存设置", should use @string resource [HardcodedText]
+                android:text="保存设置" />
+                ~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_tools.xml:66: Warning: Hardcoded string "批量转换", should use @string resource [HardcodedText]
+                            android:contentDescription="批量转换" />
+                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_tools.xml:80: Warning: Hardcoded string "批量转换", should use @string resource [HardcodedText]
+                                android:text="批量转换"
+                                ~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_tools.xml:89: Warning: Hardcoded string "批量转换字幕格式（SRT/LRC）", should use @string resource [HardcodedText]
+                                android:text="批量转换字幕格式（SRT/LRC）"
+                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_tools.xml:100: Warning: Hardcoded string "进入", should use @string resource [HardcodedText]
+                            android:contentDescription="进入" />
+                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_tools.xml:130: Warning: Hardcoded string "其他功能", should use @string resource [HardcodedText]
+                            android:contentDescription="其他功能" />
+                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_tools.xml:144: Warning: Hardcoded string "其他功能", should use @string resource [HardcodedText]
+                                android:text="其他功能"
+                                ~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_tools.xml:153: Warning: Hardcoded string "更多实用功能敬请期待", should use @string resource [HardcodedText]
+                                android:text="更多实用功能敬请期待"
+                                ~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\activity_tools.xml:164: Warning: Hardcoded string "进入", should use @string resource [HardcodedText]
+                            android:contentDescription="进入" />
+                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\item_convert_file.xml:67: Warning: Hardcoded string "删除", should use @string resource [HardcodedText]
+            android:contentDescription="删除"
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\item_subtitle.xml:63: Warning: Hardcoded string "→", should use @string resource [HardcodedText]
+                    android:text="→"
+                    ~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\layout\item_subtitle.xml:105: Warning: Hardcoded string "selected", should use @string resource [HardcodedText]
+            android:contentDescription="selected" />
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\menu\menu_drafts.xml:7: Warning: Hardcoded string "返回根目录", should use @string resource [HardcodedText]
+        android:title="返回根目录"
+        ~~~~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\menu\menu_main.xml:7: Warning: Hardcoded string "工具", should use @string resource [HardcodedText]
+        android:title="工具"
+        ~~~~~~~~~~~~~~~~~~
+D:\Work\VS Code\SubtitleEditforAndroid\app\src\main\res\menu\menu_main.xml:13: Warning: Hardcoded string "设置", should use @string resource [HardcodedText]
+        android:title="设置"
+        ~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "HardcodedText":
+   Hardcoding text attributes directly in layout files is bad for several
+   reasons:
+
+   * When creating configuration variations (for example for landscape or
+   portrait) you have to repeat the actual text (and keep it up to date when
+   making changes)
+
+   * The application cannot be translated to other languages by just adding
+   new translations for existing string resources.
+
+   There are quickfixes to automatically extract this hardcoded string into a
+   resource lookup.
+
+0 errors, 91 warnings
