@@ -106,6 +106,19 @@
                 android:layout_height="wrap_content"
                 android:text="保存设置" />
 
+            <!-- GitHub 项目地址 -->
+            <TextView
+                android:id="@+id/tvGithub"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="项目地址: https://github.com/nihaina/SubtitleEditforAndroid"
+                android:textSize="16sp"
+                android:textColor="@color/design_default_color_primary"
+                android:padding="16dp"
+                android:layout_marginTop="16dp"
+                android:clickable="true"
+                android:focusable="true" />
+
         </LinearLayout>
     </ScrollView>
 </LinearLayout>

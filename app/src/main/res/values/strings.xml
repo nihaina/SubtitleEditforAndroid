@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">字幕编辑</string>
+    <string name="app_name">SubtitleEdit</string>
     <string name="file_browser">文件浏览</string>
     <string name="batch_convert">批量转换</string>
     <string name="select_file">选择文件</string>
@@ -43,7 +43,7 @@
     <string name="menu_redo">重做</string>
     <string name="menu_cancel_selection">取消选择</string>
     <string name="menu_select_range">快速选择</string>
-    <string name="menu_source_view">源视图</string>
+    <string name="menu_source_view">切换视图</string>
     <string name="menu_search">搜索</string>
     <string name="menu_save_draft">保存草稿</string>
     <string name="menu_drafts">草稿箱</string>

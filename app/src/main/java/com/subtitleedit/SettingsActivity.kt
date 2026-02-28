@@ -27,6 +27,7 @@ class SettingsActivity : AppCompatActivity() {
         setupEncodingSpinner()
         loadSettings()
         setupSaveButton()
+        setupGithubLink()
     }
 
     private fun setupToolbar() {
@@ -64,6 +65,14 @@ class SettingsActivity : AppCompatActivity() {
     private fun setupSaveButton() {
         binding.btnSaveSettings.setOnClickListener {
             saveSettings()
+        }
+    }
+    
+    private fun setupGithubLink() {
+        binding.tvGithub.setOnClickListener {
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW,
+                android.net.Uri.parse("https://github.com/nihaina/SubtitleEditforAndroid"))
+            startActivity(intent)
         }
     }
 
