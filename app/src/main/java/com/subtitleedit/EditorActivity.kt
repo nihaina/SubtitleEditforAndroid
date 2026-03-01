@@ -313,9 +313,24 @@ class EditorActivity : AppCompatActivity() {
         currentSearchIndex = -1
         searchQuery = ""
         binding.etSearch.text?.clear()
+        // 清除列表中的搜索高亮
+        subtitleAdapter.clearSearchHighlight()
+        // 清除源视图中的搜索高亮
+        if (isSourceViewMode) {
+            clearSearchHighlightInSourceView()
+        }
         // 隐藏软键盘
         val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
         imm.hideSoftInputFromWindow(binding.etSearch.windowToken, 0)
+    }
+    
+    /**
+     * 清除源视图中的搜索高亮
+     */
+    private fun clearSearchHighlightInSourceView() {
+        val content = binding.etSourceView.text?.toString() ?: ""
+        // 恢复原始内容（不带高亮）
+        binding.etSourceView.setText(content, TextView.BufferType.EDITABLE)
     }
     
     /**
