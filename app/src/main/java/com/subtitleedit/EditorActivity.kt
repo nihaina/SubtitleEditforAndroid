@@ -336,6 +336,47 @@ class EditorActivity : AppCompatActivity() {
     }
     
     /**
+     * 删除选中的字幕
+     */
+    private fun deleteSelectedSubtitle() {
+        if (isSourceViewMode) {
+            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        val selectedEntries = subtitleAdapter.getSelectedEntries()
+        if (selectedEntries.isEmpty()) {
+            Toast.makeText(this, "请先选择要删除的字幕", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        AlertDialog.Builder(this)
+            .setTitle("删除")
+            .setMessage("确定要删除选中的字幕吗？")
+            .setPositiveButton("确定") { _, _ ->
+                // 保存要删除的条目对象
+                val entriesToDelete = selectedEntries.map { it.first }
+                // 从后往前删除，避免索引变化
+                selectedEntries.sortedByDescending { it.second }.forEach { (_, position) ->
+                    subtitleEntries.removeAt(position)
+                }
+                renumberEntries()
+                subtitleAdapter.submitList(subtitleEntries.toList())
+                // 从选中状态中移除被删除的条目
+                entriesToDelete.forEach { entry ->
+                    subtitleAdapter.removeSelectionByEntry(entry)
+                }
+                updateSelectedCountDisplay()
+                updateFormatInfo()
+                
+                markAsChanged()
+                Toast.makeText(this, "已删除 ${selectedEntries.size} 条字幕", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+    
+    /**
      * 清除源视图中的搜索高亮
      */
     private fun clearSearchHighlightInSourceView() {
@@ -1111,12 +1152,27 @@ class EditorActivity : AppCompatActivity() {
     private fun performCutDelete() {
         if (!isCutMode) return
         
+        // 保存要删除的条目对象（用于从选中状态中移除）
+        val entriesToDelete = if (cutPositionValue >= 0 && cutPositionValue < subtitleEntries.size) {
+            listOf(subtitleEntries[cutPositionValue])
+        } else if (cutPositionsValue.isNotEmpty()) {
+            cutPositionsValue.filter { it < subtitleEntries.size }.map { subtitleEntries[it] }
+        } else {
+            emptyList()
+        }
+        
         if (cutPositionValue >= 0) {
             // 单行剪切
             if (cutPositionValue < subtitleEntries.size) {
                 subtitleEntries.removeAt(cutPositionValue)
-                refreshAllItems()
-                subtitleAdapter.clearSelection()
+                renumberEntries()
+                subtitleAdapter.submitList(subtitleEntries.toList())
+                // 同步选中状态
+                subtitleAdapter.syncSelectionWithCurrentList()
+                // 从选中状态中移除被删除的条目
+                entriesToDelete.forEach { entry ->
+                    subtitleAdapter.removeSelectionByEntry(entry)
+                }
                 updateSelectedCountDisplay()
                 updateFormatInfo()
                 markAsChanged()
@@ -1130,8 +1186,14 @@ class EditorActivity : AppCompatActivity() {
                     subtitleEntries.removeAt(position)
                 }
             }
-            refreshAllItems()
-            subtitleAdapter.clearSelection()
+            renumberEntries()
+            subtitleAdapter.submitList(subtitleEntries.toList())
+            // 同步选中状态
+            subtitleAdapter.syncSelectionWithCurrentList()
+            // 从选中状态中移除被删除的条目
+            entriesToDelete.forEach { entry ->
+                subtitleAdapter.removeSelectionByEntry(entry)
+            }
             updateSelectedCountDisplay()
             updateFormatInfo()
             markAsChanged()
@@ -1243,9 +1305,15 @@ class EditorActivity : AppCompatActivity() {
                 .setTitle("删除")
                 .setMessage("确定要删除此字幕吗？")
                 .setPositiveButton("确定") { _, _ ->
+                    // 保存要删除的条目对象
+                    val entryToDelete = subtitleEntries[position]
                     subtitleEntries.removeAt(position)
-                    refreshAllItems()
-                    subtitleAdapter.clearSelection()
+                    renumberEntries()
+                    subtitleAdapter.submitList(subtitleEntries.toList())
+                    // 同步选中状态
+                    subtitleAdapter.syncSelectionWithCurrentList()
+                    // 从选中状态中移除被删除的条目
+                    subtitleAdapter.removeSelectionByEntry(entryToDelete)
                     updateSelectedCountDisplay()
                     updateFormatInfo()
                     
@@ -1283,7 +1351,10 @@ class EditorActivity : AppCompatActivity() {
         newEntry.text = "新字幕"
         
         subtitleEntries.add(insertPosition, newEntry)
-        refreshAllItems()
+        renumberEntries()
+        subtitleAdapter.submitList(subtitleEntries.toList())
+        // 同步选中状态
+        subtitleAdapter.syncSelectionWithCurrentList()
         // 不清空选择，也不自动选中新插入的行
         updateSelectedCountDisplay()
         updateFormatInfo()
@@ -1412,17 +1483,18 @@ class EditorActivity : AppCompatActivity() {
             return
         }
         
-        val positionsToRefresh = mutableListOf<Int>()
+        // 保存选中的条目对象（用于同步选中状态）
+        val selectedEntryObjects = selectedEntries.map { it.first }.toSet()
         
-        selectedEntries.forEach { (entry, position) ->
+        // 应用时间偏移
+        selectedEntryObjects.forEach { entry ->
             entry.startTime = (entry.startTime + offsetMs).coerceAtLeast(0)
             entry.endTime = (entry.endTime + offsetMs).coerceAtLeast(entry.startTime + 1)
-            positionsToRefresh.add(position)
         }
         
-        positionsToRefresh.forEach { position ->
-            subtitleAdapter.notifyItemChanged(position)
-        }
+        // 刷新列表并同步选中状态
+        subtitleAdapter.submitList(subtitleEntries.toList())
+        subtitleAdapter.syncSelectionWithCurrentList()
         
         markAsChanged()
         Toast.makeText(this, "已对选中项应用 ${offsetMs}ms 偏移", Toast.LENGTH_SHORT).show()
@@ -1925,26 +1997,33 @@ class EditorActivity : AppCompatActivity() {
             return
         }
         
-        val selectedEntries = subtitleAdapter.getSelectedEntries()
-        
         // 需要刷新的位置列表
         val positionsToRefresh = mutableListOf<Int>()
         
         when {
-            // 有选中的字幕，只对选中的字幕应用偏移
-            selectedEntries.isNotEmpty() -> {
-                selectedEntries.forEach { (entry, position) ->
-                    entry.startTime = (entry.startTime + offsetMs).coerceAtLeast(0)
-                    entry.endTime = (entry.endTime + offsetMs).coerceAtLeast(entry.startTime + 1)
-                    positionsToRefresh.add(position)
-                }
-            }
-            // 没有选中但有长按位置，对长按的字幕应用偏移
+            // 有长按位置，对长按的那一行应用偏移（无论是否有选中状态）
             longClickPos >= 0 && longClickPos < subtitleEntries.size -> {
                 val entry = subtitleEntries[longClickPos]
                 entry.startTime = (entry.startTime + offsetMs).coerceAtLeast(0)
                 entry.endTime = (entry.endTime + offsetMs).coerceAtLeast(entry.startTime + 1)
                 positionsToRefresh.add(longClickPos)
+                
+                // 刷新列表并同步选中状态（保持其他选中状态）
+                subtitleAdapter.submitList(subtitleEntries.toList())
+                subtitleAdapter.syncSelectionWithCurrentList()
+            }
+            // 没有长按位置但有选中的字幕，对选中的字幕应用偏移
+            subtitleAdapter.getSelectedCount() > 0 -> {
+                val selectedEntries = subtitleAdapter.getSelectedEntries()
+                selectedEntries.forEach { (entry, position) ->
+                    entry.startTime = (entry.startTime + offsetMs).coerceAtLeast(0)
+                    entry.endTime = (entry.endTime + offsetMs).coerceAtLeast(entry.startTime + 1)
+                    positionsToRefresh.add(position)
+                }
+                
+                // 刷新列表并同步选中状态
+                subtitleAdapter.submitList(subtitleEntries.toList())
+                subtitleAdapter.syncSelectionWithCurrentList()
             }
             // 都没有，对所有字幕应用偏移
             else -> {
@@ -1953,19 +2032,17 @@ class EditorActivity : AppCompatActivity() {
                     entry.endTime = (entry.endTime + offsetMs).coerceAtLeast(entry.startTime + 1)
                     positionsToRefresh.add(index)
                 }
+                
+                // 刷新列表
+                subtitleAdapter.submitList(subtitleEntries.toList())
             }
-        }
-        
-        // 直接刷新受影响的位置
-        positionsToRefresh.forEach { position ->
-            subtitleAdapter.notifyItemChanged(position)
         }
         
         markAsChanged()
         Toast.makeText(this, "已应用 ${offsetMs}ms 偏移", Toast.LENGTH_SHORT).show()
     }
     
-    private fun deleteSelectedSubtitle() {
+    private fun deleteSelectedSubtitles() {
         if (isSourceViewMode) {
             Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
             return
@@ -1981,12 +2058,20 @@ class EditorActivity : AppCompatActivity() {
             .setTitle("删除")
             .setMessage("确定要删除选中的字幕吗？")
             .setPositiveButton("确定") { _, _ ->
+                // 保存要删除的条目对象
+                val entriesToDelete = selectedEntries.map { it.first }
                 // 从后往前删除，避免索引变化
                 selectedEntries.sortedByDescending { it.second }.forEach { (_, position) ->
                     subtitleEntries.removeAt(position)
                 }
-                refreshAllItems()
-                subtitleAdapter.clearSelection()
+                renumberEntries()
+                subtitleAdapter.submitList(subtitleEntries.toList())
+                // 同步选中状态
+                subtitleAdapter.syncSelectionWithCurrentList()
+                // 从选中状态中移除被删除的条目
+                entriesToDelete.forEach { entry ->
+                    subtitleAdapter.removeSelectionByEntry(entry)
+                }
                 updateSelectedCountDisplay()
                 updateFormatInfo()
                 
@@ -1995,10 +2080,6 @@ class EditorActivity : AppCompatActivity() {
             }
             .setNegativeButton("取消", null)
             .show()
-    }
-    
-    private fun deleteSelectedSubtitles() {
-        deleteSelectedSubtitle()
     }
     
     /**

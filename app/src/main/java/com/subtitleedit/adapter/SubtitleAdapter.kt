@@ -21,6 +21,9 @@ import com.subtitleedit.util.TimeUtils
 /**
  * 字幕列表适配器
  * 支持点击编辑、长按菜单、多选功能
+ * 
+ * 使用 SubtitleEntry 对象本身（而非 position）来跟踪选中状态，
+ * 这样在数据变化时选中状态不会错位
  */
 class SubtitleAdapter(
     private val onItemClick: (SubtitleEntry, Int) -> Unit,
@@ -29,7 +32,9 @@ class SubtitleAdapter(
     private val onTextClick: (SubtitleEntry, Int) -> Unit
 ) : ListAdapter<SubtitleEntry, SubtitleAdapter.SubtitleViewHolder>(SubtitleDiffCallback()) {
 
-    private val selectedPositions = mutableSetOf<Int>()
+    // 使用对象本身来跟踪选中状态，而不是 position
+    // 这样在数据变化时选中状态不会错位
+    private val selectedEntries = mutableSetOf<SubtitleEntry>()
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): SubtitleViewHolder {
         val view = LayoutInflater.from(parent.context)
@@ -51,10 +56,11 @@ class SubtitleAdapter(
     }
 
     fun toggleSelection(position: Int) {
+        val entry = getItem(position)
         if (isSelected(position)) {
-            selectedPositions.remove(position)
+            selectedEntries.remove(entry)
         } else {
-            selectedPositions.add(position)
+            selectedEntries.add(entry)
         }
         // 使用 payload 强制刷新选中状态
         notifyItemChanged(position, PAYLOAD_SELECTION)
@@ -65,31 +71,86 @@ class SubtitleAdapter(
     }
 
     fun isSelected(position: Int): Boolean {
-        return selectedPositions.contains(position)
+        val entry = getItem(position)
+        return selectedEntries.contains(entry)
     }
 
     fun getSelectedPositions(): Set<Int> {
-        return selectedPositions.toSet()
+        // 返回当前选中的 position 列表（用于通知刷新）
+        return selectedEntries.mapNotNull { entry ->
+            val index = currentList.indexOf(entry)
+            if (index >= 0) index else null
+        }.toSet()
     }
 
     fun getSelectedEntries(): List<Pair<SubtitleEntry, Int>> {
-        return selectedPositions.sorted().mapNotNull { position ->
-            if (position < getItemCount()) {
-                Pair(getItem(position), position)
-            } else null
-        }
+        // 返回选中的条目及其当前位置
+        return selectedEntries.mapNotNull { entry ->
+            val index = currentList.indexOf(entry)
+            if (index >= 0) Pair(entry, index) else null
+        }.sortedBy { it.second }
     }
 
     fun clearSelection() {
-        val positionsToNotify = selectedPositions.toList()
-        selectedPositions.clear()
+        // 获取所有需要刷新的位置
+        val positionsToNotify = getSelectedPositions()
+        selectedEntries.clear()
         positionsToNotify.forEach { position ->
             notifyItemChanged(position)
         }
     }
 
     fun getSelectedCount(): Int {
-        return selectedPositions.size
+        return selectedEntries.size
+    }
+    
+    /**
+     * 根据条目对象移除选中状态（用于删除操作后保持其他选中状态）
+     */
+    fun removeSelectionByEntry(entry: SubtitleEntry) {
+        selectedEntries.remove(entry)
+    }
+    
+    /**
+     * 数据变化后刷新选中状态（重新计算位置）
+     * 关键：使用 currentList 中的对象引用来更新 selectedEntries
+     */
+    fun refreshSelectionAfterDataChange() {
+        // 保存当前选中的条目数据（用于匹配）
+        val selectedData = selectedEntries.map { it.copy() }.toSet()
+        selectedEntries.clear()
+        
+        // 从 currentList 中找到匹配的条目，使用 currentList 中的引用
+        currentList.forEach { entry ->
+            val entryData = entry.copy()
+            if (selectedData.contains(entryData)) {
+                selectedEntries.add(entry)
+            }
+        }
+        
+        notifyDataSetChanged()
+    }
+    
+    /**
+     * 根据数据匹配重新同步选中状态
+     * 用于在 submitList 后保持选中状态
+     */
+    fun syncSelectionWithCurrentList() {
+        // 保存当前选中的条目数据（用于匹配）
+        val selectedData = selectedEntries.map { 
+            Triple(it.startTime, it.endTime, it.text) 
+        }.toSet()
+        selectedEntries.clear()
+        
+        // 从 currentList 中找到匹配的条目，使用 currentList 中的引用
+        currentList.forEach { entry ->
+            val key = Triple(entry.startTime, entry.endTime, entry.text)
+            if (selectedData.contains(key)) {
+                selectedEntries.add(entry)
+            }
+        }
+        
+        notifyDataSetChanged()
     }
 
     /**
@@ -184,9 +245,12 @@ class SubtitleAdapter(
             itemView.alpha = if (isSelected) 0.6f else 1.0f
 
             // 点击事件 - 切换选中状态
-            // 使用 position 参数而不是 adapterPosition，因为 position 更可靠
+            // 使用 adapterPosition 获取实时的位置，避免 ViewHolder 复用时 position 过期
             itemView.setOnClickListener {
-                toggleSelection(position)
+                val pos = adapterPosition
+                if (pos != RecyclerView.NO_POSITION) {
+                    toggleSelection(pos)
+                }
             }
 
             // 长按事件 - 弹出菜单（不自动选中）
