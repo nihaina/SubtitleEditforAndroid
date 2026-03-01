@@ -42,52 +42,103 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
+                android:orientation="vertical"
                 android:padding="8dp">
 
-                <!-- 搜索输入框 -->
-                <EditText
-                    android:id="@+id/etSearch"
-                    android:layout_width="0dp"
+                <!-- 第一行：搜索输入 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:hint="@string/search_hint"
-                    android:inputType="text"
-                    android:maxLines="1"
-                    android:background="@null"
-                    android:paddingStart="8dp"
-                    android:paddingEnd="8dp"
-                    android:importantForAutofill="no" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
 
-                <!-- 上一项按钮 -->
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnSearchPrevious"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="wrap_content"
+                    <!-- 搜索输入框 -->
+                    <EditText
+                        android:id="@+id/etSearch"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:hint="@string/search_hint"
+                        android:inputType="text"
+                        android:maxLines="1"
+                        android:background="@null"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:importantForAutofill="no" />
+
+                    <!-- 上一项按钮 -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSearchPrevious"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/search_previous"
+                        android:textSize="12sp"
+                        android:layout_marginEnd="4dp" />
+
+                    <!-- 下一项按钮 -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSearchNext"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/search_next"
+                        android:textSize="12sp"
+                        android:layout_marginEnd="4dp" />
+
+                    <!-- 关闭按钮 -->
+                    <ImageButton
+                        android:id="@+id/btnSearchClose"
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        android:src="@drawable/ic_close"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/search_close" />
+
+                </LinearLayout>
+
+                <!-- 第二行：替换输入和操作按钮 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/search_previous"
-                    android:textSize="12sp"
-                    android:layout_marginEnd="4dp" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="4dp">
 
-                <!-- 下一项按钮 -->
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnSearchNext"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/search_next"
-                    android:textSize="12sp"
-                    android:layout_marginEnd="4dp" />
+                    <!-- 替换输入框 -->
+                    <EditText
+                        android:id="@+id/etReplace"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:hint="替换为"
+                        android:inputType="text"
+                        android:maxLines="1"
+                        android:background="@null"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:importantForAutofill="no" />
 
-                <!-- 关闭按钮 -->
-                <ImageButton
-                    android:id="@+id/btnSearchClose"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:src="@drawable/ic_close"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/search_close" />
+                    <!-- 替换按钮 -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnReplace"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="替换"
+                        android:textSize="12sp"
+                        android:layout_marginEnd="4dp" />
+
+                    <!-- 全部替换按钮 -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnReplaceAll"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="全部替换"
+                        android:textSize="12sp" />
+
+                </LinearLayout>
 
             </LinearLayout>
 

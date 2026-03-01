@@ -279,6 +279,16 @@ class EditorActivity : AppCompatActivity() {
             hideSearchBar()
         }
         
+        // 替换按钮
+        binding.btnReplace.setOnClickListener {
+            replaceOne()
+        }
+        
+        // 全部替换按钮
+        binding.btnReplaceAll.setOnClickListener {
+            replaceAll()
+        }
+        
         // 回车键搜索
         binding.etSearch.setOnKeyListener { _, keyCode, event ->
             if (keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN) {
@@ -313,6 +323,7 @@ class EditorActivity : AppCompatActivity() {
         currentSearchIndex = -1
         searchQuery = ""
         binding.etSearch.text?.clear()
+        binding.etReplace.text?.clear()
         // 清除列表中的搜索高亮
         subtitleAdapter.clearSearchHighlight()
         // 清除源视图中的搜索高亮
@@ -331,6 +342,178 @@ class EditorActivity : AppCompatActivity() {
         val content = binding.etSourceView.text?.toString() ?: ""
         // 恢复原始内容（不带高亮）
         binding.etSourceView.setText(content, TextView.BufferType.EDITABLE)
+    }
+    
+    /**
+     * 替换一个匹配项
+     */
+    private fun replaceOne() {
+        val replaceText = binding.etReplace.text?.toString() ?: ""
+        if (searchQuery.isEmpty() || searchResults.isEmpty()) {
+            Toast.makeText(this, "请先搜索内容", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        if (isSourceViewMode) {
+            replaceOneInSourceView(replaceText)
+        } else {
+            replaceOneInRecyclerView(replaceText)
+        }
+    }
+    
+    /**
+     * 在源视图中替换一个匹配项
+     */
+    private fun replaceOneInSourceView(replaceText: String) {
+        val content = binding.etSourceView.text?.toString() ?: ""
+        if (currentSearchIndex < 0 || currentSearchIndex >= searchResults.size) {
+            Toast.makeText(this, "没有可替换的匹配项", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        val position = searchResults[currentSearchIndex]
+        val newContent = content.replaceRange(
+            position,
+            position + searchQuery.length,
+            replaceText
+        )
+        binding.etSourceView.setText(newContent)
+        sourceViewContent = newContent
+        hasUnsavedChanges = true
+        
+        // 重新搜索以更新结果
+        searchInSourceView()
+        Toast.makeText(this, "已替换 1 处", Toast.LENGTH_SHORT).show()
+    }
+    
+    /**
+     * 在列表中替换一个匹配项
+     */
+    private fun replaceOneInRecyclerView(replaceText: String) {
+        if (currentSearchIndex < 0 || currentSearchIndex >= searchResults.size) {
+            Toast.makeText(this, "没有可替换的匹配项", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        val position = searchResults[currentSearchIndex]
+        val entry = subtitleEntries[position]
+        val newText = entry.text.replace(searchQuery, replaceText, ignoreCase = true)
+        
+        if (entry.text != newText) {
+            entry.text = newText
+            subtitleAdapter.notifyItemChanged(position)
+            hasUnsavedChanges = true
+            
+            // 重新搜索以更新结果
+            searchInRecyclerView()
+            Toast.makeText(this, "已替换 1 处", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "当前项无可替换内容", Toast.LENGTH_SHORT).show()
+            // 跳转到下一个
+            goToNextResult()
+        }
+    }
+    
+    /**
+     * 全部替换
+     */
+    private fun replaceAll() {
+        val replaceText = binding.etReplace.text?.toString() ?: ""
+        if (searchQuery.isEmpty()) {
+            Toast.makeText(this, "请先搜索内容", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        if (isSourceViewMode) {
+            replaceAllInSourceView(replaceText)
+        } else {
+            replaceAllInRecyclerView(replaceText)
+        }
+    }
+    
+    /**
+     * 在源视图中全部替换
+     */
+    private fun replaceAllInSourceView(replaceText: String) {
+        val content = binding.etSourceView.text?.toString() ?: ""
+        var count = 0
+        val newContent = content.replace(Regex(Regex.escape(searchQuery)), replaceText)
+            .let {
+                // 计算替换次数
+                count = (content.length - it.length) / searchQuery.length + 
+                    (if (searchQuery.length != replaceText.length) 0 else 
+                        content.split(searchQuery, ignoreCase = true).size - 1)
+                it
+            }
+        
+        // 更准确地计算替换次数
+        count = content.split(Regex(Regex.escape(searchQuery), RegexOption.IGNORE_CASE)).size - 1
+        
+        if (count > 0) {
+            AlertDialog.Builder(this)
+                .setTitle("确认替换")
+                .setMessage("确定要全部替换吗？共找到 $count 处匹配项。")
+                .setPositiveButton("确定") { _, _ ->
+                    binding.etSourceView.setText(newContent)
+                    sourceViewContent = newContent
+                    hasUnsavedChanges = true
+                    
+                    // 清除搜索结果
+                    searchResults = emptyList()
+                    currentSearchIndex = -1
+                    searchQuery = ""
+                    binding.etSearch.text?.clear()
+                    
+                    Toast.makeText(this, "已替换 $count 处", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        } else {
+            Toast.makeText(this, "没有找到可替换的内容", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    /**
+     * 在列表中全部替换
+     */
+    private fun replaceAllInRecyclerView(replaceText: String) {
+        var count = 0
+        val positionsToRefresh = mutableListOf<Int>()
+        
+        subtitleEntries.forEachIndexed { index, entry ->
+            if (entry.text.contains(searchQuery, ignoreCase = true)) {
+                val newText = entry.text.replace(Regex(Regex.escape(searchQuery), RegexOption.IGNORE_CASE), replaceText)
+                if (entry.text != newText) {
+                    entry.text = newText
+                    positionsToRefresh.add(index)
+                    count++
+                }
+            }
+        }
+        
+        if (count > 0) {
+            AlertDialog.Builder(this)
+                .setTitle("确认替换")
+                .setMessage("确定要全部替换吗？共找到 $count 处匹配项。")
+                .setPositiveButton("确定") { _, _ ->
+                    positionsToRefresh.forEach { position ->
+                        subtitleAdapter.notifyItemChanged(position)
+                    }
+                    hasUnsavedChanges = true
+                    
+                    // 清除搜索结果
+                    searchResults = emptyList()
+                    currentSearchIndex = -1
+                    searchQuery = ""
+                    binding.etSearch.text?.clear()
+                    
+                    Toast.makeText(this, "已替换 $count 处", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        } else {
+            Toast.makeText(this, "没有找到可替换的内容", Toast.LENGTH_SHORT).show()
+        }
     }
     
     /**
