@@ -45,23 +45,8 @@
 - AI API 配置
 - 翻译语言设置
 
-## 技术栈
-
-- **语言**: Kotlin
-- **最低 SDK**: Android 13 (API 33)
-- **目标 SDK**: Android 14 (API 34)
-- **架构**: MVVM
-- **主要库**:
-  - AndroidX Core KTX
-  - Material Design Components
-  - RecyclerView
-  - ViewBinding
-  - Kotlin Coroutines
-  - OkHttp3
-
 ## 环境要求
 
-- Android Studio Hedgehog 或更高版本
 - JDK 17
 - Android SDK 33+
 
@@ -132,11 +117,4 @@ cd SubtitleEditforAndroid
 
 欢迎提交 Issue 和 Pull Request！
 
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情
-
-感谢以下开源项目：
-
-- [AndroidX](https://developer.android.com/jetpack/androidx)
-- [Material Components](https://material.io/develop/android)
-- [Kotlin Coroutines](https://kotlinlang.org/docs/coroutines-overview.html)
-- [OkHttp](https://square.github.io/okhttp/)
+本项目采用 **[GPL-3.0 License](https://www.gnu.org/licenses/gpl-3.0.html)** 授权
