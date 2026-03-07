@@ -825,12 +825,38 @@ class EditorActivity : AppCompatActivity() {
         try {
             val content = FileUtils.readUri(this, uri)
             currentFile = null
+            // 获取文件名并更新显示
+            val fileName = getFileNameFromUri(uri)
+            binding.tvFileName.text = fileName
             parseContent(content)
             hasUnsavedChanges = false
-            Toast.makeText(this, "文件已打开", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "文件已打开：$fileName", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "打开文件失败：${e.message}", Toast.LENGTH_SHORT).show()
         }
+    }
+    
+    /**
+     * 从 URI 获取文件名
+     */
+    private fun getFileNameFromUri(uri: Uri): String {
+        var fileName = "未命名"
+        // 尝试从 display name 获取
+        val cursor = contentResolver.query(uri, null, null, null, null)
+        cursor?.use {
+            val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            if (it.moveToFirst() && nameIndex >= 0) {
+                fileName = it.getString(nameIndex)
+            }
+        }
+        // 如果获取失败，尝试从 path 获取
+        if (fileName == "未命名") {
+            val path = uri.path
+            if (!path.isNullOrEmpty()) {
+                fileName = path.substringAfterLast('/')
+            }
+        }
+        return fileName
     }
     
     private fun reloadFile() {
