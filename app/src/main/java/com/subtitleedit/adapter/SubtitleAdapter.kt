@@ -240,6 +240,19 @@ class SubtitleAdapter(
             tvStartTime.text = TimeUtils.formatForInput(entry.startTime)
             tvEndTime.text = TimeUtils.formatForInput(entry.endTime)
 
+            // 当开始时间大于等于结束时间时，时间轴标红提示
+            val isTimeInvalid = entry.startTime >= entry.endTime
+            if (isTimeInvalid) {
+                val errorColor = ContextCompat.getColor(itemView.context, R.color.error)
+                tvStartTime.setTextColor(errorColor)
+                tvEndTime.setTextColor(errorColor)
+            } else {
+                // 恢复正常颜色
+                val normalColor = ContextCompat.getColor(itemView.context, R.color.primary)
+                tvStartTime.setTextColor(normalColor)
+                tvEndTime.setTextColor(normalColor)
+            }
+
             // 根据是否为音频文件模式控制按钮显示
             btnJumpToTime.visibility = if (isAudioFile) View.VISIBLE else View.GONE
             btnSetTime.visibility = if (isAudioFile) View.VISIBLE else View.GONE

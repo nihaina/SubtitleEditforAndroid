@@ -60,6 +60,9 @@ class EditorActivity : AppCompatActivity() {
     
     private var filePath: String = ""
     private var currentFile: File? = null
+    // 字幕文件路径（当打开音频文件时，用于保存字幕）
+    private var subtitleFilePath: String = ""
+    private var subtitleFile: File? = null
     private var subtitleEntries = mutableListOf<SubtitleEntry>()
     private var currentCharset: Charset = StandardCharsets.UTF_8
     private var currentFormat: SubtitleParser.SubtitleFormat = SubtitleParser.SubtitleFormat.UNKNOWN
@@ -145,10 +148,19 @@ class EditorActivity : AppCompatActivity() {
         
         filePath = intent.getStringExtra(EXTRA_FILE_PATH) ?: ""
         isAudioFile = intent.getBooleanExtra(EXTRA_IS_AUDIO_FILE, false)
-        val subtitleFilePath = intent.getStringExtra(EXTRA_SUBTITLE_FILE_PATH)
+        subtitleFilePath = intent.getStringExtra(EXTRA_SUBTITLE_FILE_PATH) ?: ""
         
         if (filePath.isNotEmpty()) {
-            currentFile = File(filePath)
+            if (isAudioFile) {
+                // 音频文件模式：currentFile 指向音频文件，subtitleFile 指向字幕文件
+                currentFile = File(filePath)
+                if (subtitleFilePath.isNotEmpty()) {
+                    subtitleFile = File(subtitleFilePath)
+                }
+            } else {
+                // 普通模式：currentFile 指向字幕文件
+                currentFile = File(filePath)
+            }
         }
         
         setupToolbar()
@@ -1719,7 +1731,16 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun saveFile() {
-        if (currentFile == null && !isSourceViewMode) {
+        // 确定要保存的目标文件
+        val targetFile = if (isAudioFile) {
+            // 音频文件模式：保存到字幕文件
+            subtitleFile
+        } else {
+            // 普通模式：保存到当前文件
+            currentFile
+        }
+        
+        if (targetFile == null && !isSourceViewMode) {
             saveFileAs()
             return
         }
@@ -1736,8 +1757,8 @@ class EditorActivity : AppCompatActivity() {
                 }
             }
             
-            if (currentFile != null) {
-                FileUtils.writeFile(currentFile!!, content, currentCharset)
+            if (targetFile != null) {
+                FileUtils.writeFile(targetFile, content, currentCharset)
             } else {
                 // 对于从 URI 打开的文件，无法直接保存，需要另存为
                 saveFileAs()
@@ -2660,19 +2681,17 @@ class EditorActivity : AppCompatActivity() {
             return
         }
         
-        // 确保开始时间不超过结束时间
         val newStartTime = audioCurrentPosition
-        if (newStartTime >= entry.endTime) {
-            Toast.makeText(this, "开始时间不能大于等于结束时间", Toast.LENGTH_SHORT).show()
-            return
-        }
-        
         entry.startTime = newStartTime
         
         // 刷新该条目显示
         subtitleAdapter.notifyItemChanged(position)
         markAsChanged()
         
-        Toast.makeText(this, "已将开始时间设置为 ${TimeUtils.formatForDisplay(newStartTime)}", Toast.LENGTH_SHORT).show()
+        if (newStartTime >= entry.endTime) {
+            Toast.makeText(this, "开始时间已设置，但大于结束时间，请调整结束时间", Toast.LENGTH_LONG).show()
+        } else {
+            Toast.makeText(this, "已将开始时间设置为 ${TimeUtils.formatForDisplay(newStartTime)}", Toast.LENGTH_SHORT).show()
+        }
     }
 }
