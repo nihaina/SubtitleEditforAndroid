@@ -64,8 +64,13 @@ class WaveformTimelineView @JvmOverloads constructor(
     private var dragMode = DragMode.NONE
     private var currentSubtitle: SubtitleEntry? = null
     private var dragStartX: Float = 0f
+    private var dragStartY: Float = 0f
     private var dragStartStartTime: Long = 0L
     private var dragStartEndTime: Long = 0L
+    
+    // 波形区域拖动（平移时间轴）
+    private var isDraggingWaveform: Boolean = false
+    private var dragStartVisibleStartMs: Long = 0L
     
     // 缩放相关
     private var zoomLevel: Float = 1f
@@ -74,6 +79,9 @@ class WaveformTimelineView @JvmOverloads constructor(
     
     // 选中状态
     private var selectedIndices: Set<Int> = emptySet()
+    
+    // 选中状态变化监听器（用于通知 EditorActivity 更新字幕列表选中状态）
+    private var onSelectedIndicesChangeListener: ((Set<Int>) -> Unit)? = null
     
     // 点击监听器
     private var onTimelineClickListener: ((Float) -> Unit)? = null
@@ -451,6 +459,26 @@ class WaveformTimelineView @JvmOverloads constructor(
     
     // ==================== 触摸事件处理 ====================
     
+    /**
+     * 获取字幕轨道区域的 Y 范围
+     */
+    private fun getSubtitleTrackYRange(): Pair<Float, Float> {
+        val height = height.toFloat()
+        val timeRulerHeight = height * 0.1f
+        val waveformHeight = height * 0.55f
+        val subtitleTrackY = timeRulerHeight + waveformHeight
+        val subtitleTrackHeight = height * 0.35f
+        return Pair(subtitleTrackY, subtitleTrackY + subtitleTrackHeight)
+    }
+    
+    /**
+     * 检查 Y 坐标是否在字幕轨道区域内
+     */
+    private fun isInSubtitleTrackArea(y: Float): Boolean {
+        val (trackY, trackYEnd) = getSubtitleTrackYRange()
+        return y >= trackY && y <= trackYEnd
+    }
+    
     override fun onTouchEvent(event: MotionEvent): Boolean {
         // 处理缩放手势
         scaleGestureDetector.onTouchEvent(event)
@@ -461,16 +489,56 @@ class WaveformTimelineView @JvmOverloads constructor(
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
                 dragStartX = event.x
-                currentSubtitle = findSubtitle(event.x)
-                currentSubtitle?.let {
-                    dragMode = detectDragMode(event.x, it)
-                    dragStartStartTime = it.startTime
-                    dragStartEndTime = it.endTime
+                dragStartY = event.y
+                
+                // 检查点击是否在字幕轨道区域内
+                if (isInSubtitleTrackArea(event.y)) {
+                    // 字幕轨道区域：处理字幕选择和拖拽
+                    currentSubtitle = findSubtitle(event.x)
+                    currentSubtitle?.let {
+                        val index = subtitles.indexOf(it)
+                        // 只有选中的字幕才能拖拽
+                        if (index in selectedIndices) {
+                            dragMode = detectDragMode(event.x, it)
+                            dragStartStartTime = it.startTime
+                            dragStartEndTime = it.endTime
+                        } else {
+                            // 未选中，先选中该字幕
+                            selectSubtitle(index)
+                            dragMode = DragMode.NONE
+                        }
+                    } ?: run {
+                        // 点击空白区域，清除所有选中
+                        clearSelection()
+                    }
+                    isDraggingWaveform = false
+                } else {
+                    // 波形/时间刻度区域：处理时间轴平移
+                    isDraggingWaveform = true
+                    dragStartVisibleStartMs = visibleStartMs
+                    dragMode = DragMode.NONE
+                    currentSubtitle = null
                 }
                 return true
             }
             
             MotionEvent.ACTION_MOVE -> {
+                val deltaX = event.x - dragStartX
+                
+                // 处理波形区域拖动（平移时间轴）
+                if (isDraggingWaveform) {
+                    val timeDelta = (deltaX / width * visibleDurationMs).toLong()
+                    visibleStartMs = (dragStartVisibleStartMs - timeDelta).coerceIn(0L, max(0L, durationMs - visibleDurationMs))
+                    invalidate()
+                    return true
+                }
+                
+                // 处理字幕拖拽
+                // 只有已选中且已启动拖拽模式才能移动
+                if (dragMode == DragMode.NONE || currentSubtitle == null) {
+                    return true
+                }
+                
                 val s = currentSubtitle ?: return true
                 
                 val currentTime = xToTime(event.x)
@@ -500,17 +568,37 @@ class WaveformTimelineView @JvmOverloads constructor(
             }
             
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (dragMode != DragMode.NONE) {
+                if (dragMode != DragMode.NONE && !isDraggingWaveform) {
                     // 通知字幕变化
                     onSubtitleChangeListener?.invoke(subtitles.toList())
                 }
                 dragMode = DragMode.NONE
                 currentSubtitle = null
+                isDraggingWaveform = false
                 return true
             }
         }
         
         return super.onTouchEvent(event)
+    }
+    
+    /**
+     * 选中指定索引的字幕
+     */
+    private fun selectSubtitle(index: Int) {
+        if (index < 0 || index >= subtitles.size) return
+        selectedIndices = setOf(index)
+        onSelectedIndicesChangeListener?.invoke(selectedIndices)
+        invalidate()
+    }
+    
+    /**
+     * 清除所有选中
+     */
+    private fun clearSelection() {
+        selectedIndices = emptySet()
+        onSelectedIndicesChangeListener?.invoke(selectedIndices)
+        invalidate()
     }
     
     /**
@@ -592,6 +680,13 @@ class WaveformTimelineView @JvmOverloads constructor(
     fun setSelectedIndices(indices: Set<Int>) {
         selectedIndices = indices
         invalidate()
+    }
+    
+    /**
+     * 设置选中状态变化监听器
+     */
+    fun setOnSelectedIndicesChangeListener(listener: (Set<Int>) -> Unit) {
+        onSelectedIndicesChangeListener = listener
     }
     
     /**

@@ -2461,6 +2461,18 @@ class EditorActivity : AppCompatActivity() {
             markAsChanged()
         }
         
+        // 设置选中状态变化监听器（波形时间轴选中状态同步到字幕列表）
+        binding.waveformTimelineView.setOnSelectedIndicesChangeListener { indices ->
+            // 同步选中状态到字幕列表
+            subtitleAdapter.clearSelection()
+            indices.forEach { index ->
+                if (index >= 0 && index < subtitleEntries.size) {
+                    subtitleAdapter.toggleSelection(index)
+                }
+            }
+            updateSelectedCountDisplay()
+        }
+        
         // 播放/暂停按钮
         binding.btnPlayPause.setOnClickListener {
             togglePlayPause()
