@@ -47,7 +47,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import com.subtitleedit.audio.WaveformExtractor
+import com.subtitleedit.audio.WaveformChunkLoader
+import androidx.activity.ComponentActivity
+import androidx.lifecycle.lifecycleScope
 
 /**
  * 字幕编辑界面
@@ -895,6 +897,11 @@ class EditorActivity : AppCompatActivity() {
         
         if (subtitleEntries.isEmpty() && !isSourceViewMode) {
             Toast.makeText(this, "未找到字幕内容", Toast.LENGTH_SHORT).show()
+        }
+        
+        // 同步字幕到波形视图（仅音频模式有效）
+        if (isAudioFile) {
+            binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
         }
     }
     
@@ -2445,24 +2452,27 @@ class EditorActivity : AppCompatActivity() {
         }
         
         // 设置时间轴点击监听器
-        binding.waveformTimelineView.setOnTimelineClickListener { position ->
+        binding.waveformTimelineView.onTimelineClickListener = { position ->
             // 点击时间轴跳转到对应时间
             val targetTime = (audioDuration * position).toLong()
             seekTo(targetTime)
+            // 暂停时也要更新 UI，确保播放头位置正确显示
+            updatePlayerUI()
         }
         
         // 设置字幕变化监听器
-        binding.waveformTimelineView.setOnSubtitleChangeListener { updatedSubtitles ->
+        binding.waveformTimelineView.onSubtitleChangeListener = { updatedSubtitles ->
             // 更新字幕列表
             subtitleEntries.clear()
             subtitleEntries.addAll(updatedSubtitles)
             renumberEntries()
-            subtitleAdapter.submitList(subtitleEntries.toList())
+            // 使用 notifyDataSetChanged 强制立即刷新，而不是异步的 submitList
+            subtitleAdapter.notifyDataSetChanged()
             markAsChanged()
         }
         
         // 设置选中状态变化监听器（波形时间轴选中状态同步到字幕列表）
-        binding.waveformTimelineView.setOnSelectedIndicesChangeListener { indices ->
+        binding.waveformTimelineView.onSelectedIndicesChangeListener = { indices ->
             // 同步选中状态到字幕列表
             subtitleAdapter.clearSelection()
             indices.forEach { index ->
@@ -2471,6 +2481,14 @@ class EditorActivity : AppCompatActivity() {
                 }
             }
             updateSelectedCountDisplay()
+            
+            // 滚动到选中的字幕行
+            if (indices.isNotEmpty()) {
+                val firstSelectedIndex = indices.first()
+                if (firstSelectedIndex >= 0 && firstSelectedIndex < subtitleEntries.size) {
+                    binding.rvSubtitles.scrollToPosition(firstSelectedIndex)
+                }
+            }
         }
         
         // 播放/暂停按钮
@@ -2487,6 +2505,13 @@ class EditorActivity : AppCompatActivity() {
                     val targetTime = (audioDuration * progress / 1000).toLong()
                     audioCurrentPosition = targetTime
                     binding.tvCurrentTime.text = TimeUtils.formatForDisplay(targetTime)
+                    // 拖动时实时更新波形图时间轴线位置
+                    val wavePosition = if (audioDuration > 0) {
+                        audioCurrentPosition.toFloat() / audioDuration
+                    } else {
+                        0f
+                    }
+                    binding.waveformTimelineView.setCurrentPosition(wavePosition)
                 }
             }
             
@@ -2530,19 +2555,7 @@ class EditorActivity : AppCompatActivity() {
             Toast.makeText(this, "加载音频失败：${e.message}", Toast.LENGTH_SHORT).show()
         }
         
-        // 在后台线程提取真实波形数据
-        // 先设置加载状态
-        binding.waveformTimelineView.setLoading(true)
-        
-        CoroutineScope(Dispatchers.IO).launch {
-            val waveform = WaveformExtractor.extractWaveform(currentFile!!.absolutePath, samplesPerSecond = 100)
-            
-            withContext(Dispatchers.Main) {
-                binding.waveformTimelineView.setTimelineData(audioDuration, subtitleEntries.toList(), waveform)
-            }
-        }
-        
-        // 加载字幕文件（如果有）
+        // 先加载字幕文件（如果有）
         if (subtitleFilePath != null) {
             val subtitleFile = File(subtitleFilePath)
             if (subtitleFile.exists()) {
@@ -2559,6 +2572,22 @@ class EditorActivity : AppCompatActivity() {
             subtitleEntries.clear()
             subtitleAdapter.submitList(emptyList())
             updateFormatInfo()
+        }
+        
+        // 字幕加载完毕后，再初始化波形视图（此时 subtitleEntries 已有数据）
+        binding.waveformTimelineView.initialize(audioDuration, subtitleEntries.toList())
+        
+        // 创建 chunk 加载器
+        val chunkLoader = WaveformChunkLoader(lifecycleScope)
+        chunkLoader.prepare(currentFile!!.absolutePath, audioDuration)
+        
+        // 连接 View 和 Loader
+        binding.waveformTimelineView.onChunkLoadRequest = { chunkIndex, startMs, endMs, targetSamples ->
+            chunkLoader.requestChunk(chunkIndex, startMs, endMs, targetSamples) { idx, data ->
+                binding.waveformTimelineView.post { 
+                    binding.waveformTimelineView.updateChunk(idx, data) 
+                }
+            }
         }
         
         updatePlayerUI()
@@ -2607,6 +2636,9 @@ class EditorActivity : AppCompatActivity() {
         
         // 高亮显示对应时间的字幕
         highlightSubtitleAtTime(audioCurrentPosition)
+        
+        // 立即更新 UI（进度条、波形图时间轴线）
+        updatePlayerUI()
         
         // 如果之前在播放，继续播放
         if (isPlaying) {
@@ -2704,31 +2736,7 @@ class EditorActivity : AppCompatActivity() {
         Toast.makeText(this, "已跳转到 ${TimeUtils.formatForDisplay(entry.startTime)}", Toast.LENGTH_SHORT).show()
     }
     
-    /**
-     * 生成模拟波形数据（用于 UI 展示）
-     * @param durationMs 音频时长（毫秒）
-     * @param samplesPerSecond 每秒采样点数（默认 100，即每 10ms 一个采样点）
-     */
-    private fun generateMockWaveformWithDuration(durationMs: Long, samplesPerSecond: Int = 100): FloatArray {
-        val totalSamples = ((durationMs / 1000f) * samplesPerSecond).toInt().coerceAtLeast(1000)
-        val amplitudes = FloatArray(totalSamples)
-        var phase = 0f
-        
-        for (i in 0 until totalSamples) {
-            // 使用多个正弦波叠加模拟真实音频波形
-            val base = kotlin.math.sin(phase).toFloat() * 0.5f
-            val harmonic1 = kotlin.math.sin(phase * 2.3f).toFloat() * 0.3f
-            val harmonic2 = kotlin.math.sin(phase * 0.7f).toFloat() * 0.2f
-            
-            // 添加随机变化
-            val noise = (Math.random().toFloat() - 0.5f) * 0.3f
-            
-            amplitudes[i] = (base + harmonic1 + harmonic2 + noise).coerceIn(-1f, 1f)
-            phase += 0.1f + Math.random().toFloat() * 0.05f
-        }
-        
-        return amplitudes
-    }
+    
     
     /**
      * 将字幕的开始时间设置为当前音频进度

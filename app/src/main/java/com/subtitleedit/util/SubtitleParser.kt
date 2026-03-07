@@ -182,7 +182,7 @@ object SubtitleParser {
             // 如果文本为空，跳过（这是空白时间标签）
             if (text.isEmpty()) continue
             
-            var endTime = startTime + 3000 // 默认 3 秒持续时间
+            var endTime = startTime + 6000 // 默认 6 秒持续时间
             var endTimeModified = false
             
             // 查找下一个时间标签
@@ -193,11 +193,11 @@ object SubtitleParser {
                     // 下一行是空白时间标签，使用它作为结束时间
                     endTime = nextStartTime
                     endTimeModified = true // 空白时间标签表示用户明确设置了结束时间
-                } else if (nextStartTime < startTime + 3000) {
-                    // 下一行起始时间小于 3 秒，使用下一行起始时间作为结束时间
+                } else if (nextStartTime < startTime + 6000) {
+                    // 下一行起始时间小于 6 秒，使用下一行起始时间作为结束时间
                     endTime = nextStartTime
                 }
-                // 否则保持默认 3 秒
+                // 否则保持默认 6 秒
             }
             
             entries.add(
