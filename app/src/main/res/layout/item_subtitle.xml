@@ -95,14 +95,45 @@
 
         </LinearLayout>
 
-        <!-- 选中指示器 -->
-        <ImageView
-            android:id="@+id/ivSelected"
-            android:layout_width="24dp"
-            android:layout_height="24dp"
-            android:src="@drawable/ic_check"
-            android:visibility="gone"
-            android:contentDescription="selected" />
+        <!-- 选中指示器和操作按钮容器 -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:layout_marginStart="8dp">
+            
+            <!-- 选中指示器 -->
+            <ImageView
+                android:id="@+id/ivSelected"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:src="@drawable/ic_check"
+                android:visibility="gone"
+                android:contentDescription="selected" />
+            
+            <!-- 右上按钮：跳转到字幕时间 -->
+            <ImageButton
+                android:id="@+id/btnJumpToTime"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@android:drawable/ic_media_play"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="跳转到字幕时间"
+                android:visibility="gone"
+                android:scaleType="centerInside" />
+            
+            <!-- 右下按钮：设置字幕时间为当前进度 -->
+            <ImageButton
+                android:id="@+id/btnSetTime"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@android:drawable/ic_menu_edit"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="设置字幕时间"
+                android:visibility="gone"
+                android:scaleType="centerInside" />
+        </LinearLayout>
 
     </LinearLayout>
 

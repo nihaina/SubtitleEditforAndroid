@@ -29,7 +29,10 @@ class SubtitleAdapter(
     private val onItemClick: (SubtitleEntry, Int) -> Unit,
     private val onItemLongClick: (SubtitleEntry, Int) -> Unit,
     private val onTimeClick: (SubtitleEntry, Int, Boolean) -> Unit, // isStartTime
-    private val onTextClick: (SubtitleEntry, Int) -> Unit
+    private val onTextClick: (SubtitleEntry, Int) -> Unit,
+    private val onJumpToTimeClick: (SubtitleEntry, Int) -> Unit, // 跳转到字幕时间
+    private val onSetTimeClick: (SubtitleEntry, Int) -> Unit, // 设置字幕时间为当前进度
+    private val isAudioFile: Boolean = false // 是否为音频文件模式
 ) : ListAdapter<SubtitleEntry, SubtitleAdapter.SubtitleViewHolder>(SubtitleDiffCallback()) {
 
     // 使用对象本身来跟踪选中状态，而不是 position
@@ -164,6 +167,9 @@ class SubtitleAdapter(
     private var searchHighlightPosition: Int = -1
     private var searchQuery: String = ""
     
+    // 当前播放的字幕位置（用于音频播放时高亮）
+    private var currentPlayingPosition: Int = -1
+    
     /**
      * 高亮显示搜索结果
      */
@@ -181,6 +187,33 @@ class SubtitleAdapter(
         searchQuery = ""
         notifyDataSetChanged()
     }
+    
+    /**
+     * 高亮显示当前正在播放的字幕
+     */
+    fun highlightCurrentPlaying(position: Int) {
+        val oldPosition = currentPlayingPosition
+        currentPlayingPosition = position
+        
+        // 刷新旧位置和新位置
+        if (oldPosition >= 0) {
+            notifyItemChanged(oldPosition)
+        }
+        if (position >= 0) {
+            notifyItemChanged(position)
+        }
+    }
+    
+    /**
+     * 清除播放高亮
+     */
+    fun clearPlayingHighlight() {
+        val oldPosition = currentPlayingPosition
+        currentPlayingPosition = -1
+        if (oldPosition >= 0) {
+            notifyItemChanged(oldPosition)
+        }
+    }
 
     inner class SubtitleViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val tvIndex: TextView = itemView.findViewById(R.id.tvIndex)
@@ -188,6 +221,8 @@ class SubtitleAdapter(
         private val tvEndTime: TextView = itemView.findViewById(R.id.tvEndTime)
         private val tvSubtitleText: TextView = itemView.findViewById(R.id.tvSubtitleText)
         private val ivSelected: ImageView = itemView.findViewById(R.id.ivSelected)
+        private val btnJumpToTime: ImageView = itemView.findViewById(R.id.btnJumpToTime)
+        private val btnSetTime: ImageView = itemView.findViewById(R.id.btnSetTime)
 
         /**
          * 只刷新选中状态（用于 payload 刷新）
@@ -204,6 +239,10 @@ class SubtitleAdapter(
             // 设置时间轴
             tvStartTime.text = TimeUtils.formatForInput(entry.startTime)
             tvEndTime.text = TimeUtils.formatForInput(entry.endTime)
+
+            // 根据是否为音频文件模式控制按钮显示
+            btnJumpToTime.visibility = if (isAudioFile) View.VISIBLE else View.GONE
+            btnSetTime.visibility = if (isAudioFile) View.VISIBLE else View.GONE
 
             // 设置字幕文本（只显示第一行）
             val displayText = entry.text.split("\n").firstOrNull() ?: entry.text
@@ -234,6 +273,10 @@ class SubtitleAdapter(
                 } else {
                     tvSubtitleText.text = displayText
                 }
+            } else if (position == currentPlayingPosition) {
+                // 高亮当前播放的字幕（使用淡黄色，避免遮挡时间轴）
+                itemView.setBackgroundColor(ContextCompat.getColor(itemView.context, R.color.playing_highlight))
+                tvSubtitleText.text = displayText
             } else {
                 // 恢复正常背景
                 itemView.setBackgroundColor(ContextCompat.getColor(itemView.context, android.R.color.transparent))
@@ -284,6 +327,22 @@ class SubtitleAdapter(
                 val adapterPosition = adapterPosition
                 if (adapterPosition != RecyclerView.NO_POSITION) {
                     onTextClick(entry, adapterPosition)
+                }
+            }
+
+            // 右上按钮：跳转到字幕时间
+            btnJumpToTime.setOnClickListener {
+                val adapterPosition = adapterPosition
+                if (adapterPosition != RecyclerView.NO_POSITION) {
+                    onJumpToTimeClick(entry, adapterPosition)
+                }
+            }
+
+            // 右下按钮：设置字幕时间为当前进度
+            btnSetTime.setOnClickListener {
+                val adapterPosition = adapterPosition
+                if (adapterPosition != RecyclerView.NO_POSITION) {
+                    onSetTimeClick(entry, adapterPosition)
                 }
             }
         }

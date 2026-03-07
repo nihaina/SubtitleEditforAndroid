@@ -144,6 +144,160 @@
 
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- 音频播放器容器（仅在打开音频文件时显示） -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/audioPlayerContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="8dp"
+            app:cardCornerRadius="8dp"
+            app:cardElevation="2dp"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <!-- 音频文件信息 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:src="@drawable/ic_file"
+                        android:contentDescription="音频文件"
+                        app:tint="@color/primary" />
+
+                    <TextView
+                        android:id="@+id/tvAudioFileName"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp"
+                        android:maxLines="1"
+                        android:ellipsize="middle"
+                        tools:text="audio.mp3" />
+
+                </LinearLayout>
+
+                <!-- 波形图容器 -->
+                <FrameLayout
+                    android:id="@+id/waveformContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="60dp"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/bg_waveform_placeholder">
+
+                    <!-- 波形图将在这里动态绘制 -->
+                    <com.subtitleedit.view.WaveformView
+                        android:id="@+id/waveformView"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent" />
+
+                </FrameLayout>
+                
+                <!-- 波形图缩放控制 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="4dp">
+                    
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="缩放:"
+                        android:textSize="12sp"
+                        android:textColor="@color/on_surface" />
+                    
+                    <ImageButton
+                        android:id="@+id/btnZoomOut"
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        android:src="@android:drawable/ic_menu_zoom"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="缩小"
+                        android:rotation="180" />
+                    
+                    <SeekBar
+                        android:id="@+id/zoomSeekBar"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="50" />
+                    
+                    <ImageButton
+                        android:id="@+id/btnZoomIn"
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        android:src="@android:drawable/ic_menu_zoom"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="放大" />
+                    
+                </LinearLayout>
+
+                <!-- 播放控制 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="8dp">
+
+                    <!-- 播放/暂停按钮 -->
+                    <ImageButton
+                        android:id="@+id/btnPlayPause"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:src="@android:drawable/ic_media_play"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="播放/暂停"
+                        app:tint="@color/primary" />
+
+                    <!-- 当前时间 -->
+                    <TextView
+                        android:id="@+id/tvCurrentTime"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/on_surface"
+                        android:textSize="12sp"
+                        tools:text="00:00:00" />
+
+                    <!-- 进度条 -->
+                    <SeekBar
+                        android:id="@+id/seekBar"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp"
+                        android:layout_marginEnd="8dp" />
+
+                    <!-- 总时长 -->
+                    <TextView
+                        android:id="@+id/tvTotalTime"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/on_surface"
+                        android:textSize="12sp"
+                        tools:text="05:30:00" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
+
         <!-- 顶部工具栏 -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"

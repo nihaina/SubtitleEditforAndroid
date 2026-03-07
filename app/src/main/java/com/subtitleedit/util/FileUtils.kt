@@ -28,6 +28,9 @@ object FileUtils {
     // 常见的字幕文件扩展名
     val SUBTITLE_EXTENSIONS = setOf("srt", "lrc", "ass", "ssa", "sub", "txt", "vtt")
     
+    // 音频文件扩展名
+    val AUDIO_EXTENSIONS = setOf("mp3", "wav", "flac", "aac", "ogg", "m4a", "wma", "ape")
+    
     // 常见的编码方式 - 使用带显示名称的数据类
     data class EncodingInfo(val charset: Charset, val displayName: String)
     
@@ -131,6 +134,36 @@ object FileUtils {
     fun isSubtitleFile(file: File): Boolean {
         val extension = file.extension.lowercase()
         return extension in SUBTITLE_EXTENSIONS
+    }
+    
+    /**
+     * 检查是否为音频文件
+     */
+    fun isAudioFile(file: File): Boolean {
+        val extension = file.extension.lowercase()
+        return extension in AUDIO_EXTENSIONS
+    }
+    
+    /**
+     * 获取音频文件对应的可能字幕文件名
+     */
+    fun getPossibleSubtitleFiles(audioFile: File): List<File> {
+        val directory = audioFile.parentFile ?: return emptyList()
+        val baseName = audioFile.nameWithoutExtension
+        
+        // 可能的字幕扩展名
+        val subtitleExts = listOf("srt", "lrc", "ass", "ssa", "sub", "vtt", "txt")
+        
+        // 查找同名字幕文件
+        val possibleFiles = mutableListOf<File>()
+        for (ext in subtitleExts) {
+            val subtitleFile = File(directory, "$baseName.$ext")
+            if (subtitleFile.exists()) {
+                possibleFiles.add(subtitleFile)
+            }
+        }
+        
+        return possibleFiles
     }
     
     /**

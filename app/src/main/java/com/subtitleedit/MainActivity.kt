@@ -204,6 +204,12 @@ class MainActivity : AppCompatActivity() {
         }?.sortedBy { it.name.lowercase() } ?: emptyList()
         files.addAll(subtitleFiles)
         
+        // 添加音频文件
+        val audioFiles = directory.listFiles { file ->
+            file.isFile && FileUtils.isAudioFile(file)
+        }?.sortedBy { it.name.lowercase() } ?: emptyList()
+        files.addAll(audioFiles)
+        
         fileAdapter.submitList(files)
         
         // 更新空状态
@@ -231,9 +237,31 @@ class MainActivity : AppCompatActivity() {
         } else if (FileUtils.isSubtitleFile(file)) {
             // 打开字幕文件进行编辑
             openFileForEdit(file)
+        } else if (FileUtils.isAudioFile(file)) {
+            // 打开音频文件进行编辑（自动查找同名字幕）
+            openAudioFileForEdit(file)
         } else {
             Toast.makeText(this, "不支持的文件格式", Toast.LENGTH_SHORT).show()
         }
+    }
+    
+    /**
+     * 打开音频文件进行编辑
+     * 自动查找同文件夹下同名的字幕文件
+     */
+    private fun openAudioFileForEdit(audioFile: File) {
+        val intent = Intent(this, EditorActivity::class.java)
+        intent.putExtra(EditorActivity.EXTRA_FILE_PATH, audioFile.absolutePath)
+        intent.putExtra(EditorActivity.EXTRA_IS_AUDIO_FILE, true)
+        
+        // 查找可能的字幕文件
+        val possibleSubtitleFiles = FileUtils.getPossibleSubtitleFiles(audioFile)
+        if (possibleSubtitleFiles.isNotEmpty()) {
+            // 使用找到的第一个字幕文件（优先级：srt > lrc > ass > ...）
+            intent.putExtra(EditorActivity.EXTRA_SUBTITLE_FILE_PATH, possibleSubtitleFiles[0].absolutePath)
+        }
+        
+        startActivity(intent)
     }
     
     private fun goUpLevel() {

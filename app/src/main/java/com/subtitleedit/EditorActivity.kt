@@ -27,6 +27,7 @@ import androidx.core.content.ContextCompat
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
+import android.media.MediaPlayer
 import com.subtitleedit.adapter.SubtitleAdapter
 import com.subtitleedit.databinding.ActivityEditorBinding
 import com.subtitleedit.util.AiTranslator
@@ -94,6 +95,16 @@ class EditorActivity : AppCompatActivity() {
     private var currentSearchIndex: Int = -1
     private var searchQuery: String = ""
     
+    // 音频文件相关
+    private var isAudioFile: Boolean = false
+    private var audioFilePath: String = ""
+    private var audioDuration: Long = 0L  // 音频总时长（毫秒）
+    private var audioCurrentPosition: Long = 0L  // 当前播放位置（毫秒）
+    private var isPlaying: Boolean = false
+    
+    // MediaPlayer
+    private var mediaPlayer: MediaPlayer? = null
+    
     // 文件选择器
     private val openFileLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -123,6 +134,8 @@ class EditorActivity : AppCompatActivity() {
     
     companion object {
         const val EXTRA_FILE_PATH = "extra_file_path"
+        const val EXTRA_IS_AUDIO_FILE = "extra_is_audio_file"
+        const val EXTRA_SUBTITLE_FILE_PATH = "extra_subtitle_file_path"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -131,6 +144,9 @@ class EditorActivity : AppCompatActivity() {
         setContentView(binding.root)
         
         filePath = intent.getStringExtra(EXTRA_FILE_PATH) ?: ""
+        isAudioFile = intent.getBooleanExtra(EXTRA_IS_AUDIO_FILE, false)
+        val subtitleFilePath = intent.getStringExtra(EXTRA_SUBTITLE_FILE_PATH)
+        
         if (filePath.isNotEmpty()) {
             currentFile = File(filePath)
         }
@@ -139,9 +155,15 @@ class EditorActivity : AppCompatActivity() {
         setupRecyclerView()
         setupSourceView()
         setupSearchBar()
+        setupAudioPlayer()
+        initializeMediaPlayer()
         
         if (filePath.isNotEmpty()) {
-            loadFile()
+            if (isAudioFile) {
+                loadAudioFile(subtitleFilePath)
+            } else {
+                loadFile()
+            }
         }
     }
     
@@ -228,7 +250,14 @@ class EditorActivity : AppCompatActivity() {
             },
             onTextClick = { entry, position ->
                 showTextEditDialog(entry, position)
-            }
+            },
+            onJumpToTimeClick = { entry, position ->
+                jumpToSubtitleTime(entry)
+            },
+            onSetTimeClick = { entry, position ->
+                setSubtitleTimeToCurrentPosition(entry, position)
+            },
+            isAudioFile = isAudioFile
         )
         
         binding.rvSubtitles.apply {
@@ -2306,9 +2335,344 @@ class EditorActivity : AppCompatActivity() {
     
     override fun onDestroy() {
         super.onDestroy()
+        // 释放 MediaPlayer
+        releaseMediaPlayer()
         if (isTranslating) {
             translateCancelled = true
             translateJob?.cancel()
         }
+    }
+    
+    // ==================== 音频播放器相关方法 ====================
+    
+    /**
+     * 初始化 MediaPlayer
+     */
+    private fun initializeMediaPlayer() {
+        if (!isAudioFile) return
+        
+        mediaPlayer = MediaPlayer()
+        mediaPlayer?.setOnCompletionListener {
+            isPlaying = false
+            updatePlayerUI()
+        }
+        mediaPlayer?.setOnErrorListener { _, what, extra ->
+            Toast.makeText(this, "播放错误：$what, $extra", Toast.LENGTH_SHORT).show()
+            isPlaying = false
+            updatePlayerUI()
+            true
+        }
+    }
+    
+    /**
+     * 释放 MediaPlayer
+     */
+    private fun releaseMediaPlayer() {
+        mediaPlayer?.let { player ->
+            if (player.isPlaying) {
+                player.stop()
+            }
+            player.release()
+            mediaPlayer = null
+        }
+    }
+    
+    /**
+     * 设置音频播放器 UI
+     */
+    private fun setupAudioPlayer() {
+        if (!isAudioFile) {
+            binding.audioPlayerContainer.visibility = android.view.View.GONE
+            return
+        }
+        
+        binding.audioPlayerContainer.visibility = android.view.View.VISIBLE
+        
+        // 设置音频文件名
+        currentFile?.let {
+            binding.tvAudioFileName.text = it.name
+        }
+        
+        // 生成模拟波形图
+        binding.waveformView.generateMockWaveform(200)
+        
+        // 设置波形图点击监听器
+        binding.waveformView.onWaveformClickListener = { position ->
+            // 点击波形图跳转到对应时间
+            val targetTime = (audioDuration * position).toLong()
+            seekTo(targetTime)
+        }
+        
+        // 播放/暂停按钮
+        binding.btnPlayPause.setOnClickListener {
+            togglePlayPause()
+        }
+        
+        // 进度条拖动 - SeekBar max 为 1000，代表 0-100% 的进度
+        binding.seekBar.max = 1000
+        binding.seekBar.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    // progress 范围是 0-1000，直接按比例计算时间
+                    val targetTime = (audioDuration * progress / 1000).toLong()
+                    audioCurrentPosition = targetTime
+                    binding.tvCurrentTime.text = TimeUtils.formatForDisplay(targetTime)
+                }
+            }
+            
+            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+            
+            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {
+                seekTo(audioCurrentPosition)
+            }
+        })
+        
+        // 缩放控制
+        binding.btnZoomIn.setOnClickListener {
+            val currentZoom = binding.waveformView.getZoomLevel()
+            binding.waveformView.setZoomLevel(currentZoom + 1f)
+            binding.zoomSeekBar.progress = (binding.waveformView.getZoomLevel() * 10).toInt()
+        }
+        
+        binding.btnZoomOut.setOnClickListener {
+            val currentZoom = binding.waveformView.getZoomLevel()
+            binding.waveformView.setZoomLevel(currentZoom - 1f)
+            binding.zoomSeekBar.progress = (binding.waveformView.getZoomLevel() * 10).toInt()
+        }
+        
+        binding.zoomSeekBar.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    val zoom = progress / 10f
+                    binding.waveformView.setZoomLevel(zoom)
+                }
+            }
+            
+            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+            
+            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
+        })
+        
+        // 初始化播放器状态
+        updatePlayerUI()
+    }
+    
+    /**
+     * 加载音频文件
+     */
+    private fun loadAudioFile(subtitleFilePath: String?) {
+        if (filePath.isEmpty() || currentFile == null) {
+            Toast.makeText(this, "音频文件路径无效", Toast.LENGTH_SHORT).show()
+            finish()
+            return
+        }
+        
+        if (!currentFile!!.exists()) {
+            Toast.makeText(this, "音频文件不存在", Toast.LENGTH_SHORT).show()
+            finish()
+            return
+        }
+        
+        audioFilePath = filePath
+        binding.tvFileName.text = subtitleFilePath?.let { File(it).name } ?: "（无字幕文件）"
+        
+        // 设置 MediaPlayer 数据源
+        try {
+            mediaPlayer?.reset()
+            mediaPlayer?.setDataSource(currentFile?.absolutePath)
+            mediaPlayer?.prepare()
+            audioDuration = mediaPlayer?.duration?.toLong() ?: 0L
+        } catch (e: Exception) {
+            Toast.makeText(this, "加载音频失败：${e.message}", Toast.LENGTH_SHORT).show()
+        }
+        
+        // 更新波形图
+        binding.waveformView.generateMockWaveform(200)
+        
+        // 加载字幕文件（如果有）
+        if (subtitleFilePath != null) {
+            val subtitleFile = File(subtitleFilePath)
+            if (subtitleFile.exists()) {
+                loadSubtitleFile(subtitleFile)
+            } else {
+                // 没有字幕文件，显示空列表
+                subtitleEntries.clear()
+                subtitleAdapter.submitList(emptyList())
+                updateFormatInfo()
+                Toast.makeText(this, "未找到同名字幕文件", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            // 没有指定字幕文件，显示空列表
+            subtitleEntries.clear()
+            subtitleAdapter.submitList(emptyList())
+            updateFormatInfo()
+        }
+        
+        updatePlayerUI()
+    }
+    
+    /**
+     * 加载字幕文件
+     */
+    private fun loadSubtitleFile(subtitleFile: File) {
+        val settingsManager = SettingsManager.getInstance(this)
+        currentCharset = settingsManager.getDefaultEncoding()
+        
+        try {
+            val content = FileUtils.readFile(subtitleFile, currentCharset)
+            parseContent(content)
+            hasUnsavedChanges = false
+        } catch (e: Exception) {
+            Toast.makeText(this, "读取字幕文件失败：${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    /**
+     * 切换播放/暂停状态
+     */
+    private fun togglePlayPause() {
+        mediaPlayer?.let { player ->
+            if (player.isPlaying) {
+                player.pause()
+                isPlaying = false
+            } else {
+                player.start()
+                isPlaying = true
+                // 开始定时更新 UI
+                startProgressUpdate()
+            }
+            updatePlayerUI()
+        }
+    }
+    
+    /**
+     * 跳转到指定时间
+     */
+    private fun seekTo(timeMs: Long) {
+        mediaPlayer?.seekTo(timeMs.toInt())
+        audioCurrentPosition = timeMs.coerceIn(0L, audioDuration)
+        
+        // 高亮显示对应时间的字幕
+        highlightSubtitleAtTime(audioCurrentPosition)
+        
+        // 如果之前在播放，继续播放
+        if (isPlaying) {
+            startProgressUpdate()
+        }
+    }
+    
+    /**
+     * 高亮显示指定时间的字幕
+     * 注意：只高亮显示，不自动滚动，以免干扰用户编辑
+     */
+    private fun highlightSubtitleAtTime(timeMs: Long) {
+        if (isSourceViewMode) return
+        
+        // 查找包含当前时间的字幕
+        for ((index, entry) in subtitleEntries.withIndex()) {
+            if (timeMs >= entry.startTime && timeMs <= entry.endTime) {
+                // 只高亮显示，不自动滚动，允许用户自由浏览
+                subtitleAdapter.highlightCurrentPlaying(index)
+                break
+            }
+        }
+    }
+    
+    /**
+     * 更新播放器 UI
+     */
+    private fun updatePlayerUI() {
+        // 从 MediaPlayer 获取实时状态
+        mediaPlayer?.let { player ->
+            audioCurrentPosition = player.currentPosition.toLong()
+            audioDuration = player.duration.toLong().takeIf { it > 0 } ?: audioDuration
+            isPlaying = player.isPlaying
+        }
+        
+        // 更新播放/暂停按钮图标
+        val playPauseIcon = if (isPlaying) {
+            android.R.drawable.ic_media_pause
+        } else {
+            android.R.drawable.ic_media_play
+        }
+        binding.btnPlayPause.setImageResource(playPauseIcon)
+        
+        // 更新时间显示
+        binding.tvCurrentTime.text = TimeUtils.formatForDisplay(audioCurrentPosition)
+        binding.tvTotalTime.text = TimeUtils.formatForDisplay(audioDuration)
+        
+        // 更新进度条 - SeekBar max 为 1000，代表 0-100% 的进度
+        val progress = if (audioDuration > 0) {
+            (audioCurrentPosition * 1000 / audioDuration).toInt().coerceIn(0, 1000)
+        } else {
+            0
+        }
+        binding.seekBar.progress = progress
+        
+        // 更新波形图播放位置
+        val wavePosition = if (audioDuration > 0) {
+            audioCurrentPosition.toFloat() / audioDuration
+        } else {
+            0f
+        }
+        binding.waveformView.setCurrentPosition(wavePosition)
+    }
+    
+    /**
+     * 开始定时更新播放进度
+     */
+    private fun startProgressUpdate() {
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val updateRunnable = object : Runnable {
+            override fun run() {
+                if (isPlaying && mediaPlayer?.isPlaying == true) {
+                    updatePlayerUI()
+                    // 检查是否需要高亮字幕
+                    highlightSubtitleAtTime(audioCurrentPosition)
+                    handler.postDelayed(this, 100)
+                }
+            }
+        }
+        handler.post(updateRunnable)
+    }
+    
+    // ==================== 字幕时间控制按钮方法 ====================
+    
+    /**
+     * 跳转到字幕的开始时间
+     */
+    private fun jumpToSubtitleTime(entry: SubtitleEntry) {
+        if (!isAudioFile) {
+            Toast.makeText(this, "此功能仅在打开音频文件时可用", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        seekTo(entry.startTime)
+        Toast.makeText(this, "已跳转到 ${TimeUtils.formatForDisplay(entry.startTime)}", Toast.LENGTH_SHORT).show()
+    }
+    
+    /**
+     * 将字幕的开始时间设置为当前音频进度
+     */
+    private fun setSubtitleTimeToCurrentPosition(entry: SubtitleEntry, position: Int) {
+        if (!isAudioFile) {
+            Toast.makeText(this, "此功能仅在打开音频文件时可用", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        // 确保开始时间不超过结束时间
+        val newStartTime = audioCurrentPosition
+        if (newStartTime >= entry.endTime) {
+            Toast.makeText(this, "开始时间不能大于等于结束时间", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        entry.startTime = newStartTime
+        
+        // 刷新该条目显示
+        subtitleAdapter.notifyItemChanged(position)
+        markAsChanged()
+        
+        Toast.makeText(this, "已将开始时间设置为 ${TimeUtils.formatForDisplay(newStartTime)}", Toast.LENGTH_SHORT).show()
     }
 }
