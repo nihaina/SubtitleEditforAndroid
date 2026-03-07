@@ -141,6 +141,12 @@ object SubtitleParser {
     
     /**
      * 解析 LRC 格式
+     * 支持解析空白时间标签作为上一行的结束时间
+     * 例如：
+     * [00:00.00] 字幕内容
+     * [00:01.00](空白)
+     * [00:02.00] 下一行字幕
+     * 则第一行的结束时间为 00:01.00
      */
     fun parseLRC(content: String): List<SubtitleEntry> {
         val entries = mutableListOf<SubtitleEntry>()
@@ -148,6 +154,9 @@ object SubtitleParser {
         var currentIndex = 1
         
         val timePattern = Regex("\\[(\\d{2}):(\\d{2})\\.(\\d{2,3})\\]")
+        
+        // 首先解析所有时间标签和文本
+        val timeTags = mutableListOf<Pair<Long, String>>() // Pair<时间，文本>
         
         while (true) {
             val currentLine = reader.readLine() ?: break
@@ -162,24 +171,44 @@ object SubtitleParser {
                 // 获取时间标签后的文本
                 val text = currentLine.substring(matcher.range.last + 1).trim()
                 
-                if (text.isNotEmpty()) {
-                    entries.add(
-                        SubtitleEntry(
-                            index = currentIndex++,
-                            startTime = timeMs,
-                            endTime = timeMs + 3000, // 默认 3 秒持续时间
-                            text = text
-                        )
-                    )
-                }
+                timeTags.add(Pair(timeMs, text))
             }
         }
         
-        // 设置结束时间
-        for (i in entries.indices) {
-            if (i < entries.size - 1) {
-                entries[i].endTime = entries[i + 1].startTime
+        // 处理时间标签，确定每个字幕的结束时间
+        for (i in timeTags.indices) {
+            val (startTime, text) = timeTags[i]
+            
+            // 如果文本为空，跳过（这是空白时间标签）
+            if (text.isEmpty()) continue
+            
+            var endTime = startTime + 3000 // 默认 3 秒持续时间
+            var endTimeModified = false
+            
+            // 查找下一个时间标签
+            if (i < timeTags.size - 1) {
+                val (nextStartTime, nextText) = timeTags[i + 1]
+                
+                if (nextText.isEmpty()) {
+                    // 下一行是空白时间标签，使用它作为结束时间
+                    endTime = nextStartTime
+                    endTimeModified = true // 空白时间标签表示用户明确设置了结束时间
+                } else if (nextStartTime < startTime + 3000) {
+                    // 下一行起始时间小于 3 秒，使用下一行起始时间作为结束时间
+                    endTime = nextStartTime
+                }
+                // 否则保持默认 3 秒
             }
+            
+            entries.add(
+                SubtitleEntry(
+                    index = currentIndex++,
+                    startTime = startTime,
+                    endTime = endTime,
+                    text = text,
+                    endTimeModified = endTimeModified
+                )
+            )
         }
         
         return entries
@@ -236,12 +265,23 @@ object SubtitleParser {
     
     /**
      * 生成 LRC 格式内容
+     * 如果用户修改了 endTime，则插入空白时间标签
      */
     fun toLRC(entries: List<SubtitleEntry>): String {
         val sb = StringBuilder()
-        entries.forEach { entry ->
+        
+        for (i in entries.indices) {
+            val entry = entries[i]
+            
+            // 输出当前字幕
             sb.appendLine("${entry.getTimeAxisLRC()}${entry.text}")
+            
+            // 如果用户修改了 endTime，插入空白时间标签
+            if (entry.endTimeModified) {
+                sb.appendLine(entry.formatTimeLRC(entry.endTime))
+            }
         }
+        
         return sb.toString()
     }
     

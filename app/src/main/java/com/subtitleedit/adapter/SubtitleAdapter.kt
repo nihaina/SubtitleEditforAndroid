@@ -214,6 +214,22 @@ class SubtitleAdapter(
             notifyItemChanged(oldPosition)
         }
     }
+    
+    /**
+     * 检查当前字幕的结束时间是否超过下一行字幕的起始时间
+     * （LRC 格式冲突检测）
+     */
+    private fun hasTimeConflict(position: Int, entry: SubtitleEntry): Boolean {
+        // 如果不是最后一行，检查结束时间是否超过下一行的起始时间
+        if (position < currentList.size - 1) {
+            val nextEntry = currentList[position + 1]
+            // 如果结束时间超过下一行起始时间，则标记为冲突
+            if (entry.endTime > nextEntry.startTime) {
+                return true
+            }
+        }
+        return false
+    }
 
     inner class SubtitleViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val tvIndex: TextView = itemView.findViewById(R.id.tvIndex)
@@ -240,11 +256,22 @@ class SubtitleAdapter(
             tvStartTime.text = TimeUtils.formatForInput(entry.startTime)
             tvEndTime.text = TimeUtils.formatForInput(entry.endTime)
 
-            // 当开始时间大于等于结束时间时，时间轴标红提示
-            val isTimeInvalid = entry.startTime >= entry.endTime
-            if (isTimeInvalid) {
+            // 检查时间是否有效
+            // 1. 开始时间大于等于结束时间 - 两个时间都标红
+            // 2. 结束时间超过下一行字幕的起始时间（LRC 格式冲突检测）- 只标红结束时间
+            val isBasicInvalid = entry.startTime >= entry.endTime
+            val hasConflict = hasTimeConflict(position, entry)
+            
+            if (isBasicInvalid) {
+                // 开始时间 >= 结束时间，两个时间都标红
                 val errorColor = ContextCompat.getColor(itemView.context, R.color.error)
                 tvStartTime.setTextColor(errorColor)
+                tvEndTime.setTextColor(errorColor)
+            } else if (hasConflict) {
+                // 结束时间超过下一行起始时间，只标红结束时间
+                val normalColor = ContextCompat.getColor(itemView.context, R.color.primary)
+                val errorColor = ContextCompat.getColor(itemView.context, R.color.error)
+                tvStartTime.setTextColor(normalColor)
                 tvEndTime.setTextColor(errorColor)
             } else {
                 // 恢复正常颜色

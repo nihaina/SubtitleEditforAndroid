@@ -8,7 +8,9 @@ data class SubtitleEntry(
     var index: Int = 0,
     var startTime: Long = 0L,      // 开始时间 (毫秒)
     var endTime: Long = 0L,        // 结束时间 (毫秒)
-    var text: String = ""          // 字幕文本
+    var text: String = "",         // 字幕文本
+    // 标记 endTime 是否被用户修改过（用于 LRC 格式保存）
+    var endTimeModified: Boolean = false
 ) {
     /**
      * 格式化时间戳为 SRT 格式 (HH:MM:SS,mmm)
@@ -48,6 +50,6 @@ data class SubtitleEntry(
      * 复制当前条目
      */
     fun copy(): SubtitleEntry {
-        return SubtitleEntry(index, startTime, endTime, text)
+        return SubtitleEntry(index, startTime, endTime, text, endTimeModified)
     }
 }

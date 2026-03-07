@@ -189,63 +189,23 @@
 
                 </LinearLayout>
 
-                <!-- 波形图容器 -->
-                <FrameLayout
-                    android:id="@+id/waveformContainer"
+                <!-- 时间轴容器（包含波形图、时间刻度、字幕轨道） -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/timelineContainer"
                     android:layout_width="match_parent"
-                    android:layout_height="60dp"
+                    android:layout_height="200dp"
                     android:layout_marginTop="8dp"
-                    android:background="@drawable/bg_waveform_placeholder">
+                    app:cardCornerRadius="4dp"
+                    app:cardElevation="1dp">
 
-                    <!-- 波形图将在这里动态绘制 -->
-                    <com.subtitleedit.view.WaveformView
-                        android:id="@+id/waveformView"
+                    <!-- 统一的波形时间轴视图 -->
+                    <com.subtitleedit.view.WaveformTimelineView
+                        android:id="@+id/waveformTimelineView"
                         android:layout_width="match_parent"
-                        android:layout_height="match_parent" />
+                        android:layout_height="match_parent"
+                        android:background="@drawable/bg_waveform_placeholder" />
 
-                </FrameLayout>
-                
-                <!-- 波形图缩放控制 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginTop="4dp">
-                    
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="缩放:"
-                        android:textSize="12sp"
-                        android:textColor="@color/on_surface" />
-                    
-                    <ImageButton
-                        android:id="@+id/btnZoomOut"
-                        android:layout_width="36dp"
-                        android:layout_height="36dp"
-                        android:src="@android:drawable/ic_menu_zoom"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="缩小"
-                        android:rotation="180" />
-                    
-                    <SeekBar
-                        android:id="@+id/zoomSeekBar"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:max="100"
-                        android:progress="50" />
-                    
-                    <ImageButton
-                        android:id="@+id/btnZoomIn"
-                        android:layout_width="36dp"
-                        android:layout_height="36dp"
-                        android:src="@android:drawable/ic_menu_zoom"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="放大" />
-                    
-                </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
 
                 <!-- 播放控制 -->
                 <LinearLayout

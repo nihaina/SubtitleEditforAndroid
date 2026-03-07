@@ -31,6 +31,7 @@ import android.media.MediaPlayer
 import com.subtitleedit.adapter.SubtitleAdapter
 import com.subtitleedit.databinding.ActivityEditorBinding
 import com.subtitleedit.util.AiTranslator
+import com.subtitleedit.view.WaveformTimelineView
 import com.subtitleedit.util.DraftManager
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
@@ -46,6 +47,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.subtitleedit.audio.WaveformExtractor
 
 /**
  * 字幕编辑界面
@@ -1068,9 +1070,9 @@ class EditorActivity : AppCompatActivity() {
         // 构建菜单项列表
         val itemsList = mutableListOf<String>()
         
-        // 如果有选中项，添加"只对勾选字幕生效"选项
+        // 如果有选中项，添加"勾选字幕操作"选项
         if (hasSelection) {
-            itemsList.add("只对勾选字幕生效 (${selectedCount}项)")
+            itemsList.add("对勾选字幕操作 (${selectedCount}项)")
         }
         
         // 添加常规操作（针对当前长按的字幕）
@@ -1590,6 +1592,8 @@ class EditorActivity : AppCompatActivity() {
                         entry.startTime = newTime
                     } else {
                         entry.endTime = newTime
+                        // 用户修改了结束时间，设置标记
+                        entry.endTimeModified = true
                     }
                     
                     // 直接刷新该位置
@@ -2440,14 +2444,21 @@ class EditorActivity : AppCompatActivity() {
             binding.tvAudioFileName.text = it.name
         }
         
-        // 生成模拟波形图
-        binding.waveformView.generateMockWaveform(200)
-        
-        // 设置波形图点击监听器
-        binding.waveformView.onWaveformClickListener = { position ->
-            // 点击波形图跳转到对应时间
+        // 设置时间轴点击监听器
+        binding.waveformTimelineView.setOnTimelineClickListener { position ->
+            // 点击时间轴跳转到对应时间
             val targetTime = (audioDuration * position).toLong()
             seekTo(targetTime)
+        }
+        
+        // 设置字幕变化监听器
+        binding.waveformTimelineView.setOnSubtitleChangeListener { updatedSubtitles ->
+            // 更新字幕列表
+            subtitleEntries.clear()
+            subtitleEntries.addAll(updatedSubtitles)
+            renumberEntries()
+            subtitleAdapter.submitList(subtitleEntries.toList())
+            markAsChanged()
         }
         
         // 播放/暂停按钮
@@ -2472,32 +2483,6 @@ class EditorActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {
                 seekTo(audioCurrentPosition)
             }
-        })
-        
-        // 缩放控制
-        binding.btnZoomIn.setOnClickListener {
-            val currentZoom = binding.waveformView.getZoomLevel()
-            binding.waveformView.setZoomLevel(currentZoom + 1f)
-            binding.zoomSeekBar.progress = (binding.waveformView.getZoomLevel() * 10).toInt()
-        }
-        
-        binding.btnZoomOut.setOnClickListener {
-            val currentZoom = binding.waveformView.getZoomLevel()
-            binding.waveformView.setZoomLevel(currentZoom - 1f)
-            binding.zoomSeekBar.progress = (binding.waveformView.getZoomLevel() * 10).toInt()
-        }
-        
-        binding.zoomSeekBar.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) {
-                    val zoom = progress / 10f
-                    binding.waveformView.setZoomLevel(zoom)
-                }
-            }
-            
-            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
-            
-            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
         })
         
         // 初始化播放器状态
@@ -2533,8 +2518,17 @@ class EditorActivity : AppCompatActivity() {
             Toast.makeText(this, "加载音频失败：${e.message}", Toast.LENGTH_SHORT).show()
         }
         
-        // 更新波形图
-        binding.waveformView.generateMockWaveform(200)
+        // 在后台线程提取真实波形数据
+        // 先设置加载状态
+        binding.waveformTimelineView.setLoading(true)
+        
+        CoroutineScope(Dispatchers.IO).launch {
+            val waveform = WaveformExtractor.extractWaveform(currentFile!!.absolutePath, samplesPerSecond = 100)
+            
+            withContext(Dispatchers.Main) {
+                binding.waveformTimelineView.setTimelineData(audioDuration, subtitleEntries.toList(), waveform)
+            }
+        }
         
         // 加载字幕文件（如果有）
         if (subtitleFilePath != null) {
@@ -2656,13 +2650,13 @@ class EditorActivity : AppCompatActivity() {
         }
         binding.seekBar.progress = progress
         
-        // 更新波形图播放位置
+        // 更新波形时间轴播放位置
         val wavePosition = if (audioDuration > 0) {
             audioCurrentPosition.toFloat() / audioDuration
         } else {
             0f
         }
-        binding.waveformView.setCurrentPosition(wavePosition)
+        binding.waveformTimelineView.setCurrentPosition(wavePosition)
     }
     
     /**
@@ -2696,6 +2690,32 @@ class EditorActivity : AppCompatActivity() {
         
         seekTo(entry.startTime)
         Toast.makeText(this, "已跳转到 ${TimeUtils.formatForDisplay(entry.startTime)}", Toast.LENGTH_SHORT).show()
+    }
+    
+    /**
+     * 生成模拟波形数据（用于 UI 展示）
+     * @param durationMs 音频时长（毫秒）
+     * @param samplesPerSecond 每秒采样点数（默认 100，即每 10ms 一个采样点）
+     */
+    private fun generateMockWaveformWithDuration(durationMs: Long, samplesPerSecond: Int = 100): FloatArray {
+        val totalSamples = ((durationMs / 1000f) * samplesPerSecond).toInt().coerceAtLeast(1000)
+        val amplitudes = FloatArray(totalSamples)
+        var phase = 0f
+        
+        for (i in 0 until totalSamples) {
+            // 使用多个正弦波叠加模拟真实音频波形
+            val base = kotlin.math.sin(phase).toFloat() * 0.5f
+            val harmonic1 = kotlin.math.sin(phase * 2.3f).toFloat() * 0.3f
+            val harmonic2 = kotlin.math.sin(phase * 0.7f).toFloat() * 0.2f
+            
+            // 添加随机变化
+            val noise = (Math.random().toFloat() - 0.5f) * 0.3f
+            
+            amplitudes[i] = (base + harmonic1 + harmonic2 + noise).coerceIn(-1f, 1f)
+            phase += 0.1f + Math.random().toFloat() * 0.05f
+        }
+        
+        return amplitudes
     }
     
     /**
