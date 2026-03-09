@@ -47,7 +47,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import com.subtitleedit.audio.WaveformChunkLoader
 import com.subtitleedit.audio.FfmpegWaveformChunkLoader
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope

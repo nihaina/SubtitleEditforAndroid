@@ -28,10 +28,10 @@ object FfmpegWaveformExtractor {
     private const val TAG = "FfmpegWaveformExtractor"
     
     /** 每帧的采样点数（512 samples @ 44100Hz ≈ 11.6ms）*/
-    private const val SAMPLES_PER_FRAME = 512
+    const val SAMPLES_PER_FRAME = 512
     
     /** PCM 采样率 */
-    private const val SAMPLE_RATE = 44100
+    const val SAMPLE_RATE = 44100
     
     /** PCM 位深（16bit）*/
     private const val BITS_PER_SAMPLE = 2  // 2 bytes = 16 bits
