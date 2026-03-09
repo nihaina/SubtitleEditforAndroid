@@ -48,6 +48,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.subtitleedit.audio.WaveformChunkLoader
+import com.subtitleedit.audio.FfmpegWaveformChunkLoader
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 
@@ -111,6 +112,9 @@ class EditorActivity : AppCompatActivity() {
     
     // MediaPlayer
     private var mediaPlayer: MediaPlayer? = null
+    
+    // FFmpeg 波形加载器
+    private var ffmpegChunkLoader: FfmpegWaveformChunkLoader? = null
     
     // 文件选择器
     private val openFileLauncher = registerForActivityResult(
@@ -2395,6 +2399,9 @@ class EditorActivity : AppCompatActivity() {
         super.onDestroy()
         // 释放 MediaPlayer
         releaseMediaPlayer()
+        // 释放波形加载器
+        ffmpegChunkLoader?.release()
+        ffmpegChunkLoader = null
         if (isTranslating) {
             translateCancelled = true
             translateJob?.cancel()
@@ -2577,20 +2584,47 @@ class EditorActivity : AppCompatActivity() {
         // 字幕加载完毕后，再初始化波形视图（此时 subtitleEntries 已有数据）
         binding.waveformTimelineView.initialize(audioDuration, subtitleEntries.toList())
         
-        // 创建 chunk 加载器
-        val chunkLoader = WaveformChunkLoader(lifecycleScope)
-        chunkLoader.prepare(currentFile!!.absolutePath, audioDuration)
+        // 创建 FFmpeg 波形加载器
+        ffmpegChunkLoader = FfmpegWaveformChunkLoader(lifecycleScope)
+        ffmpegChunkLoader?.prepare(currentFile!!.absolutePath, audioDuration)
         
-        // 连接 View 和 Loader
+        // 先检查缓存是否就绪，如果就绪直接使用，否则生成缓存
+        if (ffmpegChunkLoader?.isCacheReady() == true) {
+            // 缓存已就绪，连接 View 和 Loader
+            connectWaveformLoader()
+        } else {
+            // 显示加载提示
+            Toast.makeText(this, "正在生成波形缓存，请稍候...", Toast.LENGTH_SHORT).show()
+            
+            // 生成缓存
+            ffmpegChunkLoader?.generateCache { success ->
+                if (success) {
+                    Toast.makeText(this, "波形缓存生成完成", Toast.LENGTH_SHORT).show()
+                    connectWaveformLoader()
+                } else {
+                    Toast.makeText(this, "波形缓存生成失败", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        
+        updatePlayerUI()
+    }
+    
+    /**
+     * 连接波形加载器到 View
+     */
+    private fun connectWaveformLoader() {
         binding.waveformTimelineView.onChunkLoadRequest = { chunkIndex, startMs, endMs, targetSamples ->
-            chunkLoader.requestChunk(chunkIndex, startMs, endMs, targetSamples) { idx, data ->
+            ffmpegChunkLoader?.requestChunk(chunkIndex, startMs, endMs, targetSamples) { idx, data ->
                 binding.waveformTimelineView.post { 
                     binding.waveformTimelineView.updateChunk(idx, data) 
                 }
             }
         }
         
-        updatePlayerUI()
+        // 缓存已就绪，重新触发可见区域的 chunk 加载请求
+        // （因为在 initialize() 时可能回调还未设置，导致请求被忽略）
+        binding.waveformTimelineView.refreshVisibleChunks()
     }
     
     /**

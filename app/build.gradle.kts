@@ -55,6 +55,9 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     
+    // FFmpegKit - for audio decoding to PCM
+    implementation("com.arthenica:ffmpeg-kit-min:6.0")
+    
     // OkHttp
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     

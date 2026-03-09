@@ -778,4 +778,17 @@ class WaveformTimelineView @JvmOverloads constructor(
         requestVisibleChunks()
         invalidate()
     }
+
+    /**
+     * 重新触发可见区域的 chunk 加载请求
+     * 用于在回调设置完成后重新加载已缓存的数据
+     */
+    fun refreshVisibleChunks() {
+        if (isInitialized && totalChunks > 0) {
+            // 重置请求计数，允许重新请求
+            chunkRequestedSamples = IntArray(totalChunks)
+            // 触发可见区域 chunk 加载
+            requestVisibleChunks()
+        }
+    }
 }
