@@ -22,6 +22,10 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_AI_MODEL = "ai_model"
         private const val KEY_AI_SOURCE_LANGUAGE = "ai_source_language"
         private const val KEY_AI_TARGET_LANGUAGE = "ai_target_language"
+        private const val KEY_WAVEFORM_CACHE_LOCATION = "waveform_cache_location"
+        
+        const val WAVEFORM_CACHE_APP = "app_cache"
+        const val WAVEFORM_CACHE_SOURCE = "source_dir"
         
         @Volatile private var instance: SettingsManager? = null
         
@@ -105,5 +109,18 @@ class SettingsManager private constructor(context: Context) {
      */
     fun setAiTargetLanguage(language: String) {
         prefs.edit().putString(KEY_AI_TARGET_LANGUAGE, language).apply()
+    }
+    
+    /**
+     * 获取波形缓存存放位置
+     */
+    fun getWaveformCacheLocation(): String =
+        prefs.getString(KEY_WAVEFORM_CACHE_LOCATION, WAVEFORM_CACHE_APP) ?: WAVEFORM_CACHE_APP
+    
+    /**
+     * 设置波形缓存存放位置
+     */
+    fun setWaveformCacheLocation(location: String) {
+        prefs.edit().putString(KEY_WAVEFORM_CACHE_LOCATION, location).apply()
     }
 }

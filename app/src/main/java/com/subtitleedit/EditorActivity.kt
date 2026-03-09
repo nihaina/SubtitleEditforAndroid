@@ -115,6 +115,9 @@ class EditorActivity : AppCompatActivity() {
     // FFmpeg 波形加载器
     private var ffmpegChunkLoader: FfmpegWaveformChunkLoader? = null
     
+    // 临时修复的 WAV 文件（start time 不为 0 时生成）
+    private var tempFixedWavFile: File? = null
+    
     // 文件选择器
     private val openFileLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -2401,6 +2404,9 @@ class EditorActivity : AppCompatActivity() {
         // 释放波形加载器
         ffmpegChunkLoader?.release()
         ffmpegChunkLoader = null
+        // 清理临时修复的 WAV 文件
+        tempFixedWavFile?.delete()
+        tempFixedWavFile = null
         if (isTranslating) {
             translateCancelled = true
             translateJob?.cancel()
@@ -2408,6 +2414,40 @@ class EditorActivity : AppCompatActivity() {
     }
     
     // ==================== 音频播放器相关方法 ====================
+    
+    /**
+     * 检查音频 start time，若不为 0 则用 FFmpeg 转换为 WAV 修复
+     * @return 修复后可用的音频文件（可能是原文件，也可能是临时 WAV）
+     */
+    private suspend fun checkAndFixAudioStartTime(audioFile: File): File {
+        return withContext(Dispatchers.IO) {
+            // 用 FFprobeKit 获取 start time
+            val session = com.arthenica.ffmpegkit.FFprobeKit.getMediaInformation(audioFile.absolutePath)
+            val startTime = session.mediaInformation?.startTime?.toDoubleOrNull() ?: 0.0
+
+            if (startTime <= 0.001) {
+                // start time 正常，直接返回原文件
+                return@withContext audioFile
+            }
+
+            android.util.Log.w("EditorActivity", "音频 start time 不为 0：$startTime，开始转换为 WAV")
+
+            // 生成临时 WAV 文件（放在 cacheDir，避免污染用户目录）
+            val wavFile = File(cacheDir, "${audioFile.nameWithoutExtension}_fixed.wav")
+            if (wavFile.exists()) wavFile.delete()
+
+            val cmd = "-y -i \"${audioFile.absolutePath}\" -c:a pcm_s16le -ar 44100 -ac 2 \"${wavFile.absolutePath}\""
+            val ffmpegSession = com.arthenica.ffmpegkit.FFmpegKit.execute(cmd)
+
+            if (ffmpegSession.returnCode.isValueSuccess) {
+                android.util.Log.d("EditorActivity", "WAV 转换成功：${wavFile.absolutePath}")
+                wavFile
+            } else {
+                android.util.Log.e("EditorActivity", "WAV 转换失败，使用原文件")
+                audioFile
+            }
+        }
+    }
     
     /**
      * 初始化 MediaPlayer
@@ -2548,54 +2588,85 @@ class EditorActivity : AppCompatActivity() {
             return
         }
         
-        audioFilePath = filePath
+        // 先显示检测中提示，再异步检测 start time
+        val checkingDialog = android.app.AlertDialog.Builder(this)
+            .setMessage("正在检测音频文件...")
+            .setCancelable(false)
+            .create()
+        checkingDialog.show()
+        
+        lifecycleScope.launch {
+            val originalFile = currentFile!!
+            val audioFile = checkAndFixAudioStartTime(originalFile)
+            
+            val wasFixed = audioFile != originalFile
+            if (wasFixed) {
+                tempFixedWavFile = audioFile
+            }
+            
+            checkingDialog.dismiss()
+            
+            if (wasFixed) {
+                Toast.makeText(
+                    this@EditorActivity,
+                    "检测到音频 start time 不为 0,请注意处理,已临时修复，正在加载...",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            
+            // 使用修复后的文件路径继续加载
+            doLoadAudioFile(audioFile, subtitleFilePath)
+        }
+    }
+    
+    /**
+     * 实际执行音频加载（原 loadAudioFile 的主体逻辑）
+     */
+    private fun doLoadAudioFile(audioFile: File, subtitleFilePath: String?) {
+        audioFilePath = audioFile.absolutePath
         binding.tvFileName.text = subtitleFilePath?.let { File(it).name } ?: "（无字幕文件）"
         
-        // 设置 MediaPlayer 数据源
         try {
             mediaPlayer?.reset()
-            mediaPlayer?.setDataSource(currentFile?.absolutePath)
+            mediaPlayer?.setDataSource(audioFile.absolutePath)
             mediaPlayer?.prepare()
             audioDuration = mediaPlayer?.duration?.toLong() ?: 0L
         } catch (e: Exception) {
             Toast.makeText(this, "加载音频失败：${e.message}", Toast.LENGTH_SHORT).show()
         }
         
-        // 先加载字幕文件（如果有）
         if (subtitleFilePath != null) {
             val subtitleFile = File(subtitleFilePath)
             if (subtitleFile.exists()) {
                 loadSubtitleFile(subtitleFile)
             } else {
-                // 没有字幕文件，显示空列表
                 subtitleEntries.clear()
                 subtitleAdapter.submitList(emptyList())
                 updateFormatInfo()
                 Toast.makeText(this, "未找到同名字幕文件", Toast.LENGTH_SHORT).show()
             }
         } else {
-            // 没有指定字幕文件，显示空列表
             subtitleEntries.clear()
             subtitleAdapter.submitList(emptyList())
             updateFormatInfo()
         }
         
-        // 字幕加载完毕后，再初始化波形视图（此时 subtitleEntries 已有数据）
         binding.waveformTimelineView.initialize(audioDuration, subtitleEntries.toList())
         
-        // 创建 FFmpeg 波形加载器
-        ffmpegChunkLoader = FfmpegWaveformChunkLoader(lifecycleScope)
-        ffmpegChunkLoader?.prepare(currentFile!!.absolutePath, audioDuration)
+        // 波形缓存使用修复后的音频文件
+        val settingsManager = SettingsManager.getInstance(this)
+        val cacheDir: File? = when (settingsManager.getWaveformCacheLocation()) {
+            SettingsManager.WAVEFORM_CACHE_APP -> File(cacheDir, "waveform")
+            else -> null   // null = 与音频同目录
+        }
         
-        // 先检查缓存是否就绪，如果就绪直接使用，否则生成缓存
+        ffmpegChunkLoader = FfmpegWaveformChunkLoader(lifecycleScope)
+        ffmpegChunkLoader?.prepare(audioFile.absolutePath, audioDuration, cacheDir)
+        
         if (ffmpegChunkLoader?.isCacheReady() == true) {
-            // 缓存已就绪，连接 View 和 Loader
             connectWaveformLoader()
         } else {
-            // 显示加载提示
             Toast.makeText(this, "正在生成波形缓存，请稍候...", Toast.LENGTH_SHORT).show()
-            
-            // 生成缓存
             ffmpegChunkLoader?.generateCache { success ->
                 if (success) {
                     Toast.makeText(this, "波形缓存生成完成", Toast.LENGTH_SHORT).show()

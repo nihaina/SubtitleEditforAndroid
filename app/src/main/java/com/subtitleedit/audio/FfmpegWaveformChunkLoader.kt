@@ -44,11 +44,21 @@ class FfmpegWaveformChunkLoader(
      * 
      * @param filePath 音频文件路径
      * @param durationMs 音频时长（毫秒）
+     * @param cacheDir 缓存目录；null 表示与音频文件同目录（旧行为）
      */
-    fun prepare(filePath: String, durationMs: Long) {
+    fun prepare(filePath: String, durationMs: Long, cacheDir: java.io.File? = null) {
         this.audioFilePath = filePath
         this.durationMs = durationMs
-        this.cacheFile = FfmpegWaveformExtractor.getCachePath(java.io.File(filePath))
+        
+        val audioFile = java.io.File(filePath)
+        val targetDir = if (cacheDir != null) {
+            cacheDir.mkdirs()
+            cacheDir
+        } else {
+            audioFile.parentFile ?: cacheDir
+        }
+        this.cacheFile = java.io.File(targetDir, "${audioFile.nameWithoutExtension}.wave")
+        
         this.isCacheReady = false
         this.isGeneratingCache = false
         

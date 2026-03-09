@@ -100,6 +100,50 @@
                     android:text="中文" />
             </com.google.android.material.textfield.TextInputLayout>
 
+            <!-- 波形缓存存放位置 -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="波形图缓存存放位置"
+                android:textStyle="bold"
+                android:paddingTop="16dp"
+                android:paddingBottom="4dp"/>
+
+            <RadioGroup
+                android:id="@+id/rgWaveformCache"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <RadioButton
+                    android:id="@+id/rbCacheApp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="存放到软件缓存目录（默认，可一键清除）"/>
+
+                <RadioButton
+                    android:id="@+id/rbCacheSource"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="存放到音频文件同目录"/>
+            </RadioGroup>
+
+            <TextView
+                android:id="@+id/tvCacheSize"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/secondary"
+                android:paddingTop="4dp"
+                android:visibility="gone"/>
+
+            <Button
+                android:id="@+id/btnClearWaveformCache"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="清除波形缓存"
+                android:enabled="false"
+                android:layout_marginTop="8dp"/>
+
             <Button
                 android:id="@+id/btnSaveSettings"
                 android:layout_width="match_parent"
