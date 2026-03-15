@@ -103,8 +103,9 @@
 
                 </com.google.android.material.card.MaterialCardView>
 
-                <!-- 其他功能卡片（预留） -->
+                <!-- 音视频转换卡片 -->
                 <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardMediaConvert"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="16dp"
@@ -124,10 +125,10 @@
                         <ImageView
                             android:layout_width="48dp"
                             android:layout_height="48dp"
-                            android:src="@drawable/ic_more"
+                            android:src="@drawable/ic_convert"
                             android:padding="8dp"
                             android:background="@drawable/bg_icon_circle"
-                            android:contentDescription="其他功能" />
+                            android:contentDescription="音视频转换" />
 
                         <!-- 标题和描述 -->
                         <LinearLayout
@@ -138,10 +139,10 @@
                             android:layout_marginStart="16dp">
 
                             <TextView
-                                android:id="@+id/btnOtherFeatures"
+                                android:id="@+id/btnMediaConvert"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="其他功能"
+                                android:text="音视频转换"
                                 android:textSize="16sp"
                                 android:textStyle="bold"
                                 android:textColor="@color/on_surface" />
@@ -150,7 +151,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="4dp"
-                                android:text="更多实用功能敬请期待"
+                                android:text="视频转音频/格式转换 (MP3/AAC/MP4 等)"
                                 android:textSize="14sp"
                                 android:textColor="@color/on_surface_variant" />
 

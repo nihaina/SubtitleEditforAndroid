@@ -2,7 +2,6 @@ package com.subtitleedit
 
 import android.content.Intent
 import android.os.Bundle
-import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import com.subtitleedit.databinding.ActivityToolsBinding
 
@@ -34,12 +33,12 @@ class ToolsActivity : AppCompatActivity() {
     }
     
     private fun setupButtons() {
-        // 批量转换卡片点击事件
         binding.cardBatchConvert.setOnClickListener {
             startActivity(Intent(this, BatchConvertActivity::class.java))
         }
-        
-        // 其他功能卡片（预留位置）
-        // 暂不实现
+
+        binding.cardMediaConvert.setOnClickListener {
+            startActivity(Intent(this, MediaConvertActivity::class.java))
+        }
     }
 }
