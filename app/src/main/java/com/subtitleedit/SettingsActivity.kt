@@ -50,71 +50,103 @@ class SettingsActivity : AppCompatActivity() {
         binding.spinnerEncoding.adapter = adapter
     }
 
-    // ==================== 波形缓存设置 ====================
+    // ==================== 波形/频谱图缓存设置 ====================
 
     private fun setupWaveformCacheSection() {
-        // 单选按钮切换时，同步清除按钮的可用状态
         binding.rgWaveformCache.setOnCheckedChangeListener { _, checkedId ->
             val isAppCache = (checkedId == binding.rbCacheApp.id)
-            binding.btnClearWaveformCache.isEnabled = isAppCache
+            binding.btnClearWaveformCache.isEnabled    = isAppCache
+            binding.btnClearSpectrogramCache.isEnabled = isAppCache
             refreshCacheSizeDisplay()
         }
 
-        // 清除缓存按钮
         binding.btnClearWaveformCache.setOnClickListener {
-            confirmClearCache()
+            confirmClearWaveformCache()
+        }
+        binding.btnClearSpectrogramCache.setOnClickListener {
+            confirmClearSpectrogramCache()
         }
     }
 
-    /** 刷新缓存大小显示 */
     private fun refreshCacheSizeDisplay() {
         val isAppCache = binding.rgWaveformCache.checkedRadioButtonId == binding.rbCacheApp.id
         if (isAppCache) {
-            val size = calcWaveformCacheSize()
-            binding.tvCacheSize.text = "当前缓存：${formatSize(size)}"
-            binding.tvCacheSize.visibility = android.view.View.VISIBLE
+            val waveSize = calcWaveformCacheSize()
+            val specSize = calcSpectrogramCacheSize()
+            binding.tvWaveformCacheSize.text    = "波形图缓存：${formatSize(waveSize)}"
+            binding.tvSpectrogramCacheSize.text = "频谱图缓存：${formatSize(specSize)}"
+            binding.tvWaveformCacheSize.visibility    = android.view.View.VISIBLE
+            binding.tvSpectrogramCacheSize.visibility = android.view.View.VISIBLE
         } else {
-            binding.tvCacheSize.visibility = android.view.View.GONE
+            binding.tvWaveformCacheSize.visibility    = android.view.View.GONE
+            binding.tvSpectrogramCacheSize.visibility = android.view.View.GONE
         }
     }
 
-    /** 计算软件缓存目录下 .wave 文件的总大小（字节） */
     private fun calcWaveformCacheSize(): Long {
-        val cacheDir = File(cacheDir, "waveform")
-        if (!cacheDir.exists()) return 0L
-        return cacheDir.walkTopDown()
+        val dir = File(cacheDir, "waveform")
+        if (!dir.exists()) return 0L
+        return dir.walkTopDown()
             .filter { it.isFile && it.extension == "wave" }
             .sumOf { it.length() }
     }
 
+    private fun calcSpectrogramCacheSize(): Long {
+        val dir = File(cacheDir, "waveform")
+        if (!dir.exists()) return 0L
+        return dir.walkTopDown()
+            .filter { it.isFile && it.extension == "png" && it.name.contains(".spec_") }
+            .sumOf { it.length() }
+    }
+
     private fun formatSize(bytes: Long): String = when {
-        bytes < 1024L        -> "${bytes} B"
+        bytes < 1024L        -> "$bytes B"
         bytes < 1024L * 1024 -> "${"%.1f".format(bytes / 1024.0)} KB"
         else                 -> "${"%.2f".format(bytes / 1024.0 / 1024.0)} MB"
     }
 
-    private fun confirmClearCache() {
+    private fun confirmClearWaveformCache() {
         val size = calcWaveformCacheSize()
         if (size == 0L) {
-            Toast.makeText(this, "暂无波形缓存可清除", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "暂无波形图缓存可清除", Toast.LENGTH_SHORT).show()
             return
         }
         AlertDialog.Builder(this)
-            .setTitle("清除波形缓存")
-            .setMessage("将删除 ${formatSize(size)} 的波形缓存文件，下次打开音频时会重新生成。\n确定继续？")
-            .setPositiveButton("清除") { _, _ -> doClearCache() }
+            .setTitle("清除波形图缓存")
+            .setMessage("将删除 ${formatSize(size)} 的波形图缓存，下次打开音频时会重新生成。\n确定继续？")
+            .setPositiveButton("清除") { _, _ ->
+                val dir = File(cacheDir, "waveform")
+                var count = 0
+                dir.walkTopDown()
+                    .filter { it.isFile && it.extension == "wave" }
+                    .forEach { it.delete(); count++ }
+                Toast.makeText(this, "已清除 $count 个波形图缓存文件", Toast.LENGTH_SHORT).show()
+                refreshCacheSizeDisplay()
+            }
             .setNegativeButton("取消", null)
             .show()
     }
 
-    private fun doClearCache() {
-        val cacheDir = File(cacheDir, "waveform")
-        var count = 0
-        cacheDir.walkTopDown()
-            .filter { it.isFile && it.extension == "wave" }
-            .forEach { it.delete(); count++ }
-        Toast.makeText(this, "已清除 $count 个波形缓存文件", Toast.LENGTH_SHORT).show()
-        refreshCacheSizeDisplay()
+    private fun confirmClearSpectrogramCache() {
+        val size = calcSpectrogramCacheSize()
+        if (size == 0L) {
+            Toast.makeText(this, "暂无频谱图缓存可清除", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("清除频谱图缓存")
+            .setMessage("将删除 ${formatSize(size)} 的频谱图缓存，下次查看频谱图时会重新生成。\n确定继续？")
+            .setPositiveButton("清除") { _, _ ->
+                val dir = File(cacheDir, "waveform")
+                var count = 0
+                dir.walkTopDown()
+                    .filter { it.isFile && it.extension == "png" && it.name.contains(".spec_") }
+                    .forEach { it.delete(); count++ }
+                Toast.makeText(this, "已清除 $count 个频谱图缓存文件", Toast.LENGTH_SHORT).show()
+                refreshCacheSizeDisplay()
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     // ==================== 读写设置 ====================

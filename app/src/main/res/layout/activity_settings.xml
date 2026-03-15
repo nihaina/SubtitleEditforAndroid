@@ -149,7 +149,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="波形图缓存存放位置"
+                android:text="波形图和频谱图缓存存放位置"
                 android:textStyle="bold"
                 android:paddingTop="16dp"
                 android:paddingBottom="4dp"/>
@@ -173,21 +173,62 @@
                     android:text="存放到音频文件同目录"/>
             </RadioGroup>
 
-            <TextView
-                android:id="@+id/tvCacheSize"
+            <!-- 波形图缓存统计和操作 -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="@color/secondary"
-                android:paddingTop="4dp"
-                android:visibility="gone"/>
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="8dp">
 
-            <Button
-                android:id="@+id/btnClearWaveformCache"
-                android:layout_width="wrap_content"
+                <TextView
+                    android:id="@+id/tvWaveformCacheSize"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textColor="@color/secondary"
+                    android:textSize="12sp"
+                    android:visibility="gone"/>
+
+                <Button
+                    android:id="@+id/btnClearWaveformCache"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="清除波形缓存"
+                    android:enabled="false"
+                    android:textSize="12sp"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"/>
+            </LinearLayout>
+
+            <!-- 频谱图缓存统计和操作 -->
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="清除波形缓存"
-                android:enabled="false"
-                android:layout_marginTop="8dp"/>
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="8dp">
+
+                <TextView
+                    android:id="@+id/tvSpectrogramCacheSize"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textColor="@color/secondary"
+                    android:textSize="12sp"
+                    android:visibility="gone"/>
+
+                <Button
+                    android:id="@+id/btnClearSpectrogramCache"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="清除频谱缓存"
+                    android:enabled="false"
+                    android:textSize="12sp"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"/>
+            </LinearLayout>
 
             <Button
                 android:id="@+id/btnSaveSettings"

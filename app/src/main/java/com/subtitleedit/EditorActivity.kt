@@ -125,6 +125,11 @@ class EditorActivity : AppCompatActivity() {
     private var currentDisplayMode = WaveformTimelineView.DisplayMode.WAVEFORM
     private var spectrogramFile: File? = null
 
+    // 频谱图生成进度追踪
+    private var spectrogramTotalChunks = 0
+    private var spectrogramDoneChunks = 0
+    private var spectrogramIsGenerating = false
+
     // 选中字幕循环播放
     private var loopSubtitleEntry: SubtitleEntry? = null  // 当前循环目标
 
@@ -2649,9 +2654,18 @@ class EditorActivity : AppCompatActivity() {
                     WaveformTimelineView.DisplayMode.SPECTROGRAM
                 else WaveformTimelineView.DisplayMode.WAVEFORM
 
+            if (currentDisplayMode == WaveformTimelineView.DisplayMode.SPECTROGRAM) {
+                // 切换到频谱图：重置进度、先不显示 View 内容（View 内部会显示占位灰块）
+                binding.waveformTimelineView.resetSpectrogramCache()
+                spectrogramTotalChunks = calcTotalChunks()
+                spectrogramDoneChunks = 0
+                spectrogramIsGenerating = spectrogramTotalChunks > 0
+                if (spectrogramIsGenerating) {
+                    Toast.makeText(this, "正在生成频谱图缓存，请稍候...", Toast.LENGTH_SHORT).show()
+                }
+            }
+
             binding.waveformTimelineView.setDisplayMode(currentDisplayMode)
-            // 切换模式时重置频谱图缓存，允许重新请求尺寸变化后的 chunk
-            binding.waveformTimelineView.resetSpectrogramCache()
             refreshWaveformToolbarState()
         }
 
@@ -2673,6 +2687,13 @@ class EditorActivity : AppCompatActivity() {
         binding.btnAmplitudeZoomOut.setOnClickListener {
             binding.waveformTimelineView.zoomOutAmplitude()
         }
+    }
+
+    /** 计算频谱图总 chunk 数 */
+    private fun calcTotalChunks(): Int {
+        if (audioDuration <= 0) return 0
+        val chunkMs = WaveformTimelineView.CHUNK_DURATION_MS
+        return ((audioDuration + chunkMs - 1) / chunkMs).toInt()
     }
 
     /** 根据当前展开状态和显示模式，同步工具栏按钮文字和可用状态 */
@@ -2823,13 +2844,12 @@ class EditorActivity : AppCompatActivity() {
         }
         cacheBaseDir.mkdirs()
 
-        // 缓存文件名包含尺寸，尺寸变化（如旋转屏幕）会重新生成
         val specFile = File(cacheBaseDir,
             "${audioFile.nameWithoutExtension}.spec_${chunkIndex}_${widthPx}x${heightPx}.png")
 
         lifecycleScope.launch(Dispatchers.IO) {
-            // 缓存命中直接解码
             val bmp: android.graphics.Bitmap? = if (specFile.exists() && specFile.length() > 0) {
+                // 缓存命中，不算作"新生成"，直接回调
                 android.graphics.BitmapFactory.decodeFile(specFile.absolutePath)
             } else {
                 val startSec = startMs / 1000.0
@@ -2849,6 +2869,19 @@ class EditorActivity : AppCompatActivity() {
             withContext(Dispatchers.Main) {
                 if (bmp != null) {
                     binding.waveformTimelineView.updateSpectrogramChunk(chunkIndex, bmp)
+
+                    // 更新进度：只在本次切换触发的生成流程中计数
+                    if (spectrogramIsGenerating) {
+                        spectrogramDoneChunks++
+                        if (spectrogramDoneChunks >= spectrogramTotalChunks) {
+                            spectrogramIsGenerating = false
+                            Toast.makeText(
+                                this@EditorActivity,
+                                "频谱图缓存生成完成",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
                 }
             }
         }
