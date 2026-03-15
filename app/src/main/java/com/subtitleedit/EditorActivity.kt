@@ -118,6 +118,13 @@ class EditorActivity : AppCompatActivity() {
     // 临时修复的 WAV 文件（start time 不为 0 时生成）
     private var tempFixedWavFile: File? = null
     
+    // 波形图展开状态（提升为 class 级别，避免 setupAudioPlayer 重复调用时状态丢失）
+    private var isWaveformExpanded = true
+
+    // 频谱图
+    private var currentDisplayMode = WaveformTimelineView.DisplayMode.WAVEFORM
+    private var spectrogramFile: File? = null
+
     // 文件选择器
     private val openFileLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -2570,6 +2577,71 @@ class EditorActivity : AppCompatActivity() {
         
         // 初始化播放器状态
         updatePlayerUI()
+        
+        // ——— 展开/折叠 ———
+        binding.btnToggleWaveform.setOnClickListener {
+            isWaveformExpanded = !isWaveformExpanded
+            binding.timelineContainer.visibility =
+                if (isWaveformExpanded) android.view.View.VISIBLE else android.view.View.GONE
+            (binding.btnToggleWaveform as TextView).text =
+                if (isWaveformExpanded) "▼" else "▶"
+            refreshWaveformToolbarState()
+        }
+
+        // ——— 模式切换 ———
+        binding.btnToggleDisplayMode.setOnClickListener {
+            currentDisplayMode =
+                if (currentDisplayMode == WaveformTimelineView.DisplayMode.WAVEFORM)
+                    WaveformTimelineView.DisplayMode.SPECTROGRAM
+                else WaveformTimelineView.DisplayMode.WAVEFORM
+
+            binding.waveformTimelineView.setDisplayMode(currentDisplayMode)
+            // 切换模式时重置频谱图缓存，允许重新请求尺寸变化后的 chunk
+            binding.waveformTimelineView.resetSpectrogramCache()
+            refreshWaveformToolbarState()
+        }
+
+        // ——— 频谱图分块回调 ———
+        binding.waveformTimelineView.onSpectrogramChunkRequest =
+            { chunkIndex, startMs, endMs, widthPx, heightPx ->
+                generateSpectrogramChunkAsync(chunkIndex, startMs, endMs, widthPx, heightPx)
+            }
+
+        // ——— 振幅缩放 ———
+        binding.btnAmplitudeZoomIn.setOnClickListener {
+            binding.waveformTimelineView.zoomInAmplitude()
+        }
+        binding.btnAmplitudeZoomIn.setOnLongClickListener {
+            binding.waveformTimelineView.resetAmplitudeScale()
+            Toast.makeText(this, "振幅已重置", Toast.LENGTH_SHORT).show()
+            true
+        }
+        binding.btnAmplitudeZoomOut.setOnClickListener {
+            binding.waveformTimelineView.zoomOutAmplitude()
+        }
+    }
+
+    /** 根据当前展开状态和显示模式，同步工具栏按钮文字和可用状态 */
+    private fun refreshWaveformToolbarState() {
+        val isSpectrogram = currentDisplayMode == WaveformTimelineView.DisplayMode.SPECTROGRAM
+
+        // 标签文字：显示当前正在展示的内容名称
+        (binding.tvWaveformLabel as? android.widget.TextView)?.text =
+            if (isSpectrogram) "频谱图" else "波形图"
+
+        // 模式切换按钮文字：显示点击后将切换到的目标模式
+        (binding.btnToggleDisplayMode as? android.widget.TextView)?.text =
+            if (isSpectrogram) "波形" else "频谱"
+
+        // 振幅按钮：频谱模式下或折叠时禁用
+        val amplEnabled = isWaveformExpanded && !isSpectrogram
+        binding.btnAmplitudeZoomIn.isEnabled  = amplEnabled
+        binding.btnAmplitudeZoomOut.isEnabled = amplEnabled
+        val color = if (amplEnabled) "#CCCCCC" else "#555555"
+        (binding.btnAmplitudeZoomIn  as? android.widget.TextView)
+            ?.setTextColor(android.graphics.Color.parseColor(color))
+        (binding.btnAmplitudeZoomOut as? android.widget.TextView)
+            ?.setTextColor(android.graphics.Color.parseColor(color))
     }
     
     /**
@@ -2679,7 +2751,55 @@ class EditorActivity : AppCompatActivity() {
         
         updatePlayerUI()
     }
-    
+
+    /**
+     * 异步生成某个 chunk 的频谱图（分块版本）
+     * 每个 chunk 按当前 View 宽度生成对应 30s 的频谱图，保证 1:1 像素精度
+     */
+    private fun generateSpectrogramChunkAsync(
+        chunkIndex: Int,
+        startMs: Long, endMs: Long,
+        widthPx: Int, heightPx: Int
+    ) {
+        val audioFile = currentFile ?: return
+        val settingsManager = SettingsManager.getInstance(this)
+        val cacheBaseDir = when (settingsManager.getWaveformCacheLocation()) {
+            SettingsManager.WAVEFORM_CACHE_APP -> File(cacheDir, "waveform")
+            else -> audioFile.parentFile ?: File(cacheDir, "waveform")
+        }
+        cacheBaseDir.mkdirs()
+
+        // 缓存文件名包含尺寸，尺寸变化（如旋转屏幕）会重新生成
+        val specFile = File(cacheBaseDir,
+            "${audioFile.nameWithoutExtension}.spec_${chunkIndex}_${widthPx}x${heightPx}.png")
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            // 缓存命中直接解码
+            val bmp: android.graphics.Bitmap? = if (specFile.exists() && specFile.length() > 0) {
+                android.graphics.BitmapFactory.decodeFile(specFile.absolutePath)
+            } else {
+                val startSec = startMs / 1000.0
+                val durSec   = (endMs - startMs) / 1000.0
+                val cmd = "-y -ss $startSec -t $durSec " +
+                          "-i \"${audioFile.absolutePath}\" " +
+                          "-lavfi showspectrumpic=s=${widthPx}x${heightPx}:" +
+                          "mode=combined:color=intensity:scale=log:legend=0 " +
+                          "-frames:v 1 \"${specFile.absolutePath}\""
+
+                val session = com.arthenica.ffmpegkit.FFmpegKit.execute(cmd)
+                if (session.returnCode.isValueSuccess && specFile.exists())
+                    android.graphics.BitmapFactory.decodeFile(specFile.absolutePath)
+                else null
+            }
+
+            withContext(Dispatchers.Main) {
+                if (bmp != null) {
+                    binding.waveformTimelineView.updateSpectrogramChunk(chunkIndex, bmp)
+                }
+            }
+        }
+    }
+
     /**
      * 连接波形加载器到 View
      */

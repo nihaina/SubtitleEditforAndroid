@@ -189,23 +189,115 @@
 
                 </LinearLayout>
 
-                <!-- 时间轴容器（包含波形图、时间刻度、字幕轨道） -->
-                <com.google.android.material.card.MaterialCardView
-                    android:id="@+id/timelineContainer"
+                <!-- 波形区域容器 -->
+                <LinearLayout
+                    android:id="@+id/waveformSection"
                     android:layout_width="match_parent"
-                    android:layout_height="200dp"
-                    android:layout_marginTop="8dp"
-                    app:cardCornerRadius="4dp"
-                    app:cardElevation="1dp">
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginTop="8dp">
 
-                    <!-- 统一的波形时间轴视图 -->
-                    <com.subtitleedit.view.WaveformTimelineView
-                        android:id="@+id/waveformTimelineView"
+                    <!-- 工具栏：展开/折叠 + 振幅缩放 + 模式切换 -->
+                    <LinearLayout
+                        android:id="@+id/waveformToolbar"
                         android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:background="@drawable/bg_waveform_placeholder" />
+                        android:layout_height="32dp"
+                        android:orientation="horizontal"
+                        android:paddingStart="6dp"
+                        android:paddingEnd="6dp"
+                        android:gravity="center_vertical"
+                        android:background="@color/waveform_toolbar_bg">
 
-                </com.google.android.material.card.MaterialCardView>
+                        <!-- 展开/折叠按钮 -->
+                        <TextView
+                            android:id="@+id/btnToggleWaveform"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:text="▼"
+                            android:gravity="center"
+                            android:textSize="11sp"
+                            android:textColor="#CCCCCC"
+                            android:background="@drawable/bg_waveform_btn"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:contentDescription="展开/折叠波形图"/>
+
+                        <!-- 标签 -->
+                        <TextView
+                            android:id="@+id/tvWaveformLabel"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="波形图"
+                            android:textSize="11sp"
+                            android:paddingStart="6dp"
+                            android:textColor="#9E9E9E"/>
+
+                        <!-- 模式切换：波形 ↔ 频谱 -->
+                        <TextView
+                            android:id="@+id/btnToggleDisplayMode"
+                            android:layout_width="wrap_content"
+                            android:layout_height="24dp"
+                            android:text="频谱"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp"
+                            android:gravity="center"
+                            android:textSize="11sp"
+                            android:textColor="#CCCCCC"
+                            android:background="@drawable/bg_waveform_btn"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:layout_marginEnd="4dp"
+                            android:contentDescription="切换波形/频谱"/>
+
+                        <!-- 振幅缩小 -->
+                        <TextView
+                            android:id="@+id/btnAmplitudeZoomOut"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:text="−"
+                            android:gravity="center"
+                            android:textSize="15sp"
+                            android:textColor="#CCCCCC"
+                            android:background="@drawable/bg_waveform_btn"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:layout_marginEnd="4dp"
+                            android:contentDescription="缩小振幅"/>
+
+                        <!-- 振幅放大（长按重置） -->
+                        <TextView
+                            android:id="@+id/btnAmplitudeZoomIn"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:text="+"
+                            android:gravity="center"
+                            android:textSize="15sp"
+                            android:textColor="#CCCCCC"
+                            android:background="@drawable/bg_waveform_btn"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:contentDescription="放大振幅（长按重置）"/>
+
+                    </LinearLayout>
+
+                    <!-- 波形图本体（折叠时 GONE） -->
+                    <com.google.android.material.card.MaterialCardView
+                        android:id="@+id/timelineContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="220dp"
+                        app:cardCornerRadius="4dp"
+                        app:cardElevation="1dp">
+
+                        <com.subtitleedit.view.WaveformTimelineView
+                            android:id="@+id/waveformTimelineView"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:background="@drawable/bg_waveform_placeholder" />
+
+                    </com.google.android.material.card.MaterialCardView>
+
+                </LinearLayout>
 
                 <!-- 播放控制 -->
                 <LinearLayout

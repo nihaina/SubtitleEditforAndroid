@@ -6,6 +6,8 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.DashPathEffect
+import android.graphics.Path
 import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -67,6 +69,9 @@ class WaveformTimelineView @JvmOverloads constructor(
 
         /** 重新请求高精度的阈值：现有精度低于目标的 60% 时触发 */
         private const val RESAMPLE_THRESHOLD = 0.6f
+
+        /** 频谱图每个 chunk 的固定生成宽度（像素），与缩放无关，保证放大后仍清晰 */
+        private const val SPECTROGRAM_CHUNK_WIDTH = 2048
     }
 
     // ==================== 数据 ====================
@@ -120,6 +125,29 @@ class WaveformTimelineView @JvmOverloads constructor(
     // ==================== 选中 ====================
 
     private var selectedIndices: Set<Int> = emptySet()
+
+    // ==================== 振幅缩放 ====================
+    /** 垂直振幅缩放倍数，默认 1.0，范围 0.2 ~ 4.0 */
+    private var amplitudeScale: Float = 1.0f
+
+    // ==================== 显示模式 ====================
+    enum class DisplayMode { WAVEFORM, SPECTROGRAM }
+    private var displayMode = DisplayMode.WAVEFORM
+
+    // ==================== 频谱图分块 ====================
+    /** 每个 chunk 的频谱图 Bitmap，null = 未生成 */
+    private var spectrogramChunks: Array<Bitmap?> = emptyArray()
+    /** 已发起请求的 chunk 集合，避免重复请求 */
+    private val spectrogramRequested = mutableSetOf<Int>()
+
+    var onSpectrogramChunkRequest: ((chunkIndex: Int, startMs: Long, endMs: Long, widthPx: Int, heightPx: Int) -> Unit)? = null
+
+    private val spectrogramHintPaint = Paint().apply {
+        color = Color.parseColor("#9E9E9E")
+        textSize = 28f
+        isAntiAlias = true
+        textAlign = Paint.Align.CENTER
+    }
 
     // ==================== 回调 ====================
 
@@ -189,6 +217,22 @@ class WaveformTimelineView @JvmOverloads constructor(
     private val timeRulerBgPaint = Paint().apply { color = Color.parseColor("#1A1A1A") }
     private val subtitleBgPaint = Paint().apply { color = Color.parseColor("#1A1A1A") }
 
+    // ==================== 字幕边界虚线画笔 ====================
+    private val subtitleEdgePaint = Paint().apply {
+        color = Color.parseColor("#A54CAF50")   // 绿色半透明
+        strokeWidth = 2f
+        style = Paint.Style.STROKE
+        isAntiAlias = false
+        pathEffect = DashPathEffect(floatArrayOf(6f, 4f), 0f)
+    }
+    private val subtitleEdgeSelectedPaint = Paint().apply {
+        color = Color.parseColor("#CC64B5F6")   // 蓝色半透明
+        strokeWidth = 2f
+        style = Paint.Style.STROKE
+        isAntiAlias = false
+        pathEffect = DashPathEffect(floatArrayOf(6f, 4f), 0f)
+    }
+
     // ==================== 手势 ====================
 
     private val scaleGestureDetector = ScaleGestureDetector(
@@ -239,6 +283,9 @@ class WaveformTimelineView @JvmOverloads constructor(
     fun release() {
         waveformCache?.recycle()
         waveformCache = null
+        spectrogramChunks.forEach { it?.recycle() }
+        spectrogramChunks = emptyArray()
+        spectrogramRequested.clear()
     }
 
     override fun onDetachedFromWindow() {
@@ -352,14 +399,19 @@ class WaveformTimelineView @JvmOverloads constructor(
             return
         }
 
-        val h = height.toFloat()
+        val h      = height.toFloat()
         val rulerH = h * 0.10f
-        val waveH = h * 0.55f
-        val subH = h * 0.35f
+        val waveH  = h * 0.55f
+        val subH   = h * 0.35f
 
         drawTimeRuler(canvas, rulerH)
-        drawWaveform(canvas, rulerH, waveH)
+        when (displayMode) {
+            DisplayMode.WAVEFORM    -> drawWaveform(canvas, rulerH, waveH)
+            DisplayMode.SPECTROGRAM -> drawSpectrogram(canvas, rulerH, waveH)
+        }
         drawSubtitles(canvas, rulerH + waveH, subH)
+        // 字幕边界虚线：独立 pass，不受 subtitle clipRect 限制，可穿入波形区
+        drawSubtitleEdgeLines(canvas, rulerH, waveH + subH)
         drawPlayhead(canvas, h)
     }
 
@@ -370,23 +422,152 @@ class WaveformTimelineView @JvmOverloads constructor(
         canvas.clipRect(0f, 0f, width.toFloat(), rulerH)
         canvas.drawRect(0f, 0f, width.toFloat(), rulerH, timeRulerBgPaint)
 
-        val numMarks = 10
-        val interval = visibleDurationMs / numMarks
-        for (i in 0..numMarks) {
-            val t = visibleStartMs + i * interval
-            val x = timeToX(t)
-            canvas.drawLine(x, rulerH * 0.3f, x, rulerH, timeRulerPaint)
-            canvas.drawText(formatTime(t), x + 4, rulerH * 0.8f, timeRulerPaint)
+        // 1. 根据可见时长选一个"整点对齐"的主刻度间隔
+        //    目标：屏幕上出现 5~8 个主刻度
+        val intervalMs = pickNiceInterval(visibleDurationMs)
+
+        // 2. 副刻度间隔 = 主刻度 / 5（最小 100ms）
+        val minorIntervalMs = (intervalMs / 5L).coerceAtLeast(100L)
+
+        val visibleEndMs = visibleStartMs + visibleDurationMs
+
+        // 3. 先画副刻度（细线，无文字）
+        val minorStart = (visibleStartMs / minorIntervalMs) * minorIntervalMs
+        var t = minorStart
+        while (t <= visibleEndMs) {
+            if (t % intervalMs != 0L) {          // 非主刻度才画副刻度
+                val x = timeToX(t)
+                if (x in 0f..width.toFloat()) {
+                    canvas.drawLine(x, rulerH * 0.65f, x, rulerH, timeRulerPaint.apply {
+                        alpha = 80
+                    })
+                }
+            }
+            t += minorIntervalMs
         }
+        timeRulerPaint.alpha = 255
+
+        // 4. 画主刻度（长线 + 文字），从最近的主刻度整点开始
+        val majorStart = (visibleStartMs / intervalMs) * intervalMs
+        t = majorStart
+        var prevLabelRight = -Float.MAX_VALUE   // 防止文字重叠
+        while (t <= visibleEndMs) {
+            val x = timeToX(t)
+            if (x >= 0f && x <= width.toFloat()) {
+                // 长刻度线
+                canvas.drawLine(x, rulerH * 0.25f, x, rulerH, timeRulerPaint)
+
+                // 文字：只在不与前一个标签重叠时才绘制
+                val label = formatRulerTime(t, intervalMs)
+                val labelW = timeRulerPaint.measureText(label)
+                val labelX = (x + 4f).coerceAtMost(width - labelW - 2f)
+                if (labelX > prevLabelRight + 4f) {
+                    canvas.drawText(label, labelX, rulerH * 0.78f, timeRulerPaint)
+                    prevLabelRight = labelX + labelW
+                }
+            }
+            t += intervalMs
+        }
+
         canvas.restore()
     }
 
-    private fun formatTime(ms: Long): String {
-        val h = ms / 3_600_000
-        val m = (ms % 3_600_000) / 60_000
-        val s = (ms % 60_000) / 1_000
-        return if (h > 0) String.format("%d:%02d:%02d", h, m, s)
-        else String.format("%d:%02d", m, s)
+    /**
+     * 根据可见时长选出最合适的主刻度间隔（毫秒），目标在屏幕上出现 5~8 个刻度。
+     *
+     * 候选间隔列表（均为"整点"：整百 ms / 整秒 / 整分钟）：
+     * 100ms, 200ms, 500ms,
+     * 1s, 2s, 5s, 10s, 15s, 30s,
+     * 1min, 2min, 5min, 10min
+     */
+    private fun pickNiceInterval(visibleMs: Long): Long {
+        val candidates = longArrayOf(
+            100, 200, 500,
+            1_000, 2_000, 5_000, 10_000, 15_000, 30_000,
+            60_000, 120_000, 300_000, 600_000
+        )
+        // 目标 6 个主刻度
+        val target = visibleMs / 6L
+        return candidates.minByOrNull { abs(it - target) } ?: 1_000L
+    }
+
+    /**
+     * 格式化刻度标签，根据当前间隔决定精度：
+     * - 间隔 < 1s  → 显示 m:ss.S（精确到百毫秒）
+     * - 间隔 < 1min → 显示 m:ss
+     * - 间隔 >= 1min → 显示 h:mm:ss 或 m:ss
+     */
+    private fun formatRulerTime(ms: Long, intervalMs: Long): String {
+        val h  =  ms / 3_600_000L
+        val m  = (ms % 3_600_000L) / 60_000L
+        val s  = (ms % 60_000L) / 1_000L
+        val ds = (ms % 1_000L) / 100L   // 十分之一秒
+
+        return when {
+            intervalMs < 1_000L ->
+                if (h > 0) String.format("%d:%02d:%02d.%d", h, m, s, ds)
+                else       String.format("%d:%02d.%d", m, s, ds)
+            h > 0 ->
+                String.format("%d:%02d:%02d", h, m, s)
+            else ->
+                String.format("%d:%02d", m, s)
+        }
+    }
+
+    // ---------- 频谱图（分块版本）----------
+
+    private fun drawSpectrogram(canvas: Canvas, yOffset: Float, spectH: Float) {
+        canvas.save()
+        canvas.clipRect(0f, yOffset, width.toFloat(), yOffset + spectH)
+        canvas.drawRect(0f, yOffset, width.toFloat(), yOffset + spectH, waveformBgPaint)
+
+        if (durationMs <= 0) { canvas.restore(); return }
+
+        val startChunk = timeToChunkIndex(visibleStartMs).coerceIn(0, totalChunks - 1)
+        val endChunk   = timeToChunkIndex(visibleStartMs + visibleDurationMs).coerceIn(0, totalChunks - 1)
+
+        for (chunkIdx in startChunk..endChunk) {
+            val chunkStart = chunkStartMs(chunkIdx)
+            val chunkEnd   = chunkEndMs(chunkIdx)
+            val chunkDur   = (chunkEnd - chunkStart).toFloat()
+
+            // 该 chunk 在当前视口中实际可见的时间段
+            val visStart = maxOf(visibleStartMs, chunkStart)
+            val visEnd   = minOf(visibleStartMs + visibleDurationMs, chunkEnd)
+
+            val dstLeft  = timeToX(visStart)
+            val dstRight = timeToX(visEnd)
+            if (dstLeft >= dstRight) continue
+
+            val bmp = spectrogramChunks.getOrNull(chunkIdx)
+
+            if (bmp == null) {
+                // 占位灰块 + 触发请求（固定宽度，与缩放无关）
+                canvas.drawRect(dstLeft, yOffset, dstRight, yOffset + spectH, placeholderPaint)
+                if (chunkIdx !in spectrogramRequested) {
+                    spectrogramRequested.add(chunkIdx)
+                    onSpectrogramChunkRequest?.invoke(
+                        chunkIdx, chunkStart, chunkEnd,
+                        SPECTROGRAM_CHUNK_WIDTH,
+                        spectH.toInt().coerceAtLeast(64)
+                    )
+                }
+                continue
+            }
+
+            // 将可见时间段映射到 bitmap 的像素列范围（src），绘制到屏幕范围（dst）
+            // 无论缩放级别，bitmap 始终以固定 2048px 宽生成，由 Android 负责缩放插值
+            val srcLeft  = ((visStart  - chunkStart) / chunkDur * bmp.width)
+                .toInt().coerceIn(0, bmp.width - 1)
+            val srcRight = ((visEnd    - chunkStart) / chunkDur * bmp.width)
+                .toInt().coerceIn(srcLeft + 1, bmp.width)
+
+            val src = android.graphics.Rect(srcLeft, 0, srcRight, bmp.height)
+            val dst = RectF(dstLeft, yOffset, dstRight, yOffset + spectH)
+            canvas.drawBitmap(bmp, src, dst, null)
+        }
+
+        canvas.restore()
     }
 
     // ---------- 波形（带 Bitmap 缓存）----------
@@ -476,7 +657,7 @@ class WaveformTimelineView @JvmOverloads constructor(
                     if (data[i] > maxAmp) maxAmp = data[i]
                 }
 
-                val h = maxAmp * amplitude
+                val h = (maxAmp * amplitude * amplitudeScale).coerceAtMost(amplitude)
                 c.drawLine(px.toFloat(), centerY - h, px.toFloat(), centerY + h, waveformPaint)
             }
         }
@@ -516,6 +697,31 @@ class WaveformTimelineView @JvmOverloads constructor(
             }
         }
         canvas.restore()
+    }
+
+    /**
+     * 字幕边界虚线：从波形区顶部画到字幕区底部，穿越两个区域。
+     * 不加 clipRect，直接绘制在全 canvas 上。
+     */
+    private fun drawSubtitleEdgeLines(canvas: Canvas, waveTop: Float, totalH: Float) {
+        val lineTop = waveTop          // 波形区顶部
+        val lineBot = waveTop + totalH // 字幕区底部
+
+        for ((index, sub) in subtitles.withIndex()) {
+            if (sub.endTime < visibleStartMs || sub.startTime > visibleStartMs + visibleDurationMs) continue
+
+            val edgePaint = if (index in selectedIndices) subtitleEdgeSelectedPaint else subtitleEdgePaint
+
+            val x1 = timeToX(sub.startTime)
+            val x2 = timeToX(sub.endTime)
+
+            if (x1 in 0f..width.toFloat()) {
+                canvas.drawLine(x1, lineTop, x1, lineBot, edgePaint)
+            }
+            if (x2 in 0f..width.toFloat()) {
+                canvas.drawLine(x2, lineTop, x2, lineBot, edgePaint)
+            }
+        }
     }
 
     /** O(log n) 二分裁剪文本 */
@@ -685,6 +891,8 @@ class WaveformTimelineView @JvmOverloads constructor(
         this.totalChunks = ((durationMs + CHUNK_DURATION_MS - 1) / CHUNK_DURATION_MS).toInt()
         this.chunkData = Array(totalChunks) { null }
         this.chunkRequestedSamples = IntArray(totalChunks)
+        this.spectrogramChunks = Array(totalChunks) { null }
+        this.spectrogramRequested.clear()
         this.isInitialized = true
 
         // 默认视口：从头开始，显示 3 分钟（或音频更短时显示全部）
@@ -791,4 +999,63 @@ class WaveformTimelineView @JvmOverloads constructor(
             requestVisibleChunks()
         }
     }
+
+    // ==================== 公共 API - 振幅缩放 ====================
+
+    /** 放大振幅（每次 ×1.25） */
+    fun zoomInAmplitude() {
+        amplitudeScale = (amplitudeScale * 1.25f).coerceAtMost(4.0f)
+        invalidateCache()
+        invalidate()
+    }
+
+    /** 缩小振幅（每次 ×0.8） */
+    fun zoomOutAmplitude() {
+        amplitudeScale = (amplitudeScale * 0.8f).coerceAtLeast(0.2f)
+        invalidateCache()
+        invalidate()
+    }
+
+    /** 重置振幅缩放为默认值 */
+    fun resetAmplitudeScale() {
+        amplitudeScale = 1.0f
+        invalidateCache()
+        invalidate()
+    }
+
+    // ==================== 公共 API - 显示模式 ====================
+
+    /**
+     * 切换显示模式（波形 / 频谱）
+     */
+    fun setDisplayMode(mode: DisplayMode) {
+        if (displayMode == mode) return
+        displayMode = mode
+        invalidateCache()   // 波形缓存在频谱模式下不需要，切回时需重建
+        invalidate()
+    }
+    fun getDisplayMode(): DisplayMode = displayMode
+
+    /**
+     * 注入某个 chunk 的频谱图 Bitmap（主线程调用）
+     */
+    fun updateSpectrogramChunk(chunkIndex: Int, bmp: Bitmap) {
+        if (chunkIndex !in 0 until totalChunks) return
+        spectrogramChunks[chunkIndex]?.recycle()
+        spectrogramChunks[chunkIndex] = bmp
+        if (displayMode == DisplayMode.SPECTROGRAM) invalidate()
+    }
+
+    /**
+     * 切换模式时重置频谱请求（允许重新请求尺寸变化后的 chunk）
+     */
+    fun resetSpectrogramCache() {
+        spectrogramChunks.forEachIndexed { i, bmp ->
+            bmp?.recycle()
+            spectrogramChunks[i] = null
+        }
+        spectrogramRequested.clear()
+        invalidate()
+    }
+
 }

@@ -17,4 +17,6 @@
     <color name="inverse_primary">#FFD54F</color>
     <!-- 播放高亮颜色 - 淡黄色，避免遮挡时间轴 -->
     <color name="playing_highlight">#FFF9C4</color>
+    <!-- 波形工具栏背景色 -->
+    <color name="waveform_toolbar_bg">#1E1E1E</color>
 </resources>
