@@ -125,6 +125,9 @@ class EditorActivity : AppCompatActivity() {
     private var currentDisplayMode = WaveformTimelineView.DisplayMode.WAVEFORM
     private var spectrogramFile: File? = null
 
+    // 选中字幕循环播放
+    private var loopSubtitleEntry: SubtitleEntry? = null  // 当前循环目标
+
     // 文件选择器
     private val openFileLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -268,8 +271,11 @@ class EditorActivity : AppCompatActivity() {
     
     private fun setupRecyclerView() {
         subtitleAdapter = SubtitleAdapter(
-            onItemClick = { _, _ ->
+            onItemClick = { _, position ->
                 updateSelectedCountDisplay()
+                // 同步循环目标
+                val selected = subtitleAdapter.getSelectedEntries()
+                loopSubtitleEntry = if (selected.isNotEmpty()) selected.first().first else null
             },
             onItemLongClick = { entry, position ->
                 showContextMenu(position)
@@ -1007,47 +1013,90 @@ class EditorActivity : AppCompatActivity() {
             Toast.makeText(this, "TXT 文件只能使用源视图模式", Toast.LENGTH_SHORT).show()
             return
         }
-        
+
+        if (isSourceViewMode) {
+            // 源视图 → 列表视图：直接切换，解析源视图当前内容
+            doExitSourceView()
+        } else {
+            // 列表视图 → 源视图：需要重新读取文件
+            doEnterSourceView()
+        }
+    }
+
+    /**
+     * 列表视图 → 源视图
+     * 重新从磁盘读取文件内容，有未保存更改时提醒先保存
+     */
+    private fun doEnterSourceView() {
         if (hasUnsavedChanges) {
             AlertDialog.Builder(this)
-                .setTitle("提示")
-                .setMessage("当前有未保存的更改，切换视图可能会丢失更改，确定继续吗？")
-                .setPositiveButton("确定") { _, _ ->
-                    doToggleSourceView()
+                .setTitle("有未保存的更改")
+                .setMessage("切换到源视图将重新读取文件，当前列表中未保存的更改不会体现在源视图中。\n\n建议先保存后再切换。")
+                .setPositiveButton("先保存再切换") { _, _ ->
+                    saveFile()
+                    reloadAndEnterSourceView()
+                }
+                .setNeutralButton("直接切换（丢弃更改）") { _, _ ->
+                    reloadAndEnterSourceView()
                 }
                 .setNegativeButton("取消", null)
                 .show()
         } else {
-            doToggleSourceView()
+            reloadAndEnterSourceView()
         }
     }
-    
-    private fun doToggleSourceView() {
-        if (isSourceViewMode) {
-            // 从源视图切换到列表视图
-            val editedContent = binding.etSourceView.text.toString()
-            // 尝试解析源视图内容为字幕条目
+
+    /**
+     * 重新从磁盘读取原始文件后进入源视图
+     */
+    private fun reloadAndEnterSourceView() {
+        val file = if (isAudioFile) subtitleFile else currentFile
+
+        if (file != null && file.exists()) {
+            // 有文件：重新读取磁盘内容，保证与已保存状态一致
             try {
-                subtitleEntries = SubtitleParser.parse(editedContent, currentCharset).toMutableList()
-                exitSourceViewMode()
-                updateFormatInfo()
-                Toast.makeText(this, "已切换到列表视图", Toast.LENGTH_SHORT).show()
+                val freshContent = FileUtils.readFile(file, currentCharset)
+                originalFileContent = freshContent
+                sourceViewContent = freshContent
             } catch (e: Exception) {
-                Toast.makeText(this, "解析失败：${e.message}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "读取文件失败：${e.message}", Toast.LENGTH_SHORT).show()
+                return
             }
         } else {
-            // 从列表视图切换到源视图 - 如果有原始内容，优先显示原始内容
-            if (originalFileContent.isNotEmpty()) {
-                sourceViewContent = originalFileContent
-            } else {
-                sourceViewContent = when (currentFormat) {
-                    SubtitleParser.SubtitleFormat.SRT -> SubtitleParser.toSRT(subtitleEntries)
-                    SubtitleParser.SubtitleFormat.LRC -> SubtitleParser.toLRC(subtitleEntries)
-                    else -> SubtitleParser.toSRT(subtitleEntries)
-                }
+            // 无文件（从剪贴板/URI 打开，或新建未保存）：退而序列化当前列表
+            sourceViewContent = when (currentFormat) {
+                SubtitleParser.SubtitleFormat.SRT -> SubtitleParser.toSRT(subtitleEntries)
+                SubtitleParser.SubtitleFormat.LRC -> SubtitleParser.toLRC(subtitleEntries)
+                else -> SubtitleParser.toSRT(subtitleEntries)
             }
-            enterSourceViewMode()
-            Toast.makeText(this, "已切换到源视图", Toast.LENGTH_SHORT).show()
+            originalFileContent = sourceViewContent
+            Toast.makeText(this, "文件尚未保存，已从当前列表生成源视图内容", Toast.LENGTH_SHORT).show()
+        }
+
+        enterSourceViewMode()
+        Toast.makeText(this, "已切换到源视图", Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * 源视图 → 列表视图：解析源视图中当前编辑的内容
+     */
+    private fun doExitSourceView() {
+        val editedContent = binding.etSourceView.text.toString()
+        try {
+            subtitleEntries = SubtitleParser.parse(editedContent, currentCharset).toMutableList()
+            // 将源视图内容同步回 originalFileContent，使再次切换时内容一致
+            originalFileContent = editedContent
+            sourceViewContent   = editedContent
+            // 标记有未保存更改（用户在源视图里编辑了内容）
+            if (editedContent != (if (isAudioFile) subtitleFile else currentFile)
+                    ?.let { FileUtils.readFile(it, currentCharset) }) {
+                hasUnsavedChanges = true
+            }
+            exitSourceViewMode()
+            updateFormatInfo()
+            Toast.makeText(this, "已切换到列表视图", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "解析失败：${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
     
@@ -2540,7 +2589,12 @@ class EditorActivity : AppCompatActivity() {
                 val firstSelectedIndex = indices.first()
                 if (firstSelectedIndex >= 0 && firstSelectedIndex < subtitleEntries.size) {
                     binding.rvSubtitles.scrollToPosition(firstSelectedIndex)
+                    // 更新循环目标为第一个选中的字幕
+                    loopSubtitleEntry = subtitleEntries[firstSelectedIndex]
                 }
+            } else {
+                // 取消选中时清除循环目标
+                loopSubtitleEntry = null
             }
         }
         
@@ -2855,9 +2909,20 @@ class EditorActivity : AppCompatActivity() {
      * 跳转到指定时间
      */
     private fun seekTo(timeMs: Long) {
-        mediaPlayer?.seekTo(timeMs.toInt())
-        audioCurrentPosition = timeMs.coerceIn(0L, audioDuration)
-        
+        // 若循环模式开启且有选中字幕，将目标时间钳制在字幕区间内
+        val loopTarget = loopSubtitleEntry
+        val clampedTime = if (
+            loopTarget != null &&
+            SettingsManager.getInstance(this).isLoopSelectedSubtitleEnabled()
+        ) {
+            timeMs.coerceIn(loopTarget.startTime, loopTarget.endTime - 1)
+        } else {
+            timeMs.coerceIn(0L, audioDuration)
+        }
+
+        mediaPlayer?.seekTo(clampedTime.toInt())
+        audioCurrentPosition = clampedTime
+
         // 高亮显示对应时间的字幕
         highlightSubtitleAtTime(audioCurrentPosition)
         
@@ -2934,12 +2999,33 @@ class EditorActivity : AppCompatActivity() {
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
         val updateRunnable = object : Runnable {
             override fun run() {
-                if (isPlaying && mediaPlayer?.isPlaying == true) {
-                    updatePlayerUI()
-                    // 检查是否需要高亮字幕
-                    highlightSubtitleAtTime(audioCurrentPosition)
-                    handler.postDelayed(this, 100)
+                if (!isPlaying || mediaPlayer?.isPlaying != true) return
+
+                updatePlayerUI()
+                highlightSubtitleAtTime(audioCurrentPosition)
+
+                // 选中字幕循环播放：检测双边界
+                val loopTarget = loopSubtitleEntry
+                if (loopTarget != null &&
+                    SettingsManager.getInstance(this@EditorActivity).isLoopSelectedSubtitleEnabled()
+                ) {
+                    when {
+                        // 超过右边界 → 跳回开始
+                        audioCurrentPosition >= loopTarget.endTime -> {
+                            mediaPlayer?.seekTo(loopTarget.startTime.toInt())
+                            audioCurrentPosition = loopTarget.startTime
+                            updatePlayerUI()
+                        }
+                        // 在左边界之前（用户拖进度条拖到外面）→ 跳到开始
+                        audioCurrentPosition < loopTarget.startTime -> {
+                            mediaPlayer?.seekTo(loopTarget.startTime.toInt())
+                            audioCurrentPosition = loopTarget.startTime
+                            updatePlayerUI()
+                        }
+                    }
                 }
+
+                handler.postDelayed(this, 50)
             }
         }
         handler.post(updateRunnable)

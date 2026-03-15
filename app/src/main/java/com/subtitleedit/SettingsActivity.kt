@@ -140,6 +140,9 @@ class SettingsActivity : AppCompatActivity() {
         }
         // 初始化显示
         refreshCacheSizeDisplay()
+
+        // 选中字幕循环播放
+        binding.switchLoopSelectedSubtitle.isChecked = settingsManager.isLoopSelectedSubtitleEnabled()
     }
 
     private fun setupSaveButton() {
@@ -157,31 +160,45 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun saveSettings() {
+        // ① 编码设置——无需校验，直接保存
         val selectedEncoding = FileUtils.SUPPORTED_ENCODINGS[binding.spinnerEncoding.selectedItemPosition]
         settingsManager.setDefaultEncoding(selectedEncoding.charset)
 
-        val apiKey         = binding.etApiKey.text.toString().trim()
-        val model          = binding.etModel.text.toString().trim()
-        val sourceLang     = binding.etSourceLanguage.text.toString().trim()
-        val targetLang     = binding.etTargetLanguage.text.toString().trim()
-
-        if (apiKey.isEmpty()) { Toast.makeText(this, "请输入 API Key", Toast.LENGTH_SHORT).show(); return }
-        if (model.isEmpty())  { Toast.makeText(this, "请输入模型名称", Toast.LENGTH_SHORT).show(); return }
-        if (targetLang.isEmpty()) { Toast.makeText(this, "请输入翻译目标语言", Toast.LENGTH_SHORT).show(); return }
-
-        settingsManager.setAiApiKey(apiKey)
-        settingsManager.setAiModel(model)
-        settingsManager.setAiSourceLanguage(sourceLang)
-        settingsManager.setAiTargetLanguage(targetLang)
-
-        // 波形缓存位置
-        val cacheLocation = if (binding.rgWaveformCache.checkedRadioButtonId == binding.rbCacheSource.id)
-            SettingsManager.WAVEFORM_CACHE_SOURCE
-        else
-            SettingsManager.WAVEFORM_CACHE_APP
+        // ② 波形缓存位置——无需校验，直接保存
+        val cacheLocation =
+            if (binding.rgWaveformCache.checkedRadioButtonId == binding.rbCacheSource.id)
+                SettingsManager.WAVEFORM_CACHE_SOURCE
+            else
+                SettingsManager.WAVEFORM_CACHE_APP
         settingsManager.setWaveformCacheLocation(cacheLocation)
 
-        Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show()
-        finish()
+        // ③ 循环播放开关——无需校验，直接保存
+        settingsManager.setLoopSelectedSubtitleEnabled(binding.switchLoopSelectedSubtitle.isChecked)
+
+        // ④ AI 设置——有内容才保存，为空时仅提示，不阻断其他设置
+        val apiKey     = binding.etApiKey.text.toString().trim()
+        val model      = binding.etModel.text.toString().trim()
+        val sourceLang = binding.etSourceLanguage.text.toString().trim()
+        val targetLang = binding.etTargetLanguage.text.toString().trim()
+
+        val aiWarnings = mutableListOf<String>()
+        if (apiKey.isEmpty())     aiWarnings.add("API Key")
+        if (model.isEmpty())      aiWarnings.add("模型名称")
+        if (targetLang.isEmpty()) aiWarnings.add("翻译目标语言")
+
+        if (aiWarnings.isNotEmpty()) {
+            // 其他设置已保存，仅提示 AI 字段缺失
+            Toast.makeText(
+                this,
+                "设置已保存，但 AI 翻译功能缺少以下字段：${aiWarnings.joinToString("、")}",
+                Toast.LENGTH_LONG
+            ).show()
+        } else {
+            settingsManager.setAiApiKey(apiKey)
+            settingsManager.setAiModel(model)
+            settingsManager.setAiSourceLanguage(sourceLang)
+            settingsManager.setAiTargetLanguage(targetLang)
+            Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show()
+        }
     }
 }

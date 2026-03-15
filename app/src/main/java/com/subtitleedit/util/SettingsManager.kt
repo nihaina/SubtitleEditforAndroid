@@ -23,6 +23,7 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_AI_SOURCE_LANGUAGE = "ai_source_language"
         private const val KEY_AI_TARGET_LANGUAGE = "ai_target_language"
         private const val KEY_WAVEFORM_CACHE_LOCATION = "waveform_cache_location"
+        private const val KEY_LOOP_SELECTED_SUBTITLE = "loop_selected_subtitle"
         
         const val WAVEFORM_CACHE_APP = "app_cache"
         const val WAVEFORM_CACHE_SOURCE = "source_dir"
@@ -123,4 +124,16 @@ class SettingsManager private constructor(context: Context) {
     fun setWaveformCacheLocation(location: String) {
         prefs.edit().putString(KEY_WAVEFORM_CACHE_LOCATION, location).apply()
     }
+    
+    /**
+     * 获取是否启用选中字幕循环播放
+     */
+    fun isLoopSelectedSubtitleEnabled(): Boolean =
+        prefs.getBoolean(KEY_LOOP_SELECTED_SUBTITLE, false)
+    
+    /**
+     * 设置是否启用选中字幕循环播放
+     */
+    fun setLoopSelectedSubtitleEnabled(enabled: Boolean) =
+        prefs.edit().putBoolean(KEY_LOOP_SELECTED_SUBTITLE, enabled).apply()
 }
