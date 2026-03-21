@@ -16,9 +16,10 @@
         <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
+            android:layout_height="48dp"
             app:navigationIcon="@drawable/ic_back"
-            app:title="@string/app_name" />
+            app:titleTextAppearance="@style/TextAppearance.Material3.TitleSmall"
+            app:subtitleTextAppearance="@style/TextAppearance.Material3.LabelSmall" />
 
     </com.google.android.material.appbar.AppBarLayout>
 
@@ -285,7 +286,7 @@
                     <com.google.android.material.card.MaterialCardView
                         android:id="@+id/timelineContainer"
                         android:layout_width="match_parent"
-                        android:layout_height="220dp"
+                        android:layout_height="185dp"
                         app:cardCornerRadius="4dp"
                         app:cardElevation="1dp">
 
@@ -299,111 +300,68 @@
 
                 </LinearLayout>
 
-                <!-- 播放控制 -->
+                <!-- 播放控制：两行布局，进度条独占全宽避免被时间文字挤压 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginTop="8dp">
+                    android:orientation="vertical"
+                    android:layout_marginTop="4dp">
 
-                    <!-- 播放/暂停按钮 -->
-                    <ImageButton
-                        android:id="@+id/btnPlayPause"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:src="@android:drawable/ic_media_play"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="播放/暂停"
-                        app:tint="@color/primary" />
-
-                    <!-- 当前时间 -->
-                    <TextView
-                        android:id="@+id/tvCurrentTime"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textColor="@color/on_surface"
-                        android:textSize="12sp"
-                        tools:text="00:00:00" />
-
-                    <!-- 进度条 -->
+                    <!-- 第一行：进度条独占全宽 -->
                     <SeekBar
                         android:id="@+id/seekBar"
-                        android:layout_width="0dp"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:layout_marginStart="8dp"
-                        android:layout_marginEnd="8dp" />
+                        android:layout_marginStart="2dp"
+                        android:layout_marginEnd="2dp" />
 
-                    <!-- 总时长 -->
-                    <TextView
-                        android:id="@+id/tvTotalTime"
-                        android:layout_width="wrap_content"
+                    <!-- 第二行：播放按钮 + 当前时间（左）+ 弹性空白 + 总时长（右）-->
+                    <LinearLayout
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:textColor="@color/on_surface"
-                        android:textSize="12sp"
-                        tools:text="05:30:00" />
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginTop="2dp">
+
+                        <ImageButton
+                            android:id="@+id/btnPlayPause"
+                            android:layout_width="32dp"
+                            android:layout_height="32dp"
+                            android:src="@android:drawable/ic_media_play"
+                            android:background="?attr/selectableItemBackgroundBorderless"
+                            android:contentDescription="播放/暂停"
+                            android:layout_marginEnd="4dp"
+                            app:tint="@color/primary" />
+
+                        <!-- 等宽字体：每个数字字形宽度一致，彻底消除抖动 -->
+                        <TextView
+                            android:id="@+id/tvCurrentTime"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="@color/on_surface"
+                            android:textSize="11sp"
+                            android:fontFamily="monospace"
+                            android:maxLines="1"
+                            tools:text="00:00:00.000" />
+
+                        <Space
+                            android:layout_width="0dp"
+                            android:layout_height="1dp"
+                            android:layout_weight="1" />
+
+                        <TextView
+                            android:id="@+id/tvTotalTime"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="@color/on_surface"
+                            android:textSize="11sp"
+                            android:fontFamily="monospace"
+                            android:maxLines="1"
+                            tools:text="05:30:00.000" />
+
+                    </LinearLayout>
 
                 </LinearLayout>
-
-            </LinearLayout>
-
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- 顶部工具栏 -->
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_margin="8dp"
-            app:cardCornerRadius="8dp"
-            app:cardElevation="2dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="12dp">
-
-                <!-- 文件信息和格式 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
-
-                    <TextView
-                        android:id="@+id/tvFileName"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:textColor="@color/on_surface"
-                        android:textSize="14sp"
-                        android:maxLines="1"
-                        android:ellipsize="middle"
-                        tools:text="example.srt" />
-
-                </LinearLayout>
-
-                <!-- 格式信息 -->
-                <TextView
-                    android:id="@+id/tvFormatInfo"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:textColor="@color/on_surface"
-                    android:textSize="12sp"
-                    tools:text="格式：SRT | 条目数：50" />
-                
-                <!-- 选中提示 -->
-                <TextView
-                    android:id="@+id/tvSelectedCount"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:textColor="@color/primary"
-                    android:textSize="12sp"
-                    android:visibility="gone"
-                    tools:text="已选择 3 项" />
 
             </LinearLayout>
 

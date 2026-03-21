@@ -88,6 +88,9 @@ class EditorActivity : AppCompatActivity() {
     // 是否有未保存的更改
     private var hasUnsavedChanges = false
     
+    // 当前格式信息（用于 toolbar subtitle 恢复）
+    private var currentFormatInfo = ""
+    
     // 复制/剪贴板数据（支持多行）
     private var clipboardEntries: List<SubtitleEntry> = emptyList()
     private var isCutMode: Boolean = false  // 是否为剪切模式
@@ -108,6 +111,7 @@ class EditorActivity : AppCompatActivity() {
     private var audioDuration: Long = 0L  // 音频总时长（毫秒）
     private var audioCurrentPosition: Long = 0L  // 当前播放位置（毫秒）
     private var isPlaying: Boolean = false
+    private var isUserSeeking = false
     
     // MediaPlayer
     private var mediaPlayer: MediaPlayer? = null
@@ -208,7 +212,7 @@ class EditorActivity : AppCompatActivity() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.setDisplayShowHomeEnabled(true)
-        supportActionBar?.title = getString(R.string.app_name)
+        supportActionBar?.title = "未命名"
         
         binding.toolbar.setNavigationOnClickListener {
             onBackPressed()
@@ -815,10 +819,9 @@ class EditorActivity : AppCompatActivity() {
     private fun updateSelectedCountDisplay() {
         val count = subtitleAdapter.getSelectedCount()
         if (count > 0) {
-            binding.tvSelectedCount.text = "已选择 $count 项"
-            binding.tvSelectedCount.visibility = android.view.View.VISIBLE
+            supportActionBar?.subtitle = "已选择 $count 项"
         } else {
-            binding.tvSelectedCount.visibility = android.view.View.GONE
+            supportActionBar?.subtitle = currentFormatInfo
         }
     }
     
@@ -835,7 +838,7 @@ class EditorActivity : AppCompatActivity() {
             return
         }
         
-        binding.tvFileName.text = currentFile!!.name
+        supportActionBar?.title = currentFile!!.name
         // 使用用户设置的默认编码
         val settingsManager = SettingsManager.getInstance(this)
         currentCharset = settingsManager.getDefaultEncoding()
@@ -855,7 +858,7 @@ class EditorActivity : AppCompatActivity() {
             currentFile = null
             // 获取文件名并更新显示
             val fileName = getFileNameFromUri(uri)
-            binding.tvFileName.text = fileName
+            supportActionBar?.title = fileName
             parseContent(content)
             hasUnsavedChanges = false
             Toast.makeText(this, "文件已打开：$fileName", Toast.LENGTH_SHORT).show()
@@ -1809,8 +1812,9 @@ class EditorActivity : AppCompatActivity() {
         subtitleAdapter.submitList(emptyList())
         subtitleAdapter.clearSelection()
         updateSelectedCountDisplay()
-        binding.tvFileName.text = "未命名"
-        binding.tvFormatInfo.text = "格式：SRT | 条目数：0"
+        supportActionBar?.title = "未命名"
+        currentFormatInfo = "格式：SRT | 条目数：0"
+        supportActionBar?.subtitle = currentFormatInfo
         hasUnsavedChanges = false
         Toast.makeText(this, "已新建文件", Toast.LENGTH_SHORT).show()
     }
@@ -2423,7 +2427,8 @@ class EditorActivity : AppCompatActivity() {
         } else {
             "条目数：${subtitleEntries.size}"
         }
-        binding.tvFormatInfo.text = "格式：$formatName | $countInfo"
+        currentFormatInfo = "格式：$formatName | $countInfo"
+        supportActionBar?.subtitle = currentFormatInfo
         // 条目数变化时，强制刷新所有可见项的序号显示
         if (!isSourceViewMode) {
             subtitleAdapter.refreshAllItems()
@@ -2580,25 +2585,21 @@ class EditorActivity : AppCompatActivity() {
         
         // 设置选中状态变化监听器（波形时间轴选中状态同步到字幕列表）
         binding.waveformTimelineView.onSelectedIndicesChangeListener = { indices ->
-            // 同步选中状态到字幕列表
-            subtitleAdapter.clearSelection()
-            indices.forEach { index ->
-                if (index >= 0 && index < subtitleEntries.size) {
-                    subtitleAdapter.toggleSelection(index)
-                }
-            }
-            updateSelectedCountDisplay()
-            
-            // 滚动到选中的字幕行
             if (indices.isNotEmpty()) {
                 val firstSelectedIndex = indices.first()
                 if (firstSelectedIndex >= 0 && firstSelectedIndex < subtitleEntries.size) {
                     binding.rvSubtitles.scrollToPosition(firstSelectedIndex)
-                    // 更新循环目标为第一个选中的字幕
                     loopSubtitleEntry = subtitleEntries[firstSelectedIndex]
+
+                    // 若循环模式开启，且播放头不在字幕区间内，则跳到字幕起始时间
+                    val target = subtitleEntries[firstSelectedIndex]
+                    if (SettingsManager.getInstance(this).isLoopSelectedSubtitleEnabled()) {
+                        if (audioCurrentPosition < target.startTime || audioCurrentPosition >= target.endTime) {
+                            seekTo(target.startTime)
+                        }
+                    }
                 }
             } else {
-                // 取消选中时清除循环目标
                 loopSubtitleEntry = null
             }
         }
@@ -2613,23 +2614,18 @@ class EditorActivity : AppCompatActivity() {
         binding.seekBar.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) {
-                    // progress 范围是 0-1000，直接按比例计算时间
                     val targetTime = (audioDuration * progress / 1000).toLong()
                     audioCurrentPosition = targetTime
                     binding.tvCurrentTime.text = TimeUtils.formatForDisplay(targetTime)
-                    // 拖动时实时更新波形图时间轴线位置
-                    val wavePosition = if (audioDuration > 0) {
-                        audioCurrentPosition.toFloat() / audioDuration
-                    } else {
-                        0f
-                    }
+                    val wavePosition = if (audioDuration > 0) audioCurrentPosition.toFloat() / audioDuration else 0f
                     binding.waveformTimelineView.setCurrentPosition(wavePosition)
                 }
             }
-            
-            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
-            
+            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {
+                isUserSeeking = true
+            }
             override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {
+                isUserSeeking = false
                 seekTo(audioCurrentPosition)
             }
         })
@@ -2771,7 +2767,7 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun doLoadAudioFile(audioFile: File, subtitleFilePath: String?) {
         audioFilePath = audioFile.absolutePath
-        binding.tvFileName.text = subtitleFilePath?.let { File(it).name } ?: "（无字幕文件）"
+        supportActionBar?.title = subtitleFilePath?.let { File(it).name } ?: "（无字幕文件）"
         
         try {
             mediaPlayer?.reset()
@@ -2976,52 +2972,46 @@ class EditorActivity : AppCompatActivity() {
         if (isSourceViewMode) return
         
         // 查找包含当前时间的字幕
+        // endTime 用严格小于，确保边界时间点归属于后一行而非前一行
         for ((index, entry) in subtitleEntries.withIndex()) {
-            if (timeMs >= entry.startTime && timeMs <= entry.endTime) {
-                // 只高亮显示，不自动滚动，允许用户自由浏览
+            if (timeMs >= entry.startTime && timeMs < entry.endTime) {
                 subtitleAdapter.highlightCurrentPlaying(index)
-                break
+                return
             }
         }
+        // 当前时间不在任何字幕区间内，清除高亮
+        subtitleAdapter.clearPlayingHighlight()
     }
     
-    /**
-     * 更新播放器 UI
-     */
     private fun updatePlayerUI() {
-        // 从 MediaPlayer 获取实时状态
         mediaPlayer?.let { player ->
-            audioCurrentPosition = player.currentPosition.toLong()
+            if (!isUserSeeking) {
+                val pos = player.currentPosition.toLong()
+                // 单调递增过滤：只接受向前推进的值（200ms 容差允许 seek 后的回退）
+                if (pos >= audioCurrentPosition || audioCurrentPosition - pos > 200) {
+                    audioCurrentPosition = pos
+                }
+            }
             audioDuration = player.duration.toLong().takeIf { it > 0 } ?: audioDuration
             isPlaying = player.isPlaying
         }
-        
-        // 更新播放/暂停按钮图标
-        val playPauseIcon = if (isPlaying) {
-            android.R.drawable.ic_media_pause
-        } else {
-            android.R.drawable.ic_media_play
-        }
-        binding.btnPlayPause.setImageResource(playPauseIcon)
-        
-        // 更新时间显示
+
+        binding.btnPlayPause.setImageResource(
+            if (isPlaying) android.R.drawable.ic_media_pause
+            else android.R.drawable.ic_media_play
+        )
+
         binding.tvCurrentTime.text = TimeUtils.formatForDisplay(audioCurrentPosition)
-        binding.tvTotalTime.text = TimeUtils.formatForDisplay(audioDuration)
-        
-        // 更新进度条 - SeekBar max 为 1000，代表 0-100% 的进度
-        val progress = if (audioDuration > 0) {
-            (audioCurrentPosition * 1000 / audioDuration).toInt().coerceIn(0, 1000)
-        } else {
-            0
+        binding.tvTotalTime.text   = TimeUtils.formatForDisplay(audioDuration)
+
+        if (!isUserSeeking) {
+            val progress = if (audioDuration > 0)
+                (audioCurrentPosition * 1000 / audioDuration).toInt().coerceIn(0, 1000)
+            else 0
+            binding.seekBar.progress = progress
         }
-        binding.seekBar.progress = progress
-        
-        // 更新波形时间轴播放位置
-        val wavePosition = if (audioDuration > 0) {
-            audioCurrentPosition.toFloat() / audioDuration
-        } else {
-            0f
-        }
+
+        val wavePosition = if (audioDuration > 0) audioCurrentPosition.toFloat() / audioDuration else 0f
         binding.waveformTimelineView.setCurrentPosition(wavePosition)
     }
     
@@ -3058,7 +3048,7 @@ class EditorActivity : AppCompatActivity() {
                     }
                 }
 
-                handler.postDelayed(this, 50)
+                handler.postDelayed(this, 100)
             }
         }
         handler.post(updateRunnable)

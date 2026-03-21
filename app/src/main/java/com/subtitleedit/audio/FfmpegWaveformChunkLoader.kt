@@ -165,14 +165,18 @@ class FfmpegWaveformChunkLoader(
                 // 委托给 FfmpegWaveformExtractor 读取帧数据
                 val frames = FfmpegWaveformExtractor.readWaveformFrames(cacheFile!!, startFrame, frameCount)
                 
-                // 转换为归一化的振幅数组（取 max 的绝对值）
-                val amplitudes = FloatArray(frames.size) { i ->
-                    FfmpegWaveformExtractor.normalizeAmplitude(frames[i].max)
+                // 转换为交错数组 [max₀, absMin₀, max₁, absMin₁ …]
+                // max  → 正向峰值（0..1），决定波形上沿
+                // absMin → 负向谷值取绝对值（0..1），决定波形下沿
+                val amplitudes = FloatArray(frames.size * 2) { i ->
+                    val frame = frames[i / 2]
+                    if (i % 2 == 0) FfmpegWaveformExtractor.normalizeAmplitude(frame.max)
+                    else            FfmpegWaveformExtractor.normalizeAmplitude(frame.min)
                 }
-                
-                // 降采样到目标点数
-                val result = if (amplitudes.size > targetSamples) {
-                    downsample(amplitudes, targetSamples)
+
+                // 降采样到目标帧数（保持交错格式）
+                val result = if (frames.size > targetSamples) {
+                    downsamplePairs(amplitudes, targetSamples)
                 } else {
                     amplitudes
                 }
@@ -219,25 +223,30 @@ class FfmpegWaveformChunkLoader(
     // ==================== 内部实现 ====================
 
     /**
-     * 降采样波形数据
+     * 对交错数组 [max₀, absMin₀, max₁, absMin₁ …] 降采样到 targetFrames 帧。
+     * 每个输出帧取原始区间内的 max(max) 和 max(absMin)，保留峰值细节。
      */
-    private fun downsample(source: FloatArray, targetSize: Int): FloatArray {
-        if (source.isEmpty()) return FloatArray(0)
-        if (source.size <= targetSize) return source
-        
-        val result = FloatArray(targetSize)
-        val step = source.size.toFloat() / targetSize
-        
-        for (i in 0 until targetSize) {
+    private fun downsamplePairs(source: FloatArray, targetFrames: Int): FloatArray {
+        val srcFrames = source.size / 2
+        if (srcFrames <= targetFrames) return source
+
+        val result = FloatArray(targetFrames * 2)
+        val step = srcFrames.toFloat() / targetFrames
+
+        for (i in 0 until targetFrames) {
             val from = (i * step).toInt()
-            val to = ((i + 1) * step).toInt().coerceAtMost(source.size)
-            var max = 0f
+            val to   = ((i + 1) * step).toInt().coerceAtMost(srcFrames)
+            var peakMax = 0f
+            var peakMin = 0f
             for (j in from until to) {
-                if (source[j] > max) max = source[j]
+                val mx = source[j * 2]
+                val mn = source[j * 2 + 1]
+                if (mx > peakMax) peakMax = mx
+                if (mn > peakMin) peakMin = mn
             }
-            result[i] = max
+            result[i * 2]     = peakMax
+            result[i * 2 + 1] = peakMin
         }
-        
         return result
     }
 }

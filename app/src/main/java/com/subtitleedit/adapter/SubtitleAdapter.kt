@@ -50,11 +50,15 @@ class SubtitleAdapter(
     }
     
     override fun onBindViewHolder(holder: SubtitleViewHolder, position: Int, payloads: MutableList<Any>) {
-        if (payloads.contains(PAYLOAD_SELECTION)) {
-            // 只刷新选中状态，不刷新整个条目
-            holder.bindSelection(isSelected(position))
-        } else {
-            onBindViewHolder(holder, position)
+        when {
+            payloads.contains(PAYLOAD_PLAYING) -> {
+                // 只更新播放高亮背景，完全不触碰选中状态（alpha / ivSelected）
+                holder.bindPlaying(position == currentPlayingPosition)
+            }
+            payloads.contains(PAYLOAD_SELECTION) -> {
+                holder.bindSelection(isSelected(position))
+            }
+            else -> onBindViewHolder(holder, position)
         }
     }
 
@@ -71,6 +75,7 @@ class SubtitleAdapter(
     
     companion object {
         const val PAYLOAD_SELECTION = "selection"
+        const val PAYLOAD_PLAYING   = "playing"
     }
 
     fun isSelected(position: Int): Boolean {
@@ -194,14 +199,8 @@ class SubtitleAdapter(
     fun highlightCurrentPlaying(position: Int) {
         val oldPosition = currentPlayingPosition
         currentPlayingPosition = position
-        
-        // 刷新旧位置和新位置
-        if (oldPosition >= 0) {
-            notifyItemChanged(oldPosition)
-        }
-        if (position >= 0) {
-            notifyItemChanged(position)
-        }
+        if (oldPosition >= 0) notifyItemChanged(oldPosition, PAYLOAD_PLAYING)
+        if (position >= 0)    notifyItemChanged(position,    PAYLOAD_PLAYING)
     }
     
     /**
@@ -210,9 +209,7 @@ class SubtitleAdapter(
     fun clearPlayingHighlight() {
         val oldPosition = currentPlayingPosition
         currentPlayingPosition = -1
-        if (oldPosition >= 0) {
-            notifyItemChanged(oldPosition)
-        }
+        if (oldPosition >= 0) notifyItemChanged(oldPosition, PAYLOAD_PLAYING)
     }
     
     /**
@@ -246,6 +243,18 @@ class SubtitleAdapter(
         fun bindSelection(isSelected: Boolean) {
             ivSelected.visibility = if (isSelected) View.VISIBLE else View.GONE
             itemView.alpha = if (isSelected) 0.6f else 1.0f
+        }
+
+        /**
+         * 只刷新播放高亮背景（用于 payload 刷新）
+         */
+        fun bindPlaying(isPlaying: Boolean) {
+            itemView.setBackgroundColor(
+                if (isPlaying)
+                    ContextCompat.getColor(itemView.context, R.color.playing_highlight)
+                else
+                    android.graphics.Color.TRANSPARENT
+            )
         }
 
         fun bind(entry: SubtitleEntry, position: Int, isSelected: Boolean) {
