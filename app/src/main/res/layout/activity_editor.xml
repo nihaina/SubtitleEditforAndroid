@@ -333,6 +333,24 @@
                             android:layout_marginEnd="4dp"
                             app:tint="@color/primary" />
 
+                        <!-- 播放速率按钮 -->
+                        <TextView
+                            android:id="@+id/tvPlaybackSpeed"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="1.0×"
+                            android:textSize="11sp"
+                            android:textColor="@color/primary"
+                            android:paddingStart="6dp"
+                            android:paddingEnd="6dp"
+                            android:paddingTop="2dp"
+                            android:paddingBottom="2dp"
+                            android:background="@drawable/bg_waveform_btn"
+                            android:layout_marginEnd="6dp"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:contentDescription="播放速度" />
+
                         <!-- 等宽字体：每个数字字形宽度一致，彻底消除抖动 -->
                         <TextView
                             android:id="@+id/tvCurrentTime"

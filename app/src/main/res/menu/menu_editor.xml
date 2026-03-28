@@ -25,6 +25,10 @@
                 android:id="@+id/menu_save_as"
                 android:title="@string/menu_save_as"
                 app:showAsAction="never" />
+            <item
+                android:id="@+id/menu_encoding"
+                android:title="@string/menu_encoding"
+                app:showAsAction="never" />
         </menu>
     </item>
 
@@ -60,11 +64,5 @@
                 app:showAsAction="never" />
         </menu>
     </item>
-
-    <!-- 编码菜单 -->
-    <item
-        android:id="@+id/menu_encoding"
-        android:title="@string/menu_encoding"
-        app:showAsAction="ifRoom" />
 
 </menu>

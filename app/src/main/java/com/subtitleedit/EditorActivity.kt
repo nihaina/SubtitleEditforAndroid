@@ -113,6 +113,9 @@ class EditorActivity : AppCompatActivity() {
     private var isPlaying: Boolean = false
     private var isUserSeeking = false
     
+    // 播放速率（默认 1.0）
+    private var playbackSpeed: Float = 1.0f
+    
     // MediaPlayer
     private var mediaPlayer: MediaPlayer? = null
     
@@ -891,9 +894,10 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun reloadFile() {
-        if (currentFile != null && currentFile!!.exists()) {
+        val targetFile = if (isAudioFile) subtitleFile else currentFile
+        if (targetFile != null && targetFile.exists()) {
             try {
-                val content = FileUtils.readFile(currentFile!!, currentCharset)
+                val content = FileUtils.readFile(targetFile, currentCharset)
                 parseContent(content)
                 hasUnsavedChanges = false
                 Toast.makeText(this, "已切换编码为：${FileUtils.SUPPORTED_ENCODINGS.find { it.charset == currentCharset }?.displayName}", Toast.LENGTH_SHORT).show()
@@ -2683,6 +2687,11 @@ class EditorActivity : AppCompatActivity() {
         binding.btnAmplitudeZoomOut.setOnClickListener {
             binding.waveformTimelineView.zoomOutAmplitude()
         }
+
+        // ——— 播放速率按钮 ———
+        binding.tvPlaybackSpeed.setOnClickListener {
+            showSpeedInputDialog()
+        }
     }
 
     /** 计算频谱图总 chunk 数 */
@@ -2774,6 +2783,10 @@ class EditorActivity : AppCompatActivity() {
             mediaPlayer?.setDataSource(audioFile.absolutePath)
             mediaPlayer?.prepare()
             audioDuration = mediaPlayer?.duration?.toLong() ?: 0L
+            // 恢复用户设置的播放速率
+            if (playbackSpeed != 1.0f) {
+                mediaPlayer?.playbackParams = android.media.PlaybackParams().setSpeed(playbackSpeed)
+            }
         } catch (e: Exception) {
             Toast.makeText(this, "加载音频失败：${e.message}", Toast.LENGTH_SHORT).show()
         }
@@ -3092,5 +3105,72 @@ class EditorActivity : AppCompatActivity() {
         } else {
             Toast.makeText(this, "已将开始时间设置为 ${TimeUtils.formatForDisplay(newStartTime)}", Toast.LENGTH_SHORT).show()
         }
+    }
+    
+    /**
+     * 弹出速率输入对话框
+     */
+    private fun showSpeedInputDialog() {
+        val input = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                        android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText(playbackSpeed.toString())
+            hint = "例如：0.5、1.0、1.5、2.0"
+            selectAll()
+            setPadding(48, 32, 48, 16)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("设置播放速率")
+            .setMessage("请输入倍数（0.25 ~ 4.0）")
+            .setView(input)
+            .setPositiveButton("确定") { _, _ ->
+                val text = input.text?.toString()?.trim() ?: ""
+                val speed = text.toFloatOrNull()
+                when {
+                    speed == null ->
+                        Toast.makeText(this, "请输入有效数字", Toast.LENGTH_SHORT).show()
+                    speed < 0.25f || speed > 4.0f ->
+                        Toast.makeText(this, "速率范围：0.25 ~ 4.0", Toast.LENGTH_SHORT).show()
+                    else ->
+                        applyPlaybackSpeed(speed)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+
+        // 自动弹出软键盘
+        input.postDelayed({
+            val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+                as android.view.inputmethod.InputMethodManager
+            imm.showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        }, 100)
+    }
+
+    /**
+     * 应用播放速率到 MediaPlayer，并刷新按钮文字
+     */
+    private fun applyPlaybackSpeed(speed: Float) {
+        playbackSpeed = speed
+
+        // 格式化按钮文字：整数倍省略小数（1× / 1.5×）
+        val label = if (speed == speed.toLong().toFloat()) {
+            "${speed.toLong()}×"
+        } else {
+            // 最多保留两位有效小数，去掉末尾 0
+            "%.2f".format(speed).trimEnd('0').trimEnd('.') + "×"
+        }
+        binding.tvPlaybackSpeed.text = label
+
+        mediaPlayer?.let { player ->
+            try {
+                val params = android.media.PlaybackParams().setSpeed(speed)
+                player.playbackParams = params
+            } catch (e: Exception) {
+                Toast.makeText(this, "设置速率失败：${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        Toast.makeText(this, "播放速率已设置为 ${label}", Toast.LENGTH_SHORT).show()
     }
 }
