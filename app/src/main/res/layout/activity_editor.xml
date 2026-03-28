@@ -386,7 +386,7 @@
         </com.google.android.material.card.MaterialCardView>
 
         <!-- 字幕列表 -->
-        <androidx.recyclerview.widget.RecyclerView
+        <com.subtitleedit.view.DraggableRecyclerView
             android:id="@+id/rvSubtitles"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
