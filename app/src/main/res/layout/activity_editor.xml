@@ -395,15 +395,12 @@
             tools:listitem="@layout/item_subtitle" />
 
         <!-- 源视图编辑器（用于 TXT 文件或手动切换） -->
-        <ScrollView
+        <com.subtitleedit.view.DraggableScrollView
             android:id="@+id/svSourceView"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:fillViewport="true"
-            android:scrollbars="vertical"
-            android:fadeScrollbars="false"
-            android:scrollbarSize="6dp"
-            android:scrollbarThumbVertical="@android:color/darker_gray"
+            android:scrollbars="none"
             android:overScrollMode="always"
             android:visibility="gone">
 
@@ -422,7 +419,7 @@
                 android:isScrollContainer="false"
                 tools:text="Line 1\nLine 2\nLine 3" />
 
-        </ScrollView>
+        </com.subtitleedit.view.DraggableScrollView>
 
     </LinearLayout>
 

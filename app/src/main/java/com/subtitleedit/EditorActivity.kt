@@ -22,6 +22,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.subtitleedit.view.DraggableScrollView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.activity.result.contract.ActivityResultContracts
