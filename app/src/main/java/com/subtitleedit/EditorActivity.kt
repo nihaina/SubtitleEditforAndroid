@@ -138,6 +138,10 @@ class EditorActivity : AppCompatActivity() {
     private var spectrogramDoneChunks = 0
     private var spectrogramIsGenerating = false
 
+    // 手动生成状态：false = 未生成/未触发，true = 已触发或缓存已就绪
+    private var isWaveformGenerated = false
+    private var isSpectrogramGenerationStarted = false
+
     // 选中字幕循环播放
     private var loopSubtitleEntry: SubtitleEntry? = null  // 当前循环目标
 
@@ -2645,6 +2649,7 @@ class EditorActivity : AppCompatActivity() {
                 if (isWaveformExpanded) android.view.View.VISIBLE else android.view.View.GONE
             (binding.btnToggleWaveform as TextView).text =
                 if (isWaveformExpanded) "▼" else "▶"
+            updateGenerateButton()
             refreshWaveformToolbarState()
         }
 
@@ -2656,24 +2661,29 @@ class EditorActivity : AppCompatActivity() {
                 else WaveformTimelineView.DisplayMode.WAVEFORM
 
             if (currentDisplayMode == WaveformTimelineView.DisplayMode.SPECTROGRAM) {
-                // 切换到频谱图：重置进度、先不显示 View 内容（View 内部会显示占位灰块）
+                // 切换到频谱图：重置缓存，等待用户手动生成
                 binding.waveformTimelineView.resetSpectrogramCache()
                 spectrogramTotalChunks = calcTotalChunks()
                 spectrogramDoneChunks = 0
-                spectrogramIsGenerating = spectrogramTotalChunks > 0
-                if (spectrogramIsGenerating) {
-                    Toast.makeText(this, "正在生成频谱图缓存，请稍候...", Toast.LENGTH_SHORT).show()
-                }
+                spectrogramIsGenerating = false
+                isSpectrogramGenerationStarted = false
+            } else {
+                // 切回波形图
+                isSpectrogramGenerationStarted = false
             }
 
             binding.waveformTimelineView.setDisplayMode(currentDisplayMode)
+            updateGenerateButton()
             refreshWaveformToolbarState()
         }
 
         // ——— 频谱图分块回调 ———
         binding.waveformTimelineView.onSpectrogramChunkRequest =
             { chunkIndex, startMs, endMs, widthPx, heightPx ->
-                generateSpectrogramChunkAsync(chunkIndex, startMs, endMs, widthPx, heightPx)
+                // 只有用户手动点击生成后才真正执行
+                if (isSpectrogramGenerationStarted) {
+                    generateSpectrogramChunkAsync(chunkIndex, startMs, endMs, widthPx, heightPx)
+                }
             }
 
         // ——— 振幅缩放 ———
@@ -2692,6 +2702,15 @@ class EditorActivity : AppCompatActivity() {
         // ——— 播放速率按钮 ———
         binding.tvPlaybackSpeed.setOnClickListener {
             showSpeedInputDialog()
+        }
+
+        // ——— 手动生成按钮 ———
+        binding.btnGenerateCache.setOnClickListener {
+            if (currentDisplayMode == WaveformTimelineView.DisplayMode.WAVEFORM) {
+                startWaveformGeneration()
+            } else {
+                startSpectrogramGeneration()
+            }
         }
     }
 
@@ -2821,20 +2840,18 @@ class EditorActivity : AppCompatActivity() {
         ffmpegChunkLoader?.prepare(audioFile.absolutePath, audioDuration, cacheDir)
         
         if (ffmpegChunkLoader?.isCacheReady() == true) {
+            // 缓存已存在，直接连接，不显示按钮
+            isWaveformGenerated = true
             connectWaveformLoader()
         } else {
-            Toast.makeText(this, "正在生成波形缓存，请稍候...", Toast.LENGTH_SHORT).show()
-            ffmpegChunkLoader?.generateCache { success ->
-                if (success) {
-                    Toast.makeText(this, "波形缓存生成完成", Toast.LENGTH_SHORT).show()
-                    connectWaveformLoader()
-                } else {
-                    Toast.makeText(this, "波形缓存生成失败", Toast.LENGTH_SHORT).show()
-                }
-            }
+            // 需要手动生成
+            isWaveformGenerated = false
+            updateGenerateButton()
         }
         
         updatePlayerUI()
+        // 初始状态下同步生成按钮
+        if (isAudioFile) updateGenerateButton()
     }
 
     /**
@@ -2895,6 +2912,59 @@ class EditorActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * 根据当前模式和生成状态，更新生成按钮的可见性和文字
+     */
+    private fun updateGenerateButton() {
+        val needsGenerate = when (currentDisplayMode) {
+            WaveformTimelineView.DisplayMode.WAVEFORM    -> !isWaveformGenerated
+            WaveformTimelineView.DisplayMode.SPECTROGRAM -> !isSpectrogramGenerationStarted
+        }
+        binding.btnGenerateCache.visibility =
+            if (needsGenerate && isWaveformExpanded) android.view.View.VISIBLE
+            else android.view.View.GONE
+
+        binding.btnGenerateCache.text = when (currentDisplayMode) {
+            WaveformTimelineView.DisplayMode.WAVEFORM    -> "生成波形图"
+            WaveformTimelineView.DisplayMode.SPECTROGRAM -> "生成频谱图"
+        }
+    }
+
+    /**
+     * 用户点击生成 → 开始波形缓存生成
+     */
+    private fun startWaveformGeneration() {
+        binding.btnGenerateCache.isEnabled = false
+        binding.btnGenerateCache.text = "生成中..."
+        Toast.makeText(this, "正在生成波形缓存，请稍候...", Toast.LENGTH_SHORT).show()
+        ffmpegChunkLoader?.generateCache { success ->
+            if (success) {
+                isWaveformGenerated = true
+                Toast.makeText(this, "波形缓存生成完成", Toast.LENGTH_SHORT).show()
+                connectWaveformLoader()
+            } else {
+                Toast.makeText(this, "波形缓存生成失败", Toast.LENGTH_SHORT).show()
+                binding.btnGenerateCache.isEnabled = true
+                binding.btnGenerateCache.text = "生成波形图"
+            }
+            updateGenerateButton()
+        }
+    }
+
+    /**
+     * 用户点击生成 → 开始频谱图生成（解锁 chunk 回调）
+     */
+    private fun startSpectrogramGeneration() {
+        isSpectrogramGenerationStarted = true
+        spectrogramTotalChunks = calcTotalChunks()
+        spectrogramDoneChunks = 0
+        spectrogramIsGenerating = spectrogramTotalChunks > 0
+        updateGenerateButton()
+        Toast.makeText(this, "正在生成频谱图缓存，请稍候...", Toast.LENGTH_SHORT).show()
+        // 触发可见区域的 chunk 请求
+        binding.waveformTimelineView.refreshVisibleChunks()
     }
 
     /**

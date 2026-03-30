@@ -296,6 +296,16 @@
                             android:layout_height="match_parent"
                             android:background="@drawable/bg_waveform_placeholder" />
 
+                        <!-- 手动生成按钮，叠在波形图正中间 -->
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnGenerateCache"
+                            style="@style/Widget.Material3.Button.TonalButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="center"
+                            android:text="生成波形图"
+                            android:visibility="gone" />
+
                     </com.google.android.material.card.MaterialCardView>
 
                 </LinearLayout>
@@ -386,7 +396,7 @@
         </com.google.android.material.card.MaterialCardView>
 
         <!-- 字幕列表 -->
-        <com.subtitleedit.view.DraggableRecyclerView
+        <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/rvSubtitles"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
