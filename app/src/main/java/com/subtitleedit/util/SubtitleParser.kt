@@ -265,7 +265,7 @@ object SubtitleParser {
     
     /**
      * 生成 LRC 格式内容
-     * 如果用户修改了 endTime，则插入空白时间标签
+     * 优化：对比下一行开始时间，若有空隙则插入终止标签
      */
     fun toLRC(entries: List<SubtitleEntry>): String {
         val sb = StringBuilder()
@@ -273,11 +273,19 @@ object SubtitleParser {
         for (i in entries.indices) {
             val entry = entries[i]
             
-            // 输出当前字幕
+            // 1. 输出当前字幕及其起始时间
             sb.appendLine("${entry.getTimeAxisLRC()}${entry.text}")
             
-            // 如果用户修改了 endTime，插入空白时间标签
-            if (entry.endTimeModified) {
+            // 2. 决定是否需要插入终止（空白）时间标签
+            val nextEntry = entries.getOrNull(i + 1)
+            
+            if (nextEntry != null) {
+                // 如果当前结束时间早于下一条开始时间（存在空白期），则需要终止标签
+                if (entry.endTime < nextEntry.startTime) {
+                    sb.appendLine(entry.formatTimeLRC(entry.endTime))
+                }
+            } else {
+                // 如果是最后一条字幕，通常也需要输出终止标签，否则播放器会一直显示到结束
                 sb.appendLine(entry.formatTimeLRC(entry.endTime))
             }
         }

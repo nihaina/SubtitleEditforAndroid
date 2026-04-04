@@ -197,16 +197,52 @@ class BatchConvertActivity : AppCompatActivity() {
         }
     }
     
+    /**
+     * 获取唯一的文件名，如果文件已存在，则添加 (1), (2) 等后缀
+     */
+    private fun getUniqueFileName(directoryUri: Uri, fileName: String): String {
+        val nameWithoutExt = fileName.substringBeforeLast(".")
+        val extension = fileName.substringAfterLast(".", "")
+        val suffix = if (extension.isNotEmpty()) ".$extension" else ""
+        
+        var newFileName = fileName
+        var counter = 1
+        
+        // 检查文件是否存在
+        while (checkFileExists(directoryUri, newFileName)) {
+            newFileName = "$nameWithoutExt ($counter)$suffix"
+            counter++
+        }
+        return newFileName
+    }
+    
+    /**
+     * 检查指定目录下是否存在同名文件
+     */
+    private fun checkFileExists(directoryUri: Uri, fileName: String): Boolean {
+        return try {
+            if (directoryUri.scheme == "file") {
+                File(directoryUri.path!!, fileName).exists()
+            } else {
+                val documentFile = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, directoryUri)
+                documentFile?.findFile(fileName)?.exists() == true
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+    
     private fun createFileInDirectory(directoryUri: Uri, fileName: String, content: String) {
         try {
+            // 获取不冲突的文件名
+            val uniqueFileName = getUniqueFileName(directoryUri, fileName)
+            
             // 检查是否是 file:// URI（本地目录）
             if (directoryUri.scheme == "file") {
                 // 使用传统 File API
                 val dir = File(directoryUri.path!!)
-                val outputFile = File(dir, fileName)
-                if (outputFile.exists()) {
-                    outputFile.delete()
-                }
+                val outputFile = File(dir, uniqueFileName)
+                // 直接写入，因为 getUniqueFileName 已经确保了名字不重复
                 outputFile.writeText(content, StandardCharsets.UTF_8)
                 return
             }
@@ -222,28 +258,20 @@ class BatchConvertActivity : AppCompatActivity() {
             // 如果还是 null，尝试直接使用 DocumentsContract 创建文件
             if (documentFile == null || !documentFile.canWrite()) {
                 // 使用 DocumentsContract 直接在目录中创建文件
-                createFileUsingDocumentsContract(directoryUri, fileName, content)
+                createFileUsingDocumentsContract(directoryUri, uniqueFileName, content)
                 return
             }
             
-            // 先尝试查找是否已存在同名文件
-            val existingFile = documentFile?.findFile(fileName)
-            
-            // 如果文件已存在，先删除
-            if (existingFile != null && existingFile.exists()) {
-                existingFile.delete()
-            }
-            
-            // 创建新文件
-            val mimeType = getMimeTypeFromFileName(fileName)
-            val newFile = documentFile?.createFile(mimeType, fileName)
+            // 创建新文件（不需要先删除，因为 getUniqueFileName 已经确保了名字不重复）
+            val mimeType = getMimeTypeFromFileName(uniqueFileName)
+            val newFile = documentFile?.createFile(mimeType, uniqueFileName)
             if (newFile != null) {
                 contentResolver.openOutputStream(newFile.uri, "wt")?.use { outputStream ->
                     outputStream.write(content.toByteArray(StandardCharsets.UTF_8))
                     outputStream.flush()
                 }
             } else {
-                throw Exception("无法创建文件：$fileName")
+                throw Exception("无法创建文件：$uniqueFileName")
             }
         } catch (e: Exception) {
             throw e
@@ -290,21 +318,10 @@ class BatchConvertActivity : AppCompatActivity() {
         }
     }
     
-    private fun startConversion() {
-        if (convertFiles.isEmpty()) {
-            Toast.makeText(this, "请先添加要转换的文件", Toast.LENGTH_SHORT).show()
-            return
-        }
-        
-        // 不需要检查源格式和目标格式是否相同，因为源格式是自动检测的
-        
-        // 确保有输出目录 - 默认使用 Download/SubtitleEdit/Convert 目录
-        val finalOutputUri = outputDirectoryUri ?: run {
-            // 默认使用 Download/SubtitleEdit/Convert 目录
-            val convertDir = getConvertOutputDirectory()
-            android.net.Uri.fromFile(convertDir)
-        }
-        
+    /**
+     * 执行实际的转换逻辑
+     */
+    private fun executeConversionLogic(finalOutputUri: Uri) {
         // 处理文件
         var successCount = 0
         var failCount = 0
@@ -383,6 +400,47 @@ class BatchConvertActivity : AppCompatActivity() {
             .setMessage(message)
             .setPositiveButton("确定", null)
             .show()
+    }
+    
+    private fun startConversion() {
+        if (convertFiles.isEmpty()) {
+            Toast.makeText(this, "请先添加要转换的文件", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        // 不需要检查源格式和目标格式是否相同，因为源格式是自动检测的
+        
+        // 确保有输出目录 - 默认使用 Download/SubtitleEdit/Convert 目录
+        val finalOutputUri = outputDirectoryUri ?: run {
+            // 默认使用 Download/SubtitleEdit/Convert 目录
+            val convertDir = getConvertOutputDirectory()
+            android.net.Uri.fromFile(convertDir)
+        }
+        
+        // 检查是否有潜在冲突
+        val hasConflict = convertFiles.any { convertFile ->
+            val targetExtension = when (targetFormat) {
+                SubtitleParser.SubtitleFormat.SRT -> "srt"
+                SubtitleParser.SubtitleFormat.LRC -> "lrc"
+                else -> "txt"
+            }
+            val nameWithoutExt = convertFile.fileName.substringBeforeLast(".")
+            val outName = "${nameWithoutExt}.${targetExtension}"
+            checkFileExists(finalOutputUri, outName)
+        }
+        
+        if (hasConflict) {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("文件名冲突")
+                .setMessage("输出目录中已存在同名文件。是否自动重命名（例如添加 (1)）并继续？")
+                .setPositiveButton("继续") { _, _ ->
+                    executeConversionLogic(finalOutputUri)
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        } else {
+            executeConversionLogic(finalOutputUri)
+        }
     }
     
     inner class ConvertFileAdapter(
