@@ -8,6 +8,8 @@
 
 目前主要完善基础的字幕编辑功能，一边做新功能一边优化操作逻辑一边修bug
 
+可以根据波形图和频谱图快速对轴
+
 后续预期会添加字幕合并和本地部署whisper语音转字幕功能
 
 ## 主要功能
@@ -54,17 +56,16 @@
 1. 克隆项目
 
 ```bash
-git clone https://github.com/yourusername/SubtitleEditforAndroid.git
+git clone https://github.com/nihaina/SubtitleEditforAndroid
 cd SubtitleEditforAndroid
 ```
 
-2. 使用 Android Studio 打开项目
+2. 打开项目
 3. 同步 Gradle 依赖
-4. 运行应用
-
-```bash
-./gradlew assembleDebug
-```
+4. ```
+   ./gradlew assembleDebug
+   ```
+5. 运行应用
 
 ## 使用说明
 
@@ -95,7 +96,6 @@ cd SubtitleEditforAndroid
 ## 权限说明
 
 只需要存储权限，没有其他权限要求
-
 
 欢迎提交 Issue 和 Pull Request！
 

@@ -141,6 +141,9 @@ class EditorActivity : AppCompatActivity() {
     // 手动生成状态：false = 未生成/未触发，true = 已触发或缓存已就绪
     private var isWaveformGenerated = false
     private var isSpectrogramGenerationStarted = false
+    
+    // 【新增】标记波形图是否正在后台生成中，防止状态丢失和重复生成
+    private var isWaveformGenerating = false
 
     // 选中字幕循环播放
     private var loopSubtitleEntry: SubtitleEntry? = null  // 当前循环目标
@@ -2660,19 +2663,24 @@ class EditorActivity : AppCompatActivity() {
                     WaveformTimelineView.DisplayMode.SPECTROGRAM
                 else WaveformTimelineView.DisplayMode.WAVEFORM
 
+            binding.waveformTimelineView.setDisplayMode(currentDisplayMode)
+
             if (currentDisplayMode == WaveformTimelineView.DisplayMode.SPECTROGRAM) {
-                // 切换到频谱图：重置缓存，等待用户手动生成
-                binding.waveformTimelineView.resetSpectrogramCache()
-                spectrogramTotalChunks = calcTotalChunks()
-                spectrogramDoneChunks = 0
-                spectrogramIsGenerating = false
-                isSpectrogramGenerationStarted = false
-            } else {
-                // 切回波形图
-                isSpectrogramGenerationStarted = false
+                // 切换到频谱图时，检查是否已经启动过生成
+                if (isSpectrogramGenerationStarted) {
+                    // 如果之前已经启动过生成，切回来时直接恢复状态并刷新可见区域
+                    // 只要已完成的分块还没达到总数，就认为还在生成中
+                    spectrogramIsGenerating = spectrogramDoneChunks < spectrogramTotalChunks
+                    binding.waveformTimelineView.refreshVisibleChunks()
+                } else {
+                    // 只有在完全没有启动过生成的情况下，才初始化这些重置状态
+                    binding.waveformTimelineView.resetSpectrogramCache()
+                    spectrogramTotalChunks = calcTotalChunks()
+                    spectrogramDoneChunks = 0
+                    spectrogramIsGenerating = false
+                }
             }
 
-            binding.waveformTimelineView.setDisplayMode(currentDisplayMode)
             updateGenerateButton()
             refreshWaveformToolbarState()
         }
@@ -2926,9 +2934,19 @@ class EditorActivity : AppCompatActivity() {
             if (needsGenerate && isWaveformExpanded) android.view.View.VISIBLE
             else android.view.View.GONE
 
-        binding.btnGenerateCache.text = when (currentDisplayMode) {
-            WaveformTimelineView.DisplayMode.WAVEFORM    -> "生成波形图"
-            WaveformTimelineView.DisplayMode.SPECTROGRAM -> "生成频谱图"
+        // 根据模式和正在生成的状态更新按钮文字和可点击性
+        if (currentDisplayMode == WaveformTimelineView.DisplayMode.WAVEFORM) {
+            if (isWaveformGenerating) {
+                binding.btnGenerateCache.text = "生成中..."
+                binding.btnGenerateCache.isEnabled = false
+            } else {
+                binding.btnGenerateCache.text = "生成波形图"
+                binding.btnGenerateCache.isEnabled = true
+            }
+        } else {
+            binding.btnGenerateCache.text = "生成频谱图"
+            // 频谱图一旦开始就会隐藏按钮，所以只要显示就一定是可用的
+            binding.btnGenerateCache.isEnabled = true 
         }
     }
 
@@ -2936,18 +2954,21 @@ class EditorActivity : AppCompatActivity() {
      * 用户点击生成 → 开始波形缓存生成
      */
     private fun startWaveformGeneration() {
-        binding.btnGenerateCache.isEnabled = false
-        binding.btnGenerateCache.text = "生成中..."
+        // 标记为正在生成
+        isWaveformGenerating = true
+        updateGenerateButton()
+        
         Toast.makeText(this, "正在生成波形缓存，请稍候...", Toast.LENGTH_SHORT).show()
         ffmpegChunkLoader?.generateCache { success ->
+            // 回调结束，重置生成中状态
+            isWaveformGenerating = false
+            
             if (success) {
                 isWaveformGenerated = true
                 Toast.makeText(this, "波形缓存生成完成", Toast.LENGTH_SHORT).show()
                 connectWaveformLoader()
             } else {
                 Toast.makeText(this, "波形缓存生成失败", Toast.LENGTH_SHORT).show()
-                binding.btnGenerateCache.isEnabled = true
-                binding.btnGenerateCache.text = "生成波形图"
             }
             updateGenerateButton()
         }
@@ -2963,6 +2984,12 @@ class EditorActivity : AppCompatActivity() {
         spectrogramIsGenerating = spectrogramTotalChunks > 0
         updateGenerateButton()
         Toast.makeText(this, "正在生成频谱图缓存，请稍候...", Toast.LENGTH_SHORT).show()
+        
+        // 【关键修复】重置 View 内部的 Spectrogram 缓存状态
+        // 这会清除 View 内部记录的"已请求 Chunk"列表，
+        // 防止之前被忽略的初始可见区块请求（如开头 3 分钟）被判定为重复请求而跳过。
+        binding.waveformTimelineView.resetSpectrogramCache()
+        
         // 触发可见区域的 chunk 请求
         binding.waveformTimelineView.refreshVisibleChunks()
     }
