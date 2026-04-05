@@ -179,8 +179,8 @@ class EditorActivity : AppCompatActivity() {
                         }
                     }
 
-                    // 16ms 递归，实现 60fps
-                    progressHandler.postDelayed(this, 16)
+                    // 4ms 递归，实现 240fps，适配高刷新率屏幕
+                    progressHandler.postDelayed(this, 4)
                 }
             }
         }

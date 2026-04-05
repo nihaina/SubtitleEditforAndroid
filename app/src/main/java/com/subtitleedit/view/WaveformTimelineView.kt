@@ -226,7 +226,7 @@ class WaveformTimelineView @JvmOverloads constructor(
 
     private val playheadPaint = Paint().apply {
         color = Color.parseColor("#FF5722")
-        strokeWidth = 4f
+        strokeWidth = 0.75f * resources.displayMetrics.density
         isAntiAlias = true
     }
 
