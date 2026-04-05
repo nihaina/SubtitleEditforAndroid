@@ -148,6 +148,66 @@ class EditorActivity : AppCompatActivity() {
     // 选中字幕循环播放
     private var loopSubtitleEntry: SubtitleEntry? = null  // 当前循环目标
 
+    // ==================== 播放进度更新相关（类成员变量，避免循环叠加）====================
+    // Handler 和 Runnable 提升为类成员，配合 16ms 更新频率实现 60fps
+    private val progressHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val progressRunnable = object : Runnable {
+        override fun run() {
+            mediaPlayer?.let { player ->
+                if (player.isPlaying) {
+                    updatePlayerUI()
+                    highlightSubtitleAtTime(audioCurrentPosition)
+
+                    // 选中字幕循环播放：检测双边界
+                    val loopTarget = loopSubtitleEntry
+                    if (loopTarget != null &&
+                        SettingsManager.getInstance(this@EditorActivity).isLoopSelectedSubtitleEnabled()
+                    ) {
+                        when {
+                            // 超过右边界 → 跳回开始
+                            audioCurrentPosition >= loopTarget.endTime -> {
+                                player.seekTo(loopTarget.startTime.toInt())
+                                audioCurrentPosition = loopTarget.startTime
+                                updatePlayerUI()
+                            }
+                            // 在左边界之前（用户拖进度条拖到外面）→ 跳到开始
+                            audioCurrentPosition < loopTarget.startTime -> {
+                                player.seekTo(loopTarget.startTime.toInt())
+                                audioCurrentPosition = loopTarget.startTime
+                                updatePlayerUI()
+                            }
+                        }
+                    }
+
+                    // 16ms 递归，实现 60fps
+                    progressHandler.postDelayed(this, 16)
+                }
+            }
+        }
+    }
+
+    /**
+     * 开始定时更新播放进度（16ms 间隔，约 60fps）
+     * 关键：先移除已有的回调，确保永远只有一个循环在运行
+     */
+    private fun startProgressUpdate() {
+        // 先移除已有的，确保永远只有一个循环在运行
+        progressHandler.removeCallbacks(progressRunnable)
+        progressHandler.post(progressRunnable)
+    }
+
+    /**
+     * 停止定时更新播放进度
+     * 必须在以下生命周期/状态切换处调用：
+     * 1. onPause()
+     * 2. 播放完成回调 OnCompletionListener
+     * 3. 停止播放按钮点击时
+     * 4. onDestroy() / release()
+     */
+    private fun stopProgressUpdate() {
+        progressHandler.removeCallbacks(progressRunnable)
+    }
+
     // 文件选择器
     private val openFileLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -2536,6 +2596,7 @@ class EditorActivity : AppCompatActivity() {
         mediaPlayer = MediaPlayer()
         mediaPlayer?.setOnCompletionListener {
             isPlaying = false
+            stopProgressUpdate()
             updatePlayerUI()
         }
         mediaPlayer?.setOnErrorListener { _, what, extra ->
@@ -2550,6 +2611,9 @@ class EditorActivity : AppCompatActivity() {
      * 释放 MediaPlayer
      */
     private fun releaseMediaPlayer() {
+        // 停止进度更新
+        stopProgressUpdate()
+        
         mediaPlayer?.let { player ->
             if (player.isPlaying) {
                 player.stop()
@@ -3035,6 +3099,8 @@ class EditorActivity : AppCompatActivity() {
             if (player.isPlaying) {
                 player.pause()
                 isPlaying = false
+                // 暂停时停止进度更新
+                stopProgressUpdate()
             } else {
                 player.start()
                 isPlaying = true
@@ -3124,45 +3190,6 @@ class EditorActivity : AppCompatActivity() {
 
         val wavePosition = if (audioDuration > 0) audioCurrentPosition.toFloat() / audioDuration else 0f
         binding.waveformTimelineView.setCurrentPosition(wavePosition)
-    }
-    
-    /**
-     * 开始定时更新播放进度
-     */
-    private fun startProgressUpdate() {
-        val handler = android.os.Handler(android.os.Looper.getMainLooper())
-        val updateRunnable = object : Runnable {
-            override fun run() {
-                if (!isPlaying || mediaPlayer?.isPlaying != true) return
-
-                updatePlayerUI()
-                highlightSubtitleAtTime(audioCurrentPosition)
-
-                // 选中字幕循环播放：检测双边界
-                val loopTarget = loopSubtitleEntry
-                if (loopTarget != null &&
-                    SettingsManager.getInstance(this@EditorActivity).isLoopSelectedSubtitleEnabled()
-                ) {
-                    when {
-                        // 超过右边界 → 跳回开始
-                        audioCurrentPosition >= loopTarget.endTime -> {
-                            mediaPlayer?.seekTo(loopTarget.startTime.toInt())
-                            audioCurrentPosition = loopTarget.startTime
-                            updatePlayerUI()
-                        }
-                        // 在左边界之前（用户拖进度条拖到外面）→ 跳到开始
-                        audioCurrentPosition < loopTarget.startTime -> {
-                            mediaPlayer?.seekTo(loopTarget.startTime.toInt())
-                            audioCurrentPosition = loopTarget.startTime
-                            updatePlayerUI()
-                        }
-                    }
-                }
-
-                handler.postDelayed(this, 100)
-            }
-        }
-        handler.post(updateRunnable)
     }
     
     // ==================== 字幕时间控制按钮方法 ====================

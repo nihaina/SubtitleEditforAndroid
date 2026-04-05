@@ -58,8 +58,8 @@ class WaveformTimelineView @JvmOverloads constructor(
         /** 高精度采样数上限（聚焦 chunk，约 100 点/秒）*/
         private const val HIGH_RES_SAMPLES = 3000
 
-        /** 最大放大：屏幕显示 10 秒 */
-        private const val MIN_VISIBLE_MS = 10_000L
+        /** 最大放大：屏幕显示 5 秒 */
+        private const val MIN_VISIBLE_MS = 5_000L
 
         /** 最大缩小：屏幕显示 10 分钟 */
         private const val MAX_VISIBLE_MS = 600_000L
@@ -296,8 +296,13 @@ class WaveformTimelineView @JvmOverloads constructor(
             }
         })
 
+    // 播放头上次绘制的 X 坐标，用于局部刷新（脏区更新）
+    private var lastPlayheadX = -1f
+
     init {
-        setLayerType(LAYER_TYPE_HARDWARE, null)
+        // 软件渲染对 invalidate(Rect) 的响应更直接，且方便局部绘制缓存
+        // 硬件加速在处理频繁的小面积重绘时反而可能变慢，因为它涉及复杂的纹理更新
+        setLayerType(View.LAYER_TYPE_SOFTWARE, null)
     }
 
     // ==================== 生命周期 ====================
@@ -408,6 +413,8 @@ class WaveformTimelineView @JvmOverloads constructor(
         waveformCache = null
         cacheVisibleStart = -1
         cacheVisibleDuration = -1
+        // 缓存失效时重置播放头位置，下次需要全屏重绘
+        lastPlayheadX = -1f
     }
 
     // ==================== 绘制 ====================
@@ -1008,6 +1015,7 @@ class WaveformTimelineView @JvmOverloads constructor(
 
     /**
      * 更新播放头位置，播放头超出可见区域时自动跟随滚动
+     * 使用脏区更新（Dirty Rect）技术，只刷新受影响的矩形区域，提高性能
      */
     fun setCurrentPosition(position: Float) {
         val newPos = position.coerceIn(0f, 1f)
@@ -1016,17 +1024,44 @@ class WaveformTimelineView @JvmOverloads constructor(
 
         if (changed && durationMs > 0) {
             val pt = (durationMs * currentPosition).toLong()
+            val newX = timeToX(pt)
+            val oldX = lastPlayheadX
+            
+            // 播放头超出可见区域时，贴左边跟随（与旧版一致）
             val ratio = if (visibleDurationMs > 0) {
                 (pt - visibleStartMs).toFloat() / visibleDurationMs
             } else 0f
-            // 播放头超出可见区域时，贴左边跟随（与旧版一致）
+            
             if (ratio > 1f || ratio < 0f) {
                 visibleStartMs = pt.coerceIn(0L, max(0L, durationMs - visibleDurationMs))
                 invalidateCache()
                 requestVisibleChunks()
+                // 视口变化后需要全屏重绘
+                lastPlayheadX = newX
+                invalidate()
+            } else {
+                // 视口未变化，使用局部刷新优化性能
+                if (oldX != newX) {
+                    // 播放头宽度假设为 4dp，加上阴影或缓冲，取左右 10px 范围
+                    val padding = 10f
+                    val dirtyRect = android.graphics.Rect(
+                        (minOf(oldX, newX) - padding).toInt().coerceAtLeast(0),
+                        0,
+                        (maxOf(oldX, newX) + padding).toInt().coerceAtMost(width),
+                        height
+                    )
+                    
+                    lastPlayheadX = newX
+                    
+                    // 关键：只刷新受影响的矩形区域
+                    if (dirtyRect.left < dirtyRect.right) {
+                        invalidate(dirtyRect)
+                    } else {
+                        invalidate()
+                    }
+                }
             }
         }
-        invalidate()
     }
 
     /**

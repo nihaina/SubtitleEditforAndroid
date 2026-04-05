@@ -120,7 +120,7 @@
                         android:id="@+id/tvOutputDir"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="默认：Download/SubtitleEdit/Convert"
+                        android:text="输出目录：Download/SubtitleEdit/Convert"
                         android:textColor="#9E9E9E"
                         android:textSize="12sp"
                         android:paddingTop="4dp"/>
