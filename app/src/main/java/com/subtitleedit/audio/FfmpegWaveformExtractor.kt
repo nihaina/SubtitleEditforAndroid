@@ -15,7 +15,7 @@ import kotlin.math.min
  * 
  * 流程：
  * 1. 使用 FFmpeg 将音频解码为 16bit PCM（单声道，44100Hz）
- * 2. 读取 PCM 数据，每 512 个采样点计算一个 WaveFrame（包含 min/max 振幅）
+ * 2. 读取 PCM 数据，每 128 个采样点计算一个 WaveFrame（包含 min/max 振幅）
  * 3. 将 WaveFrame 数组保存为 .wave 缓存文件
  * 4. 提供快速读取缓存的接口
  * 
@@ -27,8 +27,8 @@ object FfmpegWaveformExtractor {
 
     private const val TAG = "FfmpegWaveformExtractor"
     
-    /** 每帧的采样点数（512 samples @ 44100Hz ≈ 11.6ms）*/
-    const val SAMPLES_PER_FRAME = 512
+    /** 每帧的采样点数（128 samples @ 44100Hz ≈ 2.9ms，对应约 345 帧/秒）*/
+    const val SAMPLES_PER_FRAME = 128
     
     /** PCM 采样率 */
     const val SAMPLE_RATE = 44100
@@ -123,7 +123,7 @@ object FfmpegWaveformExtractor {
      * 
      * PCM 格式：16bit 小端，单声道，44100Hz
      * 每 2 字节 = 一个 sample（Short 值，范围 -32768 ~ 32767）
-     * 每 512 samples = 一个 WaveFrame
+     * 每 128 samples = 一个 WaveFrame
      */
     private fun buildWaveform(pcmFile: File): List<WaveFrame> {
         val frames = ArrayList<WaveFrame>()

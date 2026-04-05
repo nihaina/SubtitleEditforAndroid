@@ -55,8 +55,8 @@ class WaveformTimelineView @JvmOverloads constructor(
         /** 低精度采样数（未聚焦 chunk，约 5 点/秒）*/
         private const val LOW_RES_SAMPLES = 150
 
-        /** 高精度采样数上限（聚焦 chunk，约 100 点/秒）*/
-        private const val HIGH_RES_SAMPLES = 3000
+        /** 高精度采样数上限（聚焦 chunk）—— 提高到 30000，支持最大缩放时保持 4x 超采样 */
+        private const val HIGH_RES_SAMPLES = 30_000
 
         /** 最大放大：屏幕显示 5 秒 */
         private const val MIN_VISIBLE_MS = 5_000L
@@ -340,12 +340,12 @@ class WaveformTimelineView @JvmOverloads constructor(
 
     /**
      * 根据当前可见时长动态计算期望精度。
-     * 原则：屏幕上每个像素对应 >= 1 个采样点（2x 超采样保证细节）
+     * 原则：屏幕上每个像素对应 >= 2 个采样点（4x 超采样保证 peak 捕获准确）
      */
     private fun targetSamplesForZoom(): Int {
         val pixelsPerMs = width.toFloat() / visibleDurationMs
         val pixelsPerChunk = pixelsPerMs * CHUNK_DURATION_MS
-        return (pixelsPerChunk * 2).toInt().coerceIn(LOW_RES_SAMPLES, HIGH_RES_SAMPLES)
+        return (pixelsPerChunk * 4).toInt().coerceIn(LOW_RES_SAMPLES, HIGH_RES_SAMPLES)
     }
 
     /**

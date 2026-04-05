@@ -235,7 +235,7 @@ class FfmpegWaveformChunkLoader(
 
         for (i in 0 until targetFrames) {
             val from = (i * step).toInt()
-            val to   = ((i + 1) * step).toInt().coerceAtMost(srcFrames)
+            val to   = ((i + 1) * step).toInt().coerceIn(from + 1, srcFrames)
             var peakMax = 0f
             var peakMin = 0f
             for (j in from until to) {
