@@ -352,7 +352,6 @@ class EditorActivity : AppCompatActivity() {
     private fun setupRecyclerView() {
         subtitleAdapter = SubtitleAdapter(
             onItemClick = { _, position ->
-                updateSelectedCountDisplay()
                 // 同步循环目标
                 val selected = subtitleAdapter.getSelectedEntries()
                 loopSubtitleEntry = if (selected.isNotEmpty()) selected.first().first else null
@@ -372,7 +371,10 @@ class EditorActivity : AppCompatActivity() {
             onSetTimeClick = { entry, position ->
                 setSubtitleTimeToCurrentPosition(entry, position)
             },
-            isAudioFile = isAudioFile
+            isAudioFile = isAudioFile,
+            onSelectionChanged = {
+                updateSelectedCountDisplay()
+            }
         )
         
         binding.rvSubtitles.apply {
@@ -895,7 +897,7 @@ class EditorActivity : AppCompatActivity() {
     private fun updateSelectedCountDisplay() {
         val count = subtitleAdapter.getSelectedCount()
         if (count > 0) {
-            supportActionBar?.subtitle = "已选择 $count 项"
+            supportActionBar?.subtitle = "$currentFormatInfo | 选中：$count"
         } else {
             supportActionBar?.subtitle = currentFormatInfo
         }

@@ -32,7 +32,8 @@ class SubtitleAdapter(
     private val onTextClick: (SubtitleEntry, Int) -> Unit,
     private val onJumpToTimeClick: (SubtitleEntry, Int) -> Unit, // 跳转到字幕时间
     private val onSetTimeClick: (SubtitleEntry, Int) -> Unit, // 设置字幕时间为当前进度
-    private val isAudioFile: Boolean = false // 是否为音频文件模式
+    private val isAudioFile: Boolean = false, // 是否为音频文件模式
+    private val onSelectionChanged: (() -> Unit)? = null // 选中状态变化回调
 ) : ListAdapter<SubtitleEntry, SubtitleAdapter.SubtitleViewHolder>(SubtitleDiffCallback()) {
 
     // 使用对象本身来跟踪选中状态，而不是 position
@@ -71,6 +72,8 @@ class SubtitleAdapter(
         }
         // 使用 payload 强制刷新选中状态
         notifyItemChanged(position, PAYLOAD_SELECTION)
+        // 通知选中状态变化
+        onSelectionChanged?.invoke()
     }
     
     companion object {
