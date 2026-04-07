@@ -1080,7 +1080,8 @@ class WaveformTimelineView @JvmOverloads constructor(
     }
 
     fun setSubtitles(list: List<SubtitleEntry>) {
-        subtitles = list.toMutableList(); invalidate()
+        subtitles = list.toMutableList()
+        post { invalidate() }
     }
 
     fun getSubtitles(): List<SubtitleEntry> = subtitles.toList()

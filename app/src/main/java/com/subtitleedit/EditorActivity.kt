@@ -512,7 +512,12 @@ class EditorActivity : AppCompatActivity() {
                 }
                 updateSelectedCountDisplay()
                 updateFormatInfo()
-                
+
+                // 同步字幕到波形视图
+                if (isAudioFile) {
+                    binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
+                }
+
                 markAsChanged()
                 Toast.makeText(this, "已删除 ${selectedEntries.size} 条字幕", Toast.LENGTH_SHORT).show()
             }
@@ -1393,6 +1398,10 @@ class EditorActivity : AppCompatActivity() {
                 }
                 updateSelectedCountDisplay()
                 updateFormatInfo()
+                // 同步字幕到波形视图
+                if (isAudioFile) {
+                    binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
+                }
                 markAsChanged()
             }
             cutPositionValue = -1
@@ -1414,6 +1423,10 @@ class EditorActivity : AppCompatActivity() {
             }
             updateSelectedCountDisplay()
             updateFormatInfo()
+            // 同步字幕到波形视图
+            if (isAudioFile) {
+                binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
+            }
             markAsChanged()
             cutPositionsValue = emptyList()
         }
@@ -1456,8 +1469,20 @@ class EditorActivity : AppCompatActivity() {
                 targetEntry.startTime = sourceEntry.startTime
                 targetEntry.endTime = sourceEntry.endTime
                 targetEntry.text = sourceEntry.text
-                
+
+                // 刷新上一行以更新冲突检测
+                if (position > 0) {
+                    subtitleAdapter.notifyItemChanged(position - 1)
+                }
                 subtitleAdapter.notifyItemChanged(position)
+                // 刷新下一行以更新冲突检测
+                if (position + 1 < subtitleEntries.size) {
+                    subtitleAdapter.notifyItemChanged(position + 1)
+                }
+                // 同步字幕到波形视图
+                if (isAudioFile) {
+                    binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
+                }
                 markAsChanged()
                 Toast.makeText(this, "已粘贴", Toast.LENGTH_SHORT).show()
             } else {
@@ -1483,9 +1508,22 @@ class EditorActivity : AppCompatActivity() {
                 targetEntry.endTime = sourceEntry.endTime
                 targetEntry.text = sourceEntry.text
             }
+            // 刷新第一个受影响位置的上一行以更新冲突检测
+            if (position > 0) {
+                subtitleAdapter.notifyItemChanged(position - 1)
+            }
             // 刷新受影响的位置
             for (i in 0 until clipboardEntries.size) {
                 subtitleAdapter.notifyItemChanged(position + i)
+            }
+            // 刷新最后一行的下一行以更新冲突检测
+            val lastAffectedPosition = position + clipboardEntries.size - 1
+            if (lastAffectedPosition + 1 < subtitleEntries.size) {
+                subtitleAdapter.notifyItemChanged(lastAffectedPosition + 1)
+            }
+            // 同步字幕到波形视图
+            if (isAudioFile) {
+                binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
             }
         } else {
             // 剪贴板行数大于剩余行数，替换后插入多余行
@@ -1503,8 +1541,12 @@ class EditorActivity : AppCompatActivity() {
             }
             renumberEntries()
             subtitleAdapter.submitList(subtitleEntries.toList())
+            // 同步字幕到波形视图
+            if (isAudioFile) {
+                binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
+            }
         }
-        
+
         markAsChanged()
         Toast.makeText(this, "已粘贴 ${clipboardEntries.size} 项", Toast.LENGTH_SHORT).show()
     }
@@ -1534,7 +1576,12 @@ class EditorActivity : AppCompatActivity() {
                     subtitleAdapter.removeSelectionByEntry(entryToDelete)
                     updateSelectedCountDisplay()
                     updateFormatInfo()
-                    
+
+                    // 同步字幕到波形视图
+                    if (isAudioFile) {
+                        binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
+                    }
+
                     markAsChanged()
                     Toast.makeText(this, "已删除", Toast.LENGTH_SHORT).show()
                 }
@@ -1551,23 +1598,27 @@ class EditorActivity : AppCompatActivity() {
             Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
             return
         }
-        
+
         val insertPosition = if (after) refPosition + 1 else refPosition
-        
+
         val newEntry = SubtitleEntry()
         newEntry.index = insertPosition + 1
-        
-        if (subtitleEntries.isNotEmpty()) {
-            val refIndex = if (after && insertPosition > 0) insertPosition - 1 else insertPosition
-            if (refIndex < subtitleEntries.size) {
-                val refEntry = subtitleEntries[refIndex]
+
+        if (subtitleEntries.isNotEmpty() && refPosition < subtitleEntries.size) {
+            val refEntry = subtitleEntries[refPosition]
+            if (after) {
+                // 向后插入：新字幕的开始时间 = 参考字幕的结束时间
                 newEntry.startTime = refEntry.endTime
                 newEntry.endTime = newEntry.startTime + 3000
+            } else {
+                // 向前插入：新字幕的结束时间 = 参考字幕的开始时间
+                newEntry.endTime = refEntry.startTime
+                newEntry.startTime = maxOf(0L, newEntry.endTime - 3000)
             }
         }
-        
+
         newEntry.text = "新字幕"
-        
+
         subtitleEntries.add(insertPosition, newEntry)
         renumberEntries()
         subtitleAdapter.submitList(subtitleEntries.toList())
@@ -1576,7 +1627,12 @@ class EditorActivity : AppCompatActivity() {
         // 不清空选择，也不自动选中新插入的行
         updateSelectedCountDisplay()
         updateFormatInfo()
-        
+
+        // 同步字幕到波形视图
+        if (isAudioFile) {
+            binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
+        }
+
         markAsChanged()
         Toast.makeText(this, "已插入新字幕", Toast.LENGTH_SHORT).show()
     }
@@ -1842,11 +1898,26 @@ class EditorActivity : AppCompatActivity() {
             targetEntry.text = sourceEntry.text
         }
         
+        // 刷新第一个选中位置的上一行以更新冲突检测
+        val firstPosition = selectedEntries.minByOrNull { it.second }?.second
+        if (firstPosition != null && firstPosition > 0) {
+            subtitleAdapter.notifyItemChanged(firstPosition - 1)
+        }
         // 刷新所有选中的位置
         selectedEntries.forEach { (_, position) ->
             subtitleAdapter.notifyItemChanged(position)
         }
-        
+        // 刷新最后一个选中位置的下一行以更新冲突检测
+        val lastPosition = selectedEntries.maxByOrNull { it.second }?.second
+        if (lastPosition != null && lastPosition + 1 < subtitleEntries.size) {
+            subtitleAdapter.notifyItemChanged(lastPosition + 1)
+        }
+
+        // 同步字幕到波形视图
+        if (isAudioFile) {
+            binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
+        }
+
         markAsChanged()
         Toast.makeText(this, "已粘贴 ${clipboardEntries.size} 项", Toast.LENGTH_SHORT).show()
     }
@@ -2304,7 +2375,12 @@ class EditorActivity : AppCompatActivity() {
                 }
                 updateSelectedCountDisplay()
                 updateFormatInfo()
-                
+
+                // 同步字幕到波形视图
+                if (isAudioFile) {
+                    binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
+                }
+
                 markAsChanged()
                 Toast.makeText(this, "已删除 ${selectedEntries.size} 条字幕", Toast.LENGTH_SHORT).show()
             }
