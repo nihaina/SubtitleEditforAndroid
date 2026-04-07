@@ -28,6 +28,10 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_WHISPER_DECODER_PATH = "whisper_decoder_path"
         private const val KEY_WHISPER_TOKENS_PATH = "whisper_tokens_path"
         private const val KEY_VAD_MODEL_PATH = "vad_model_path"
+        private const val KEY_VAD_THRESHOLD = "vad_threshold"
+        private const val KEY_VAD_MIN_SILENCE_DURATION = "vad_min_silence_duration"
+        private const val KEY_VAD_MIN_SPEECH_DURATION = "vad_min_speech_duration"
+        private const val KEY_VAD_MAX_SPEECH_DURATION = "vad_max_speech_duration"
 
         const val WAVEFORM_CACHE_APP = "app_cache"
         const val WAVEFORM_CACHE_SOURCE = "source_dir"
@@ -195,5 +199,61 @@ class SettingsManager private constructor(context: Context) {
      */
     fun setVadModelPath(path: String) {
         prefs.edit().putString(KEY_VAD_MODEL_PATH, path).apply()
+    }
+
+    /**
+     * 获取 VAD 阈值
+     */
+    fun getVadThreshold(): Float {
+        return prefs.getFloat(KEY_VAD_THRESHOLD, 0.3f)
+    }
+
+    /**
+     * 设置 VAD 阈值
+     */
+    fun setVadThreshold(threshold: Float) {
+        prefs.edit().putFloat(KEY_VAD_THRESHOLD, threshold).apply()
+    }
+
+    /**
+     * 获取 VAD 最小静音时长
+     */
+    fun getVadMinSilenceDuration(): Float {
+        return prefs.getFloat(KEY_VAD_MIN_SILENCE_DURATION, 0.3f)
+    }
+
+    /**
+     * 设置 VAD 最小静音时长
+     */
+    fun setVadMinSilenceDuration(duration: Float) {
+        prefs.edit().putFloat(KEY_VAD_MIN_SILENCE_DURATION, duration).apply()
+    }
+
+    /**
+     * 获取 VAD 最小语音时长
+     */
+    fun getVadMinSpeechDuration(): Float {
+        return prefs.getFloat(KEY_VAD_MIN_SPEECH_DURATION, 0.25f)
+    }
+
+    /**
+     * 设置 VAD 最小语音时长
+     */
+    fun setVadMinSpeechDuration(duration: Float) {
+        prefs.edit().putFloat(KEY_VAD_MIN_SPEECH_DURATION, duration).apply()
+    }
+
+    /**
+     * 获取 VAD 最大语音时长
+     */
+    fun getVadMaxSpeechDuration(): Float {
+        return prefs.getFloat(KEY_VAD_MAX_SPEECH_DURATION, 10.0f)
+    }
+
+    /**
+     * 设置 VAD 最大语音时长
+     */
+    fun setVadMaxSpeechDuration(duration: Float) {
+        prefs.edit().putFloat(KEY_VAD_MAX_SPEECH_DURATION, duration).apply()
     }
 }

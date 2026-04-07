@@ -100,6 +100,23 @@
                     android:text="中文" />
             </com.google.android.material.textfield.TextInputLayout>
 
+            <!-- 模型设置 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="语音识别模型"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <Button
+                android:id="@+id/btnModelSettings"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="模型设置"
+                android:layout_marginBottom="24dp"
+                style="@style/Widget.Material3.Button.OutlinedButton" />
+
             <!-- 播放行为 -->
             <TextView
                 android:layout_width="match_parent"
@@ -229,12 +246,6 @@
                     android:paddingStart="12dp"
                     android:paddingEnd="12dp"/>
             </LinearLayout>
-
-            <Button
-                android:id="@+id/btnSaveSettings"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="保存设置" />
 
             <!-- GitHub 项目地址 -->
             <TextView
