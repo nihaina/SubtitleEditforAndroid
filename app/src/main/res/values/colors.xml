@@ -3,6 +3,7 @@
     <color name="primary">#1976D2</color>
     <color name="primary_dark">#1565C0</color>
     <color name="primary_container">#E3F2FD</color>
+    <color name="on_primary_container">#1565C0</color>
     <color name="secondary">#26A69A</color>
     <color name="secondary_dark">#00897B</color>
     <color name="white">#FFFFFF</color>

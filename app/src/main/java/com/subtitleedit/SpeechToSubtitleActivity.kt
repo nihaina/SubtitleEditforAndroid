@@ -3,6 +3,8 @@ package com.subtitleedit
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
+import android.util.Log
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -10,6 +12,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFprobeKit
@@ -39,6 +42,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     private var decoderPath: String = ""
     private var tokensPath: String = ""
     private var vadModelPath: String = ""
+    private var outputDirUri: Uri? = null
     private var conversionJob: Job? = null
     private var isCancelled = false
     private var pendingSubtitleContent: String = ""
@@ -102,23 +106,11 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         uri?.let { handleSelectedVad(it) }
     }
 
-    // 保存字幕文件选择器
-    private val saveFileLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("text/*")
+    // 输出目录选择器
+    private val outputDirLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
-        uri?.let {
-            try {
-                contentResolver.openOutputStream(it)?.use { output ->
-                    output.write(pendingSubtitleContent.toByteArray())
-                }
-                val segmentCount = pendingSubtitleContent.lines().filter { line ->
-                    line.matches(Regex("\\d+"))
-                }.size
-                Toast.makeText(this, "字幕已保存（共 $segmentCount 条）", Toast.LENGTH_LONG).show()
-            } catch (e: Exception) {
-                Toast.makeText(this, "保存失败：${e.message}", Toast.LENGTH_LONG).show()
-            }
-        }
+        uri?.let { handleSelectedOutputDir(it) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -191,6 +183,11 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             vadPickerLauncher.launch(arrayOf("*/*"))
         }
 
+        // 选择输出目录按钮
+        binding.btnSelectOutputDir.setOnClickListener {
+            outputDirLauncher.launch(outputDirUri)
+        }
+
         // 模型下载指引
         binding.tvModelGuide.setOnClickListener {
             showModelGuide()
@@ -216,6 +213,9 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         tokensPath = settingsManager.getWhisperTokensPath()
         vadModelPath = settingsManager.getVadModelPath()
 
+        // 设置默认输出目录
+        setupDefaultOutputDir()
+
         if (encoderPath.isNotEmpty()) {
             val uri = Uri.parse(encoderPath)
             binding.tvEncoderFile.text = getFileNameFromUri(uri)
@@ -230,7 +230,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         }
         if (vadModelPath.isNotEmpty()) {
             val uri = Uri.parse(vadModelPath)
-            binding.tvVadFile.text = getFileNameFromUri(uri)
+            binding.tvVadFile.text = "外部模型: ${getFileNameFromUri(uri)}"
         }
 
         updateStartButtonState()
@@ -374,11 +374,51 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
 
             vadModelPath = uri.toString()
             settingsManager.setVadModelPath(vadModelPath)
-            binding.tvVadFile.text = fileName
-            Toast.makeText(this, "VAD 模型已选择，将用于精确检测语音段", Toast.LENGTH_SHORT).show()
+            binding.tvVadFile.text = "外部模型: $fileName"
+            Toast.makeText(this, "外部 VAD 模型已选择", Toast.LENGTH_SHORT).show()
 
         } catch (e: Exception) {
             Toast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /**
+     * 处理选择的输出目录
+     */
+    private fun handleSelectedOutputDir(uri: Uri) {
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+
+            outputDirUri = uri
+            val docFile = DocumentFile.fromTreeUri(this, uri)
+            binding.tvOutputDir.text = docFile?.name ?: uri.path ?: "已选择"
+
+        } catch (e: Exception) {
+            Toast.makeText(this, "选择目录失败：${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /**
+     * 设置默认输出目录
+     */
+    private fun setupDefaultOutputDir() {
+        try {
+            val defaultPath = File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                "SubtitleEdit/Convert"
+            )
+
+            if (!defaultPath.exists()) {
+                defaultPath.mkdirs()
+            }
+
+            outputDirUri = Uri.fromFile(defaultPath)
+            binding.tvOutputDir.text = "Download/SubtitleEdit/Convert"
+        } catch (e: Exception) {
+            Log.e("SpeechToSubtitle", "设置默认输出目录失败", e)
         }
     }
 
@@ -632,11 +672,90 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
      * 保存字幕文件
      */
     private fun saveSubtitleFile(content: String) {
-        val format = formatOptions[binding.spinnerOutputFormat.selectedItemPosition].lowercase()
-        val outputFileName = "${selectedFileName.substringBeforeLast(".")}.$format"
+        val outputDir = outputDirUri ?: run {
+            Toast.makeText(this, "输出目录未设置", Toast.LENGTH_SHORT).show()
+            return
+        }
 
-        pendingSubtitleContent = content
-        saveFileLauncher.launch(outputFileName)
+        try {
+            val format = formatOptions[binding.spinnerOutputFormat.selectedItemPosition]
+            val baseFileName = selectedFileName.substringBeforeLast(".")
+            val extension = format.lowercase()
+
+            // 检查是否是 file:// URI（本地目录）
+            if (outputDir.scheme == "file") {
+                // 使用传统 File API
+                val dir = File(outputDir.path!!)
+                val fileName = getUniqueFileName(dir, baseFileName, extension)
+                val outputFile = File(dir, fileName)
+
+                outputFile.writeText(content, java.nio.charset.StandardCharsets.UTF_8)
+
+                val segmentCount = content.lines().filter { line ->
+                    line.matches(Regex("\\d+"))
+                }.size
+                Toast.makeText(this, "字幕已保存到输出目录（共 $segmentCount 条）", Toast.LENGTH_LONG).show()
+                return
+            }
+
+            // 使用 DocumentFile API（content:// URI）
+            val dir = DocumentFile.fromTreeUri(this, outputDir) ?: throw Exception("无法访问输出目录")
+
+            val fileName = getUniqueFileNameForDocumentFile(dir, baseFileName, extension)
+            val mimeType = when (format) {
+                "SRT" -> "application/x-subrip"
+                "LRC" -> "text/plain"
+                "TXT" -> "text/plain"
+                else -> "text/plain"
+            }
+
+            val outputFile = dir.createFile(mimeType, fileName)
+            if (outputFile == null) {
+                throw Exception("创建文件失败")
+            }
+
+            contentResolver.openOutputStream(outputFile.uri)?.use { output ->
+                output.write(content.toByteArray(java.nio.charset.StandardCharsets.UTF_8))
+            }
+
+            val segmentCount = content.lines().filter { line ->
+                line.matches(Regex("\\d+"))
+            }.size
+            Toast.makeText(this, "字幕已保存到输出目录（共 $segmentCount 条）", Toast.LENGTH_LONG).show()
+
+        } catch (e: Exception) {
+            Toast.makeText(this, "保存失败：${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /**
+     * 获取唯一的文件名（File API）
+     */
+    private fun getUniqueFileName(dir: File, baseName: String, extension: String): String {
+        var fileName = "$baseName.$extension"
+        var counter = 1
+
+        while (File(dir, fileName).exists()) {
+            fileName = "$baseName ($counter).$extension"
+            counter++
+        }
+
+        return fileName
+    }
+
+    /**
+     * 获取唯一的文件名（DocumentFile API）
+     */
+    private fun getUniqueFileNameForDocumentFile(dir: DocumentFile, baseName: String, extension: String): String {
+        var fileName = "$baseName.$extension"
+        var counter = 1
+
+        while (dir.findFile(fileName) != null) {
+            fileName = "$baseName ($counter).$extension"
+            counter++
+        }
+
+        return fileName
     }
 
     /**

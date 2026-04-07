@@ -44,5 +44,9 @@ class ToolsActivity : AppCompatActivity() {
         binding.cardSpeechToSubtitle.setOnClickListener {
             startActivity(Intent(this, SpeechToSubtitleActivity::class.java))
         }
+
+        binding.cardAutoTimestamp.setOnClickListener {
+            startActivity(Intent(this, AutoTimestampActivity::class.java))
+        }
     }
 }
