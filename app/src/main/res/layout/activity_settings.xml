@@ -43,62 +43,18 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="AI 翻译设置（硅基流动平台）"
+                android:text="AI 翻译"
                 android:textSize="16sp"
                 android:textStyle="bold"
                 android:layout_marginBottom="8dp" />
 
-            <com.google.android.material.textfield.TextInputLayout
+            <Button
+                android:id="@+id/btnAiSettings"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="API Key"
-                android:layout_marginBottom="16dp">
-
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/etApiKey"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:inputType="textPassword" />
-            </com.google.android.material.textfield.TextInputLayout>
-
-            <com.google.android.material.textfield.TextInputLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="模型名称"
-                android:layout_marginBottom="16dp">
-
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/etModel"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="deepseek-ai/DeepSeek-V3.2-Exp" />
-            </com.google.android.material.textfield.TextInputLayout>
-
-            <com.google.android.material.textfield.TextInputLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="源语言（留空自动检测）"
-                android:layout_marginBottom="16dp">
-
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/etSourceLanguage"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="自动检测" />
-            </com.google.android.material.textfield.TextInputLayout>
-
-            <com.google.android.material.textfield.TextInputLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="目标语言"
-                android:layout_marginBottom="24dp">
-
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/etTargetLanguage"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="中文" />
-            </com.google.android.material.textfield.TextInputLayout>
+                android:text="AI 翻译设置"
+                android:layout_marginBottom="24dp"
+                style="@style/Widget.Material3.Button.OutlinedButton" />
 
             <!-- 模型设置 -->
             <TextView

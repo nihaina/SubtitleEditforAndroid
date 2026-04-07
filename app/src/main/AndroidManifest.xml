@@ -69,15 +69,22 @@
         <activity
             android:name=".SpeechToSubtitleActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
 
         <activity
             android:name=".AutoTimestampActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
 
         <activity
             android:name=".ModelSettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.SubtitleEditforAndroid" />
+
+        <activity
+            android:name=".AiSettingsActivity"
             android:exported="false"
             android:theme="@style/Theme.SubtitleEditforAndroid" />
 

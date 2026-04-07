@@ -7,7 +7,9 @@ import android.os.Environment
 import android.util.Log
 import android.widget.ArrayAdapter
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
@@ -55,6 +57,25 @@ class AutoTimestampActivity : AppCompatActivity() {
         setupSpinners()
         setupButtons()
         setupDefaultOutputDir()
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (!binding.btnGenerate.isEnabled) {
+                    AlertDialog.Builder(this@AutoTimestampActivity)
+                        .setTitle("正在处理中")
+                        .setMessage("自动打轴正在进行，确定要返回吗？返回后处理将被取消。")
+                        .setPositiveButton("返回并取消") { _, _ ->
+                            isEnabled = false
+                            onBackPressedDispatcher.onBackPressed()
+                        }
+                        .setNegativeButton("继续处理", null)
+                        .show()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
     }
 
     private fun setupToolbar() {

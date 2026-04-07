@@ -6,16 +6,15 @@ import android.os.Bundle
 import android.os.Environment
 import android.util.Log
 import android.view.View
-import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import com.arthenica.ffmpegkit.FFmpegKit
-import com.arthenica.ffmpegkit.FFprobeKit
 import com.subtitleedit.databinding.ActivitySpeechToSubtitleBinding
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleParser
@@ -78,34 +77,6 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         uri?.let { handleSelectedFile(it) }
     }
 
-    // Encoder 文件选择器
-    private val encoderPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        uri?.let { handleSelectedEncoder(it) }
-    }
-
-    // Decoder 文件选择器
-    private val decoderPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        uri?.let { handleSelectedDecoder(it) }
-    }
-
-    // Tokens 文件选择器
-    private val tokensPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        uri?.let { handleSelectedTokens(it) }
-    }
-
-    // VAD 模型文件选择器
-    private val vadPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        uri?.let { handleSelectedVad(it) }
-    }
-
     // 输出目录选择器
     private val outputDirLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -124,6 +95,26 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         setupSpinners()
         setupButtons()
         loadSavedModel()
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (!binding.btnStart.isEnabled) {
+                    AlertDialog.Builder(this@SpeechToSubtitleActivity)
+                        .setTitle("正在识别中")
+                        .setMessage("语音识别正在进行，确定要返回吗？返回后识别将被取消。")
+                        .setPositiveButton("返回并取消") { _, _ ->
+                            cancelConversion()
+                            isEnabled = false
+                            onBackPressedDispatcher.onBackPressed()
+                        }
+                        .setNegativeButton("继续识别", null)
+                        .show()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
     }
 
     private fun setupToolbar() {
@@ -163,34 +154,9 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             filePickerLauncher.launch(arrayOf("audio/*", "video/*"))
         }
 
-        // 选择 Encoder 按钮
-        binding.btnSelectEncoder.setOnClickListener {
-            encoderPickerLauncher.launch(arrayOf("*/*"))
-        }
-
-        // 选择 Decoder 按钮
-        binding.btnSelectDecoder.setOnClickListener {
-            decoderPickerLauncher.launch(arrayOf("*/*"))
-        }
-
-        // 选择 Tokens 按钮
-        binding.btnSelectTokens.setOnClickListener {
-            tokensPickerLauncher.launch(arrayOf("*/*"))
-        }
-
-        // 选择 VAD 模型按钮
-        binding.btnSelectVad.setOnClickListener {
-            vadPickerLauncher.launch(arrayOf("*/*"))
-        }
-
         // 选择输出目录按钮
         binding.btnSelectOutputDir.setOnClickListener {
             outputDirLauncher.launch(outputDirUri)
-        }
-
-        // 模型下载指引
-        binding.tvModelGuide.setOnClickListener {
-            showModelGuide()
         }
 
         // 开始转换按钮
@@ -216,23 +182,6 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         // 设置默认输出目录
         setupDefaultOutputDir()
 
-        if (encoderPath.isNotEmpty()) {
-            val uri = Uri.parse(encoderPath)
-            binding.tvEncoderFile.text = getFileNameFromUri(uri)
-        }
-        if (decoderPath.isNotEmpty()) {
-            val uri = Uri.parse(decoderPath)
-            binding.tvDecoderFile.text = getFileNameFromUri(uri)
-        }
-        if (tokensPath.isNotEmpty()) {
-            val uri = Uri.parse(tokensPath)
-            binding.tvTokensFile.text = getFileNameFromUri(uri)
-        }
-        if (vadModelPath.isNotEmpty()) {
-            val uri = Uri.parse(vadModelPath)
-            binding.tvVadFile.text = "外部模型: ${getFileNameFromUri(uri)}"
-        }
-
         updateStartButtonState()
     }
 
@@ -244,142 +193,6 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         selectedFileName = getFileNameFromUri(uri)
         binding.tvSelectedFile.text = selectedFileName
         updateStartButtonState()
-    }
-
-    /**
-     * 处理选择的 Encoder 文件
-     */
-    private fun handleSelectedEncoder(uri: Uri) {
-        try {
-            // 获取持久化权限
-            contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-
-            val fileName = getFileNameFromUri(uri)
-
-            // 验证文件名
-            if (!fileName.contains("encoder", ignoreCase = true) ||
-                !fileName.endsWith(".onnx", ignoreCase = true)) {
-                Toast.makeText(
-                    this,
-                    "请选择 encoder 模型文件（文件名应包含 'encoder' 且以 .onnx 结尾）",
-                    Toast.LENGTH_LONG
-                ).show()
-                return
-            }
-
-            encoderPath = uri.toString()
-            settingsManager.setWhisperEncoderPath(encoderPath)
-            binding.tvEncoderFile.text = fileName
-            updateStartButtonState()
-
-        } catch (e: Exception) {
-            Toast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    /**
-     * 处理选择的 Decoder 文件
-     */
-    private fun handleSelectedDecoder(uri: Uri) {
-        try {
-            // 获取持久化权限
-            contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-
-            val fileName = getFileNameFromUri(uri)
-
-            // 验证文件名
-            if (!fileName.contains("decoder", ignoreCase = true) ||
-                !fileName.endsWith(".onnx", ignoreCase = true)) {
-                Toast.makeText(
-                    this,
-                    "请选择 decoder 模型文件（文件名应包含 'decoder' 且以 .onnx 结尾）",
-                    Toast.LENGTH_LONG
-                ).show()
-                return
-            }
-
-            decoderPath = uri.toString()
-            settingsManager.setWhisperDecoderPath(decoderPath)
-            binding.tvDecoderFile.text = fileName
-            updateStartButtonState()
-
-        } catch (e: Exception) {
-            Toast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    /**
-     * 处理选择的 Tokens 文件
-     */
-    private fun handleSelectedTokens(uri: Uri) {
-        try {
-            // 获取持久化权限
-            contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-
-            val fileName = getFileNameFromUri(uri)
-
-            // 验证文件名
-            if (!fileName.contains("token", ignoreCase = true) ||
-                !fileName.endsWith(".txt", ignoreCase = true)) {
-                Toast.makeText(
-                    this,
-                    "请选择 tokens 文件（文件名应包含 'token' 且以 .txt 结尾）",
-                    Toast.LENGTH_LONG
-                ).show()
-                return
-            }
-
-            tokensPath = uri.toString()
-            settingsManager.setWhisperTokensPath(tokensPath)
-            binding.tvTokensFile.text = fileName
-            updateStartButtonState()
-
-        } catch (e: Exception) {
-            Toast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    /**
-     * 处理选择的 VAD 模型文件
-     */
-    private fun handleSelectedVad(uri: Uri) {
-        try {
-            // 获取持久化权限
-            contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-
-            val fileName = getFileNameFromUri(uri)
-
-            // 验证文件名
-            if (!fileName.contains("vad", ignoreCase = true) ||
-                !fileName.endsWith(".onnx", ignoreCase = true)) {
-                Toast.makeText(
-                    this,
-                    "请选择 VAD 模型文件（文件名应包含 'vad' 且以 .onnx 结尾）",
-                    Toast.LENGTH_LONG
-                ).show()
-                return
-            }
-
-            vadModelPath = uri.toString()
-            settingsManager.setVadModelPath(vadModelPath)
-            binding.tvVadFile.text = "外部模型: $fileName"
-            Toast.makeText(this, "外部 VAD 模型已选择", Toast.LENGTH_SHORT).show()
-
-        } catch (e: Exception) {
-            Toast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
-        }
     }
 
     /**
@@ -445,47 +258,6 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             encoderPath.isNotEmpty() &&
             decoderPath.isNotEmpty() &&
             tokensPath.isNotEmpty()
-    }
-
-    /**
-     * 显示模型下载指引
-     */
-    private fun showModelGuide() {
-        val message = """
-            Whisper 模型下载指引：
-
-            1. 访问 Hugging Face 或 GitHub：
-               • https://huggingface.co/k2-fsa/sherpa-onnx-whisper-large-v3
-               • https://github.com/k2-fsa/sherpa-onnx/releases
-
-            2. 下载模型文件（需要以下 3 个文件）：
-               • encoder.onnx（或 large-v3-encoder.onnx）
-               • decoder.onnx（或 large-v3-decoder.int8.onnx）
-               • tokens.txt
-
-            3. 分别点击"选择 Encoder"、"选择 Decoder"、"选择 Tokens"按钮选择对应文件
-
-            推荐模型：
-            • Whisper Tiny (~40MB) - 快速，适合实时
-            • Whisper Base (~75MB) - 平衡性能和质量
-            • Whisper Small (~250MB) - 高质量
-            • Whisper Large V3 (~3GB) - 最高质量
-
-            VAD 模型（可选，推荐使用）：
-            • 下载地址：https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
-            • 作用：精确检测语音段，提高字幕时间轴准确性
-            • 大小：~2MB
-        """.trimIndent()
-
-        AlertDialog.Builder(this)
-            .setTitle("模型下载指引")
-            .setMessage(message)
-            .setPositiveButton("确定", null)
-            .setNeutralButton("打开 GitHub") { _, _ ->
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/k2-fsa/sherpa-onnx/releases"))
-                startActivity(intent)
-            }
-            .show()
     }
 
     /**

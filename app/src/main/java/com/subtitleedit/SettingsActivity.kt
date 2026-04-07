@@ -69,36 +69,8 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun setupAiSettings() {
-        // API Key 即时保存
-        binding.etApiKey.setOnFocusChangeListener { _, hasFocus ->
-            if (!hasFocus) {
-                val apiKey = binding.etApiKey.text.toString().trim()
-                settingsManager.setAiApiKey(apiKey)
-            }
-        }
-
-        // 模型名称即时保存
-        binding.etModel.setOnFocusChangeListener { _, hasFocus ->
-            if (!hasFocus) {
-                val model = binding.etModel.text.toString().trim()
-                settingsManager.setAiModel(model)
-            }
-        }
-
-        // 源语言即时保存
-        binding.etSourceLanguage.setOnFocusChangeListener { _, hasFocus ->
-            if (!hasFocus) {
-                val sourceLang = binding.etSourceLanguage.text.toString().trim()
-                settingsManager.setAiSourceLanguage(sourceLang)
-            }
-        }
-
-        // 目标语言即时保存
-        binding.etTargetLanguage.setOnFocusChangeListener { _, hasFocus ->
-            if (!hasFocus) {
-                val targetLang = binding.etTargetLanguage.text.toString().trim()
-                settingsManager.setAiTargetLanguage(targetLang)
-            }
+        binding.btnAiSettings.setOnClickListener {
+            startActivity(Intent(this, AiSettingsActivity::class.java))
         }
     }
 
@@ -222,12 +194,6 @@ class SettingsActivity : AppCompatActivity() {
         val currentEncoding = settingsManager.getDefaultEncoding()
         val encodingIndex = FileUtils.SUPPORTED_ENCODINGS.indexOfFirst { it.charset == currentEncoding }
         if (encodingIndex >= 0) binding.spinnerEncoding.setSelection(encodingIndex)
-
-        // AI 设置
-        binding.etApiKey.setText(settingsManager.getAiApiKey())
-        binding.etModel.setText(settingsManager.getAiModel())
-        binding.etSourceLanguage.setText(settingsManager.getAiSourceLanguage())
-        binding.etTargetLanguage.setText(settingsManager.getAiTargetLanguage())
 
         // 波形缓存位置
         val cacheLocation = settingsManager.getWaveformCacheLocation()
