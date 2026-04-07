@@ -1,5 +1,6 @@
 package com.subtitleedit
 
+import android.content.Intent
 import android.os.Bundle
 import android.widget.ArrayAdapter
 import android.widget.Toast
@@ -28,8 +29,10 @@ class SettingsActivity : AppCompatActivity() {
         setupToolbar()
         setupEncodingSpinner()
         setupWaveformCacheSection()
+        setupModelSettings()
+        setupAiSettings()
+        setupPlaybackSettings()
         loadSettings()
-        setupSaveButton()
         setupGithubLink()
     }
 
@@ -43,11 +46,67 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    private fun setupModelSettings() {
+        binding.btnModelSettings.setOnClickListener {
+            startActivity(Intent(this, ModelSettingsActivity::class.java))
+        }
+    }
+
     private fun setupEncodingSpinner() {
         val encodings = FileUtils.SUPPORTED_ENCODINGS.map { it.displayName }
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, encodings)
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         binding.spinnerEncoding.adapter = adapter
+
+        // 即时保存
+        binding.spinnerEncoding.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                val selectedEncoding = FileUtils.SUPPORTED_ENCODINGS[position]
+                settingsManager.setDefaultEncoding(selectedEncoding.charset)
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+    }
+
+    private fun setupAiSettings() {
+        // API Key 即时保存
+        binding.etApiKey.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                val apiKey = binding.etApiKey.text.toString().trim()
+                settingsManager.setAiApiKey(apiKey)
+            }
+        }
+
+        // 模型名称即时保存
+        binding.etModel.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                val model = binding.etModel.text.toString().trim()
+                settingsManager.setAiModel(model)
+            }
+        }
+
+        // 源语言即时保存
+        binding.etSourceLanguage.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                val sourceLang = binding.etSourceLanguage.text.toString().trim()
+                settingsManager.setAiSourceLanguage(sourceLang)
+            }
+        }
+
+        // 目标语言即时保存
+        binding.etTargetLanguage.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                val targetLang = binding.etTargetLanguage.text.toString().trim()
+                settingsManager.setAiTargetLanguage(targetLang)
+            }
+        }
+    }
+
+    private fun setupPlaybackSettings() {
+        // 循环播放开关即时保存
+        binding.switchLoopSelectedSubtitle.setOnCheckedChangeListener { _, isChecked ->
+            settingsManager.setLoopSelectedSubtitleEnabled(isChecked)
+        }
     }
 
     // ==================== 波形/频谱图缓存设置 ====================
@@ -58,6 +117,13 @@ class SettingsActivity : AppCompatActivity() {
             binding.btnClearWaveformCache.isEnabled    = isAppCache
             binding.btnClearSpectrogramCache.isEnabled = isAppCache
             refreshCacheSizeDisplay()
+
+            // 即时保存
+            val cacheLocation = if (checkedId == binding.rbCacheSource.id)
+                SettingsManager.WAVEFORM_CACHE_SOURCE
+            else
+                SettingsManager.WAVEFORM_CACHE_APP
+            settingsManager.setWaveformCacheLocation(cacheLocation)
         }
 
         binding.btnClearWaveformCache.setOnClickListener {
@@ -177,10 +243,6 @@ class SettingsActivity : AppCompatActivity() {
         binding.switchLoopSelectedSubtitle.isChecked = settingsManager.isLoopSelectedSubtitleEnabled()
     }
 
-    private fun setupSaveButton() {
-        binding.btnSaveSettings.setOnClickListener { saveSettings() }
-    }
-
     private fun setupGithubLink() {
         binding.tvGithub.setOnClickListener {
             val intent = android.content.Intent(
@@ -188,49 +250,6 @@ class SettingsActivity : AppCompatActivity() {
                 android.net.Uri.parse("https://github.com/nihaina/SubtitleEditforAndroid")
             )
             startActivity(intent)
-        }
-    }
-
-    private fun saveSettings() {
-        // ① 编码设置——无需校验，直接保存
-        val selectedEncoding = FileUtils.SUPPORTED_ENCODINGS[binding.spinnerEncoding.selectedItemPosition]
-        settingsManager.setDefaultEncoding(selectedEncoding.charset)
-
-        // ② 波形缓存位置——无需校验，直接保存
-        val cacheLocation =
-            if (binding.rgWaveformCache.checkedRadioButtonId == binding.rbCacheSource.id)
-                SettingsManager.WAVEFORM_CACHE_SOURCE
-            else
-                SettingsManager.WAVEFORM_CACHE_APP
-        settingsManager.setWaveformCacheLocation(cacheLocation)
-
-        // ③ 循环播放开关——无需校验，直接保存
-        settingsManager.setLoopSelectedSubtitleEnabled(binding.switchLoopSelectedSubtitle.isChecked)
-
-        // ④ AI 设置——有内容才保存，为空时仅提示，不阻断其他设置
-        val apiKey     = binding.etApiKey.text.toString().trim()
-        val model      = binding.etModel.text.toString().trim()
-        val sourceLang = binding.etSourceLanguage.text.toString().trim()
-        val targetLang = binding.etTargetLanguage.text.toString().trim()
-
-        val aiWarnings = mutableListOf<String>()
-        if (apiKey.isEmpty())     aiWarnings.add("API Key")
-        if (model.isEmpty())      aiWarnings.add("模型名称")
-        if (targetLang.isEmpty()) aiWarnings.add("翻译目标语言")
-
-        if (aiWarnings.isNotEmpty()) {
-            // 其他设置已保存，仅提示 AI 字段缺失
-            Toast.makeText(
-                this,
-                "设置已保存，但 AI 翻译功能缺少以下字段：${aiWarnings.joinToString("、")}",
-                Toast.LENGTH_LONG
-            ).show()
-        } else {
-            settingsManager.setAiApiKey(apiKey)
-            settingsManager.setAiModel(model)
-            settingsManager.setAiSourceLanguage(sourceLang)
-            settingsManager.setAiTargetLanguage(targetLang)
-            Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show()
         }
     }
 }

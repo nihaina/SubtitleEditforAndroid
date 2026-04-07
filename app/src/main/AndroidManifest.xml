@@ -76,6 +76,11 @@
             android:exported="false"
             android:theme="@style/Theme.SubtitleEditforAndroid" />
 
+        <activity
+            android:name=".ModelSettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.SubtitleEditforAndroid" />
+
     </application>
 
 </manifest>

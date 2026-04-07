@@ -64,14 +64,15 @@ class VadTimestampGenerator(private val context: Context) {
      */
     private fun initVad(): Vad? {
         return try {
+            val settingsManager = SettingsManager.getInstance(context)
             val vadConfig = VadModelConfig(
                 sileroVadModelConfig = SileroVadModelConfig(
                     model = "silero_vad.onnx",
-                    threshold = 0.3F,
-                    minSilenceDuration = 0.3F,
-                    minSpeechDuration = 0.25F,
+                    threshold = settingsManager.getVadThreshold(),
+                    minSilenceDuration = settingsManager.getVadMinSilenceDuration(),
+                    minSpeechDuration = settingsManager.getVadMinSpeechDuration(),
                     windowSize = 512,
-                    maxSpeechDuration = 10.0F
+                    maxSpeechDuration = settingsManager.getVadMaxSpeechDuration()
                 ),
                 sampleRate = SAMPLE_RATE,
                 numThreads = 2,

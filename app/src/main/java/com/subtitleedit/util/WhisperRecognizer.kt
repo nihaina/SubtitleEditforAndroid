@@ -106,14 +106,15 @@ class WhisperRecognizer(
                 // 使用内置的 VAD 模型
                 try {
                     Log.d(TAG, "使用内置 VAD 模型")
+                    val settingsManager = SettingsManager.getInstance(context)
                     val vadConfig = VadModelConfig(
                         sileroVadModelConfig = SileroVadModelConfig(
                             model = "silero_vad.onnx",
-                            threshold = 0.3F,
-                            minSilenceDuration = 0.3F,
-                            minSpeechDuration = 0.25F,
+                            threshold = settingsManager.getVadThreshold(),
+                            minSilenceDuration = settingsManager.getVadMinSilenceDuration(),
+                            minSpeechDuration = settingsManager.getVadMinSpeechDuration(),
                             windowSize = 512,
-                            maxSpeechDuration = 10.0F
+                            maxSpeechDuration = settingsManager.getVadMaxSpeechDuration()
                         ),
                         sampleRate = SAMPLE_RATE,
                         numThreads = 2,
