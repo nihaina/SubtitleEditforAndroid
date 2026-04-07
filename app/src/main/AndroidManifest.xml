@@ -65,7 +65,12 @@
             android:name=".MediaConvertActivity"
             android:exported="false"
             android:theme="@style/Theme.SubtitleEditforAndroid" />
-            
+
+        <activity
+            android:name=".SpeechToSubtitleActivity"
+            android:exported="false"
+            android:theme="@style/Theme.SubtitleEditforAndroid" />
+
     </application>
 
 </manifest>

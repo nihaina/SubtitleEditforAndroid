@@ -40,5 +40,9 @@ class ToolsActivity : AppCompatActivity() {
         binding.cardMediaConvert.setOnClickListener {
             startActivity(Intent(this, MediaConvertActivity::class.java))
         }
+
+        binding.cardSpeechToSubtitle.setOnClickListener {
+            startActivity(Intent(this, SpeechToSubtitleActivity::class.java))
+        }
     }
 }
