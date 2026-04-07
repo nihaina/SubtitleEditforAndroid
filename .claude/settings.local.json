@@ -11,7 +11,9 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:k2-fsa.github.io)",
       "Bash(grep -E \"\\(java|kt\\)$\")",
-      "Bash(./gradlew assembleDebug)"
+      "Bash(./gradlew assembleDebug)",
+      "Bash(mkdir -p \"D:\\\\Work\\\\VSCode\\\\SubtitleEditforAndroid\\\\app\\\\src\\\\main\\\\assets\")",
+      "Bash(mv \"D:\\\\Work\\\\VSCode\\\\SubtitleEditforAndroid\\\\app\\\\silero_vad.onnx\" \"D:\\\\Work\\\\VSCode\\\\SubtitleEditforAndroid\\\\app\\\\src\\\\main\\\\assets\\\\silero_vad.onnx\")"
     ]
   }
 }

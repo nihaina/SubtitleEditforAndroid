@@ -78,7 +78,7 @@ class WhisperRecognizer(
             Log.d(TAG, "  decoder: ${decoderFile.absolutePath}")
             Log.d(TAG, "  tokens: ${tokensFile.absolutePath}")
 
-            // 初始化 VAD（如果提供了模型）
+            // 初始化 VAD（如果提供了模型路径，使用外部模型；否则使用内置模型）
             if (vadModelPath.isNotEmpty()) {
                 val vadFile = copyUriToCache(Uri.parse(vadModelPath), "vad.onnx")
                 if (vadFile != null) {
@@ -98,9 +98,32 @@ class WhisperRecognizer(
                         debug = true
                     )
                     vad = Vad(assetManager = null, config = vadConfig)
-                    Log.d(TAG, "VAD 初始化成功")
+                    Log.d(TAG, "VAD 初始化成功（外部模型）")
                 } else {
-                    Log.w(TAG, "VAD 模型文件读取失败，将不使用 VAD")
+                    Log.w(TAG, "VAD 外部模型文件读取失败")
+                }
+            } else {
+                // 使用内置的 VAD 模型
+                try {
+                    Log.d(TAG, "使用内置 VAD 模型")
+                    val vadConfig = VadModelConfig(
+                        sileroVadModelConfig = SileroVadModelConfig(
+                            model = "silero_vad.onnx",
+                            threshold = 0.3F,
+                            minSilenceDuration = 0.3F,
+                            minSpeechDuration = 0.25F,
+                            windowSize = 512,
+                            maxSpeechDuration = 10.0F
+                        ),
+                        sampleRate = SAMPLE_RATE,
+                        numThreads = 2,
+                        provider = "cpu",
+                        debug = true
+                    )
+                    vad = Vad(assetManager = context.assets, config = vadConfig)
+                    Log.d(TAG, "VAD 初始化成功（内置模型）")
+                } catch (e: Exception) {
+                    Log.w(TAG, "VAD 内置模型初始化失败: ${e.message}")
                 }
             }
 
