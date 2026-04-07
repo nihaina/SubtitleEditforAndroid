@@ -1,6 +1,7 @@
 # Gradle
 .gradle/
 build/
+gradle-wrapper.jar
 
 # Local config
 local.properties
@@ -8,12 +9,64 @@ local.properties
 # Android Studio
 .idea/
 *.iml
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/gradle.xml
+.idea/assetWizardSettings.xml
+.idea/dictionaries
+.idea/libraries
+.idea/caches
+.idea/modules.xml
+.idea/navEditor.xml
 
 # Generated
 app/build/
+*/build/
 
 # Logs
 *.log
 
 # Mac
 .DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# APK files
+*.apk
+*.ap_
+*.aab
+
+# Signing files
+*.jks
+*.keystore
+
+# Native libraries (sherpa-onnx)
+# 保留源码和 jniLibs，但忽略下载的压缩包
+app/libs/*.tar.bz2
+app/libs/*.tar.gz
+app/libs/*.zip
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# Captures
+captures/
+output.json
+
+# External native build
+.externalNativeBuild
+.cxx/
+
+# Version control
+*.orig
+
+# Kotlin
+*.kotlin_module
+
+# Android Profiling
+*.hprof

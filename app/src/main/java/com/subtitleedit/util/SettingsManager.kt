@@ -24,7 +24,11 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_AI_TARGET_LANGUAGE = "ai_target_language"
         private const val KEY_WAVEFORM_CACHE_LOCATION = "waveform_cache_location"
         private const val KEY_LOOP_SELECTED_SUBTITLE = "loop_selected_subtitle"
-        
+        private const val KEY_WHISPER_ENCODER_PATH = "whisper_encoder_path"
+        private const val KEY_WHISPER_DECODER_PATH = "whisper_decoder_path"
+        private const val KEY_WHISPER_TOKENS_PATH = "whisper_tokens_path"
+        private const val KEY_VAD_MODEL_PATH = "vad_model_path"
+
         const val WAVEFORM_CACHE_APP = "app_cache"
         const val WAVEFORM_CACHE_SOURCE = "source_dir"
         
@@ -136,4 +140,60 @@ class SettingsManager private constructor(context: Context) {
      */
     fun setLoopSelectedSubtitleEnabled(enabled: Boolean) =
         prefs.edit().putBoolean(KEY_LOOP_SELECTED_SUBTITLE, enabled).apply()
+
+    /**
+     * 获取 Whisper Encoder 文件路径
+     */
+    fun getWhisperEncoderPath(): String {
+        return prefs.getString(KEY_WHISPER_ENCODER_PATH, "") ?: ""
+    }
+
+    /**
+     * 设置 Whisper Encoder 文件路径
+     */
+    fun setWhisperEncoderPath(path: String) {
+        prefs.edit().putString(KEY_WHISPER_ENCODER_PATH, path).apply()
+    }
+
+    /**
+     * 获取 Whisper Decoder 文件路径
+     */
+    fun getWhisperDecoderPath(): String {
+        return prefs.getString(KEY_WHISPER_DECODER_PATH, "") ?: ""
+    }
+
+    /**
+     * 设置 Whisper Decoder 文件路径
+     */
+    fun setWhisperDecoderPath(path: String) {
+        prefs.edit().putString(KEY_WHISPER_DECODER_PATH, path).apply()
+    }
+
+    /**
+     * 获取 Whisper Tokens 文件路径
+     */
+    fun getWhisperTokensPath(): String {
+        return prefs.getString(KEY_WHISPER_TOKENS_PATH, "") ?: ""
+    }
+
+    /**
+     * 设置 Whisper Tokens 文件路径
+     */
+    fun setWhisperTokensPath(path: String) {
+        prefs.edit().putString(KEY_WHISPER_TOKENS_PATH, path).apply()
+    }
+
+    /**
+     * 获取 VAD 模型文件路径
+     */
+    fun getVadModelPath(): String {
+        return prefs.getString(KEY_VAD_MODEL_PATH, "") ?: ""
+    }
+
+    /**
+     * 设置 VAD 模型文件路径
+     */
+    fun setVadModelPath(path: String) {
+        prefs.edit().putString(KEY_VAD_MODEL_PATH, path).apply()
+    }
 }

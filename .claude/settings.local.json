@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(xargs grep:*)",
+      "Bash(file *.tar.bz2)",
+      "Bash(file *.bz2)",
+      "Bash(file *)",
+      "Bash(tar -xjf sherpa-onnx-v1.12.35-android.tar.bz2)",
+      "Bash(tar -tjf sherpa-onnx-v1.12.35-android.tar.bz2)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:k2-fsa.github.io)",
+      "Bash(grep -E \"\\(java|kt\\)$\")",
+      "Bash(./gradlew assembleDebug)"
+    ]
+  }
+}
