@@ -2376,6 +2376,15 @@ class EditorActivity : AppCompatActivity() {
             // submitList 完成后，恢复选中状态
             subtitleAdapter.setSelectionByIndices(remainingSelectedIndices)
             updateSelectedCountDisplay()
+
+            // 刷新被删除行的前一行（消除时间冲突标红）
+            deletedIndices.forEach { deletedIdx ->
+                val offset = deletedIndices.count { it < deletedIdx }
+                val prevIdx = (deletedIdx - offset) - 1
+                if (prevIdx >= 0 && prevIdx < subtitleEntries.size) {
+                    subtitleAdapter.notifyItemChanged(prevIdx)
+                }
+            }
         }
         updateFormatInfo()
 
