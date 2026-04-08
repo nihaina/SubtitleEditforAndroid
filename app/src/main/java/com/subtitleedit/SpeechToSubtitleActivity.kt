@@ -43,6 +43,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     private var vadModelPath: String = ""
     private var outputDirUri: Uri? = null
     private var conversionJob: Job? = null
+    private var isConverting = false
     private var isCancelled = false
     private var pendingSubtitleContent: String = ""
     private val realtimeResults = StringBuilder()
@@ -98,7 +99,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (!binding.btnStart.isEnabled) {
+                if (isConverting) {
                     AlertDialog.Builder(this@SpeechToSubtitleActivity)
                         .setTitle("正在识别中")
                         .setMessage("语音识别正在进行，确定要返回吗？返回后识别将被取消。")
@@ -273,6 +274,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         realtimeResults.clear()
         conversionJob = lifecycleScope.launch {
             try {
+                isConverting = true
                 showProgress("正在准备...", 0)
                 binding.tvRealtimeResult.text = "等待识别..."
                 binding.btnStart.isEnabled = false
@@ -359,8 +361,9 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                     showError(e.message ?: "未知错误")
                 }
             } finally {
+                isConverting = false
                 hideProgress()
-                binding.btnStart.isEnabled = true
+                updateStartButtonState()
             }
         }
     }
@@ -369,10 +372,12 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
      * 取消转换
      */
     private fun cancelConversion() {
+        if (!isConverting) return
         isCancelled = true
         conversionJob?.cancel()
+        isConverting = false
         hideProgress()
-        binding.btnStart.isEnabled = true
+        updateStartButtonState()
         Toast.makeText(this, "已取消", Toast.LENGTH_SHORT).show()
     }
 
@@ -553,17 +558,6 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("错误")
             .setMessage(message ?: "未知错误")
-            .setPositiveButton("确定", null)
-            .show()
-    }
-
-    /**
-     * 显示成功
-     */
-    private fun showSuccess(segmentCount: Int) {
-        AlertDialog.Builder(this)
-            .setTitle("转换完成")
-            .setMessage("成功生成 $segmentCount 条字幕，请选择保存位置")
             .setPositiveButton("确定", null)
             .show()
     }

@@ -483,39 +483,6 @@ class EditorActivity : AppCompatActivity() {
     }
     
     /**
-     * 删除选中的字幕
-     */
-    private fun deleteSelectedSubtitle() {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val selectedEntries = subtitleAdapter.getSelectedEntries()
-        if (selectedEntries.isEmpty()) {
-            Toast.makeText(this, "请先选择要删除的字幕", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("删除")
-            .setMessage("确定要删除选中的字幕吗？")
-            .setPositiveButton("确定") { _, _ ->
-                val deletedIndices = selectedEntries.map { it.second }.toSet()
-                // 从后往前删除，避免索引变化
-                selectedEntries.sortedByDescending { it.second }.forEach { (_, position) ->
-                    subtitleEntries.removeAt(position)
-                }
-                renumberEntries()
-                syncAfterDelete(deletedIndices)
-                markAsChanged()
-                Toast.makeText(this, "已删除 ${selectedEntries.size} 条字幕", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-    
-    /**
      * 清除源视图中的搜索高亮
      */
     private fun clearSearchHighlightInSourceView() {
@@ -1354,10 +1321,6 @@ class EditorActivity : AppCompatActivity() {
     private var cutPositionValue: Int = -1
     // 剪切时保存要删除的位置（多行）
     private var cutPositionsValue: List<Int> = emptyList()
-    
-    private fun hasSelection(): Boolean {
-        return subtitleAdapter.getSelectedCount() > 0
-    }
     
     /**
      * 执行剪切删除操作（在粘贴后调用）
@@ -2586,15 +2549,6 @@ class EditorActivity : AppCompatActivity() {
         // 条目数变化时，强制刷新所有可见项的序号显示
         if (!isSourceViewMode) {
             subtitleAdapter.refreshAllItems()
-        }
-    }
-    
-    private fun getFormatName(): String {
-        return when (currentFormat) {
-            SubtitleParser.SubtitleFormat.SRT -> "SRT"
-            SubtitleParser.SubtitleFormat.LRC -> "LRC"
-            SubtitleParser.SubtitleFormat.TXT -> "TXT"
-            else -> "未知"
         }
     }
     

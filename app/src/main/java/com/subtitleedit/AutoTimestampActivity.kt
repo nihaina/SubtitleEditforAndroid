@@ -18,6 +18,7 @@ import com.subtitleedit.databinding.ActivityAutoTimestampBinding
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.VadTimestampGenerator
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -31,6 +32,8 @@ class AutoTimestampActivity : AppCompatActivity() {
     private var selectedAudioUri: Uri? = null
     private var selectedFileName: String = ""
     private var outputDirUri: Uri? = null
+    private var generationJob: Job? = null
+    private var isGenerating = false
 
     private val formatOptions = arrayOf("SRT", "LRC")
 
@@ -60,11 +63,13 @@ class AutoTimestampActivity : AppCompatActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (!binding.btnGenerate.isEnabled) {
+                if (isGenerating) {
                     AlertDialog.Builder(this@AutoTimestampActivity)
                         .setTitle("正在处理中")
                         .setMessage("自动打轴正在进行，确定要返回吗？返回后处理将被取消。")
                         .setPositiveButton("返回并取消") { _, _ ->
+                            generationJob?.cancel()
+                            isGenerating = false
                             isEnabled = false
                             onBackPressedDispatcher.onBackPressed()
                         }
@@ -171,8 +176,9 @@ class AutoTimestampActivity : AppCompatActivity() {
         binding.btnGenerate.isEnabled = false
         binding.progressBar.visibility = android.view.View.VISIBLE
         binding.tvStatus.text = "正在处理..."
+        isGenerating = true
 
-        lifecycleScope.launch {
+        generationJob = lifecycleScope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
                     // 1. 复制文件到缓存
@@ -218,10 +224,15 @@ class AutoTimestampActivity : AppCompatActivity() {
                 Toast.makeText(this@AutoTimestampActivity, "字幕已保存到输出目录", Toast.LENGTH_LONG).show()
 
             } catch (e: Exception) {
-                binding.tvStatus.text = "处理失败"
+                binding.tvStatus.text = if (isGenerating) "处理失败" else "已取消"
                 binding.progressBar.visibility = android.view.View.GONE
                 binding.btnGenerate.isEnabled = true
-                Toast.makeText(this@AutoTimestampActivity, "处理失败：${e.message}", Toast.LENGTH_LONG).show()
+                if (isGenerating) {
+                    Toast.makeText(this@AutoTimestampActivity, "处理失败：${e.message}", Toast.LENGTH_LONG).show()
+                }
+            } finally {
+                isGenerating = false
+                generationJob = null
             }
         }
     }
@@ -371,5 +382,10 @@ class AutoTimestampActivity : AppCompatActivity() {
             }
         }
         return fileName
+    }
+
+    override fun onDestroy() {
+        generationJob?.cancel()
+        super.onDestroy()
     }
 }

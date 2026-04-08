@@ -263,12 +263,6 @@ class MediaConvertActivity : AppCompatActivity() {
         updateUI()
     }
 
-    private fun onFormatSelected() {
-        // 由 onFormatButtonClicked 直接维护 selectedFormat，此方法保留兼容性
-        updateCodecSpinners()
-        updateUI()
-    }
-
     private fun setupAdvancedOptions() {
         // 视频编码器：未选择格式时显示占位
         binding.spinnerVideoCodec.adapter = ArrayAdapter(this,
