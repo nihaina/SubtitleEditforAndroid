@@ -111,6 +111,22 @@ class SubtitleAdapter(
         }
     }
 
+    fun setSelectionByIndices(indices: Set<Int>) {
+        val oldPositions = getSelectedPositions()
+        selectedEntries.clear()
+        indices.forEach { idx ->
+            if (idx >= 0 && idx < currentList.size) {
+                selectedEntries.add(currentList[idx])
+            }
+        }
+        // 刷新旧的和新的选中位置
+        (oldPositions + indices).forEach { position ->
+            if (position >= 0 && position < currentList.size) {
+                notifyItemChanged(position, PAYLOAD_SELECTION)
+            }
+        }
+    }
+
     fun getSelectedCount(): Int {
         return selectedEntries.size
     }

@@ -223,6 +223,17 @@
                             android:focusable="true"
                             android:contentDescription="展开/折叠波形图"/>
 
+                        <!-- 打轴按钮 -->
+                        <ImageButton
+                            android:id="@+id/btnInsertSubtitle"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            android:layout_marginStart="4dp"
+                            android:src="@drawable/ic_insert_subtitle"
+                            android:background="@drawable/bg_waveform_btn"
+                            android:padding="3dp"
+                            android:contentDescription="插入字幕（打轴）" />
+
                         <!-- 标签 -->
                         <TextView
                             android:id="@+id/tvWaveformLabel"

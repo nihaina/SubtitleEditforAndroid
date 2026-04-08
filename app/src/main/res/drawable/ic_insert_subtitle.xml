@@ -1,0 +1,22 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 向下箭头 -->
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M12,4 L12,14 M8,10 L12,14 L16,10"
+        android:strokeColor="@android:color/white"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- 左边长方形 -->
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M2,16 L9,16 L9,20 L2,20 Z" />
+    <!-- 右边长方形 -->
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M15,16 L22,16 L22,20 L15,20 Z" />
+</vector>

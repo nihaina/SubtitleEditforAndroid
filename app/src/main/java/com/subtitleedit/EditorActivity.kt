@@ -17,6 +17,7 @@ import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuItem
+import android.view.MotionEvent
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -489,37 +490,24 @@ class EditorActivity : AppCompatActivity() {
             Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
             return
         }
-        
+
         val selectedEntries = subtitleAdapter.getSelectedEntries()
         if (selectedEntries.isEmpty()) {
             Toast.makeText(this, "请先选择要删除的字幕", Toast.LENGTH_SHORT).show()
             return
         }
-        
+
         AlertDialog.Builder(this)
             .setTitle("删除")
             .setMessage("确定要删除选中的字幕吗？")
             .setPositiveButton("确定") { _, _ ->
-                // 保存要删除的条目对象
-                val entriesToDelete = selectedEntries.map { it.first }
+                val deletedIndices = selectedEntries.map { it.second }.toSet()
                 // 从后往前删除，避免索引变化
                 selectedEntries.sortedByDescending { it.second }.forEach { (_, position) ->
                     subtitleEntries.removeAt(position)
                 }
                 renumberEntries()
-                subtitleAdapter.submitList(subtitleEntries.toList())
-                // 从选中状态中移除被删除的条目
-                entriesToDelete.forEach { entry ->
-                    subtitleAdapter.removeSelectionByEntry(entry)
-                }
-                updateSelectedCountDisplay()
-                updateFormatInfo()
-
-                // 同步字幕到波形视图
-                if (isAudioFile) {
-                    binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
-                }
-
+                syncAfterDelete(deletedIndices)
                 markAsChanged()
                 Toast.makeText(this, "已删除 ${selectedEntries.size} 条字幕", Toast.LENGTH_SHORT).show()
             }
@@ -1391,19 +1379,7 @@ class EditorActivity : AppCompatActivity() {
             if (cutPositionValue < subtitleEntries.size) {
                 subtitleEntries.removeAt(cutPositionValue)
                 renumberEntries()
-                subtitleAdapter.submitList(subtitleEntries.toList())
-                // 同步选中状态
-                subtitleAdapter.syncSelectionWithCurrentList()
-                // 从选中状态中移除被删除的条目
-                entriesToDelete.forEach { entry ->
-                    subtitleAdapter.removeSelectionByEntry(entry)
-                }
-                updateSelectedCountDisplay()
-                updateFormatInfo()
-                // 同步字幕到波形视图
-                if (isAudioFile) {
-                    binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
-                }
+                syncAfterDelete(setOf(cutPositionValue))
                 markAsChanged()
             }
             cutPositionValue = -1
@@ -1416,19 +1392,7 @@ class EditorActivity : AppCompatActivity() {
                 }
             }
             renumberEntries()
-            subtitleAdapter.submitList(subtitleEntries.toList())
-            // 同步选中状态
-            subtitleAdapter.syncSelectionWithCurrentList()
-            // 从选中状态中移除被删除的条目
-            entriesToDelete.forEach { entry ->
-                subtitleAdapter.removeSelectionByEntry(entry)
-            }
-            updateSelectedCountDisplay()
-            updateFormatInfo()
-            // 同步字幕到波形视图
-            if (isAudioFile) {
-                binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
-            }
+            syncAfterDelete(cutPositionsValue.toSet())
             markAsChanged()
             cutPositionsValue = emptyList()
         }
@@ -1567,23 +1531,9 @@ class EditorActivity : AppCompatActivity() {
                 .setTitle("删除")
                 .setMessage("确定要删除此字幕吗？")
                 .setPositiveButton("确定") { _, _ ->
-                    // 保存要删除的条目对象
-                    val entryToDelete = subtitleEntries[position]
                     subtitleEntries.removeAt(position)
                     renumberEntries()
-                    subtitleAdapter.submitList(subtitleEntries.toList())
-                    // 同步选中状态
-                    subtitleAdapter.syncSelectionWithCurrentList()
-                    // 从选中状态中移除被删除的条目
-                    subtitleAdapter.removeSelectionByEntry(entryToDelete)
-                    updateSelectedCountDisplay()
-                    updateFormatInfo()
-
-                    // 同步字幕到波形视图
-                    if (isAudioFile) {
-                        binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
-                    }
-
+                    syncAfterDelete(setOf(position))
                     markAsChanged()
                     Toast.makeText(this, "已删除", Toast.LENGTH_SHORT).show()
                 }
@@ -1630,15 +1580,41 @@ class EditorActivity : AppCompatActivity() {
         updateSelectedCountDisplay()
         updateFormatInfo()
 
-        // 同步字幕到波形视图
+        // 同步字幕到波形视图，保持选中状态
         if (isAudioFile) {
-            binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
+            binding.waveformTimelineView.setSubtitlesKeepSelection(subtitleEntries.toList(), insertPosition)
         }
 
         markAsChanged()
         Toast.makeText(this, "已插入新字幕", Toast.LENGTH_SHORT).show()
     }
-    
+
+    private fun insertSubtitleFromTimestamp(startMs: Long, endMs: Long) {
+        val realStart = minOf(startMs, endMs)
+        val realEnd = maxOf(startMs, endMs)
+        if (realEnd - realStart < 100) return
+
+        val newEntry = SubtitleEntry().apply {
+            this.startTime = realStart
+            this.endTime = realEnd
+            this.text = "新字幕"
+        }
+        val insertPos = subtitleEntries.indexOfFirst { it.startTime > realStart }
+            .let { if (it == -1) subtitleEntries.size else it }
+
+        subtitleEntries.add(insertPos, newEntry)
+        renumberEntries()
+        subtitleAdapter.submitList(subtitleEntries.toList())
+
+        // 同步字幕到波形视图，保持选中状态
+        if (isAudioFile) {
+            binding.waveformTimelineView.setSubtitlesKeepSelection(subtitleEntries.toList(), insertPos)
+        }
+
+        markAsChanged()
+        Toast.makeText(this, "已插入新字幕", Toast.LENGTH_SHORT).show()
+    }
+
     /**
      * 显示针对选中字幕的时间偏移对话框
      */
@@ -2361,35 +2337,54 @@ class EditorActivity : AppCompatActivity() {
             .setTitle("删除")
             .setMessage("确定要删除选中的字幕吗？")
             .setPositiveButton("确定") { _, _ ->
-                // 保存要删除的条目对象
-                val entriesToDelete = selectedEntries.map { it.first }
+                val deletedIndices = selectedEntries.map { it.second }.toSet()
                 // 从后往前删除，避免索引变化
                 selectedEntries.sortedByDescending { it.second }.forEach { (_, position) ->
                     subtitleEntries.removeAt(position)
                 }
                 renumberEntries()
-                subtitleAdapter.submitList(subtitleEntries.toList())
-                // 同步选中状态
-                subtitleAdapter.syncSelectionWithCurrentList()
-                // 从选中状态中移除被删除的条目
-                entriesToDelete.forEach { entry ->
-                    subtitleAdapter.removeSelectionByEntry(entry)
-                }
-                updateSelectedCountDisplay()
-                updateFormatInfo()
-
-                // 同步字幕到波形视图
-                if (isAudioFile) {
-                    binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
-                }
-
+                syncAfterDelete(deletedIndices)
                 markAsChanged()
                 Toast.makeText(this, "已删除 ${selectedEntries.size} 条字幕", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("取消", null)
             .show()
     }
-    
+
+    /**
+     * 删除字幕后同步状态（保持未删除项的选中状态）
+     * @param deletedIndices 被删除的索引集合（删除前的索引）
+     */
+    private fun syncAfterDelete(deletedIndices: Set<Int>) {
+        // 保存删除前的所有选中索引
+        val allSelectedIndices = subtitleAdapter.getSelectedPositions()
+
+        // 计算删除后应该保持选中的索引（未被删除的选中项）
+        val remainingSelectedIndices = mutableSetOf<Int>()
+        allSelectedIndices.forEach { idx ->
+            if (idx !in deletedIndices) {
+                // 计算有多少个被删除的索引在当前索引之前
+                val offset = deletedIndices.count { it < idx }
+                remainingSelectedIndices.add(idx - offset)
+            }
+        }
+
+        // 先清空选中状态，避免旧对象引用问题
+        subtitleAdapter.clearSelection()
+
+        subtitleAdapter.submitList(subtitleEntries.toList()) {
+            // submitList 完成后，恢复选中状态
+            subtitleAdapter.setSelectionByIndices(remainingSelectedIndices)
+            updateSelectedCountDisplay()
+        }
+        updateFormatInfo()
+
+        // 同步字幕到波形视图，保持选中状态
+        if (isAudioFile) {
+            binding.waveformTimelineView.setSubtitlesAfterDelete(subtitleEntries.toList(), deletedIndices)
+        }
+    }
+
     /**
      * 取消所有选择的字幕
      */
@@ -2737,8 +2732,10 @@ class EditorActivity : AppCompatActivity() {
             markAsChanged()
         }
         
-        // 设置选中状态变化监听器（波形时间轴选中状态同步到字幕列表）
+        // 设置选中状态变化监听器（波形时间轴选中状态变化时的处理）
         binding.waveformTimelineView.onSelectedIndicesChangeListener = { indices ->
+            // 不同步选中状态到字幕列表，保持两者独立
+            // 只处理循环播放和滚动逻辑
             if (indices.isNotEmpty()) {
                 val firstSelectedIndex = indices.first()
                 if (firstSelectedIndex >= 0 && firstSelectedIndex < subtitleEntries.size) {
@@ -2861,6 +2858,22 @@ class EditorActivity : AppCompatActivity() {
             } else {
                 startSpectrogramGeneration()
             }
+        }
+
+        // ——— 打轴按钮 ———
+        var timestampStartMs = 0L
+        binding.btnInsertSubtitle.setOnLongClickListener {
+            timestampStartMs = audioCurrentPosition
+            binding.waveformTimelineView.startTimestamping(timestampStartMs)
+            true
+        }
+        binding.btnInsertSubtitle.setOnTouchListener { _, event ->
+            if ((event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL)
+                && binding.waveformTimelineView.isInTimestampingMode()) {
+                val endMs = binding.waveformTimelineView.stopTimestamping()
+                insertSubtitleFromTimestamp(timestampStartMs, endMs)
+            }
+            false
         }
     }
 

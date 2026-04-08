@@ -165,6 +165,13 @@ class WaveformTimelineView @JvmOverloads constructor(
     var onTimelineClickListener: ((Float) -> Unit)? = null
     var onSubtitleChangeListener: ((List<SubtitleEntry>) -> Unit)? = null
 
+    // ==================== 打轴模式 ====================
+
+    private var isTimestampingMode = false
+    private var timestampStartMs = 0L
+    private var timestampAnchorX = 0f
+    private var lastTouchXForTimestamp = 0f
+
     // ==================== 画笔（全部预创建，避免 onDraw 中分配对象）====================
 
     private val waveformPaint = Paint().apply {
@@ -238,6 +245,18 @@ class WaveformTimelineView @JvmOverloads constructor(
     private val waveformBgPaint = Paint().apply { color = Color.parseColor("#262626") }
     private val timeRulerBgPaint = Paint().apply { color = Color.parseColor("#1A1A1A") }
     private val subtitleBgPaint = Paint().apply { color = Color.parseColor("#1A1A1A") }
+
+    // ==================== 打轴预览画笔 ====================
+    private val timestampPreviewPaint = Paint().apply {
+        color = Color.argb(100, 76, 175, 80)  // 半透明绿色
+        style = Paint.Style.FILL
+    }
+    private val timestampPreviewBorderPaint = Paint().apply {
+        color = Color.argb(200, 76, 175, 80)
+        strokeWidth = 2f
+        style = Paint.Style.STROKE
+        isAntiAlias = false
+    }
 
     // ==================== 字幕边界虚线画笔 ====================
     private val subtitleEdgePaint = Paint().apply {
@@ -441,6 +460,10 @@ class WaveformTimelineView @JvmOverloads constructor(
         drawSubtitles(canvas, rulerH + waveH, subH)
         // 字幕边界虚线：独立 pass，不受 subtitle clipRect 限制，可穿入波形区
         drawSubtitleEdgeLines(canvas, rulerH, waveH + subH)
+        // 打轴预览框
+        if (isTimestampingMode) {
+            drawTimestampPreview(canvas, rulerH, waveH, subH)
+        }
         drawPlayhead(canvas, h)
     }
 
@@ -720,40 +743,53 @@ class WaveformTimelineView @JvmOverloads constructor(
         val boxH   = boxBot - boxTop
         val iconY  = boxTop + boxH / 2f + 8f
 
+        // 第一遍：绘制未选中的字幕块
         for ((index, sub) in subtitles.withIndex()) {
+            if (index in selectedIndices) continue
             if (sub.endTime < visibleStartMs || sub.startTime > visibleStartMs + visibleDurationMs) continue
 
             val x1 = timeToX(sub.startTime)
             val x2 = timeToX(sub.endTime)
             val rw = max(x2 - x1, 4f)
-            val rect = RectF(x1, boxTop, x1 + rw, boxBot)
+            canvas.drawRoundRect(RectF(x1, boxTop, x1 + rw, boxBot), 4f, 4f, subtitlePaint)
 
-            if (index !in selectedIndices) {
-                // 未选中：整块统一绿色
-                canvas.drawRoundRect(rect, 4f, 4f, subtitlePaint)
-            } else {
-                // 选中：三区分色
-                val hw = HANDLE_ZONE_W.coerceAtMost(rw / 3f)
+            if (sub.text.isNotEmpty()) {
+                val availW = rw - 20f
+                if (availW > 12f) {
+                    canvas.drawText(clipText(sub.text, availW), x1 + 10f, boxTop + boxH / 2f + 8f, textPaint)
+                }
+            }
+        }
 
-                // 左缩放柄
-                canvas.drawRoundRect(RectF(x1, boxTop, x1 + hw, boxBot), 4f, 4f, subtitleResizeHandlePaint)
-                // 右缩放柄
-                canvas.drawRoundRect(RectF(x1 + rw - hw, boxTop, x1 + rw, boxBot), 4f, 4f, subtitleResizeHandlePaint)
-                // 中间移动区
-                if (rw > hw * 2f) {
-                    canvas.drawRect(RectF(x1 + hw, boxTop, x1 + rw - hw, boxBot), subtitleMoveZonePaint)
-                }
-                // 柄上箭头图标
-                if (hw >= 14f) {
-                    canvas.drawText("‹", x1 + hw / 2f, iconY, handleIconPaint)
-                    canvas.drawText("›", x1 + rw - hw / 2f, iconY, handleIconPaint)
-                }
+        // 第二遍：绘制选中的字幕块（置顶）
+        for (index in selectedIndices) {
+            if (index < 0 || index >= subtitles.size) continue
+            val sub = subtitles[index]
+            if (sub.endTime < visibleStartMs || sub.startTime > visibleStartMs + visibleDurationMs) continue
+
+            val x1 = timeToX(sub.startTime)
+            val x2 = timeToX(sub.endTime)
+            val rw = max(x2 - x1, 4f)
+            val hw = HANDLE_ZONE_W.coerceAtMost(rw / 3f)
+
+            // 左缩放柄
+            canvas.drawRoundRect(RectF(x1, boxTop, x1 + hw, boxBot), 4f, 4f, subtitleResizeHandlePaint)
+            // 右缩放柄
+            canvas.drawRoundRect(RectF(x1 + rw - hw, boxTop, x1 + rw, boxBot), 4f, 4f, subtitleResizeHandlePaint)
+            // 中间移动区
+            if (rw > hw * 2f) {
+                canvas.drawRect(RectF(x1 + hw, boxTop, x1 + rw - hw, boxBot), subtitleMoveZonePaint)
+            }
+            // 柄上箭头图标
+            if (hw >= 14f) {
+                canvas.drawText("‹", x1 + hw / 2f, iconY, handleIconPaint)
+                canvas.drawText("›", x1 + rw - hw / 2f, iconY, handleIconPaint)
             }
 
             // 字幕文本
             if (sub.text.isNotEmpty()) {
-                val textMarginL = if (index in selectedIndices) HANDLE_ZONE_W.coerceAtMost(rw / 3f) + 4f else 10f
-                val textMarginR = if (index in selectedIndices) HANDLE_ZONE_W.coerceAtMost(rw / 3f) + 4f else 10f
+                val textMarginL = hw + 4f
+                val textMarginR = hw + 4f
                 val availW = rw - textMarginL - textMarginR
                 if (availW > 12f) {
                     canvas.drawText(clipText(sub.text, availW), x1 + textMarginL, boxTop + boxH / 2f + 8f, textPaint)
@@ -786,6 +822,20 @@ class WaveformTimelineView @JvmOverloads constructor(
                 canvas.drawLine(x2, lineTop, x2, lineBot, edgePaint)
             }
         }
+    }
+
+    private fun drawTimestampPreview(canvas: Canvas, rulerH: Float, waveH: Float, subH: Float) {
+        val startX = timeToX(timestampStartMs)
+        val endX = timestampAnchorX
+        val left = minOf(startX, endX)
+        val right = maxOf(startX, endX)
+        if (right - left < 2f) return
+
+        val top = rulerH
+        val bottom = rulerH + waveH + subH
+        val rect = RectF(left, top, right, bottom)
+        canvas.drawRect(rect, timestampPreviewPaint)
+        canvas.drawRect(rect, timestampPreviewBorderPaint)
     }
 
     /** O(log n) 二分裁剪文本 */
@@ -829,6 +879,23 @@ class WaveformTimelineView @JvmOverloads constructor(
     private fun isInSubtitleArea(y: Float) = y >= subtitleTrackY() && y <= height.toFloat()
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // 打轴模式：只处理波形图滚动，播放头锚点固定在屏幕上
+        if (isTimestampingMode) {
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    lastTouchXForTimestamp = event.x
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.x - lastTouchXForTimestamp
+                    val dMs = (-dx / width * visibleDurationMs).toLong()
+                    visibleStartMs = (visibleStartMs + dMs).coerceIn(0L, maxOf(0L, durationMs - visibleDurationMs))
+                    lastTouchXForTimestamp = event.x
+                    invalidate()
+                }
+            }
+            return true
+        }
+
         scaleGestureDetector.onTouchEvent(event)
         gestureDetector.onTouchEvent(event)
 
@@ -956,8 +1023,18 @@ class WaveformTimelineView @JvmOverloads constructor(
         invalidate()
     }
 
-    private fun findSubtitle(x: Float) = subtitles.firstOrNull {
-        x in timeToX(it.startTime)..timeToX(it.endTime)
+    private fun findSubtitle(x: Float): SubtitleEntry? {
+        // 优先返回选中的字幕块（置顶触摸层）
+        val selectedHit = selectedIndices.mapNotNull { idx ->
+            if (idx in subtitles.indices) subtitles[idx] else null
+        }.firstOrNull { x in timeToX(it.startTime)..timeToX(it.endTime) }
+        if (selectedHit != null) return selectedHit
+
+        // 再从后往前查找未选中的（后绘制的在上层）
+        return subtitles.lastOrNull { sub ->
+            val idx = subtitles.indexOf(sub)
+            idx !in selectedIndices && x in timeToX(sub.startTime)..timeToX(sub.endTime)
+        }
     }
 
     private fun detectDragMode(x: Float, sub: SubtitleEntry): DragMode {
@@ -1081,8 +1158,57 @@ class WaveformTimelineView @JvmOverloads constructor(
 
     fun setSubtitles(list: List<SubtitleEntry>) {
         subtitles = list.toMutableList()
+        selectedIndices = emptySet()
         post { invalidate() }
     }
+
+    fun setSubtitlesKeepSelection(list: List<SubtitleEntry>, insertedAt: Int) {
+        subtitles = list.toMutableList()
+        // 插入位置在选中索引之前或等于时，选中索引 +1
+        selectedIndices = selectedIndices.map { if (it >= insertedAt) it + 1 else it }.toSet()
+        onSelectedIndicesChangeListener?.invoke(selectedIndices)
+        post { invalidate() }
+    }
+
+    /**
+     * 删除字幕后保持选中状态
+     * @param list 新的字幕列表
+     * @param deletedIndices 被删除的索引集合（删除前的索引）
+     */
+    fun setSubtitlesAfterDelete(list: List<SubtitleEntry>, deletedIndices: Set<Int>) {
+        subtitles = list.toMutableList()
+        // 移除被删除的索引，并调整剩余索引
+        val sortedDeleted = deletedIndices.sorted()
+        selectedIndices = selectedIndices.mapNotNull { idx ->
+            if (idx in deletedIndices) {
+                null  // 被删除的索引移除
+            } else {
+                // 计算有多少个被删除的索引在当前索引之前
+                val offset = sortedDeleted.count { it < idx }
+                idx - offset
+            }
+        }.toSet()
+        onSelectedIndicesChangeListener?.invoke(selectedIndices)
+        post { invalidate() }
+    }
+
+    // ==================== 打轴模式 ====================
+
+    fun startTimestamping(startMs: Long) {
+        isTimestampingMode = true
+        timestampStartMs = startMs
+        timestampAnchorX = timeToX(startMs)
+        invalidate()
+    }
+
+    fun stopTimestamping(): Long {
+        isTimestampingMode = false
+        val endMs = xToTime(timestampAnchorX)
+        invalidate()
+        return endMs
+    }
+
+    fun isInTimestampingMode() = isTimestampingMode
 
     fun getSubtitles(): List<SubtitleEntry> = subtitles.toList()
 
