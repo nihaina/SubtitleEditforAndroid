@@ -27,6 +27,7 @@ import com.subtitleedit.view.DraggableScrollView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import android.media.MediaPlayer
@@ -36,6 +37,8 @@ import com.subtitleedit.util.AiTranslator
 import com.subtitleedit.view.WaveformTimelineView
 import com.subtitleedit.util.DraftManager
 import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.SearchReplaceEngine
+import com.subtitleedit.util.SearchReplaceOps
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
@@ -103,9 +106,7 @@ class EditorActivity : AppCompatActivity() {
     private var translateCancelled = false
     
     // 搜索相关
-    private var searchResults: List<Int> = emptyList()
-    private var currentSearchIndex: Int = -1
-    private var searchQuery: String = ""
+    private val searchEngine = SearchReplaceEngine()
     
     // 音频文件相关
     private var isAudioFile: Boolean = false
@@ -270,6 +271,7 @@ class EditorActivity : AppCompatActivity() {
         setupSearchBar()
         setupAudioPlayer()
         initializeMediaPlayer()
+        setupBackPressedHandler()
         
         if (filePath.isNotEmpty()) {
             if (isAudioFile) {
@@ -287,7 +289,7 @@ class EditorActivity : AppCompatActivity() {
         supportActionBar?.title = "未命名"
         
         binding.toolbar.setNavigationOnClickListener {
-            onBackPressed()
+            handleBackPressed()
         }
         
         binding.toolbar.setOnMenuItemClickListener { menuItem ->
@@ -352,12 +354,12 @@ class EditorActivity : AppCompatActivity() {
     
     private fun setupRecyclerView() {
         subtitleAdapter = SubtitleAdapter(
-            onItemClick = { _, position ->
+            onItemClick = { _, _ ->
                 // 同步循环目标
                 val selected = subtitleAdapter.getSelectedEntries()
                 loopSubtitleEntry = if (selected.isNotEmpty()) selected.first().first else null
             },
-            onItemLongClick = { entry, position ->
+            onItemLongClick = { _, position ->
                 showContextMenu(position)
             },
             onTimeClick = { entry, position, isStartTime ->
@@ -366,7 +368,7 @@ class EditorActivity : AppCompatActivity() {
             onTextClick = { entry, position ->
                 showTextEditDialog(entry, position)
             },
-            onJumpToTimeClick = { entry, position ->
+            onJumpToTimeClick = { entry, _ ->
                 jumpToSubtitleTime(entry)
             },
             onSetTimeClick = { entry, position ->
@@ -404,8 +406,7 @@ class EditorActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 val query = s?.toString() ?: ""
-                if (query.isNotEmpty() && query != searchQuery) {
-                    searchQuery = query
+                if (query.isNotEmpty() && searchEngine.setQueryIfChanged(query)) {
                     performSearch()
                 }
             }
@@ -454,8 +455,7 @@ class EditorActivity : AppCompatActivity() {
         binding.searchBar.visibility = android.view.View.VISIBLE
         binding.etSearch.requestFocus()
         binding.etSearch.text?.clear()
-        searchResults = emptyList()
-        currentSearchIndex = -1
+        searchEngine.clearResults()
         // 显示软键盘
         val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
         imm.showSoftInput(binding.etSearch, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
@@ -466,9 +466,7 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun hideSearchBar() {
         binding.searchBar.visibility = android.view.View.GONE
-        searchResults = emptyList()
-        currentSearchIndex = -1
-        searchQuery = ""
+        searchEngine.clearAll()
         binding.etSearch.text?.clear()
         binding.etReplace.text?.clear()
         // 清除列表中的搜索高亮
@@ -496,8 +494,8 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun replaceOne() {
         val replaceText = binding.etReplace.text?.toString() ?: ""
-        if (searchQuery.isEmpty() || searchResults.isEmpty()) {
-            Toast.makeText(this, "请先搜索内容", Toast.LENGTH_SHORT).show()
+        if (!searchEngine.hasSearchContext()) {
+            showShortToast("请先搜索内容")
             return
         }
         
@@ -513,49 +511,58 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun replaceOneInSourceView(replaceText: String) {
         val content = binding.etSourceView.text?.toString() ?: ""
-        if (currentSearchIndex < 0 || currentSearchIndex >= searchResults.size) {
-            Toast.makeText(this, "没有可替换的匹配项", Toast.LENGTH_SHORT).show()
+        val position = searchEngine.currentResultPositionOrNull()
+        if (position == null) {
+            showShortToast("没有可替换的匹配项")
             return
         }
-        
-        val position = searchResults[currentSearchIndex]
-        val newContent = content.replaceRange(
-            position,
-            position + searchQuery.length,
-            replaceText
+
+        val newContent = SearchReplaceOps.replaceInContentAt(
+            content = content,
+            start = position,
+            queryLength = searchEngine.query.length,
+            replacement = replaceText
         )
+        if (newContent == null) {
+            showShortToast("没有可替换的匹配项")
+            return
+        }
         binding.etSourceView.setText(newContent)
         sourceViewContent = newContent
         hasUnsavedChanges = true
         
         // 重新搜索以更新结果
         searchInSourceView()
-        Toast.makeText(this, "已替换 1 处", Toast.LENGTH_SHORT).show()
+        showShortToast("已替换 1 处")
     }
     
     /**
      * 在列表中替换一个匹配项
      */
     private fun replaceOneInRecyclerView(replaceText: String) {
-        if (currentSearchIndex < 0 || currentSearchIndex >= searchResults.size) {
-            Toast.makeText(this, "没有可替换的匹配项", Toast.LENGTH_SHORT).show()
+        val position = searchEngine.currentResultPositionOrNull()
+        if (position == null) {
+            showShortToast("没有可替换的匹配项")
             return
         }
-        
-        val position = searchResults[currentSearchIndex]
+
         val entry = subtitleEntries[position]
-        val newText = entry.text.replace(searchQuery, replaceText, ignoreCase = true)
+        val newText = SearchReplaceOps.replaceTextIfChanged(
+            originalText = entry.text,
+            query = searchEngine.query,
+            replacement = replaceText
+        )
         
-        if (entry.text != newText) {
+        if (newText != null) {
             entry.text = newText
             subtitleAdapter.notifyItemChanged(position)
             hasUnsavedChanges = true
             
             // 重新搜索以更新结果
             searchInRecyclerView()
-            Toast.makeText(this, "已替换 1 处", Toast.LENGTH_SHORT).show()
+            showShortToast("已替换 1 处")
         } else {
-            Toast.makeText(this, "当前项无可替换内容", Toast.LENGTH_SHORT).show()
+            showShortToast("当前项无可替换内容")
             // 跳转到下一个
             goToNextResult()
         }
@@ -566,8 +573,8 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun replaceAll() {
         val replaceText = binding.etReplace.text?.toString() ?: ""
-        if (searchQuery.isEmpty()) {
-            Toast.makeText(this, "请先搜索内容", Toast.LENGTH_SHORT).show()
+        if (searchEngine.query.isEmpty()) {
+            showShortToast("请先搜索内容")
             return
         }
         
@@ -583,40 +590,22 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun replaceAllInSourceView(replaceText: String) {
         val content = binding.etSourceView.text?.toString() ?: ""
-        var count = 0
-        val newContent = content.replace(Regex(Regex.escape(searchQuery)), replaceText)
-            .let {
-                // 计算替换次数
-                count = (content.length - it.length) / searchQuery.length + 
-                    (if (searchQuery.length != replaceText.length) 0 else 
-                        content.split(searchQuery, ignoreCase = true).size - 1)
-                it
-            }
+        val result = SearchReplaceOps.replaceAllInContent(
+            content = content,
+            query = searchEngine.query,
+            replacement = replaceText
+        )
         
-        // 更准确地计算替换次数
-        count = content.split(Regex(Regex.escape(searchQuery), RegexOption.IGNORE_CASE)).size - 1
-        
-        if (count > 0) {
-            AlertDialog.Builder(this)
-                .setTitle("确认替换")
-                .setMessage("确定要全部替换吗？共找到 $count 处匹配项。")
-                .setPositiveButton("确定") { _, _ ->
-                    binding.etSourceView.setText(newContent)
-                    sourceViewContent = newContent
+        if (result.matchCount > 0) {
+            showReplaceAllConfirm(result.matchCount) {
+                    binding.etSourceView.setText(result.newContent)
+                    sourceViewContent = result.newContent
                     hasUnsavedChanges = true
-                    
-                    // 清除搜索结果
-                    searchResults = emptyList()
-                    currentSearchIndex = -1
-                    searchQuery = ""
-                    binding.etSearch.text?.clear()
-                    
-                    Toast.makeText(this, "已替换 $count 处", Toast.LENGTH_SHORT).show()
-                }
-                .setNegativeButton("取消", null)
-                .show()
+                    clearSearchStateAfterReplace()
+                    showShortToast("已替换 ${result.matchCount} 处")
+            }
         } else {
-            Toast.makeText(this, "没有找到可替换的内容", Toast.LENGTH_SHORT).show()
+            showShortToast("没有找到可替换的内容")
         }
     }
     
@@ -624,42 +613,28 @@ class EditorActivity : AppCompatActivity() {
      * 在列表中全部替换
      */
     private fun replaceAllInRecyclerView(replaceText: String) {
-        var count = 0
-        val positionsToRefresh = mutableListOf<Int>()
+        val query = searchEngine.query
+        val updates = SearchReplaceOps.collectTextUpdates(
+            texts = subtitleEntries.map { it.text },
+            query = query,
+            replacement = replaceText
+        )
         
-        subtitleEntries.forEachIndexed { index, entry ->
-            if (entry.text.contains(searchQuery, ignoreCase = true)) {
-                val newText = entry.text.replace(Regex(Regex.escape(searchQuery), RegexOption.IGNORE_CASE), replaceText)
-                if (entry.text != newText) {
-                    entry.text = newText
-                    positionsToRefresh.add(index)
-                    count++
-                }
-            }
-        }
-        
-        if (count > 0) {
-            AlertDialog.Builder(this)
-                .setTitle("确认替换")
-                .setMessage("确定要全部替换吗？共找到 $count 处匹配项。")
-                .setPositiveButton("确定") { _, _ ->
-                    positionsToRefresh.forEach { position ->
+        if (updates.isNotEmpty()) {
+            showReplaceAllConfirm(updates.size) {
+                    updates.forEach { update ->
+                        subtitleEntries[update.index].text = update.newText
+                    }
+                    updates.forEach { update ->
+                        val position = update.index
                         subtitleAdapter.notifyItemChanged(position)
                     }
                     hasUnsavedChanges = true
-                    
-                    // 清除搜索结果
-                    searchResults = emptyList()
-                    currentSearchIndex = -1
-                    searchQuery = ""
-                    binding.etSearch.text?.clear()
-                    
-                    Toast.makeText(this, "已替换 $count 处", Toast.LENGTH_SHORT).show()
-                }
-                .setNegativeButton("取消", null)
-                .show()
+                    clearSearchStateAfterReplace()
+                    showShortToast("已替换 ${updates.size} 处")
+            }
         } else {
-            Toast.makeText(this, "没有找到可替换的内容", Toast.LENGTH_SHORT).show()
+            showShortToast("没有找到可替换的内容")
         }
     }
     
@@ -681,23 +656,15 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun searchInSourceView() {
         val content = binding.etSourceView.text?.toString() ?: ""
-        if (searchQuery.isEmpty() || content.isEmpty()) {
-            searchResults = emptyList()
-            currentSearchIndex = -1
+        if (searchEngine.query.isEmpty() || content.isEmpty()) {
+            searchEngine.clearResults()
             // 清除高亮
             val spannable = SpannableString(content)
             binding.etSourceView.setText(spannable, TextView.BufferType.EDITABLE)
             return
         }
-        
-        searchResults = mutableListOf()
-        var index = content.indexOf(searchQuery, ignoreCase = true)
-        while (index >= 0) {
-            (searchResults as MutableList).add(index)
-            index = content.indexOf(searchQuery, index + 1, ignoreCase = true)
-        }
-        
-        currentSearchIndex = if (searchResults.isNotEmpty()) 0 else -1
+
+        searchEngine.setResults(searchEngine.findMatchesInText(content))
         updateSearchResultDisplay()
         highlightSearchInSourceView()
     }
@@ -707,14 +674,16 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun highlightSearchInSourceView() {
         val content = binding.etSourceView.text?.toString() ?: ""
-        if (searchQuery.isEmpty() || searchResults.isEmpty()) return
+        val query = searchEngine.query
+        val results = searchEngine.results
+        if (query.isEmpty() || results.isEmpty()) return
         
         val spannable = SpannableString(content)
         val highlightColor = ContextCompat.getColor(this, R.color.inverse_primary)
         
         // 高亮所有搜索结果
-        searchResults.forEach { startIndex ->
-            val endIndex = (startIndex + searchQuery.length).coerceAtMost(content.length)
+        results.forEach { startIndex ->
+            val endIndex = (startIndex + query.length).coerceAtMost(content.length)
             spannable.setSpan(
                 BackgroundColorSpan(highlightColor),
                 startIndex,
@@ -730,9 +699,9 @@ class EditorActivity : AppCompatActivity() {
         }
         
         // 高亮当前选中的结果（使用不同颜色）
-        if (currentSearchIndex >= 0 && currentSearchIndex < searchResults.size) {
-            val currentIndex = searchResults[currentSearchIndex]
-            val endIndex = (currentIndex + searchQuery.length).coerceAtMost(content.length)
+        if (searchEngine.currentIndex in results.indices) {
+            val currentIndex = results[searchEngine.currentIndex]
+            val endIndex = (currentIndex + query.length).coerceAtMost(content.length)
             // 当前结果使用更亮的颜色
             spannable.setSpan(
                 BackgroundColorSpan(ContextCompat.getColor(this, R.color.secondary)),
@@ -745,8 +714,8 @@ class EditorActivity : AppCompatActivity() {
         binding.etSourceView.setText(spannable, TextView.BufferType.EDITABLE)
         
         // 滚动到当前结果
-        if (currentSearchIndex >= 0 && currentSearchIndex < searchResults.size) {
-            val position = searchResults[currentSearchIndex]
+        if (searchEngine.currentIndex in results.indices) {
+            val position = results[searchEngine.currentIndex]
             if (position < content.length) {
                 val linesBefore = content.substring(0, position).count { it == '\n' }
                 val estimatedScroll = linesBefore * 50
@@ -759,32 +728,32 @@ class EditorActivity : AppCompatActivity() {
      * 在列表中搜索（搜索字幕文本和时间）
      */
     private fun searchInRecyclerView() {
-        if (searchQuery.isEmpty()) {
-            searchResults = emptyList()
-            currentSearchIndex = -1
+        val query = searchEngine.query
+        if (query.isEmpty()) {
+            searchEngine.clearResults()
             return
         }
         
-        searchResults = subtitleEntries.mapIndexedNotNull { index, entry ->
+        val results = subtitleEntries.mapIndexedNotNull { index, entry ->
             // 搜索文本内容
-            if (entry.text.contains(searchQuery, ignoreCase = true)) {
+            if (entry.text.contains(query, ignoreCase = true)) {
                 index
             } else {
                 // 搜索时间（格式化为字符串后搜索）
                 val timeStr = TimeUtils.formatForDisplay(entry.startTime)
-                if (timeStr.contains(searchQuery, ignoreCase = true)) {
+                if (timeStr.contains(query, ignoreCase = true)) {
                     index
                 } else {
                     null
                 }
             }
         }
-        
-        currentSearchIndex = if (searchResults.isNotEmpty()) 0 else -1
+
+        searchEngine.setResults(results)
         updateSearchResultDisplay()
         
         // 跳转到第一个结果
-        if (searchResults.isNotEmpty()) {
+        if (results.isNotEmpty()) {
             scrollToSearchResult(0)
         }
     }
@@ -793,10 +762,10 @@ class EditorActivity : AppCompatActivity() {
      * 更新搜索结果显示
      */
     private fun updateSearchResultDisplay() {
-        if (searchResults.isEmpty()) {
+        if (searchEngine.results.isEmpty()) {
             Toast.makeText(this, getString(R.string.search_no_results), Toast.LENGTH_SHORT).show()
         } else {
-            val message = getString(R.string.search_result_count, searchResults.size, currentSearchIndex + 1)
+            val message = getString(R.string.search_result_count, searchEngine.results.size, searchEngine.currentIndex + 1)
             Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
         }
     }
@@ -805,9 +774,9 @@ class EditorActivity : AppCompatActivity() {
      * 滚动到搜索结果位置
      */
     private fun scrollToSearchResult(index: Int) {
-        if (index < 0 || index >= searchResults.size) return
-        
-        val position = searchResults[index]
+        if (index !in searchEngine.results.indices) return
+
+        val position = searchEngine.results[index]
         if (isSourceViewMode) {
             // 源视图模式：重新高亮并滚动
             highlightSearchInSourceView()
@@ -815,7 +784,7 @@ class EditorActivity : AppCompatActivity() {
             // 列表模式：滚动 RecyclerView
             binding.rvSubtitles.scrollToPosition(position)
             // 高亮显示（通过 adapter）
-            subtitleAdapter.highlightSearchResult(position, searchQuery)
+            subtitleAdapter.highlightSearchResult(position, searchEngine.query)
         }
     }
     
@@ -823,30 +792,18 @@ class EditorActivity : AppCompatActivity() {
      * 跳转到上一个搜索结果
      */
     private fun goToPreviousResult() {
-        if (searchResults.isEmpty()) return
-        
-        currentSearchIndex = if (currentSearchIndex <= 0) {
-            searchResults.size - 1
-        } else {
-            currentSearchIndex - 1
-        }
+        val index = searchEngine.moveToPrevious() ?: return
         updateSearchResultDisplay()
-        scrollToSearchResult(currentSearchIndex)
+        scrollToSearchResult(index)
     }
     
     /**
      * 跳转到下一个搜索结果
      */
     private fun goToNextResult() {
-        if (searchResults.isEmpty()) return
-        
-        currentSearchIndex = if (currentSearchIndex >= searchResults.size - 1) {
-            0
-        } else {
-            currentSearchIndex + 1
-        }
+        val index = searchEngine.moveToNext() ?: return
         updateSearchResultDisplay()
-        scrollToSearchResult(currentSearchIndex)
+        scrollToSearchResult(index)
     }
     
     private fun updateSelectedCountDisplay() {
@@ -860,29 +817,28 @@ class EditorActivity : AppCompatActivity() {
     
     private fun loadFile() {
         if (filePath.isEmpty() || currentFile == null) {
-            Toast.makeText(this, "文件路径无效", Toast.LENGTH_SHORT).show()
-            finish()
+            finishWithToast("文件路径无效")
             return
         }
-        
-        if (!currentFile!!.exists()) {
-            Toast.makeText(this, "文件不存在", Toast.LENGTH_SHORT).show()
-            finish()
+
+        val file = currentFile ?: run {
+            finishWithToast("文件路径无效")
             return
         }
-        
-        supportActionBar?.title = currentFile!!.name
+
+        if (!file.exists()) {
+            finishWithToast("文件不存在")
+            return
+        }
+
+        supportActionBar?.title = file.name
         // 使用用户设置的默认编码
         val settingsManager = SettingsManager.getInstance(this)
         currentCharset = settingsManager.getDefaultEncoding()
-        
-        try {
-            val content = FileUtils.readFile(currentFile!!, currentCharset)
-            parseContent(content)
-            hasUnsavedChanges = false
-        } catch (e: Exception) {
-            Toast.makeText(this, "读取文件失败：${e.message}", Toast.LENGTH_SHORT).show()
-        }
+
+        val content = readFileOrNull(file, "读取文件失败") ?: return
+        parseContent(content)
+        hasUnsavedChanges = false
     }
     
     private fun openFileFromUri(uri: Uri) {
@@ -925,18 +881,15 @@ class EditorActivity : AppCompatActivity() {
     
     private fun reloadFile() {
         val targetFile = if (isAudioFile) subtitleFile else currentFile
-        if (targetFile != null && targetFile.exists()) {
-            try {
-                val content = FileUtils.readFile(targetFile, currentCharset)
-                parseContent(content)
-                hasUnsavedChanges = false
-                Toast.makeText(this, "已切换编码为：${FileUtils.SUPPORTED_ENCODINGS.find { it.charset == currentCharset }?.displayName}", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                Toast.makeText(this, "切换编码失败：${e.message}", Toast.LENGTH_SHORT).show()
-            }
-        } else {
-            Toast.makeText(this, "当前文件无法重新加载编码，请通过「打开」功能重新选择文件", Toast.LENGTH_SHORT).show()
+        if (targetFile == null || !targetFile.exists()) {
+            showShortToast("当前文件无法重新加载编码，请通过「打开」功能重新选择文件")
+            return
         }
+
+        val content = readFileOrNull(targetFile, "切换编码失败") ?: return
+        parseContent(content)
+        hasUnsavedChanges = false
+        showShortToast("已切换编码为：${FileUtils.SUPPORTED_ENCODINGS.find { it.charset == currentCharset }?.displayName}")
     }
     
     private fun parseContent(content: String) {
@@ -961,9 +914,7 @@ class EditorActivity : AppCompatActivity() {
         }
         
         // 同步字幕到波形视图（仅音频模式有效）
-        if (isAudioFile) {
-            binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
-        }
+        syncWaveformSubtitles()
     }
     
     /**
@@ -1052,7 +1003,7 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun toggleSourceView() {
         if (currentFormat == SubtitleParser.SubtitleFormat.TXT) {
-            Toast.makeText(this, "TXT 文件只能使用源视图模式", Toast.LENGTH_SHORT).show()
+            showShortToast("TXT 文件只能使用源视图模式")
             return
         }
 
@@ -1092,31 +1043,22 @@ class EditorActivity : AppCompatActivity() {
      * 重新从磁盘读取原始文件后进入源视图
      */
     private fun reloadAndEnterSourceView() {
-        val file = if (isAudioFile) subtitleFile else currentFile
+        val file = getCurrentSubtitleFile()
 
         if (file != null && file.exists()) {
             // 有文件：重新读取磁盘内容，保证与已保存状态一致
-            try {
-                val freshContent = FileUtils.readFile(file, currentCharset)
-                originalFileContent = freshContent
-                sourceViewContent = freshContent
-            } catch (e: Exception) {
-                Toast.makeText(this, "读取文件失败：${e.message}", Toast.LENGTH_SHORT).show()
-                return
-            }
+            val freshContent = readFileOrNull(file, "读取文件失败") ?: return
+            originalFileContent = freshContent
+            sourceViewContent = freshContent
         } else {
             // 无文件（从剪贴板/URI 打开，或新建未保存）：退而序列化当前列表
-            sourceViewContent = when (currentFormat) {
-                SubtitleParser.SubtitleFormat.SRT -> SubtitleParser.toSRT(subtitleEntries)
-                SubtitleParser.SubtitleFormat.LRC -> SubtitleParser.toLRC(subtitleEntries)
-                else -> SubtitleParser.toSRT(subtitleEntries)
-            }
+            sourceViewContent = serializeEntriesForFormat(currentFormat)
             originalFileContent = sourceViewContent
-            Toast.makeText(this, "文件尚未保存，已从当前列表生成源视图内容", Toast.LENGTH_SHORT).show()
+            showShortToast("文件尚未保存，已从当前列表生成源视图内容")
         }
 
         enterSourceViewMode()
-        Toast.makeText(this, "已切换到源视图", Toast.LENGTH_SHORT).show()
+        showShortToast("已切换到源视图")
     }
 
     /**
@@ -1130,18 +1072,17 @@ class EditorActivity : AppCompatActivity() {
             originalFileContent = editedContent
             sourceViewContent   = editedContent
             // 标记有未保存更改（用户在源视图里编辑了内容）
-            if (editedContent != (if (isAudioFile) subtitleFile else currentFile)
-                    ?.let { FileUtils.readFile(it, currentCharset) }) {
+            if (isSourceContentModifiedComparedToFile(editedContent)) {
                 hasUnsavedChanges = true
             }
             exitSourceViewMode()
             updateFormatInfo()
-            Toast.makeText(this, "已切换到列表视图", Toast.LENGTH_SHORT).show()
+            showShortToast("已切换到列表视图")
         } catch (e: Exception) {
-            Toast.makeText(this, "解析失败：${e.message}", Toast.LENGTH_SHORT).show()
+            showShortToast("解析失败：${e.message}")
         }
     }
-    
+
     /**
      * 更新源视图菜单项标题
      */
@@ -1166,10 +1107,7 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun showContextMenu(position: Int) {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureListMode()) return
         
         // 保存长按位置
         longClickPosition = position
@@ -1205,7 +1143,7 @@ class EditorActivity : AppCompatActivity() {
             .setItems(items) { _, which ->
                 if (hasSelection && which == 0) {
                     // 用户选择了"只对勾选字幕生效"，显示针对选中项的操作菜单
-                    showSelectionContextMenu(selectedCount, hasClipboard)
+                    showSelectionContextMenu(hasClipboard)
                 } else {
                     // 常规操作，索引需要调整
                     val actualWhich = if (hasSelection) which - 1 else which
@@ -1216,7 +1154,7 @@ class EditorActivity : AppCompatActivity() {
                         3 -> copySingle(position)  // 复制
                         4 -> cutSingle(position)  // 剪切
                         5 -> if (hasClipboard) pasteToPosition(position) else {  // 粘贴
-                            Toast.makeText(this, "剪贴板为空，请先复制", Toast.LENGTH_SHORT).show()
+                            ensureClipboardNotEmpty()
                         }
                         6 -> deleteSingleSubtitle(position)  // 删除
                     }
@@ -1228,11 +1166,8 @@ class EditorActivity : AppCompatActivity() {
     /**
      * 显示针对选中项的操作菜单
      */
-    private fun showSelectionContextMenu(selectedCount: Int, hasClipboard: Boolean) {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
-        }
+    private fun showSelectionContextMenu(hasClipboard: Boolean) {
+        if (!ensureListMode()) return
         
         val itemsList = mutableListOf<String>()
         itemsList.add("时间偏移")
@@ -1257,7 +1192,7 @@ class EditorActivity : AppCompatActivity() {
                     2 -> copySelected()
                     3 -> cutSelected()
                     4 -> if (hasClipboard) pasteToSelected() else {
-                        Toast.makeText(this, "剪贴板为空，请先复制", Toast.LENGTH_SHORT).show()
+                        ensureClipboardNotEmpty()
                     }
                     5 -> deleteSelectedSubtitles()
                 }
@@ -1298,16 +1233,9 @@ class EditorActivity : AppCompatActivity() {
      * 剪切选中的字幕
      */
     private fun cutSelected() {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureListMode()) return
         
-        val selectedEntries = subtitleAdapter.getSelectedEntries()
-        if (selectedEntries.isEmpty()) {
-            Toast.makeText(this, "请先选择要剪切的字幕", Toast.LENGTH_SHORT).show()
-            return
-        }
+        val selectedEntries = requireSelectedEntries("请先选择要剪切的字幕") ?: return
         
         clipboardEntries = selectedEntries.map { it.first.copy() }
         isCutMode = true
@@ -1327,15 +1255,6 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun performCutDelete() {
         if (!isCutMode) return
-        
-        // 保存要删除的条目对象（用于从选中状态中移除）
-        val entriesToDelete = if (cutPositionValue >= 0 && cutPositionValue < subtitleEntries.size) {
-            listOf(subtitleEntries[cutPositionValue])
-        } else if (cutPositionsValue.isNotEmpty()) {
-            cutPositionsValue.filter { it < subtitleEntries.size }.map { subtitleEntries[it] }
-        } else {
-            emptyList()
-        }
         
         if (cutPositionValue >= 0) {
             // 单行剪切
@@ -1375,15 +1294,9 @@ class EditorActivity : AppCompatActivity() {
      * 粘贴到指定位置（单行替换）
      */
     private fun pasteToPosition(position: Int) {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureListMode()) return
         
-        if (clipboardEntries.isEmpty()) {
-            Toast.makeText(this, "剪贴板为空，请先复制", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureClipboardNotEmpty()) return
         
         if (position >= 0 && position < subtitleEntries.size) {
             // 如果是剪切模式，先删除原字幕
@@ -1395,23 +1308,10 @@ class EditorActivity : AppCompatActivity() {
                 // 单行粘贴，直接替换
                 val targetEntry = subtitleEntries[position]
                 val sourceEntry = clipboardEntries[0]
-                targetEntry.startTime = sourceEntry.startTime
-                targetEntry.endTime = sourceEntry.endTime
-                targetEntry.text = sourceEntry.text
-
-                // 刷新上一行以更新冲突检测
-                if (position > 0) {
-                    subtitleAdapter.notifyItemChanged(position - 1)
-                }
-                subtitleAdapter.notifyItemChanged(position)
-                // 刷新下一行以更新冲突检测
-                if (position + 1 < subtitleEntries.size) {
-                    subtitleAdapter.notifyItemChanged(position + 1)
-                }
+                copyEntryContent(sourceEntry, targetEntry)
+                notifyPositionsWithNeighbors(listOf(position))
                 // 同步字幕到波形视图
-                if (isAudioFile) {
-                    binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
-                }
+                syncWaveformSubtitles()
                 markAsChanged()
                 Toast.makeText(this, "已粘贴", Toast.LENGTH_SHORT).show()
             } else {
@@ -1433,35 +1333,18 @@ class EditorActivity : AppCompatActivity() {
             for (i in clipboardEntries.indices) {
                 val targetEntry = subtitleEntries[position + i]
                 val sourceEntry = clipboardEntries[i]
-                targetEntry.startTime = sourceEntry.startTime
-                targetEntry.endTime = sourceEntry.endTime
-                targetEntry.text = sourceEntry.text
+                copyEntryContent(sourceEntry, targetEntry)
             }
-            // 刷新第一个受影响位置的上一行以更新冲突检测
-            if (position > 0) {
-                subtitleAdapter.notifyItemChanged(position - 1)
-            }
-            // 刷新受影响的位置
-            for (i in 0 until clipboardEntries.size) {
-                subtitleAdapter.notifyItemChanged(position + i)
-            }
-            // 刷新最后一行的下一行以更新冲突检测
-            val lastAffectedPosition = position + clipboardEntries.size - 1
-            if (lastAffectedPosition + 1 < subtitleEntries.size) {
-                subtitleAdapter.notifyItemChanged(lastAffectedPosition + 1)
-            }
+            val affectedPositions = List(clipboardEntries.size) { index -> position + index }
+            notifyPositionsWithNeighbors(affectedPositions)
             // 同步字幕到波形视图
-            if (isAudioFile) {
-                binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
-            }
+            syncWaveformSubtitles()
         } else {
             // 剪贴板行数大于剩余行数，替换后插入多余行
             for (i in 0 until remainingRows) {
                 val targetEntry = subtitleEntries[position + i]
                 val sourceEntry = clipboardEntries[i]
-                targetEntry.startTime = sourceEntry.startTime
-                targetEntry.endTime = sourceEntry.endTime
-                targetEntry.text = sourceEntry.text
+                copyEntryContent(sourceEntry, targetEntry)
             }
             // 插入多余的行
             for (i in remainingRows until clipboardEntries.size) {
@@ -1471,9 +1354,7 @@ class EditorActivity : AppCompatActivity() {
             renumberEntries()
             subtitleAdapter.submitList(subtitleEntries.toList())
             // 同步字幕到波形视图
-            if (isAudioFile) {
-                binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
-            }
+            syncWaveformSubtitles()
         }
 
         markAsChanged()
@@ -1484,24 +1365,16 @@ class EditorActivity : AppCompatActivity() {
      * 删除单个字幕（长按的字幕）
      */
     private fun deleteSingleSubtitle(position: Int) {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureListMode()) return
         
         if (position >= 0 && position < subtitleEntries.size) {
-            AlertDialog.Builder(this)
-                .setTitle("删除")
-                .setMessage("确定要删除此字幕吗？")
-                .setPositiveButton("确定") { _, _ ->
+            showDeleteConfirm("确定要删除此字幕吗？") {
                     subtitleEntries.removeAt(position)
                     renumberEntries()
                     syncAfterDelete(setOf(position))
                     markAsChanged()
                     Toast.makeText(this, "已删除", Toast.LENGTH_SHORT).show()
-                }
-                .setNegativeButton("取消", null)
-                .show()
+            }
         }
     }
     
@@ -1509,10 +1382,7 @@ class EditorActivity : AppCompatActivity() {
      * 插入字幕到指定位置
      */
     private fun insertSubtitle(after: Boolean, refPosition: Int) {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureListMode()) return
 
         val insertPosition = if (after) refPosition + 1 else refPosition
 
@@ -1582,129 +1452,26 @@ class EditorActivity : AppCompatActivity() {
      * 显示针对选中字幕的时间偏移对话框
      */
     private fun showOffsetDialogForSelection() {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
+        if (!ensureListMode()) return
+        showOffsetInputDialog("时间偏移 (只对勾选字幕)") { totalOffset ->
+            applyOffsetToSelection(totalOffset)
         }
-        
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(50, 40, 50, 10)
-        }
-        
-        // 毫秒输入
-        val msLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        val etMs = EditText(this).apply {
-            hint = "毫秒"
-            inputType = EditorInfo.TYPE_CLASS_NUMBER or EditorInfo.TYPE_NUMBER_FLAG_SIGNED
-            setText("0")
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val tvMs = TextView(this).apply {
-            text = "毫秒"
-            setPadding(20, 0, 0, 0)
-        }
-        msLayout.addView(etMs)
-        msLayout.addView(tvMs)
-        
-        // 秒输入
-        val secLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        val etSec = EditText(this).apply {
-            hint = "秒"
-            inputType = EditorInfo.TYPE_CLASS_NUMBER or EditorInfo.TYPE_NUMBER_FLAG_SIGNED
-            setText("0")
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val tvSec = TextView(this).apply {
-            text = "秒"
-            setPadding(20, 0, 0, 0)
-        }
-        secLayout.addView(etSec)
-        secLayout.addView(tvSec)
-        
-        // 分输入
-        val minLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        val etMin = EditText(this).apply {
-            hint = "分"
-            inputType = EditorInfo.TYPE_CLASS_NUMBER or EditorInfo.TYPE_NUMBER_FLAG_SIGNED
-            setText("0")
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val tvMin = TextView(this).apply {
-            text = "分"
-            setPadding(20, 0, 0, 0)
-        }
-        minLayout.addView(etMin)
-        minLayout.addView(tvMin)
-        
-        // 小时输入
-        val hourLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        val etHour = EditText(this).apply {
-            hint = "小时"
-            inputType = EditorInfo.TYPE_CLASS_NUMBER or EditorInfo.TYPE_NUMBER_FLAG_SIGNED
-            setText("0")
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val tvHour = TextView(this).apply {
-            text = "小时"
-            setPadding(20, 0, 0, 0)
-        }
-        hourLayout.addView(etHour)
-        hourLayout.addView(tvHour)
-        
-        layout.addView(msLayout)
-        layout.addView(secLayout)
-        layout.addView(minLayout)
-        layout.addView(hourLayout)
-        
-        AlertDialog.Builder(this)
-            .setTitle("时间偏移 (只对勾选字幕)")
-            .setMessage("输入偏移量，正数延迟，负数提前")
-            .setView(layout)
-            .setPositiveButton("确定") { _, _ ->
-                val ms = etMs.text.toString().toLongOrNull() ?: 0L
-                val sec = etSec.text.toString().toLongOrNull() ?: 0L
-                val min = etMin.text.toString().toLongOrNull() ?: 0L
-                val hour = etHour.text.toString().toLongOrNull() ?: 0L
-                
-                val totalOffset = ms + sec * 1000 + min * 60000 + hour * 3600000
-                applyOffsetToSelection(totalOffset)
-            }
-            .setNegativeButton("取消", null)
-            .show()
     }
     
     /**
      * 对选中的字幕应用时间偏移
      */
     private fun applyOffsetToSelection(offsetMs: Long) {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureListMode()) return
         
-        val selectedEntries = subtitleAdapter.getSelectedEntries()
-        
-        if (selectedEntries.isEmpty()) {
-            Toast.makeText(this, "没有选中的字幕", Toast.LENGTH_SHORT).show()
-            return
-        }
+        val selectedEntries = requireSelectedEntries("没有选中的字幕") ?: return
         
         // 保存选中的条目对象（用于同步选中状态）
         val selectedEntryObjects = selectedEntries.map { it.first }.toSet()
         
         // 应用时间偏移
         selectedEntryObjects.forEach { entry ->
-            entry.startTime = (entry.startTime + offsetMs).coerceAtLeast(0)
-            entry.endTime = (entry.endTime + offsetMs).coerceAtLeast(entry.startTime + 1)
+            applyOffsetToEntry(entry, offsetMs)
         }
         
         // 刷新列表并同步选中状态
@@ -1712,14 +1479,11 @@ class EditorActivity : AppCompatActivity() {
         subtitleAdapter.syncSelectionWithCurrentList()
         
         markAsChanged()
-        Toast.makeText(this, "已对选中项应用 ${offsetMs}ms 偏移", Toast.LENGTH_SHORT).show()
+        showShortToast("已对选中项应用 ${offsetMs}ms 偏移")
     }
     
     private fun showTimeEditDialog(entry: SubtitleEntry, position: Int, isStartTime: Boolean) {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureListMode()) return
         
         val currentTime = if (isStartTime) entry.startTime else entry.endTime
         val editText = EditText(this).apply {
@@ -1742,12 +1506,9 @@ class EditorActivity : AppCompatActivity() {
                         entry.endTimeModified = true
                     }
                     
-                    // 直接刷新该位置
-                    subtitleAdapter.notifyItemChanged(position)
-                    markAsChanged()
-                    Toast.makeText(this, "已更新", Toast.LENGTH_SHORT).show()
+                    onEntryUpdated(position)
                 } else {
-                    Toast.makeText(this, "时间格式无效", Toast.LENGTH_SHORT).show()
+                    showShortToast("时间格式无效")
                 }
             }
             .setNegativeButton("取消", null)
@@ -1755,10 +1516,7 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun showTextEditDialog(entry: SubtitleEntry, position: Int) {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureListMode()) return
         
         val editText = EditText(this).apply {
             setText(entry.text)
@@ -1770,11 +1528,7 @@ class EditorActivity : AppCompatActivity() {
             .setView(editText)
             .setPositiveButton("确定") { _, _ ->
                 entry.text = editText.text.toString()
-                
-                // 直接刷新该位置
-                subtitleAdapter.notifyItemChanged(position)
-                markAsChanged()
-                Toast.makeText(this, "已更新", Toast.LENGTH_SHORT).show()
+                onEntryUpdated(position)
             }
             .setNegativeButton("取消", null)
             .show()
@@ -1784,16 +1538,9 @@ class EditorActivity : AppCompatActivity() {
      * 复制选中的字幕（支持多行）
      */
     private fun copySelected() {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureListMode()) return
         
-        val selectedEntries = subtitleAdapter.getSelectedEntries()
-        if (selectedEntries.isEmpty()) {
-            Toast.makeText(this, "请先选择要复制的字幕", Toast.LENGTH_SHORT).show()
-            return
-        }
+        val selectedEntries = requireSelectedEntries("请先选择要复制的字幕") ?: return
         
         clipboardEntries = selectedEntries.map { it.first.copy() }
         isCutMode = false
@@ -1804,21 +1551,11 @@ class EditorActivity : AppCompatActivity() {
      * 粘贴到选中的位置
      */
     private fun pasteToSelected() {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureListMode()) return
         
-        if (clipboardEntries.isEmpty()) {
-            Toast.makeText(this, "剪贴板为空，请先复制", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureClipboardNotEmpty()) return
         
-        val selectedEntries = subtitleAdapter.getSelectedEntries()
-        if (selectedEntries.isEmpty()) {
-            Toast.makeText(this, "请先选择要粘贴到的字幕", Toast.LENGTH_SHORT).show()
-            return
-        }
+        val selectedEntries = requireSelectedEntries("请先选择要粘贴到的字幕") ?: return
         
         // 检查行数是否匹配
         if (selectedEntries.size != clipboardEntries.size) {
@@ -1834,30 +1571,13 @@ class EditorActivity : AppCompatActivity() {
         // 按顺序一一对应粘贴
         selectedEntries.sortedBy { it.second }.forEachIndexed { index, (targetEntry, _) ->
             val sourceEntry = clipboardEntries[index]
-            targetEntry.startTime = sourceEntry.startTime
-            targetEntry.endTime = sourceEntry.endTime
-            targetEntry.text = sourceEntry.text
-        }
-        
-        // 刷新第一个选中位置的上一行以更新冲突检测
-        val firstPosition = selectedEntries.minByOrNull { it.second }?.second
-        if (firstPosition != null && firstPosition > 0) {
-            subtitleAdapter.notifyItemChanged(firstPosition - 1)
-        }
-        // 刷新所有选中的位置
-        selectedEntries.forEach { (_, position) ->
-            subtitleAdapter.notifyItemChanged(position)
-        }
-        // 刷新最后一个选中位置的下一行以更新冲突检测
-        val lastPosition = selectedEntries.maxByOrNull { it.second }?.second
-        if (lastPosition != null && lastPosition + 1 < subtitleEntries.size) {
-            subtitleAdapter.notifyItemChanged(lastPosition + 1)
+            copyEntryContent(sourceEntry, targetEntry)
         }
 
+        notifyPositionsWithNeighbors(selectedEntries.map { it.second })
+
         // 同步字幕到波形视图
-        if (isAudioFile) {
-            binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
-        }
+        syncWaveformSubtitles()
 
         markAsChanged()
         Toast.makeText(this, "已粘贴 ${clipboardEntries.size} 项", Toast.LENGTH_SHORT).show()
@@ -1866,20 +1586,53 @@ class EditorActivity : AppCompatActivity() {
     private fun markAsChanged() {
         hasUnsavedChanges = true
     }
+
+    private fun copyEntryContent(source: SubtitleEntry, target: SubtitleEntry) {
+        target.startTime = source.startTime
+        target.endTime = source.endTime
+        target.text = source.text
+    }
+
+    private fun applyOffsetToEntry(entry: SubtitleEntry, offsetMs: Long) {
+        entry.startTime = (entry.startTime + offsetMs).coerceAtLeast(0)
+        entry.endTime = (entry.endTime + offsetMs).coerceAtLeast(entry.startTime + 1)
+    }
+
+    private fun onEntryUpdated(position: Int, message: String = "已更新") {
+        subtitleAdapter.notifyItemChanged(position)
+        markAsChanged()
+        showShortToast(message)
+    }
+
+    private fun notifyPositionsWithNeighbors(positions: List<Int>) {
+        if (positions.isEmpty()) return
+        val allAffected = mutableSetOf<Int>()
+        positions.forEach { pos ->
+            if (pos in subtitleEntries.indices) {
+                allAffected.add(pos)
+            }
+            val prev = pos - 1
+            if (prev in subtitleEntries.indices) {
+                allAffected.add(prev)
+            }
+            val next = pos + 1
+            if (next in subtitleEntries.indices) {
+                allAffected.add(next)
+            }
+        }
+        allAffected.sorted().forEach { subtitleAdapter.notifyItemChanged(it) }
+    }
+
+    private fun syncWaveformSubtitles() {
+        if (!isAudioFile) return
+        binding.waveformTimelineView.setSubtitles(subtitleEntries.toList())
+    }
     
     private fun newFile() {
-        if (hasUnsavedChanges) {
-            AlertDialog.Builder(this)
-                .setTitle("提示")
-                .setMessage("当前文件有未保存的更改，确定要新建吗？")
-                .setPositiveButton("确定") { _, _ ->
-                    doNewFile()
-                }
-                .setNegativeButton("取消", null)
-                .show()
-        } else {
-            doNewFile()
-        }
+        runAfterUnsavedChangesConfirmed(
+            message = "当前文件有未保存的更改，确定要新建吗？",
+            action = ::doNewFile
+        )
     }
     
     private fun doNewFile() {
@@ -1904,18 +1657,10 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun openFile() {
-        if (hasUnsavedChanges) {
-            AlertDialog.Builder(this)
-                .setTitle("提示")
-                .setMessage("当前文件有未保存的更改，确定要打开新文件吗？")
-                .setPositiveButton("确定") { _, _ ->
-                    doOpenFile()
-                }
-                .setNegativeButton("取消", null)
-                .show()
-        } else {
-            doOpenFile()
-        }
+        runAfterUnsavedChangesConfirmed(
+            message = "当前文件有未保存的更改，确定要打开新文件吗？",
+            action = ::doOpenFile
+        )
     }
     
     private fun doOpenFile() {
@@ -1932,71 +1677,26 @@ class EditorActivity : AppCompatActivity() {
             currentFile
         }
         
-        if (targetFile == null && !isSourceViewMode) {
+        if (targetFile == null) {
             saveFileAs()
             return
         }
-        
-        try {
-            val content = if (isSourceViewMode) {
-                sourceViewContent
-            } else {
-                when (currentFormat) {
-                    SubtitleParser.SubtitleFormat.SRT -> SubtitleParser.toSRT(subtitleEntries)
-                    SubtitleParser.SubtitleFormat.LRC -> SubtitleParser.toLRC(subtitleEntries)
-                    SubtitleParser.SubtitleFormat.TXT -> SubtitleParser.toTXT(subtitleEntries)
-                    else -> SubtitleParser.toSRT(subtitleEntries)
-                }
-            }
-            
-            if (targetFile != null) {
-                FileUtils.writeFile(targetFile, content, currentCharset)
-            } else {
-                // 对于从 URI 打开的文件，无法直接保存，需要另存为
-                saveFileAs()
-                return
-            }
-            hasUnsavedChanges = false
-            Toast.makeText(this, "保存成功", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Toast.makeText(this, "保存失败：${e.message}", Toast.LENGTH_SHORT).show()
+
+        saveWithContent { content ->
+            FileUtils.writeFile(targetFile, content, currentCharset)
         }
     }
     
     private fun saveFileAs() {
-        val formatExtension = if (isSourceViewMode) {
-            "txt"
-        } else {
-            when (currentFormat) {
-                SubtitleParser.SubtitleFormat.SRT -> "srt"
-                SubtitleParser.SubtitleFormat.LRC -> "lrc"
-                SubtitleParser.SubtitleFormat.TXT -> "txt"
-                else -> "srt"
-            }
-        }
+        val formatExtension = if (isSourceViewMode) "txt" else getFormatExtension(currentFormat)
         saveFileLauncher.launch("subtitle.$formatExtension")
     }
     
     private fun saveFileToUri(uri: Uri) {
-        try {
-            val content = if (isSourceViewMode) {
-                sourceViewContent
-            } else {
-                when (currentFormat) {
-                    SubtitleParser.SubtitleFormat.SRT -> SubtitleParser.toSRT(subtitleEntries)
-                    SubtitleParser.SubtitleFormat.LRC -> SubtitleParser.toLRC(subtitleEntries)
-                    SubtitleParser.SubtitleFormat.TXT -> SubtitleParser.toTXT(subtitleEntries)
-                    else -> SubtitleParser.toSRT(subtitleEntries)
-                }
-            }
-            
+        saveWithContent { content ->
             contentResolver.openOutputStream(uri)?.use { outputStream ->
                 outputStream.write(content.toByteArray(currentCharset))
             }
-            hasUnsavedChanges = false
-            Toast.makeText(this, "保存成功", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Toast.makeText(this, "保存失败：${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
     
@@ -2019,55 +1719,34 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun showSelectRangeDialog() {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureListMode()) return
         
         val totalCount = subtitleEntries.size
         if (totalCount == 0) {
-            Toast.makeText(this, "没有字幕条目", Toast.LENGTH_SHORT).show()
+            showShortToast("没有字幕条目")
             return
         }
         
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(50, 40, 50, 10)
-        }
-        
+        val layout = createDialogInputContainer()
+        val rangeLabel = " (1-$totalCount)"
+
         // 起始输入
-        val startLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        val etStart = EditText(this).apply {
-            hint = "从"
-            inputType = EditorInfo.TYPE_CLASS_NUMBER
-            setText("1")
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val tvStart = TextView(this).apply {
-            text = " (1-$totalCount)"
-            setPadding(10, 0, 0, 0)
-        }
-        startLayout.addView(etStart)
-        startLayout.addView(tvStart)
+        val (startLayout, etStart) = createLabeledNumberInputRow(
+            hint = "从",
+            label = rangeLabel,
+            defaultValue = "1",
+            allowSigned = false,
+            labelPaddingStart = 10
+        )
         
         // 结束输入
-        val endLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        val etEnd = EditText(this).apply {
-            hint = "到"
-            inputType = EditorInfo.TYPE_CLASS_NUMBER
-            setText(totalCount.toString())
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val tvEnd = TextView(this).apply {
-            text = " (1-$totalCount)"
-            setPadding(10, 0, 0, 0)
-        }
-        endLayout.addView(etEnd)
-        endLayout.addView(tvEnd)
+        val (endLayout, etEnd) = createLabeledNumberInputRow(
+            hint = "到",
+            label = rangeLabel,
+            defaultValue = totalCount.toString(),
+            allowSigned = false,
+            labelPaddingStart = 10
+        )
         
         layout.addView(startLayout)
         layout.addView(endLayout)
@@ -2093,7 +1772,7 @@ class EditorActivity : AppCompatActivity() {
                     subtitleAdapter.toggleSelection(i)
                 }
                 updateSelectedCountDisplay()
-                Toast.makeText(this, "已选择第 $start 到 $end 条字幕", Toast.LENGTH_SHORT).show()
+                showShortToast("已选择第 $start 到 $end 条字幕")
             }
             .setNegativeButton("取消", null)
             .show()
@@ -2103,20 +1782,7 @@ class EditorActivity : AppCompatActivity() {
      * 保存草稿
      */
     private fun saveDraft() {
-        val content = if (isSourceViewMode) {
-            sourceViewContent
-        } else {
-            if (subtitleEntries.isEmpty()) {
-                Toast.makeText(this, "没有内容可保存", Toast.LENGTH_SHORT).show()
-                return
-            }
-            when (currentFormat) {
-                SubtitleParser.SubtitleFormat.SRT -> SubtitleParser.toSRT(subtitleEntries)
-                SubtitleParser.SubtitleFormat.LRC -> SubtitleParser.toLRC(subtitleEntries)
-                SubtitleParser.SubtitleFormat.TXT -> SubtitleParser.toTXT(subtitleEntries)
-                else -> SubtitleParser.toSRT(subtitleEntries)
-            }
-        }
+        val content = getCurrentEditableContent(requireNonEmptyList = true) ?: return
         
         val fileName = currentFile?.name ?: "未命名"
         val savedFileName = DraftManager.saveDraft(this, fileName, content)
@@ -2133,91 +1799,29 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun showOffsetDialog(longClickPos: Int = -1) {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
+        if (!ensureListMode()) return
+        showOffsetInputDialog("时间偏移") { totalOffset ->
+            applyOffset(totalOffset, longClickPos)
         }
-        
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(50, 40, 50, 10)
-        }
-        
-        // 毫秒输入
-        val msLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        val etMs = EditText(this).apply {
-            hint = "毫秒"
-            inputType = EditorInfo.TYPE_CLASS_NUMBER or EditorInfo.TYPE_NUMBER_FLAG_SIGNED
-            setText("0")
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val tvMs = TextView(this).apply {
-            text = "毫秒"
-            setPadding(20, 0, 0, 0)
-        }
-        msLayout.addView(etMs)
-        msLayout.addView(tvMs)
-        
-        // 秒输入
-        val secLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        val etSec = EditText(this).apply {
-            hint = "秒"
-            inputType = EditorInfo.TYPE_CLASS_NUMBER or EditorInfo.TYPE_NUMBER_FLAG_SIGNED
-            setText("0")
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val tvSec = TextView(this).apply {
-            text = "秒"
-            setPadding(20, 0, 0, 0)
-        }
-        secLayout.addView(etSec)
-        secLayout.addView(tvSec)
-        
-        // 分输入
-        val minLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        val etMin = EditText(this).apply {
-            hint = "分"
-            inputType = EditorInfo.TYPE_CLASS_NUMBER or EditorInfo.TYPE_NUMBER_FLAG_SIGNED
-            setText("0")
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val tvMin = TextView(this).apply {
-            text = "分"
-            setPadding(20, 0, 0, 0)
-        }
-        minLayout.addView(etMin)
-        minLayout.addView(tvMin)
-        
-        // 小时输入
-        val hourLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        val etHour = EditText(this).apply {
-            hint = "小时"
-            inputType = EditorInfo.TYPE_CLASS_NUMBER or EditorInfo.TYPE_NUMBER_FLAG_SIGNED
-            setText("0")
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val tvHour = TextView(this).apply {
-            text = "小时"
-            setPadding(20, 0, 0, 0)
-        }
-        hourLayout.addView(etHour)
-        hourLayout.addView(tvHour)
-        
-        layout.addView(msLayout)
-        layout.addView(secLayout)
-        layout.addView(minLayout)
-        layout.addView(hourLayout)
-        
+    }
+
+    private fun showOffsetInputDialog(
+        title: String,
+        onConfirm: (offsetMs: Long) -> Unit
+    ) {
+        val layout = createDialogInputContainer()
+        val (msRow, etMs) = createLabeledNumberInputRow("毫秒", "毫秒", "0", allowSigned = true)
+        val (secRow, etSec) = createLabeledNumberInputRow("秒", "秒", "0", allowSigned = true)
+        val (minRow, etMin) = createLabeledNumberInputRow("分", "分", "0", allowSigned = true)
+        val (hourRow, etHour) = createLabeledNumberInputRow("小时", "小时", "0", allowSigned = true)
+
+        layout.addView(msRow)
+        layout.addView(secRow)
+        layout.addView(minRow)
+        layout.addView(hourRow)
+
         AlertDialog.Builder(this)
-            .setTitle("时间偏移")
+            .setTitle(title)
             .setMessage("输入偏移量，正数延迟，负数提前")
             .setView(layout)
             .setPositiveButton("确定") { _, _ ->
@@ -2225,30 +1829,56 @@ class EditorActivity : AppCompatActivity() {
                 val sec = etSec.text.toString().toLongOrNull() ?: 0L
                 val min = etMin.text.toString().toLongOrNull() ?: 0L
                 val hour = etHour.text.toString().toLongOrNull() ?: 0L
-                
-                val totalOffset = ms + sec * 1000 + min * 60000 + hour * 3600000
-                applyOffset(totalOffset, longClickPos)
+                onConfirm(ms + sec * 1000 + min * 60000 + hour * 3600000)
             }
             .setNegativeButton("取消", null)
             .show()
     }
+
+    private fun createDialogInputContainer(): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(50, 40, 50, 10)
+        }
+    }
+
+    private fun createLabeledNumberInputRow(
+        hint: String,
+        label: String,
+        defaultValue: String,
+        allowSigned: Boolean,
+        labelPaddingStart: Int = 20
+    ): Pair<LinearLayout, EditText> {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        val input = EditText(this).apply {
+            this.hint = hint
+            inputType = if (allowSigned) {
+                EditorInfo.TYPE_CLASS_NUMBER or EditorInfo.TYPE_NUMBER_FLAG_SIGNED
+            } else {
+                EditorInfo.TYPE_CLASS_NUMBER
+            }
+            setText(defaultValue)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val text = TextView(this).apply {
+            this.text = label
+            setPadding(labelPaddingStart, 0, 0, 0)
+        }
+        row.addView(input)
+        row.addView(text)
+        return row to input
+    }
     
     private fun applyOffset(offsetMs: Long, longClickPos: Int = -1) {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
-        }
-        
-        // 需要刷新的位置列表
-        val positionsToRefresh = mutableListOf<Int>()
-        
+        if (!ensureListMode()) return
+
         when {
             // 有长按位置，对长按的那一行应用偏移（无论是否有选中状态）
             longClickPos >= 0 && longClickPos < subtitleEntries.size -> {
                 val entry = subtitleEntries[longClickPos]
-                entry.startTime = (entry.startTime + offsetMs).coerceAtLeast(0)
-                entry.endTime = (entry.endTime + offsetMs).coerceAtLeast(entry.startTime + 1)
-                positionsToRefresh.add(longClickPos)
+                applyOffsetToEntry(entry, offsetMs)
                 
                 // 刷新列表并同步选中状态（保持其他选中状态）
                 subtitleAdapter.submitList(subtitleEntries.toList())
@@ -2257,10 +1887,8 @@ class EditorActivity : AppCompatActivity() {
             // 没有长按位置但有选中的字幕，对选中的字幕应用偏移
             subtitleAdapter.getSelectedCount() > 0 -> {
                 val selectedEntries = subtitleAdapter.getSelectedEntries()
-                selectedEntries.forEach { (entry, position) ->
-                    entry.startTime = (entry.startTime + offsetMs).coerceAtLeast(0)
-                    entry.endTime = (entry.endTime + offsetMs).coerceAtLeast(entry.startTime + 1)
-                    positionsToRefresh.add(position)
+                selectedEntries.forEach { (entry, _) ->
+                    applyOffsetToEntry(entry, offsetMs)
                 }
                 
                 // 刷新列表并同步选中状态
@@ -2269,10 +1897,8 @@ class EditorActivity : AppCompatActivity() {
             }
             // 都没有，对所有字幕应用偏移
             else -> {
-                subtitleEntries.forEachIndexed { index, entry ->
-                    entry.startTime = (entry.startTime + offsetMs).coerceAtLeast(0)
-                    entry.endTime = (entry.endTime + offsetMs).coerceAtLeast(entry.startTime + 1)
-                    positionsToRefresh.add(index)
+                subtitleEntries.forEach { entry ->
+                    applyOffsetToEntry(entry, offsetMs)
                 }
                 
                 // 刷新列表
@@ -2281,25 +1907,15 @@ class EditorActivity : AppCompatActivity() {
         }
         
         markAsChanged()
-        Toast.makeText(this, "已应用 ${offsetMs}ms 偏移", Toast.LENGTH_SHORT).show()
+        showShortToast("已应用 ${offsetMs}ms 偏移")
     }
     
     private fun deleteSelectedSubtitles() {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureListMode()) return
         
-        val selectedEntries = subtitleAdapter.getSelectedEntries()
-        if (selectedEntries.isEmpty()) {
-            Toast.makeText(this, "请先选择要删除的字幕", Toast.LENGTH_SHORT).show()
-            return
-        }
+        val selectedEntries = requireSelectedEntries("请先选择要删除的字幕") ?: return
         
-        AlertDialog.Builder(this)
-            .setTitle("删除")
-            .setMessage("确定要删除选中的字幕吗？")
-            .setPositiveButton("确定") { _, _ ->
+        showDeleteConfirm("确定要删除选中的字幕吗？") {
                 val deletedIndices = selectedEntries.map { it.second }.toSet()
                 // 从后往前删除，避免索引变化
                 selectedEntries.sortedByDescending { it.second }.forEach { (_, position) ->
@@ -2309,9 +1925,7 @@ class EditorActivity : AppCompatActivity() {
                 syncAfterDelete(deletedIndices)
                 markAsChanged()
                 Toast.makeText(this, "已删除 ${selectedEntries.size} 条字幕", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("取消", null)
-            .show()
+        }
     }
 
     /**
@@ -2361,30 +1975,20 @@ class EditorActivity : AppCompatActivity() {
      * 取消所有选择的字幕
      */
     private fun cancelSelection() {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureListMode()) return
         
         subtitleAdapter.clearSelection()
         updateSelectedCountDisplay()
-        Toast.makeText(this, "已取消选择", Toast.LENGTH_SHORT).show()
+        showShortToast("已取消选择")
     }
     
     /**
      * 显示 AI 翻译对话框
      */
     private fun showAiTranslate() {
-        if (isSourceViewMode) {
-            Toast.makeText(this, "源视图模式下不支持此操作", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureListMode()) return
         
-        val selectedEntries = subtitleAdapter.getSelectedEntries()
-        if (selectedEntries.isEmpty()) {
-            Toast.makeText(this, "请先选择要翻译的字幕", Toast.LENGTH_SHORT).show()
-            return
-        }
+        val selectedEntries = requireSelectedEntries("请先选择要翻译的字幕") ?: return
         
         // 检查 API 设置
         val settingsManager = SettingsManager.getInstance(this)
@@ -2449,28 +2053,18 @@ class EditorActivity : AppCompatActivity() {
                     isCancelled = { translateCancelled }
                 )
                 
-                progressDialog.dismiss()
-                isTranslating = false
+                finishTranslation(progressDialog)
                 
                 if (result.isSuccess) {
                     val translatedTexts = result.getOrNull() ?: emptyList()
                     showTranslationResult(selectedEntries, translatedTexts)
                 } else {
-                    val error = result.exceptionOrNull()
-                    Toast.makeText(
-                        this@EditorActivity,
-                        "翻译失败：${error?.message ?: "未知错误"}",
-                        Toast.LENGTH_LONG
-                    ).show()
+                    val errorMessage = result.exceptionOrNull()?.message ?: "未知错误"
+                    showTranslationError(errorMessage)
                 }
             } catch (e: Exception) {
-                progressDialog.dismiss()
-                isTranslating = false
-                Toast.makeText(
-                    this@EditorActivity,
-                    "翻译失败：${e.message}",
-                    Toast.LENGTH_LONG
-                ).show()
+                finishTranslation(progressDialog)
+                showTranslationError(e.message ?: "未知错误")
             }
         }
     }
@@ -2483,7 +2077,7 @@ class EditorActivity : AppCompatActivity() {
         translatedTexts: List<String>
     ) {
         if (translatedTexts.size != selectedEntries.size) {
-            Toast.makeText(this, "翻译结果数量不匹配", Toast.LENGTH_SHORT).show()
+            showShortToast("翻译结果数量不匹配")
             return
         }
         
@@ -2519,10 +2113,22 @@ class EditorActivity : AppCompatActivity() {
                     subtitleAdapter.notifyItemChanged(position)
                 }
                 markAsChanged()
-                Toast.makeText(this, "翻译已应用", Toast.LENGTH_SHORT).show()
+                showShortToast("翻译已应用")
             }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    private fun finishTranslation(progressDialog: AlertDialog) {
+        if (progressDialog.isShowing) {
+            progressDialog.dismiss()
+        }
+        isTranslating = false
+        translateJob = null
+    }
+
+    private fun showTranslationError(message: String) {
+        Toast.makeText(this, "翻译失败：$message", Toast.LENGTH_LONG).show()
     }
     
     private fun renumberEntries() {
@@ -2532,12 +2138,7 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun updateFormatInfo() {
-        val formatName = when (currentFormat) {
-            SubtitleParser.SubtitleFormat.SRT -> "SRT"
-            SubtitleParser.SubtitleFormat.LRC -> "LRC"
-            SubtitleParser.SubtitleFormat.TXT -> "TXT"
-            else -> "未知"
-        }
+        val formatName = getFormatDisplayName(currentFormat)
         val countInfo = if (isSourceViewMode) {
             val lines = sourceViewContent.lines().size
             "行数：$lines"
@@ -2551,8 +2152,172 @@ class EditorActivity : AppCompatActivity() {
             subtitleAdapter.refreshAllItems()
         }
     }
+
+    private fun getFormatDisplayName(format: SubtitleParser.SubtitleFormat): String {
+        return when (format) {
+            SubtitleParser.SubtitleFormat.SRT -> "SRT"
+            SubtitleParser.SubtitleFormat.LRC -> "LRC"
+            SubtitleParser.SubtitleFormat.TXT -> "TXT"
+            else -> "未知"
+        }
+    }
+
+    private fun getFormatExtension(format: SubtitleParser.SubtitleFormat): String {
+        return when (format) {
+            SubtitleParser.SubtitleFormat.SRT -> "srt"
+            SubtitleParser.SubtitleFormat.LRC -> "lrc"
+            SubtitleParser.SubtitleFormat.TXT -> "txt"
+            else -> "srt"
+        }
+    }
+
+    private fun serializeEntriesForFormat(format: SubtitleParser.SubtitleFormat): String {
+        return when (format) {
+            SubtitleParser.SubtitleFormat.SRT -> SubtitleParser.toSRT(subtitleEntries)
+            SubtitleParser.SubtitleFormat.LRC -> SubtitleParser.toLRC(subtitleEntries)
+            SubtitleParser.SubtitleFormat.TXT -> SubtitleParser.toTXT(subtitleEntries)
+            else -> SubtitleParser.toSRT(subtitleEntries)
+        }
+    }
+
+    private fun getCurrentEditableContent(requireNonEmptyList: Boolean = false): String? {
+        if (isSourceViewMode) return sourceViewContent
+        if (requireNonEmptyList && subtitleEntries.isEmpty()) {
+            showShortToast("没有内容可保存")
+            return null
+        }
+        return serializeEntriesForFormat(currentFormat)
+    }
+
+    private fun ensureListMode(): Boolean {
+        if (!isSourceViewMode) return true
+        showShortToast("源视图模式下不支持此操作")
+        return false
+    }
+
+    private fun ensureAudioMode(): Boolean {
+        if (isAudioFile) return true
+        showShortToast("此功能仅在打开音频文件时可用")
+        return false
+    }
+
+    private fun ensureClipboardNotEmpty(): Boolean {
+        if (clipboardEntries.isNotEmpty()) return true
+        showShortToast("剪贴板为空，请先复制")
+        return false
+    }
+
+    private fun requireSelectedEntries(emptyMessage: String): List<Pair<SubtitleEntry, Int>>? {
+        val selectedEntries = subtitleAdapter.getSelectedEntries()
+        if (selectedEntries.isEmpty()) {
+            showShortToast(emptyMessage)
+            return null
+        }
+        return selectedEntries
+    }
+
+    private fun showConfirmDialog(
+        title: String,
+        message: String,
+        positiveText: String = "确定",
+        negativeText: String = "取消",
+        onConfirm: () -> Unit
+    ) {
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton(positiveText) { _, _ -> onConfirm() }
+            .setNegativeButton(negativeText, null)
+            .show()
+    }
+
+    private fun showUnsavedChangesConfirm(message: String, onConfirm: () -> Unit) {
+        showConfirmDialog(
+            title = "提示",
+            message = message,
+            onConfirm = onConfirm
+        )
+    }
+
+    private fun runAfterUnsavedChangesConfirmed(
+        message: String,
+        action: () -> Unit
+    ) {
+        if (!hasUnsavedChanges) {
+            action()
+            return
+        }
+        showUnsavedChangesConfirm(message, action)
+    }
+
+    private fun showReplaceAllConfirm(count: Int, onConfirm: () -> Unit) {
+        showConfirmDialog(
+            title = "确认替换",
+            message = "确定要全部替换吗？共找到 $count 处匹配项。",
+            onConfirm = onConfirm
+        )
+    }
+
+    private fun showDeleteConfirm(message: String, onConfirm: () -> Unit) {
+        showConfirmDialog(
+            title = "删除",
+            message = message,
+            onConfirm = onConfirm
+        )
+    }
+
+    private fun clearSearchStateAfterReplace() {
+        searchEngine.clearAll()
+        binding.etSearch.text?.clear()
+    }
+
+    private fun getCurrentSubtitleFile(): File? {
+        return if (isAudioFile) subtitleFile else currentFile
+    }
+
+    private fun isSourceContentModifiedComparedToFile(editedContent: String): Boolean {
+        val file = getCurrentSubtitleFile() ?: return true
+        return editedContent != FileUtils.readFile(file, currentCharset)
+    }
+
+    private fun readFileOrNull(file: File, failurePrefix: String): String? {
+        return try {
+            FileUtils.readFile(file, currentCharset)
+        } catch (e: Exception) {
+            showShortToast("$failurePrefix：${e.message}")
+            null
+        }
+    }
+
+    private fun finishWithToast(message: String) {
+        showShortToast(message)
+        finish()
+    }
+
+    private inline fun saveWithContent(writeAction: (String) -> Unit) {
+        try {
+            val content = getCurrentEditableContent() ?: return
+            writeAction(content)
+            hasUnsavedChanges = false
+            showShortToast("保存成功")
+        } catch (e: Exception) {
+            showShortToast("保存失败：${e.message}")
+        }
+    }
+
+    private fun showShortToast(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
     
-    override fun onBackPressed() {
+    private fun setupBackPressedHandler() {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                handleBackPressed()
+            }
+        })
+    }
+
+    private fun handleBackPressed() {
         if (hasUnsavedChanges) {
             AlertDialog.Builder(this)
                 .setTitle("提示")
@@ -2567,7 +2332,7 @@ class EditorActivity : AppCompatActivity() {
                 .setNeutralButton("取消", null)
                 .show()
         } else {
-            super.onBackPressed()
+            finish()
         }
     }
     
@@ -2752,7 +2517,7 @@ class EditorActivity : AppCompatActivity() {
             isWaveformExpanded = !isWaveformExpanded
             binding.timelineContainer.visibility =
                 if (isWaveformExpanded) android.view.View.VISIBLE else android.view.View.GONE
-            (binding.btnToggleWaveform as TextView).text =
+            binding.btnToggleWaveform.text =
                 if (isWaveformExpanded) "▼" else "▶"
             updateGenerateButton()
             refreshWaveformToolbarState()
@@ -3252,13 +3017,10 @@ class EditorActivity : AppCompatActivity() {
      * 跳转到字幕的开始时间
      */
     private fun jumpToSubtitleTime(entry: SubtitleEntry) {
-        if (!isAudioFile) {
-            Toast.makeText(this, "此功能仅在打开音频文件时可用", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureAudioMode()) return
         
         seekTo(entry.startTime)
-        Toast.makeText(this, "已跳转到 ${TimeUtils.formatForDisplay(entry.startTime)}", Toast.LENGTH_SHORT).show()
+        showShortToast("已跳转到 ${TimeUtils.formatForDisplay(entry.startTime)}")
     }
     
     
@@ -3267,10 +3029,7 @@ class EditorActivity : AppCompatActivity() {
      * 将字幕的开始时间设置为当前音频进度
      */
     private fun setSubtitleTimeToCurrentPosition(entry: SubtitleEntry, position: Int) {
-        if (!isAudioFile) {
-            Toast.makeText(this, "此功能仅在打开音频文件时可用", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!ensureAudioMode()) return
         
         val newStartTime = audioCurrentPosition
         entry.startTime = newStartTime
@@ -3282,7 +3041,7 @@ class EditorActivity : AppCompatActivity() {
         if (newStartTime >= entry.endTime) {
             Toast.makeText(this, "开始时间已设置，但大于结束时间，请调整结束时间", Toast.LENGTH_LONG).show()
         } else {
-            Toast.makeText(this, "已将开始时间设置为 ${TimeUtils.formatForDisplay(newStartTime)}", Toast.LENGTH_SHORT).show()
+            showShortToast("已将开始时间设置为 ${TimeUtils.formatForDisplay(newStartTime)}")
         }
     }
     
@@ -3353,3 +3112,4 @@ class EditorActivity : AppCompatActivity() {
         Toast.makeText(this, "播放速率已设置为 ${label}", Toast.LENGTH_SHORT).show()
     }
 }
+

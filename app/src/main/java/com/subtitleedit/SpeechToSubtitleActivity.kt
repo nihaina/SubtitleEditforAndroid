@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.util.Log
 import android.view.View
+import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
@@ -147,6 +148,14 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         )
         formatAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         binding.spinnerOutputFormat.adapter = formatAdapter
+        binding.spinnerOutputFormat.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                updateVadOptionState()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        updateVadOptionState()
     }
 
     private fun setupButtons() {
@@ -312,6 +321,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                     decoderPath = decoderPath,
                     tokensPath = tokensPath,
                     vadModelPath = vadModelPath,
+                    useVad = shouldUseVad(),
                     language = selectedLanguage,
                     contentResolver = contentResolver,
                     context = this@SpeechToSubtitleActivity
@@ -443,6 +453,20 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             "TXT" -> SubtitleParser.toTXT(entries)
             else -> SubtitleParser.toSRT(entries)
         }
+    }
+
+    private fun shouldUseVad(): Boolean {
+        val format = formatOptions[binding.spinnerOutputFormat.selectedItemPosition]
+        if (format != "TXT") {
+            return true
+        }
+        return !binding.switchDisableVadForTxt.isChecked
+    }
+
+    private fun updateVadOptionState() {
+        val isTxt = formatOptions[binding.spinnerOutputFormat.selectedItemPosition] == "TXT"
+        binding.switchDisableVadForTxt.isEnabled = isTxt
+        binding.tvDisableVadHint.alpha = if (isTxt) 1f else 0.6f
     }
 
     /**

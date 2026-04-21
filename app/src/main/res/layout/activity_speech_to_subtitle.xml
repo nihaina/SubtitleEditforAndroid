@@ -150,6 +150,23 @@
                     android:layout_marginTop="8dp"
                     android:minHeight="48dp" />
 
+                <com.google.android.material.switchmaterial.SwitchMaterial
+                    android:id="@+id/switchDisableVadForTxt"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="TXT格式不使用VAD分段"
+                    android:textColor="@color/on_surface" />
+
+                <TextView
+                    android:id="@+id/tvDisableVadHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="仅在输出格式为 TXT 时生效"
+                    android:textSize="13sp"
+                    android:textColor="@color/on_surface_variant" />
+
             </LinearLayout>
 
         </com.google.android.material.card.MaterialCardView>
@@ -195,54 +212,6 @@
                     android:layout_marginTop="8dp"
                     android:text="选择目录"
                     style="@style/Widget.Material3.Button.OutlinedButton" />
-
-            </LinearLayout>
-
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- 高级选项 -->
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginHorizontal="16dp"
-            android:layout_marginBottom="16dp"
-            app:cardCornerRadius="12dp"
-            app:cardElevation="2dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
-
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="保存波形图"
-                        android:textSize="16sp"
-                        android:textColor="@color/on_surface" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchSaveWaveform"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
-
-                </LinearLayout>
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="生成字幕的同时保存波形图文件"
-                    android:textSize="14sp"
-                    android:textColor="@color/on_surface_variant" />
 
             </LinearLayout>
 

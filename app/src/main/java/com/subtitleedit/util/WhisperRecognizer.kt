@@ -20,6 +20,7 @@ class WhisperRecognizer(
     private val decoderPath: String,
     private val tokensPath: String,
     private val vadModelPath: String = "",
+    private val useVad: Boolean = true,
     private val language: String = "auto",
     private val contentResolver: ContentResolver,
     private val context: Context
@@ -78,54 +79,59 @@ class WhisperRecognizer(
             Log.d(TAG, "  decoder: ${decoderFile.absolutePath}")
             Log.d(TAG, "  tokens: ${tokensFile.absolutePath}")
 
-            // 初始化 VAD（如果提供了模型路径，使用外部模型；否则使用内置模型）
-            if (vadModelPath.isNotEmpty()) {
-                val vadFile = copyUriToCache(Uri.parse(vadModelPath), "vad.onnx")
-                if (vadFile != null) {
-                    Log.d(TAG, "  vad: ${vadFile.absolutePath}")
-                    val vadConfig = VadModelConfig(
-                        sileroVadModelConfig = SileroVadModelConfig(
-                            model = vadFile.absolutePath,
-                            threshold = 0.3F,  // 适中的阈值
-                            minSilenceDuration = 0.3F,  // 0.3秒静音就分段
-                            minSpeechDuration = 0.25F,  // 最短语音 0.25 秒
-                            windowSize = 512,
-                            maxSpeechDuration = 10.0F  // 单段最长 10 秒，超过就强制分段
-                        ),
-                        sampleRate = SAMPLE_RATE,
-                        numThreads = 2,
-                        provider = "cpu",
-                        debug = true
-                    )
-                    vad = Vad(assetManager = null, config = vadConfig)
-                    Log.d(TAG, "VAD 初始化成功（外部模型）")
+            if (useVad) {
+                // 初始化 VAD（如果提供了模型路径，使用外部模型；否则使用内置模型）
+                if (vadModelPath.isNotEmpty()) {
+                    val vadFile = copyUriToCache(Uri.parse(vadModelPath), "vad.onnx")
+                    if (vadFile != null) {
+                        Log.d(TAG, "  vad: ${vadFile.absolutePath}")
+                        val vadConfig = VadModelConfig(
+                            sileroVadModelConfig = SileroVadModelConfig(
+                                model = vadFile.absolutePath,
+                                threshold = 0.3F,  // 适中的阈值
+                                minSilenceDuration = 0.3F,  // 0.3秒静音就分段
+                                minSpeechDuration = 0.25F,  // 最短语音 0.25 秒
+                                windowSize = 512,
+                                maxSpeechDuration = 10.0F  // 单段最长 10 秒，超过就强制分段
+                            ),
+                            sampleRate = SAMPLE_RATE,
+                            numThreads = 2,
+                            provider = "cpu",
+                            debug = true
+                        )
+                        vad = Vad(assetManager = null, config = vadConfig)
+                        Log.d(TAG, "VAD 初始化成功（外部模型）")
+                    } else {
+                        Log.w(TAG, "VAD 外部模型文件读取失败")
+                    }
                 } else {
-                    Log.w(TAG, "VAD 外部模型文件读取失败")
+                    // 使用内置的 VAD 模型
+                    try {
+                        Log.d(TAG, "使用内置 VAD 模型")
+                        val settingsManager = SettingsManager.getInstance(context)
+                        val vadConfig = VadModelConfig(
+                            sileroVadModelConfig = SileroVadModelConfig(
+                                model = "silero_vad.onnx",
+                                threshold = settingsManager.getVadThreshold(),
+                                minSilenceDuration = settingsManager.getVadMinSilenceDuration(),
+                                minSpeechDuration = settingsManager.getVadMinSpeechDuration(),
+                                windowSize = 512,
+                                maxSpeechDuration = settingsManager.getVadMaxSpeechDuration()
+                            ),
+                            sampleRate = SAMPLE_RATE,
+                            numThreads = 2,
+                            provider = "cpu",
+                            debug = true
+                        )
+                        vad = Vad(assetManager = context.assets, config = vadConfig)
+                        Log.d(TAG, "VAD 初始化成功（内置模型）")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "VAD 内置模型初始化失败: ${e.message}")
+                    }
                 }
             } else {
-                // 使用内置的 VAD 模型
-                try {
-                    Log.d(TAG, "使用内置 VAD 模型")
-                    val settingsManager = SettingsManager.getInstance(context)
-                    val vadConfig = VadModelConfig(
-                        sileroVadModelConfig = SileroVadModelConfig(
-                            model = "silero_vad.onnx",
-                            threshold = settingsManager.getVadThreshold(),
-                            minSilenceDuration = settingsManager.getVadMinSilenceDuration(),
-                            minSpeechDuration = settingsManager.getVadMinSpeechDuration(),
-                            windowSize = 512,
-                            maxSpeechDuration = settingsManager.getVadMaxSpeechDuration()
-                        ),
-                        sampleRate = SAMPLE_RATE,
-                        numThreads = 2,
-                        provider = "cpu",
-                        debug = true
-                    )
-                    vad = Vad(assetManager = context.assets, config = vadConfig)
-                    Log.d(TAG, "VAD 初始化成功（内置模型）")
-                } catch (e: Exception) {
-                    Log.w(TAG, "VAD 内置模型初始化失败: ${e.message}")
-                }
+                vad = null
+                Log.d(TAG, "已禁用 VAD 分段，将使用固定分段识别")
             }
 
             val modelConfig = OfflineModelConfig(

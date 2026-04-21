@@ -6,6 +6,15 @@ gradle-wrapper.jar
 # Local config
 local.properties
 
+# Local editor / AI assistant settings
+.claude/
+.cursor/
+.windsurf/
+.roo/
+.aider*
+.env
+.env.*
+
 # Android Studio
 .idea/
 *.iml
