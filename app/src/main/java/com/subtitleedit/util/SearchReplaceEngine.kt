@@ -16,9 +16,30 @@ class SearchReplaceEngine {
         return true
     }
 
-    fun setResults(newResults: List<Int>) {
+    fun setResults(
+        newResults: List<Int>,
+        preferredResultValue: Int? = null,
+        preferredIndex: Int? = null
+    ) {
         results = newResults
-        currentIndex = if (newResults.isNotEmpty()) 0 else -1
+        if (newResults.isEmpty()) {
+            currentIndex = -1
+            return
+        }
+
+        currentIndex = when {
+            preferredResultValue != null -> {
+                val exact = newResults.indexOf(preferredResultValue)
+                if (exact >= 0) {
+                    exact
+                } else {
+                    val next = newResults.indexOfFirst { it >= preferredResultValue }
+                    if (next >= 0) next else newResults.lastIndex
+                }
+            }
+            preferredIndex != null -> preferredIndex.coerceIn(0, newResults.lastIndex)
+            else -> 0
+        }
     }
 
     fun clearResults() {
@@ -63,4 +84,3 @@ class SearchReplaceEngine {
         return matches
     }
 }
-

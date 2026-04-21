@@ -532,7 +532,7 @@ class EditorActivity : AppCompatActivity() {
         hasUnsavedChanges = true
         
         // 重新搜索以更新结果
-        searchInSourceView()
+        searchInSourceView(preferredResultPosition = position, scrollToCurrent = false)
         showShortToast("已替换 1 处")
     }
     
@@ -540,6 +540,7 @@ class EditorActivity : AppCompatActivity() {
      * 在列表中替换一个匹配项
      */
     private fun replaceOneInRecyclerView(replaceText: String) {
+        val currentIndex = searchEngine.currentIndex
         val position = searchEngine.currentResultPositionOrNull()
         if (position == null) {
             showShortToast("没有可替换的匹配项")
@@ -559,7 +560,11 @@ class EditorActivity : AppCompatActivity() {
             hasUnsavedChanges = true
             
             // 重新搜索以更新结果
-            searchInRecyclerView()
+            searchInRecyclerView(
+                preferredResultPosition = position,
+                preferredIndex = currentIndex,
+                scrollToCurrent = false
+            )
             showShortToast("已替换 1 处")
         } else {
             showShortToast("当前项无可替换内容")
@@ -654,7 +659,10 @@ class EditorActivity : AppCompatActivity() {
     /**
      * 在源视图中搜索
      */
-    private fun searchInSourceView() {
+    private fun searchInSourceView(
+        preferredResultPosition: Int? = null,
+        scrollToCurrent: Boolean = true
+    ) {
         val content = binding.etSourceView.text?.toString() ?: ""
         if (searchEngine.query.isEmpty() || content.isEmpty()) {
             searchEngine.clearResults()
@@ -664,15 +672,18 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
-        searchEngine.setResults(searchEngine.findMatchesInText(content))
+        searchEngine.setResults(
+            newResults = searchEngine.findMatchesInText(content),
+            preferredResultValue = preferredResultPosition
+        )
         updateSearchResultDisplay()
-        highlightSearchInSourceView()
+        highlightSearchInSourceView(scrollToCurrent)
     }
     
     /**
      * 在源视图中高亮搜索结果
      */
-    private fun highlightSearchInSourceView() {
+    private fun highlightSearchInSourceView(scrollToCurrent: Boolean = true) {
         val content = binding.etSourceView.text?.toString() ?: ""
         val query = searchEngine.query
         val results = searchEngine.results
@@ -714,20 +725,33 @@ class EditorActivity : AppCompatActivity() {
         binding.etSourceView.setText(spannable, TextView.BufferType.EDITABLE)
         
         // 滚动到当前结果
-        if (searchEngine.currentIndex in results.indices) {
+        if (scrollToCurrent && searchEngine.currentIndex in results.indices) {
             val position = results[searchEngine.currentIndex]
-            if (position < content.length) {
-                val linesBefore = content.substring(0, position).count { it == '\n' }
-                val estimatedScroll = linesBefore * 50
-                binding.svSourceView.scrollTo(0, estimatedScroll)
-            }
+            scrollSourceViewToOffset(position)
+        }
+    }
+
+    private fun scrollSourceViewToOffset(offset: Int) {
+        val contentLength = binding.etSourceView.text?.length ?: 0
+        if (offset < 0 || offset > contentLength) return
+        binding.etSourceView.post {
+            val layout = binding.etSourceView.layout ?: return@post
+            val line = layout.getLineForOffset(offset.coerceAtMost(contentLength))
+            val lineTop = layout.getLineTop(line)
+            val viewportHeight = binding.svSourceView.height
+            val targetY = (lineTop - viewportHeight / 3).coerceAtLeast(0)
+            binding.svSourceView.smoothScrollTo(0, targetY)
         }
     }
     
     /**
      * 在列表中搜索（搜索字幕文本和时间）
      */
-    private fun searchInRecyclerView() {
+    private fun searchInRecyclerView(
+        preferredResultPosition: Int? = null,
+        preferredIndex: Int? = null,
+        scrollToCurrent: Boolean = true
+    ) {
         val query = searchEngine.query
         if (query.isEmpty()) {
             searchEngine.clearResults()
@@ -749,12 +773,16 @@ class EditorActivity : AppCompatActivity() {
             }
         }
 
-        searchEngine.setResults(results)
+        searchEngine.setResults(
+            newResults = results,
+            preferredResultValue = preferredResultPosition,
+            preferredIndex = preferredIndex
+        )
         updateSearchResultDisplay()
         
-        // 跳转到第一个结果
-        if (results.isNotEmpty()) {
-            scrollToSearchResult(0)
+        // 跳转到当前结果
+        if (scrollToCurrent && searchEngine.currentIndex in searchEngine.results.indices) {
+            scrollToSearchResult(searchEngine.currentIndex)
         }
     }
     
