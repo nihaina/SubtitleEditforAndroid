@@ -1020,8 +1020,13 @@ class EditorActivity : AppCompatActivity() {
                             override fun onAnimationEnd(animation: Animator) {
                                 // 恢复滚动位置 - 根据滚动位置计算可见项
                                 val layoutManager = binding.rvSubtitles.layoutManager as LinearLayoutManager
-                                val estimatedPosition = savedScrollPosition / 80
-                                layoutManager.scrollToPositionWithOffset(estimatedPosition.coerceIn(0, subtitleEntries.size - 1), 0)
+                                if (subtitleEntries.isNotEmpty()) {
+                                    val estimatedPosition = savedScrollPosition / 80
+                                    layoutManager.scrollToPositionWithOffset(
+                                        estimatedPosition.coerceIn(0, subtitleEntries.lastIndex),
+                                        0
+                                    )
+                                }
                             }
                         })
                 }
@@ -2740,7 +2745,7 @@ class EditorActivity : AppCompatActivity() {
         startMs: Long, endMs: Long,
         widthPx: Int, heightPx: Int
     ) {
-        val audioFile = currentFile ?: return
+        val audioFile = audioFilePath.takeIf { it.isNotEmpty() }?.let { File(it) } ?: currentFile ?: return
         val settingsManager = SettingsManager.getInstance(this)
         val cacheBaseDir = when (settingsManager.getWaveformCacheLocation()) {
             SettingsManager.WAVEFORM_CACHE_APP -> File(cacheDir, "waveform")

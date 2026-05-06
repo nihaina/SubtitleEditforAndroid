@@ -217,6 +217,7 @@ class SubtitleAdapter(
      */
     fun highlightCurrentPlaying(position: Int) {
         val oldPosition = currentPlayingPosition
+        if (oldPosition == position) return
         currentPlayingPosition = position
         if (oldPosition >= 0) notifyItemChanged(oldPosition, PAYLOAD_PLAYING)
         if (position >= 0)    notifyItemChanged(position,    PAYLOAD_PLAYING)

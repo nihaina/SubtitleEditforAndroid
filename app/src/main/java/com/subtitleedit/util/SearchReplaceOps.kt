@@ -58,10 +58,9 @@ object SearchReplaceOps {
         query: String,
         replacement: String
     ): ReplaceAllInTextResult {
-        val newContent = content.replace(Regex(Regex.escape(query)), replacement)
-        val matchCount = content.split(
-            Regex(Regex.escape(query), RegexOption.IGNORE_CASE)
-        ).size - 1
+        val regex = Regex(Regex.escape(query), RegexOption.IGNORE_CASE)
+        val matchCount = regex.findAll(content).count()
+        val newContent = content.replace(regex, replacement)
         return ReplaceAllInTextResult(newContent, matchCount)
     }
 }
