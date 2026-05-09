@@ -1,6 +1,6 @@
 package com.subtitleedit.util
 
-import com.subtitleedit.SubtitleEntry
+import com.subtitleedit.model.SubtitleEntry
 
 object SubtitleEntryOps {
     fun deepCopy(entry: SubtitleEntry): SubtitleEntry {

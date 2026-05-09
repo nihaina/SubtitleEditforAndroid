@@ -43,7 +43,7 @@ import com.subtitleedit.util.SearchReplaceOps
 import com.subtitleedit.util.SubtitlePasteOps
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleEntryOps
-import com.subtitleedit.SubtitleEntry
+import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.TimeUtils
 import java.io.File
@@ -790,10 +790,10 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun updateSearchResultDisplay() {
         if (searchEngine.results.isEmpty()) {
-            Toast.makeText(this, getString(R.string.search_no_results), Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, getString(R.string.search_no_results), Toast.LENGTH_SHORT).show()
         } else {
             val message = getString(R.string.search_result_count, searchEngine.results.size, searchEngine.currentIndex + 1)
-            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, message, Toast.LENGTH_SHORT).show()
         }
     }
     
@@ -877,9 +877,9 @@ class EditorActivity : AppCompatActivity() {
             supportActionBar?.title = fileName
             parseContent(content)
             hasUnsavedChanges = false
-            Toast.makeText(this, "文件已打开：$fileName", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "文件已打开：$fileName", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
-            Toast.makeText(this, "打开文件失败：${e.message}", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "打开文件失败：${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
     
@@ -937,7 +937,7 @@ class EditorActivity : AppCompatActivity() {
         updateFormatInfo()
         
         if (subtitleEntries.isEmpty() && !isSourceViewMode) {
-            Toast.makeText(this, "未找到字幕内容", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "未找到字幕内容", Toast.LENGTH_SHORT).show()
         }
         
         // 同步字幕到波形视图（仅音频模式有效）
@@ -1132,7 +1132,7 @@ class EditorActivity : AppCompatActivity() {
             .setPositiveButton("确定") { _, _ ->
                 parseContent(content)
                 hasUnsavedChanges = true
-                Toast.makeText(this, "已加载草稿：$draftFileName", Toast.LENGTH_SHORT).show()
+                com.subtitleedit.util.OverwritingToast.makeText(this, "已加载草稿：$draftFileName", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("取消", null)
             .show()
@@ -1241,7 +1241,7 @@ class EditorActivity : AppCompatActivity() {
         if (position >= 0 && position < subtitleEntries.size) {
             clipboardEntries = listOf(SubtitleEntryOps.deepCopy(subtitleEntries[position]))
             cutPasteController.clear()
-            Toast.makeText(this, "已复制", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "已复制", Toast.LENGTH_SHORT).show()
         }
     }
     
@@ -1255,7 +1255,7 @@ class EditorActivity : AppCompatActivity() {
             // 先保存到剪贴板
             clipboardEntries = listOf(SubtitleEntryOps.deepCopy(subtitleEntries[position]))
             cutPasteController.markSingleCut(position)
-            Toast.makeText(this, "已剪切", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "已剪切", Toast.LENGTH_SHORT).show()
         }
     }
     
@@ -1269,7 +1269,7 @@ class EditorActivity : AppCompatActivity() {
         
         clipboardEntries = SubtitleEntryOps.deepCopy(selectedEntries.map { it.first })
         cutPasteController.markMultiCut(selectedEntries.map { it.second })
-        Toast.makeText(this, "已剪切 ${clipboardEntries.size} 项", Toast.LENGTH_SHORT).show()
+        com.subtitleedit.util.OverwritingToast.makeText(this, "已剪切 ${clipboardEntries.size} 项", Toast.LENGTH_SHORT).show()
     }
     
     /**
@@ -1307,7 +1307,7 @@ class EditorActivity : AppCompatActivity() {
             if (subtitleEntries.isEmpty()) {
                 setSubtitleEntries(SubtitleEntryOps.deepCopy(clipboardEntries))
                 submitSubtitleList(refreshAll = true, markChanged = true)
-                Toast.makeText(this, "已粘贴 ${clipboardEntries.size} 项", Toast.LENGTH_SHORT).show()
+                com.subtitleedit.util.OverwritingToast.makeText(this, "已粘贴 ${clipboardEntries.size} 项", Toast.LENGTH_SHORT).show()
                 return
             }
             targetPosition = targetPosition.coerceIn(0, subtitleEntries.lastIndex)
@@ -1319,10 +1319,10 @@ class EditorActivity : AppCompatActivity() {
             )
             if (pasteResult.structureChanged) {
                 submitSubtitleList(refreshAll = true, markChanged = true)
-                Toast.makeText(this, "已粘贴 ${clipboardEntries.size} 项", Toast.LENGTH_SHORT).show()
+                com.subtitleedit.util.OverwritingToast.makeText(this, "已粘贴 ${clipboardEntries.size} 项", Toast.LENGTH_SHORT).show()
             } else {
                 notifyEntriesChanged(pasteResult.affectedPositions)
-                Toast.makeText(this, "已粘贴", Toast.LENGTH_SHORT).show()
+                com.subtitleedit.util.OverwritingToast.makeText(this, "已粘贴", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -1337,7 +1337,7 @@ class EditorActivity : AppCompatActivity() {
             showDeleteConfirm("确定要删除此字幕吗？") {
                     subtitleEntries.removeAt(position)
                     syncAfterDelete(setOf(position))
-                    Toast.makeText(this, "已删除", Toast.LENGTH_SHORT).show()
+                    com.subtitleedit.util.OverwritingToast.makeText(this, "已删除", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -1378,7 +1378,7 @@ class EditorActivity : AppCompatActivity() {
             updateSelectedCountDisplay()
         }
         setWaveformSubtitlesKeepSelection(insertPosition)
-        Toast.makeText(this, "已插入新字幕", Toast.LENGTH_SHORT).show()
+        com.subtitleedit.util.OverwritingToast.makeText(this, "已插入新字幕", Toast.LENGTH_SHORT).show()
     }
 
     private fun insertSubtitleFromTimestamp(startMs: Long, endMs: Long) {
@@ -1401,7 +1401,7 @@ class EditorActivity : AppCompatActivity() {
             markChanged = true
         )
         setWaveformSubtitlesKeepSelection(insertPos)
-        Toast.makeText(this, "已插入新字幕", Toast.LENGTH_SHORT).show()
+        com.subtitleedit.util.OverwritingToast.makeText(this, "已插入新字幕", Toast.LENGTH_SHORT).show()
     }
 
     /**
@@ -1494,7 +1494,7 @@ class EditorActivity : AppCompatActivity() {
         
         clipboardEntries = SubtitleEntryOps.deepCopy(selectedEntries.map { it.first })
         cutPasteController.clear()
-        Toast.makeText(this, "已复制 ${clipboardEntries.size} 项", Toast.LENGTH_SHORT).show()
+        com.subtitleedit.util.OverwritingToast.makeText(this, "已复制 ${clipboardEntries.size} 项", Toast.LENGTH_SHORT).show()
     }
     
     /**
@@ -1538,7 +1538,7 @@ class EditorActivity : AppCompatActivity() {
             selectedIndices = replaceResult.insertedPositions,
             markChanged = true
         )
-        Toast.makeText(this, "已粘贴 ${clipboardEntries.size} 项", Toast.LENGTH_SHORT).show()
+        com.subtitleedit.util.OverwritingToast.makeText(this, "已粘贴 ${clipboardEntries.size} 项", Toast.LENGTH_SHORT).show()
     }
     
     private fun markAsChanged() {
@@ -1648,7 +1648,7 @@ class EditorActivity : AppCompatActivity() {
         currentFormatInfo = "格式：SRT | 条目数：0"
         supportActionBar?.subtitle = currentFormatInfo
         hasUnsavedChanges = false
-        Toast.makeText(this, "已新建文件", Toast.LENGTH_SHORT).show()
+        com.subtitleedit.util.OverwritingToast.makeText(this, "已新建文件", Toast.LENGTH_SHORT).show()
     }
     
     private fun openFile() {
@@ -1781,7 +1781,7 @@ class EditorActivity : AppCompatActivity() {
         
         val fileName = currentFile?.name ?: "未命名"
         val savedFileName = DraftManager.saveDraft(this, fileName, content)
-        Toast.makeText(this, "草稿已保存：$savedFileName", Toast.LENGTH_LONG).show()
+        com.subtitleedit.util.OverwritingToast.makeText(this, "草稿已保存：$savedFileName", Toast.LENGTH_LONG).show()
     }
     
     /**
@@ -1906,7 +1906,7 @@ class EditorActivity : AppCompatActivity() {
                     subtitleEntries.removeAt(position)
                 }
                 syncAfterDelete(deletedIndices)
-                Toast.makeText(this, "已删除 ${selectedEntries.size} 条字幕", Toast.LENGTH_SHORT).show()
+                com.subtitleedit.util.OverwritingToast.makeText(this, "已删除 ${selectedEntries.size} 条字幕", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -1972,7 +1972,7 @@ class EditorActivity : AppCompatActivity() {
         val settingsManager = SettingsManager.getInstance(this)
         val apiKey = settingsManager.getAiApiKey()
         if (apiKey.isEmpty()) {
-            Toast.makeText(this, "请先在设置中配置 API Key", Toast.LENGTH_LONG).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "请先在设置中配置 API Key", Toast.LENGTH_LONG).show()
             return
         }
         
@@ -2102,7 +2102,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun showTranslationError(message: String) {
-        Toast.makeText(this, "翻译失败：$message", Toast.LENGTH_LONG).show()
+        com.subtitleedit.util.OverwritingToast.makeText(this, "翻译失败：$message", Toast.LENGTH_LONG).show()
     }
     
     private fun renumberEntries(force: Boolean = false) {
@@ -2289,7 +2289,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun showShortToast(message: String) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        com.subtitleedit.util.OverwritingToast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
     
     private fun setupBackPressedHandler() {
@@ -2384,7 +2384,7 @@ class EditorActivity : AppCompatActivity() {
             updatePlayerUI()
         }
         mediaPlayer?.setOnErrorListener { _, what, extra ->
-            Toast.makeText(this, "播放错误：$what, $extra", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "播放错误：$what, $extra", Toast.LENGTH_SHORT).show()
             isPlaying = false
             updatePlayerUI()
             true
@@ -2546,7 +2546,7 @@ class EditorActivity : AppCompatActivity() {
         }
         binding.btnAmplitudeZoomIn.setOnLongClickListener {
             binding.waveformTimelineView.resetAmplitudeScale()
-            Toast.makeText(this, "振幅已重置", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "振幅已重置", Toast.LENGTH_SHORT).show()
             true
         }
         binding.btnAmplitudeZoomOut.setOnClickListener {
@@ -2619,13 +2619,13 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun loadAudioFile(subtitleFilePath: String?) {
         if (filePath.isEmpty() || currentFile == null) {
-            Toast.makeText(this, "音频文件路径无效", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "音频文件路径无效", Toast.LENGTH_SHORT).show()
             finish()
             return
         }
         
         if (!currentFile!!.exists()) {
-            Toast.makeText(this, "音频文件不存在", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "音频文件不存在", Toast.LENGTH_SHORT).show()
             finish()
             return
         }
@@ -2649,7 +2649,7 @@ class EditorActivity : AppCompatActivity() {
             checkingDialog.dismiss()
             
             if (wasFixed) {
-                Toast.makeText(
+                com.subtitleedit.util.OverwritingToast.makeText(
                     this@EditorActivity,
                     "检测到音频 start time 不为 0,请注意处理,已临时修复，正在加载...",
                     Toast.LENGTH_LONG
@@ -2678,7 +2678,7 @@ class EditorActivity : AppCompatActivity() {
                 mediaPlayer?.playbackParams = android.media.PlaybackParams().setSpeed(playbackSpeed)
             }
         } catch (e: Exception) {
-            Toast.makeText(this, "加载音频失败：${e.message}", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "加载音频失败：${e.message}", Toast.LENGTH_SHORT).show()
         }
         
         if (subtitleFilePath != null) {
@@ -2688,7 +2688,7 @@ class EditorActivity : AppCompatActivity() {
             } else {
                 clearSubtitleEntries()
                 submitSubtitleList(refreshAll = true, syncWaveform = false)
-                Toast.makeText(this, "未找到同名字幕文件", Toast.LENGTH_SHORT).show()
+                com.subtitleedit.util.OverwritingToast.makeText(this, "未找到同名字幕文件", Toast.LENGTH_SHORT).show()
             }
         } else {
             clearSubtitleEntries()
@@ -2770,7 +2770,7 @@ class EditorActivity : AppCompatActivity() {
                         spectrogramDoneChunks++
                         if (spectrogramDoneChunks >= spectrogramTotalChunks) {
                             spectrogramIsGenerating = false
-                            Toast.makeText(
+                            com.subtitleedit.util.OverwritingToast.makeText(
                                 this@EditorActivity,
                                 "频谱图缓存生成完成",
                                 Toast.LENGTH_SHORT
@@ -2818,17 +2818,17 @@ class EditorActivity : AppCompatActivity() {
         isWaveformGenerating = true
         updateGenerateButton()
         
-        Toast.makeText(this, "正在生成波形缓存，请稍候...", Toast.LENGTH_SHORT).show()
+        com.subtitleedit.util.OverwritingToast.makeText(this, "正在生成波形缓存，请稍候...", Toast.LENGTH_SHORT).show()
         ffmpegChunkLoader?.generateCache { success ->
             // 回调结束，重置生成中状态
             isWaveformGenerating = false
             
             if (success) {
                 isWaveformGenerated = true
-                Toast.makeText(this, "波形缓存生成完成", Toast.LENGTH_SHORT).show()
+                com.subtitleedit.util.OverwritingToast.makeText(this, "波形缓存生成完成", Toast.LENGTH_SHORT).show()
                 connectWaveformLoader()
             } else {
-                Toast.makeText(this, "波形缓存生成失败", Toast.LENGTH_SHORT).show()
+                com.subtitleedit.util.OverwritingToast.makeText(this, "波形缓存生成失败", Toast.LENGTH_SHORT).show()
             }
             updateGenerateButton()
         }
@@ -2843,7 +2843,7 @@ class EditorActivity : AppCompatActivity() {
         spectrogramDoneChunks = 0
         spectrogramIsGenerating = spectrogramTotalChunks > 0
         updateGenerateButton()
-        Toast.makeText(this, "正在生成频谱图缓存，请稍候...", Toast.LENGTH_SHORT).show()
+        com.subtitleedit.util.OverwritingToast.makeText(this, "正在生成频谱图缓存，请稍候...", Toast.LENGTH_SHORT).show()
         
         // 【关键修复】重置 View 内部的 Spectrogram 缓存状态
         // 这会清除 View 内部记录的"已请求 Chunk"列表，
@@ -2883,7 +2883,7 @@ class EditorActivity : AppCompatActivity() {
             parseContent(content)
             hasUnsavedChanges = false
         } catch (e: Exception) {
-            Toast.makeText(this, "读取字幕文件失败：${e.message}", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "读取字幕文件失败：${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
     
@@ -3014,7 +3014,7 @@ class EditorActivity : AppCompatActivity() {
         notifyEntriesChanged(listOf(position))
         
         if (newStartTime >= entry.endTime) {
-            Toast.makeText(this, "开始时间已设置，但大于结束时间，请调整结束时间", Toast.LENGTH_LONG).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "开始时间已设置，但大于结束时间，请调整结束时间", Toast.LENGTH_LONG).show()
         } else {
             showShortToast("已将开始时间设置为 ${TimeUtils.formatForDisplay(newStartTime)}")
         }
@@ -3042,9 +3042,9 @@ class EditorActivity : AppCompatActivity() {
                 val speed = text.toFloatOrNull()
                 when {
                     speed == null ->
-                        Toast.makeText(this, "请输入有效数字", Toast.LENGTH_SHORT).show()
+                        com.subtitleedit.util.OverwritingToast.makeText(this, "请输入有效数字", Toast.LENGTH_SHORT).show()
                     speed < 0.25f || speed > 4.0f ->
-                        Toast.makeText(this, "速率范围：0.25 ~ 4.0", Toast.LENGTH_SHORT).show()
+                        com.subtitleedit.util.OverwritingToast.makeText(this, "速率范围：0.25 ~ 4.0", Toast.LENGTH_SHORT).show()
                     else ->
                         applyPlaybackSpeed(speed)
                 }
@@ -3080,11 +3080,11 @@ class EditorActivity : AppCompatActivity() {
                 val params = android.media.PlaybackParams().setSpeed(speed)
                 player.playbackParams = params
             } catch (e: Exception) {
-                Toast.makeText(this, "设置速率失败：${e.message}", Toast.LENGTH_SHORT).show()
+                com.subtitleedit.util.OverwritingToast.makeText(this, "设置速率失败：${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
 
-        Toast.makeText(this, "播放速率已设置为 ${label}", Toast.LENGTH_SHORT).show()
+        com.subtitleedit.util.OverwritingToast.makeText(this, "播放速率已设置为 ${label}", Toast.LENGTH_SHORT).show()
     }
 }
 

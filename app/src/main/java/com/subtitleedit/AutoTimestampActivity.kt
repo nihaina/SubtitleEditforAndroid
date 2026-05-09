@@ -15,6 +15,7 @@ import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.subtitleedit.databinding.ActivityAutoTimestampBinding
+import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.VadTimestampGenerator
 import kotlinx.coroutines.Dispatchers
@@ -146,7 +147,7 @@ class AutoTimestampActivity : AppCompatActivity() {
             binding.btnGenerate.isEnabled = true
 
         } catch (e: Exception) {
-            Toast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -162,14 +163,14 @@ class AutoTimestampActivity : AppCompatActivity() {
             binding.tvOutputDir.text = docFile?.name ?: uri.path ?: "已选择"
 
         } catch (e: Exception) {
-            Toast.makeText(this, "选择目录失败：${e.message}", Toast.LENGTH_LONG).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "选择目录失败：${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
     private fun generateTimestamps() {
         val audioUri = selectedAudioUri ?: return
         val outputDir = outputDirUri ?: run {
-            Toast.makeText(this, "请选择输出目录", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "请选择输出目录", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -221,14 +222,14 @@ class AutoTimestampActivity : AppCompatActivity() {
                 // 显示预览
                 binding.tvPreview.text = result
 
-                Toast.makeText(this@AutoTimestampActivity, "字幕已保存到输出目录", Toast.LENGTH_LONG).show()
+                com.subtitleedit.util.OverwritingToast.makeText(this@AutoTimestampActivity, "字幕已保存到输出目录", Toast.LENGTH_LONG).show()
 
             } catch (e: Exception) {
                 binding.tvStatus.text = if (isGenerating) "处理失败" else "已取消"
                 binding.progressBar.visibility = android.view.View.GONE
                 binding.btnGenerate.isEnabled = true
                 if (isGenerating) {
-                    Toast.makeText(this@AutoTimestampActivity, "处理失败：${e.message}", Toast.LENGTH_LONG).show()
+                    com.subtitleedit.util.OverwritingToast.makeText(this@AutoTimestampActivity, "处理失败：${e.message}", Toast.LENGTH_LONG).show()
                 }
             } finally {
                 isGenerating = false

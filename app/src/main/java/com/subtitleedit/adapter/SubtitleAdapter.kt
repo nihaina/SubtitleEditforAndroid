@@ -15,7 +15,7 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.subtitleedit.R
-import com.subtitleedit.SubtitleEntry
+import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.TimeUtils
 
 /**

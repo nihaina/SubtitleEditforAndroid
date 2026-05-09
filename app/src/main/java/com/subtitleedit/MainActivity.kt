@@ -176,7 +176,7 @@ class MainActivity : AppCompatActivity() {
     
     private fun loadDirectory(directory: File) {
         if (!directory.exists() || !directory.canRead()) {
-            Toast.makeText(this, "无法访问目录：${directory.name}", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "无法访问目录：${directory.name}", Toast.LENGTH_SHORT).show()
             return
         }
         
@@ -241,7 +241,7 @@ class MainActivity : AppCompatActivity() {
             // 打开音频文件进行编辑（自动查找同名字幕）
             openAudioFileForEdit(file)
         } else {
-            Toast.makeText(this, "不支持的文件格式", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "不支持的文件格式", Toast.LENGTH_SHORT).show()
         }
     }
     

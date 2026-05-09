@@ -13,7 +13,7 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
-import com.subtitleedit.SubtitleEntry
+import com.subtitleedit.model.SubtitleEntry
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min

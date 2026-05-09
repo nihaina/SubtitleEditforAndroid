@@ -1,4 +1,4 @@
-package com.subtitleedit
+package com.subtitleedit.model
 
 /**
  * 字幕条目数据类

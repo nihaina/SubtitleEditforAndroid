@@ -553,10 +553,10 @@ class MediaConvertActivity : AppCompatActivity() {
 
     private fun startConvert() {
         val uri = sourceUri ?: run {
-            Toast.makeText(this, "请先选择源文件", Toast.LENGTH_SHORT).show(); return
+            com.subtitleedit.util.OverwritingToast.makeText(this, "请先选择源文件", Toast.LENGTH_SHORT).show(); return
         }
         val fmt = selectedFormat ?: run {
-            Toast.makeText(this, "请选择输出格式", Toast.LENGTH_SHORT).show(); return
+            com.subtitleedit.util.OverwritingToast.makeText(this, "请选择输出格式", Toast.LENGTH_SHORT).show(); return
         }
 
         convertJob = lifecycleScope.launch {

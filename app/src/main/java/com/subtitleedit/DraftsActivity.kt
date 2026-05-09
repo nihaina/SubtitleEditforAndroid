@@ -234,7 +234,7 @@ class DraftsActivity : AppCompatActivity() {
     private fun copyToClipboard(content: String) {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("draft", content))
-        Toast.makeText(this, "已复制到剪贴板", Toast.LENGTH_SHORT).show()
+        com.subtitleedit.util.OverwritingToast.makeText(this, "已复制到剪贴板", Toast.LENGTH_SHORT).show()
     }
     
     /**
@@ -255,9 +255,9 @@ class DraftsActivity : AppCompatActivity() {
                 contentResolver.openOutputStream(uri)?.use { outputStream ->
                     outputStream.write(content.toByteArray())
                 }
-                Toast.makeText(this, "导出成功", Toast.LENGTH_SHORT).show()
+                com.subtitleedit.util.OverwritingToast.makeText(this, "导出成功", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
-                Toast.makeText(this, "导出失败：${e.message}", Toast.LENGTH_SHORT).show()
+                com.subtitleedit.util.OverwritingToast.makeText(this, "导出失败：${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
         draftToExport = null
@@ -280,7 +280,7 @@ class DraftsActivity : AppCompatActivity() {
             .setPositiveButton(R.string.confirm) { _, _ ->
                 val success = DraftManager.deleteDraft(this, draft.folderName, draft.fileName)
                 if (success) {
-                    Toast.makeText(this, R.string.draft_deleted, Toast.LENGTH_SHORT).show()
+                    com.subtitleedit.util.OverwritingToast.makeText(this, R.string.draft_deleted, Toast.LENGTH_SHORT).show()
                     loadDrafts()
                 }
             }
@@ -295,7 +295,7 @@ class DraftsActivity : AppCompatActivity() {
             .setPositiveButton(R.string.confirm) { _, _ ->
                 val success = DraftManager.deleteDraftFolder(this, draft.folderName)
                 if (success) {
-                    Toast.makeText(this, R.string.draft_deleted, Toast.LENGTH_SHORT).show()
+                    com.subtitleedit.util.OverwritingToast.makeText(this, R.string.draft_deleted, Toast.LENGTH_SHORT).show()
                     if (currentFolder == draft.folderName) {
                         currentFolder = ""
                         updateToolbarTitle()

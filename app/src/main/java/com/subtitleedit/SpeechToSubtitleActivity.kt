@@ -17,6 +17,7 @@ import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.subtitleedit.databinding.ActivitySpeechToSubtitleBinding
+import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.WhisperRecognizer
@@ -220,7 +221,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             binding.tvOutputDir.text = docFile?.name ?: uri.path ?: "已选择"
 
         } catch (e: Exception) {
-            Toast.makeText(this, "选择目录失败：${e.message}", Toast.LENGTH_LONG).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "选择目录失败：${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -275,7 +276,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
      */
     private fun startConversion() {
         if (selectedFileUri == null || encoderPath.isEmpty() || decoderPath.isEmpty() || tokensPath.isEmpty()) {
-            Toast.makeText(this, "请先选择文件和模型", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "请先选择文件和模型", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -388,7 +389,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         isConverting = false
         hideProgress()
         updateStartButtonState()
-        Toast.makeText(this, "已取消", Toast.LENGTH_SHORT).show()
+        com.subtitleedit.util.OverwritingToast.makeText(this, "已取消", Toast.LENGTH_SHORT).show()
     }
 
     /**
@@ -474,7 +475,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
      */
     private fun saveSubtitleFile(content: String) {
         val outputDir = outputDirUri ?: run {
-            Toast.makeText(this, "输出目录未设置", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "输出目录未设置", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -495,7 +496,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                 val segmentCount = content.lines().filter { line ->
                     line.matches(Regex("\\d+"))
                 }.size
-                Toast.makeText(this, "字幕已保存到输出目录（共 $segmentCount 条）", Toast.LENGTH_LONG).show()
+                com.subtitleedit.util.OverwritingToast.makeText(this, "字幕已保存到输出目录（共 $segmentCount 条）", Toast.LENGTH_LONG).show()
                 return
             }
 
@@ -522,10 +523,10 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             val segmentCount = content.lines().filter { line ->
                 line.matches(Regex("\\d+"))
             }.size
-            Toast.makeText(this, "字幕已保存到输出目录（共 $segmentCount 条）", Toast.LENGTH_LONG).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "字幕已保存到输出目录（共 $segmentCount 条）", Toast.LENGTH_LONG).show()
 
         } catch (e: Exception) {
-            Toast.makeText(this, "保存失败：${e.message}", Toast.LENGTH_LONG).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "保存失败：${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 

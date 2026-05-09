@@ -146,7 +146,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun confirmClearWaveformCache() {
         val size = calcWaveformCacheSize()
         if (size == 0L) {
-            Toast.makeText(this, "暂无波形图缓存可清除", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "暂无波形图缓存可清除", Toast.LENGTH_SHORT).show()
             return
         }
         AlertDialog.Builder(this)
@@ -158,7 +158,7 @@ class SettingsActivity : AppCompatActivity() {
                 dir.walkTopDown()
                     .filter { it.isFile && it.extension == "wave" }
                     .forEach { it.delete(); count++ }
-                Toast.makeText(this, "已清除 $count 个波形图缓存文件", Toast.LENGTH_SHORT).show()
+                com.subtitleedit.util.OverwritingToast.makeText(this, "已清除 $count 个波形图缓存文件", Toast.LENGTH_SHORT).show()
                 refreshCacheSizeDisplay()
             }
             .setNegativeButton("取消", null)
@@ -168,7 +168,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun confirmClearSpectrogramCache() {
         val size = calcSpectrogramCacheSize()
         if (size == 0L) {
-            Toast.makeText(this, "暂无频谱图缓存可清除", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "暂无频谱图缓存可清除", Toast.LENGTH_SHORT).show()
             return
         }
         AlertDialog.Builder(this)
@@ -180,7 +180,7 @@ class SettingsActivity : AppCompatActivity() {
                 dir.walkTopDown()
                     .filter { it.isFile && it.extension == "png" && it.name.contains(".spec_") }
                     .forEach { it.delete(); count++ }
-                Toast.makeText(this, "已清除 $count 个频谱图缓存文件", Toast.LENGTH_SHORT).show()
+                com.subtitleedit.util.OverwritingToast.makeText(this, "已清除 $count 个频谱图缓存文件", Toast.LENGTH_SHORT).show()
                 refreshCacheSizeDisplay()
             }
             .setNegativeButton("取消", null)

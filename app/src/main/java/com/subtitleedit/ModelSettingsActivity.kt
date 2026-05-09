@@ -224,7 +224,7 @@ class ModelSettingsActivity : AppCompatActivity() {
 
             if (!fileName.contains("encoder", ignoreCase = true) ||
                 !fileName.endsWith(".onnx", ignoreCase = true)) {
-                Toast.makeText(
+                com.subtitleedit.util.OverwritingToast.makeText(
                     this,
                     "请选择 encoder 模型文件（文件名应包含 'encoder' 且以 .onnx 结尾）",
                     Toast.LENGTH_LONG
@@ -237,7 +237,7 @@ class ModelSettingsActivity : AppCompatActivity() {
             binding.tvEncoderFile.text = fileName
 
         } catch (e: Exception) {
-            Toast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -252,7 +252,7 @@ class ModelSettingsActivity : AppCompatActivity() {
 
             if (!fileName.contains("decoder", ignoreCase = true) ||
                 !fileName.endsWith(".onnx", ignoreCase = true)) {
-                Toast.makeText(
+                com.subtitleedit.util.OverwritingToast.makeText(
                     this,
                     "请选择 decoder 模型文件（文件名应包含 'decoder' 且以 .onnx 结尾）",
                     Toast.LENGTH_LONG
@@ -265,7 +265,7 @@ class ModelSettingsActivity : AppCompatActivity() {
             binding.tvDecoderFile.text = fileName
 
         } catch (e: Exception) {
-            Toast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -280,7 +280,7 @@ class ModelSettingsActivity : AppCompatActivity() {
 
             if (!fileName.contains("token", ignoreCase = true) ||
                 !fileName.endsWith(".txt", ignoreCase = true)) {
-                Toast.makeText(
+                com.subtitleedit.util.OverwritingToast.makeText(
                     this,
                     "请选择 tokens 文件（文件名应包含 'token' 且以 .txt 结尾）",
                     Toast.LENGTH_LONG
@@ -293,7 +293,7 @@ class ModelSettingsActivity : AppCompatActivity() {
             binding.tvTokensFile.text = fileName
 
         } catch (e: Exception) {
-            Toast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -308,7 +308,7 @@ class ModelSettingsActivity : AppCompatActivity() {
 
             if (!fileName.contains("vad", ignoreCase = true) ||
                 !fileName.endsWith(".onnx", ignoreCase = true)) {
-                Toast.makeText(
+                com.subtitleedit.util.OverwritingToast.makeText(
                     this,
                     "请选择 VAD 模型文件（文件名应包含 'vad' 且以 .onnx 结尾）",
                     Toast.LENGTH_LONG
@@ -319,10 +319,10 @@ class ModelSettingsActivity : AppCompatActivity() {
             vadModelPath = uri.toString()
             settingsManager.setVadModelPath(vadModelPath)
             binding.tvVadFile.text = "外部模型: $fileName"
-            Toast.makeText(this, "外部 VAD 模型已选择", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "外部 VAD 模型已选择", Toast.LENGTH_SHORT).show()
 
         } catch (e: Exception) {
-            Toast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 

@@ -404,7 +404,7 @@ class BatchConvertActivity : AppCompatActivity() {
     
     private fun startConversion() {
         if (convertFiles.isEmpty()) {
-            Toast.makeText(this, "请先添加要转换的文件", Toast.LENGTH_SHORT).show()
+            com.subtitleedit.util.OverwritingToast.makeText(this, "请先添加要转换的文件", Toast.LENGTH_SHORT).show()
             return
         }
         
