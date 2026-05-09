@@ -6,7 +6,6 @@ import com.k2fsa.sherpa.onnx.Vad
 import com.k2fsa.sherpa.onnx.VadModelConfig
 import com.k2fsa.sherpa.onnx.SileroVadModelConfig
 import java.io.File
-import java.io.FileInputStream
 
 /**
  * VAD 时间轴生成器 - 使用 VAD 检测语音段并生成字幕时间轴
@@ -41,10 +40,6 @@ class VadTimestampGenerator(private val context: Context) {
     fun generateSegments(pcmFile: File): List<VadSegment> {
         Log.d(TAG, "开始生成时间轴，音频文件: ${pcmFile.absolutePath}")
 
-        // 读取 PCM 音频数据
-        val audioData = readPcmFile(pcmFile)
-        Log.d(TAG, "音频数据加载完成，采样点数: ${audioData.size}")
-
         // 初始化 VAD
         val vad = initVad()
         if (vad == null) {
@@ -52,8 +47,10 @@ class VadTimestampGenerator(private val context: Context) {
             return emptyList()
         }
 
-        // 检测语音段
-        val segments = detectSpeechSegments(vad, audioData)
+        val segments = Pcm16WavReader(pcmFile).use { reader ->
+            Log.d(TAG, "音频信息: sampleRate=${reader.sampleRate}, channels=${reader.channels}, samples=${reader.totalSamples}")
+            detectSpeechSegments(vad, reader)
+        }
         Log.d(TAG, "检测到 ${segments.size} 个语音段")
 
         return segments
@@ -91,17 +88,11 @@ class VadTimestampGenerator(private val context: Context) {
     /**
      * 检测语音段
      */
-    private fun detectSpeechSegments(vad: Vad, audioData: FloatArray): List<VadSegment> {
+    private fun detectSpeechSegments(vad: Vad, reader: Pcm16WavReader): List<VadSegment> {
         val segments = mutableListOf<VadSegment>()
 
         try {
-            // 流式输入音频
-            val windowSize = 512
-            var offset = 0
-
-            while (offset < audioData.size) {
-                val end = minOf(offset + windowSize, audioData.size)
-                val chunk = audioData.copyOfRange(offset, end)
+            reader.forEachChunk(chunkSamples = 512) { chunk, _ ->
                 vad.acceptWaveform(chunk)
 
                 // 立即检查是否有语音段产生
@@ -117,8 +108,6 @@ class VadTimestampGenerator(private val context: Context) {
                     segments.add(VadSegment(startTime, endTime))
                     Log.d(TAG, "检测到语音段: ${startTime}ms - ${endTime}ms")
                 }
-
-                offset = end
             }
 
             // 刷新 VAD 缓冲区
@@ -181,23 +170,6 @@ class VadTimestampGenerator(private val context: Context) {
         val seconds = (milliseconds % 60000) / 1000
         val millis = milliseconds % 1000
         return String.format("%02d:%02d:%02d,%03d", hours, minutes, seconds, millis)
-    }
-
-    /**
-     * 读取 PCM 文件
-     */
-    private fun readPcmFile(file: File): FloatArray {
-        val bytes = FileInputStream(file).use { it.readBytes() }
-        val samples = FloatArray(bytes.size / 2)
-
-        for (i in samples.indices) {
-            val low = bytes[i * 2].toInt() and 0xFF
-            val high = bytes[i * 2 + 1].toInt()
-            val sample = (high shl 8) or low
-            samples[i] = sample / 32768.0f
-        }
-
-        return samples
     }
 
     /**

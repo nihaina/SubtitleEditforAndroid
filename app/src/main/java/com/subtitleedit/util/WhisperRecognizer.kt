@@ -6,9 +6,6 @@ import android.net.Uri
 import android.util.Log
 import com.k2fsa.sherpa.onnx.*
 import java.io.File
-import java.io.FileInputStream
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 /**
  * Whisper 语音识别器
@@ -49,7 +46,7 @@ class WhisperRecognizer(
      */
     data class VadSegment(
         val startSample: Int,  // 起始采样点（相对于原始音频）
-        val samples: FloatArray,  // 语音段的音频数据
+        val sampleCount: Int,  // 语音段采样点数量
         val startTime: Long,   // 起始时间（毫秒）
         val endTime: Long      // 结束时间（毫秒）
     )
@@ -221,109 +218,114 @@ class WhisperRecognizer(
 
             progressCallback(0, "正在加载音频...", null)
 
-            // 读取音频数据
-            val audioData = readAudioFile(audioFile)
-            val totalSamples = audioData.size
-            val totalDurationMs = (totalSamples * 1000L) / SAMPLE_RATE
-
-            Log.d(TAG, "音频总时长: ${totalDurationMs}ms, 总采样点: $totalSamples")
-
             val allSegments = mutableListOf<SubtitleSegment>()
 
-            // 如果启用了 VAD，先进行语音段检测
-            val vadSegments = if (vad != null) {
-                Log.d(TAG, "使用 VAD 进行语音段检测...")
-                Log.d(TAG, "音频数据统计: min=${audioData.minOrNull()}, max=${audioData.maxOrNull()}, avg=${audioData.average()}")
-                progressCallback(5, "正在检测语音段...", null)
+            Pcm16WavReader(audioFile).use { reader ->
+                val totalSamples = reader.totalSamples
+                val totalDurationMs = (totalSamples * 1000L) / SAMPLE_RATE
 
-                val segments = detectSpeechSegments(audioData)
-                Log.d(TAG, "VAD 检测到 ${segments.size} 个语音段")
+                Log.d(
+                    TAG,
+                    "音频总时长: ${totalDurationMs}ms, 总采样点: $totalSamples, sampleRate=${reader.sampleRate}, channels=${reader.channels}"
+                )
 
-                if (segments.isEmpty()) {
-                    Log.w(TAG, "VAD 未检测到任何语音段，将使用固定分段方式")
-                    null
-                } else {
-                    segments
-                }
-            } else {
-                null
-            }
+                // 如果启用了 VAD，先进行语音段检测
+                val vadSegments = if (vad != null) {
+                    Log.d(TAG, "使用 VAD 进行语音段检测...")
+                    progressCallback(5, "正在检测语音段...", null)
 
-            if (vadSegments != null) {
-                // 对每个语音段进行识别
-                for ((index, vadSegment) in vadSegments.withIndex()) {
-                    if (isCancelled()) {
-                        return Result.failure(Exception("用户取消"))
-                    }
+                    val segments = detectSpeechSegments(reader)
+                    Log.d(TAG, "VAD 检测到 ${segments.size} 个语音段")
 
-                    progressCallback(
-                        5 + ((index * 95) / vadSegments.size),
-                        "正在识别第 ${index + 1}/${vadSegments.size} 个语音段...",
+                    if (segments.isEmpty()) {
+                        Log.w(TAG, "VAD 未检测到任何语音段，将使用固定分段方式")
                         null
-                    )
+                    } else {
+                        segments
+                    }
+                } else {
+                    null
+                }
 
-                    Log.d(TAG, "识别语音段 ${index + 1}/${vadSegments.size} (${vadSegment.startTime}ms - ${vadSegment.endTime}ms)")
+                if (vadSegments != null) {
+                    // 对每个语音段进行识别
+                    for ((index, vadSegment) in vadSegments.withIndex()) {
+                        if (isCancelled()) {
+                            return Result.failure(Exception("用户取消"))
+                        }
 
-                    // 使用 VAD 提取的语音段数据
-                    val segmentData = vadSegment.samples
+                        progressCallback(
+                            5 + ((index * 95) / vadSegments.size),
+                            "正在识别第 ${index + 1}/${vadSegments.size} 个语音段...",
+                            null
+                        )
 
-                    // 识别当前语音段
-                    val segments = recognizeSegment(segmentData, vadSegment.startTime)
-                    allSegments.addAll(segments)
+                        Log.d(TAG, "识别语音段 ${index + 1}/${vadSegments.size} (${vadSegment.startTime}ms - ${vadSegment.endTime}ms)")
 
-                    // 实时返回识别结果
-                    if (segments.isNotEmpty()) {
-                        for (segment in segments) {
-                            progressCallback(
-                                5 + ((index * 95) / vadSegments.size),
-                                "正在识别第 ${index + 1}/${vadSegments.size} 个语音段...",
-                                segment
-                            )
+                        val segmentData = reader.readRange(
+                            startSample = vadSegment.startSample.toLong(),
+                            sampleCount = vadSegment.sampleCount
+                        )
+
+                        // 识别当前语音段
+                        val segments = recognizeSegment(segmentData, vadSegment.startTime)
+                        allSegments.addAll(segments)
+
+                        // 实时返回识别结果
+                        if (segments.isNotEmpty()) {
+                            for (segment in segments) {
+                                progressCallback(
+                                    5 + ((index * 95) / vadSegments.size),
+                                    "正在识别第 ${index + 1}/${vadSegments.size} 个语音段...",
+                                    segment
+                                )
+                            }
                         }
                     }
-                }
-            } else {
-                // 没有 VAD，使用原来的固定分段方式
-                Log.d(TAG, "未使用 VAD，采用固定时长分段")
+                } else {
+                    // 没有 VAD，使用固定分段方式，但每次只读取当前 30 秒片段
+                    Log.d(TAG, "未使用 VAD，采用固定时长分段")
 
-                // 计算分段数量
-                val segmentCount = ((totalDurationMs + SEGMENT_DURATION_MS - 1) / SEGMENT_DURATION_MS).toInt()
-                val samplesPerSegment = (SEGMENT_DURATION_MS * SAMPLE_RATE / 1000).toInt()
+                    // 计算分段数量
+                    val segmentCount = ((totalDurationMs + SEGMENT_DURATION_MS - 1) / SEGMENT_DURATION_MS).toInt()
+                    val samplesPerSegment = (SEGMENT_DURATION_MS * SAMPLE_RATE / 1000).toInt()
 
-                Log.d(TAG, "将分为 $segmentCount 段处理")
+                    Log.d(TAG, "将分为 $segmentCount 段处理")
 
-                // 逐段识别
-                for (i in 0 until segmentCount) {
-                    if (isCancelled()) {
-                        return Result.failure(Exception("用户取消"))
-                    }
+                    // 逐段识别
+                    for (i in 0 until segmentCount) {
+                        if (isCancelled()) {
+                            return Result.failure(Exception("用户取消"))
+                        }
 
-                    val startSample = i * samplesPerSegment
-                    val endSample = minOf((i + 1) * samplesPerSegment, totalSamples)
-                    val segmentData = audioData.copyOfRange(startSample, endSample)
+                        val startSample = i.toLong() * samplesPerSegment
+                        val endSample = minOf((i + 1).toLong() * samplesPerSegment, totalSamples)
+                        val sampleCount = (endSample - startSample).toInt()
+                        val segmentData = reader.readRange(startSample, sampleCount)
 
-                    val startTimeMs = (startSample * 1000L) / SAMPLE_RATE
+                        val startTimeMs = (startSample * 1000L) / SAMPLE_RATE
 
-                    progressCallback(
-                        (i * 100) / segmentCount,
-                        "正在识别第 ${i + 1}/$segmentCount 段...",
-                        null
-                    )
+                        progressCallback(
+                            (i * 100) / segmentCount,
+                            "正在识别第 ${i + 1}/$segmentCount 段...",
+                            null
+                        )
 
-                    Log.d(TAG, "识别第 ${i + 1}/$segmentCount 段 (${startTimeMs}ms - ${(endSample * 1000L) / SAMPLE_RATE}ms)")
+                        Log.d(TAG, "识别第 ${i + 1}/$segmentCount 段 (${startTimeMs}ms - ${(endSample * 1000L) / SAMPLE_RATE}ms)")
 
-                    // 识别当前段
-                    val segments = recognizeSegment(segmentData, startTimeMs)
-                    allSegments.addAll(segments)
+                        // 识别当前段
+                        val segments = recognizeSegment(segmentData, startTimeMs)
+                        allSegments.addAll(segments)
 
-                    // 如果识别到内容，立即通过回调返回
-                    if (segments.isNotEmpty()) {
-                        for (segment in segments) {
-                            progressCallback(
-                                (i * 100) / segmentCount,
-                                "正在识别第 ${i + 1}/$segmentCount 段...",
-                                segment
-                            )
+                        // 如果识别到内容，立即通过回调返回
+                        if (segments.isNotEmpty()) {
+                            for (segment in segments) {
+                                progressCallback(
+                                    (i * 100) / segmentCount,
+                                    "正在识别第 ${i + 1}/$segmentCount 段...",
+                                    segment
+                                )
+                            }
                         }
                     }
                 }
@@ -458,31 +460,6 @@ class WhisperRecognizer(
     }
 
     /**
-     * 读取 WAV 文件为 Float 数组
-     */
-    private fun readAudioFile(file: File): FloatArray {
-        FileInputStream(file).use { fis ->
-            // 跳过 WAV 文件头（44 字节）
-            fis.skip(44)
-
-            // 读取 PCM 数据
-            val buffer = ByteArray(fis.available())
-            fis.read(buffer)
-
-            // 转换为 Float 数组（16-bit PCM -> Float）
-            val samples = FloatArray(buffer.size / 2)
-            val byteBuffer = ByteBuffer.wrap(buffer).order(ByteOrder.LITTLE_ENDIAN)
-
-            for (i in samples.indices) {
-                val sample = byteBuffer.short.toFloat() / 32768.0f
-                samples[i] = sample
-            }
-
-            return samples
-        }
-    }
-
-    /**
      * 将文本按句子分割
      */
     private fun splitIntoSentences(text: String): List<String> {
@@ -541,22 +518,16 @@ class WhisperRecognizer(
     /**
      * 使用 VAD 检测语音段（流式处理）
      */
-    private fun detectSpeechSegments(audioData: FloatArray): List<VadSegment> {
+    private fun detectSpeechSegments(reader: Pcm16WavReader): List<VadSegment> {
         val segments = mutableListOf<VadSegment>()
         val vadInstance = vad ?: return segments
 
         try {
-            // 流式输入：每次输入一小块，立即检查是否有语音段产生
-            val windowSize = 512  // 每次输入 512 个采样点（32ms）
-            var offset = 0
             var totalProcessed = 0
 
-            Log.d(TAG, "开始流式输入音频到 VAD，总长度: ${audioData.size} 采样点")
+            Log.d(TAG, "开始流式输入音频到 VAD，总长度: ${reader.totalSamples} 采样点")
 
-            while (offset < audioData.size) {
-                val end = minOf(offset + windowSize, audioData.size)
-                val chunk = audioData.copyOfRange(offset, end)
-
+            reader.forEachChunk(chunkSamples = 512) { chunk, _ ->
                 // 输入音频块
                 vadInstance.acceptWaveform(chunk)
                 totalProcessed += chunk.size
@@ -574,15 +545,13 @@ class WhisperRecognizer(
 
                     segments.add(VadSegment(
                         startSample = startSample,
-                        samples = speechSegment.samples,
+                        sampleCount = speechSegment.samples.size,
                         startTime = startTime,
                         endTime = endTime
                     ))
 
                     Log.d(TAG, "VAD 检测到语音段: ${startTime}ms - ${endTime}ms (${speechSegment.samples.size} 采样点)")
                 }
-
-                offset = end
             }
 
             // 刷新 VAD 缓冲区，获取剩余的语音段
@@ -601,7 +570,7 @@ class WhisperRecognizer(
 
                 segments.add(VadSegment(
                     startSample = startSample,
-                    samples = speechSegment.samples,
+                    sampleCount = speechSegment.samples.size,
                     startTime = startTime,
                     endTime = endTime
                 ))
