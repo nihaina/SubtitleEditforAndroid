@@ -85,6 +85,11 @@
             android:theme="@style/Theme.SubtitleEditforAndroid" />
 
         <activity
+            android:name=".SpeechToSubtitleSettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.SubtitleEditforAndroid" />
+
+        <activity
             android:name=".AiSettingsActivity"
             android:exported="false"
             android:theme="@style/Theme.SubtitleEditforAndroid" />

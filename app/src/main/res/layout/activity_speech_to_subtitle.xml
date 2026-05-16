@@ -33,6 +33,16 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
+        <!-- 快速设置入口 -->
+        <Button
+            android:id="@+id/btnModelSettings"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginHorizontal="16dp"
+            android:layout_marginTop="16dp"
+            android:text="模型设置" />
+
         <!-- 文件选择区域 -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"

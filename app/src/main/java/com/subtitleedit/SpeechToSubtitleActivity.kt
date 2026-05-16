@@ -18,6 +18,7 @@ import androidx.lifecycle.lifecycleScope
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.subtitleedit.databinding.ActivitySpeechToSubtitleBinding
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.WhisperRecognizer
@@ -160,6 +161,10 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     }
 
     private fun setupButtons() {
+        binding.btnModelSettings.setOnClickListener {
+            startActivity(Intent(this, ModelSettingsActivity::class.java))
+        }
+
         // 选择文件按钮
         binding.btnSelectFile.setOnClickListener {
             filePickerLauncher.launch(arrayOf("audio/*", "video/*"))
@@ -217,8 +222,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             )
 
             outputDirUri = uri
-            val docFile = DocumentFile.fromTreeUri(this, uri)
-            binding.tvOutputDir.text = docFile?.name ?: uri.path ?: "已选择"
+            binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, uri)
 
         } catch (e: Exception) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "选择目录失败：${e.message}", Toast.LENGTH_LONG).show()
@@ -240,7 +244,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             }
 
             outputDirUri = Uri.fromFile(defaultPath)
-            binding.tvOutputDir.text = "Download/SubtitleEdit/Convert"
+            binding.tvOutputDir.text = defaultPath.absolutePath
         } catch (e: Exception) {
             Log.e("SpeechToSubtitle", "设置默认输出目录失败", e)
         }

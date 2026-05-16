@@ -95,6 +95,10 @@ class ModelSettingsActivity : AppCompatActivity() {
             vadPickerLauncher.launch(arrayOf("*/*"))
         }
 
+        binding.btnSpeechAdvancedSettings.setOnClickListener {
+            startActivity(Intent(this, SpeechToSubtitleSettingsActivity::class.java))
+        }
+
         binding.tvModelGuide.setOnClickListener {
             showModelGuide()
         }

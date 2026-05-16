@@ -32,6 +32,14 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_VAD_MIN_SILENCE_DURATION = "vad_min_silence_duration"
         private const val KEY_VAD_MIN_SPEECH_DURATION = "vad_min_speech_duration"
         private const val KEY_VAD_MAX_SPEECH_DURATION = "vad_max_speech_duration"
+        private const val KEY_STT_FIXED_SEGMENT_SECONDS = "stt_fixed_segment_seconds"
+        private const val KEY_STT_KEYWORD_SPOTTING_ENABLED = "stt_keyword_spotting_enabled"
+        private const val KEY_STT_KEYWORD_MODEL_TYPE = "stt_keyword_model_type"
+        private const val KEY_STT_KEYWORDS = "stt_keywords"
+        private const val KEY_STT_KEYWORDS_SCORE = "stt_keywords_score"
+        private const val KEY_STT_KEYWORDS_THRESHOLD = "stt_keywords_threshold"
+        private const val KEY_STT_NUM_TRAILING_BLANKS = "stt_num_trailing_blanks"
+        private const val KEY_STT_WHISPER_THREADS = "stt_whisper_threads"
 
         const val WAVEFORM_CACHE_APP = "app_cache"
         const val WAVEFORM_CACHE_SOURCE = "source_dir"
@@ -255,5 +263,69 @@ class SettingsManager private constructor(context: Context) {
      */
     fun setVadMaxSpeechDuration(duration: Float) {
         prefs.edit().putFloat(KEY_VAD_MAX_SPEECH_DURATION, duration).apply()
+    }
+
+    fun getSpeechFixedSegmentSeconds(): Int {
+        return prefs.getInt(KEY_STT_FIXED_SEGMENT_SECONDS, 30)
+    }
+
+    fun setSpeechFixedSegmentSeconds(seconds: Int) {
+        prefs.edit().putInt(KEY_STT_FIXED_SEGMENT_SECONDS, seconds.coerceIn(5, 120)).apply()
+    }
+
+    fun isKeywordSpottingEnabled(): Boolean {
+        return prefs.getBoolean(KEY_STT_KEYWORD_SPOTTING_ENABLED, false)
+    }
+
+    fun setKeywordSpottingEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_STT_KEYWORD_SPOTTING_ENABLED, enabled).apply()
+    }
+
+    fun getKeywordSpottingModelType(): Int {
+        return prefs.getInt(KEY_STT_KEYWORD_MODEL_TYPE, 0)
+    }
+
+    fun setKeywordSpottingModelType(type: Int) {
+        prefs.edit().putInt(KEY_STT_KEYWORD_MODEL_TYPE, type.coerceIn(0, 0)).apply()
+    }
+
+    fun getKeywordSpottingKeywords(): String {
+        return prefs.getString(KEY_STT_KEYWORDS, "") ?: ""
+    }
+
+    fun setKeywordSpottingKeywords(keywords: String) {
+        prefs.edit().putString(KEY_STT_KEYWORDS, keywords).apply()
+    }
+
+    fun getKeywordSpottingScore(): Float {
+        return prefs.getFloat(KEY_STT_KEYWORDS_SCORE, 1.5f)
+    }
+
+    fun setKeywordSpottingScore(score: Float) {
+        prefs.edit().putFloat(KEY_STT_KEYWORDS_SCORE, score.coerceIn(0.5f, 5.0f)).apply()
+    }
+
+    fun getKeywordSpottingThreshold(): Float {
+        return prefs.getFloat(KEY_STT_KEYWORDS_THRESHOLD, 0.25f)
+    }
+
+    fun setKeywordSpottingThreshold(threshold: Float) {
+        prefs.edit().putFloat(KEY_STT_KEYWORDS_THRESHOLD, threshold.coerceIn(0.05f, 1.0f)).apply()
+    }
+
+    fun getKeywordSpottingNumTrailingBlanks(): Int {
+        return prefs.getInt(KEY_STT_NUM_TRAILING_BLANKS, 2)
+    }
+
+    fun setKeywordSpottingNumTrailingBlanks(value: Int) {
+        prefs.edit().putInt(KEY_STT_NUM_TRAILING_BLANKS, value.coerceIn(0, 10)).apply()
+    }
+
+    fun getSpeechWhisperThreads(): Int {
+        return prefs.getInt(KEY_STT_WHISPER_THREADS, 4)
+    }
+
+    fun setSpeechWhisperThreads(threads: Int) {
+        prefs.edit().putInt(KEY_STT_WHISPER_THREADS, threads.coerceIn(1, 8)).apply()
     }
 }
