@@ -6,6 +6,7 @@ import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import com.subtitleedit.databinding.ActivitySettingsBinding
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
@@ -32,6 +33,7 @@ class SettingsActivity : AppCompatActivity() {
         setupModelSettings()
         setupAiSettings()
         setupPlaybackSettings()
+        setupThemeSettings()
         loadSettings()
         setupGithubLink()
     }
@@ -217,5 +219,47 @@ class SettingsActivity : AppCompatActivity() {
             )
             startActivity(intent)
         }
+    }
+
+    private fun setupThemeSettings() {
+        updateThemeLabel()
+        binding.layoutTheme.setOnClickListener { showThemeDialog() }
+    }
+
+    private fun updateThemeLabel() {
+        binding.tvThemeMode.text = when (settingsManager.getThemeMode()) {
+            SettingsManager.THEME_LIGHT -> "亮色"
+            SettingsManager.THEME_DARK -> "深色"
+            else -> "跟随系统"
+        }
+    }
+
+    private fun showThemeDialog() {
+        val options = arrayOf("亮色主题", "深色主题", "跟随系统")
+        val current = when (settingsManager.getThemeMode()) {
+            SettingsManager.THEME_LIGHT -> 0
+            SettingsManager.THEME_DARK -> 1
+            else -> 2
+        }
+        AlertDialog.Builder(this)
+            .setTitle("主题")
+            .setSingleChoiceItems(options, current) { dialog, which ->
+                val mode = when (which) {
+                    0 -> SettingsManager.THEME_LIGHT
+                    1 -> SettingsManager.THEME_DARK
+                    else -> SettingsManager.THEME_SYSTEM
+                }
+                settingsManager.setThemeMode(mode)
+                AppCompatDelegate.setDefaultNightMode(
+                    when (mode) {
+                        SettingsManager.THEME_LIGHT -> AppCompatDelegate.MODE_NIGHT_NO
+                        SettingsManager.THEME_DARK -> AppCompatDelegate.MODE_NIGHT_YES
+                        else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+                    }
+                )
+                updateThemeLabel()
+                dialog.dismiss()
+            }
+            .show()
     }
 }

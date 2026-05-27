@@ -6,7 +6,6 @@ import android.net.Uri
 import android.util.Log
 import com.k2fsa.sherpa.onnx.*
 import java.io.File
-import java.util.Locale
 
 /**
  * Whisper 语音识别器
@@ -152,7 +151,8 @@ class WhisperRecognizer(
                     sampleRate = SAMPLE_RATE,
                     featureDim = 80
                 ),
-                modelConfig = modelConfig
+                modelConfig = modelConfig,
+                hotwordsScore = settingsManager().getSpeechHotwordsScore()
             )
 
             Log.d(TAG, "开始初始化 OfflineRecognizer...")
@@ -229,17 +229,6 @@ class WhisperRecognizer(
                     TAG,
                     "音频总时长: ${totalDurationMs}ms, 总采样点: $totalSamples, sampleRate=${reader.sampleRate}, channels=${reader.channels}"
                 )
-
-                if (settings.isKeywordSpottingEnabled()) {
-                    progressCallback(2, "正在检测关键词...", null)
-                    val keywordSegments = detectKeywords(reader)
-                    for (keywordSegment in keywordSegments) {
-                        progressCallback(2, "检测到关键词：${keywordSegment.text}", keywordSegment)
-                    }
-                    progressCallback(100, "关键词检测完成", null)
-                    Log.d(TAG, "关键词检测完成，共生成 ${keywordSegments.size} 个字幕片段")
-                    return Result.success(keywordSegments.sortedBy { it.startTime })
-                }
 
                 // 如果启用了 VAD，先进行语音段检测
                 val vadSegments = if (vad != null) {
@@ -376,7 +365,12 @@ class WhisperRecognizer(
 
             Log.d(TAG, "创建 stream...")
             val stream = try {
-                rec.createStream()
+                val hotwords = buildSpeechHotwords()
+                if (hotwords.isEmpty()) {
+                    rec.createStream()
+                } else {
+                    rec.createStream(hotwords)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "创建 stream 失败", e)
                 return segments
@@ -472,159 +466,15 @@ class WhisperRecognizer(
         return segments
     }
 
-    private fun detectKeywords(reader: Pcm16WavReader): List<SubtitleSegment> {
+    private fun buildSpeechHotwords(): String {
         val settings = settingsManager()
-        val modelConfig = getKwsModelConfig(settings.getKeywordSpottingModelType())
-        if (modelConfig == null) {
-            Log.w(TAG, "KWS 模型配置不存在")
-            return emptyList()
-        }
+        if (!settings.isSpeechHotwordsEnabled()) return ""
 
-        val keywordsFile = getKeywordsFile(settings.getKeywordSpottingModelType())
-        if (keywordsFile.isEmpty()) {
-            Log.w(TAG, "KWS 关键词文件不存在")
-            return emptyList()
-        }
-
-        val keywordSegments = mutableListOf<SubtitleSegment>()
-        var keywordSpotter: KeywordSpotter? = null
-        var stream: OnlineStream? = null
-
-        try {
-            val config = KeywordSpotterConfig(
-                featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = 80),
-                modelConfig = modelConfig,
-                maxActivePaths = 4,
-                keywordsFile = keywordsFile,
-                keywordsScore = settings.getKeywordSpottingScore(),
-                keywordsThreshold = settings.getKeywordSpottingThreshold(),
-                numTrailingBlanks = settings.getKeywordSpottingNumTrailingBlanks()
-            )
-
-            keywordSpotter = KeywordSpotter(assetManager = context.assets, config = config)
-            val rawKeywordText = settings.getKeywordSpottingKeywords()
-            val customKeywords = buildKeywordSpotterKeywords(rawKeywordText)
-            if (rawKeywordText.isNotBlank() && customKeywords.isBlank()) {
-                Log.w(TAG, "用户关键词无法转换为 KWS 格式，本次不使用内置默认词表")
-                return emptyList()
-            }
-            stream = keywordSpotter.createStream(customKeywords)
-            val kws = keywordSpotter
-            val kwsStream = stream
-
-            reader.forEachChunk(chunkSamples = 1600) { chunk, startSample ->
-                kwsStream.acceptWaveform(chunk, SAMPLE_RATE)
-                while (kws.isReady(kwsStream)) {
-                    kws.decode(kwsStream)
-                }
-
-                val result = kws.getResult(kwsStream)
-                if (result.keyword.isNotBlank()) {
-                    val startTime = keywordStartTimeMs(result, startSample)
-                    val endTime = keywordEndTimeMs(result, startTime, chunk.size)
-                    val text = "关键词：${result.keyword}"
-                    keywordSegments.add(SubtitleSegment(startTime, endTime, text))
-                    Log.d(TAG, "KWS 检测到关键词: ${result.keyword}, $startTime-$endTime ms")
-                    kws.reset(kwsStream)
-                }
-            }
-
-            kwsStream.inputFinished()
-            while (kws.isReady(kwsStream)) {
-                kws.decode(kwsStream)
-            }
-            val result = kws.getResult(kwsStream)
-            if (result.keyword.isNotBlank()) {
-                val endTime = (reader.totalSamples * 1000L) / SAMPLE_RATE
-                val startTime = (endTime - 1000L).coerceAtLeast(0L)
-                val text = "关键词：${result.keyword}"
-                keywordSegments.add(SubtitleSegment(startTime, endTime, text))
-                Log.d(TAG, "KWS 结束时检测到关键词: ${result.keyword}")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "关键词发现失败", e)
-        } finally {
-            stream?.release()
-            keywordSpotter?.release()
-        }
-
-        return keywordSegments
-    }
-
-    private fun keywordStartTimeMs(result: KeywordSpotterResult, fallbackStartSample: Long): Long {
-        return if (result.timestamps.isNotEmpty()) {
-            (result.timestamps.first() * 1000).toLong().coerceAtLeast(0L)
-        } else {
-            ((fallbackStartSample * 1000L) / SAMPLE_RATE).coerceAtLeast(0L)
-        }
-    }
-
-    private fun keywordEndTimeMs(result: KeywordSpotterResult, startTime: Long, fallbackSamples: Int): Long {
-        return if (result.timestamps.isNotEmpty()) {
-            ((result.timestamps.last() * 1000).toLong() + 300L).coerceAtLeast(startTime + 1)
-        } else {
-            startTime + ((fallbackSamples * 1000L) / SAMPLE_RATE).coerceAtLeast(1L)
-        }
-    }
-
-    private fun buildKeywordSpotterKeywords(rawKeywords: String): String {
-        val lines = rawKeywords.lines()
+        return settings.getSpeechHotwords()
+            .lines()
             .map { it.trim() }
             .filter { it.isNotEmpty() }
-
-        if (lines.isEmpty()) return ""
-
-        val englishLexicon = lazy { loadEnglishPhoneLexicon() }
-        val converted = mutableListOf<String>()
-
-        for (line in lines) {
-            if (line.contains("@")) {
-                converted.add(line)
-                continue
-            }
-
-            if (line.any { it.code > 127 }) {
-                Log.w(TAG, "中文关键词需要 sherpa-onnx token 化格式，已跳过: $line")
-                continue
-            }
-
-            val phones = line.split(Regex("\\s+"))
-                .map { it.trim().trim(',', '.', '!', '?', ';', ':', '"', '\'', '(', ')', '[', ']') }
-                .filter { it.isNotEmpty() }
-                .flatMap { word ->
-                    englishLexicon.value[word.uppercase(Locale.US)] ?: run {
-                        Log.w(TAG, "关键词词典中找不到英文单词，已跳过该词: $word")
-                        emptyList()
-                    }
-                }
-
-            if (phones.isNotEmpty()) {
-                val label = line.trim().replace(Regex("\\s+"), "_").uppercase(Locale.US)
-                converted.add("${phones.joinToString(" ")} @$label")
-            }
-        }
-
-        return converted.joinToString("\n")
-    }
-
-    private fun loadEnglishPhoneLexicon(): Map<String, List<String>> {
-        val result = mutableMapOf<String, List<String>>()
-        val assetPath = "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/en.phone"
-
-        try {
-            context.assets.open(assetPath).bufferedReader().useLines { lines ->
-                lines.forEach { rawLine ->
-                    val parts = rawLine.trim().split(Regex("\\s+"))
-                    if (parts.size >= 2) {
-                        result[parts.first().uppercase(Locale.US)] = parts.drop(1)
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "读取英文关键词词典失败", e)
-        }
-
-        return result
+            .joinToString("\n")
     }
 
     /**

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#90CAF9</color>
+    <color name="primary_dark">#64B5F6</color>
+    <color name="primary_container">#1565C0</color>
+    <color name="on_primary_container">#E3F2FD</color>
+    <color name="secondary">#80CBC4</color>
+    <color name="secondary_dark">#4DB6AC</color>
+    <color name="background">#121212</color>
+    <color name="surface">#1E1E1E</color>
+    <color name="error">#CF6679</color>
+    <color name="on_background">#E6E1E5</color>
+    <color name="on_surface">#E6E1E5</color>
+    <color name="on_surface_variant">#CAC4D0</color>
+    <color name="on_error">#FFFFFF</color>
+    <color name="inverse_primary">#1976D2</color>
+    <color name="playing_highlight">#3E3A00</color>
+    <color name="waveform_toolbar_bg">#1E1E1E</color>
+</resources>

@@ -15,6 +15,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.subtitleedit.adapter.FileListAdapter
@@ -57,6 +58,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val settingsManager = com.subtitleedit.util.SettingsManager.getInstance(this)
+        AppCompatDelegate.setDefaultNightMode(
+            when (settingsManager.getThemeMode()) {
+                com.subtitleedit.util.SettingsManager.THEME_LIGHT -> AppCompatDelegate.MODE_NIGHT_NO
+                com.subtitleedit.util.SettingsManager.THEME_DARK -> AppCompatDelegate.MODE_NIGHT_YES
+                else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+            }
+        )
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)

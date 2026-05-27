@@ -95,7 +95,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
-                        android:text="配置关键词发现、标点恢复、语言识别等扩展功能"
+                        android:text="配置固定分段、Whisper 线程数和热词"
                         android:textColor="@color/on_surface_variant"
                         android:textSize="13sp" />
 

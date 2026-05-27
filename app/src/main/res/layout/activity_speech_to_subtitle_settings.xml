@@ -167,10 +167,10 @@
                     android:padding="16dp">
 
                     <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchKeywordSpotting"
+                        android:id="@+id/switchHotwords"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="启用关键词发现"
+                        android:text="启用热词"
                         android:textColor="@color/on_surface"
                         android:textSize="16sp"
                         android:textStyle="bold" />
@@ -179,34 +179,19 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
-                        android:text="打开后，语音转字幕只输出关键词和对应时间戳，不输出完整识别文本"
+                        android:text="提高特定词汇的识别倾向，仍会输出完整字幕"
                         android:textColor="@color/on_surface_variant"
                         android:textSize="12sp" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="14dp"
-                        android:text="关键词模型"
-                        android:textColor="@color/on_surface"
-                        android:textSize="14sp" />
-
-                    <Spinner
-                        android:id="@+id/spinnerKeywordModel"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:minHeight="48dp" />
 
                     <com.google.android.material.textfield.TextInputLayout
                         style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="12dp"
-                        android:hint="关键词">
+                        android:hint="热词">
 
                         <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/etKeywords"
+                            android:id="@+id/etHotwords"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:gravity="top"
@@ -220,23 +205,23 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="6dp"
-                        android:text="每行一个关键词。英文会自动转换；中文请使用 sherpa-onnx token 化格式。留空使用内置示例词表"
+                        android:text="每行一个词或短语"
                         android:textColor="@color/on_surface_variant"
                         android:textSize="12sp" />
 
                     <Button
-                        android:id="@+id/btnSaveKeywords"
+                        android:id="@+id/btnSaveHotwords"
                         style="@style/Widget.Material3.Button.OutlinedButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:text="保存关键词" />
+                        android:text="保存热词" />
 
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="14dp"
-                        android:text="关键词得分"
+                        android:text="热词权重"
                         android:textColor="@color/on_surface"
                         android:textSize="14sp" />
 
@@ -247,7 +232,7 @@
                         android:orientation="horizontal">
 
                         <com.google.android.material.slider.Slider
-                            android:id="@+id/sliderKeywordScore"
+                            android:id="@+id/sliderHotwordsScore"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
@@ -257,81 +242,11 @@
                             android:valueTo="5.0" />
 
                         <TextView
-                            android:id="@+id/tvKeywordScore"
+                            android:id="@+id/tvHotwordsScore"
                             android:layout_width="56dp"
                             android:layout_height="wrap_content"
                             android:gravity="center"
                             android:text="1.5"
-                            android:textColor="@color/on_surface"
-                            android:textSize="14sp" />
-
-                    </LinearLayout>
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:text="触发阈值"
-                        android:textColor="@color/on_surface"
-                        android:textSize="14sp" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <com.google.android.material.slider.Slider
-                            android:id="@+id/sliderKeywordThreshold"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:stepSize="0.05"
-                            android:value="0.25"
-                            android:valueFrom="0.05"
-                            android:valueTo="1.0" />
-
-                        <TextView
-                            android:id="@+id/tvKeywordThreshold"
-                            android:layout_width="56dp"
-                            android:layout_height="wrap_content"
-                            android:gravity="center"
-                            android:text="0.25"
-                            android:textColor="@color/on_surface"
-                            android:textSize="14sp" />
-
-                    </LinearLayout>
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:text="尾随空白帧"
-                        android:textColor="@color/on_surface"
-                        android:textSize="14sp" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <com.google.android.material.slider.Slider
-                            android:id="@+id/sliderTrailingBlanks"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:stepSize="1"
-                            android:value="2"
-                            android:valueFrom="0"
-                            android:valueTo="10" />
-
-                        <TextView
-                            android:id="@+id/tvTrailingBlanks"
-                            android:layout_width="56dp"
-                            android:layout_height="wrap_content"
-                            android:gravity="center"
-                            android:text="2"
                             android:textColor="@color/on_surface"
                             android:textSize="14sp" />
 

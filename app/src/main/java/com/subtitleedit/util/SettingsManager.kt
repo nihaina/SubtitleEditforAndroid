@@ -33,16 +33,18 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_VAD_MIN_SPEECH_DURATION = "vad_min_speech_duration"
         private const val KEY_VAD_MAX_SPEECH_DURATION = "vad_max_speech_duration"
         private const val KEY_STT_FIXED_SEGMENT_SECONDS = "stt_fixed_segment_seconds"
-        private const val KEY_STT_KEYWORD_SPOTTING_ENABLED = "stt_keyword_spotting_enabled"
-        private const val KEY_STT_KEYWORD_MODEL_TYPE = "stt_keyword_model_type"
-        private const val KEY_STT_KEYWORDS = "stt_keywords"
-        private const val KEY_STT_KEYWORDS_SCORE = "stt_keywords_score"
-        private const val KEY_STT_KEYWORDS_THRESHOLD = "stt_keywords_threshold"
-        private const val KEY_STT_NUM_TRAILING_BLANKS = "stt_num_trailing_blanks"
         private const val KEY_STT_WHISPER_THREADS = "stt_whisper_threads"
+        private const val KEY_STT_HOTWORDS_ENABLED = "stt_hotwords_enabled"
+        private const val KEY_STT_HOTWORDS = "stt_hotwords"
+        private const val KEY_STT_HOTWORDS_SCORE = "stt_hotwords_score"
+        private const val KEY_THEME_MODE = "theme_mode"
 
         const val WAVEFORM_CACHE_APP = "app_cache"
         const val WAVEFORM_CACHE_SOURCE = "source_dir"
+
+        const val THEME_LIGHT = "light"
+        const val THEME_DARK = "dark"
+        const val THEME_SYSTEM = "system"
         
         @Volatile private var instance: SettingsManager? = null
         
@@ -273,59 +275,43 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putInt(KEY_STT_FIXED_SEGMENT_SECONDS, seconds.coerceIn(5, 120)).apply()
     }
 
-    fun isKeywordSpottingEnabled(): Boolean {
-        return prefs.getBoolean(KEY_STT_KEYWORD_SPOTTING_ENABLED, false)
-    }
-
-    fun setKeywordSpottingEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_STT_KEYWORD_SPOTTING_ENABLED, enabled).apply()
-    }
-
-    fun getKeywordSpottingModelType(): Int {
-        return prefs.getInt(KEY_STT_KEYWORD_MODEL_TYPE, 0)
-    }
-
-    fun setKeywordSpottingModelType(type: Int) {
-        prefs.edit().putInt(KEY_STT_KEYWORD_MODEL_TYPE, type.coerceIn(0, 0)).apply()
-    }
-
-    fun getKeywordSpottingKeywords(): String {
-        return prefs.getString(KEY_STT_KEYWORDS, "") ?: ""
-    }
-
-    fun setKeywordSpottingKeywords(keywords: String) {
-        prefs.edit().putString(KEY_STT_KEYWORDS, keywords).apply()
-    }
-
-    fun getKeywordSpottingScore(): Float {
-        return prefs.getFloat(KEY_STT_KEYWORDS_SCORE, 1.5f)
-    }
-
-    fun setKeywordSpottingScore(score: Float) {
-        prefs.edit().putFloat(KEY_STT_KEYWORDS_SCORE, score.coerceIn(0.5f, 5.0f)).apply()
-    }
-
-    fun getKeywordSpottingThreshold(): Float {
-        return prefs.getFloat(KEY_STT_KEYWORDS_THRESHOLD, 0.25f)
-    }
-
-    fun setKeywordSpottingThreshold(threshold: Float) {
-        prefs.edit().putFloat(KEY_STT_KEYWORDS_THRESHOLD, threshold.coerceIn(0.05f, 1.0f)).apply()
-    }
-
-    fun getKeywordSpottingNumTrailingBlanks(): Int {
-        return prefs.getInt(KEY_STT_NUM_TRAILING_BLANKS, 2)
-    }
-
-    fun setKeywordSpottingNumTrailingBlanks(value: Int) {
-        prefs.edit().putInt(KEY_STT_NUM_TRAILING_BLANKS, value.coerceIn(0, 10)).apply()
-    }
-
     fun getSpeechWhisperThreads(): Int {
         return prefs.getInt(KEY_STT_WHISPER_THREADS, 4)
     }
 
     fun setSpeechWhisperThreads(threads: Int) {
         prefs.edit().putInt(KEY_STT_WHISPER_THREADS, threads.coerceIn(1, 8)).apply()
+    }
+
+    fun isSpeechHotwordsEnabled(): Boolean {
+        return prefs.getBoolean(KEY_STT_HOTWORDS_ENABLED, false)
+    }
+
+    fun setSpeechHotwordsEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_STT_HOTWORDS_ENABLED, enabled).apply()
+    }
+
+    fun getSpeechHotwords(): String {
+        return prefs.getString(KEY_STT_HOTWORDS, "") ?: ""
+    }
+
+    fun setSpeechHotwords(hotwords: String) {
+        prefs.edit().putString(KEY_STT_HOTWORDS, hotwords).apply()
+    }
+
+    fun getSpeechHotwordsScore(): Float {
+        return prefs.getFloat(KEY_STT_HOTWORDS_SCORE, 1.5f)
+    }
+
+    fun setSpeechHotwordsScore(score: Float) {
+        prefs.edit().putFloat(KEY_STT_HOTWORDS_SCORE, score.coerceIn(0.5f, 5.0f)).apply()
+    }
+
+    fun getThemeMode(): String {
+        return prefs.getString(KEY_THEME_MODE, THEME_SYSTEM) ?: THEME_SYSTEM
+    }
+
+    fun setThemeMode(mode: String) {
+        prefs.edit().putString(KEY_THEME_MODE, mode).apply()
     }
 }
