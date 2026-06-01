@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.util.Log
+import android.view.MotionEvent
 import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
@@ -17,6 +18,7 @@ import com.arthenica.ffmpegkit.FFmpegKit
 import com.subtitleedit.databinding.ActivityAutoTimestampBinding
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.DirectoryDisplayPath
+import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.VadTimestampGenerator
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +38,8 @@ class AutoTimestampActivity : AppCompatActivity() {
     private var outputDirUri: Uri? = null
     private var generationJob: Job? = null
     private var isGenerating = false
+    private lateinit var settingsManager: SettingsManager
+    private val operationLog = StringBuilder()
 
     private val formatOptions = arrayOf("SRT", "LRC")
 
@@ -57,10 +61,12 @@ class AutoTimestampActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityAutoTimestampBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        settingsManager = SettingsManager.getInstance(this)
 
         setupToolbar()
         setupSpinners()
         setupButtons()
+        setupScrollableLogs()
         setupDefaultOutputDir()
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -114,6 +120,16 @@ class AutoTimestampActivity : AppCompatActivity() {
 
         binding.btnGenerate.setOnClickListener {
             generateTimestamps()
+        }
+    }
+
+    private fun setupScrollableLogs() {
+        binding.previewScroll.setOnTouchListener { view, event ->
+            view.parent.requestDisallowInterceptTouchEvent(true)
+            if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                view.parent.requestDisallowInterceptTouchEvent(false)
+            }
+            false
         }
     }
 
@@ -177,39 +193,73 @@ class AutoTimestampActivity : AppCompatActivity() {
         binding.btnGenerate.isEnabled = false
         binding.progressBar.visibility = android.view.View.VISIBLE
         binding.tvStatus.text = "正在处理..."
+        operationLog.clear()
+        binding.tvPreview.text = ""
+        appendOperationLog("开始自动打轴")
+        appendOperationLog("输入文件：$selectedFileName")
+        appendOperationLog("输出格式：${formatOptions[binding.spinnerOutputFormat.selectedItemPosition]}")
+        appendOperationLog("输出目录：${binding.tvOutputDir.text}")
+        appendOperationLog("预处理配置：FFmpeg 提取 16kHz 单声道 PCM WAV")
+        appendVadConfig()
         isGenerating = true
 
         generationJob = lifecycleScope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
                     // 1. 复制文件到缓存
+                    runOnUiThread {
+                        binding.tvStatus.text = "正在复制文件..."
+                        appendOperationLog("预处理：复制输入文件到缓存目录")
+                    }
                     val cachedFile = copyUriToCache(audioUri, selectedFileName)
                     if (cachedFile == null) {
                         throw Exception("复制文件失败")
                     }
+                    runOnUiThread {
+                        appendOperationLog("缓存文件：${cachedFile.name}，大小 ${formatBytes(cachedFile.length())}")
+                    }
 
                     // 2. 转换为 16kHz PCM WAV
-                    runOnUiThread { binding.tvStatus.text = "正在提取音频..." }
+                    runOnUiThread {
+                        binding.tvStatus.text = "正在提取音频..."
+                        appendOperationLog("预处理：使用 FFmpeg 转换音频")
+                    }
                     val pcmFile = convertToPcm(cachedFile)
                     if (pcmFile == null) {
                         throw Exception("音频转换失败")
                     }
+                    runOnUiThread {
+                        appendOperationLog("PCM 文件：${pcmFile.name}，大小 ${formatBytes(pcmFile.length())}")
+                    }
 
                     // 3. 使用 VAD 生成时间轴
-                    runOnUiThread { binding.tvStatus.text = "正在检测语音段..." }
+                    runOnUiThread {
+                        binding.tvStatus.text = "正在检测语音段..."
+                        appendOperationLog("VAD：开始检测语音段")
+                    }
                     val generator = VadTimestampGenerator(this@AutoTimestampActivity)
                     val segments = generator.generateSegments(pcmFile)
 
                     if (segments.isEmpty()) {
                         throw Exception("未检测到任何语音段")
                     }
+                    runOnUiThread {
+                        appendOperationLog("VAD：检测到 ${segments.size} 个语音段")
+                        appendVadSegments(segments)
+                    }
 
                     // 4. 生成字幕内容
                     val format = formatOptions[binding.spinnerOutputFormat.selectedItemPosition]
+                    runOnUiThread {
+                        appendOperationLog("生成字幕：$format 格式")
+                    }
                     val subtitleContent = generateSubtitle(segments, format)
 
                     // 5. 保存到输出目录
-                    runOnUiThread { binding.tvStatus.text = "正在保存..." }
+                    runOnUiThread {
+                        binding.tvStatus.text = "正在保存..."
+                        appendOperationLog("保存：写入输出目录")
+                    }
                     saveToOutputDir(outputDir, subtitleContent, format)
 
                     subtitleContent
@@ -220,7 +270,10 @@ class AutoTimestampActivity : AppCompatActivity() {
                 binding.btnGenerate.isEnabled = true
 
                 // 显示预览
-                binding.tvPreview.text = result
+                appendOperationLog("生成完成")
+                operationLog.append("\n===== 生成结果 =====\n")
+                operationLog.append(result)
+                binding.tvPreview.text = operationLog.toString()
 
                 com.subtitleedit.util.OverwritingToast.makeText(this@AutoTimestampActivity, "字幕已保存到输出目录", Toast.LENGTH_LONG).show()
 
@@ -370,6 +423,63 @@ class AutoTimestampActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Log.e("AutoTimestamp", "音频转换失败", e)
             null
+        }
+    }
+
+    private fun appendOperationLog(message: String) {
+        operationLog.append("[${formatClockTime()}] ").append(message).append("\n")
+        binding.tvPreview.text = operationLog.toString()
+        binding.previewScroll.post {
+            binding.previewScroll.fullScroll(android.view.View.FOCUS_DOWN)
+        }
+    }
+
+    private fun appendVadConfig() {
+        appendOperationLog("VAD 配置：")
+        appendOperationLog("  模型：内置 silero_vad.onnx")
+        appendOperationLog("  采样率：16000Hz，线程：2，provider：cpu")
+        appendOperationLog("  阈值：${settingsManager.getVadThreshold()}，最小静音：${settingsManager.getVadMinSilenceDuration()}s")
+        appendOperationLog("  最小语音：${settingsManager.getVadMinSpeechDuration()}s，最大语音：${settingsManager.getVadMaxSpeechDuration()}s")
+    }
+
+    private fun appendVadSegments(segments: List<VadTimestampGenerator.VadSegment>) {
+        for ((index, segment) in segments.withIndex()) {
+            operationLog.append(
+                String.format(
+                    java.util.Locale.getDefault(),
+                    "  #%02d %s --> %s，时长 %.2fs\n",
+                    index + 1,
+                    formatSubtitleTime(segment.startTime),
+                    formatSubtitleTime(segment.endTime),
+                    (segment.endTime - segment.startTime) / 1000.0
+                )
+            )
+        }
+        binding.tvPreview.text = operationLog.toString()
+        binding.previewScroll.post {
+            binding.previewScroll.fullScroll(android.view.View.FOCUS_DOWN)
+        }
+    }
+
+    private fun formatClockTime(): String {
+        return java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+            .format(java.util.Date())
+    }
+
+    private fun formatSubtitleTime(timeMs: Long): String {
+        val totalSeconds = timeMs / 1000
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        val millis = timeMs % 1000
+        return String.format("%02d:%02d:%02d.%03d", hours, minutes, seconds, millis)
+    }
+
+    private fun formatBytes(bytes: Long): String {
+        return when {
+            bytes < 1024L -> "$bytes B"
+            bytes < 1024L * 1024L -> String.format("%.1f KB", bytes / 1024.0)
+            else -> String.format("%.2f MB", bytes / 1024.0 / 1024.0)
         }
     }
 

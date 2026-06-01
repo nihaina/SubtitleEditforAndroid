@@ -279,16 +279,18 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
-                android:text="识别内容："
+                android:text="运行日志与识别内容："
                 android:textSize="14sp"
                 android:textStyle="bold"
                 android:textColor="@color/on_surface" />
 
             <ScrollView
+                android:id="@+id/realtimeResultScroll"
                 android:layout_width="match_parent"
                 android:layout_height="200dp"
                 android:layout_marginTop="8dp"
                 android:background="@android:color/transparent"
+                android:nestedScrollingEnabled="true"
                 android:padding="8dp">
 
                 <TextView
@@ -296,8 +298,9 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="等待识别..."
-                    android:textSize="14sp"
+                    android:textSize="12sp"
                     android:textColor="@color/on_surface"
+                    android:fontFamily="monospace"
                     android:lineSpacingExtra="4dp" />
 
             </ScrollView>

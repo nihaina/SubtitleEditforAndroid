@@ -225,15 +225,17 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="预览"
+                        android:text="运行日志与预览"
                         android:textSize="16sp"
                         android:textStyle="bold"
                         android:textColor="@color/on_surface" />
 
                     <ScrollView
+                        android:id="@+id/previewScroll"
                         android:layout_width="match_parent"
                         android:layout_height="300dp"
-                        android:layout_marginTop="8dp">
+                        android:layout_marginTop="8dp"
+                        android:nestedScrollingEnabled="true">
 
                         <TextView
                             android:id="@+id/tvPreview"
