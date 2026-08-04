@@ -51,9 +51,18 @@ class ModelSettingsActivity : AppCompatActivity() {
     private var pendingStorageAction: (() -> Unit)? = null
 
     private companion object {
-        private const val VAD_THRESHOLD_MIN = 0.1f
+        private const val VAD_THRESHOLD_MIN = 0.01f
         private const val VAD_THRESHOLD_MAX = 0.9f
-        private const val VAD_THRESHOLD_STEP = 0.05f
+        private const val VAD_THRESHOLD_STEP = 0.01f
+        private const val VAD_MIN_SILENCE_MIN = 0.01f
+        private const val VAD_MIN_SILENCE_MAX = 2.0f
+        private const val VAD_MIN_SILENCE_STEP = 0.01f
+        private const val VAD_MIN_SPEECH_MIN = 0.01f
+        private const val VAD_MIN_SPEECH_MAX = 1.0f
+        private const val VAD_MIN_SPEECH_STEP = 0.01f
+        private const val VAD_MAX_SPEECH_MIN = 1.0f
+        private const val VAD_MAX_SPEECH_MAX = 60.0f
+        private const val VAD_MAX_SPEECH_STEP = 1.0f
     }
 
     // Encoder 文件选择器
@@ -519,10 +528,14 @@ class ModelSettingsActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 val v = s.toString().toFloatOrNull() ?: return
-                val clamped = v.coerceIn(0.1f, 2.0f)
-                val snapped = (Math.round(clamped / 0.1f) * 0.1f)
+                val snapped = snapVadValue(
+                    v,
+                    VAD_MIN_SILENCE_STEP,
+                    VAD_MIN_SILENCE_MIN,
+                    VAD_MIN_SILENCE_MAX
+                )
                 if (binding.sliderMinSilence.value != snapped) binding.sliderMinSilence.value = snapped
-                settingsManager.setVadMinSilenceDuration(clamped)
+                settingsManager.setVadMinSilenceDuration(snapped)
             }
         })
 
@@ -536,10 +549,14 @@ class ModelSettingsActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 val v = s.toString().toFloatOrNull() ?: return
-                val clamped = v.coerceIn(0.05f, 1.0f)
-                val snapped = (Math.round(clamped / 0.05f) * 0.05f)
+                val snapped = snapVadValue(
+                    v,
+                    VAD_MIN_SPEECH_STEP,
+                    VAD_MIN_SPEECH_MIN,
+                    VAD_MIN_SPEECH_MAX
+                )
                 if (binding.sliderMinSpeech.value != snapped) binding.sliderMinSpeech.value = snapped
-                settingsManager.setVadMinSpeechDuration(clamped)
+                settingsManager.setVadMinSpeechDuration(snapped)
             }
         })
 
@@ -553,10 +570,14 @@ class ModelSettingsActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 val v = s.toString().toFloatOrNull() ?: return
-                val clamped = v.coerceIn(5.0f, 60.0f)
-                val snapped = (Math.round(clamped / 5.0f) * 5.0f).toFloat()
+                val snapped = snapVadValue(
+                    v,
+                    VAD_MAX_SPEECH_STEP,
+                    VAD_MAX_SPEECH_MIN,
+                    VAD_MAX_SPEECH_MAX
+                )
                 if (binding.sliderMaxSpeech.value != snapped) binding.sliderMaxSpeech.value = snapped
-                settingsManager.setVadMaxSpeechDuration(clamped)
+                settingsManager.setVadMaxSpeechDuration(snapped)
             }
         })
     }
@@ -763,9 +784,17 @@ class ModelSettingsActivity : AppCompatActivity() {
     }
 
     private fun normalizeVadThreshold(threshold: Float): Float {
-        val clamped = threshold.coerceIn(VAD_THRESHOLD_MIN, VAD_THRESHOLD_MAX)
-        val steps = Math.round((clamped - VAD_THRESHOLD_MIN) / VAD_THRESHOLD_STEP).coerceIn(0, 16)
-        return ((VAD_THRESHOLD_MIN * 100).toInt() + steps * 5) / 100f
+        return snapVadValue(
+            threshold,
+            VAD_THRESHOLD_STEP,
+            VAD_THRESHOLD_MIN,
+            VAD_THRESHOLD_MAX
+        )
+    }
+
+    private fun snapVadValue(value: Float, step: Float, min: Float, max: Float): Float {
+        val clamped = value.coerceIn(min, max)
+        return (Math.round((clamped - min) / step) * step + min).coerceIn(min, max)
     }
 
     private fun floatEquals(a: Float, b: Float): Boolean {

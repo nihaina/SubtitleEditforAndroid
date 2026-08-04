@@ -456,42 +456,60 @@ class SettingsManager private constructor(context: Context) {
      * 获取 VAD 最小静音时长
      */
     fun getVadMinSilenceDuration(): Float {
-        return prefs.getFloat(KEY_VAD_MIN_SILENCE_DURATION, 0.3f)
+        return normalizeVadValue(
+            prefs.getFloat(KEY_VAD_MIN_SILENCE_DURATION, 0.3f),
+            step = 0.01f,
+            min = 0.01f,
+            max = 2.0f
+        )
     }
 
     /**
      * 设置 VAD 最小静音时长
      */
     fun setVadMinSilenceDuration(duration: Float) {
-        prefs.edit().putFloat(KEY_VAD_MIN_SILENCE_DURATION, duration).apply()
+        val normalized = normalizeVadValue(duration, step = 0.01f, min = 0.01f, max = 2.0f)
+        prefs.edit().putFloat(KEY_VAD_MIN_SILENCE_DURATION, normalized).apply()
     }
 
     /**
      * 获取 VAD 最小语音时长
      */
     fun getVadMinSpeechDuration(): Float {
-        return prefs.getFloat(KEY_VAD_MIN_SPEECH_DURATION, 0.25f)
+        return normalizeVadValue(
+            prefs.getFloat(KEY_VAD_MIN_SPEECH_DURATION, 0.25f),
+            step = 0.01f,
+            min = 0.01f,
+            max = 1.0f
+        )
     }
 
     /**
      * 设置 VAD 最小语音时长
      */
     fun setVadMinSpeechDuration(duration: Float) {
-        prefs.edit().putFloat(KEY_VAD_MIN_SPEECH_DURATION, duration).apply()
+        val normalized = normalizeVadValue(duration, step = 0.01f, min = 0.01f, max = 1.0f)
+        prefs.edit().putFloat(KEY_VAD_MIN_SPEECH_DURATION, normalized).apply()
     }
 
     /**
      * 获取 VAD 最大语音时长
      */
     fun getVadMaxSpeechDuration(): Float {
-        return prefs.getFloat(KEY_VAD_MAX_SPEECH_DURATION, 10.0f)
+        return normalizeVadValue(
+            prefs.getFloat(KEY_VAD_MAX_SPEECH_DURATION, 10.0f),
+            step = 1.0f,
+            min = 1.0f,
+            max = 60.0f
+        )
     }
 
     /**
      * 设置 VAD 最大语音时长
      */
     fun setVadMaxSpeechDuration(duration: Float) {
-        prefs.edit().putFloat(KEY_VAD_MAX_SPEECH_DURATION, duration).apply()
+        val normalized = normalizeVadValue(duration, step = 1.0f, min = 1.0f, max = 60.0f)
+        prefs.edit().putFloat(KEY_VAD_MAX_SPEECH_DURATION, normalized).apply()
     }
 
     fun getSpeechFixedSegmentSeconds(): Int {
@@ -530,45 +548,47 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun getSpeechSecondaryVadThreshold(): Float {
-        return normalizeVadThreshold(prefs.getFloat(KEY_STT_SECONDARY_VAD_THRESHOLD, 0.2f))
+        return normalizeSecondaryVadThreshold(
+            prefs.getFloat(KEY_STT_SECONDARY_VAD_THRESHOLD, 0.2f)
+        )
     }
 
     fun setSpeechSecondaryVadThreshold(threshold: Float) {
         prefs.edit()
-            .putFloat(KEY_STT_SECONDARY_VAD_THRESHOLD, normalizeVadThreshold(threshold))
+            .putFloat(KEY_STT_SECONDARY_VAD_THRESHOLD, normalizeSecondaryVadThreshold(threshold))
             .apply()
     }
 
     fun getSpeechSecondaryVadMinSilenceDuration(): Float {
         return prefs.getFloat(KEY_STT_SECONDARY_VAD_MIN_SILENCE_DURATION, 0.1f)
-            .coerceIn(0.1f, 2.0f)
+            .coerceIn(0.01f, 2.0f)
     }
 
     fun setSpeechSecondaryVadMinSilenceDuration(duration: Float) {
         prefs.edit()
-            .putFloat(KEY_STT_SECONDARY_VAD_MIN_SILENCE_DURATION, duration.coerceIn(0.1f, 2.0f))
+            .putFloat(KEY_STT_SECONDARY_VAD_MIN_SILENCE_DURATION, duration.coerceIn(0.01f, 2.0f))
             .apply()
     }
 
     fun getSpeechSecondaryVadMinSpeechDuration(): Float {
         return prefs.getFloat(KEY_STT_SECONDARY_VAD_MIN_SPEECH_DURATION, 0.1f)
-            .coerceIn(0.05f, 1.0f)
+            .coerceIn(0.01f, 1.0f)
     }
 
     fun setSpeechSecondaryVadMinSpeechDuration(duration: Float) {
         prefs.edit()
-            .putFloat(KEY_STT_SECONDARY_VAD_MIN_SPEECH_DURATION, duration.coerceIn(0.05f, 1.0f))
+            .putFloat(KEY_STT_SECONDARY_VAD_MIN_SPEECH_DURATION, duration.coerceIn(0.01f, 1.0f))
             .apply()
     }
 
     fun getSpeechSecondaryVadMaxSpeechDuration(): Float {
         return prefs.getFloat(KEY_STT_SECONDARY_VAD_MAX_SPEECH_DURATION, 5.0f)
-            .coerceIn(5.0f, 60.0f)
+            .coerceIn(1.0f, 60.0f)
     }
 
     fun setSpeechSecondaryVadMaxSpeechDuration(duration: Float) {
         prefs.edit()
-            .putFloat(KEY_STT_SECONDARY_VAD_MAX_SPEECH_DURATION, duration.coerceIn(5.0f, 60.0f))
+            .putFloat(KEY_STT_SECONDARY_VAD_MAX_SPEECH_DURATION, duration.coerceIn(1.0f, 60.0f))
             .apply()
     }
 
@@ -743,8 +763,16 @@ class SettingsManager private constructor(context: Context) {
     }
 
     private fun normalizeVadThreshold(threshold: Float): Float {
-        val clamped = threshold.coerceIn(0.1f, 0.9f)
-        val steps = Math.round((clamped - 0.1f) / 0.05f).coerceIn(0, 16)
-        return (10 + steps * 5) / 100f
+        return normalizeVadValue(threshold, step = 0.01f, min = 0.01f, max = 0.9f)
+    }
+
+    private fun normalizeSecondaryVadThreshold(threshold: Float): Float {
+        val clamped = threshold.coerceIn(0.01f, 0.9f)
+        return Math.round(clamped * 100f) / 100f
+    }
+
+    private fun normalizeVadValue(value: Float, step: Float, min: Float, max: Float): Float {
+        val clamped = value.coerceIn(min, max)
+        return (Math.round((clamped - min) / step) * step + min).coerceIn(min, max)
     }
 }

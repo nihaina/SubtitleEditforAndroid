@@ -497,9 +497,9 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:valueFrom="0.1"
+                            android:valueFrom="0.01"
                             android:valueTo="0.9"
-                            android:stepSize="0.05"
+                            android:stepSize="0.01"
                             android:value="0.3" />
 
                         <com.google.android.material.textfield.TextInputLayout
@@ -550,9 +550,9 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:valueFrom="0.1"
+                            android:valueFrom="0.01"
                             android:valueTo="2.0"
-                            android:stepSize="0.1"
+                            android:stepSize="0.01"
                             android:value="0.3" />
 
                         <com.google.android.material.textfield.TextInputLayout
@@ -604,9 +604,9 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:valueFrom="0.05"
+                            android:valueFrom="0.01"
                             android:valueTo="1.0"
-                            android:stepSize="0.05"
+                            android:stepSize="0.01"
                             android:value="0.25" />
 
                         <com.google.android.material.textfield.TextInputLayout
@@ -658,9 +658,9 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:valueFrom="5.0"
+                            android:valueFrom="1.0"
                             android:valueTo="60.0"
-                            android:stepSize="5.0"
+                            android:stepSize="1.0"
                             android:value="10.0" />
 
                         <com.google.android.material.textfield.TextInputLayout

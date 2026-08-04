@@ -82,21 +82,21 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
             slider = binding.sliderSecondaryVadMinSilence,
             input = binding.etSecondaryVadMinSilence,
             format = "%.2f",
-            normalize = { value -> snap(value, 0.1f, 0.1f, 2.0f) },
+            normalize = { value -> snap(value, 0.01f, 0.01f, 2.0f) },
             save = settingsManager::setSpeechSecondaryVadMinSilenceDuration
         )
         bindSecondaryVadValue(
             slider = binding.sliderSecondaryVadMinSpeech,
             input = binding.etSecondaryVadMinSpeech,
             format = "%.2f",
-            normalize = { value -> snap(value, 0.05f, 0.05f, 1.0f) },
+            normalize = { value -> snap(value, 0.01f, 0.01f, 1.0f) },
             save = settingsManager::setSpeechSecondaryVadMinSpeechDuration
         )
         bindSecondaryVadValue(
             slider = binding.sliderSecondaryVadMaxSpeech,
             input = binding.etSecondaryVadMaxSpeech,
             format = "%.1f",
-            normalize = { value -> snap(value, 5.0f, 5.0f, 60.0f) },
+            normalize = { value -> snap(value, 1.0f, 1.0f, 60.0f) },
             save = settingsManager::setSpeechSecondaryVadMaxSpeechDuration
         )
 
@@ -275,7 +275,7 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
     }
 
     private fun normalizeSecondaryVadThreshold(value: Float): Float {
-        return snap(value, 0.05f, 0.1f, 0.9f)
+        return snap(value, 0.01f, 0.01f, 0.9f)
     }
 
     private fun snap(value: Float, step: Float, min: Float, max: Float): Float {
