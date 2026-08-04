@@ -76,7 +76,7 @@
 ## 环境要求
 
 - JDK 17
-- Android SDK 34+
+- Android SDK 26+
 
 ### 构建步骤
 

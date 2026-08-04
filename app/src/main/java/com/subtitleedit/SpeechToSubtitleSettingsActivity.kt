@@ -4,7 +4,6 @@ import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
-import android.view.ViewGroup
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.slider.Slider
@@ -183,7 +182,6 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         binding.tvWhisperThreads.text = String.format(Locale.getDefault(), "%d", whisperThreads)
 
         loading = false
-        updateSecondaryVadParameterState()
     }
 
     private fun updateSecondaryVadMode(mode: String, checked: Boolean) {
@@ -208,7 +206,6 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
             settingsManager.setSpeechSecondaryVadMode(activeMode)
         }
         updatingSecondaryVadMode = false
-        updateSecondaryVadParameterState()
     }
 
     private fun bindSecondaryVadValue(
@@ -257,22 +254,6 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
     ) {
         slider.value = value
         input.setText(String.format(Locale.US, format, value))
-    }
-
-    private fun updateSecondaryVadParameterState() {
-        val enabled = binding.switchSecondaryVadSchemeOne.isChecked ||
-            binding.switchSecondaryVadSchemeTwo.isChecked
-        setViewEnabled(binding.layoutSecondaryVadParameters, enabled)
-        binding.layoutSecondaryVadParameters.alpha = if (enabled) 1f else 0.55f
-    }
-
-    private fun setViewEnabled(view: View, enabled: Boolean) {
-        view.isEnabled = enabled
-        if (view is ViewGroup) {
-            for (index in 0 until view.childCount) {
-                setViewEnabled(view.getChildAt(index), enabled)
-            }
-        }
     }
 
     private fun normalizeSecondaryVadThreshold(value: Float): Float {

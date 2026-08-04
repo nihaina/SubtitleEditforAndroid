@@ -90,6 +90,51 @@
                         android:textSize="14sp"
                         android:textColor="@color/on_surface_variant" />
 
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchSecondaryProcessing"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:minHeight="40dp"
+                        android:text="@string/activity_auto_timestamp_text_12"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/activity_auto_timestamp_text_13"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="12sp" />
+
+                    <TextView
+                        android:id="@+id/tvSubtitleFileTitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/activity_auto_timestamp_text_14"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp" />
+
+                    <Button
+                        android:id="@+id/btnSelectSubtitle"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:enabled="false"
+                        android:text="@string/activity_auto_timestamp_text_15" />
+
+                    <TextView
+                        android:id="@+id/tvSubtitleFile"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/activity_auto_timestamp_text_16"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="14sp" />
+
                 </LinearLayout>
 
             </com.google.android.material.card.MaterialCardView>

@@ -106,6 +106,11 @@
     <string name="activity_auto_timestamp_text_09">生成时间轴</string>
     <string name="activity_auto_timestamp_text_10">运行日志与预览</string>
     <string name="activity_auto_timestamp_text_11">等待生成...</string>
+    <string name="activity_auto_timestamp_text_12">二次处理</string>
+    <string name="activity_auto_timestamp_text_13">以已有字幕时间段作为已覆盖区域，对音视频中全部未覆盖区间执行方案一二次 VAD</string>
+    <string name="activity_auto_timestamp_text_14">字幕文件（SRT/LRC）</string>
+    <string name="activity_auto_timestamp_text_15">选择字幕文件</string>
+    <string name="activity_auto_timestamp_text_16">未选择字幕文件</string>
     <string name="activity_batch_convert_text_01">转换设置</string>
     <string name="activity_batch_convert_text_02">选择输出目录</string>
     <string name="activity_batch_convert_text_03">输出目录：Download/SubtitleEdit/Convert（默认）</string>

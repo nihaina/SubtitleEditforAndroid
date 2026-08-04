@@ -17,6 +17,7 @@ import com.arthenica.ffmpegkit.FFmpegKit
 import com.subtitleedit.databinding.ActivityAutoTimestampBinding
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.DirectoryDisplayPath
+import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleParser
@@ -35,6 +36,7 @@ class AutoTimestampActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityAutoTimestampBinding
     private val selectedMediaFiles = mutableListOf<SelectedMediaFile>()
+    private var selectedSubtitleFile: SelectedMediaFile? = null
     private var outputDirUri: Uri? = null
     private var generationJob: Job? = null
     private var isGenerating = false
@@ -56,6 +58,12 @@ class AutoTimestampActivity : AppCompatActivity() {
         if (uris.isNotEmpty()) handleSelectedAudios(uris)
     }
 
+    private val subtitlePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let(::handleSelectedSubtitle)
+    }
+
     // 输出目录选择器
     private val outputDirLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -74,6 +82,8 @@ class AutoTimestampActivity : AppCompatActivity() {
         setupButtons()
         setupScrollableLogs()
         setupDefaultOutputDir()
+        updateSecondaryProcessingState(binding.switchSecondaryProcessing.isChecked)
+        updateGenerateButtonState()
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -117,6 +127,15 @@ class AutoTimestampActivity : AppCompatActivity() {
     private fun setupButtons() {
         binding.btnSelectAudio.setOnClickListener {
             audioPickerLauncher.launch(arrayOf("audio/*", "video/*"))
+        }
+
+        binding.switchSecondaryProcessing.setOnCheckedChangeListener { _, checked ->
+            updateSecondaryProcessingState(checked)
+            updateGenerateButtonState()
+        }
+
+        binding.btnSelectSubtitle.setOnClickListener {
+            subtitlePickerLauncher.launch(arrayOf("*/*"))
         }
 
         binding.btnSelectOutputDir.setOnClickListener {
@@ -173,11 +192,49 @@ class AutoTimestampActivity : AppCompatActivity() {
                     append("\n${index + 1}. ${file.fileName}")
                 }
             }
-            binding.btnGenerate.isEnabled = true
+            updateGenerateButtonState()
 
         } catch (e: Exception) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun handleSelectedSubtitle(uri: Uri) {
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val fileName = getFileNameFromUri(uri)
+            val extension = fileName.substringAfterLast('.', "").lowercase()
+            if (extension !in setOf("srt", "lrc")) {
+                com.subtitleedit.util.OverwritingToast.makeText(
+                    this,
+                    "请选择 SRT 或 LRC 字幕文件",
+                    Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+            selectedSubtitleFile = SelectedMediaFile(uri, fileName)
+            binding.tvSubtitleFile.text = fileName
+            updateGenerateButtonState()
+        } catch (e: Exception) {
+            com.subtitleedit.util.OverwritingToast.makeText(
+                this,
+                "选择字幕文件失败：${e.message}",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun updateSecondaryProcessingState(enabled: Boolean) {
+        binding.btnSelectSubtitle.isEnabled = enabled
+        binding.tvSubtitleFileTitle.alpha = if (enabled) 1f else 0.55f
+        binding.btnSelectSubtitle.alpha = if (enabled) 1f else 0.55f
+        binding.tvSubtitleFile.alpha = if (enabled) 1f else 0.55f
+    }
+
+    private fun updateGenerateButtonState() {
+        val subtitleReady = !binding.switchSecondaryProcessing.isChecked ||
+            selectedSubtitleFile != null
+        binding.btnGenerate.isEnabled = selectedMediaFiles.isNotEmpty() && subtitleReady && !isGenerating
     }
 
     private fun handleSelectedOutputDir(uri: Uri) {
@@ -197,6 +254,24 @@ class AutoTimestampActivity : AppCompatActivity() {
 
     private fun generateTimestamps() {
         if (selectedMediaFiles.isEmpty()) return
+        if (binding.switchSecondaryProcessing.isChecked) {
+            if (selectedMediaFiles.size != 1) {
+                com.subtitleedit.util.OverwritingToast.makeText(
+                    this,
+                    "二次处理时请选择一个音频或视频文件",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return
+            }
+            if (selectedSubtitleFile == null) {
+                com.subtitleedit.util.OverwritingToast.makeText(
+                    this,
+                    "请先选择要二次处理的字幕文件",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return
+            }
+        }
         if (!settingsManager.isVadUseBuiltInModel() && settingsManager.getVadModelPath().isBlank()) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "请先选择外部 VAD 模型，或在模型设置中勾选使用内置", Toast.LENGTH_SHORT).show()
             return
@@ -212,7 +287,7 @@ class AutoTimestampActivity : AppCompatActivity() {
                 SubtitleOutputWriter.exists(
                     this,
                     outputDir,
-                    file.fileName.substringBeforeLast("."),
+                    outputSourceFileName(file).substringBeforeLast("."),
                     extension
                 )
             }) {
@@ -238,6 +313,9 @@ class AutoTimestampActivity : AppCompatActivity() {
             com.subtitleedit.util.OverwritingToast.makeText(this, "请选择输出目录", Toast.LENGTH_SHORT).show()
             return
         }
+        val refinementSubtitle = selectedSubtitleFile.takeIf {
+            binding.switchSecondaryProcessing.isChecked
+        }
 
         binding.btnGenerate.isEnabled = false
         binding.progressBar.visibility = android.view.View.VISIBLE
@@ -250,7 +328,13 @@ class AutoTimestampActivity : AppCompatActivity() {
         appendOperationLog("输出格式：${formatOptions[binding.spinnerOutputFormat.selectedItemPosition]}")
         appendOperationLog("输出目录：${binding.tvOutputDir.text}")
         appendOperationLog("预处理配置：FFmpeg 提取 16kHz 单声道 PCM WAV")
-        appendVadConfig()
+        if (refinementSubtitle != null) {
+            appendOperationLog("二次处理：启用，方案一")
+            appendOperationLog("参考字幕：${refinementSubtitle.fileName}")
+        } else {
+            appendOperationLog("二次处理：关闭")
+        }
+        appendVadConfig(refinementSubtitle != null)
         isGenerating = true
         isCancelled = false
 
@@ -263,14 +347,17 @@ class AutoTimestampActivity : AppCompatActivity() {
                 for ((index, file) in selectedMediaFiles.withIndex()) {
                     if (isCancelled) break
 
-                    val outputBaseName = file.fileName.substringBeforeLast(".").lowercase()
+                    val outputBaseName = outputSourceFileName(file, refinementSubtitle)
+                        .substringBeforeLast(".")
+                        .lowercase()
                     val shouldOverwrite = overwriteOutput && writtenOutputBaseNames.add(outputBaseName)
                     val result = generateTimestampForFile(
                         file,
                         index + 1,
                         selectedMediaFiles.size,
                         outputDir,
-                        shouldOverwrite
+                        shouldOverwrite,
+                        refinementSubtitle
                     )
                     if (isCancelled) break
 
@@ -297,8 +384,8 @@ class AutoTimestampActivity : AppCompatActivity() {
             } finally {
                 binding.progressBar.visibility = android.view.View.GONE
                 binding.btnCancel.visibility = android.view.View.GONE
-                binding.btnGenerate.isEnabled = true
                 isGenerating = false
+                updateGenerateButtonState()
                 generationJob = null
             }
         }
@@ -321,7 +408,7 @@ class AutoTimestampActivity : AppCompatActivity() {
         isGenerating = false
         binding.progressBar.visibility = android.view.View.GONE
         binding.btnCancel.visibility = android.view.View.GONE
-        binding.btnGenerate.isEnabled = true
+        updateGenerateButtonState()
         binding.tvStatus.text = "已取消"
         if (showToast) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "已取消", Toast.LENGTH_SHORT).show()
@@ -333,7 +420,8 @@ class AutoTimestampActivity : AppCompatActivity() {
         fileIndex: Int,
         fileCount: Int,
         outputDir: Uri,
-        overwriteOutput: Boolean
+        overwriteOutput: Boolean,
+        refinementSubtitle: SelectedMediaFile?
     ): Result<Unit> {
         val taskCacheDir = File(
             cacheDir,
@@ -362,25 +450,64 @@ class AutoTimestampActivity : AppCompatActivity() {
             if (isCancelled) return Result.failure(Exception("用户取消"))
 
             binding.tvStatus.text = "$progressPrefix 正在检测语音段..."
-            appendOperationLog("VAD：开始检测语音段")
-            val segments = withContext(Dispatchers.IO) {
-                VadTimestampGenerator(this@AutoTimestampActivity).generateSegments(pcmFile)
+            val originalEntries = if (refinementSubtitle != null) {
+                appendOperationLog("读取参考字幕：${refinementSubtitle.fileName}")
+                withContext(Dispatchers.IO) {
+                    loadSubtitleEntries(refinementSubtitle)
+                }.getOrElse { return Result.failure(it) }
+            } else {
+                emptyList()
             }
-            if (segments.isEmpty()) return Result.failure(Exception("未检测到任何语音段"))
-            appendOperationLog("VAD：检测到 ${segments.size} 个语音段")
+
+            val segments = withContext(Dispatchers.IO) {
+                val generator = VadTimestampGenerator(this@AutoTimestampActivity)
+                if (refinementSubtitle != null) {
+                    generator.generateUncoveredSegments(
+                        pcmFile = pcmFile,
+                        occupiedTimeRangesMs = originalEntries.map { entry ->
+                            entry.startTime to entry.endTime
+                        }
+                    )
+                } else {
+                    generator.generateSegments(pcmFile)
+                }
+            }
+            if (refinementSubtitle == null && segments.isEmpty()) {
+                return Result.failure(Exception("未检测到任何语音段"))
+            }
+            appendOperationLog(
+                if (refinementSubtitle != null) {
+                    "二次 VAD：在未覆盖区间检测到 ${segments.size} 个新增语音段"
+                } else {
+                    "VAD：检测到 ${segments.size} 个语音段"
+                }
+            )
             appendVadSegments(segments)
 
             val format = formatOptions[binding.spinnerOutputFormat.selectedItemPosition]
             appendOperationLog("生成字幕：$format 格式")
-            val subtitleContent = generateSubtitle(segments, format)
+            val outputEntries = if (refinementSubtitle != null) {
+                buildRefinedSubtitleEntries(originalEntries, segments)
+            } else {
+                buildGeneratedSubtitleEntries(segments)
+            }
+            val subtitleContent = generateSubtitle(outputEntries, format)
 
             binding.tvStatus.text = "$progressPrefix 正在保存..."
             appendOperationLog("保存：写入输出目录")
             val outputFileName = withContext(Dispatchers.IO) {
-                saveToOutputDir(outputDir, file.fileName, subtitleContent, format, overwriteOutput)
+                saveToOutputDir(
+                    outputDir,
+                    outputSourceFileName(file, refinementSubtitle),
+                    subtitleContent,
+                    format,
+                    overwriteOutput
+                )
             }
             appendOperationLog("已保存字幕：$outputFileName")
-            operationLog.append("\n===== ${file.fileName} 生成结果 =====\n")
+            operationLog.append(
+                "\n===== ${outputSourceFileName(file, refinementSubtitle)} 生成结果 =====\n"
+            )
             operationLog.append(subtitleContent)
             binding.tvPreview.text = operationLog.toString()
             Result.success(Unit)
@@ -393,11 +520,33 @@ class AutoTimestampActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 生成字幕内容
-     */
-    private fun generateSubtitle(segments: List<VadTimestampGenerator.VadSegment>, format: String): String {
-        val entries = segments.mapIndexed { index, segment ->
+    private fun loadSubtitleEntries(file: SelectedMediaFile): Result<List<SubtitleEntry>> {
+        return try {
+            val charset = settingsManager.getDefaultEncoding()
+            val content = FileUtils.readUri(this, file.uri, charset)
+            val detectedFormat = SubtitleParser.detectFormat(content)
+            if (
+                detectedFormat != SubtitleParser.SubtitleFormat.SRT &&
+                detectedFormat != SubtitleParser.SubtitleFormat.LRC
+            ) {
+                return Result.failure(Exception("参考字幕不是有效的 SRT 或 LRC 文件"))
+            }
+            val entries = SubtitleParser.parse(content, charset)
+                .filter { entry -> entry.endTime > entry.startTime }
+            if (entries.isEmpty()) {
+                Result.failure(Exception("参考字幕中没有有效时间段"))
+            } else {
+                Result.success(entries)
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("读取参考字幕失败：${e.message}", e))
+        }
+    }
+
+    private fun buildGeneratedSubtitleEntries(
+        segments: List<VadTimestampGenerator.VadSegment>
+    ): List<SubtitleEntry> {
+        return segments.mapIndexed { index, segment ->
             SubtitleEntry(
                 index = index + 1,
                 startTime = segment.startTime,
@@ -405,13 +554,40 @@ class AutoTimestampActivity : AppCompatActivity() {
                 text = "请输入文本"
             )
         }
+    }
 
+    private fun buildRefinedSubtitleEntries(
+        originalEntries: List<SubtitleEntry>,
+        detectedSegments: List<VadTimestampGenerator.VadSegment>
+    ): List<SubtitleEntry> {
+        val newEntries = detectedSegments.map { segment ->
+            SubtitleEntry(
+                startTime = segment.startTime,
+                endTime = segment.endTime,
+                text = "请输入文本"
+            )
+        }
+        return (originalEntries.map { it.copy() } + newEntries)
+            .sortedWith(compareBy<SubtitleEntry> { it.startTime }.thenBy { it.endTime })
+            .mapIndexed { index, entry -> entry.apply { this.index = index + 1 } }
+    }
+
+    private fun generateSubtitle(entries: List<SubtitleEntry>, format: String): String {
         return when (format) {
             "SRT" -> SubtitleParser.toSRT(entries)
             "LRC" -> SubtitleParser.toLRC(entries)
             "TXT" -> SubtitleParser.toTXT(entries)
             else -> SubtitleParser.toSRT(entries)
         }
+    }
+
+    private fun outputSourceFileName(
+        mediaFile: SelectedMediaFile,
+        subtitleFile: SelectedMediaFile? = selectedSubtitleFile.takeIf {
+            binding.switchSecondaryProcessing.isChecked
+        }
+    ): String {
+        return subtitleFile?.fileName ?: mediaFile.fileName
     }
 
     /**
@@ -482,12 +658,23 @@ class AutoTimestampActivity : AppCompatActivity() {
         }
     }
 
-    private fun appendVadConfig() {
+    private fun appendVadConfig(secondaryProcessing: Boolean) {
         appendOperationLog("VAD 配置：")
         appendOperationLog("  模型：${getVadModelDisplayText()}")
         appendOperationLog("  采样率：16000Hz，线程：2，provider：cpu")
-        appendOperationLog("  阈值：${settingsManager.getVadThreshold()}，最小静音：${settingsManager.getVadMinSilenceDuration()}s")
-        appendOperationLog("  最小语音：${settingsManager.getVadMinSpeechDuration()}s，最大语音：${settingsManager.getVadMaxSpeechDuration()}s")
+        if (secondaryProcessing) {
+            appendOperationLog(
+                "  二次阈值：${settingsManager.getSpeechSecondaryVadThreshold()}，" +
+                    "最小静音：${settingsManager.getSpeechSecondaryVadMinSilenceDuration()}s"
+            )
+            appendOperationLog(
+                "  最小语音：${settingsManager.getSpeechSecondaryVadMinSpeechDuration()}s，" +
+                    "最大语音：${settingsManager.getSpeechSecondaryVadMaxSpeechDuration()}s"
+            )
+        } else {
+            appendOperationLog("  阈值：${settingsManager.getVadThreshold()}，最小静音：${settingsManager.getVadMinSilenceDuration()}s")
+            appendOperationLog("  最小语音：${settingsManager.getVadMinSpeechDuration()}s，最大语音：${settingsManager.getVadMaxSpeechDuration()}s")
+        }
     }
 
     private fun getVadModelDisplayText(): String {

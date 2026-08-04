@@ -59,20 +59,7 @@ class VadTimestampGenerator(private val context: Context) {
         return try {
             val segments = Pcm16WavReader(pcmFile).use { reader ->
                 Log.d(TAG, "音频信息: sampleRate=${reader.sampleRate}, channels=${reader.channels}, samples=${reader.totalSamples}")
-                val primarySegments = detectSpeechSegments(vad, reader)
-                val settingsManager = SettingsManager.getInstance(context)
-                val secondaryMode = settingsManager.getSpeechSecondaryVadMode()
-                if (secondaryMode == SettingsManager.SECONDARY_VAD_MODE_NONE) {
-                    primarySegments
-                } else {
-                    secondaryVad = initVad(secondary = true)
-                    if (secondaryVad == null) {
-                        Log.w(TAG, "二次 VAD 初始化失败，将仅使用第一次 VAD")
-                        primarySegments
-                    } else {
-                        applySecondaryVad(reader, primarySegments, secondaryMode)
-                    }
-                }
+                detectSpeechSegments(vad, reader)
             }
             Log.d(TAG, "检测到 ${segments.size} 个语音段")
             segments
@@ -270,6 +257,46 @@ class VadTimestampGenerator(private val context: Context) {
         }
     }
 
+    /**
+     * 将已有字幕时间段视为已覆盖区域，仅对所有未覆盖音频运行二次 VAD 方案一。
+     * 此入口不读取语音转字幕配置中的二次 VAD 模式开关。
+     */
+    fun generateUncoveredSegments(
+        pcmFile: File,
+        occupiedTimeRangesMs: List<Pair<Long, Long>>
+    ): List<VadSegment> {
+        val vad = initVad(secondary = true)
+        if (vad == null) {
+            Log.e(TAG, "二次 VAD 初始化失败")
+            return emptyList()
+        }
+        secondaryVad = vad
+
+        return try {
+            Pcm16WavReader(pcmFile).use { reader ->
+                val occupiedRanges = occupiedTimeRangesMs.mapNotNull { (startTime, endTime) ->
+                    val startSample = (startTime.coerceAtLeast(0L) * SAMPLE_RATE) / 1000L
+                    val endSample = (endTime.coerceAtLeast(startTime) * SAMPLE_RATE) / 1000L
+                    val clampedStart = startSample.coerceIn(0L, reader.totalSamples)
+                    val clampedEnd = endSample.coerceIn(clampedStart, reader.totalSamples)
+                    if (clampedEnd > clampedStart) {
+                        SampleRange(clampedStart, clampedEnd)
+                    } else {
+                        null
+                    }
+                }
+                val uncoveredRanges = findUncoveredSampleRanges(reader.totalSamples, occupiedRanges)
+                Log.d(TAG, "自动打轴二次处理：扫描 ${uncoveredRanges.size} 个未覆盖区间")
+                uncoveredRanges.flatMap { range ->
+                    detectSecondarySpeechSegments(reader, range)
+                }.sortedBy { it.startSample }
+            }
+        } finally {
+            secondaryVad?.release()
+            secondaryVad = null
+        }
+    }
+
     private fun findUncoveredRanges(
         totalSamples: Long,
         segments: List<VadSegment>
@@ -285,6 +312,28 @@ class VadTimestampGenerator(private val context: Context) {
                 ranges.add(SampleRange(coveredUntil, segmentStart))
             }
             coveredUntil = maxOf(coveredUntil, segmentEnd)
+        }
+
+        if (coveredUntil < totalSamples) {
+            ranges.add(SampleRange(coveredUntil, totalSamples))
+        }
+        return ranges
+    }
+
+    private fun findUncoveredSampleRanges(
+        totalSamples: Long,
+        coveredRanges: List<SampleRange>
+    ): List<SampleRange> {
+        val ranges = mutableListOf<SampleRange>()
+        var coveredUntil = 0L
+
+        for (coveredRange in coveredRanges.sortedBy { it.startSample }) {
+            val coveredStart = coveredRange.startSample.coerceIn(0L, totalSamples)
+            val coveredEnd = coveredRange.endSample.coerceIn(coveredStart, totalSamples)
+            if (coveredStart > coveredUntil) {
+                ranges.add(SampleRange(coveredUntil, coveredStart))
+            }
+            coveredUntil = maxOf(coveredUntil, coveredEnd)
         }
 
         if (coveredUntil < totalSamples) {
