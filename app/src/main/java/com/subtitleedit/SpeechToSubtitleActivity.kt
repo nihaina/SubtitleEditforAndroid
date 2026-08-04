@@ -706,6 +706,13 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                         "最小语音 ${settingsManager.getSpeechSecondaryVadMinSpeechDuration()}s，" +
                         "最大语音 ${settingsManager.getSpeechSecondaryVadMaxSpeechDuration()}s"
                 )
+                appendRuntimeLog(
+                    "  合并语音段：${if (settingsManager.isSpeechSecondaryVadMergeEnabled()) {
+                        "启用，最大间隔 ${settingsManager.getSpeechSecondaryVadMergeGapMs()}ms"
+                    } else {
+                        "关闭"
+                    }}"
+                )
             }
         }
         if (modelType == SettingsManager.ASR_MODEL_WHISPER || modelType == SettingsManager.ASR_MODEL_PARAKEET_TDT) {

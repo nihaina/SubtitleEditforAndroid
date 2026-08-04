@@ -979,7 +979,8 @@ class WhisperRecognizer(
         reader: Pcm16WavReader,
         primarySegments: List<VadSegment>
     ): List<VadSegment> {
-        return when (settingsManager().getSpeechSecondaryVadMode()) {
+        val settings = settingsManager()
+        val processedSegments = when (settings.getSpeechSecondaryVadMode()) {
             SettingsManager.SECONDARY_VAD_MODE_UNCOVERED -> {
                 val uncoveredRanges = findUncoveredRanges(reader.totalSamples, primarySegments)
                 Log.d(TAG, "二次 VAD 方案一：处理 ${uncoveredRanges.size} 个未划分区间")
@@ -1005,6 +1006,53 @@ class WhisperRecognizer(
 
             else -> primarySegments
         }
+        if (!settings.isSpeechSecondaryVadMergeEnabled()) return processedSegments
+
+        val mergedSegments = mergeVadSegments(
+            processedSegments,
+            settings.getSpeechSecondaryVadMergeGapMs()
+        )
+        Log.d(
+            TAG,
+            "二次 VAD 合并语音段：${processedSegments.size} -> ${mergedSegments.size}，" +
+                "最大间隔 ${settings.getSpeechSecondaryVadMergeGapMs()}ms"
+        )
+        return mergedSegments
+    }
+
+    private fun mergeVadSegments(
+        segments: List<VadSegment>,
+        maxGapMs: Int
+    ): List<VadSegment> {
+        if (segments.size < 2) return segments.sortedBy { it.startSample }
+
+        val maxGapSamples = (maxGapMs.toLong() * SAMPLE_RATE) / 1000L
+        val sorted = segments.sortedBy { it.startSample }
+        val merged = mutableListOf<VadSegment>()
+        var current = sorted.first()
+
+        for (next in sorted.drop(1)) {
+            val currentEnd = current.startSample.toLong() + current.sampleCount.toLong()
+            val nextStart = next.startSample.toLong()
+            if (nextStart - currentEnd <= maxGapSamples) {
+                val mergedStart = current.startSample.toLong()
+                val mergedEnd = maxOf(
+                    currentEnd,
+                    next.startSample.toLong() + next.sampleCount.toLong()
+                )
+                current = VadSegment(
+                    startSample = mergedStart.toInt(),
+                    sampleCount = (mergedEnd - mergedStart).toInt(),
+                    startTime = (mergedStart * 1000L) / SAMPLE_RATE,
+                    endTime = (mergedEnd * 1000L) / SAMPLE_RATE
+                )
+            } else {
+                merged.add(current)
+                current = next
+            }
+        }
+        merged.add(current)
+        return merged
     }
 
     private fun findUncoveredRanges(

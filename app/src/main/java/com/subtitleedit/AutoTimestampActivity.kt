@@ -51,6 +51,11 @@ class AutoTimestampActivity : AppCompatActivity() {
         val fileName: String
     )
 
+    private data class MergeableSubtitleEntry(
+        val entry: SubtitleEntry,
+        val generatedPlaceholder: Boolean
+    )
+
     // 音频文件选择器
     private val audioPickerLauncher = registerForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
@@ -560,16 +565,80 @@ class AutoTimestampActivity : AppCompatActivity() {
         originalEntries: List<SubtitleEntry>,
         detectedSegments: List<VadTimestampGenerator.VadSegment>
     ): List<SubtitleEntry> {
-        val newEntries = detectedSegments.map { segment ->
-            SubtitleEntry(
-                startTime = segment.startTime,
-                endTime = segment.endTime,
-                text = "请输入文本"
+        val mergeableEntries = originalEntries.map { entry ->
+            MergeableSubtitleEntry(entry.copy(), generatedPlaceholder = false)
+        } + detectedSegments.map { segment ->
+            MergeableSubtitleEntry(
+                entry = SubtitleEntry(
+                    startTime = segment.startTime,
+                    endTime = segment.endTime,
+                    text = "请输入文本"
+                ),
+                generatedPlaceholder = true
             )
         }
-        return (originalEntries.map { it.copy() } + newEntries)
-            .sortedWith(compareBy<SubtitleEntry> { it.startTime }.thenBy { it.endTime })
+
+        val sortedEntries = mergeableEntries.sortedWith(
+            compareBy<MergeableSubtitleEntry> { it.entry.startTime }
+                .thenBy { it.entry.endTime }
+        )
+        val outputEntries = if (settingsManager.isSpeechSecondaryVadMergeEnabled()) {
+            mergeSubtitleEntries(
+                sortedEntries,
+                settingsManager.getSpeechSecondaryVadMergeGapMs()
+            )
+        } else {
+            sortedEntries.map { it.entry }
+        }
+        return outputEntries
             .mapIndexed { index, entry -> entry.apply { this.index = index + 1 } }
+    }
+
+    private fun mergeSubtitleEntries(
+        entries: List<MergeableSubtitleEntry>,
+        maxGapMs: Int
+    ): List<SubtitleEntry> {
+        if (entries.isEmpty()) return emptyList()
+
+        val merged = mutableListOf<SubtitleEntry>()
+        var group = mutableListOf(entries.first())
+        var groupStart = entries.first().entry.startTime
+        var groupEnd = entries.first().entry.endTime
+
+        fun flushGroup() {
+            if (group.size == 1) {
+                merged.add(group.first().entry.copy())
+            } else {
+                val text = group.joinToString(separator = "") { item ->
+                    if (item.generatedPlaceholder) {
+                        "（${item.entry.text}）"
+                    } else {
+                        item.entry.text
+                    }
+                }
+                merged.add(
+                    SubtitleEntry(
+                        startTime = groupStart,
+                        endTime = groupEnd,
+                        text = text
+                    )
+                )
+            }
+        }
+
+        for (next in entries.drop(1)) {
+            if (next.entry.startTime - groupEnd <= maxGapMs) {
+                group.add(next)
+                groupEnd = maxOf(groupEnd, next.entry.endTime)
+            } else {
+                flushGroup()
+                group = mutableListOf(next)
+                groupStart = next.entry.startTime
+                groupEnd = next.entry.endTime
+            }
+        }
+        flushGroup()
+        return merged
     }
 
     private fun generateSubtitle(entries: List<SubtitleEntry>, format: String): String {
@@ -663,6 +732,7 @@ class AutoTimestampActivity : AppCompatActivity() {
         appendOperationLog("  模型：${getVadModelDisplayText()}")
         appendOperationLog("  采样率：16000Hz，线程：2，provider：cpu")
         if (secondaryProcessing) {
+            appendOperationLog("  自动打轴字幕二次处理：方案一（独立开关）")
             appendOperationLog(
                 "  二次阈值：${settingsManager.getSpeechSecondaryVadThreshold()}，" +
                     "最小静音：${settingsManager.getSpeechSecondaryVadMinSilenceDuration()}s"
@@ -671,10 +741,39 @@ class AutoTimestampActivity : AppCompatActivity() {
                 "  最小语音：${settingsManager.getSpeechSecondaryVadMinSpeechDuration()}s，" +
                     "最大语音：${settingsManager.getSpeechSecondaryVadMaxSpeechDuration()}s"
             )
+            appendSecondaryVadMergeConfig()
         } else {
             appendOperationLog("  阈值：${settingsManager.getVadThreshold()}，最小静音：${settingsManager.getVadMinSilenceDuration()}s")
             appendOperationLog("  最小语音：${settingsManager.getVadMinSpeechDuration()}s，最大语音：${settingsManager.getVadMaxSpeechDuration()}s")
+            val secondaryMode = settingsManager.getSpeechSecondaryVadMode()
+            val secondaryModeText = when (secondaryMode) {
+                SettingsManager.SECONDARY_VAD_MODE_UNCOVERED -> "方案一（处理未划分区间）"
+                SettingsManager.SECONDARY_VAD_MODE_WITHIN_SEGMENTS -> "方案二（段内再次划分）"
+                else -> "关闭"
+            }
+            appendOperationLog("  高级配置二次 VAD：$secondaryModeText")
+            if (secondaryMode != SettingsManager.SECONDARY_VAD_MODE_NONE) {
+                appendOperationLog(
+                    "  二次阈值：${settingsManager.getSpeechSecondaryVadThreshold()}，" +
+                        "最小静音：${settingsManager.getSpeechSecondaryVadMinSilenceDuration()}s"
+                )
+                appendOperationLog(
+                    "  二次最小语音：${settingsManager.getSpeechSecondaryVadMinSpeechDuration()}s，" +
+                        "最大语音：${settingsManager.getSpeechSecondaryVadMaxSpeechDuration()}s"
+                )
+                appendSecondaryVadMergeConfig()
+            }
         }
+    }
+
+    private fun appendSecondaryVadMergeConfig() {
+        appendOperationLog(
+            "  合并语音段：${if (settingsManager.isSpeechSecondaryVadMergeEnabled()) {
+                "启用，最大间隔 ${settingsManager.getSpeechSecondaryVadMergeGapMs()}ms"
+            } else {
+                "关闭"
+            }}"
+        )
     }
 
     private fun getVadModelDisplayText(): String {

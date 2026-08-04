@@ -59,6 +59,10 @@ class SettingsManager private constructor(context: Context) {
             "stt_secondary_vad_min_speech_duration"
         private const val KEY_STT_SECONDARY_VAD_MAX_SPEECH_DURATION =
             "stt_secondary_vad_max_speech_duration"
+        private const val KEY_STT_SECONDARY_VAD_MERGE_ENABLED =
+            "stt_secondary_vad_merge_enabled"
+        private const val KEY_STT_SECONDARY_VAD_MERGE_GAP_MS =
+            "stt_secondary_vad_merge_gap_ms"
         private const val KEY_STT_WHISPER_THREADS = "stt_whisper_threads"
         private const val KEY_STT_HOTWORDS_ENABLED = "stt_hotwords_enabled"
         private const val KEY_STT_HOTWORDS = "stt_hotwords"
@@ -566,6 +570,22 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit()
             .putFloat(KEY_STT_SECONDARY_VAD_MAX_SPEECH_DURATION, duration.coerceIn(5.0f, 60.0f))
             .apply()
+    }
+
+    fun isSpeechSecondaryVadMergeEnabled(): Boolean {
+        return prefs.getBoolean(KEY_STT_SECONDARY_VAD_MERGE_ENABLED, false)
+    }
+
+    fun setSpeechSecondaryVadMergeEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_STT_SECONDARY_VAD_MERGE_ENABLED, enabled).apply()
+    }
+
+    fun getSpeechSecondaryVadMergeGapMs(): Int {
+        return prefs.getInt(KEY_STT_SECONDARY_VAD_MERGE_GAP_MS, 200).coerceIn(0, 5000)
+    }
+
+    fun setSpeechSecondaryVadMergeGapMs(gapMs: Int) {
+        prefs.edit().putInt(KEY_STT_SECONDARY_VAD_MERGE_GAP_MS, gapMs.coerceIn(0, 5000)).apply()
     }
 
     fun getSpeechWhisperThreads(): Int {

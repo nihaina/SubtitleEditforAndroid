@@ -234,9 +234,9 @@
     <string name="activity_speech_to_subtitle_settings_text_16">二次 VAD</string>
     <string name="activity_speech_to_subtitle_settings_text_17">两个方案互斥，可全部关闭；启用后使用下方独立参数执行第二次语音段检测</string>
     <string name="activity_speech_to_subtitle_settings_text_18">方案一</string>
-    <string name="activity_speech_to_subtitle_settings_text_19">第一次 VAD 后，对所有未划分时间段的音频进行二次 VAD，并保留两次检测结果</string>
+    <string name="activity_speech_to_subtitle_settings_text_19">方案一:第一次 VAD 后，对所有未划分时间段的音频进行二次 VAD，并保留两次检测结果</string>
     <string name="activity_speech_to_subtitle_settings_text_20">方案二</string>
-    <string name="activity_speech_to_subtitle_settings_text_21">对第一次 VAD 生成的每个时间段内部进行二次 VAD，以二次检测结果进一步划分时间段</string>
+    <string name="activity_speech_to_subtitle_settings_text_21">方案二:对第一次 VAD 生成的每个时间段内部进行二次 VAD，以二次检测结果进一步划分时间段</string>
     <string name="activity_speech_to_subtitle_settings_text_22">二次 VAD 参数</string>
     <string name="activity_speech_to_subtitle_settings_text_23">阈值</string>
     <string name="activity_speech_to_subtitle_settings_text_24">数值越低越容易检测到轻声和较弱语音</string>
@@ -250,6 +250,11 @@
     <string name="activity_speech_to_subtitle_settings_text_32">最大语音时长</string>
     <string name="activity_speech_to_subtitle_settings_text_33">连续语音达到该时长后由 VAD 强制切段</string>
     <string name="activity_speech_to_subtitle_settings_text_34" translatable="false">5.0</string>
+    <string name="activity_speech_to_subtitle_settings_text_35">合并语音段</string>
+    <string name="activity_speech_to_subtitle_settings_text_36">二次 VAD 完成后，合并间隔不超过指定时间的相邻语音段</string>
+    <string name="activity_speech_to_subtitle_settings_text_37">最大合并间隔</string>
+    <string name="activity_speech_to_subtitle_settings_text_38">设为 0 时仅合并重叠或首尾相接的语音段</string>
+    <string name="activity_speech_to_subtitle_settings_text_39" translatable="false">200</string>
     <string name="activity_speech_to_subtitle_text_01">选择音频/视频文件（可多选）</string>
     <string name="activity_speech_to_subtitle_text_02">支持 MP3, WAV, FLAC, MP4, MKV 等格式</string>
     <string name="activity_speech_to_subtitle_text_03">源语言</string>

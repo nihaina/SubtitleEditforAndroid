@@ -60,6 +60,16 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         binding.switchSecondaryVadSchemeTwo.setOnCheckedChangeListener { _, checked ->
             updateSecondaryVadMode(SettingsManager.SECONDARY_VAD_MODE_WITHIN_SEGMENTS, checked)
         }
+        binding.switchSecondaryVadMerge.setOnCheckedChangeListener { _, checked ->
+            if (!loading) settingsManager.setSpeechSecondaryVadMergeEnabled(checked)
+        }
+        bindSecondaryVadValue(
+            slider = binding.sliderSecondaryVadMergeGap,
+            input = binding.etSecondaryVadMergeGap,
+            format = "%.0f",
+            normalize = { value -> snap(value, 50f, 0f, 5000f) },
+            save = { value -> settingsManager.setSpeechSecondaryVadMergeGapMs(value.toInt()) }
+        )
 
         bindSecondaryVadValue(
             slider = binding.sliderSecondaryVadThreshold,
@@ -145,6 +155,14 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
                 binding.switchSecondaryVadSchemeTwo.isChecked = false
             }
         }
+        binding.switchSecondaryVadMerge.isChecked =
+            settingsManager.isSpeechSecondaryVadMergeEnabled()
+        loadSecondaryVadValue(
+            binding.sliderSecondaryVadMergeGap,
+            binding.etSecondaryVadMergeGap,
+            settingsManager.getSpeechSecondaryVadMergeGapMs().toFloat(),
+            "%.0f"
+        )
         loadSecondaryVadValue(
             binding.sliderSecondaryVadThreshold,
             binding.etSecondaryVadThreshold,

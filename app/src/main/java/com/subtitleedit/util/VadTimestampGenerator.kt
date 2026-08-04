@@ -59,7 +59,20 @@ class VadTimestampGenerator(private val context: Context) {
         return try {
             val segments = Pcm16WavReader(pcmFile).use { reader ->
                 Log.d(TAG, "音频信息: sampleRate=${reader.sampleRate}, channels=${reader.channels}, samples=${reader.totalSamples}")
-                detectSpeechSegments(vad, reader)
+                val primarySegments = detectSpeechSegments(vad, reader)
+                val settingsManager = SettingsManager.getInstance(context)
+                val secondaryMode = settingsManager.getSpeechSecondaryVadMode()
+                if (secondaryMode == SettingsManager.SECONDARY_VAD_MODE_NONE) {
+                    primarySegments
+                } else {
+                    secondaryVad = initVad(secondary = true)
+                    if (secondaryVad == null) {
+                        Log.w(TAG, "二次 VAD 初始化失败，将仅使用第一次 VAD")
+                        primarySegments
+                    } else {
+                        applySecondaryVad(reader, primarySegments, secondaryMode)
+                    }
+                }
             }
             Log.d(TAG, "检测到 ${segments.size} 个语音段")
             segments
@@ -229,7 +242,7 @@ class VadTimestampGenerator(private val context: Context) {
         primarySegments: List<VadSegment>,
         mode: String
     ): List<VadSegment> {
-        return when (mode) {
+        val processedSegments = when (mode) {
             SettingsManager.SECONDARY_VAD_MODE_UNCOVERED -> {
                 val uncoveredRanges = findUncoveredRanges(reader.totalSamples, primarySegments)
                 Log.d(TAG, "二次 VAD 方案一：处理 ${uncoveredRanges.size} 个未划分区间")
@@ -255,6 +268,54 @@ class VadTimestampGenerator(private val context: Context) {
 
             else -> primarySegments
         }
+        val settingsManager = SettingsManager.getInstance(context)
+        if (!settingsManager.isSpeechSecondaryVadMergeEnabled()) return processedSegments
+
+        val mergedSegments = mergeVadSegments(
+            processedSegments,
+            settingsManager.getSpeechSecondaryVadMergeGapMs()
+        )
+        Log.d(
+            TAG,
+            "二次 VAD 合并语音段：${processedSegments.size} -> ${mergedSegments.size}，" +
+                "最大间隔 ${settingsManager.getSpeechSecondaryVadMergeGapMs()}ms"
+        )
+        return mergedSegments
+    }
+
+    private fun mergeVadSegments(
+        segments: List<VadSegment>,
+        maxGapMs: Int
+    ): List<VadSegment> {
+        if (segments.size < 2) return segments.sortedBy { it.startSample }
+
+        val maxGapSamples = (maxGapMs.toLong() * SAMPLE_RATE) / 1000L
+        val sorted = segments.sortedBy { it.startSample }
+        val merged = mutableListOf<VadSegment>()
+        var current = sorted.first()
+
+        for (next in sorted.drop(1)) {
+            val currentEnd = current.startSample.toLong() + current.sampleCount.toLong()
+            val nextStart = next.startSample.toLong()
+            if (nextStart - currentEnd <= maxGapSamples) {
+                val mergedStart = current.startSample.toLong()
+                val mergedEnd = maxOf(
+                    currentEnd,
+                    next.startSample.toLong() + next.sampleCount.toLong()
+                )
+                current = VadSegment(
+                    startTime = (mergedStart * 1000L) / SAMPLE_RATE,
+                    endTime = (mergedEnd * 1000L) / SAMPLE_RATE,
+                    startSample = mergedStart.toInt(),
+                    sampleCount = (mergedEnd - mergedStart).toInt()
+                )
+            } else {
+                merged.add(current)
+                current = next
+            }
+        }
+        merged.add(current)
+        return merged
     }
 
     /**
