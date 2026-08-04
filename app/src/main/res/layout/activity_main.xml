@@ -47,6 +47,14 @@
 
         </HorizontalScrollView>
 
+        <ProgressBar
+            android:id="@+id/searchProgress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="2dp"
+            android:indeterminate="true"
+            android:visibility="invisible" />
+
         <!-- 文件列表 -->
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/rvFileList"
@@ -68,6 +76,7 @@
             android:visibility="gone">
 
             <TextView
+                android:id="@+id/tvEmptyStateMessage"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/no_files"

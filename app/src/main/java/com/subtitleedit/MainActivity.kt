@@ -15,6 +15,7 @@ import android.os.Environment
 import android.os.FileObserver
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.Menu
 import android.view.MenuItem
@@ -50,6 +51,7 @@ import com.subtitleedit.model.ArchiveConflictDialogFormatter
 import com.subtitleedit.model.ArchiveConflictDialogModel
 import com.subtitleedit.model.ArchiveConflictFileMetadata
 import com.subtitleedit.model.FileBrowserOrder
+import com.subtitleedit.model.FileBrowserSearch
 import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
 import com.subtitleedit.util.FileUtils
@@ -62,6 +64,7 @@ import java.util.Locale
 import com.subtitleedit.util.ArchivePasswordRequiredException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -83,6 +86,7 @@ class MainActivity : AppCompatActivity() {
         const val MENU_MORE = 0x10005
         const val CONFLICT_WAIT_INTERVAL_MS = 250L
         const val DIRECTORY_REFRESH_DELAY_MS = 250L
+        const val SEARCH_PROGRESS_INTERVAL_MS = 150L
         val DIRECTORY_CHANGE_EVENTS = FileObserver.CREATE or FileObserver.DELETE or
             FileObserver.MOVED_FROM or FileObserver.MOVED_TO or FileObserver.CLOSE_WRITE or
             FileObserver.ATTRIB or FileObserver.DELETE_SELF or FileObserver.MOVE_SELF
@@ -125,6 +129,9 @@ class MainActivity : AppCompatActivity() {
     private var directoryObserver: FileObserver? = null
     private var observedDirectoryPath: String? = null
     private var directoryWatchingEnabled = false
+    private var directorySearchJob: Job? = null
+    private var directorySearchGeneration = 0L
+    private var activeFileSearchView: SearchView? = null
     private val directoryRefreshRunnable = Runnable {
         val directory = currentDirectory ?: return@Runnable
         if (directory.exists() && directory.canRead()) loadDirectory(directory)
@@ -344,6 +351,7 @@ class MainActivity : AppCompatActivity() {
             supportActionBar?.title = getString(R.string.nav_directory)
             currentDirectory?.let(::loadDirectory)
         } else {
+            directorySearchJob?.cancel()
             stopDirectoryObserver()
             val fragment = when (itemId) {
                 R.id.nav_favorites -> FavoritesFragment()
@@ -383,18 +391,28 @@ class MainActivity : AppCompatActivity() {
         pendingArchiveFile = null
         destinationNavigationHistory.clear()
         stateModel.searchQuery = ""
+        stateModel.isFileSearchActive = false
         binding.bottomNavigation.selectedItemId = R.id.nav_directory
     }
 
     private fun configureSearchItem(item: MenuItem) {
-        val searchView = SearchView(this).apply {
+        var suppressSearchCallbacks = true
+        val searchView = SearchView(this)
+        activeFileSearchView = searchView
+        searchView.apply {
             queryHint = getString(R.string.file_search_hint)
             maxWidth = Int.MAX_VALUE
             setQuery(stateModel.searchQuery, false)
             setOnQueryTextListener(object : SearchView.OnQueryTextListener {
                 override fun onQueryTextSubmit(query: String?): Boolean = true
                 override fun onQueryTextChange(newText: String?): Boolean {
-                    stateModel.searchQuery = newText.orEmpty()
+                    if (activeFileSearchView !== searchView || suppressSearchCallbacks) return true
+                    val updatedQuery = newText.orEmpty()
+                    val selectionUiActive = selectedPaths.isNotEmpty() || pendingFileOperation != null
+                    if (selectionUiActive) return true
+                    if (updatedQuery == stateModel.searchQuery) return true
+                    stateModel.isFileSearchActive = true
+                    stateModel.searchQuery = updatedQuery
                     displayDirectoryFiles()
                     return true
                 }
@@ -402,16 +420,36 @@ class MainActivity : AppCompatActivity() {
         }
         item.actionView = searchView
         item.setOnActionExpandListener(object : MenuItem.OnActionExpandListener {
-            override fun onMenuItemActionExpand(item: MenuItem): Boolean = true
+            override fun onMenuItemActionExpand(item: MenuItem): Boolean {
+                if (activeFileSearchView !== searchView) return true
+                stateModel.isFileSearchActive = true
+                return true
+            }
+
             override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
-                stateModel.searchQuery = ""
-                displayDirectoryFiles()
+                if (activeFileSearchView !== searchView || suppressSearchCallbacks) return true
+                val enteringSelectionMode = selectedPaths.isNotEmpty() || pendingFileOperation != null
+                if (!enteringSelectionMode) {
+                    clearFileSearch(refreshDirectory = true)
+                }
                 return true
             }
         })
-        if (stateModel.searchQuery.isNotEmpty()) {
+        if (stateModel.isFileSearchActive && stateModel.searchQuery.isNotEmpty()) {
             item.expandActionView()
             searchView.setQuery(stateModel.searchQuery, false)
+            searchView.post {
+                if (activeFileSearchView !== searchView) return@post
+                val retainedQuery = stateModel.searchQuery
+                if (stateModel.isFileSearchActive && retainedQuery.isNotEmpty() &&
+                    searchView.query.toString() != retainedQuery
+                ) {
+                    searchView.setQuery(retainedQuery, false)
+                }
+                suppressSearchCallbacks = false
+            }
+        } else {
+            suppressSearchCallbacks = false
         }
     }
 
@@ -704,46 +742,12 @@ class MainActivity : AppCompatActivity() {
         
         val files = mutableListOf<File>()
         
-        // 添加子目录
-        val subDirs = directory.listFiles { file ->
-            file.isDirectory && (showHiddenFiles || !file.name.startsWith("."))
-        }?.toList() ?: emptyList()
-        files.addAll(subDirs)
-        
-        // 添加字幕文件
-        val subtitleFiles = directory.listFiles { file ->
-            file.isFile && (showHiddenFiles || !file.name.startsWith(".")) && FileUtils.isSubtitleFile(file)
-        }?.toList() ?: emptyList()
-        files.addAll(subtitleFiles)
-        
-        // 添加音频文件
-        val audioFiles = directory.listFiles { file ->
-            file.isFile && (showHiddenFiles || !file.name.startsWith(".")) && FileUtils.isAudioFile(file)
-        }?.toList() ?: emptyList()
-        files.addAll(audioFiles)
-
-        // 视频文件始终显示，不受“显示所有类型文件”设置影响
-        val videoFiles = directory.listFiles { file ->
-            file.isFile && (showHiddenFiles || !file.name.startsWith(".")) &&
-                file.extension.lowercase() in VIDEO_EXTENSIONS
-        }?.toList() ?: emptyList()
-        files.addAll(videoFiles)
-
-        val archiveFiles = directory.listFiles { file ->
-            file.isFile && (showHiddenFiles || !file.name.startsWith(".")) &&
-                ArchiveManager.isRecognizedArchive(file)
-        }?.toList() ?: emptyList()
-        files.addAll(archiveFiles)
-
-        if (showAllFileTypes) {
-            val otherFiles = directory.listFiles { file ->
-                file.isFile && (showHiddenFiles || !file.name.startsWith(".")) &&
-                    !FileUtils.isSubtitleFile(file) && !FileUtils.isAudioFile(file) &&
-                    file.extension.lowercase() !in VIDEO_EXTENSIONS &&
-                    !ArchiveManager.isRecognizedArchive(file)
-            }?.toList() ?: emptyList()
-            files.addAll(otherFiles)
-        }
+        files.addAll(
+            directory.listFiles { file ->
+                (showHiddenFiles || !file.name.startsWith(".")) &&
+                    (file.isDirectory || shouldDisplayFile(file, showAllFileTypes))
+            }?.toList().orEmpty()
+        )
         directoryFiles.clear()
         directoryFiles.addAll(files.distinctBy { it.absolutePath })
         displayDirectoryFiles()
@@ -752,24 +756,141 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun displayDirectoryFiles() {
-        val displayed = FileBrowserOrder.sort(
-            FileBrowserOrder.filter(directoryFiles, stateModel.searchQuery),
+        directorySearchJob?.cancel()
+        directorySearchJob = null
+        val searchGeneration = ++directorySearchGeneration
+        binding.searchProgress.visibility = View.INVISIBLE
+
+        val directory = currentDirectory ?: return
+        val query = if (stateModel.isFileSearchActive) {
+            stateModel.searchQuery.trim()
+        } else {
+            ""
+        }
+        val directMatches = FileBrowserOrder.sort(
+            FileBrowserOrder.filter(directoryFiles, query),
             sortField,
             sortDirection
         )
+        if (query.isEmpty()) {
+            showDirectoryFiles(
+                directMatches,
+                showParent = true,
+                relativePathRoot = null,
+                searching = false
+            )
+            return
+        }
+
+        binding.searchProgress.visibility = View.VISIBLE
+        showDirectoryFiles(
+            directMatches,
+            showParent = false,
+            relativePathRoot = directory,
+            searching = true
+        )
+
+        val rootPath = directory.absolutePath
+        val includeHidden = showHiddenFiles
+        val searchSortField = sortField
+        val searchSortDirection = sortDirection
+        directorySearchJob = lifecycleScope.launch {
+            try {
+                val displayed = withContext(Dispatchers.IO) {
+                    val searchContext = coroutineContext
+                    var lastPublishedAt = 0L
+                    var lastPublishedCount = -1
+                    val matches = FileBrowserSearch.search(
+                        root = directory,
+                        query = query,
+                        includeHidden = includeHidden,
+                        includeFile = { true },
+                        canEnterDirectory = { !isRestrictedAndroidDirectory(it) },
+                        onEntryVisited = { searchContext.ensureActive() },
+                        onDirectoryScanned = { partialMatches ->
+                            searchContext.ensureActive()
+                            val now = SystemClock.elapsedRealtime()
+                            if (partialMatches.size != lastPublishedCount &&
+                                now - lastPublishedAt >= SEARCH_PROGRESS_INTERVAL_MS
+                            ) {
+                                lastPublishedAt = now
+                                lastPublishedCount = partialMatches.size
+                                val partialDisplayed = FileBrowserOrder.sort(
+                                    partialMatches.toList(),
+                                    searchSortField,
+                                    searchSortDirection
+                                )
+                                directoryRefreshHandler.post {
+                                    if (directorySearchGeneration == searchGeneration &&
+                                        directorySearchJob?.isActive == true &&
+                                        currentDirectory?.absolutePath == rootPath &&
+                                        stateModel.searchQuery.trim() == query
+                                    ) {
+                                        showDirectoryFiles(
+                                            partialDisplayed,
+                                            showParent = false,
+                                            relativePathRoot = directory,
+                                            searching = true
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    )
+                    FileBrowserOrder.sort(matches, searchSortField, searchSortDirection)
+                }
+                if (directorySearchGeneration != searchGeneration ||
+                    currentDirectory?.absolutePath != rootPath ||
+                    stateModel.searchQuery.trim() != query
+                ) {
+                    return@launch
+                }
+                showDirectoryFiles(
+                    displayed,
+                    showParent = false,
+                    relativePathRoot = directory,
+                    searching = false
+                )
+            } finally {
+                if (directorySearchGeneration == searchGeneration) {
+                    binding.searchProgress.visibility = View.INVISIBLE
+                }
+            }
+        }
+    }
+
+    private fun showDirectoryFiles(
+        displayed: List<File>,
+        showParent: Boolean,
+        relativePathRoot: File?,
+        searching: Boolean
+    ) {
         visibleFiles.clear()
         visibleFiles.addAll(displayed)
 
         val adapterItems = mutableListOf<File>()
         val directory = currentDirectory
-        if (stateModel.searchQuery.isBlank() && directory?.parentFile?.canRead() == true) {
+        if (showParent && directory?.parentFile?.canRead() == true) {
             adapterItems.add(File(directory.absolutePath + "/.."))
         }
         adapterItems.addAll(displayed)
+        fileAdapter.setRelativePathRoot(relativePathRoot)
         fileAdapter.submitList(adapterItems) { fileAdapter.notifyDataSetChanged() }
         updateSelectionUi(invalidateMenu = false)
+        binding.tvEmptyStateMessage.setText(
+            if (searching) R.string.file_searching else R.string.no_files
+        )
         binding.emptyState.visibility = if (adapterItems.isEmpty()) View.VISIBLE else View.GONE
         binding.rvFileList.visibility = if (adapterItems.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    private fun shouldDisplayFile(file: File, includeAllFileTypes: Boolean): Boolean {
+        if (!file.isFile) return false
+        return includeAllFileTypes ||
+            FileUtils.isSubtitleFile(file) ||
+            FileUtils.isAudioFile(file) ||
+            file.extension.lowercase() in VIDEO_EXTENSIONS ||
+            ArchiveManager.isRecognizedArchive(file)
     }
 
     private fun startDirectoryObserver(directory: File) {
@@ -838,8 +959,7 @@ class MainActivity : AppCompatActivity() {
 
         if (selectedPaths.isNotEmpty()) {
             if (file.isDirectory) {
-                directoryHistory.add(currentDirectory!!)
-                loadDirectory(file)
+                navigateIntoDirectory(file)
             } else {
                 toggleSelection(file)
             }
@@ -848,8 +968,7 @@ class MainActivity : AppCompatActivity() {
         
         if (file.isDirectory) {
             // 进入子目录
-            directoryHistory.add(currentDirectory!!)
-            loadDirectory(file)
+            navigateIntoDirectory(file)
         } else if (ArchiveManager.isRecognizedArchive(file)) {
             if (ArchiveManager.isSupportedArchive(file)) {
                 showArchiveActions(file)
@@ -865,6 +984,53 @@ class MainActivity : AppCompatActivity() {
         } else {
             com.subtitleedit.util.OverwritingToast.makeText(this, "不支持的文件格式", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun navigateIntoDirectory(directory: File) {
+        val previousDirectory = currentDirectory ?: return
+        val wasSearching = isFileSearchQueryActive()
+        val historyEntries = if (wasSearching) {
+            navigationHistoryForSearchResult(previousDirectory, directory)
+        } else {
+            listOf(previousDirectory)
+        }
+        if (wasSearching) {
+            clearFileSearch(refreshDirectory = false)
+        }
+
+        if (loadDirectory(directory)) {
+            directoryHistory.addAll(historyEntries)
+            if (wasSearching) invalidateOptionsMenu()
+        }
+    }
+
+    private fun navigationHistoryForSearchResult(root: File, target: File): List<File> {
+        val rootPath = runCatching { root.canonicalPath }.getOrElse { root.absolutePath }
+        val reversedHistory = mutableListOf<File>()
+        var directory = target.parentFile
+
+        while (directory != null) {
+            reversedHistory.add(directory)
+            val directoryPath = runCatching { directory.canonicalPath }
+                .getOrElse { directory.absolutePath }
+            if (directoryPath == rootPath) return reversedHistory.asReversed()
+            directory = directory.parentFile
+        }
+
+        return listOf(root)
+    }
+
+    private fun isFileSearchQueryActive(): Boolean =
+        stateModel.isFileSearchActive && stateModel.searchQuery.isNotBlank()
+
+    private fun clearFileSearch(refreshDirectory: Boolean) {
+        stateModel.isFileSearchActive = false
+        stateModel.searchQuery = ""
+        directorySearchJob?.cancel()
+        directorySearchJob = null
+        directorySearchGeneration++
+        binding.searchProgress.visibility = View.INVISIBLE
+        if (refreshDirectory) displayDirectoryFiles()
     }
 
     private fun isRestrictedAndroidDirectory(file: File): Boolean {
@@ -968,7 +1134,10 @@ class MainActivity : AppCompatActivity() {
         } else {
             null
         })
-        if (invalidateMenu) invalidateOptionsMenu()
+        if (invalidateMenu) {
+            if (isSelectionUiActive) activeFileSearchView = null
+            invalidateOptionsMenu()
+        }
         fileAdapter.updateSelection(selectedPaths.isNotEmpty() && operation == null, selectedPaths)
     }
 
@@ -1127,12 +1296,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun showMoreActions() {
         PopupMenu(this, binding.btnMoreSelected).apply {
-            val compressItem = menu.add("压缩")
+            val compressItem = if (!isFileSearchQueryActive()) menu.add("压缩") else null
             val propertiesItem = menu.add("详情")
             setOnMenuItemClickListener { item ->
-                when (item) {
-                    compressItem -> showCreateArchiveDialog()
-                    propertiesItem -> showSelectedProperties()
+                when {
+                    item === compressItem -> showCreateArchiveDialog()
+                    item === propertiesItem -> showSelectedProperties()
                 }
                 true
             }

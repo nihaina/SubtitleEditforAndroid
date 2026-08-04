@@ -8,7 +8,8 @@
     <string name="favorite_directory_already_added">该目录已添加</string>
     <string name="remove_favorite_directory">移除常用目录</string>
     <string name="remove_favorite_directory_confirm">确定从常用目录中移除“%1$s”吗？</string>
-    <string name="file_search_hint">搜索当前目录</string>
+    <string name="file_search_hint">搜索</string>
+    <string name="file_searching">正在搜索子目录...</string>
     <string name="file_management_settings">文件管理设置</string>
     <string name="app_name">SubtitleEdit</string>
     <string name="about">关于</string>

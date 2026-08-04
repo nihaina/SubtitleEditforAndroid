@@ -60,6 +60,15 @@ class FileListAdapter(
     private val directoryItemCountCache = ConcurrentHashMap<String, Int>()
     private val pendingDirectoryCountKeys = ConcurrentHashMap.newKeySet<String>()
     private val modifiedTimeFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    private var relativePathRoot: File? = null
+
+    fun setRelativePathRoot(root: File?) {
+        val previousPath = relativePathRoot?.absolutePath
+        val newPath = root?.absolutePath
+        if (previousPath == newPath) return
+        relativePathRoot = root
+        notifyDataSetChanged()
+    }
 
     fun updateSelection(selectionMode: Boolean, selectedPaths: Set<String>) {
         this.selectionMode = selectionMode
@@ -151,7 +160,9 @@ class FileListAdapter(
             ivFileIcon.alpha = if (file.name.startsWith(".") && file.name != "..") 0.5f else 1f
 
             // 设置文件名
-            tvFileName.text = file.name
+            tvFileName.text = relativePathRoot?.let { root ->
+                runCatching { file.relativeTo(root).path }.getOrDefault(file.name)
+            } ?: file.name
             tvFileName.setTextColor(
                 androidx.core.content.ContextCompat.getColor(
                     itemView.context,

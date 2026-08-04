@@ -20,6 +20,7 @@ internal class MainViewModel : ViewModel() {
     var pendingArchiveFile: File? = null
     val destinationNavigationHistory = mutableListOf<DestinationNavigationState>()
     var searchQuery: String = ""
+    var isFileSearchActive: Boolean = false
     var selectedTopLevelItem: Int = com.subtitleedit.R.id.nav_directory
     var sortField: FileSortField? = null
     var sortDirection: FileSortDirection? = null
