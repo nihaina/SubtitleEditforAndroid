@@ -2,6 +2,7 @@ package com.subtitleedit.util
 
 import android.content.ContentResolver
 import android.content.Context
+import android.content.res.AssetManager
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.util.Log
@@ -34,6 +35,7 @@ class WhisperRecognizer(
 
     private var recognizer: OfflineRecognizer? = null
     private var vad: Vad? = null
+    private var secondaryVad: Vad? = null
     // 原生识别器只接受文件路径。对 SAF URI 保持描述符存活，避免复制大型模型文件。
     private val modelFileDescriptors = mutableListOf<ParcelFileDescriptor>()
 
@@ -64,6 +66,11 @@ class WhisperRecognizer(
     private data class SegmentTimeRange(
         val startTimeMs: Long,
         val endTimeMs: Long
+    )
+
+    private data class SampleRange(
+        val startSample: Long,
+        val endSample: Long
     )
 
     /**
@@ -112,58 +119,10 @@ class WhisperRecognizer(
             Log.d(TAG, "  tokens: $tokensFile")
 
             if (useVad) {
-                // 初始化 VAD（如果提供了模型路径，使用外部模型；否则使用内置模型）
-                if (vadModelPath.isNotEmpty()) {
-                    val vadFile = resolveModelPath(vadModelPath, "vad.onnx")
-                    if (vadFile != null) {
-                        Log.d(TAG, "  vad: $vadFile")
-                        val settingsManager = SettingsManager.getInstance(context)
-                        val vadConfig = VadModelConfig(
-                            sileroVadModelConfig = SileroVadModelConfig(
-                                model = vadFile,
-                                threshold = settingsManager.getVadThreshold(),
-                                minSilenceDuration = settingsManager.getVadMinSilenceDuration(),
-                                minSpeechDuration = settingsManager.getVadMinSpeechDuration(),
-                                windowSize = 512,
-                                maxSpeechDuration = settingsManager.getVadMaxSpeechDuration()
-                            ),
-                            sampleRate = SAMPLE_RATE,
-                            numThreads = 2,
-                            provider = "cpu",
-                            debug = true
-                        )
-                        vad = Vad(assetManager = null, config = vadConfig)
-                        Log.d(TAG, "VAD 初始化成功（外部模型）")
-                    } else {
-                        Log.w(TAG, "VAD 外部模型文件读取失败")
-                    }
-                } else {
-                    // 使用内置的 VAD 模型
-                    try {
-                        Log.d(TAG, "使用内置 VAD 模型")
-                        val settingsManager = SettingsManager.getInstance(context)
-                        val vadConfig = VadModelConfig(
-                            sileroVadModelConfig = SileroVadModelConfig(
-                                model = "silero_vad.onnx",
-                                threshold = settingsManager.getVadThreshold(),
-                                minSilenceDuration = settingsManager.getVadMinSilenceDuration(),
-                                minSpeechDuration = settingsManager.getVadMinSpeechDuration(),
-                                windowSize = 512,
-                                maxSpeechDuration = settingsManager.getVadMaxSpeechDuration()
-                            ),
-                            sampleRate = SAMPLE_RATE,
-                            numThreads = 2,
-                            provider = "cpu",
-                            debug = true
-                        )
-                        vad = Vad(assetManager = context.assets, config = vadConfig)
-                        Log.d(TAG, "VAD 初始化成功（内置模型）")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "VAD 内置模型初始化失败: ${e.message}")
-                    }
-                }
+                initializeVadInstances()
             } else {
                 vad = null
+                secondaryVad = null
                 Log.d(TAG, "已禁用 VAD 分段，将使用固定分段识别")
             }
 
@@ -242,6 +201,95 @@ class WhisperRecognizer(
             recognizer = null
             Result.failure(e)
         }
+    }
+
+    private fun initializeVadInstances() {
+        val settings = settingsManager()
+        val modelPath: String
+        val assetManager: AssetManager?
+        val modelSource: String
+
+        if (vadModelPath.isNotEmpty()) {
+            val resolvedModel = resolveModelPath(vadModelPath, "vad.onnx")
+            if (resolvedModel == null) {
+                Log.w(TAG, "VAD 外部模型文件读取失败")
+                vad = null
+                secondaryVad = null
+                return
+            }
+            modelPath = resolvedModel
+            assetManager = null
+            modelSource = "外部模型"
+            Log.d(TAG, "  vad: $resolvedModel")
+        } else {
+            modelPath = "silero_vad.onnx"
+            assetManager = context.assets
+            modelSource = "内置模型"
+            Log.d(TAG, "使用内置 VAD 模型")
+        }
+
+        try {
+            vad = Vad(
+                assetManager = assetManager,
+                config = createVadConfig(
+                    modelPath = modelPath,
+                    threshold = settings.getVadThreshold(),
+                    minSilenceDuration = settings.getVadMinSilenceDuration(),
+                    minSpeechDuration = settings.getVadMinSpeechDuration(),
+                    maxSpeechDuration = settings.getVadMaxSpeechDuration()
+                )
+            )
+            Log.d(TAG, "VAD 初始化成功（$modelSource）")
+        } catch (e: Exception) {
+            vad = null
+            Log.w(TAG, "VAD 初始化失败（$modelSource）: ${e.message}")
+            return
+        }
+
+        if (settings.getSpeechSecondaryVadMode() == SettingsManager.SECONDARY_VAD_MODE_NONE) {
+            secondaryVad = null
+            return
+        }
+
+        try {
+            secondaryVad = Vad(
+                assetManager = assetManager,
+                config = createVadConfig(
+                    modelPath = modelPath,
+                    threshold = settings.getSpeechSecondaryVadThreshold(),
+                    minSilenceDuration = settings.getSpeechSecondaryVadMinSilenceDuration(),
+                    minSpeechDuration = settings.getSpeechSecondaryVadMinSpeechDuration(),
+                    maxSpeechDuration = settings.getSpeechSecondaryVadMaxSpeechDuration()
+                )
+            )
+            Log.d(TAG, "二次 VAD 初始化成功（$modelSource）")
+        } catch (e: Exception) {
+            secondaryVad = null
+            Log.w(TAG, "二次 VAD 初始化失败，将仅使用第一次 VAD: ${e.message}")
+        }
+    }
+
+    private fun createVadConfig(
+        modelPath: String,
+        threshold: Float,
+        minSilenceDuration: Float,
+        minSpeechDuration: Float,
+        maxSpeechDuration: Float
+    ): VadModelConfig {
+        return VadModelConfig(
+            sileroVadModelConfig = SileroVadModelConfig(
+                model = modelPath,
+                threshold = threshold,
+                minSilenceDuration = minSilenceDuration,
+                minSpeechDuration = minSpeechDuration,
+                windowSize = 512,
+                maxSpeechDuration = maxSpeechDuration
+            ),
+            sampleRate = SAMPLE_RATE,
+            numThreads = 2,
+            provider = "cpu",
+            debug = true
+        )
     }
 
     /**
@@ -331,8 +379,19 @@ class WhisperRecognizer(
                     Log.d(TAG, "使用 VAD 进行语音段检测...")
                     progressCallback(5, "正在检测语音段...", null)
 
-                    val segments = detectSpeechSegments(reader)
-                    Log.d(TAG, "VAD 检测到 ${segments.size} 个语音段")
+                    val primarySegments = detectSpeechSegments(reader)
+                    Log.d(TAG, "VAD 检测到 ${primarySegments.size} 个语音段")
+
+                    val segments = if (
+                        secondaryVad != null &&
+                        settingsManager().getSpeechSecondaryVadMode() !=
+                        SettingsManager.SECONDARY_VAD_MODE_NONE
+                    ) {
+                        progressCallback(5, "正在进行二次 VAD 检测...", null)
+                        applySecondaryVad(reader, primarySegments)
+                    } else {
+                        primarySegments
+                    }
 
                     if (segments.isEmpty()) {
                         Log.w(TAG, "VAD 未检测到任何语音段，将使用固定分段方式")
@@ -765,6 +824,8 @@ class WhisperRecognizer(
             recognizer = null
             vad?.release()
             vad = null
+            secondaryVad?.release()
+            secondaryVad = null
             modelFileDescriptors.forEach { descriptor ->
                 try {
                     descriptor.close()
@@ -910,6 +971,124 @@ class WhisperRecognizer(
             segment.copy(
                 startTime = if (index == 0) rangeStartTime else segment.startTime,
                 endTime = if (index == constrained.lastIndex) rangeEndTime else segment.endTime
+            )
+        }
+    }
+
+    private fun applySecondaryVad(
+        reader: Pcm16WavReader,
+        primarySegments: List<VadSegment>
+    ): List<VadSegment> {
+        return when (settingsManager().getSpeechSecondaryVadMode()) {
+            SettingsManager.SECONDARY_VAD_MODE_UNCOVERED -> {
+                val uncoveredRanges = findUncoveredRanges(reader.totalSamples, primarySegments)
+                Log.d(TAG, "二次 VAD 方案一：处理 ${uncoveredRanges.size} 个未划分区间")
+                val secondarySegments = uncoveredRanges.flatMap { range ->
+                    detectSecondarySpeechSegments(reader, range)
+                }
+                Log.d(TAG, "二次 VAD 方案一：新增 ${secondarySegments.size} 个语音段")
+                (primarySegments + secondarySegments).sortedBy { it.startSample }
+            }
+
+            SettingsManager.SECONDARY_VAD_MODE_WITHIN_SEGMENTS -> {
+                Log.d(TAG, "二次 VAD 方案二：处理 ${primarySegments.size} 个第一次 VAD 语音段")
+                val refinedSegments = primarySegments.sortedBy { it.startSample }.flatMap { segment ->
+                    val range = SampleRange(
+                        startSample = segment.startSample.toLong(),
+                        endSample = segment.startSample.toLong() + segment.sampleCount.toLong()
+                    )
+                    detectSecondarySpeechSegments(reader, range).ifEmpty { listOf(segment) }
+                }
+                Log.d(TAG, "二次 VAD 方案二：生成 ${refinedSegments.size} 个语音段")
+                refinedSegments.sortedBy { it.startSample }
+            }
+
+            else -> primarySegments
+        }
+    }
+
+    private fun findUncoveredRanges(
+        totalSamples: Long,
+        segments: List<VadSegment>
+    ): List<SampleRange> {
+        val ranges = mutableListOf<SampleRange>()
+        var coveredUntil = 0L
+
+        for (segment in segments.sortedBy { it.startSample }) {
+            val segmentStart = segment.startSample.toLong().coerceIn(0L, totalSamples)
+            val segmentEnd = (segment.startSample.toLong() + segment.sampleCount.toLong())
+                .coerceIn(segmentStart, totalSamples)
+            if (segmentStart > coveredUntil) {
+                ranges.add(SampleRange(coveredUntil, segmentStart))
+            }
+            coveredUntil = maxOf(coveredUntil, segmentEnd)
+        }
+
+        if (coveredUntil < totalSamples) {
+            ranges.add(SampleRange(coveredUntil, totalSamples))
+        }
+        return ranges
+    }
+
+    private fun detectSecondarySpeechSegments(
+        reader: Pcm16WavReader,
+        range: SampleRange
+    ): List<VadSegment> {
+        val vadInstance = secondaryVad ?: return emptyList()
+        val rangeStart = range.startSample.coerceIn(0L, reader.totalSamples)
+        val rangeEnd = range.endSample.coerceIn(rangeStart, reader.totalSamples)
+        if (rangeEnd <= rangeStart) return emptyList()
+
+        val segments = mutableListOf<VadSegment>()
+        return try {
+            vadInstance.reset()
+            var cursor = rangeStart
+            while (cursor < rangeEnd) {
+                val chunkSize = minOf(512L, rangeEnd - cursor).toInt()
+                vadInstance.acceptWaveform(reader.readRange(cursor, chunkSize))
+                cursor += chunkSize
+                drainSecondaryVadSegments(vadInstance, rangeStart, rangeEnd, segments)
+            }
+
+            vadInstance.flush()
+            drainSecondaryVadSegments(vadInstance, rangeStart, rangeEnd, segments)
+            segments
+        } catch (e: Exception) {
+            Log.e(
+                TAG,
+                "二次 VAD 检测失败: $rangeStart - $rangeEnd 采样点",
+                e
+            )
+            emptyList()
+        } finally {
+            runCatching { vadInstance.reset() }
+        }
+    }
+
+    private fun drainSecondaryVadSegments(
+        vadInstance: Vad,
+        rangeStart: Long,
+        rangeEnd: Long,
+        output: MutableList<VadSegment>
+    ) {
+        while (!vadInstance.empty()) {
+            val speechSegment = vadInstance.front()
+            vadInstance.pop()
+
+            val startSample = (rangeStart + speechSegment.start.toLong())
+                .coerceIn(rangeStart, rangeEnd)
+            val endSample = (rangeStart + speechSegment.start.toLong() + speechSegment.samples.size)
+                .coerceIn(startSample, rangeEnd)
+            if (endSample <= startSample || startSample > Int.MAX_VALUE) continue
+
+            val sampleCount = (endSample - startSample).toInt()
+            output.add(
+                VadSegment(
+                    startSample = startSample.toInt(),
+                    sampleCount = sampleCount,
+                    startTime = (startSample * 1000L) / SAMPLE_RATE,
+                    endTime = (endSample * 1000L) / SAMPLE_RATE
+                )
             )
         }
     }

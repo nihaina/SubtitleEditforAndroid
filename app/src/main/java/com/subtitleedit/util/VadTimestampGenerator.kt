@@ -19,6 +19,13 @@ class VadTimestampGenerator(private val context: Context) {
         private const val SAMPLE_RATE = 16000
     }
 
+    private var secondaryVad: Vad? = null
+
+    private data class SampleRange(
+        val startSample: Long,
+        val endSample: Long
+    )
+
     /**
      * 生成时间轴
      */
@@ -49,19 +56,40 @@ class VadTimestampGenerator(private val context: Context) {
             return emptyList()
         }
 
-        val segments = Pcm16WavReader(pcmFile).use { reader ->
-            Log.d(TAG, "音频信息: sampleRate=${reader.sampleRate}, channels=${reader.channels}, samples=${reader.totalSamples}")
-            detectSpeechSegments(vad, reader)
+        return try {
+            val segments = Pcm16WavReader(pcmFile).use { reader ->
+                Log.d(TAG, "音频信息: sampleRate=${reader.sampleRate}, channels=${reader.channels}, samples=${reader.totalSamples}")
+                val primarySegments = detectSpeechSegments(vad, reader)
+                val settingsManager = SettingsManager.getInstance(context)
+                val secondaryMode = settingsManager.getSpeechSecondaryVadMode()
+                if (secondaryMode == SettingsManager.SECONDARY_VAD_MODE_NONE) {
+                    primarySegments
+                } else {
+                    secondaryVad = initVad(secondary = true)
+                    if (secondaryVad == null) {
+                        Log.w(TAG, "二次 VAD 初始化失败，将仅使用第一次 VAD")
+                        primarySegments
+                    } else {
+                        applySecondaryVad(reader, primarySegments, secondaryMode)
+                    }
+                }
+            }
+            Log.d(TAG, "检测到 ${segments.size} 个语音段")
+            segments
+        } finally {
+            try {
+                vad.release()
+            } finally {
+                secondaryVad?.release()
+                secondaryVad = null
+            }
         }
-        Log.d(TAG, "检测到 ${segments.size} 个语音段")
-
-        return segments
     }
 
     /**
      * 初始化 VAD
      */
-    private fun initVad(): Vad? {
+    private fun initVad(secondary: Boolean = false): Vad? {
         return try {
             val settingsManager = SettingsManager.getInstance(context)
             val useBuiltIn = settingsManager.isVadUseBuiltInModel()
@@ -73,16 +101,35 @@ class VadTimestampGenerator(private val context: Context) {
                     Log.e(TAG, "外部 VAD 模型未选择")
                     return null
                 }
-                copyUriToCache(Uri.parse(vadModelPath), "auto_timestamp_vad.onnx") ?: return null
+                copyUriToCache(
+                    Uri.parse(vadModelPath),
+                    if (secondary) "auto_timestamp_secondary_vad.onnx" else "auto_timestamp_vad.onnx"
+                ) ?: return null
             }
             val vadConfig = VadModelConfig(
                 sileroVadModelConfig = SileroVadModelConfig(
                     model = vadFile?.absolutePath ?: "silero_vad.onnx",
-                    threshold = settingsManager.getVadThreshold(),
-                    minSilenceDuration = settingsManager.getVadMinSilenceDuration(),
-                    minSpeechDuration = settingsManager.getVadMinSpeechDuration(),
+                    threshold = if (secondary) {
+                        settingsManager.getSpeechSecondaryVadThreshold()
+                    } else {
+                        settingsManager.getVadThreshold()
+                    },
+                    minSilenceDuration = if (secondary) {
+                        settingsManager.getSpeechSecondaryVadMinSilenceDuration()
+                    } else {
+                        settingsManager.getVadMinSilenceDuration()
+                    },
+                    minSpeechDuration = if (secondary) {
+                        settingsManager.getSpeechSecondaryVadMinSpeechDuration()
+                    } else {
+                        settingsManager.getVadMinSpeechDuration()
+                    },
                     windowSize = 512,
-                    maxSpeechDuration = settingsManager.getVadMaxSpeechDuration()
+                    maxSpeechDuration = if (secondary) {
+                        settingsManager.getSpeechSecondaryVadMaxSpeechDuration()
+                    } else {
+                        settingsManager.getVadMaxSpeechDuration()
+                    }
                 ),
                 sampleRate = SAMPLE_RATE,
                 numThreads = 2,
@@ -90,7 +137,10 @@ class VadTimestampGenerator(private val context: Context) {
                 debug = true
             )
             val vad = Vad(assetManager = if (useBuiltIn) context.assets else null, config = vadConfig)
-            Log.d(TAG, "VAD 初始化成功（${if (useBuiltIn) "内置模型" else "外部模型：${vadFile?.absolutePath}"}）")
+            Log.d(
+                TAG,
+                "${if (secondary) "二次 VAD" else "VAD"} 初始化成功（${if (useBuiltIn) "内置模型" else "外部模型：${vadFile?.absolutePath}"}）"
+            )
             vad
         } catch (e: Exception) {
             Log.e(TAG, "VAD 初始化失败", e)
@@ -142,7 +192,14 @@ class VadTimestampGenerator(private val context: Context) {
                     val startTime = (startSample * 1000L) / SAMPLE_RATE
                     val endTime = (endSample * 1000L) / SAMPLE_RATE
 
-                    segments.add(VadSegment(startTime, endTime))
+                    segments.add(
+                        VadSegment(
+                            startTime = startTime,
+                            endTime = endTime,
+                            startSample = startSample,
+                            sampleCount = speechSegment.samples.size
+                        )
+                    )
                     Log.d(TAG, "检测到语音段: ${startTime}ms - ${endTime}ms")
                 }
             }
@@ -160,7 +217,14 @@ class VadTimestampGenerator(private val context: Context) {
                 val startTime = (startSample * 1000L) / SAMPLE_RATE
                 val endTime = (endSample * 1000L) / SAMPLE_RATE
 
-                segments.add(VadSegment(startTime, endTime))
+                segments.add(
+                    VadSegment(
+                        startTime = startTime,
+                        endTime = endTime,
+                        startSample = startSample,
+                        sampleCount = speechSegment.samples.size
+                    )
+                )
                 Log.d(TAG, "flush 后检测到语音段: ${startTime}ms - ${endTime}ms")
             }
 
@@ -171,6 +235,120 @@ class VadTimestampGenerator(private val context: Context) {
         }
 
         return segments
+    }
+
+    private fun applySecondaryVad(
+        reader: Pcm16WavReader,
+        primarySegments: List<VadSegment>,
+        mode: String
+    ): List<VadSegment> {
+        return when (mode) {
+            SettingsManager.SECONDARY_VAD_MODE_UNCOVERED -> {
+                val uncoveredRanges = findUncoveredRanges(reader.totalSamples, primarySegments)
+                Log.d(TAG, "二次 VAD 方案一：处理 ${uncoveredRanges.size} 个未划分区间")
+                val secondarySegments = uncoveredRanges.flatMap { range ->
+                    detectSecondarySpeechSegments(reader, range)
+                }
+                Log.d(TAG, "二次 VAD 方案一：新增 ${secondarySegments.size} 个语音段")
+                (primarySegments + secondarySegments).sortedBy { it.startSample }
+            }
+
+            SettingsManager.SECONDARY_VAD_MODE_WITHIN_SEGMENTS -> {
+                Log.d(TAG, "二次 VAD 方案二：处理 ${primarySegments.size} 个第一次 VAD 语音段")
+                val refinedSegments = primarySegments.sortedBy { it.startSample }.flatMap { segment ->
+                    val range = SampleRange(
+                        startSample = segment.startSample.toLong(),
+                        endSample = segment.startSample.toLong() + segment.sampleCount.toLong()
+                    )
+                    detectSecondarySpeechSegments(reader, range).ifEmpty { listOf(segment) }
+                }
+                Log.d(TAG, "二次 VAD 方案二：生成 ${refinedSegments.size} 个语音段")
+                refinedSegments.sortedBy { it.startSample }
+            }
+
+            else -> primarySegments
+        }
+    }
+
+    private fun findUncoveredRanges(
+        totalSamples: Long,
+        segments: List<VadSegment>
+    ): List<SampleRange> {
+        val ranges = mutableListOf<SampleRange>()
+        var coveredUntil = 0L
+
+        for (segment in segments.sortedBy { it.startSample }) {
+            val segmentStart = segment.startSample.toLong().coerceIn(0L, totalSamples)
+            val segmentEnd = (segment.startSample.toLong() + segment.sampleCount.toLong())
+                .coerceIn(segmentStart, totalSamples)
+            if (segmentStart > coveredUntil) {
+                ranges.add(SampleRange(coveredUntil, segmentStart))
+            }
+            coveredUntil = maxOf(coveredUntil, segmentEnd)
+        }
+
+        if (coveredUntil < totalSamples) {
+            ranges.add(SampleRange(coveredUntil, totalSamples))
+        }
+        return ranges
+    }
+
+    private fun detectSecondarySpeechSegments(
+        reader: Pcm16WavReader,
+        range: SampleRange
+    ): List<VadSegment> {
+        val vadInstance = secondaryVad ?: return emptyList()
+        val rangeStart = range.startSample.coerceIn(0L, reader.totalSamples)
+        val rangeEnd = range.endSample.coerceIn(rangeStart, reader.totalSamples)
+        if (rangeEnd <= rangeStart) return emptyList()
+
+        val segments = mutableListOf<VadSegment>()
+        return try {
+            vadInstance.reset()
+            var cursor = rangeStart
+            while (cursor < rangeEnd) {
+                val chunkSize = minOf(512L, rangeEnd - cursor).toInt()
+                vadInstance.acceptWaveform(reader.readRange(cursor, chunkSize))
+                cursor += chunkSize
+                drainSecondaryVadSegments(vadInstance, rangeStart, rangeEnd, segments)
+            }
+
+            vadInstance.flush()
+            drainSecondaryVadSegments(vadInstance, rangeStart, rangeEnd, segments)
+            segments
+        } catch (e: Exception) {
+            Log.e(TAG, "二次 VAD 检测失败: $rangeStart - $rangeEnd 采样点", e)
+            emptyList()
+        } finally {
+            runCatching { vadInstance.reset() }
+        }
+    }
+
+    private fun drainSecondaryVadSegments(
+        vadInstance: Vad,
+        rangeStart: Long,
+        rangeEnd: Long,
+        output: MutableList<VadSegment>
+    ) {
+        while (!vadInstance.empty()) {
+            val speechSegment = vadInstance.front()
+            vadInstance.pop()
+
+            val startSample = (rangeStart + speechSegment.start.toLong())
+                .coerceIn(rangeStart, rangeEnd)
+            val endSample = (rangeStart + speechSegment.start.toLong() + speechSegment.samples.size)
+                .coerceIn(startSample, rangeEnd)
+            if (endSample <= startSample) continue
+
+            output.add(
+                VadSegment(
+                    startTime = (startSample * 1000L) / SAMPLE_RATE,
+                    endTime = (endSample * 1000L) / SAMPLE_RATE,
+                    startSample = startSample.toInt(),
+                    sampleCount = (endSample - startSample).toInt()
+                )
+            )
+        }
     }
 
     /**
@@ -214,6 +392,8 @@ class VadTimestampGenerator(private val context: Context) {
      */
     data class VadSegment(
         val startTime: Long,
-        val endTime: Long
+        val endTime: Long,
+        internal val startSample: Int = 0,
+        internal val sampleCount: Int = 0
     )
 }

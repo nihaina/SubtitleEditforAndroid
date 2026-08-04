@@ -29,6 +29,7 @@ class WhisperSettingsActivity : AppCompatActivity() {
         binding.tvFixedSegmentTitle.visibility = View.GONE
         binding.tvFixedSegmentHint.visibility = View.GONE
         binding.layoutFixedSegment.visibility = View.GONE
+        binding.cardSecondaryVad.visibility = View.GONE
 
         binding.sliderWhisperThreads.addOnChangeListener { _, value, _ ->
             binding.tvWhisperThreads.text = String.format(Locale.getDefault(), "%d", value.toInt())

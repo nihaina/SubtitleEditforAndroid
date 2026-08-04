@@ -51,6 +51,14 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_VAD_MAX_SPEECH_DURATION = "vad_max_speech_duration"
         private const val KEY_STT_FIXED_SEGMENT_SECONDS = "stt_fixed_segment_seconds"
         private const val KEY_STT_VAD_DYNAMIC_PADDING_ENABLED = "stt_vad_dynamic_padding_enabled"
+        private const val KEY_STT_SECONDARY_VAD_MODE = "stt_secondary_vad_mode"
+        private const val KEY_STT_SECONDARY_VAD_THRESHOLD = "stt_secondary_vad_threshold"
+        private const val KEY_STT_SECONDARY_VAD_MIN_SILENCE_DURATION =
+            "stt_secondary_vad_min_silence_duration"
+        private const val KEY_STT_SECONDARY_VAD_MIN_SPEECH_DURATION =
+            "stt_secondary_vad_min_speech_duration"
+        private const val KEY_STT_SECONDARY_VAD_MAX_SPEECH_DURATION =
+            "stt_secondary_vad_max_speech_duration"
         private const val KEY_STT_WHISPER_THREADS = "stt_whisper_threads"
         private const val KEY_STT_HOTWORDS_ENABLED = "stt_hotwords_enabled"
         private const val KEY_STT_HOTWORDS = "stt_hotwords"
@@ -79,6 +87,10 @@ class SettingsManager private constructor(context: Context) {
         const val ASR_MODEL_SENSEVOICE = "sensevoice"
         const val ASR_MODEL_PARAKEET_TDT = "parakeet_tdt"
         const val ASR_MODEL_PARAKEET_CTC_JA = "parakeet_ctc_ja"
+
+        const val SECONDARY_VAD_MODE_NONE = "none"
+        const val SECONDARY_VAD_MODE_UNCOVERED = "uncovered"
+        const val SECONDARY_VAD_MODE_WITHIN_SEGMENTS = "within_segments"
 
         val ASR_MODEL_TYPES = setOf(
             ASR_MODEL_WHISPER,
@@ -494,6 +506,68 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putBoolean(KEY_STT_VAD_DYNAMIC_PADDING_ENABLED, enabled).apply()
     }
 
+    fun getSpeechSecondaryVadMode(): String {
+        return prefs.getString(KEY_STT_SECONDARY_VAD_MODE, SECONDARY_VAD_MODE_NONE)
+            ?.takeIf {
+                it == SECONDARY_VAD_MODE_NONE ||
+                    it == SECONDARY_VAD_MODE_UNCOVERED ||
+                    it == SECONDARY_VAD_MODE_WITHIN_SEGMENTS
+            }
+            ?: SECONDARY_VAD_MODE_NONE
+    }
+
+    fun setSpeechSecondaryVadMode(mode: String) {
+        val normalized = mode.takeIf {
+            it == SECONDARY_VAD_MODE_NONE ||
+                it == SECONDARY_VAD_MODE_UNCOVERED ||
+                it == SECONDARY_VAD_MODE_WITHIN_SEGMENTS
+        } ?: SECONDARY_VAD_MODE_NONE
+        prefs.edit().putString(KEY_STT_SECONDARY_VAD_MODE, normalized).apply()
+    }
+
+    fun getSpeechSecondaryVadThreshold(): Float {
+        return normalizeVadThreshold(prefs.getFloat(KEY_STT_SECONDARY_VAD_THRESHOLD, 0.2f))
+    }
+
+    fun setSpeechSecondaryVadThreshold(threshold: Float) {
+        prefs.edit()
+            .putFloat(KEY_STT_SECONDARY_VAD_THRESHOLD, normalizeVadThreshold(threshold))
+            .apply()
+    }
+
+    fun getSpeechSecondaryVadMinSilenceDuration(): Float {
+        return prefs.getFloat(KEY_STT_SECONDARY_VAD_MIN_SILENCE_DURATION, 0.1f)
+            .coerceIn(0.1f, 2.0f)
+    }
+
+    fun setSpeechSecondaryVadMinSilenceDuration(duration: Float) {
+        prefs.edit()
+            .putFloat(KEY_STT_SECONDARY_VAD_MIN_SILENCE_DURATION, duration.coerceIn(0.1f, 2.0f))
+            .apply()
+    }
+
+    fun getSpeechSecondaryVadMinSpeechDuration(): Float {
+        return prefs.getFloat(KEY_STT_SECONDARY_VAD_MIN_SPEECH_DURATION, 0.1f)
+            .coerceIn(0.05f, 1.0f)
+    }
+
+    fun setSpeechSecondaryVadMinSpeechDuration(duration: Float) {
+        prefs.edit()
+            .putFloat(KEY_STT_SECONDARY_VAD_MIN_SPEECH_DURATION, duration.coerceIn(0.05f, 1.0f))
+            .apply()
+    }
+
+    fun getSpeechSecondaryVadMaxSpeechDuration(): Float {
+        return prefs.getFloat(KEY_STT_SECONDARY_VAD_MAX_SPEECH_DURATION, 5.0f)
+            .coerceIn(5.0f, 60.0f)
+    }
+
+    fun setSpeechSecondaryVadMaxSpeechDuration(duration: Float) {
+        prefs.edit()
+            .putFloat(KEY_STT_SECONDARY_VAD_MAX_SPEECH_DURATION, duration.coerceIn(5.0f, 60.0f))
+            .apply()
+    }
+
     fun getSpeechWhisperThreads(): Int {
         return prefs.getInt(KEY_STT_WHISPER_THREADS, 4)
     }
@@ -553,7 +627,7 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun isShowAllFileTypesEnabled(): Boolean =
-        prefs.getBoolean(KEY_SHOW_ALL_FILE_TYPES, false)
+        prefs.getBoolean(KEY_SHOW_ALL_FILE_TYPES, true)
 
     fun setShowAllFileTypesEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_SHOW_ALL_FILE_TYPES, enabled).apply()

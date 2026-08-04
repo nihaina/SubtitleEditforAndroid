@@ -1,11 +1,14 @@
 package com.subtitleedit
 
 import android.os.Bundle
-import android.view.View
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.View
+import android.view.ViewGroup
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.slider.Slider
+import com.google.android.material.textfield.TextInputEditText
 import com.subtitleedit.databinding.ActivitySpeechToSubtitleSettingsBinding
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SettingsManager
@@ -16,6 +19,8 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySpeechToSubtitleSettingsBinding
     private lateinit var settingsManager: SettingsManager
     private var loading = false
+    private var updatingSecondaryVadMode = false
+    private var updatingSecondaryVadValue = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,6 +54,42 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         binding.switchVadDynamicPadding.setOnCheckedChangeListener { _, checked ->
             if (!loading) settingsManager.setSpeechVadDynamicPaddingEnabled(checked)
         }
+
+        binding.switchSecondaryVadSchemeOne.setOnCheckedChangeListener { _, checked ->
+            updateSecondaryVadMode(SettingsManager.SECONDARY_VAD_MODE_UNCOVERED, checked)
+        }
+        binding.switchSecondaryVadSchemeTwo.setOnCheckedChangeListener { _, checked ->
+            updateSecondaryVadMode(SettingsManager.SECONDARY_VAD_MODE_WITHIN_SEGMENTS, checked)
+        }
+
+        bindSecondaryVadValue(
+            slider = binding.sliderSecondaryVadThreshold,
+            input = binding.etSecondaryVadThreshold,
+            format = "%.2f",
+            normalize = ::normalizeSecondaryVadThreshold,
+            save = settingsManager::setSpeechSecondaryVadThreshold
+        )
+        bindSecondaryVadValue(
+            slider = binding.sliderSecondaryVadMinSilence,
+            input = binding.etSecondaryVadMinSilence,
+            format = "%.2f",
+            normalize = { value -> snap(value, 0.1f, 0.1f, 2.0f) },
+            save = settingsManager::setSpeechSecondaryVadMinSilenceDuration
+        )
+        bindSecondaryVadValue(
+            slider = binding.sliderSecondaryVadMinSpeech,
+            input = binding.etSecondaryVadMinSpeech,
+            format = "%.2f",
+            normalize = { value -> snap(value, 0.05f, 0.05f, 1.0f) },
+            save = settingsManager::setSpeechSecondaryVadMinSpeechDuration
+        )
+        bindSecondaryVadValue(
+            slider = binding.sliderSecondaryVadMaxSpeech,
+            input = binding.etSecondaryVadMaxSpeech,
+            format = "%.1f",
+            normalize = { value -> snap(value, 5.0f, 5.0f, 60.0f) },
+            save = settingsManager::setSpeechSecondaryVadMaxSpeechDuration
+        )
 
         binding.switchHotwords.setOnCheckedChangeListener { _, checked ->
             if (!loading) settingsManager.setSpeechHotwordsEnabled(checked)
@@ -91,6 +132,45 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         binding.etFixedSegmentSeconds.setText(String.format(Locale.US, "%d", segmentSeconds))
         binding.switchVadDynamicPadding.isChecked = settingsManager.isSpeechVadDynamicPaddingEnabled()
 
+        when (settingsManager.getSpeechSecondaryVadMode()) {
+            SettingsManager.SECONDARY_VAD_MODE_UNCOVERED -> {
+                binding.switchSecondaryVadSchemeOne.isChecked = true
+                binding.switchSecondaryVadSchemeTwo.isChecked = false
+            }
+            SettingsManager.SECONDARY_VAD_MODE_WITHIN_SEGMENTS -> {
+                binding.switchSecondaryVadSchemeOne.isChecked = false
+                binding.switchSecondaryVadSchemeTwo.isChecked = true
+            }
+            else -> {
+                binding.switchSecondaryVadSchemeOne.isChecked = false
+                binding.switchSecondaryVadSchemeTwo.isChecked = false
+            }
+        }
+        loadSecondaryVadValue(
+            binding.sliderSecondaryVadThreshold,
+            binding.etSecondaryVadThreshold,
+            settingsManager.getSpeechSecondaryVadThreshold(),
+            "%.2f"
+        )
+        loadSecondaryVadValue(
+            binding.sliderSecondaryVadMinSilence,
+            binding.etSecondaryVadMinSilence,
+            settingsManager.getSpeechSecondaryVadMinSilenceDuration(),
+            "%.2f"
+        )
+        loadSecondaryVadValue(
+            binding.sliderSecondaryVadMinSpeech,
+            binding.etSecondaryVadMinSpeech,
+            settingsManager.getSpeechSecondaryVadMinSpeechDuration(),
+            "%.2f"
+        )
+        loadSecondaryVadValue(
+            binding.sliderSecondaryVadMaxSpeech,
+            binding.etSecondaryVadMaxSpeech,
+            settingsManager.getSpeechSecondaryVadMaxSpeechDuration(),
+            "%.1f"
+        )
+
         binding.switchHotwords.isChecked = settingsManager.isSpeechHotwordsEnabled()
         binding.etHotwords.setText(settingsManager.getSpeechHotwords())
 
@@ -103,6 +183,105 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         binding.tvWhisperThreads.text = String.format(Locale.getDefault(), "%d", whisperThreads)
 
         loading = false
+        updateSecondaryVadParameterState()
+    }
+
+    private fun updateSecondaryVadMode(mode: String, checked: Boolean) {
+        if (loading || updatingSecondaryVadMode) return
+
+        updatingSecondaryVadMode = true
+        if (checked) {
+            if (mode == SettingsManager.SECONDARY_VAD_MODE_UNCOVERED) {
+                binding.switchSecondaryVadSchemeTwo.isChecked = false
+            } else {
+                binding.switchSecondaryVadSchemeOne.isChecked = false
+            }
+            settingsManager.setSpeechSecondaryVadMode(mode)
+        } else {
+            val activeMode = when {
+                binding.switchSecondaryVadSchemeOne.isChecked ->
+                    SettingsManager.SECONDARY_VAD_MODE_UNCOVERED
+                binding.switchSecondaryVadSchemeTwo.isChecked ->
+                    SettingsManager.SECONDARY_VAD_MODE_WITHIN_SEGMENTS
+                else -> SettingsManager.SECONDARY_VAD_MODE_NONE
+            }
+            settingsManager.setSpeechSecondaryVadMode(activeMode)
+        }
+        updatingSecondaryVadMode = false
+        updateSecondaryVadParameterState()
+    }
+
+    private fun bindSecondaryVadValue(
+        slider: Slider,
+        input: TextInputEditText,
+        format: String,
+        normalize: (Float) -> Float,
+        save: (Float) -> Unit
+    ) {
+        slider.addOnChangeListener { _, value, fromUser ->
+            if (updatingSecondaryVadValue) return@addOnChangeListener
+            val normalized = normalize(value)
+            updatingSecondaryVadValue = true
+            if (fromUser) {
+                input.setText(String.format(Locale.US, format, normalized))
+                input.setSelection(input.text?.length ?: 0)
+            }
+            updatingSecondaryVadValue = false
+            if (!loading) save(normalized)
+        }
+        input.addTextChangedListener(simpleTextWatcher { text ->
+            if (updatingSecondaryVadValue || text.isBlank() || text.endsWith(".")) {
+                return@simpleTextWatcher
+            }
+            val value = text.toFloatOrNull() ?: return@simpleTextWatcher
+            val normalized = normalize(value)
+            updatingSecondaryVadValue = true
+            if (kotlin.math.abs(slider.value - normalized) >= 0.0001f) {
+                slider.value = normalized
+            }
+            val normalizedText = String.format(Locale.US, format, normalized)
+            if (text != normalizedText) {
+                input.setText(normalizedText)
+                input.setSelection(input.text?.length ?: 0)
+            }
+            updatingSecondaryVadValue = false
+            if (!loading) save(normalized)
+        })
+    }
+
+    private fun loadSecondaryVadValue(
+        slider: Slider,
+        input: TextInputEditText,
+        value: Float,
+        format: String
+    ) {
+        slider.value = value
+        input.setText(String.format(Locale.US, format, value))
+    }
+
+    private fun updateSecondaryVadParameterState() {
+        val enabled = binding.switchSecondaryVadSchemeOne.isChecked ||
+            binding.switchSecondaryVadSchemeTwo.isChecked
+        setViewEnabled(binding.layoutSecondaryVadParameters, enabled)
+        binding.layoutSecondaryVadParameters.alpha = if (enabled) 1f else 0.55f
+    }
+
+    private fun setViewEnabled(view: View, enabled: Boolean) {
+        view.isEnabled = enabled
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                setViewEnabled(view.getChildAt(index), enabled)
+            }
+        }
+    }
+
+    private fun normalizeSecondaryVadThreshold(value: Float): Float {
+        return snap(value, 0.05f, 0.1f, 0.9f)
+    }
+
+    private fun snap(value: Float, step: Float, min: Float, max: Float): Float {
+        val clamped = value.coerceIn(min, max)
+        return (Math.round((clamped - min) / step) * step + min).coerceIn(min, max)
     }
 
     private fun simpleTextWatcher(afterChanged: (String) -> Unit): TextWatcher {

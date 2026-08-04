@@ -677,7 +677,7 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun getDefaultDirectory(): File {
-        return Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        return Environment.getExternalStorageDirectory()
     }
 
     private fun loadInitialDirectory() {
@@ -722,6 +722,13 @@ class MainActivity : AppCompatActivity() {
         }?.toList() ?: emptyList()
         files.addAll(audioFiles)
 
+        // 视频文件始终显示，不受“显示所有类型文件”设置影响
+        val videoFiles = directory.listFiles { file ->
+            file.isFile && (showHiddenFiles || !file.name.startsWith(".")) &&
+                file.extension.lowercase() in VIDEO_EXTENSIONS
+        }?.toList() ?: emptyList()
+        files.addAll(videoFiles)
+
         val archiveFiles = directory.listFiles { file ->
             file.isFile && (showHiddenFiles || !file.name.startsWith(".")) &&
                 ArchiveManager.isRecognizedArchive(file)
@@ -732,6 +739,7 @@ class MainActivity : AppCompatActivity() {
             val otherFiles = directory.listFiles { file ->
                 file.isFile && (showHiddenFiles || !file.name.startsWith(".")) &&
                     !FileUtils.isSubtitleFile(file) && !FileUtils.isAudioFile(file) &&
+                    file.extension.lowercase() !in VIDEO_EXTENSIONS &&
                     !ArchiveManager.isRecognizedArchive(file)
             }?.toList() ?: emptyList()
             files.addAll(otherFiles)

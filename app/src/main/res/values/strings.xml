@@ -226,6 +226,25 @@
     <string name="activity_speech_to_subtitle_settings_text_13" translatable="false">1.5</string>
     <string name="activity_speech_to_subtitle_settings_text_14">动态 Padding</string>
     <string name="activity_speech_to_subtitle_settings_text_15">为 VAD 语音段和快速转录区间动态加入最多前后各 500 毫秒的上下文，适用于所有识别模型；只扩展模型输入，不改变最终字幕边界</string>
+    <string name="activity_speech_to_subtitle_settings_text_16">二次 VAD</string>
+    <string name="activity_speech_to_subtitle_settings_text_17">两个方案互斥，可全部关闭；启用后使用下方独立参数执行第二次语音段检测</string>
+    <string name="activity_speech_to_subtitle_settings_text_18">方案一</string>
+    <string name="activity_speech_to_subtitle_settings_text_19">第一次 VAD 后，对所有未划分时间段的音频进行二次 VAD，并保留两次检测结果</string>
+    <string name="activity_speech_to_subtitle_settings_text_20">方案二</string>
+    <string name="activity_speech_to_subtitle_settings_text_21">对第一次 VAD 生成的每个时间段内部进行二次 VAD，以二次检测结果进一步划分时间段</string>
+    <string name="activity_speech_to_subtitle_settings_text_22">二次 VAD 参数</string>
+    <string name="activity_speech_to_subtitle_settings_text_23">阈值</string>
+    <string name="activity_speech_to_subtitle_settings_text_24">数值越低越容易检测到轻声和较弱语音</string>
+    <string name="activity_speech_to_subtitle_settings_text_25" translatable="false">0.20</string>
+    <string name="activity_speech_to_subtitle_settings_text_26">最小静音时长</string>
+    <string name="activity_speech_to_subtitle_settings_text_27">短于该时长的静音不会切开语音段</string>
+    <string name="activity_speech_to_subtitle_settings_text_28" translatable="false">0.10</string>
+    <string name="activity_speech_to_subtitle_settings_text_29">最小语音时长</string>
+    <string name="activity_speech_to_subtitle_settings_text_30">短于该时长的检测结果会被 VAD 忽略</string>
+    <string name="activity_speech_to_subtitle_settings_text_31" translatable="false">0.10</string>
+    <string name="activity_speech_to_subtitle_settings_text_32">最大语音时长</string>
+    <string name="activity_speech_to_subtitle_settings_text_33">连续语音达到该时长后由 VAD 强制切段</string>
+    <string name="activity_speech_to_subtitle_settings_text_34" translatable="false">5.0</string>
     <string name="activity_speech_to_subtitle_text_01">选择音频/视频文件（可多选）</string>
     <string name="activity_speech_to_subtitle_text_02">支持 MP3, WAV, FLAC, MP4, MKV 等格式</string>
     <string name="activity_speech_to_subtitle_text_03">源语言</string>
