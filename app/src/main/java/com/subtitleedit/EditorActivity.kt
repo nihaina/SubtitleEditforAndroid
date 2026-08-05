@@ -51,6 +51,7 @@ import com.subtitleedit.util.TimeUtils
 import java.io.File
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
@@ -148,11 +149,15 @@ class EditorActivity : AppCompatActivity() {
     private var mediaType: EditorMediaType
         get() = stateModel.mediaType
         set(value) { stateModel.mediaType = value }
+    private var isAudioOnlyFromVideo: Boolean
+        get() = stateModel.isAudioOnlyFromVideo
+        set(value) { stateModel.isAudioOnlyFromVideo = value }
     private lateinit var audioFilePreparer: EditorAudioFilePreparer
     private lateinit var playbackController: EditorPlaybackController
     private lateinit var waveformController: EditorWaveformController
     private lateinit var subtitlePreviewController: EditorSubtitlePreviewController
     private var waveformMediaFile: File? = null
+    private var waveformAudioStreamIndex: Int? = null
 
     // 文件选择器
     private val openFileLauncher = registerForActivityResult(
@@ -190,6 +195,7 @@ class EditorActivity : AppCompatActivity() {
         const val EXTRA_FILE_PATH = "extra_file_path"
         const val EXTRA_IS_AUDIO_FILE = "extra_is_audio_file"
         const val EXTRA_MEDIA_TYPE = "extra_media_type"
+        const val EXTRA_AUDIO_ONLY_FROM_VIDEO = "extra_audio_only_from_video"
         const val EXTRA_SUBTITLE_FILE_PATH = "extra_subtitle_file_path"
         private const val MENU_SELECT_ALL = 0x20001
         private const val MENU_SELECT_RANGE = 0x20002
@@ -210,6 +216,7 @@ class EditorActivity : AppCompatActivity() {
             } else {
                 EditorMediaType.SUBTITLE_ONLY
             }
+            isAudioOnlyFromVideo = intent.getBooleanExtra(EXTRA_AUDIO_ONLY_FROM_VIDEO, false)
             subtitleFilePath = intent.getStringExtra(EXTRA_SUBTITLE_FILE_PATH) ?: ""
 
             if (filePath.isNotEmpty()) {
@@ -489,6 +496,7 @@ class EditorActivity : AppCompatActivity() {
 
     private fun onMediaReady(durationMs: Long, audioStreamIndex: Int?) {
         val ffmpegAudioStreamIndex = audioStreamIndex?.takeIf { it >= 0 }
+            ?: waveformAudioStreamIndex
         stateModel.selectedAudioStreamIndex = ffmpegAudioStreamIndex
         if (stateModel.playbackSpeed != 1.0f) {
             playbackController.applyPlaybackSpeed(stateModel.playbackSpeed, showConfirmation = false)
@@ -2102,18 +2110,38 @@ class EditorActivity : AppCompatActivity() {
         setDocumentTitle(originalFile.name)
 
         if (mediaType == EditorMediaType.VIDEO) {
-            doLoadMediaFile(originalFile, subtitleFilePath, restoreDocument)
+            doLoadMediaFile(
+                playbackFile = originalFile,
+                analysisFile = originalFile,
+                subtitleFilePath = subtitleFilePath,
+                restoreDocument = restoreDocument
+            )
             return
         }
 
         val checkingDialog = android.app.AlertDialog.Builder(this)
-            .setMessage("正在检测音频文件...")
+            .setMessage(
+                if (isAudioOnlyFromVideo) "正在检测视频音轨..." else "正在检测音频文件..."
+            )
             .setCancelable(false)
             .create()
         checkingDialog.show()
 
         lifecycleScope.launch {
-            val preparedAudio = audioFilePreparer.prepare(originalFile)
+            val preparedAudio = try {
+                audioFilePreparer.prepare(
+                    originalFile,
+                    inspectVideoAudioTrack = isAudioOnlyFromVideo
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                checkingDialog.dismiss()
+                prepareMediaDocument(subtitleFilePath, restoreDocument)
+                stateModel.documentLoaded = true
+                showShortToast(error.message ?: "加载音频失败")
+                return@launch
+            }
             checkingDialog.dismiss()
 
             if (preparedAudio.wasFixed) {
@@ -2124,16 +2152,34 @@ class EditorActivity : AppCompatActivity() {
                 ).show()
             }
 
-            doLoadMediaFile(preparedAudio.file, subtitleFilePath, restoreDocument)
+            doLoadMediaFile(
+                playbackFile = preparedAudio.playbackFile,
+                analysisFile = originalFile,
+                subtitleFilePath = subtitleFilePath,
+                restoreDocument = restoreDocument,
+                audioStreamIndex = preparedAudio.audioStreamIndex
+            )
         }
     }
 
     private fun doLoadMediaFile(
-        mediaFile: File,
+        playbackFile: File,
+        analysisFile: File,
+        subtitleFilePath: String?,
+        restoreDocument: Boolean,
+        audioStreamIndex: Int? = null
+    ) {
+        waveformMediaFile = analysisFile
+        waveformAudioStreamIndex = audioStreamIndex
+        prepareMediaDocument(subtitleFilePath, restoreDocument)
+        stateModel.documentLoaded = true
+        playbackController.prepare(playbackFile)
+    }
+
+    private fun prepareMediaDocument(
         subtitleFilePath: String?,
         restoreDocument: Boolean
     ) {
-        waveformMediaFile = mediaFile
         if (restoreDocument) {
             syncWaveformSubtitles()
         } else if (subtitleFilePath != null) {
@@ -2147,9 +2193,6 @@ class EditorActivity : AppCompatActivity() {
         } else {
             prepareEmptyMediaDocument()
         }
-
-        stateModel.documentLoaded = true
-        playbackController.prepare(mediaFile)
     }
 
     private fun prepareEmptyMediaDocument() {

@@ -982,7 +982,7 @@ class MainActivity : AppCompatActivity() {
         } else if (FileUtils.isAudioFile(file)) {
             openMediaFileForEdit(file, EditorMediaType.AUDIO)
         } else if (file.extension.lowercase() in VIDEO_EXTENSIONS) {
-            openMediaFileForEdit(file, EditorMediaType.VIDEO)
+            showVideoOpenModePicker(file)
         } else {
             com.subtitleedit.util.OverwritingToast.makeText(this, "不支持的文件格式", Toast.LENGTH_SHORT).show()
         }
@@ -2461,17 +2461,49 @@ class MainActivity : AppCompatActivity() {
         com.subtitleedit.util.OverwritingToast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
     
-    private fun openMediaFileForEdit(mediaFile: File, mediaType: EditorMediaType) {
+    private fun openMediaFileForEdit(
+        mediaFile: File,
+        mediaType: EditorMediaType,
+        audioOnlyFromVideo: Boolean = false
+    ) {
         val possibleSubtitleFiles = FileUtils.getPossibleSubtitleFiles(mediaFile)
 
         when {
             possibleSubtitleFiles.size > 1 -> {
-                showSubtitleFilePicker(mediaFile, mediaType, possibleSubtitleFiles)
+                showSubtitleFilePicker(
+                    mediaFile,
+                    mediaType,
+                    possibleSubtitleFiles,
+                    audioOnlyFromVideo
+                )
             }
             else -> {
-                openMediaWithSubtitle(mediaFile, mediaType, possibleSubtitleFiles.firstOrNull())
+                openMediaWithSubtitle(
+                    mediaFile,
+                    mediaType,
+                    possibleSubtitleFiles.firstOrNull(),
+                    audioOnlyFromVideo
+                )
             }
         }
+    }
+
+    private fun showVideoOpenModePicker(videoFile: File) {
+        val options = arrayOf("加载视频", "仅加载音频")
+        AlertDialog.Builder(this)
+            .setTitle("打开视频文件")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> openMediaFileForEdit(videoFile, EditorMediaType.VIDEO)
+                    else -> openMediaFileForEdit(
+                        videoFile,
+                        EditorMediaType.AUDIO,
+                        audioOnlyFromVideo = true
+                    )
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     /**
@@ -2480,7 +2512,8 @@ class MainActivity : AppCompatActivity() {
     private fun showSubtitleFilePicker(
         mediaFile: File,
         mediaType: EditorMediaType,
-        subtitleFiles: List<File>
+        subtitleFiles: List<File>,
+        audioOnlyFromVideo: Boolean
     ) {
         val fileNames = subtitleFiles.map { file ->
             file.name + "  (" + FileUtils.formatFileSize(file.length()) + ")"
@@ -2507,23 +2540,28 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setCustomTitle(customTitle)
             .setItems(fileNames) { _, which ->
-                openMediaWithSubtitle(mediaFile, mediaType, subtitleFiles[which])
+                openMediaWithSubtitle(
+                    mediaFile,
+                    mediaType,
+                    subtitleFiles[which],
+                    audioOnlyFromVideo
+                )
             }
-            .setNegativeButton("不加载字幕") { _, _ ->
-                openMediaWithSubtitle(mediaFile, mediaType, null)
-            }
+            .setNegativeButton("取消", null)
             .show()
     }
 
     private fun openMediaWithSubtitle(
         mediaFile: File,
         mediaType: EditorMediaType,
-        subtitleFile: File?
+        subtitleFile: File?,
+        audioOnlyFromVideo: Boolean
     ) {
         val intent = Intent(this, EditorActivity::class.java)
         intent.putExtra(EditorActivity.EXTRA_FILE_PATH, mediaFile.absolutePath)
         intent.putExtra(EditorActivity.EXTRA_MEDIA_TYPE, mediaType.name)
         intent.putExtra(EditorActivity.EXTRA_IS_AUDIO_FILE, mediaType == EditorMediaType.AUDIO)
+        intent.putExtra(EditorActivity.EXTRA_AUDIO_ONLY_FROM_VIDEO, audioOnlyFromVideo)
         if (subtitleFile != null) {
             intent.putExtra(EditorActivity.EXTRA_SUBTITLE_FILE_PATH, subtitleFile.absolutePath)
         }

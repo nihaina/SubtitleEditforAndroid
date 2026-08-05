@@ -31,6 +31,7 @@ internal class EditorViewModel : ViewModel() {
     var playbackSpeed = 1.0f
     var isVideoCollapsed = false
     var selectedAudioStreamIndex: Int? = null
+    var isAudioOnlyFromVideo = false
     var hasUnsavedChanges = false
     var isNewFile = true
     var currentFormatInfo = ""
