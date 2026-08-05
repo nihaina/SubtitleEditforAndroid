@@ -33,6 +33,7 @@ class FfmpegWaveformChunkLoader(
     private var audioFilePath: String? = null
     private var cacheFile: java.io.File? = null
     private var durationMs: Long = 0
+    private var audioStreamIndex: Int? = null
     private var totalFrames: Int = 0
     private var isCacheReady: Boolean = false
     private var isGeneratingCache: Boolean = false
@@ -46,9 +47,15 @@ class FfmpegWaveformChunkLoader(
      * @param durationMs 音频时长（毫秒）
      * @param cacheDir 缓存目录；null 表示与音频文件同目录（旧行为）
      */
-    fun prepare(filePath: String, durationMs: Long, cacheDir: java.io.File? = null) {
+    fun prepare(
+        filePath: String,
+        durationMs: Long,
+        cacheDir: java.io.File? = null,
+        audioStreamIndex: Int? = null
+    ) {
         this.audioFilePath = filePath
         this.durationMs = durationMs
+        this.audioStreamIndex = audioStreamIndex
         
         val audioFile = java.io.File(filePath)
         val targetDir = if (cacheDir != null) {
@@ -57,7 +64,11 @@ class FfmpegWaveformChunkLoader(
         } else {
             audioFile.parentFile ?: cacheDir
         }
-        this.cacheFile = java.io.File(targetDir, "${audioFile.nameWithoutExtension}.wave")
+        val streamSuffix = audioStreamIndex?.let { ".a$it" }.orEmpty()
+        this.cacheFile = java.io.File(
+            targetDir,
+            "${audioFile.nameWithoutExtension}$streamSuffix.wave"
+        )
         
         this.isCacheReady = false
         this.isGeneratingCache = false
@@ -103,7 +114,11 @@ class FfmpegWaveformChunkLoader(
                 Log.d(TAG, "开始生成波形缓存：${audioFile.absolutePath}")
                 
                 // 委托给 FfmpegWaveformExtractor 生成缓存
-                val success = FfmpegWaveformExtractor.generateWaveformCache(audioFile, cache)
+                val success = FfmpegWaveformExtractor.generateWaveformCache(
+                    audioFile,
+                    cache,
+                    audioStreamIndex
+                )
                 
                 if (!success) {
                     Log.e(TAG, "缓存生成失败")
@@ -215,6 +230,7 @@ class FfmpegWaveformChunkLoader(
         audioFilePath = null
         cacheFile = null
         durationMs = 0
+        audioStreamIndex = null
         totalFrames = 0
         isCacheReady = false
         isGeneratingCache = false

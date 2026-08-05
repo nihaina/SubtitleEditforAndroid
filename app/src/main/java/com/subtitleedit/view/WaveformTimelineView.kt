@@ -1007,10 +1007,10 @@ class WaveformTimelineView @JvmOverloads constructor(
                 suppressTapSelection = false
 
                 if (isInSubtitleArea(event.y)) {
-                    val sub = findSubtitle(event.x)
-                    if (sub != null) {
+                    val idx = findSubtitleIndexAtX(event.x)
+                    val sub = subtitles.getOrNull(idx)
+                    if (sub != null && idx >= 0) {
                         currentSubtitle = sub
-                        val idx = subtitles.indexOf(sub)
                         if (idx in selectedIndices) {
                             // 已选中：DOWN 时保持 NONE，等 MOVE 时确认真正拖动再设置 dragMode
                             downOnSelectedSubtitle = true
@@ -1121,7 +1121,6 @@ class WaveformTimelineView @JvmOverloads constructor(
                 isDraggingWaveform = false
                 isPinching = false
                 activePointerId = MotionEvent.INVALID_POINTER_ID
-                invalidate()
                 return true
             }
         }
@@ -1256,24 +1255,26 @@ class WaveformTimelineView @JvmOverloads constructor(
         pendingSingleTapSelection = null
     }
 
-    private fun findSubtitle(x: Float): SubtitleEntry? {
-        // 优先返回选中的字幕块（置顶触摸层）
-        val selectedHit = selectedIndices.mapNotNull { idx ->
-            if (idx in subtitles.indices) subtitles[idx] else null
-        }.firstOrNull { x in timeToXUnclamped(it.startTime)..timeToXUnclamped(it.endTime) }
-        if (selectedHit != null) return selectedHit
-
-        // 再从后往前查找未选中的（后绘制的在上层）
-        return subtitles.lastOrNull { sub ->
-            val idx = subtitles.indexOf(sub)
-            idx !in selectedIndices && x in timeToX(sub.startTime)..timeToX(sub.endTime)
+    private fun findSubtitleIndexAtX(x: Float): Int {
+        // 选中项绘制在最上层，命中时也应优先。
+        for (index in selectedIndices) {
+            val subtitle = subtitles.getOrNull(index) ?: continue
+            if (x in timeToXUnclamped(subtitle.startTime)..timeToXUnclamped(subtitle.endTime)) {
+                return index
+            }
         }
+
+        for (index in subtitles.lastIndex downTo 0) {
+            if (index in selectedIndices) continue
+            val subtitle = subtitles[index]
+            if (x in timeToX(subtitle.startTime)..timeToX(subtitle.endTime)) return index
+        }
+        return -1
     }
 
     private fun findSubtitleIndex(x: Float, y: Float): Int {
         if (!isInSubtitleArea(y)) return -1
-        val subtitle = findSubtitle(x) ?: return -1
-        return subtitles.indexOf(subtitle)
+        return findSubtitleIndexAtX(x)
     }
 
     private fun detectDragMode(x: Float, sub: SubtitleEntry): DragMode {

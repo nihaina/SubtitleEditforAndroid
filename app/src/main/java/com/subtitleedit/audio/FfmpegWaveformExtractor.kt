@@ -60,11 +60,15 @@ object FfmpegWaveformExtractor {
      * @param cacheFile 缓存文件（.wave）
      * @return 是否成功
      */
-    fun generateWaveformCache(audioFile: File, cacheFile: File): Boolean {
+    fun generateWaveformCache(
+        audioFile: File,
+        cacheFile: File,
+        audioStreamIndex: Int? = null
+    ): Boolean {
         return try {
             // 1. 使用 FFmpeg 导出 PCM
             val pcmFile = File(audioFile.parentFile, "${audioFile.nameWithoutExtension}.pcm")
-            exportPcm(audioFile.absolutePath, pcmFile.absolutePath)
+            exportPcm(audioFile.absolutePath, pcmFile.absolutePath, audioStreamIndex)
             
             if (!pcmFile.exists()) {
                 Log.e(TAG, "PCM 文件生成失败")
@@ -100,8 +104,13 @@ object FfmpegWaveformExtractor {
      * - -ac 1: 单声道
      * - -ar 44100: 采样率 44100Hz
      */
-    private fun exportPcm(inputPath: String, outputPath: String): Boolean {
-        val cmd = "-y -i \"$inputPath\" -f s16le -ac 1 -ar $SAMPLE_RATE \"$outputPath\""
+    private fun exportPcm(
+        inputPath: String,
+        outputPath: String,
+        audioStreamIndex: Int?
+    ): Boolean {
+        val mapOption = audioStreamIndex?.let { "-map 0:$it " }.orEmpty()
+        val cmd = "-y -i \"$inputPath\" $mapOption-f s16le -ac 1 -ar $SAMPLE_RATE \"$outputPath\""
         
         Log.d(TAG, "执行 FFmpeg 命令：$cmd")
         

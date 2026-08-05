@@ -30,8 +30,10 @@ import com.subtitleedit.adapter.SubtitleAdapter
 import com.subtitleedit.adapter.TranslationPreviewItem
 import com.subtitleedit.databinding.ActivityEditorBinding
 import com.subtitleedit.editor.EditorAudioFilePreparer
+import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.editor.EditorPlaybackController
 import com.subtitleedit.editor.EditorSearchController
+import com.subtitleedit.editor.EditorSubtitlePreviewController
 import com.subtitleedit.editor.EditorTextPreviewDialog
 import com.subtitleedit.editor.EditorTranscribeController
 import com.subtitleedit.editor.EditorTranslationController
@@ -143,13 +145,14 @@ class EditorActivity : AppCompatActivity() {
 
     private lateinit var searchController: EditorSearchController
     
-    // 音频文件相关
-    private var isAudioFile: Boolean
-        get() = stateModel.isAudioFile
-        set(value) { stateModel.isAudioFile = value }
+    private var mediaType: EditorMediaType
+        get() = stateModel.mediaType
+        set(value) { stateModel.mediaType = value }
     private lateinit var audioFilePreparer: EditorAudioFilePreparer
     private lateinit var playbackController: EditorPlaybackController
     private lateinit var waveformController: EditorWaveformController
+    private lateinit var subtitlePreviewController: EditorSubtitlePreviewController
+    private var waveformMediaFile: File? = null
 
     // 文件选择器
     private val openFileLauncher = registerForActivityResult(
@@ -186,6 +189,7 @@ class EditorActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_FILE_PATH = "extra_file_path"
         const val EXTRA_IS_AUDIO_FILE = "extra_is_audio_file"
+        const val EXTRA_MEDIA_TYPE = "extra_media_type"
         const val EXTRA_SUBTITLE_FILE_PATH = "extra_subtitle_file_path"
         private const val MENU_SELECT_ALL = 0x20001
         private const val MENU_SELECT_RANGE = 0x20002
@@ -199,11 +203,17 @@ class EditorActivity : AppCompatActivity() {
         
         if (!stateModel.initialized) {
             filePath = intent.getStringExtra(EXTRA_FILE_PATH) ?: ""
-            isAudioFile = intent.getBooleanExtra(EXTRA_IS_AUDIO_FILE, false)
+            mediaType = if (intent.hasExtra(EXTRA_MEDIA_TYPE)) {
+                EditorMediaType.fromIntentValue(intent.getStringExtra(EXTRA_MEDIA_TYPE))
+            } else if (intent.getBooleanExtra(EXTRA_IS_AUDIO_FILE, false)) {
+                EditorMediaType.AUDIO
+            } else {
+                EditorMediaType.SUBTITLE_ONLY
+            }
             subtitleFilePath = intent.getStringExtra(EXTRA_SUBTITLE_FILE_PATH) ?: ""
 
             if (filePath.isNotEmpty()) {
-                if (isAudioFile) {
+                if (mediaType.hasPlayableMedia) {
                     currentFile = File(filePath)
                     if (subtitleFilePath.isNotEmpty()) {
                         subtitleFile = File(subtitleFilePath)
@@ -221,16 +231,20 @@ class EditorActivity : AppCompatActivity() {
         setupSearchController()
         setupPlaybackController()
         setupWaveformController()
+        setupSubtitlePreviewController()
         setupAiControllers()
-        setupAudioActions()
+        setupMediaActions()
+        setupVideoPanel()
         setupBackPressedHandler()
         
         if (stateModel.documentLoaded) {
             restoreDocumentState()
-            if (isAudioFile && filePath.isNotEmpty()) loadAudioFile(subtitleFilePath, restoreDocument = true)
+            if (mediaType.hasPlayableMedia && filePath.isNotEmpty()) {
+                loadMediaFile(subtitleFilePath, restoreDocument = true)
+            }
         } else if (filePath.isNotEmpty()) {
-            if (isAudioFile) {
-                loadAudioFile(subtitleFilePath)
+            if (mediaType.hasPlayableMedia) {
+                loadMediaFile(subtitleFilePath)
             } else {
                 loadFile()
             }
@@ -345,7 +359,7 @@ class EditorActivity : AppCompatActivity() {
             onSetTimeClick = { entry, position ->
                 setSubtitleTimeToCurrentPosition(entry, position)
             },
-            isAudioFile = isAudioFile,
+            hasPlayableMedia = mediaType.hasPlayableMedia,
             onSelectionChanged = {
                 updateSelectedCountDisplay()
             }
@@ -367,6 +381,7 @@ class EditorActivity : AppCompatActivity() {
                 if (isSourceViewMode) {
                     hasUnsavedChanges = true
                     sourceViewContent = s?.toString() ?: ""
+                    scheduleSubtitlePreview()
                 }
             }
         })
@@ -399,7 +414,7 @@ class EditorActivity : AppCompatActivity() {
         playbackController = EditorPlaybackController(
             context = this,
             binding = binding,
-            isAudioFile = isAudioFile,
+            mediaType = mediaType,
             subtitles = { subtitleEntries },
             isSourceViewMode = { isSourceViewMode },
             onPlayingSubtitleChanged = { index ->
@@ -409,6 +424,7 @@ class EditorActivity : AppCompatActivity() {
                     subtitleAdapter.highlightCurrentPlaying(index)
                 }
             },
+            onMediaReady = ::onMediaReady,
             showMessage = ::showShortToast
         )
         playbackController.bind()
@@ -419,7 +435,7 @@ class EditorActivity : AppCompatActivity() {
             context = this,
             binding = binding,
             scope = lifecycleScope,
-            isAudioFile = isAudioFile,
+            hasPlayableMedia = mediaType.hasPlayableMedia,
             appCacheDir = cacheDir,
             currentPlaybackPositionMs = { playbackController.currentPositionMs },
             onSubtitlesChanged = { updatedSubtitles ->
@@ -428,14 +444,81 @@ class EditorActivity : AppCompatActivity() {
             },
             onSelectedIndexChanged = { index ->
                 if (index in subtitleEntries.indices) {
-                    (binding.rvSubtitles.layoutManager as? LinearLayoutManager)
-                        ?.scrollToPositionWithOffset(index, 0)
+                    (binding.rvSubtitles.layoutManager as? LinearLayoutManager)?.let { manager ->
+                        val firstVisible = manager.findFirstVisibleItemPosition()
+                        val lastVisible = manager.findLastVisibleItemPosition()
+                        if (index !in firstVisible..lastVisible) {
+                            manager.scrollToPositionWithOffset(index, 0)
+                        }
+                    }
                 }
             },
             onTimestampInserted = ::insertSubtitleFromTimestamp,
             showMessage = ::showShortToast
         )
         waveformController.bind()
+    }
+
+    private fun setupSubtitlePreviewController() {
+        subtitlePreviewController = EditorSubtitlePreviewController(
+            cacheDir = cacheDir,
+            scope = lifecycleScope,
+            replaceTrack = playbackController::replaceVideoSubtitleTrack
+        )
+    }
+
+    private fun setupVideoPanel() {
+        binding.videoSection.visibility =
+            if (mediaType == EditorMediaType.VIDEO) View.VISIBLE else View.GONE
+        if (mediaType != EditorMediaType.VIDEO) return
+
+        applyVideoCollapsedState(stateModel.isVideoCollapsed)
+        binding.btnToggleVideo.setOnClickListener {
+            stateModel.isVideoCollapsed = !stateModel.isVideoCollapsed
+            applyVideoCollapsedState(stateModel.isVideoCollapsed)
+        }
+    }
+
+    private fun applyVideoCollapsedState(collapsed: Boolean) {
+        binding.videoViewportContainer.visibility = if (collapsed) View.GONE else View.VISIBLE
+        binding.btnToggleVideo.text = if (collapsed) "▶" else "▼"
+        binding.btnToggleVideo.contentDescription = getString(
+            if (collapsed) R.string.editor_video_expand else R.string.editor_video_collapse
+        )
+    }
+
+    private fun onMediaReady(durationMs: Long, audioStreamIndex: Int?) {
+        val ffmpegAudioStreamIndex = audioStreamIndex?.takeIf { it >= 0 }
+        stateModel.selectedAudioStreamIndex = ffmpegAudioStreamIndex
+        if (stateModel.playbackSpeed != 1.0f) {
+            playbackController.applyPlaybackSpeed(stateModel.playbackSpeed, showConfirmation = false)
+        }
+        if (stateModel.playbackPositionMs > 0L) {
+            playbackController.seekTo(stateModel.playbackPositionMs)
+        }
+
+        val mediaFile = waveformMediaFile ?: return
+        if (mediaType == EditorMediaType.VIDEO && audioStreamIndex == null) {
+            waveformController.showNoAudioTrack(durationMs, subtitleEntries.toList())
+        } else {
+            waveformController.load(
+                mediaFile,
+                durationMs,
+                subtitleEntries.toList(),
+                ffmpegAudioStreamIndex
+            )
+        }
+        scheduleSubtitlePreview()
+    }
+
+    private fun scheduleSubtitlePreview() {
+        if (mediaType != EditorMediaType.VIDEO || !::subtitlePreviewController.isInitialized) return
+        subtitlePreviewController.schedule(
+            format = currentFormat,
+            entries = subtitleEntries,
+            sourceViewMode = isSourceViewMode,
+            sourceContent = sourceViewContent
+        )
     }
 
     private fun setupAiControllers() {
@@ -536,7 +619,7 @@ class EditorActivity : AppCompatActivity() {
         currentCharset = settingsManager.getDefaultEncoding()
 
         val content = readFileOrNull(file, "读取文件失败") ?: return
-        parseContent(content)
+        parseContent(content, file.name)
         hasUnsavedChanges = false
         isNewFile = false
     }
@@ -550,7 +633,7 @@ class EditorActivity : AppCompatActivity() {
             setDocumentTitle(fileName)
             stateModel.documentUri = uri.toString()
             takePersistableWritePermission(uri)
-            parseContent(content)
+            parseContent(content, fileName)
             hasUnsavedChanges = false
             isNewFile = false
             com.subtitleedit.util.OverwritingToast.makeText(this, "文件已打开：$fileName", Toast.LENGTH_SHORT).show()
@@ -583,30 +666,29 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun reloadFile() {
-        val targetFile = if (isAudioFile) subtitleFile else currentFile
+        val targetFile = if (mediaType.hasPlayableMedia) subtitleFile else currentFile
         if (targetFile == null || !targetFile.exists()) {
             showShortToast("当前文件无法重新加载编码，请通过「打开」功能重新选择文件")
             return
         }
 
         val content = readFileOrNull(targetFile, "切换编码失败") ?: return
-        parseContent(content)
+        parseContent(content, targetFile.name)
         hasUnsavedChanges = false
         showShortToast("已切换编码为：${FileUtils.SUPPORTED_ENCODINGS.find { it.charset == currentCharset }?.displayName}")
     }
     
-    private fun parseContent(content: String) {
-        currentFormat = SubtitleParser.detectFormat(content)
+    private fun parseContent(content: String, fileName: String? = null) {
+        currentFormat = SubtitleParser.detectFormat(content, fileName)
         
         // 始终保存原始文件内容
         originalFileContent = content
         
-        // 如果是 TXT 格式，直接使用源视图模式
-        if (currentFormat == SubtitleParser.SubtitleFormat.TXT) {
+        if (currentFormat.isSourceOnly) {
             sourceViewContent = originalFileContent
             enterSourceViewMode()
         } else {
-            replaceSubtitleEntries(SubtitleParser.parse(content, currentCharset))
+            replaceSubtitleEntries(SubtitleParser.parse(content, currentFormat))
             exitSourceViewMode()
         }
         
@@ -618,6 +700,7 @@ class EditorActivity : AppCompatActivity() {
         
         // 同步字幕到波形视图（仅音频模式有效）
         syncWaveformSubtitles()
+        scheduleSubtitlePreview()
         stateModel.documentLoaded = true
     }
     
@@ -713,8 +796,8 @@ class EditorActivity : AppCompatActivity() {
      * 切换源视图模式
      */
     private fun toggleSourceView() {
-        if (currentFormat == SubtitleParser.SubtitleFormat.TXT) {
-            showShortToast("TXT 文件只能使用源视图模式")
+        if (currentFormat.isSourceOnly) {
+            showShortToast("${getFormatDisplayName(currentFormat)} 文件使用源码视图编辑")
             return
         }
 
@@ -777,7 +860,7 @@ class EditorActivity : AppCompatActivity() {
     private fun doExitSourceView() {
         val editedContent = binding.etSourceView.text.toString()
         try {
-            replaceSubtitleEntries(SubtitleParser.parse(editedContent, currentCharset))
+            replaceSubtitleEntries(SubtitleParser.parse(editedContent, currentFormat))
             // 将源视图内容同步回 originalFileContent，使再次切换时内容一致
             originalFileContent = editedContent
             sourceViewContent   = editedContent
@@ -1259,6 +1342,7 @@ class EditorActivity : AppCompatActivity() {
         if (markChanged) markAsChanged()
         if (::playbackController.isInitialized) playbackController.invalidateHighlightCache()
         if (::searchController.isInitialized) searchController.onDocumentChanged()
+        scheduleSubtitlePreview()
     }
 
     private fun notifyPositionsWithNeighbors(positions: List<Int>) {
@@ -1314,6 +1398,7 @@ class EditorActivity : AppCompatActivity() {
         if (markChanged) markAsChanged()
         if (::playbackController.isInitialized) playbackController.invalidateHighlightCache()
         if (::searchController.isInitialized) searchController.onDocumentChanged()
+        scheduleSubtitlePreview()
     }
     
     private fun newFile() {
@@ -1371,7 +1456,7 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
-        val targetFile = if (isAudioFile) {
+        val targetFile = if (mediaType.hasPlayableMedia) {
             subtitleFile
         } else {
             currentFile
@@ -1394,7 +1479,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun launchSaveFilePicker() {
-        val formatExtension = if (isSourceViewMode) "txt" else getFormatExtension(currentFormat)
+        val formatExtension = getFormatExtension(currentFormat)
         saveFileLauncher.launch("subtitle.$formatExtension")
     }
     
@@ -1673,12 +1758,12 @@ class EditorActivity : AppCompatActivity() {
     /** 对当前选中的字幕行按各自时间范围执行离线语音转录。 */
     private fun showQuickTranscribe() {
         if (!ensureListMode()) return
-        val audioFile = currentFile?.takeIf { isAudioFile } ?: run {
-            showShortToast("仅在打开音频文件时可快速转录")
+        val audioFile = currentFile?.takeIf { mediaType.hasPlayableMedia } ?: run {
+            showShortToast("仅在打开音频或视频文件时可快速转录")
             return
         }
         val selectedEntries = requireSelectedEntries("请先选择要转录的字幕") ?: return
-        transcribeController.start(selectedEntries, audioFile)
+        transcribeController.start(selectedEntries, audioFile, stateModel.selectedAudioStreamIndex)
     }
 
     /** 把预览对话框中勾选应用的文本写回字幕列表。 */
@@ -1739,6 +1824,9 @@ class EditorActivity : AppCompatActivity() {
             SubtitleParser.SubtitleFormat.SRT -> "SRT"
             SubtitleParser.SubtitleFormat.LRC -> "LRC"
             SubtitleParser.SubtitleFormat.TXT -> "TXT"
+            SubtitleParser.SubtitleFormat.ASS -> "ASS"
+            SubtitleParser.SubtitleFormat.SSA -> "SSA"
+            SubtitleParser.SubtitleFormat.VTT -> "WebVTT"
             else -> "未知"
         }
     }
@@ -1748,6 +1836,9 @@ class EditorActivity : AppCompatActivity() {
             SubtitleParser.SubtitleFormat.SRT -> "srt"
             SubtitleParser.SubtitleFormat.LRC -> "lrc"
             SubtitleParser.SubtitleFormat.TXT -> "txt"
+            SubtitleParser.SubtitleFormat.ASS -> "ass"
+            SubtitleParser.SubtitleFormat.SSA -> "ssa"
+            SubtitleParser.SubtitleFormat.VTT -> "vtt"
             else -> "srt"
         }
     }
@@ -1764,6 +1855,9 @@ class EditorActivity : AppCompatActivity() {
             SubtitleParser.SubtitleFormat.SRT -> SubtitleParser.toSRT(entries)
             SubtitleParser.SubtitleFormat.LRC -> SubtitleParser.toLRC(entries)
             SubtitleParser.SubtitleFormat.TXT -> SubtitleParser.toTXT(entries)
+            SubtitleParser.SubtitleFormat.ASS,
+            SubtitleParser.SubtitleFormat.SSA,
+            SubtitleParser.SubtitleFormat.VTT -> sourceViewContent
             else -> SubtitleParser.toSRT(entries)
         }
     }
@@ -1783,9 +1877,9 @@ class EditorActivity : AppCompatActivity() {
         return false
     }
 
-    private fun ensureAudioMode(): Boolean {
-        if (isAudioFile) return true
-        showShortToast("此功能仅在打开音频文件时可用")
+    private fun ensureMediaMode(): Boolean {
+        if (mediaType.hasPlayableMedia) return true
+        showShortToast("此功能仅在打开音频或视频文件时可用")
         return false
     }
 
@@ -1855,7 +1949,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun getCurrentSubtitleFile(): File? {
-        return if (isAudioFile) subtitleFile else currentFile
+        return if (mediaType.hasPlayableMedia) subtitleFile else currentFile
     }
 
     private fun isSourceContentModifiedComparedToFile(editedContent: String): Boolean {
@@ -1927,6 +2021,8 @@ class EditorActivity : AppCompatActivity() {
     override fun onStop() {
         if (::playbackController.isInitialized) {
             stateModel.playbackPositionMs = playbackController.currentPositionMs
+            stateModel.playbackSpeed = playbackController.playbackSpeed
+            playbackController.pauseForLifecycle()
         }
         if (::subtitleAdapter.isInitialized) {
             stateModel.selectedIndices = subtitleAdapter.getSelectedPositions()
@@ -1946,18 +2042,19 @@ class EditorActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         ttsController.release()
-        super.onDestroy()
+        if (::subtitlePreviewController.isInitialized) subtitlePreviewController.release()
         audioFilePreparer.release()
         playbackController.release()
         waveformController.release()
         translationController.release()
         transcribeController.release()
+        super.onDestroy()
     }
     
-    // ==================== 音频播放器相关方法 ====================
+    // ==================== 媒体播放器相关方法 ====================
     
-    private fun setupAudioActions() {
-        if (!isAudioFile) return
+    private fun setupMediaActions() {
+        if (!mediaType.hasPlayableMedia) return
 
         binding.btnQuickTranscribe.setOnClickListener {
             showQuickTranscribe()
@@ -1988,39 +2085,37 @@ class EditorActivity : AppCompatActivity() {
         ttsController.speak(texts)
     }
 
-    /**
-     * 加载音频文件
-     */
-    private fun loadAudioFile(subtitleFilePath: String?, restoreDocument: Boolean = false) {
+    private fun loadMediaFile(subtitleFilePath: String?, restoreDocument: Boolean = false) {
         if (filePath.isEmpty() || currentFile == null) {
-            com.subtitleedit.util.OverwritingToast.makeText(this, "音频文件路径无效", Toast.LENGTH_SHORT).show()
-            finish()
-            return
-        }
-        
-        if (!currentFile!!.exists()) {
-            com.subtitleedit.util.OverwritingToast.makeText(this, "音频文件不存在", Toast.LENGTH_SHORT).show()
+            showShortToast("媒体文件路径无效")
             finish()
             return
         }
 
-        // The editor title identifies the file the user opened. The audio used for
-        // playback may later be replaced by a repaired cache copy with another name.
-        setDocumentTitle(currentFile!!.name)
-        
-        // 先显示检测中提示，再异步检测 start time
+        val originalFile = currentFile ?: return
+        if (!originalFile.exists()) {
+            showShortToast("媒体文件不存在")
+            finish()
+            return
+        }
+
+        setDocumentTitle(originalFile.name)
+
+        if (mediaType == EditorMediaType.VIDEO) {
+            doLoadMediaFile(originalFile, subtitleFilePath, restoreDocument)
+            return
+        }
+
         val checkingDialog = android.app.AlertDialog.Builder(this)
             .setMessage("正在检测音频文件...")
             .setCancelable(false)
             .create()
         checkingDialog.show()
-        
+
         lifecycleScope.launch {
-            val originalFile = currentFile!!
             val preparedAudio = audioFilePreparer.prepare(originalFile)
-            
             checkingDialog.dismiss()
-            
+
             if (preparedAudio.wasFixed) {
                 com.subtitleedit.util.OverwritingToast.makeText(
                     this@EditorActivity,
@@ -2028,51 +2123,44 @@ class EditorActivity : AppCompatActivity() {
                     Toast.LENGTH_LONG
                 ).show()
             }
-            
-            // 使用修复后的文件路径继续加载
-            doLoadAudioFile(preparedAudio.file, subtitleFilePath, restoreDocument)
+
+            doLoadMediaFile(preparedAudio.file, subtitleFilePath, restoreDocument)
         }
     }
-    
-    /**
-     * 实际执行音频加载（原 loadAudioFile 的主体逻辑）
-     */
-    private fun doLoadAudioFile(
-        audioFile: File,
+
+    private fun doLoadMediaFile(
+        mediaFile: File,
         subtitleFilePath: String?,
         restoreDocument: Boolean
     ) {
-        try {
-            playbackController.prepare(audioFile)
-        } catch (e: Exception) {
-            com.subtitleedit.util.OverwritingToast.makeText(this, "加载音频失败：${e.message}", Toast.LENGTH_SHORT).show()
-        }
-        
+        waveformMediaFile = mediaFile
         if (restoreDocument) {
             syncWaveformSubtitles()
-            if (stateModel.playbackPositionMs > 0L) {
-                playbackController.seekTo(stateModel.playbackPositionMs)
-            }
         } else if (subtitleFilePath != null) {
             val subtitleFile = File(subtitleFilePath)
             if (subtitleFile.exists()) {
                 loadSubtitleFile(subtitleFile)
             } else {
-                clearSubtitleEntries()
-                submitSubtitleList(refreshAll = true, syncWaveform = false)
-                com.subtitleedit.util.OverwritingToast.makeText(this, "未找到同名字幕文件", Toast.LENGTH_SHORT).show()
+                prepareEmptyMediaDocument()
+                showShortToast("未找到同名字幕文件")
             }
         } else {
-            clearSubtitleEntries()
-            submitSubtitleList(refreshAll = true, syncWaveform = false)
+            prepareEmptyMediaDocument()
         }
-        
-        waveformController.load(
-            audioFile,
-            playbackController.durationMs,
-            subtitleEntries.toList()
-        )
+
         stateModel.documentLoaded = true
+        playbackController.prepare(mediaFile)
+    }
+
+    private fun prepareEmptyMediaDocument() {
+        clearSubtitleEntries()
+        currentFormat = SubtitleParser.SubtitleFormat.SRT
+        isSourceViewMode = false
+        sourceViewContent = ""
+        originalFileContent = ""
+        binding.svSourceView.visibility = View.GONE
+        binding.rvSubtitles.visibility = View.VISIBLE
+        submitSubtitleList(refreshAll = true, syncWaveform = false)
     }
 
     /**
@@ -2084,7 +2172,7 @@ class EditorActivity : AppCompatActivity() {
         
         try {
             val content = FileUtils.readFile(subtitleFile, currentCharset)
-            parseContent(content)
+            parseContent(content, subtitleFile.name)
             hasUnsavedChanges = false
             isNewFile = false
         } catch (e: Exception) {
@@ -2098,7 +2186,7 @@ class EditorActivity : AppCompatActivity() {
      * 跳转到字幕的开始时间
      */
     private fun jumpToSubtitleTime(entry: SubtitleEntry) {
-        if (!ensureAudioMode()) return
+        if (!ensureMediaMode()) return
         
         playbackController.seekTo(entry.startTime)
         showShortToast("已跳转到 ${TimeUtils.formatForDisplay(entry.startTime)}")
@@ -2110,7 +2198,7 @@ class EditorActivity : AppCompatActivity() {
      * 将字幕的开始时间设置为当前音频进度
      */
     private fun setSubtitleTimeToCurrentPosition(entry: SubtitleEntry, position: Int) {
-        if (!ensureAudioMode()) return
+        if (!ensureMediaMode()) return
         
         val newStartTime = playbackController.currentPositionMs
         entry.startTime = newStartTime

@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.widget.TextView
@@ -23,7 +24,7 @@ internal class EditorWaveformController(
     private val context: Context,
     private val binding: ActivityEditorBinding,
     private val scope: CoroutineScope,
-    private val isAudioFile: Boolean,
+    private val hasPlayableMedia: Boolean,
     private val appCacheDir: File,
     private val currentPlaybackPositionMs: () -> Long,
     private val onSubtitlesChanged: (List<SubtitleEntry>) -> Unit,
@@ -34,6 +35,8 @@ internal class EditorWaveformController(
     private var chunkLoader: FfmpegWaveformChunkLoader? = null
     private var audioFile: File? = null
     private var durationMs = 0L
+    private var audioStreamIndex: Int? = null
+    private var hasAudioTrack = true
     private var isWaveformExpanded = true
     private var currentDisplayMode = WaveformTimelineView.DisplayMode.WAVEFORM
     private var spectrogramTotalChunks = 0
@@ -44,12 +47,12 @@ internal class EditorWaveformController(
     private var isWaveformGenerating = false
 
     fun bind() {
-        if (!isAudioFile) {
-            binding.audioPlayerContainer.visibility = View.GONE
+        if (!hasPlayableMedia) {
+            binding.mediaPlayerContainer.visibility = View.GONE
             return
         }
 
-        binding.audioPlayerContainer.visibility = View.VISIBLE
+        binding.mediaPlayerContainer.visibility = View.VISIBLE
         binding.waveformTimelineView.onSubtitleChangeListener = onSubtitlesChanged
         binding.waveformTimelineView.onSelectedIndicesChangeListener = { indices ->
             indices.firstOrNull()?.let(onSelectedIndexChanged)
@@ -139,9 +142,17 @@ internal class EditorWaveformController(
         }
     }
 
-    fun load(audioFile: File, durationMs: Long, subtitles: List<SubtitleEntry>) {
+    fun load(
+        audioFile: File,
+        durationMs: Long,
+        subtitles: List<SubtitleEntry>,
+        audioStreamIndex: Int? = null
+    ) {
         this.audioFile = audioFile
         this.durationMs = durationMs
+        this.audioStreamIndex = audioStreamIndex
+        hasAudioTrack = true
+        binding.btnGenerateCache.isEnabled = true
         binding.waveformTimelineView.initialize(durationMs, subtitles)
         restoreSpectrogramCacheState(audioFile)
         binding.waveformTimelineView.post {
@@ -156,7 +167,7 @@ internal class EditorWaveformController(
 
         chunkLoader?.release()
         chunkLoader = FfmpegWaveformChunkLoader(scope).also {
-            it.prepare(audioFile.absolutePath, durationMs, cacheDir)
+            it.prepare(audioFile.absolutePath, durationMs, cacheDir, audioStreamIndex)
         }
 
         if (chunkLoader?.isCacheReady() == true) {
@@ -170,18 +181,33 @@ internal class EditorWaveformController(
         updateGenerateButton()
     }
 
+    fun showNoAudioTrack(durationMs: Long, subtitles: List<SubtitleEntry>) {
+        this.audioFile = null
+        this.durationMs = durationMs
+        this.audioStreamIndex = null
+        hasAudioTrack = false
+        chunkLoader?.release()
+        chunkLoader = null
+        isWaveformGenerated = false
+        isSpectrogramGenerationStarted = false
+        binding.waveformTimelineView.initialize(durationMs, subtitles)
+        binding.btnGenerateCache.visibility = View.VISIBLE
+        binding.btnGenerateCache.isEnabled = false
+        binding.btnGenerateCache.text = context.getString(com.subtitleedit.R.string.editor_video_no_audio)
+    }
+
     fun setSubtitles(subtitles: List<SubtitleEntry>) {
-        if (!isAudioFile) return
+        if (!hasPlayableMedia) return
         binding.waveformTimelineView.setSubtitles(subtitles)
     }
 
     fun setSubtitlesKeepSelection(subtitles: List<SubtitleEntry>, selectedIndex: Int) {
-        if (!isAudioFile) return
+        if (!hasPlayableMedia) return
         binding.waveformTimelineView.setSubtitlesKeepSelection(subtitles, selectedIndex)
     }
 
     fun setSubtitlesAfterDelete(subtitles: List<SubtitleEntry>, deletedIndices: Set<Int>) {
-        if (!isAudioFile) return
+        if (!hasPlayableMedia) return
         binding.waveformTimelineView.setSubtitlesAfterDelete(subtitles, deletedIndices)
     }
 
@@ -219,9 +245,10 @@ internal class EditorWaveformController(
         val currentAudioFile = audioFile ?: return
         val cacheBaseDir = spectrogramCacheBaseDir(currentAudioFile)
         cacheBaseDir.mkdirs()
+        val streamSuffix = audioStreamIndex?.let { ".a$it" }.orEmpty()
         val specFile = File(
             cacheBaseDir,
-            "${currentAudioFile.nameWithoutExtension}.spec_${chunkIndex}_${widthPx}x${heightPx}.png"
+            "${currentAudioFile.nameWithoutExtension}$streamSuffix.spec_${chunkIndex}_${widthPx}x${heightPx}.png"
         )
 
         scope.launch(Dispatchers.IO) {
@@ -230,15 +257,20 @@ internal class EditorWaveformController(
             } else {
                 val startSec = startMs / 1000.0
                 val durationSec = (endMs - startMs) / 1000.0
+                val spectrumFilter = "showspectrumpic=s=${widthPx}x${heightPx}:" +
+                    "mode=combined:color=intensity:scale=log:legend=0"
+                val filterOptions = audioStreamIndex?.let { streamIndex ->
+                    "-filter_complex \"[0:$streamIndex]$spectrumFilter[spectrum]\" " +
+                        "-map \"[spectrum]\" "
+                } ?: "-lavfi $spectrumFilter "
                 val command = "-y -ss $startSec -t $durationSec " +
-                    "-i \"${currentAudioFile.absolutePath}\" " +
-                    "-lavfi showspectrumpic=s=${widthPx}x${heightPx}:" +
-                    "mode=combined:color=intensity:scale=log:legend=0 " +
+                    "-i \"${currentAudioFile.absolutePath}\" $filterOptions" +
                     "-frames:v 1 \"${specFile.absolutePath}\""
                 val session = FFmpegKit.execute(command)
                 if (session.getReturnCode()?.isValueSuccess() == true && specFile.exists()) {
                     BitmapFactory.decodeFile(specFile.absolutePath)
                 } else {
+                    Log.e(TAG, "频谱图分块生成失败：${session.getOutput()}")
                     null
                 }
             }
@@ -274,7 +306,8 @@ internal class EditorWaveformController(
         val dimensions = binding.waveformTimelineView.getSpectrogramCacheDimensions() ?: return false
         val (width, height) = dimensions
         val cacheBaseDir = spectrogramCacheBaseDir(audioFile)
-        val prefix = "${audioFile.nameWithoutExtension}.spec_"
+        val streamSuffix = audioStreamIndex?.let { ".a$it" }.orEmpty()
+        val prefix = "${audioFile.nameWithoutExtension}$streamSuffix.spec_"
         return (0 until totalChunks).all { chunkIndex ->
             File(cacheBaseDir, "${prefix}${chunkIndex}_${width}x${height}.png")
                 .let { it.isFile && it.length() > 0L }
@@ -289,6 +322,12 @@ internal class EditorWaveformController(
     }
 
     private fun updateGenerateButton() {
+        if (!hasAudioTrack) {
+            binding.btnGenerateCache.visibility = if (isWaveformExpanded) View.VISIBLE else View.GONE
+            binding.btnGenerateCache.isEnabled = false
+            binding.btnGenerateCache.text = context.getString(com.subtitleedit.R.string.editor_video_no_audio)
+            return
+        }
         val needsGenerate = when (currentDisplayMode) {
             WaveformTimelineView.DisplayMode.WAVEFORM -> !isWaveformGenerated
             WaveformTimelineView.DisplayMode.SPECTROGRAM -> !isSpectrogramGenerationStarted
@@ -353,5 +392,9 @@ internal class EditorWaveformController(
                 }
             }
         binding.waveformTimelineView.refreshVisibleChunks()
+    }
+
+    private companion object {
+        const val TAG = "EditorWaveformController"
     }
 }

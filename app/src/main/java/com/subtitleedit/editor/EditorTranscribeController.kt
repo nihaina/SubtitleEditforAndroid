@@ -32,7 +32,11 @@ internal class EditorTranscribeController(
     private var transcribeJob: Job? = null
     private var transcribeCancelled = false
 
-    fun start(selectedEntries: List<Pair<SubtitleEntry, Int>>, audioFile: File) {
+    fun start(
+        selectedEntries: List<Pair<SubtitleEntry, Int>>,
+        audioFile: File,
+        audioStreamIndex: Int? = null
+    ) {
         if (selectedEntries.any { it.first.endTime <= it.first.startTime }) {
             showMessage("选中的字幕包含无效时间范围")
             return
@@ -101,7 +105,8 @@ internal class EditorTranscribeController(
                     joinerPath,
                     tokensPath,
                     modelType,
-                    selectedLanguage
+                    selectedLanguage,
+                    audioStreamIndex
                 )
             }
             .setNegativeButton("取消", null)
@@ -158,7 +163,8 @@ internal class EditorTranscribeController(
         joinerPath: String,
         tokensPath: String,
         modelType: String,
-        sourceLanguage: String
+        sourceLanguage: String,
+        audioStreamIndex: Int?
     ) {
         val progressDialog = AlertDialog.Builder(activity)
             .setTitle("正在转录")
@@ -171,13 +177,13 @@ internal class EditorTranscribeController(
 
         transcribeJob = scope.launch {
             try {
-                val cachedPcmFile = recognitionPcmCacheFile(inputFile)
+                val cachedPcmFile = recognitionPcmCacheFile(inputFile, audioStreamIndex)
                 progressDialog.setMessage(
                     if (isRecognitionPcmCacheValid(cachedPcmFile)) "正在使用缓存音频..."
                     else "正在准备音频..."
                 )
                 val pcmFile = withContext(Dispatchers.IO) {
-                    convertAudioToRecognitionPcm(inputFile)
+                    convertAudioToRecognitionPcm(inputFile, audioStreamIndex)
                 } ?: throw IllegalStateException("音频转换失败")
                 if (transcribeCancelled) return@launch
 
@@ -225,21 +231,25 @@ internal class EditorTranscribeController(
     /**
      * 缓存键包含源文件元数据。源文件变化时会自然切换到新的缓存，不会读取旧音频。
      */
-    private fun recognitionPcmCacheFile(inputFile: File): File {
+    private fun recognitionPcmCacheFile(inputFile: File, audioStreamIndex: Int?): File {
         val sourceKey = "${inputFile.absolutePath.hashCode().toUInt().toString(16)}_" +
-            "${inputFile.length()}_${inputFile.lastModified()}"
+            "${inputFile.length()}_${inputFile.lastModified()}_${audioStreamIndex ?: "default"}"
         return File(cacheDir, "quick_transcribe_${sourceKey}_16k.wav")
     }
 
     private fun isRecognitionPcmCacheValid(file: File): Boolean =
         file.exists() && file.length() > 44L
 
-    private fun convertAudioToRecognitionPcm(inputFile: File): File? {
+    private fun convertAudioToRecognitionPcm(
+        inputFile: File,
+        audioStreamIndex: Int?
+    ): File? {
         return try {
-            val outputFile = recognitionPcmCacheFile(inputFile)
+            val outputFile = recognitionPcmCacheFile(inputFile, audioStreamIndex)
             if (isRecognitionPcmCacheValid(outputFile)) return outputFile
             if (outputFile.exists()) outputFile.delete()
-            val command = "-y -i \"${inputFile.absolutePath}\" " +
+            val mapOption = audioStreamIndex?.let { "-map 0:$it " }.orEmpty()
+            val command = "-y -i \"${inputFile.absolutePath}\" $mapOption" +
                 "-ar 16000 -ac 1 -c:a pcm_s16le \"${outputFile.absolutePath}\""
             val session = FFmpegKit.execute(command)
             outputFile.takeIf {

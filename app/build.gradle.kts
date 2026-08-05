@@ -57,6 +57,13 @@ val generateArchiveLicenseAssets by tasks.registering(Sync::class) {
     from(rootProject.file("THIRD_PARTY_NOTICES.md")) {
         into("licenses")
     }
+    from(rootProject.file("LICENSE")) {
+        into("licenses")
+        rename { "GPL-3.0.txt" }
+    }
+    from(rootProject.file("native/mpv/mpv-android-LICENSE.txt")) {
+        into("licenses")
+    }
     into(archiveLicenseAssetsDir)
 }
 
@@ -154,7 +161,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
     // FFmpegKitNext is built locally because upstream does not publish Android artifacts.
-    implementation("com.arthenica:ffmpeg-kit-next:8.1.0")
+    implementation("com.arthenica:ffmpeg-kit-next:8.1.0-mpv1")
+    implementation("com.subtitleedit.native:mpv-android-runtime:0.41.0-ffmpeg8.1.2-1")
 
     // OkHttp
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

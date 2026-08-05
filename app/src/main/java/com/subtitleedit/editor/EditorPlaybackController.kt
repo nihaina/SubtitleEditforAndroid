@@ -2,10 +2,9 @@ package com.subtitleedit.editor
 
 import android.app.AlertDialog
 import android.content.Context
-import android.media.MediaPlayer
-import android.media.PlaybackParams
 import android.text.InputType
 import android.view.Choreographer
+import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.SeekBar
@@ -17,24 +16,14 @@ import com.subtitleedit.util.TimeUtils
 import java.io.File
 import java.util.Locale
 
-internal enum class PlaybackPhase {
-    IDLE,
-    LOADING,
-    READY,
-    ERROR,
-    RELEASED;
-
-    val canAccessPlayer: Boolean
-        get() = this == READY
-}
-
 internal class EditorPlaybackController(
     private val context: Context,
     private val binding: ActivityEditorBinding,
-    private val isAudioFile: Boolean,
+    private val mediaType: EditorMediaType,
     private val subtitles: () -> List<SubtitleEntry>,
     private val isSourceViewMode: () -> Boolean,
     private val onPlayingSubtitleChanged: (Int?) -> Unit,
+    private val onMediaReady: (Long, Int?) -> Unit,
     private val showMessage: (String) -> Unit
 ) {
     var currentPositionMs: Long = 0L
@@ -43,34 +32,132 @@ internal class EditorPlaybackController(
     var durationMs: Long = 0L
         private set
 
+    var playbackSpeed: Float = 1.0f
+        private set
+
     private var isPlaying = false
     private var isUserSeeking = false
-    private var playbackSpeed = 1.0f
-    private var mediaPlayer: MediaPlayer? = null
-    private var playbackPhase = PlaybackPhase.IDLE
+    private var engine: EditorPlaybackEngine? = null
     private var limitedPlaybackEntry: SubtitleEntry? = null
     private var isLimitedRangePlaybackActive = false
-
     private val highlightCursor = SubtitleHighlightCursor()
 
-    // 每个 vsync 刷新一次即可：屏幕最高 120Hz，更高频率只是白烧 CPU 和 Binder IPC。
     private val frameCallback = Choreographer.FrameCallback { onProgressFrame() }
     private var progressScheduled = false
-
     private var lastPlayPauseShowsPause: Boolean? = null
     private var lastTotalTimeText: String? = null
+    private var lastCurrentTimeText: String? = null
+    private var lastSeekBarProgress: Int? = null
+
+    fun bind() {
+        if (!mediaType.hasPlayableMedia) return
+
+        engine = when (mediaType) {
+            EditorMediaType.AUDIO -> MediaPlayerPlaybackEngine()
+            EditorMediaType.VIDEO -> MpvVideoPlaybackEngine(
+                view = binding.mpvView,
+                configDir = context.filesDir,
+                cacheDir = context.cacheDir
+            )
+            EditorMediaType.SUBTITLE_ONLY -> null
+        }?.also { playbackEngine ->
+            playbackEngine.listener = object : EditorPlaybackEngine.Listener {
+                override fun onReady(durationMs: Long, audioStreamIndex: Int?) {
+                    this@EditorPlaybackController.durationMs = durationMs
+                    updatePlayerUi()
+                    renderControlAvailability()
+                    if (mediaType == EditorMediaType.VIDEO) {
+                        binding.tvVideoStatus.visibility = View.GONE
+                    }
+                    onMediaReady(durationMs, audioStreamIndex)
+                }
+
+                override fun onPlaybackStateChanged() {
+                    updatePlayerUi()
+                    if (playbackEngine.isPlaying) startProgressUpdate() else stopProgressUpdate()
+                }
+
+                override fun onCompleted() {
+                    isPlaying = false
+                    stopProgressUpdate()
+                    updatePlayerUi()
+                }
+
+                override fun onError(message: String) {
+                    isPlaying = false
+                    stopProgressUpdate()
+                    renderControlAvailability()
+                    renderPlayPauseIcon()
+                    if (mediaType == EditorMediaType.VIDEO) {
+                        binding.tvVideoStatus.text = message
+                        binding.tvVideoStatus.visibility = View.VISIBLE
+                    }
+                    showMessage(message)
+                }
+            }
+        }
+
+        bindTimelinePlaybackCallbacks()
+        bindPlayerControls()
+        renderPlayPauseIcon()
+        renderTotalTime()
+        renderProgress(currentPositionMs)
+        renderControlAvailability()
+    }
+
+    fun prepare(mediaFile: File) {
+        currentPositionMs = 0L
+        durationMs = 0L
+        if (mediaType == EditorMediaType.VIDEO) {
+            binding.tvVideoStatus.visibility = View.VISIBLE
+        }
+        engine?.prepare(mediaFile)
+        renderControlAvailability()
+    }
+
+    fun seekTo(timeMs: Long) {
+        val playbackEngine = engine?.takeIf { it.phase.canAccessPlayer } ?: return
+        isLimitedRangePlaybackActive = false
+        val clampedTime = timeMs.coerceIn(0L, durationMs)
+        playbackEngine.seekTo(clampedTime)
+        currentPositionMs = clampedTime
+        highlightSubtitleAtTime(currentPositionMs)
+        updatePlayerUiAtKnownPosition(clampedTime)
+        if (isPlaying) startProgressUpdate()
+    }
+
+    fun pauseForLifecycle() {
+        engine?.takeIf { it.phase.canAccessPlayer && it.isPlaying }?.pause()
+        isPlaying = false
+        stopProgressUpdate()
+        updatePlayerUi()
+    }
+
+    fun replaceVideoSubtitleTrack(file: File?) {
+        (engine as? MpvVideoPlaybackEngine)?.replaceSubtitleTrack(file)
+    }
+
+    fun release() {
+        stopProgressUpdate()
+        engine?.release()
+        engine = null
+        isPlaying = false
+    }
+
+    fun invalidateHighlightCache() {
+        highlightCursor.invalidate()
+    }
 
     private fun onProgressFrame() {
         progressScheduled = false
-        val player = mediaPlayer ?: return
-        if (!playbackPhase.canAccessPlayer) return
-        if (!player.isPlaying) return
+        val playbackEngine = engine?.takeIf { it.phase.canAccessPlayer } ?: return
+        if (!playbackEngine.isPlaying) return
         isPlaying = true
         renderPlayPauseIcon()
 
         if (!isUserSeeking) {
-            val position = player.currentPosition.toLong()
-            if (position >= currentPositionMs || currentPositionMs - position > 200) {
+            val position = playbackEngine.currentPositionMs
+            if (position >= currentPositionMs || currentPositionMs - position > 200L) {
                 currentPositionMs = position
             }
         }
@@ -82,11 +169,11 @@ internal class EditorPlaybackController(
             when {
                 currentPositionMs >= rangeTarget.endTime -> {
                     if (SettingsManager.getInstance(context).isLoopSelectedSubtitleEnabled()) {
-                        player.seekTo(rangeTarget.startTime.toInt())
+                        playbackEngine.seekTo(rangeTarget.startTime)
                         updatePlayerUiAtKnownPosition(rangeTarget.startTime)
                     } else {
-                        player.pause()
-                        player.seekTo(rangeTarget.endTime.toInt())
+                        playbackEngine.pause()
+                        playbackEngine.seekTo(rangeTarget.endTime)
                         isPlaying = false
                         isLimitedRangePlaybackActive = false
                         stopProgressUpdate()
@@ -95,7 +182,7 @@ internal class EditorPlaybackController(
                     }
                 }
                 currentPositionMs < rangeTarget.startTime -> {
-                    player.seekTo(rangeTarget.startTime.toInt())
+                    playbackEngine.seekTo(rangeTarget.startTime)
                     updatePlayerUiAtKnownPosition(rangeTarget.startTime)
                 }
             }
@@ -104,84 +191,9 @@ internal class EditorPlaybackController(
         startProgressUpdate()
     }
 
-    fun bind() {
-        if (!isAudioFile) return
-
-        mediaPlayer = MediaPlayer().apply {
-            setOnCompletionListener {
-                this@EditorPlaybackController.isPlaying = false
-                stopProgressUpdate()
-                updatePlayerUi()
-            }
-            setOnErrorListener { _, what, extra ->
-                playbackPhase = PlaybackPhase.ERROR
-                showMessage("播放错误：$what, $extra")
-                this@EditorPlaybackController.isPlaying = false
-                stopProgressUpdate()
-                renderPlayPauseIcon()
-                renderProgress(currentPositionMs)
-                true
-            }
-        }
-        playbackPhase = PlaybackPhase.IDLE
-
-        bindTimelinePlaybackCallbacks()
-        bindPlayerControls()
-        renderPlayPauseIcon()
-        renderTotalTime()
-        renderProgress(currentPositionMs)
-    }
-
-    fun prepare(audioFile: File) {
-        val player = mediaPlayer ?: return
-        playbackPhase = PlaybackPhase.LOADING
-        try {
-            player.reset()
-            player.setDataSource(audioFile.absolutePath)
-            player.prepare()
-            playbackPhase = PlaybackPhase.READY
-            durationMs = player.duration.toLong()
-            currentPositionMs = 0L
-            if (playbackSpeed != 1.0f) {
-                player.playbackParams = PlaybackParams().setSpeed(playbackSpeed)
-            }
-            updatePlayerUi()
-        } catch (error: Exception) {
-            playbackPhase = PlaybackPhase.ERROR
-            throw error
-        }
-    }
-
-    fun seekTo(timeMs: Long) {
-        if (!playbackPhase.canAccessPlayer) return
-        isLimitedRangePlaybackActive = false
-        val clampedTime = timeMs.coerceIn(0L, durationMs)
-
-        mediaPlayer?.seekTo(clampedTime.toInt())
-        currentPositionMs = clampedTime
-        highlightSubtitleAtTime(currentPositionMs)
-        updatePlayerUi()
-
-        if (isPlaying) startProgressUpdate()
-    }
-
-    fun release() {
-        stopProgressUpdate()
-        mediaPlayer?.let { player ->
-            if (playbackPhase.canAccessPlayer && runCatching { player.isPlaying }.getOrDefault(false)) {
-                runCatching { player.stop() }
-            }
-            player.release()
-        }
-        mediaPlayer = null
-        playbackPhase = PlaybackPhase.RELEASED
-        isPlaying = false
-    }
-
     private fun bindTimelinePlaybackCallbacks() {
         binding.waveformTimelineView.onTimelineClickListener = { position ->
             seekTo((durationMs * position).toLong())
-            updatePlayerUi()
         }
         binding.waveformTimelineView.onDraggedViewportPlayheadCorrection = { positionMs ->
             correctPlaybackAfterViewportDrag(positionMs)
@@ -193,15 +205,11 @@ internal class EditorPlaybackController(
         binding.waveformTimelineView.onLimitedPlaybackStartRequest = { subtitleIndex ->
             startLimitedRangePlayback(subtitleIndex)
         }
-        binding.waveformTimelineView.onSubtitleStartSeekRequest = { positionMs ->
-            seekTo(positionMs)
-        }
+        binding.waveformTimelineView.onSubtitleStartSeekRequest = ::seekTo
         binding.waveformTimelineView.onLimitedPlaybackRangeOutOfView = {
             if (isLimitedRangePlaybackActive) {
                 isLimitedRangePlaybackActive = false
-                mediaPlayer?.takeIf { playbackPhase.canAccessPlayer }?.let { player ->
-                    if (player.isPlaying) player.pause()
-                }
+                engine?.pause()
                 isPlaying = false
                 stopProgressUpdate()
                 updatePlayerUi()
@@ -214,17 +222,12 @@ internal class EditorPlaybackController(
         binding.seekBar.max = 1000
         binding.seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) {
-                    val targetTime = (durationMs * progress / 1000).toLong()
-                    currentPositionMs = targetTime
-                    binding.tvCurrentTime.text = TimeUtils.formatForDisplay(targetTime)
-                    val wavePosition = if (durationMs > 0) {
-                        currentPositionMs.toFloat() / durationMs
-                    } else {
-                        0f
-                    }
-                    binding.waveformTimelineView.setCurrentPosition(wavePosition)
-                }
+                if (!fromUser) return
+                val targetTime = durationMs * progress / 1000L
+                currentPositionMs = targetTime
+                binding.tvCurrentTime.text = TimeUtils.formatForDisplay(targetTime)
+                val wavePosition = if (durationMs > 0L) targetTime.toFloat() / durationMs else 0f
+                binding.waveformTimelineView.setCurrentPosition(wavePosition)
             }
 
             override fun onStartTrackingTouch(seekBar: SeekBar?) {
@@ -240,39 +243,37 @@ internal class EditorPlaybackController(
     }
 
     private fun togglePlayPause() {
-        mediaPlayer?.takeIf { playbackPhase.canAccessPlayer }?.let { player ->
-            if (player.isPlaying) {
-                player.pause()
-                isPlaying = false
-                stopProgressUpdate()
-            } else {
-                isLimitedRangePlaybackActive = false
-                player.start()
-                isPlaying = true
-                startProgressUpdate()
-            }
-            updatePlayerUi()
+        val playbackEngine = engine?.takeIf { it.phase.canAccessPlayer } ?: return
+        if (playbackEngine.isPlaying) {
+            playbackEngine.pause()
+            isPlaying = false
+            stopProgressUpdate()
+        } else {
+            isLimitedRangePlaybackActive = false
+            playbackEngine.play()
+            isPlaying = true
+            startProgressUpdate()
         }
+        updatePlayerUi()
     }
 
     private fun correctPlaybackAfterViewportDrag(positionMs: Long) {
-        if (!playbackPhase.canAccessPlayer) return
+        val playbackEngine = engine?.takeIf { it.phase.canAccessPlayer } ?: return
         val correctedPositionMs = positionMs.coerceIn(0L, durationMs)
-        val wasPlaying = mediaPlayer?.isPlaying == true
-        mediaPlayer?.seekTo(correctedPositionMs.toInt())
+        val wasPlaying = playbackEngine.isPlaying
+        playbackEngine.seekTo(correctedPositionMs)
         isPlaying = wasPlaying
         updatePlayerUiAtKnownPosition(correctedPositionMs)
         if (wasPlaying) startProgressUpdate() else stopProgressUpdate()
     }
 
     private fun startLimitedRangePlayback(subtitleIndex: Int) {
-        if (!playbackPhase.canAccessPlayer) return
+        val playbackEngine = engine?.takeIf { it.phase.canAccessPlayer } ?: return
         val target = subtitles().getOrNull(subtitleIndex) ?: return
-        val player = mediaPlayer ?: return
         limitedPlaybackEntry = target
         isLimitedRangePlaybackActive = true
-        player.seekTo(target.startTime.toInt())
-        if (!player.isPlaying) player.start()
+        playbackEngine.seekTo(target.startTime)
+        if (!playbackEngine.isPlaying) playbackEngine.play()
         isPlaying = true
         updatePlayerUiAtKnownPosition(target.startTime)
         startProgressUpdate()
@@ -293,28 +294,30 @@ internal class EditorPlaybackController(
         }
     }
 
-    /** 字幕列表结构或时间轴变化后调用，否则高亮游标可能停在旧下标上。 */
-    fun invalidateHighlightCache() {
-        highlightCursor.invalidate()
-    }
-
     private fun highlightSubtitleAtTime(timeMs: Long) {
         if (isSourceViewMode()) return
         val index = highlightCursor.resolve(subtitles(), timeMs)
         onPlayingSubtitleChanged(if (index >= 0) index else null)
     }
 
-    /** 热路径：只写随播放位置变化的三处，不再向 MediaPlayer 多要 duration / isPlaying。 */
     private fun renderProgress(positionMs: Long) {
-        binding.tvCurrentTime.text = TimeUtils.formatForDisplay(positionMs)
+        val currentTimeText = TimeUtils.formatForDisplay(positionMs)
+        if (lastCurrentTimeText != currentTimeText) {
+            lastCurrentTimeText = currentTimeText
+            binding.tvCurrentTime.text = currentTimeText
+        }
         if (!isUserSeeking) {
-            binding.seekBar.progress = if (durationMs > 0) {
-                (positionMs * 1000 / durationMs).toInt().coerceIn(0, 1000)
+            val seekBarProgress = if (durationMs > 0L) {
+                (positionMs * 1000L / durationMs).toInt().coerceIn(0, 1000)
             } else {
                 0
             }
+            if (lastSeekBarProgress != seekBarProgress) {
+                lastSeekBarProgress = seekBarProgress
+                binding.seekBar.progress = seekBarProgress
+            }
         }
-        val wavePosition = if (durationMs > 0) positionMs.toFloat() / durationMs else 0f
+        val wavePosition = if (durationMs > 0L) positionMs.toFloat() / durationMs else 0f
         binding.waveformTimelineView.setCurrentPosition(wavePosition)
     }
 
@@ -334,21 +337,28 @@ internal class EditorPlaybackController(
         binding.tvTotalTime.text = text
     }
 
+    private fun renderControlAvailability() {
+        val enabled = engine?.phase?.canAccessPlayer == true
+        binding.btnPlayPause.isEnabled = enabled
+        binding.seekBar.isEnabled = enabled
+        binding.tvPlaybackSpeed.isEnabled = enabled
+    }
+
     private fun updatePlayerUi() {
-        mediaPlayer?.takeIf { playbackPhase.canAccessPlayer }?.let { player ->
+        engine?.takeIf { it.phase.canAccessPlayer }?.let { playbackEngine ->
             if (!isUserSeeking) {
-                val position = player.currentPosition.toLong()
-                if (position >= currentPositionMs || currentPositionMs - position > 200) {
+                val position = playbackEngine.currentPositionMs
+                if (position >= currentPositionMs || currentPositionMs - position > 200L) {
                     currentPositionMs = position
                 }
             }
-            durationMs = player.duration.toLong().takeIf { it > 0 } ?: durationMs
-            isPlaying = player.isPlaying
+            durationMs = playbackEngine.durationMs.takeIf { it > 0L } ?: durationMs
+            isPlaying = playbackEngine.isPlaying
         }
-
         renderPlayPauseIcon()
         renderTotalTime()
         renderProgress(currentPositionMs)
+        renderControlAvailability()
     }
 
     private fun startProgressUpdate() {
@@ -391,10 +401,10 @@ internal class EditorPlaybackController(
             val inputMethodManager = context.getSystemService(Context.INPUT_METHOD_SERVICE)
                 as InputMethodManager
             inputMethodManager.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
-        }, 100)
+        }, 100L)
     }
 
-    private fun applyPlaybackSpeed(speed: Float) {
+    fun applyPlaybackSpeed(speed: Float, showConfirmation: Boolean = true) {
         playbackSpeed = speed
         val label = if (speed == speed.toLong().toFloat()) {
             "${speed.toLong()}×"
@@ -402,15 +412,13 @@ internal class EditorPlaybackController(
             formatPlaybackSpeedValue(speed) + "×"
         }
         binding.tvPlaybackSpeed.text = label
-
-        mediaPlayer?.takeIf { playbackPhase.canAccessPlayer }?.let { player ->
-            try {
-                player.playbackParams = PlaybackParams().setSpeed(speed)
-            } catch (e: Exception) {
-                showMessage("设置速率失败：${e.message}")
-            }
+        try {
+            engine?.setSpeed(speed)
+        } catch (error: Exception) {
+            showMessage("设置速率失败：${error.message}")
+            return
         }
-        showMessage("播放速率已设置为 $label")
+        if (showConfirmation) showMessage("播放速率已设置为 $label")
     }
 
     private fun formatPlaybackSpeedValue(speed: Float): String =

@@ -146,9 +146,9 @@
 
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- 音频播放器容器（仅在打开音频文件时显示） -->
+        <!-- Media player container for audio and video editor modes. -->
         <com.google.android.material.card.MaterialCardView
-            android:id="@+id/audioPlayerContainer"
+            android:id="@+id/mediaPlayerContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_margin="8dp"
@@ -162,6 +162,69 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:padding="12dp">
+
+                <LinearLayout
+                    android:id="@+id/videoSection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="4dp"
+                    android:orientation="vertical"
+                    android:visibility="gone"
+                    tools:visibility="visible">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="32dp"
+                        android:background="@color/waveform_toolbar_bg"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingStart="6dp"
+                        android:paddingEnd="6dp">
+
+                        <TextView
+                            android:id="@+id/btnToggleVideo"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:background="@drawable/bg_waveform_btn"
+                            android:clickable="true"
+                            android:contentDescription="@string/editor_video_collapse"
+                            android:focusable="true"
+                            android:gravity="center"
+                            android:text="@string/activity_editor_text_03"
+                            android:textColor="#CCCCCC"
+                            android:textSize="11sp" />
+
+                    </LinearLayout>
+
+                    <FrameLayout
+                        android:id="@+id/videoViewportContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/editor_video_height"
+                        android:background="#000000">
+
+                        <com.subtitleedit.mpv.EditorMpvView
+                            android:id="@+id/mpvView"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:keepScreenOn="true" />
+
+                        <TextView
+                            android:id="@+id/tvVideoStatus"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="center"
+                            android:gravity="center"
+                            android:maxWidth="260dp"
+                            android:padding="12dp"
+                            android:text="@string/editor_video_loading"
+                            android:textColor="#DDFFFFFF"
+                            android:textSize="13sp"
+                            android:visibility="gone"
+                            tools:visibility="visible" />
+
+                    </FrameLayout>
+
+                </LinearLayout>
 
                 <!-- 波形区域容器 -->
                 <LinearLayout

@@ -347,4 +347,8 @@
     <string name="menu_main_title_02">设置</string>
     <string name="menu_subtitle_format_editor_title_01">全选/取消全选</string>
     <string name="menu_subtitle_format_editor_title_02">区间选择</string>
+    <string name="editor_video_collapse">折叠视频画面</string>
+    <string name="editor_video_expand">展开视频画面</string>
+    <string name="editor_video_loading">正在加载视频…</string>
+    <string name="editor_video_no_audio">视频没有可用音轨</string>
 </resources>

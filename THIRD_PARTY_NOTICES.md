@@ -17,3 +17,30 @@ in `app/src/main/cpp/third_party/7zip/7zip-LICENSE.txt` and in the APK at
 
 The unRAR-derived sources must not be used to develop a RAR-compatible
 archiver. This application only exposes RAR extraction.
+
+## mpv 0.41.0
+
+mpv is copyright its contributors and is distributed under
+GPL-2.0-or-later. This application combines libmpv with GPLv3 application
+code and distributes the resulting work under GPLv3. The corresponding build
+configuration and pinned source revisions are documented in `native/mpv/`.
+
+## mpv-android JNI wrapper
+
+The minimal Android Surface and JNI integration is derived from mpv-android,
+commit `20a3fa526fac6d3fe267aee0d4c349893fee65a3`, under the MIT License. The
+license text is distributed at `assets/licenses/mpv-android-LICENSE.txt`.
+
+## FFmpegKit Next and FFmpeg
+
+FFmpegKit Next 8.1.0 is used to build FFmpeg n8.1.2 and the Java/JNI command
+API. libmpv is linked against the same FFmpeg shared libraries packaged by
+FFmpegKit Next. The enabled FFmpeg configuration is LGPL-compatible; libmpv
+and the combined application remain governed by GPLv3 as described above.
+
+## libass and libplacebo
+
+libass 0.17.4 provides subtitle rendering and libplacebo 6.338.2 provides the
+GPU rendering pipeline used by libmpv. Their upstream license notices and
+source revisions are retained by the reproducible native build described in
+`native/mpv/README.md`.

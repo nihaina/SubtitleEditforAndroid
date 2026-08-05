@@ -35,7 +35,7 @@ class SubtitleAdapter(
     private val onTextClick: (SubtitleEntry, Int) -> Unit,
     private val onJumpToTimeClick: (SubtitleEntry, Int) -> Unit, // 跳转到字幕时间
     private val onSetTimeClick: (SubtitleEntry, Int) -> Unit, // 设置字幕时间为当前进度
-    private val isAudioFile: Boolean = false, // 是否为音频文件模式
+    private val hasPlayableMedia: Boolean = false,
     private val onSelectionChanged: (() -> Unit)? = null // 选中状态变化回调
 ) : ListAdapter<SubtitleEntry, SubtitleAdapter.SubtitleViewHolder>(SubtitleDiffCallback()) {
 
@@ -315,8 +315,8 @@ class SubtitleAdapter(
             }
 
             // 根据是否为音频文件模式控制按钮显示
-            btnJumpToTime.visibility = if (isAudioFile) View.VISIBLE else View.GONE
-            btnSetTime.visibility = if (isAudioFile) View.VISIBLE else View.GONE
+            btnJumpToTime.visibility = if (hasPlayableMedia) View.VISIBLE else View.GONE
+            btnSetTime.visibility = if (hasPlayableMedia) View.VISIBLE else View.GONE
 
             // 设置字幕文本（只显示第一行）
             val displayText = entry.text.split("\n").firstOrNull() ?: entry.text

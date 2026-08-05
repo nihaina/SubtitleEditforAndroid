@@ -18,7 +18,15 @@ object SubtitleParser {
         SRT,
         LRC,
         TXT,
+        ASS,
+        SSA,
+        VTT,
         UNKNOWN
+
+        ;
+
+        val isSourceOnly: Boolean
+            get() = this == TXT || this == ASS || this == SSA || this == VTT
     }
     
     /**
@@ -29,6 +37,10 @@ object SubtitleParser {
      */
     fun parse(content: String, charset: Charset = Charsets.UTF_8): List<SubtitleEntry> {
         val format = detectFormat(content)
+        return parse(content, format)
+    }
+
+    fun parse(content: String, format: SubtitleFormat): List<SubtitleEntry> {
         return when (format) {
             SubtitleFormat.SRT -> parseSRT(content)
             SubtitleFormat.LRC -> parseLRC(content)
@@ -40,8 +52,27 @@ object SubtitleParser {
     /**
      * 检测字幕格式
      */
-    fun detectFormat(content: String): SubtitleFormat {
+    fun detectFormat(content: String, fileName: String? = null): SubtitleFormat {
+        when (fileName?.substringAfterLast('.', "")?.lowercase()) {
+            "srt" -> return SubtitleFormat.SRT
+            "lrc" -> return SubtitleFormat.LRC
+            "txt" -> return SubtitleFormat.TXT
+            "ass" -> return SubtitleFormat.ASS
+            "ssa" -> return SubtitleFormat.SSA
+            "vtt" -> return SubtitleFormat.VTT
+        }
+
         val trimmed = content.trim()
+
+        if (trimmed.startsWith("WEBVTT", ignoreCase = true)) {
+            return SubtitleFormat.VTT
+        }
+
+        if (trimmed.contains("[Script Info]", ignoreCase = true) ||
+            trimmed.contains("[Events]", ignoreCase = true)
+        ) {
+            return SubtitleFormat.ASS
+        }
         
         // SRT 格式特征：以数字开头，包含 --> 时间轴标记
         if (trimmed.matches(Regex("^\\d+.*"))) {

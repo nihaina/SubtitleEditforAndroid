@@ -44,6 +44,7 @@ import com.subtitleedit.databinding.DialogArchiveProgressBinding
 import com.subtitleedit.databinding.DialogArchivePasswordBinding
 import com.subtitleedit.databinding.DialogArchiveConflictBinding
 import com.subtitleedit.databinding.DialogCreateArchiveBinding
+import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.util.ArchiveManager
 import com.subtitleedit.util.ArchivePreviewCache
 import com.subtitleedit.util.ArchivePasswordVault
@@ -979,8 +980,9 @@ class MainActivity : AppCompatActivity() {
             // 打开字幕文件进行编辑
             openFileForEdit(file)
         } else if (FileUtils.isAudioFile(file)) {
-            // 打开音频文件进行编辑（自动查找同名字幕）
-            openAudioFileForEdit(file)
+            openMediaFileForEdit(file, EditorMediaType.AUDIO)
+        } else if (file.extension.lowercase() in VIDEO_EXTENSIONS) {
+            openMediaFileForEdit(file, EditorMediaType.VIDEO)
         } else {
             com.subtitleedit.util.OverwritingToast.makeText(this, "不支持的文件格式", Toast.LENGTH_SHORT).show()
         }
@@ -2459,19 +2461,15 @@ class MainActivity : AppCompatActivity() {
         com.subtitleedit.util.OverwritingToast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
     
-    /**
-     * 打开音频文件进行编辑
-     * 自动查找同文件夹下同名的字幕文件，多个时让用户选择
-     */
-    private fun openAudioFileForEdit(audioFile: File) {
-        val possibleSubtitleFiles = FileUtils.getPossibleSubtitleFiles(audioFile)
+    private fun openMediaFileForEdit(mediaFile: File, mediaType: EditorMediaType) {
+        val possibleSubtitleFiles = FileUtils.getPossibleSubtitleFiles(mediaFile)
 
         when {
             possibleSubtitleFiles.size > 1 -> {
-                showSubtitleFilePicker(audioFile, possibleSubtitleFiles)
+                showSubtitleFilePicker(mediaFile, mediaType, possibleSubtitleFiles)
             }
             else -> {
-                openAudioWithSubtitle(audioFile, possibleSubtitleFiles.firstOrNull())
+                openMediaWithSubtitle(mediaFile, mediaType, possibleSubtitleFiles.firstOrNull())
             }
         }
     }
@@ -2479,7 +2477,11 @@ class MainActivity : AppCompatActivity() {
     /**
      * 当存在多个同名字幕文件时，弹出选择对话框
      */
-    private fun showSubtitleFilePicker(audioFile: File, subtitleFiles: List<File>) {
+    private fun showSubtitleFilePicker(
+        mediaFile: File,
+        mediaType: EditorMediaType,
+        subtitleFiles: List<File>
+    ) {
         val fileNames = subtitleFiles.map { file ->
             file.name + "  (" + FileUtils.formatFileSize(file.length()) + ")"
         }.toTypedArray()
@@ -2495,7 +2497,8 @@ class MainActivity : AppCompatActivity() {
                 setPadding(4, 0, 4, 6)
             })
             addView(android.widget.TextView(context).apply {
-                text = "音频「${audioFile.name}」同目录下存在多个字幕文件，请选择要打开的文件："
+                val typeLabel = if (mediaType == EditorMediaType.VIDEO) "视频" else "音频"
+                text = "$typeLabel「${mediaFile.name}」同目录下存在多个字幕文件，请选择要打开的文件："
                 textSize = 14f
                 setPadding(4, 0, 4, 0)
             })
@@ -2504,21 +2507,23 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setCustomTitle(customTitle)
             .setItems(fileNames) { _, which ->
-                openAudioWithSubtitle(audioFile, subtitleFiles[which])
+                openMediaWithSubtitle(mediaFile, mediaType, subtitleFiles[which])
             }
             .setNegativeButton("不加载字幕") { _, _ ->
-                openAudioWithSubtitle(audioFile, null)
+                openMediaWithSubtitle(mediaFile, mediaType, null)
             }
             .show()
     }
 
-    /**
-     * 打开音频文件及指定字幕文件（字幕文件为 null 时仅打开音频）
-     */
-    private fun openAudioWithSubtitle(audioFile: File, subtitleFile: File?) {
+    private fun openMediaWithSubtitle(
+        mediaFile: File,
+        mediaType: EditorMediaType,
+        subtitleFile: File?
+    ) {
         val intent = Intent(this, EditorActivity::class.java)
-        intent.putExtra(EditorActivity.EXTRA_FILE_PATH, audioFile.absolutePath)
-        intent.putExtra(EditorActivity.EXTRA_IS_AUDIO_FILE, true)
+        intent.putExtra(EditorActivity.EXTRA_FILE_PATH, mediaFile.absolutePath)
+        intent.putExtra(EditorActivity.EXTRA_MEDIA_TYPE, mediaType.name)
+        intent.putExtra(EditorActivity.EXTRA_IS_AUDIO_FILE, mediaType == EditorMediaType.AUDIO)
         if (subtitleFile != null) {
             intent.putExtra(EditorActivity.EXTRA_SUBTITLE_FILE_PATH, subtitleFile.absolutePath)
         }

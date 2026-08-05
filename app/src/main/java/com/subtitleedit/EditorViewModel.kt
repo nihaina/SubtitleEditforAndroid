@@ -1,6 +1,7 @@
 package com.subtitleedit
 
 import androidx.lifecycle.ViewModel
+import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
 import java.io.File
@@ -27,10 +28,13 @@ internal class EditorViewModel : ViewModel() {
     var savedFirstVisibleItemPosition = 0
     var selectedIndices: Set<Int> = emptySet()
     var playbackPositionMs = 0L
+    var playbackSpeed = 1.0f
+    var isVideoCollapsed = false
+    var selectedAudioStreamIndex: Int? = null
     var hasUnsavedChanges = false
     var isNewFile = true
     var currentFormatInfo = ""
     var clipboardTexts: List<String> = emptyList()
-    var isAudioFile = false
+    var mediaType = EditorMediaType.SUBTITLE_ONLY
     val saveCoordinator = EditorSaveCoordinator()
 }
