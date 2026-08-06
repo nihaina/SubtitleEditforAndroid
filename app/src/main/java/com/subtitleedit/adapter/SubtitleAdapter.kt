@@ -16,6 +16,7 @@ import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.subtitleedit.R
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.util.SearchTextMatcher
 import com.subtitleedit.util.TimeUtils
 import java.util.Collections
 import java.util.IdentityHashMap
@@ -194,6 +195,8 @@ class SubtitleAdapter(
     // 搜索高亮相关
     private var searchHighlightPosition: Int = -1
     private var searchQuery: String = ""
+    private var searchMatchCase: Boolean = false
+    private var searchWholeWord: Boolean = false
     
     // 当前播放的字幕位置（用于音频播放时高亮）
     private var currentPlayingPosition: Int = -1
@@ -201,9 +204,16 @@ class SubtitleAdapter(
     /**
      * 高亮显示搜索结果
      */
-    fun highlightSearchResult(position: Int, query: String) {
+    fun highlightSearchResult(
+        position: Int,
+        query: String,
+        matchCase: Boolean = false,
+        wholeWord: Boolean = false
+    ) {
         searchHighlightPosition = position
         searchQuery = query
+        searchMatchCase = matchCase
+        searchWholeWord = wholeWord
         notifyDataSetChanged()
     }
     
@@ -213,6 +223,8 @@ class SubtitleAdapter(
     fun clearSearchHighlight() {
         searchHighlightPosition = -1
         searchQuery = ""
+        searchMatchCase = false
+        searchWholeWord = false
         notifyDataSetChanged()
     }
     
@@ -327,20 +339,24 @@ class SubtitleAdapter(
                 itemView.setBackgroundColor(ContextCompat.getColor(itemView.context, R.color.primary_container))
                 
                 // 高亮文本中的搜索词
-                if (displayText.contains(searchQuery, ignoreCase = true)) {
+                val matchRange = SearchTextMatcher.firstMatchRange(
+                    displayText,
+                    searchQuery,
+                    searchMatchCase,
+                    searchWholeWord
+                )
+                if (matchRange != null) {
                     val spannable = SpannableString(displayText)
-                    val startIndex = displayText.indexOf(searchQuery, ignoreCase = true)
-                    val endIndex = startIndex + searchQuery.length
                     spannable.setSpan(
                         BackgroundColorSpan(ContextCompat.getColor(itemView.context, R.color.inverse_primary)),
-                        startIndex,
-                        endIndex,
+                        matchRange.first,
+                        matchRange.last + 1,
                         Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
                     )
                     spannable.setSpan(
                         StyleSpan(Typeface.BOLD),
-                        startIndex,
-                        endIndex,
+                        matchRange.first,
+                        matchRange.last + 1,
                         Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
                     )
                     tvSubtitleText.text = spannable

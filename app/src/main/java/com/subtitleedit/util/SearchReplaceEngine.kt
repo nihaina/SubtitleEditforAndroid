@@ -73,14 +73,14 @@ class SearchReplaceEngine {
         return currentIndex
     }
 
-    fun findMatchesInText(content: String): List<Int> {
-        if (query.isEmpty() || content.isEmpty()) return emptyList()
-        val matches = mutableListOf<Int>()
-        var index = content.indexOf(query, ignoreCase = true)
-        while (index >= 0) {
-            matches.add(index)
-            index = content.indexOf(query, index + 1, ignoreCase = true)
-        }
-        return matches
-    }
+    fun findMatchesInText(
+        content: String,
+        matchCase: Boolean = false,
+        wholeWord: Boolean = false
+    ): List<Int> = SearchTextMatcher.findMatchStarts(
+        content = content,
+        query = query,
+        matchCase = matchCase,
+        wholeWord = wholeWord
+    )
 }

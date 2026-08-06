@@ -23,6 +23,19 @@ class SearchReplaceOpsTest {
     }
 
     @Test
+    fun replaceFirstTextIfChanged_respectsMatchCase() {
+        assertEquals(
+            "Cat x",
+            SearchReplaceOps.replaceFirstTextIfChanged(
+                "Cat cat",
+                "cat",
+                "x",
+                matchCase = true
+            )
+        )
+    }
+
+    @Test
     fun countMatches_countsLiteralCaseInsensitiveMatches() {
         assertEquals(3, SearchReplaceOps.countMatches("a A a.c", "a"))
         assertEquals(1, SearchReplaceOps.countMatches("a.c abc", "a.c"))
@@ -136,5 +149,17 @@ class SearchReplaceOpsTest {
         val result = SearchReplaceOps.replaceAllInContent("abc", "zzz", "x")
         assertEquals(0, result.matchCount)
         assertEquals("abc", result.newContent)
+    }
+
+    @Test
+    fun replaceAllInContent_respectsWholeWord() {
+        val result = SearchReplaceOps.replaceAllInContent(
+            content = "cat scatter cat",
+            query = "cat",
+            replacement = "x",
+            wholeWord = true
+        )
+        assertEquals(2, result.matchCount)
+        assertEquals("x scatter x", result.newContent)
     }
 }

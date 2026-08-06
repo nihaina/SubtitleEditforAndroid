@@ -20,6 +20,7 @@ import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SearchResultRetention
 import com.subtitleedit.util.SearchReplaceEngine
 import com.subtitleedit.util.SearchReplaceOps
+import com.subtitleedit.util.SearchTextMatcher
 import com.subtitleedit.util.TimeUtils
 
 /** Coordinates the editor search bar without owning the editor document. */
@@ -37,12 +38,16 @@ class EditorSearchController(
     private val engine = SearchReplaceEngine()
     private val sourceHighlightSpans = mutableListOf<Any>()
     private var listResultEntries: List<SubtitleEntry> = emptyList()
+    private var matchCase = false
+    private var wholeWord = false
     private var applyingSourceReplacement = false
     private var applyingEntryReplacement = false
 
     init {
         bindSearchBar()
         bindSourceChanges()
+        updateSearchOptionButtons()
+        updateResultCount()
     }
 
     fun show() {
@@ -91,6 +96,7 @@ class EditorSearchController(
                     engine.clearResults()
                     listResultEntries = emptyList()
                     clearHighlights()
+                    updateResultCount()
                 } else {
                     performSearch()
                 }
@@ -102,6 +108,28 @@ class EditorSearchController(
         binding.btnSearchClose.setOnClickListener { hide() }
         binding.btnReplace.setOnClickListener { replaceOne() }
         binding.btnReplaceAll.setOnClickListener { replaceAll() }
+        binding.btnSearchMatchCase.setOnClickListener {
+            matchCase = !matchCase
+            updateSearchOptionButtons()
+            showMessage(
+                context.getString(
+                    R.string.search_match_case_status,
+                    optionStateText(matchCase)
+                )
+            )
+            refreshSearchAfterOptionChanged()
+        }
+        binding.btnSearchWholeWord.setOnClickListener {
+            wholeWord = !wholeWord
+            updateSearchOptionButtons()
+            showMessage(
+                context.getString(
+                    R.string.search_whole_word_status,
+                    optionStateText(wholeWord)
+                )
+            )
+            refreshSearchAfterOptionChanged()
+        }
         binding.etSearch.setOnKeyListener { _, keyCode, event ->
             if (keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN) {
                 performSearch()
@@ -138,7 +166,10 @@ class EditorSearchController(
         val content = binding.etSourceView.text?.toString().orEmpty()
         val position = engine.currentResultPositionOrNull()
         val query = engine.query
-        if (position == null || !content.regionMatches(position, query, 0, query.length, ignoreCase = true)) {
+        if (
+            position == null ||
+            !SearchTextMatcher.isMatchAt(content, position, query, matchCase, wholeWord)
+        ) {
             searchInSourceView(announce = false)
             showMessage("当前匹配项已变化，请重试")
             return
@@ -173,7 +204,9 @@ class EditorSearchController(
         val newText = SearchReplaceOps.replaceFirstTextIfChanged(
             originalText = entry.text,
             query = engine.query,
-            replacement = binding.etReplace.text?.toString().orEmpty()
+            replacement = binding.etReplace.text?.toString().orEmpty(),
+            matchCase = matchCase,
+            wholeWord = wholeWord
         )
         if (newText == null) {
             showMessage("当前项的文本中没有可替换内容")
@@ -209,7 +242,9 @@ class EditorSearchController(
         val result = SearchReplaceOps.replaceAllInContent(
             content = binding.etSourceView.text?.toString().orEmpty(),
             query = query,
-            replacement = binding.etReplace.text?.toString().orEmpty()
+            replacement = binding.etReplace.text?.toString().orEmpty(),
+            matchCase = matchCase,
+            wholeWord = wholeWord
         )
         if (result.matchCount == 0) {
             showMessage("没有找到可替换的内容")
@@ -233,9 +268,13 @@ class EditorSearchController(
         val updates = SearchReplaceOps.collectTextUpdates(
             texts = texts,
             query = query,
-            replacement = binding.etReplace.text?.toString().orEmpty()
+            replacement = binding.etReplace.text?.toString().orEmpty(),
+            matchCase = matchCase,
+            wholeWord = wholeWord
         )
-        val matchCount = texts.sumOf { SearchReplaceOps.countMatches(it, query) }
+        val matchCount = texts.sumOf {
+            SearchReplaceOps.countMatches(it, query, matchCase, wholeWord)
+        }
         if (updates.isEmpty() || matchCount == 0) {
             showMessage("没有找到可替换的内容")
             return
@@ -279,12 +318,14 @@ class EditorSearchController(
         if (engine.query.isEmpty() || content.isEmpty()) {
             engine.clearResults()
             clearSourceHighlights()
+            updateResultCount()
             return
         }
         engine.setResults(
-            newResults = engine.findMatchesInText(content),
+            newResults = engine.findMatchesInText(content, matchCase, wholeWord),
             preferredResultValue = preferredResultPosition
         )
+        updateResultCount()
         if (announce) announceResults()
         highlightSourceResults(scrollToCurrent)
     }
@@ -301,14 +342,19 @@ class EditorSearchController(
             engine.clearResults()
             listResultEntries = emptyList()
             subtitleAdapter.clearSearchHighlight()
+            updateResultCount()
             return
         }
         val previousResultEntries = listResultEntries
         val previousIndex = engine.currentIndex
         val matchingEntries = entries().mapIndexedNotNull { index, entry ->
-            val matchesText = entry.text.contains(query, ignoreCase = true)
-            val matchesTime = TimeUtils.formatForDisplay(entry.startTime)
-                .contains(query, ignoreCase = true)
+            val matchesText = SearchTextMatcher.contains(entry.text, query, matchCase, wholeWord)
+            val matchesTime = SearchTextMatcher.contains(
+                TimeUtils.formatForDisplay(entry.startTime),
+                query,
+                matchCase,
+                wholeWord
+            )
             if (matchesText || matchesTime) index to entry else null
         }
         val results = matchingEntries.map { it.first }
@@ -328,6 +374,7 @@ class EditorSearchController(
         }
         engine.setResults(results, preferredResultPosition, preferredIndex ?: retainedIndex)
         listResultEntries = newResultEntries
+        updateResultCount()
         if (announce) announceResults()
         if (scrollToCurrent) {
             scrollToCurrentResult()
@@ -387,12 +434,14 @@ class EditorSearchController(
 
     private fun moveToPrevious() {
         if (engine.moveToPrevious() == null) return
+        updateResultCount()
         announceResults()
         scrollToCurrentResult()
     }
 
     private fun moveToNext() {
         if (engine.moveToNext() == null) return
+        updateResultCount()
         announceResults()
         scrollToCurrentResult()
     }
@@ -403,7 +452,12 @@ class EditorSearchController(
             highlightSourceResults(scrollToCurrent = true)
         } else {
             binding.rvSubtitles.scrollToPosition(position)
-            subtitleAdapter.highlightSearchResult(position, engine.query)
+            subtitleAdapter.highlightSearchResult(
+                position,
+                engine.query,
+                matchCase,
+                wholeWord
+            )
         }
     }
 
@@ -412,8 +466,52 @@ class EditorSearchController(
         if (position == null) {
             subtitleAdapter.clearSearchHighlight()
         } else {
-            subtitleAdapter.highlightSearchResult(position, engine.query)
+            subtitleAdapter.highlightSearchResult(
+                position,
+                engine.query,
+                matchCase,
+                wholeWord
+            )
         }
+    }
+
+    private fun refreshSearchAfterOptionChanged() {
+        if (engine.query.isEmpty()) return
+        if (isSourceViewMode()) {
+            searchInSourceView(
+                preferredResultPosition = engine.currentResultPositionOrNull(),
+                announce = false,
+                scrollToCurrent = false
+            )
+        } else {
+            performSearch(
+                announce = false,
+                scrollToCurrent = false,
+                retainCurrentListResult = true
+            )
+        }
+    }
+
+    private fun updateSearchOptionButtons() {
+        binding.btnSearchMatchCase.isChecked = matchCase
+        binding.btnSearchWholeWord.isChecked = wholeWord
+    }
+
+    private fun optionStateText(enabled: Boolean): String = context.getString(
+        if (enabled) R.string.search_option_on else R.string.search_option_off
+    )
+
+    private fun updateResultCount() {
+        val current = if (engine.currentIndex in engine.results.indices) {
+            engine.currentIndex + 1
+        } else {
+            0
+        }
+        binding.tvSearchResultCount.text = context.getString(
+            R.string.search_result_position,
+            current,
+            engine.results.size
+        )
     }
 
     private fun announceResults() {
@@ -445,6 +543,7 @@ class EditorSearchController(
         engine.clearAll()
         listResultEntries = emptyList()
         clearHighlights()
+        updateResultCount()
     }
 
     private fun isSearchVisible(): Boolean = binding.searchBar.isVisible

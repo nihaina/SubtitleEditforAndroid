@@ -14,12 +14,15 @@ object SearchReplaceOps {
     fun replaceTextIfChanged(
         originalText: String,
         query: String,
-        replacement: String
+        replacement: String,
+        matchCase: Boolean = false,
+        wholeWord: Boolean = false
     ): String? {
-        if (!originalText.contains(query, ignoreCase = true)) return null
+        val regex = SearchTextMatcher.literalRegex(query, matchCase, wholeWord) ?: return null
+        if (!regex.containsMatchIn(originalText)) return null
         // escapeReplacement：替换内容中的 $ 和 \ 必须按字面处理，否则会被当作正则组引用导致异常
         val updated = originalText.replace(
-            Regex(Regex.escape(query), RegexOption.IGNORE_CASE),
+            regex,
             Regex.escapeReplacement(replacement)
         )
         return if (updated != originalText) updated else null
@@ -28,29 +31,43 @@ object SearchReplaceOps {
     fun replaceFirstTextIfChanged(
         originalText: String,
         query: String,
-        replacement: String
+        replacement: String,
+        matchCase: Boolean = false,
+        wholeWord: Boolean = false
     ): String? {
-        if (query.isEmpty()) return null
-        val match = Regex(Regex.escape(query), RegexOption.IGNORE_CASE).find(originalText)
-            ?: return null
+        val match = SearchTextMatcher.literalRegex(query, matchCase, wholeWord)
+            ?.find(originalText) ?: return null
         return originalText.replaceRange(match.range, replacement)
             .takeIf { it != originalText }
     }
 
-    fun countMatches(content: String, query: String): Int {
-        if (query.isEmpty()) return 0
-        return Regex(Regex.escape(query), RegexOption.IGNORE_CASE).findAll(content).count()
-    }
+    fun countMatches(
+        content: String,
+        query: String,
+        matchCase: Boolean = false,
+        wholeWord: Boolean = false
+    ): Int = SearchTextMatcher.literalRegex(query, matchCase, wholeWord)
+        ?.findAll(content)
+        ?.count()
+        ?: 0
 
     fun collectTextUpdates(
         texts: List<String>,
         query: String,
-        replacement: String
+        replacement: String,
+        matchCase: Boolean = false,
+        wholeWord: Boolean = false
     ): List<TextUpdate> {
         if (query.isEmpty()) return emptyList()
         val updates = mutableListOf<TextUpdate>()
         texts.forEachIndexed { index, text ->
-            val updated = replaceTextIfChanged(text, query, replacement)
+            val updated = replaceTextIfChanged(
+                originalText = text,
+                query = query,
+                replacement = replacement,
+                matchCase = matchCase,
+                wholeWord = wholeWord
+            )
             if (updated != null) {
                 updates.add(TextUpdate(index, updated))
             }
@@ -74,9 +91,12 @@ object SearchReplaceOps {
     fun replaceAllInContent(
         content: String,
         query: String,
-        replacement: String
+        replacement: String,
+        matchCase: Boolean = false,
+        wholeWord: Boolean = false
     ): ReplaceAllInTextResult {
-        val regex = Regex(Regex.escape(query), RegexOption.IGNORE_CASE)
+        val regex = SearchTextMatcher.literalRegex(query, matchCase, wholeWord)
+            ?: return ReplaceAllInTextResult(content, 0)
         val matchCount = regex.findAll(content).count()
         val newContent = content.replace(regex, Regex.escapeReplacement(replacement))
         return ReplaceAllInTextResult(newContent, matchCount)

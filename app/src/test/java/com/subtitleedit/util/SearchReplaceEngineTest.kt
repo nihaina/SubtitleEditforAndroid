@@ -146,6 +146,16 @@ class SearchReplaceEngineTest {
     }
 
     @Test
+    fun findMatchesInText_respectsMatchOptions() {
+        val engine = SearchReplaceEngine()
+        engine.setQueryIfChanged("cat")
+        assertEquals(
+            listOf(12),
+            engine.findMatchesInText("Cat scatter cat", matchCase = true, wholeWord = true)
+        )
+    }
+
+    @Test
     fun findMatchesInText_emptyQueryOrContent() {
         val engine = SearchReplaceEngine()
         assertTrue(engine.findMatchesInText("content").isEmpty())

@@ -35,110 +35,222 @@
             android:id="@+id/searchBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_margin="8dp"
-            app:cardCornerRadius="8dp"
-            app:cardElevation="4dp"
+            app:cardBackgroundColor="@color/surface"
+            app:cardCornerRadius="0dp"
+            app:cardElevation="1dp"
             android:visibility="gone"
             tools:visibility="visible">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="8dp">
+                android:orientation="vertical">
 
-                <!-- 第一行：搜索输入 -->
+                <!-- Result position and match options. -->
                 <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
+                    android:layout_height="48dp"
+                    android:gravity="center_vertical"
                     android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:paddingStart="16dp"
+                    android:paddingEnd="8dp">
 
-                    <!-- 搜索输入框 -->
-                    <EditText
-                        android:id="@+id/etSearch"
+                    <TextView
+                        android:id="@+id/tvSearchResultCount"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:hint="@string/search_hint"
-                        android:inputType="text"
+                        android:ellipsize="end"
                         android:maxLines="1"
-                        android:background="@null"
-                        android:paddingStart="8dp"
-                        android:paddingEnd="8dp"
-                        android:importantForAutofill="no" />
+                        android:text="@string/search_result_position_empty"
+                        android:textColor="@color/on_surface"
+                        android:textSize="16sp"
+                        tools:text="搜索结果：6/16" />
 
-                    <!-- 上一项按钮 -->
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnSearchPrevious"
-                        style="@style/Widget.Material3.Button.TonalButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/search_previous"
-                        android:textSize="12sp"
-                        android:layout_marginEnd="4dp" />
+                        android:id="@+id/btnSearchMatchCase"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="48dp"
+                        android:layout_height="40dp"
+                        android:checkable="true"
+                        android:contentDescription="@string/search_match_case"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minWidth="0dp"
+                        android:padding="0dp"
+                        android:text="@string/search_match_case_short"
+                        android:textAllCaps="false"
+                        android:textColor="@color/search_option_text"
+                        android:textSize="16sp"
+                        android:tooltipText="@string/search_match_case"
+                        app:backgroundTint="@color/search_option_background"
+                        app:cornerRadius="6dp" />
 
-                    <!-- 下一项按钮 -->
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnSearchNext"
-                        style="@style/Widget.Material3.Button.TonalButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/search_next"
-                        android:textSize="12sp"
-                        android:layout_marginEnd="4dp" />
-
-                    <!-- 关闭按钮 -->
-                    <ImageButton
-                        android:id="@+id/btnSearchClose"
-                        android:layout_width="36dp"
-                        android:layout_height="36dp"
-                        android:src="@drawable/ic_close"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="@string/search_close" />
+                        android:id="@+id/btnSearchWholeWord"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="48dp"
+                        android:layout_height="40dp"
+                        android:layout_marginStart="4dp"
+                        android:checkable="true"
+                        android:contentDescription="@string/search_whole_word"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minWidth="0dp"
+                        android:padding="0dp"
+                        android:text="@string/search_whole_word_short"
+                        android:textAllCaps="false"
+                        android:textColor="@color/search_option_text"
+                        android:textSize="16sp"
+                        android:tooltipText="@string/search_whole_word"
+                        app:backgroundTint="@color/search_option_background"
+                        app:cornerRadius="6dp" />
 
                 </LinearLayout>
 
-                <!-- 第二行：替换输入和操作按钮 -->
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:alpha="0.24"
+                    android:background="@color/on_surface_variant" />
+
+                <!-- Search and replacement fields. -->
                 <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
+                    android:layout_height="48dp"
                     android:gravity="center_vertical"
-                    android:layout_marginTop="4dp">
+                    android:orientation="horizontal"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp">
 
-                    <!-- 替换输入框 -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:maxLines="1"
+                        android:text="@string/search_find_label"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp" />
+
+                    <EditText
+                        android:id="@+id/etSearch"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1.15"
+                        android:backgroundTint="@color/primary"
+                        android:imeOptions="actionSearch"
+                        android:importantForAutofill="no"
+                        android:inputType="text"
+                        android:maxLines="1"
+                        android:minWidth="0dp"
+                        android:paddingStart="0dp"
+                        android:paddingEnd="0dp"
+                        android:textSize="15sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="12dp"
+                        android:layout_marginEnd="8dp"
+                        android:maxLines="1"
+                        android:text="@string/search_replace_label"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp" />
+
                     <EditText
                         android:id="@+id/etReplace"
                         android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:hint="@string/activity_editor_hint_01"
+                        android:layout_height="44dp"
+                        android:layout_weight="0.85"
+                        android:backgroundTint="@color/primary"
+                        android:imeOptions="actionDone"
+                        android:importantForAutofill="no"
                         android:inputType="text"
                         android:maxLines="1"
-                        android:background="@null"
-                        android:paddingStart="8dp"
-                        android:paddingEnd="8dp"
-                        android:importantForAutofill="no" />
+                        android:minWidth="0dp"
+                        android:paddingStart="0dp"
+                        android:paddingEnd="0dp"
+                        android:textSize="15sp" />
 
-                    <!-- 替换按钮 -->
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:alpha="0.24"
+                    android:background="@color/on_surface_variant" />
+
+                <!-- Navigation and replacement commands. -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSearchPrevious"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minWidth="0dp"
+                        android:padding="0dp"
+                        android:text="@string/search_previous"
+                        android:textSize="14sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSearchNext"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minWidth="0dp"
+                        android:padding="0dp"
+                        android:text="@string/search_next"
+                        android:textSize="14sp" />
+
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnReplace"
-                        style="@style/Widget.Material3.Button.TonalButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minWidth="0dp"
+                        android:padding="0dp"
                         android:text="@string/activity_editor_text_01"
-                        android:textSize="12sp"
-                        android:layout_marginEnd="4dp" />
+                        android:textSize="14sp" />
 
-                    <!-- 全部替换按钮 -->
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnReplaceAll"
-                        style="@style/Widget.Material3.Button.TonalButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/activity_editor_text_02"
-                        android:textSize="12sp" />
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:contentDescription="@string/activity_editor_text_02"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minWidth="0dp"
+                        android:padding="0dp"
+                        android:text="@string/search_replace_all_short"
+                        android:textSize="14sp" />
+
+                    <ImageButton
+                        android:id="@+id/btnSearchClose"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/search_close"
+                        android:padding="13dp"
+                        android:src="@drawable/ic_close"
+                        app:tint="@color/primary" />
 
                 </LinearLayout>
 

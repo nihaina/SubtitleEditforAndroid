@@ -70,11 +70,24 @@
     
     <!-- 搜索相关 -->
     <string name="search_hint">搜索字幕文本或时间...</string>
-    <string name="search_previous">上一项</string>
-    <string name="search_next">下一项</string>
+    <string name="search_previous">上个</string>
+    <string name="search_next">下个</string>
     <string name="search_close">关闭</string>
     <string name="search_no_results">未找到匹配项</string>
     <string name="search_result_count">找到 %1$d 项，第 %2$d 项</string>
+    <string name="search_result_position">搜索结果：%1$d/%2$d</string>
+    <string name="search_result_position_empty">搜索结果：0/0</string>
+    <string name="search_find_label">查找</string>
+    <string name="search_replace_label">替换为</string>
+    <string name="search_replace_all_short">全部</string>
+    <string name="search_match_case">区分大小写</string>
+    <string name="search_match_case_short" translatable="false">Cc</string>
+    <string name="search_whole_word">全词匹配</string>
+    <string name="search_whole_word_short" translatable="false">W</string>
+    <string name="search_match_case_status">区分大小写：%1$s</string>
+    <string name="search_whole_word_status">全词匹配：%1$s</string>
+    <string name="search_option_on">开</string>
+    <string name="search_option_off">关</string>
 
     <!-- TTS -->
     <string name="tts_settings">TTS 设置</string>
