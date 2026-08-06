@@ -1,7 +1,7 @@
 {
-  "versionCode": 3,
-  "versionName": "1.1.3",
+  "versionCode": 4,
+  "versionName": "1.1.4",
   "downloadUrl": "https://github.com/nihaina/SubtitleEditforAndroid/releases/latest",
-  "releaseNotes": "修复转换音视频格式缓存不会清理的问题\n修改界面布局\n完善文件管理功能\n支持parakeet模型\n\n常用目录暂不可用",
+  "releaseNotes": "添加二次vad处理，可以更精准的进行自动打轴，使用时推荐使用方案一并开启语音段合并\n增大vad参数调整范围\n文件搜索可以跨子目录搜索\n可以添加常用目录\n添加视频播放支持",
   "forceUpdate": false
 }
