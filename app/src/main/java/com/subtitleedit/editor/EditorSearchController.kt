@@ -17,6 +17,7 @@ import com.subtitleedit.adapter.SubtitleAdapter
 import com.subtitleedit.databinding.ActivityEditorBinding
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.OverwritingToast
+import com.subtitleedit.util.SearchResultRetention
 import com.subtitleedit.util.SearchReplaceEngine
 import com.subtitleedit.util.SearchReplaceOps
 import com.subtitleedit.util.TimeUtils
@@ -35,6 +36,7 @@ class EditorSearchController(
 ) {
     private val engine = SearchReplaceEngine()
     private val sourceHighlightSpans = mutableListOf<Any>()
+    private var listResultEntries: List<SubtitleEntry> = emptyList()
     private var applyingSourceReplacement = false
     private var applyingEntryReplacement = false
 
@@ -70,7 +72,11 @@ class EditorSearchController(
 
     fun onDocumentChanged() {
         if (applyingEntryReplacement || !isSearchVisible() || engine.query.isEmpty()) return
-        performSearch(announce = false, scrollToCurrent = false)
+        performSearch(
+            announce = false,
+            scrollToCurrent = false,
+            retainCurrentListResult = true
+        )
     }
 
     private fun bindSearchBar() {
@@ -83,6 +89,7 @@ class EditorSearchController(
                 if (!engine.setQueryIfChanged(query)) return
                 if (query.isEmpty()) {
                     engine.clearResults()
+                    listResultEntries = emptyList()
                     clearHighlights()
                 } else {
                     performSearch()
@@ -248,12 +255,17 @@ class EditorSearchController(
 
     private fun performSearch(
         announce: Boolean = true,
-        scrollToCurrent: Boolean = true
+        scrollToCurrent: Boolean = true,
+        retainCurrentListResult: Boolean = false
     ) {
         if (isSourceViewMode()) {
             searchInSourceView(announce = announce, scrollToCurrent = scrollToCurrent)
         } else {
-            searchInListView(announce = announce, scrollToCurrent = scrollToCurrent)
+            searchInListView(
+                announce = announce,
+                scrollToCurrent = scrollToCurrent,
+                retainCurrentResult = retainCurrentListResult
+            )
         }
     }
 
@@ -263,6 +275,7 @@ class EditorSearchController(
         scrollToCurrent: Boolean = true
     ) {
         val content = binding.etSourceView.text?.toString().orEmpty()
+        listResultEntries = emptyList()
         if (engine.query.isEmpty() || content.isEmpty()) {
             engine.clearResults()
             clearSourceHighlights()
@@ -280,23 +293,47 @@ class EditorSearchController(
         preferredResultPosition: Int? = null,
         preferredIndex: Int? = null,
         announce: Boolean = true,
-        scrollToCurrent: Boolean = true
+        scrollToCurrent: Boolean = true,
+        retainCurrentResult: Boolean = false
     ) {
         val query = engine.query
         if (query.isEmpty()) {
             engine.clearResults()
+            listResultEntries = emptyList()
             subtitleAdapter.clearSearchHighlight()
             return
         }
-        val results = entries().mapIndexedNotNull { index, entry ->
+        val previousResultEntries = listResultEntries
+        val previousIndex = engine.currentIndex
+        val matchingEntries = entries().mapIndexedNotNull { index, entry ->
             val matchesText = entry.text.contains(query, ignoreCase = true)
             val matchesTime = TimeUtils.formatForDisplay(entry.startTime)
                 .contains(query, ignoreCase = true)
-            index.takeIf { matchesText || matchesTime }
+            if (matchesText || matchesTime) index to entry else null
         }
-        engine.setResults(results, preferredResultPosition, preferredIndex)
+        val results = matchingEntries.map { it.first }
+        val newResultEntries = matchingEntries.map { it.second }
+        val retainedIndex = if (
+            retainCurrentResult &&
+            preferredResultPosition == null &&
+            preferredIndex == null
+        ) {
+            SearchResultRetention.preferredIndex(
+                previousResults = previousResultEntries,
+                previousIndex = previousIndex,
+                newResults = newResultEntries
+            )
+        } else {
+            null
+        }
+        engine.setResults(results, preferredResultPosition, preferredIndex ?: retainedIndex)
+        listResultEntries = newResultEntries
         if (announce) announceResults()
-        if (scrollToCurrent) scrollToCurrentResult()
+        if (scrollToCurrent) {
+            scrollToCurrentResult()
+        } else {
+            highlightCurrentListResult()
+        }
     }
 
     private fun highlightSourceResults(scrollToCurrent: Boolean) {
@@ -370,6 +407,15 @@ class EditorSearchController(
         }
     }
 
+    private fun highlightCurrentListResult() {
+        val position = engine.currentResultPositionOrNull()
+        if (position == null) {
+            subtitleAdapter.clearSearchHighlight()
+        } else {
+            subtitleAdapter.highlightSearchResult(position, engine.query)
+        }
+    }
+
     private fun announceResults() {
         if (engine.results.isEmpty()) {
             OverwritingToast.makeText(
@@ -397,6 +443,7 @@ class EditorSearchController(
 
     private fun clearSearchState() {
         engine.clearAll()
+        listResultEntries = emptyList()
         clearHighlights()
     }
 
