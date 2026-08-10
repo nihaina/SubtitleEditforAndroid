@@ -118,7 +118,6 @@ class MainActivity : AppCompatActivity() {
     private var pendingArchiveFile: File?
         get() = stateModel.pendingArchiveFile
         set(value) { stateModel.pendingArchiveFile = value }
-    private val destinationNavigationHistory get() = stateModel.destinationNavigationHistory
     private var updateCheckStarted = false
     private var pendingUpdate: UpdateChecker.UpdateInfo? = null
     private var updateDialogShown = false
@@ -395,7 +394,6 @@ class MainActivity : AppCompatActivity() {
         selectedPaths.clear()
         pendingFileOperation = null
         pendingArchiveFile = null
-        destinationNavigationHistory.clear()
         stateModel.searchQuery = ""
         stateModel.isFileSearchActive = false
         binding.bottomNavigation.selectedItemId = R.id.nav_directory
@@ -733,7 +731,6 @@ class MainActivity : AppCompatActivity() {
         selectedPaths.clear()
         pendingFileOperation = null
         pendingArchiveFile = null
-        destinationNavigationHistory.clear()
         loadDirectory(getDefaultDirectory())
     }
     
@@ -1152,7 +1149,6 @@ class MainActivity : AppCompatActivity() {
         selectedPaths.clear()
         pendingFileOperation = null
         pendingArchiveFile = null
-        destinationNavigationHistory.clear()
         updateSelectionUi()
     }
 
@@ -1162,7 +1158,6 @@ class MainActivity : AppCompatActivity() {
             return
         }
         pendingFileOperation = operation
-        destinationNavigationHistory.clear()
         updateSelectionUi()
     }
 
@@ -1249,7 +1244,6 @@ class MainActivity : AppCompatActivity() {
     private fun cancelDestinationSelection() {
         pendingFileOperation = null
         pendingArchiveFile = null
-        destinationNavigationHistory.clear()
         updateSelectionUi()
     }
 
@@ -1769,7 +1763,6 @@ class MainActivity : AppCompatActivity() {
         selectedPaths.clear()
         pendingArchiveFile = archive
         pendingFileOperation = FileOperation.EXTRACT
-        destinationNavigationHistory.clear()
         updateSelectionUi()
     }
 
@@ -2748,40 +2741,33 @@ class MainActivity : AppCompatActivity() {
 
     private fun navigateDestinationInto(directory: File) {
         val current = currentDirectory ?: return
-        val state = DestinationNavigationState(current, directoryHistory.toList())
         if (loadDirectory(directory)) {
-            destinationNavigationHistory += state
             directoryHistory += current
         }
     }
 
-    private fun navigateDestinationUp() {
-        val current = currentDirectory ?: return
-        val state = DestinationNavigationState(current, directoryHistory.toList())
-        val target: File
-        val updatedHistory: List<File>
-        if (directoryHistory.isNotEmpty()) {
-            target = directoryHistory.last()
-            updatedHistory = directoryHistory.dropLast(1)
-        } else {
-            target = current.parentFile ?: return
-            updatedHistory = emptyList()
-        }
-        if (!target.exists() || !target.canRead()) return
-        if (loadDirectory(target)) {
-            destinationNavigationHistory += state
-            directoryHistory.clear()
-            directoryHistory.addAll(updatedHistory)
-        }
-    }
+    private fun navigateDestinationUp(): Boolean {
+        val current = currentDirectory ?: return false
+        val storageRoot = getDefaultDirectory()
+        val currentPath = runCatching { current.canonicalPath }.getOrElse { current.absolutePath }
+        val rootPath = runCatching { storageRoot.canonicalPath }.getOrElse { storageRoot.absolutePath }
+        if (currentPath == rootPath) return false
 
-    private fun navigateBackInDestinationSelection(): Boolean {
-        val state = destinationNavigationHistory.lastOrNull() ?: return false
-        if (!loadDirectory(state.directory)) return true
-        destinationNavigationHistory.removeAt(destinationNavigationHistory.lastIndex)
-        directoryHistory.clear()
-        directoryHistory.addAll(state.directoryHistory)
-        return true
+        val target = current.parentFile ?: return false
+        if (!target.exists() || !target.canRead()) return false
+        if (loadDirectory(target)) {
+            val historyTarget = directoryHistory.lastOrNull()
+            val historyPath = historyTarget?.let { history ->
+                runCatching { history.canonicalPath }.getOrElse { history.absolutePath }
+            }
+            if (historyPath == runCatching { target.canonicalPath }.getOrElse { target.absolutePath }) {
+                directoryHistory.removeAt(directoryHistory.lastIndex)
+            } else {
+                directoryHistory.clear()
+            }
+            return true
+        }
+        return false
     }
     
     private fun goUpLevel() {
@@ -2809,7 +2795,7 @@ class MainActivity : AppCompatActivity() {
                 ?.handleTopLevelBack() == true
             if (!handled) super.onBackPressed()
         } else if (pendingFileOperation != null) {
-            if (!navigateBackInDestinationSelection()) {
+            if (!navigateDestinationUp()) {
                 cancelDestinationSelection()
             }
         } else if (selectedPaths.isNotEmpty()) {
