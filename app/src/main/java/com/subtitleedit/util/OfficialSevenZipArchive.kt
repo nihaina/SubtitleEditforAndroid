@@ -446,7 +446,8 @@ internal object OfficialSevenZipArchive {
         method: ArchiveManager.CompressionMethod,
         password: CharArray?,
         encryptionMethod: ArchiveManager.EncryptionMethod?,
-        splitSizeBytes: Long?
+        splitSizeBytes: Long?,
+        progressCapture: File? = null
     ) {
         require(
             encryptionMethod == null ||
@@ -462,7 +463,8 @@ internal object OfficialSevenZipArchive {
                     ArchiveManager.CompressionMethod.TAR_STORE,
                     null,
                     null,
-                    null
+                    null,
+                    progressCapture
                 )
                 val compressor = when (method) {
                     ArchiveManager.CompressionMethod.TAR_GZIP -> "-tgzip"
@@ -472,9 +474,10 @@ internal object OfficialSevenZipArchive {
                 }
                 val volume = splitSizeBytes?.let { listOf("-v${it}b") }.orEmpty()
                 val result = run(
-                    listOf("a", "-y", "-bd", "-bsp0", "-sccUTF-8", compressor) +
+                    listOf("a", "-y", "-bb1", "-bsp1", "-sccUTF-8", compressor) +
                         volume + listOf(destination.absolutePath, temporaryTar.name),
-                    workingDirectory = temporaryTar.absoluteFile.parentFile
+                    workingDirectory = temporaryTar.absoluteFile.parentFile,
+                    capture = progressCapture
                 )
                 if (result != 0) throw java.io.IOException("7-Zip 创建压缩包失败（错误码 $result）")
             } finally {
@@ -493,7 +496,7 @@ internal object OfficialSevenZipArchive {
             encryptionMethod = encryptionMethod,
             splitSizeBytes = splitSizeBytes
         )
-        val result = run(args, workingDirectory = sourceDirectory)
+        val result = run(args, capture = progressCapture, workingDirectory = sourceDirectory)
         if (result != 0) throw java.io.IOException("7-Zip 创建压缩包失败（错误码 $result）")
     }
 
@@ -506,7 +509,7 @@ internal object OfficialSevenZipArchive {
         encryptionMethod: ArchiveManager.EncryptionMethod?,
         splitSizeBytes: Long?
     ): List<String> {
-        val args = mutableListOf("a", "-y", "-bd", "-bsp0", "-sccUTF-8")
+        val args = mutableListOf("a", "-y", "-bb1", "-bsp1", "-sccUTF-8")
         args += when (format) {
             ArchiveManager.CreateFormat.ZIP -> "-tzip"
             ArchiveManager.CreateFormat.SEVEN_Z -> "-t7z"

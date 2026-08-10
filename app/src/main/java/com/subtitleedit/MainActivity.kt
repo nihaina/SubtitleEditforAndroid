@@ -1603,8 +1603,8 @@ class MainActivity : AppCompatActivity() {
         deleteSources: Boolean
     ) {
         val progress = showArchiveProgress(
-            title = "正在压缩",
-            message = "正在创建 ${output.name}...",
+            title = "正在压缩：",
+            message = sources.firstOrNull()?.name ?: output.name,
             showCancel = true
         )
         val committed = AtomicBoolean(false)
@@ -1622,8 +1622,8 @@ class MainActivity : AppCompatActivity() {
                         encryptionMethod = encryptionMethod,
                         splitSizeBytes = splitSizeBytes,
                         checkCancelled = workerContext::ensureActive,
-                        onProgress = { generatedBytes, sourceBytes ->
-                            updateCompressionProgress(progress, generatedBytes, sourceBytes)
+                        onDetailedProgress = { compressionProgress ->
+                            updateCompressionProgress(progress, compressionProgress)
                         },
                         onCommitted = {
                             committed.set(true)
@@ -1671,6 +1671,8 @@ class MainActivity : AppCompatActivity() {
             progress.binding.tvProgressMessage.text = "正在取消..."
             progress.binding.progressBar.isIndeterminate = true
             progress.binding.tvProgressPercent.visibility = View.GONE
+            progress.binding.tvProgressLeading.visibility = View.GONE
+            progress.binding.tvProgressProcessed.visibility = View.GONE
             compressionJob.cancel(CancellationException("用户取消压缩"))
         }
     }
@@ -2215,6 +2217,8 @@ class MainActivity : AppCompatActivity() {
     ): ArchiveProgressUi {
         val progressBinding = DialogArchiveProgressBinding.inflate(layoutInflater)
         progressBinding.tvProgressMessage.text = message
+        progressBinding.tvProgressLeading.visibility = View.GONE
+        progressBinding.tvProgressProcessed.visibility = View.GONE
         progressBinding.progressBar.isIndeterminate = true
         progressBinding.tvProgressPercent.visibility = View.GONE
         val builder = AlertDialog.Builder(this)
@@ -2667,22 +2671,35 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateCompressionProgress(
         progress: ArchiveProgressUi,
-        generatedBytes: Long,
-        sourceBytes: Long
+        compressionProgress: ArchiveManager.CompressionProgress
     ) {
         runOnUiThread {
             if (!progress.dialog.isShowing) return@runOnUiThread
-            progress.binding.tvProgressMessage.text = "正在压缩..."
-            progress.binding.progressBar.isIndeterminate = true
-            progress.binding.tvProgressPercent.text = buildString {
-                append("已生成 ")
-                append(FileUtils.formatFileSize(generatedBytes))
-                if (sourceBytes > 0L) {
-                    append(" · 源文件 ")
-                    append(FileUtils.formatFileSize(sourceBytes))
-                }
+            progress.binding.tvProgressLeading.text =
+                "已生成 ${FileUtils.formatFileSize(compressionProgress.generatedBytes)}"
+            progress.binding.tvProgressLeading.visibility = View.VISIBLE
+            if (compressionProgress.sourceBytes > 0L) {
+                progress.binding.tvProgressProcessed.text =
+                    "已处理 ${FileUtils.formatFileSize(compressionProgress.processedBytes)} / " +
+                        FileUtils.formatFileSize(compressionProgress.sourceBytes)
+                progress.binding.tvProgressProcessed.visibility = View.VISIBLE
+            } else {
+                progress.binding.tvProgressProcessed.visibility = View.GONE
             }
-            progress.binding.tvProgressPercent.visibility = View.VISIBLE
+            progress.binding.tvProgressMessage.text = compressionProgress.currentFileName?.let {
+                it
+            } ?: progress.binding.tvProgressMessage.text
+            val percent = compressionProgress.percent
+            if (percent != null) {
+                progress.binding.progressBar.isIndeterminate = false
+                progress.binding.progressBar.max = 100
+                progress.binding.progressBar.progress = percent
+                progress.binding.tvProgressPercent.text = "$percent%"
+                progress.binding.tvProgressPercent.visibility = View.VISIBLE
+            } else {
+                progress.binding.progressBar.isIndeterminate = true
+                progress.binding.tvProgressPercent.visibility = View.GONE
+            }
         }
     }
 

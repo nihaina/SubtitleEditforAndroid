@@ -5,6 +5,7 @@ import java.io.FileInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.io.RandomAccessFile
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -59,6 +60,14 @@ object ArchiveManager {
     data class TestResult(val entryCount: Int, val totalBytes: Long)
 
     data class ExtractResult(val entryCount: Int, val totalBytes: Long, val skippedCount: Int)
+
+    data class CompressionProgress(
+        val generatedBytes: Long,
+        val sourceBytes: Long,
+        val processedBytes: Long,
+        val percent: Int?,
+        val currentFileName: String?
+    )
 
     enum class ConflictPolicy { FAIL, OVERWRITE, RENAME, SKIP }
 
@@ -192,6 +201,7 @@ object ArchiveManager {
         splitSizeBytes: Long? = null,
         checkCancelled: () -> Unit = {},
         onProgress: (generatedBytes: Long, sourceBytes: Long) -> Unit = { _, _ -> },
+        onDetailedProgress: ((CompressionProgress) -> Unit)? = null,
         onCommitted: () -> Unit = {}
     ) {
         checkCancelled()
@@ -245,6 +255,7 @@ object ArchiveManager {
                 splitSizeBytes = splitSizeBytes,
                 sourceBytes = sourceBytes,
                 onProgress = onProgress,
+                onDetailedProgress = onDetailedProgress,
                 checkCancelled = checkCancelled
             )
             checkCancelled()
@@ -1001,10 +1012,12 @@ object ArchiveManager {
         splitSizeBytes: Long?,
         sourceBytes: Long,
         onProgress: (generatedBytes: Long, sourceBytes: Long) -> Unit,
+        onDetailedProgress: ((CompressionProgress) -> Unit)?,
         checkCancelled: () -> Unit
     ) {
         val finished = AtomicBoolean(false)
         val failure = AtomicReference<Throwable?>()
+        val progressCapture = File.createTempFile("subtitleedit-7z-progress-", ".txt")
         val worker = Thread({
             try {
                 OfficialSevenZipArchive.create(
@@ -1014,7 +1027,8 @@ object ArchiveManager {
                     method = method,
                     password = password,
                     encryptionMethod = encryptionMethod,
-                    splitSizeBytes = splitSizeBytes
+                    splitSizeBytes = splitSizeBytes,
+                    progressCapture = progressCapture
                 )
             } catch (error: Throwable) {
                 failure.set(error)
@@ -1023,10 +1037,27 @@ object ArchiveManager {
             }
         }, "subtitleedit-archive-create")
         worker.start()
+        var currentFileName: String? = null
         try {
             while (!finished.get()) {
                 checkCancelled()
-                onProgress(compressionOutputBytes(destination), sourceBytes)
+                val generatedBytes = compressionOutputBytes(destination)
+                val nativeProgress = readCompressionProgress(progressCapture)
+                nativeProgress.currentFileName?.let { currentFileName = it }
+                val percent = nativeProgress.percent
+                val processedBytes = if (percent != null && sourceBytes > 0L) {
+                    (sourceBytes * percent.toLong() / 100L).coerceIn(0L, sourceBytes)
+                } else 0L
+                onProgress(generatedBytes, sourceBytes)
+                onDetailedProgress?.invoke(
+                    CompressionProgress(
+                        generatedBytes = generatedBytes,
+                        sourceBytes = sourceBytes,
+                        processedBytes = processedBytes,
+                        percent = percent,
+                        currentFileName = currentFileName
+                    )
+                )
                 try {
                     Thread.sleep(COMPRESS_PROGRESS_INTERVAL_MS)
                 } catch (error: InterruptedException) {
@@ -1035,7 +1066,19 @@ object ArchiveManager {
                 }
             }
             checkCancelled()
-            onProgress(compressionOutputBytes(destination), sourceBytes)
+            val generatedBytes = compressionOutputBytes(destination)
+            val nativeProgress = readCompressionProgress(progressCapture)
+            nativeProgress.currentFileName?.let { currentFileName = it }
+            onProgress(generatedBytes, sourceBytes)
+            onDetailedProgress?.invoke(
+                CompressionProgress(
+                    generatedBytes = generatedBytes,
+                    sourceBytes = sourceBytes,
+                    processedBytes = sourceBytes,
+                    percent = 100,
+                    currentFileName = currentFileName
+                )
+            )
             failure.get()?.let { throw it }
         } catch (error: Throwable) {
             if (!finished.get()) {
@@ -1044,7 +1087,40 @@ object ArchiveManager {
                 runCatching { worker.join(COMPRESS_CANCEL_WAIT_MS) }
             }
             throw error
+        } finally {
+            progressCapture.delete()
         }
+    }
+
+    private data class NativeCompressionProgress(val percent: Int?, val currentFileName: String?)
+
+    private fun readCompressionProgress(capture: File): NativeCompressionProgress {
+        if (!capture.isFile) return NativeCompressionProgress(null, null)
+        val text = runCatching {
+            RandomAccessFile(capture, "r").use { file ->
+                val length = file.length()
+                val start = (length - 64L * 1024L).coerceAtLeast(0L)
+                file.seek(start)
+                val bytes = ByteArray((length - start).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+                file.readFully(bytes)
+                String(bytes, Charsets.UTF_8)
+            }
+        }.getOrDefault("")
+        val percent = Regex("(?:^|[\\r\\n\\u0008])\\s*(\\d{1,3})%")
+            .findAll(text)
+            .lastOrNull()
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toIntOrNull()
+            ?.takeIf { it in 0..100 }
+        val currentFile = Regex("(?:^|[\\r\\n\\u0008])(?:\\+|U)\\s+([^\\r\\n\\u0008]+)")
+            .findAll(text)
+            .lastOrNull()
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        return NativeCompressionProgress(percent, currentFile)
     }
 
     private fun sourceTreeBytes(file: File, checkCancelled: () -> Unit): Long {
