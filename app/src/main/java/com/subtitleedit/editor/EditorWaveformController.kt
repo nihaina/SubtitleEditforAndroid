@@ -12,6 +12,7 @@ import com.arthenica.ffmpegkit.FFmpegKit
 import com.subtitleedit.audio.FfmpegWaveformChunkLoader
 import com.subtitleedit.databinding.ActivityEditorBinding
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.util.FileHashUtils
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.view.WaveformTimelineView
 import java.io.File
@@ -34,6 +35,7 @@ internal class EditorWaveformController(
 ) {
     private var chunkLoader: FfmpegWaveformChunkLoader? = null
     private var audioFile: File? = null
+    private var audioCacheKey: String? = null
     private var durationMs = 0L
     private var audioStreamIndex: Int? = null
     private var hasAudioTrack = true
@@ -149,6 +151,7 @@ internal class EditorWaveformController(
         audioStreamIndex: Int? = null
     ) {
         this.audioFile = audioFile
+        this.audioCacheKey = FileHashUtils.md5(audioFile)
         this.durationMs = durationMs
         this.audioStreamIndex = audioStreamIndex
         hasAudioTrack = true
@@ -167,7 +170,7 @@ internal class EditorWaveformController(
 
         chunkLoader?.release()
         chunkLoader = FfmpegWaveformChunkLoader(scope).also {
-            it.prepare(audioFile.absolutePath, durationMs, cacheDir, audioStreamIndex)
+            it.prepare(audioFile.absolutePath, durationMs, cacheDir, audioStreamIndex, audioCacheKey)
         }
 
         if (chunkLoader?.isCacheReady() == true) {
@@ -183,6 +186,7 @@ internal class EditorWaveformController(
 
     fun showNoAudioTrack(durationMs: Long, subtitles: List<SubtitleEntry>) {
         this.audioFile = null
+        this.audioCacheKey = null
         this.durationMs = durationMs
         this.audioStreamIndex = null
         hasAudioTrack = false
@@ -214,6 +218,7 @@ internal class EditorWaveformController(
     fun release() {
         chunkLoader?.release()
         chunkLoader = null
+        audioCacheKey = null
     }
 
     private fun calcTotalChunks(): Int {
@@ -315,10 +320,13 @@ internal class EditorWaveformController(
     }
 
     private fun spectrogramCacheBaseDir(audioFile: File): File {
-        return when (SettingsManager.getInstance(context).getWaveformCacheLocation()) {
+        val cacheRootDir = when (SettingsManager.getInstance(context).getWaveformCacheLocation()) {
             SettingsManager.WAVEFORM_CACHE_APP -> File(appCacheDir, "waveform")
             else -> audioFile.parentFile ?: File(appCacheDir, "waveform")
         }.apply { mkdirs() }
+        val cacheKey = audioCacheKey.takeIf { this.audioFile?.absolutePath == audioFile.absolutePath }
+            ?: FileHashUtils.md5(audioFile)
+        return File(cacheRootDir, cacheKey).apply { mkdirs() }
     }
 
     private fun updateGenerateButton() {

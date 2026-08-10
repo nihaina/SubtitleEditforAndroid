@@ -1,6 +1,8 @@
 package com.subtitleedit.audio
 
 import android.util.Log
+import com.subtitleedit.util.FileHashUtils
+import java.io.File
 import kotlinx.coroutines.*
 
 /**
@@ -51,22 +53,26 @@ class FfmpegWaveformChunkLoader(
         filePath: String,
         durationMs: Long,
         cacheDir: java.io.File? = null,
-        audioStreamIndex: Int? = null
+        audioStreamIndex: Int? = null,
+        audioCacheKey: String? = null
     ) {
         this.audioFilePath = filePath
         this.durationMs = durationMs
         this.audioStreamIndex = audioStreamIndex
         
         val audioFile = java.io.File(filePath)
-        val targetDir = if (cacheDir != null) {
+        val cacheRootDir = if (cacheDir != null) {
             cacheDir.mkdirs()
             cacheDir
         } else {
             audioFile.parentFile ?: cacheDir
         }
+        val audioCacheDir = cacheRootDir?.let {
+            File(it, audioCacheKey ?: FileHashUtils.md5(audioFile)).apply { mkdirs() }
+        }
         val streamSuffix = audioStreamIndex?.let { ".a$it" }.orEmpty()
         this.cacheFile = java.io.File(
-            targetDir,
+            audioCacheDir,
             "${audioFile.nameWithoutExtension}$streamSuffix.wave"
         )
         

@@ -2,6 +2,7 @@ package com.subtitleedit.audio
 
 import android.util.Log
 import com.arthenica.ffmpegkit.FFmpegKit
+import com.subtitleedit.util.FileHashUtils
 import java.io.File
 import java.io.FileInputStream
 import java.io.DataOutputStream
@@ -309,10 +310,11 @@ object FfmpegWaveformExtractor {
     }
 
     /**
-     * 获取缓存文件路径（与音频文件同目录，同名.wave 扩展名）
+     * 获取缓存文件路径（音频文件同目录下的 MD5 子目录，同名.wave 扩展名）
      */
     fun getCachePath(audioFile: File): File {
-        return File(audioFile.parentFile, "${audioFile.nameWithoutExtension}.wave")
+        val cacheDir = File(audioFile.parentFile, FileHashUtils.md5(audioFile)).apply { mkdirs() }
+        return File(cacheDir, "${audioFile.nameWithoutExtension}.wave")
     }
 
     /**

@@ -252,9 +252,9 @@ class SettingsFragment : Fragment() {
 
     private fun cacheGroups(): List<Pair<String, List<File>>> {
         val waveform = File(requireContext().cacheDir, "waveform").walkTopDown().filter { it.isFile }.toList()
-        val quick = requireContext().cacheDir.listFiles()?.filter {
+        val quick = requireContext().cacheDir.walkTopDown().filter {
             it.isFile && it.name.startsWith("quick_transcribe_") && it.name.endsWith("_16k.wav")
-        }.orEmpty()
+        }.toList()
         return listOf(
             "波形图缓存" to waveform.filter { it.extension == "wave" },
             "频谱图缓存" to waveform.filter { it.extension == "png" && it.name.contains(".spec_") },

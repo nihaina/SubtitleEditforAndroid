@@ -181,11 +181,11 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun quickTranscribeAudioCacheFiles(): List<File> {
-        return cacheDir.listFiles()
-            ?.filter { file ->
+        return cacheDir.walkTopDown()
+            .filter { file ->
                 file.isFile && file.name.startsWith("quick_transcribe_") && file.name.endsWith("_16k.wav")
             }
-            .orEmpty()
+            .toList()
     }
 
     private fun formatSize(bytes: Long): String = when {

@@ -10,6 +10,7 @@ import android.widget.TextView
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.subtitleedit.adapter.TranslationPreviewItem
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.util.FileHashUtils
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.WhisperRecognizer
 import java.io.File
@@ -177,13 +178,14 @@ internal class EditorTranscribeController(
 
         transcribeJob = scope.launch {
             try {
-                val cachedPcmFile = recognitionPcmCacheFile(inputFile, audioStreamIndex)
+                val sourceMd5 = withContext(Dispatchers.IO) { FileHashUtils.md5(inputFile) }
+                val cachedPcmFile = recognitionPcmCacheFile(sourceMd5, audioStreamIndex)
                 progressDialog.setMessage(
                     if (isRecognitionPcmCacheValid(cachedPcmFile)) "正在使用缓存音频..."
                     else "正在准备音频..."
                 )
                 val pcmFile = withContext(Dispatchers.IO) {
-                    convertAudioToRecognitionPcm(inputFile, audioStreamIndex)
+                    convertAudioToRecognitionPcm(inputFile, audioStreamIndex, sourceMd5)
                 } ?: throw IllegalStateException("音频转换失败")
                 if (transcribeCancelled) return@launch
 
@@ -228,13 +230,11 @@ internal class EditorTranscribeController(
         }
     }
 
-    /**
-     * 缓存键包含源文件元数据。源文件变化时会自然切换到新的缓存，不会读取旧音频。
-     */
-    private fun recognitionPcmCacheFile(inputFile: File, audioStreamIndex: Int?): File {
-        val sourceKey = "${inputFile.absolutePath.hashCode().toUInt().toString(16)}_" +
-            "${inputFile.length()}_${inputFile.lastModified()}_${audioStreamIndex ?: "default"}"
-        return File(cacheDir, "quick_transcribe_${sourceKey}_16k.wav")
+    /** Returns the quick-transcription cache inside the source media's MD5 directory. */
+    private fun recognitionPcmCacheFile(sourceMd5: String, audioStreamIndex: Int?): File {
+        val mediaCacheDir = File(cacheDir, "quick_transcribe/$sourceMd5").apply { mkdirs() }
+        val streamKey = audioStreamIndex?.toString() ?: "default"
+        return File(mediaCacheDir, "quick_transcribe_${streamKey}_16k.wav")
     }
 
     private fun isRecognitionPcmCacheValid(file: File): Boolean =
@@ -242,10 +242,11 @@ internal class EditorTranscribeController(
 
     private fun convertAudioToRecognitionPcm(
         inputFile: File,
-        audioStreamIndex: Int?
+        audioStreamIndex: Int?,
+        sourceMd5: String
     ): File? {
         return try {
-            val outputFile = recognitionPcmCacheFile(inputFile, audioStreamIndex)
+            val outputFile = recognitionPcmCacheFile(sourceMd5, audioStreamIndex)
             if (isRecognitionPcmCacheValid(outputFile)) return outputFile
             if (outputFile.exists()) outputFile.delete()
             val mapOption = audioStreamIndex?.let { "-map 0:$it " }.orEmpty()
