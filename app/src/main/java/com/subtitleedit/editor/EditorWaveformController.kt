@@ -18,6 +18,7 @@ import com.subtitleedit.view.WaveformTimelineView
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -34,6 +35,8 @@ internal class EditorWaveformController(
     private val showMessage: (String) -> Unit
 ) {
     private var chunkLoader: FfmpegWaveformChunkLoader? = null
+    private var cacheIndexJob: Job? = null
+    private var cacheIndexGeneration = 0L
     private var audioFile: File? = null
     private var audioCacheKey: String? = null
     private var durationMs = 0L
@@ -47,6 +50,8 @@ internal class EditorWaveformController(
     private var isWaveformGenerated = false
     private var isSpectrogramGenerationStarted = false
     private var isWaveformGenerating = false
+    private var isPreparingCacheIndex = false
+    private var cacheIndexFailure: String? = null
 
     fun bind() {
         if (!hasPlayableMedia) {
@@ -150,46 +155,53 @@ internal class EditorWaveformController(
         subtitles: List<SubtitleEntry>,
         audioStreamIndex: Int? = null
     ) {
+        cacheIndexJob?.cancel()
+        val cacheIndexRequest = ++cacheIndexGeneration
         this.audioFile = audioFile
-        this.audioCacheKey = FileHashUtils.md5(audioFile)
+        this.audioCacheKey = null
         this.durationMs = durationMs
         this.audioStreamIndex = audioStreamIndex
         hasAudioTrack = true
-        binding.btnGenerateCache.isEnabled = true
-        binding.waveformTimelineView.initialize(durationMs, subtitles)
-        restoreSpectrogramCacheState(audioFile)
-        binding.waveformTimelineView.post {
-            restoreSpectrogramCacheState(audioFile)
-            updateGenerateButton()
-        }
-
-        val cacheDir = when (SettingsManager.getInstance(context).getWaveformCacheLocation()) {
-            SettingsManager.WAVEFORM_CACHE_APP -> File(appCacheDir, "waveform")
-            else -> null
-        }
-
+        isPreparingCacheIndex = true
+        cacheIndexFailure = null
+        isWaveformGenerated = false
+        isSpectrogramGenerationStarted = false
+        spectrogramIsGenerating = false
         chunkLoader?.release()
-        chunkLoader = FfmpegWaveformChunkLoader(scope).also {
-            it.prepare(audioFile.absolutePath, durationMs, cacheDir, audioStreamIndex, audioCacheKey)
-        }
-
-        if (chunkLoader?.isCacheReady() == true) {
-            isWaveformGenerated = true
-            connectWaveformLoader()
-        } else {
-            isWaveformGenerated = false
-            updateGenerateButton()
-        }
-
+        chunkLoader = null
+        binding.waveformTimelineView.initialize(durationMs, subtitles)
         updateGenerateButton()
+
+        cacheIndexJob = scope.launch(Dispatchers.IO) {
+            val cacheKey = runCatching { FileHashUtils.md5(audioFile) }
+            withContext(Dispatchers.Main) {
+                if (cacheIndexRequest != cacheIndexGeneration) return@withContext
+
+                isPreparingCacheIndex = false
+                cacheKey.onSuccess { key ->
+                    audioCacheKey = key
+                    initializeMediaCache(audioFile, durationMs, audioStreamIndex, cacheIndexRequest)
+                }.onFailure { error ->
+                    cacheIndexFailure = error.message ?: error.javaClass.simpleName
+                    Log.e(TAG, "计算媒体缓存索引失败", error)
+                    showMessage("无法读取媒体文件")
+                    updateGenerateButton()
+                }
+            }
+        }
     }
 
     fun showNoAudioTrack(durationMs: Long, subtitles: List<SubtitleEntry>) {
+        cacheIndexGeneration++
+        cacheIndexJob?.cancel()
+        cacheIndexJob = null
         this.audioFile = null
         this.audioCacheKey = null
         this.durationMs = durationMs
         this.audioStreamIndex = null
         hasAudioTrack = false
+        isPreparingCacheIndex = false
+        cacheIndexFailure = null
         chunkLoader?.release()
         chunkLoader = null
         isWaveformGenerated = false
@@ -216,9 +228,47 @@ internal class EditorWaveformController(
     }
 
     fun release() {
+        cacheIndexGeneration++
+        cacheIndexJob?.cancel()
+        cacheIndexJob = null
         chunkLoader?.release()
         chunkLoader = null
         audioCacheKey = null
+        isPreparingCacheIndex = false
+        cacheIndexFailure = null
+    }
+
+    private fun initializeMediaCache(
+        audioFile: File,
+        durationMs: Long,
+        audioStreamIndex: Int?,
+        cacheIndexRequest: Long
+    ) {
+        if (cacheIndexRequest != cacheIndexGeneration) return
+
+        restoreSpectrogramCacheState(audioFile)
+        binding.waveformTimelineView.post {
+            if (cacheIndexRequest != cacheIndexGeneration) return@post
+            restoreSpectrogramCacheState(audioFile)
+            updateGenerateButton()
+        }
+
+        val cacheDir = when (SettingsManager.getInstance(context).getWaveformCacheLocation()) {
+            SettingsManager.WAVEFORM_CACHE_APP -> File(appCacheDir, "waveform")
+            else -> null
+        }
+
+        chunkLoader = FfmpegWaveformChunkLoader(scope).also {
+            it.prepare(audioFile.absolutePath, durationMs, cacheDir, audioStreamIndex, audioCacheKey)
+        }
+
+        if (chunkLoader?.isCacheReady() == true) {
+            isWaveformGenerated = true
+            connectWaveformLoader()
+        } else {
+            isWaveformGenerated = false
+        }
+        updateGenerateButton()
     }
 
     private fun calcTotalChunks(): Int {
@@ -248,7 +298,7 @@ internal class EditorWaveformController(
         heightPx: Int
     ) {
         val currentAudioFile = audioFile ?: return
-        val cacheBaseDir = spectrogramCacheBaseDir(currentAudioFile)
+        val cacheBaseDir = spectrogramCacheBaseDir(currentAudioFile) ?: return
         cacheBaseDir.mkdirs()
         val streamSuffix = audioStreamIndex?.let { ".a$it" }.orEmpty()
         val specFile = File(
@@ -310,7 +360,7 @@ internal class EditorWaveformController(
         if (totalChunks <= 0) return false
         val dimensions = binding.waveformTimelineView.getSpectrogramCacheDimensions() ?: return false
         val (width, height) = dimensions
-        val cacheBaseDir = spectrogramCacheBaseDir(audioFile)
+        val cacheBaseDir = spectrogramCacheBaseDir(audioFile) ?: return false
         val streamSuffix = audioStreamIndex?.let { ".a$it" }.orEmpty()
         val prefix = "${audioFile.nameWithoutExtension}$streamSuffix.spec_"
         return (0 until totalChunks).all { chunkIndex ->
@@ -319,13 +369,13 @@ internal class EditorWaveformController(
         }
     }
 
-    private fun spectrogramCacheBaseDir(audioFile: File): File {
+    private fun spectrogramCacheBaseDir(audioFile: File): File? {
+        val cacheKey = audioCacheKey.takeIf { this.audioFile?.absolutePath == audioFile.absolutePath }
+            ?: return null
         val cacheRootDir = when (SettingsManager.getInstance(context).getWaveformCacheLocation()) {
             SettingsManager.WAVEFORM_CACHE_APP -> File(appCacheDir, "waveform")
             else -> audioFile.parentFile ?: File(appCacheDir, "waveform")
         }.apply { mkdirs() }
-        val cacheKey = audioCacheKey.takeIf { this.audioFile?.absolutePath == audioFile.absolutePath }
-            ?: FileHashUtils.md5(audioFile)
         return File(cacheRootDir, cacheKey).apply { mkdirs() }
     }
 
@@ -334,6 +384,18 @@ internal class EditorWaveformController(
             binding.btnGenerateCache.visibility = if (isWaveformExpanded) View.VISIBLE else View.GONE
             binding.btnGenerateCache.isEnabled = false
             binding.btnGenerateCache.text = context.getString(com.subtitleedit.R.string.editor_video_no_audio)
+            return
+        }
+        if (isPreparingCacheIndex) {
+            binding.btnGenerateCache.visibility = if (isWaveformExpanded) View.VISIBLE else View.GONE
+            binding.btnGenerateCache.isEnabled = false
+            binding.btnGenerateCache.text = "正在准备缓存..."
+            return
+        }
+        if (cacheIndexFailure != null) {
+            binding.btnGenerateCache.visibility = if (isWaveformExpanded) View.VISIBLE else View.GONE
+            binding.btnGenerateCache.isEnabled = false
+            binding.btnGenerateCache.text = "缓存准备失败"
             return
         }
         val needsGenerate = when (currentDisplayMode) {
@@ -358,6 +420,7 @@ internal class EditorWaveformController(
     }
 
     private fun startWaveformGeneration() {
+        if (chunkLoader == null) return
         isWaveformGenerating = true
         updateGenerateButton()
         showMessage("正在生成波形缓存，请稍候...")
@@ -375,6 +438,7 @@ internal class EditorWaveformController(
     }
 
     private fun startSpectrogramGeneration() {
+        if (audioCacheKey == null) return
         isSpectrogramGenerationStarted = true
         spectrogramTotalChunks = calcTotalChunks()
         spectrogramDoneChunks = 0

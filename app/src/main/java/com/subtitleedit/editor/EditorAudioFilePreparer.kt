@@ -1,5 +1,7 @@
 package com.subtitleedit.editor
 
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.util.Log
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFprobeKit
@@ -27,7 +29,8 @@ internal class EditorAudioFilePreparer(
             .getMediaInformation()
         val audioStreamIndex = if (inspectVideoAudioTrack) {
             selectDefaultAudioStreamIndex(mediaInformation)
-                ?: throw IllegalStateException("视频没有可用音轨")
+                ?: if (hasAudioTrack(audioFile)) null
+                else throw IllegalStateException("视频没有可用音轨")
         } else {
             null
         }
@@ -85,7 +88,12 @@ internal class EditorAudioFilePreparer(
         mediaInformation: com.arthenica.ffmpegkit.MediaInformation?
     ): Int? {
         val audioStreams = mediaInformation?.getStreams()
-            ?.filter { it.getType() == "audio" }
+            ?.filter { stream ->
+                stream.getType().equals("audio", ignoreCase = true) ||
+                    stream.getAllProperties()
+                        ?.optString("codec_type")
+                        .equals("audio", ignoreCase = true)
+            }
             .orEmpty()
         val selectedStream = audioStreams.firstOrNull { stream ->
             stream.getAllProperties()
@@ -93,6 +101,23 @@ internal class EditorAudioFilePreparer(
                 ?.optInt("default", 0) == 1
         } ?: audioStreams.firstOrNull()
         return selectedStream?.getIndex()?.toInt()
+    }
+
+    private fun hasAudioTrack(mediaFile: File): Boolean {
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(mediaFile.absolutePath)
+            (0 until extractor.trackCount).any { index ->
+                extractor.getTrackFormat(index)
+                    .getString(MediaFormat.KEY_MIME)
+                    ?.startsWith("audio/") == true
+            }
+        } catch (error: Exception) {
+            Log.w(TAG, "无法通过 MediaExtractor 检测视频音轨", error)
+            false
+        } finally {
+            extractor.release()
+        }
     }
 
     private fun createTemporaryWav(prefix: String): File {
