@@ -1622,6 +1622,9 @@ class MainActivity : AppCompatActivity() {
                         encryptionMethod = encryptionMethod,
                         splitSizeBytes = splitSizeBytes,
                         checkCancelled = workerContext::ensureActive,
+                        onProgress = { generatedBytes, sourceBytes ->
+                            updateCompressionProgress(progress, generatedBytes, sourceBytes)
+                        },
                         onCommitted = {
                             committed.set(true)
                             runOnUiThread {
@@ -1933,57 +1936,77 @@ class MainActivity : AppCompatActivity() {
         onCancelled: () -> Unit = {},
         onConflict: ((ArchiveManager.DestinationConflict) -> ArchiveManager.ConflictResolution)? = null
     ) {
-        val archiveProgress = showArchiveProgress("正在解压", "目标：${destination.absolutePath}")
-        lifecycleScope.launch {
-            val passwordChars = password?.toCharArray()
-            val result = try {
-                withContext(Dispatchers.IO) {
-                    runCatching {
-                        ArchiveManager.extractArchive(
+        val archiveProgress = showArchiveProgress(
+            "正在解压",
+            "目标：${destination.absolutePath}",
+            showCancel = true
+        )
+        val cancelledByUser = AtomicBoolean(false)
+        val extractionJob = lifecycleScope.launch {
+            try {
+                val passwordChars = password?.toCharArray()
+                val result = try {
+                    withContext(Dispatchers.IO) {
+                        val workerContext = currentCoroutineContext()
+                        runCatching {
+                            ArchiveManager.extractArchive(
+                                archive = archive,
+                                destination = destination,
+                                password = passwordChars,
+                                conflictPolicy = conflictPolicy,
+                                conflictPolicies = conflictPolicies,
+                                conflictsPrechecked = true,
+                                onProgress = { phase, completed, total ->
+                                    updateArchiveProgress(archiveProgress, phase, completed, total)
+                                },
+                                onConflict = onConflict,
+                                checkCancelled = workerContext::ensureActive
+                            )
+                        }
+                    }
+                } finally {
+                    passwordChars?.fill('\u0000')
+                    archiveProgress.dialog.dismiss()
+                }
+                result.onSuccess { extracted ->
+                    showExtractionCompleted(extracted)
+                    onCompleted()
+                }.onFailure { error ->
+                    if (isArchiveOperationCancelled(error)) {
+                        onCancelled()
+                    } else if (isDestinationConflict(error)) {
+                        prepareArchiveExtraction(archive, destination, password, onCompleted, onCancelled)
+                    } else if (needsArchivePassword(archive, error, password != null)) {
+                        showArchivePasswordDialog(
                             archive = archive,
-                            destination = destination,
-                            password = passwordChars,
-                            conflictPolicy = conflictPolicy,
-                            conflictPolicies = conflictPolicies,
-                            conflictsPrechecked = true,
-                            onProgress = { phase, completed, total ->
-                                updateArchiveProgress(archiveProgress, phase, completed, total)
+                            onPassword = { enteredPassword ->
+                                prepareArchiveExtraction(
+                                    archive,
+                                    destination,
+                                    enteredPassword,
+                                    onCompleted,
+                                    onCancelled
+                                )
                             },
-                            onConflict = onConflict
+                            onCancelled = onCancelled
                         )
+                    } else {
+                        onCancelled()
+                        showOperationError("解压失败", error)
                     }
                 }
-            } finally {
-                passwordChars?.fill('\u0000')
-                archiveProgress.dialog.dismiss()
+            } catch (error: CancellationException) {
+                if (!cancelledByUser.get()) throw error
+                onCancelled()
             }
-            result.onSuccess { extracted ->
-                showExtractionCompleted(extracted)
-                onCompleted()
-            }.onFailure { error ->
-                if (isArchiveOperationCancelled(error)) {
-                    onCancelled()
-                } else if (isDestinationConflict(error)) {
-                    prepareArchiveExtraction(archive, destination, password, onCompleted, onCancelled)
-                } else if (needsArchivePassword(archive, error, password != null)) {
-                    showArchivePasswordDialog(
-                        archive = archive,
-                        onPassword = { enteredPassword ->
-                            prepareArchiveExtraction(
-                                archive,
-                                destination,
-                                enteredPassword,
-                                onCompleted,
-                                onCancelled
-                            )
-                        },
-                        onCancelled = onCancelled
-                    )
-                } else {
-                    onCancelled()
-                    showOperationError("解压失败", error)
-                }
-            }
+        }
+        archiveProgress.dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { button ->
+            button.isEnabled = false
+            archiveProgress.binding.tvProgressMessage.text = "正在取消..."
+            archiveProgress.binding.progressBar.isIndeterminate = true
+            archiveProgress.binding.tvProgressPercent.visibility = View.GONE
+            cancelledByUser.set(true)
+            extractionJob.cancel(CancellationException("用户取消解压"))
         }
     }
 
@@ -2222,13 +2245,20 @@ class MainActivity : AppCompatActivity() {
                 progress.binding.progressBar.isIndeterminate = false
                 progress.binding.progressBar.max = 1000
                 progress.binding.progressBar.progress = (ratio * 1000.0).toInt().coerceIn(0, 1000)
-                progress.binding.tvProgressPercent.text = "$percent%"
+                progress.binding.tvProgressPercent.text = if (phase == ArchiveManager.ProgressPhase.SCANNING) {
+                    "$percent% · 已检查 $completed / $total 项"
+                } else {
+                    "$percent% · 已处理 ${FileUtils.formatFileSize(completed)} / ${FileUtils.formatFileSize(total)}"
+                }
                 progress.binding.tvProgressPercent.visibility = View.VISIBLE
             } else {
                 progress.binding.progressBar.isIndeterminate = true
-                if (phase == ArchiveManager.ProgressPhase.EXTRACTING && completed > 0L) {
-                    progress.binding.tvProgressPercent.text =
+                if (phase == ArchiveManager.ProgressPhase.EXTRACTING) {
+                    progress.binding.tvProgressPercent.text = if (completed > 0L) {
                         "已处理 ${FileUtils.formatFileSize(completed)}"
+                    } else {
+                        "正在读取..."
+                    }
                     progress.binding.tvProgressPercent.visibility = View.VISIBLE
                 } else {
                     progress.binding.tvProgressPercent.visibility = View.GONE
@@ -2632,6 +2662,27 @@ class MainActivity : AppCompatActivity() {
                     audioOnlyFromVideo
                 )
             }
+        }
+    }
+
+    private fun updateCompressionProgress(
+        progress: ArchiveProgressUi,
+        generatedBytes: Long,
+        sourceBytes: Long
+    ) {
+        runOnUiThread {
+            if (!progress.dialog.isShowing) return@runOnUiThread
+            progress.binding.tvProgressMessage.text = "正在压缩..."
+            progress.binding.progressBar.isIndeterminate = true
+            progress.binding.tvProgressPercent.text = buildString {
+                append("已生成 ")
+                append(FileUtils.formatFileSize(generatedBytes))
+                if (sourceBytes > 0L) {
+                    append(" · 源文件 ")
+                    append(FileUtils.formatFileSize(sourceBytes))
+                }
+            }
+            progress.binding.tvProgressPercent.visibility = View.VISIBLE
         }
     }
 

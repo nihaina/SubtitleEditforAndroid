@@ -13,6 +13,8 @@ import java.nio.file.SimpleFileVisitor
 import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.BasicFileAttributes
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 object ArchiveManager {
 
@@ -189,6 +191,7 @@ object ArchiveManager {
         encryptionMethod: EncryptionMethod? = null,
         splitSizeBytes: Long? = null,
         checkCancelled: () -> Unit = {},
+        onProgress: (generatedBytes: Long, sourceBytes: Long) -> Unit = { _, _ -> },
         onCommitted: () -> Unit = {}
     ) {
         checkCancelled()
@@ -224,17 +227,25 @@ object ArchiveManager {
         destination.parentFile?.mkdirs()
 
         validateSources(sources, checkCancelled)
+        var sourceBytes = 0L
+        sources.forEach { source ->
+            sourceBytes = addArchiveBytes(sourceBytes, sourceTreeBytes(source, checkCancelled))
+        }
         val temp = File(destination.parentFile, ".${destination.name}.${UUID.randomUUID()}.${outputExtension(format, method)}")
         try {
             checkCancelled()
-            OfficialSevenZipArchive.create(
-                temp,
-                sources,
-                format,
-                method,
-                password,
-                effectiveEncryptionMethod,
-                splitSizeBytes
+            onProgress(0L, sourceBytes)
+            createArchiveWithProgress(
+                destination = temp,
+                sources = sources,
+                format = format,
+                method = method,
+                password = password,
+                encryptionMethod = effectiveEncryptionMethod,
+                splitSizeBytes = splitSizeBytes,
+                sourceBytes = sourceBytes,
+                onProgress = onProgress,
+                checkCancelled = checkCancelled
             )
             checkCancelled()
             if (splitSizeBytes == null) commitSingleArchive(temp, destination, checkCancelled)
@@ -281,8 +292,10 @@ object ArchiveManager {
         conflictsPrechecked: Boolean = false,
         limits: ExtractionLimits = ExtractionLimits(),
         onProgress: ((ProgressPhase, Long, Long) -> Unit)? = null,
-        onConflict: ((DestinationConflict) -> ConflictResolution)? = null
+        onConflict: ((DestinationConflict) -> ConflictResolution)? = null,
+        checkCancelled: () -> Unit = {}
     ): ExtractResult {
+        checkCancelled()
         require(
             existsNoFollow(destination) &&
                 Files.isDirectory(destination.toPath(), LinkOption.NOFOLLOW_LINKS)
@@ -296,13 +309,16 @@ object ArchiveManager {
                 conflictPolicies = conflictPolicies,
                 limits = limits,
                 onProgress = onProgress,
-                onConflict = onConflict
+                onConflict = onConflict,
+                checkCancelled = checkCancelled
             )
         }
         val entries = OfficialSevenZipArchive.list(archive, password)
+        checkCancelled()
         entries.firstOrNull { it.isSymbolicLink }?.let { throw IOException("压缩包包含不支持的符号链接：${it.name}") }
         val validationCounter = Counter(limits)
         entries.forEach { entry ->
+            checkCancelled()
             validationCounter.addEntry()
             if (!entry.isDirectory) validationCounter.addBytes(entry.size.coerceAtLeast(0L))
             validateEntryName(entry.name)
@@ -315,9 +331,9 @@ object ArchiveManager {
                 }
         }
 
-        onProgress?.invoke(ProgressPhase.EXTRACTING, 0L, 0L)
-        val counter = Counter(limits)
         val totalBytes = entries.sumOf { it.size.coerceAtLeast(0L) }
+        onProgress?.invoke(ProgressPhase.EXTRACTING, 0L, totalBytes)
+        val counter = Counter(limits)
         val resolver = ExtractionTargetResolver(
             destination = destination,
             policy = conflictPolicy,
@@ -326,8 +342,16 @@ object ArchiveManager {
         )
         val staging = File(destination, ".subtitleedit-extract-${UUID.randomUUID()}")
         try {
-            OfficialSevenZipArchive.extractTo(archive, staging, password)
+            extractToStagingWithProgress(
+                archive = archive,
+                staging = staging,
+                password = password,
+                totalBytes = totalBytes,
+                onProgress = onProgress,
+                checkCancelled = checkCancelled
+            )
             entries.sortedBy { it.name.count { character -> character == '/' } }.forEach { entry ->
+                checkCancelled()
                 counter.addEntry()
                 validateEntryName(entry.name)
                 val source = File(staging, entry.name.replace('/', File.separatorChar))
@@ -393,8 +417,10 @@ object ArchiveManager {
         conflictPolicies: Map<String, ConflictPolicy>,
         limits: ExtractionLimits,
         onProgress: ((ProgressPhase, Long, Long) -> Unit)?,
-        onConflict: ((DestinationConflict) -> ConflictResolution)?
+        onConflict: ((DestinationConflict) -> ConflictResolution)?,
+        checkCancelled: () -> Unit
     ): ExtractResult {
+        checkCancelled()
         val staging = File(destination, ".subtitleedit-extract-${UUID.randomUUID()}")
         val counter = Counter(limits)
         val planner = StreamingConflictPlanner(
@@ -415,7 +441,9 @@ object ArchiveManager {
                         maxEntries = limits.maxEntries,
                         maxBytes = limits.maxBytes,
                         validateExpectedSize = format != ReadFormat.TAR_GZIP,
+                        checkCancelled = checkCancelled,
                         onEntry = { entry ->
+                            checkCancelled()
                             counter.addEntry()
                             validateEntryName(entry.name)
                             planner.inspect(
@@ -426,6 +454,7 @@ object ArchiveManager {
                             )
                         },
                         onProgress = { completed, total ->
+                            checkCancelled()
                             onProgress?.invoke(ProgressPhase.EXTRACTING, completed, total)
                         }
                     )
@@ -453,6 +482,7 @@ object ArchiveManager {
             )
             resolver = targetResolver
             entries.sortedBy { it.name.count { character -> character == '/' } }.forEach { entry ->
+                checkCancelled()
                 val target = targetResolver.resolve(
                     entry.name,
                     entry.isDirectory,
@@ -961,6 +991,165 @@ object ArchiveManager {
         }.isSuccess
     }
 
+    private fun createArchiveWithProgress(
+        destination: File,
+        sources: List<File>,
+        format: CreateFormat,
+        method: CompressionMethod,
+        password: CharArray?,
+        encryptionMethod: EncryptionMethod?,
+        splitSizeBytes: Long?,
+        sourceBytes: Long,
+        onProgress: (generatedBytes: Long, sourceBytes: Long) -> Unit,
+        checkCancelled: () -> Unit
+    ) {
+        val finished = AtomicBoolean(false)
+        val failure = AtomicReference<Throwable?>()
+        val worker = Thread({
+            try {
+                OfficialSevenZipArchive.create(
+                    destination = destination,
+                    sources = sources,
+                    format = format,
+                    method = method,
+                    password = password,
+                    encryptionMethod = encryptionMethod,
+                    splitSizeBytes = splitSizeBytes
+                )
+            } catch (error: Throwable) {
+                failure.set(error)
+            } finally {
+                finished.set(true)
+            }
+        }, "subtitleedit-archive-create")
+        worker.start()
+        try {
+            while (!finished.get()) {
+                checkCancelled()
+                onProgress(compressionOutputBytes(destination), sourceBytes)
+                try {
+                    Thread.sleep(COMPRESS_PROGRESS_INTERVAL_MS)
+                } catch (error: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw IOException("压缩线程被中断", error)
+                }
+            }
+            checkCancelled()
+            onProgress(compressionOutputBytes(destination), sourceBytes)
+            failure.get()?.let { throw it }
+        } catch (error: Throwable) {
+            if (!finished.get()) {
+                worker.interrupt()
+                deleteCompressionOutputFiles(destination)
+                runCatching { worker.join(COMPRESS_CANCEL_WAIT_MS) }
+            }
+            throw error
+        }
+    }
+
+    private fun sourceTreeBytes(file: File, checkCancelled: () -> Unit): Long {
+        checkCancelled()
+        if (file.isFile) return file.length().coerceAtLeast(0L)
+        if (!file.isDirectory) return 0L
+        val children = file.listFiles() ?: throw IOException("无法读取文件夹内容：${file.name}")
+        var total = 0L
+        children.forEach { child ->
+            total = addArchiveBytes(total, sourceTreeBytes(child, checkCancelled))
+        }
+        return total
+    }
+
+    private fun compressionOutputBytes(destination: File): Long {
+        val prefix = ".${destination.name}."
+        val splitPrefix = "${destination.name}."
+        var total = 0L
+        destination.parentFile?.listFiles { file ->
+            file == destination || file.name.startsWith(prefix) || file.name.startsWith(splitPrefix)
+        }?.forEach { file ->
+            total = addArchiveBytes(total, file.length().coerceAtLeast(0L))
+        }
+        return total
+    }
+
+    private fun deleteCompressionOutputFiles(destination: File) {
+        val prefix = ".${destination.name}."
+        val splitPrefix = "${destination.name}."
+        destination.parentFile?.listFiles { file ->
+            file == destination || file.name.startsWith(prefix) || file.name.startsWith(splitPrefix)
+        }?.forEach { file ->
+            runCatching { file.deleteRecursively() }
+        }
+    }
+
+    private fun addArchiveBytes(current: Long, amount: Long): Long =
+        if (amount > 0L && current > Long.MAX_VALUE - amount) Long.MAX_VALUE else current + amount
+
+    private fun extractToStagingWithProgress(
+        archive: File,
+        staging: File,
+        password: CharArray?,
+        totalBytes: Long,
+        onProgress: ((ProgressPhase, Long, Long) -> Unit)?,
+        checkCancelled: () -> Unit
+    ) {
+        val finished = AtomicBoolean(false)
+        val failure = AtomicReference<Throwable?>()
+        val worker = Thread({
+            try {
+                OfficialSevenZipArchive.extractTo(archive, staging, password)
+            } catch (error: Throwable) {
+                failure.set(error)
+            } finally {
+                finished.set(true)
+            }
+        }, "subtitleedit-archive-extract")
+        worker.start()
+        try {
+            while (!finished.get()) {
+                checkCancelled()
+                onProgress?.invoke(
+                    ProgressPhase.EXTRACTING,
+                    stagedFileBytes(staging),
+                    totalBytes
+                )
+                try {
+                    Thread.sleep(EXTRACT_PROGRESS_INTERVAL_MS)
+                } catch (error: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw IOException("解压线程被中断", error)
+                }
+            }
+            checkCancelled()
+            onProgress?.invoke(
+                ProgressPhase.EXTRACTING,
+                stagedFileBytes(staging),
+                totalBytes
+            )
+            failure.get()?.let { throw it }
+        } catch (error: Throwable) {
+            if (!finished.get()) {
+                worker.interrupt()
+                deleteTreeNoFollow(staging)
+                runCatching { worker.join(EXTRACT_CANCEL_WAIT_MS) }
+            }
+            throw error
+        }
+    }
+
+    private fun stagedFileBytes(staging: File): Long {
+        var total = 0L
+        staging.walkTopDown().forEach { file ->
+            if (!file.isFile) return@forEach
+            val size = file.length().coerceAtLeast(0L)
+            total = if (size > 0L && total > Long.MAX_VALUE - size) {
+                Long.MAX_VALUE
+            } else {
+                total + size
+            }
+        }
+        return total
+    }
+
     private fun existsNoFollow(file: File): Boolean =
         Files.exists(file.toPath(), LinkOption.NOFOLLOW_LINKS)
 
@@ -1199,4 +1388,8 @@ object ArchiveManager {
     }
 
     private const val ARCHIVE_IO_BUFFER_SIZE = 64 * 1024
+    private const val EXTRACT_PROGRESS_INTERVAL_MS = 100L
+    private const val EXTRACT_CANCEL_WAIT_MS = 2_000L
+    private const val COMPRESS_PROGRESS_INTERVAL_MS = 100L
+    private const val COMPRESS_CANCEL_WAIT_MS = 2_000L
 }
