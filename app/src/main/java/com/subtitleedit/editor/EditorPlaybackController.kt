@@ -120,6 +120,12 @@ internal class EditorPlaybackController(
         isLimitedRangePlaybackActive = false
         val clampedTime = timeMs.coerceIn(0L, durationMs)
         playbackEngine.seekTo(clampedTime)
+        if (mediaType == EditorMediaType.AUDIO) {
+            // MediaPlayer seeks asynchronously. Keep the head on its last actual position
+            // until OnSeekComplete supplies the new media-clock position.
+            stopProgressUpdate()
+            return
+        }
         currentPositionMs = clampedTime
         highlightSubtitleAtTime(currentPositionMs)
         updatePlayerUiAtKnownPosition(clampedTime)

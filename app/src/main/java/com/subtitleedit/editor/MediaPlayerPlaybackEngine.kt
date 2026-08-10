@@ -20,8 +20,9 @@ internal class MediaPlayerPlaybackEngine : EditorPlaybackEngine {
     override val currentPositionMs: Long
         get() {
             val mediaPlayer = player?.takeIf { phase.canAccessPlayer } ?: return 0L
-            if (seekInProgress) return cachedSeekPositionMs
-            return runCatching { mediaPlayer.currentPosition.toLong() }.getOrDefault(0L)
+            return runCatching {
+                mediaPlayer.currentPosition.toLong()
+            }.getOrDefault(cachedSeekPositionMs)
         }
 
     override val durationMs: Long
