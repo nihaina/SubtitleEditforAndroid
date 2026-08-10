@@ -64,6 +64,7 @@ import java.util.Date
 import java.util.Locale
 import com.subtitleedit.util.ArchivePasswordRequiredException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
@@ -73,6 +74,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.nio.file.Files
 
 /**
  * 主界面 - 文件浏览器
@@ -131,6 +135,7 @@ class MainActivity : AppCompatActivity() {
     private var observedDirectoryPath: String? = null
     private var directoryWatchingEnabled = false
     private var directorySearchJob: Job? = null
+    private var fileCopyJob: Job? = null
     private var directorySearchGeneration = 0L
     private var activeFileSearchView: SearchView? = null
     private val directoryRefreshRunnable = Runnable {
@@ -1173,25 +1178,71 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val sources = selectedFiles()
-        lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    sources.forEach { source -> copyOrMove(source, destination, operation) }
+        if (sources.isEmpty()) {
+            exitSelectionMode()
+            return
+        }
+
+        if (operation == FileOperation.MOVE) {
+            // 移动使用文件系统的重命名操作，启动后立即退出选择模式。
+            exitSelectionMode()
+            lifecycleScope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    runCatching {
+                        sources.forEach { source -> moveFile(source, destination) }
+                    }
+                }
+                result.onSuccess {
+                    showShortToast("已移动")
+                    loadDirectory(destination)
+                }.onFailure { error ->
+                    showShortToast("移动失败：${error.message ?: "未知错误"}")
+                    loadDirectory(destination)
                 }
             }
-            result.onSuccess {
-                showShortToast(
-                    when (operation) {
-                        FileOperation.COPY -> "已复制"
-                        FileOperation.MOVE -> "已移动"
-                        FileOperation.EXTRACT -> error("无效的复制操作")
-                    }
-                )
+            return
+        }
+
+        if (fileCopyJob?.isActive == true) return
+        val progress = showArchiveProgress(
+            title = "正在复制",
+            message = "正在准备复制...",
+            showCancel = true
+        )
+        val cancelledByUser = AtomicBoolean(false)
+        fileCopyJob = lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    copyFiles(
+                        sources = sources,
+                        destination = destination,
+                        onProgress = { message, completed, total ->
+                            updateFileCopyProgress(progress, message, completed, total)
+                        }
+                    )
+                }
                 exitSelectionMode()
                 loadDirectory(destination)
-            }.onFailure { error ->
-                showShortToast("操作失败：${error.message ?: "未知错误"}")
+                showShortToast("已复制")
+            } catch (error: CancellationException) {
+                if (!cancelledByUser.get()) throw error
+                exitSelectionMode()
+                loadDirectory(destination)
+                showShortToast("已取消复制")
+            } catch (error: Throwable) {
+                showShortToast("复制失败：${error.message ?: "未知错误"}")
+            } finally {
+                progress.dialog.dismiss()
+                fileCopyJob = null
             }
+        }
+        progress.dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { button ->
+            button.isEnabled = false
+            progress.binding.tvProgressMessage.text = "正在取消..."
+            progress.binding.progressBar.isIndeterminate = true
+            progress.binding.tvProgressPercent.visibility = View.GONE
+            cancelledByUser.set(true)
+            fileCopyJob?.cancel(CancellationException("用户取消复制"))
         }
     }
 
@@ -1202,20 +1253,123 @@ class MainActivity : AppCompatActivity() {
         updateSelectionUi()
     }
 
-    private fun copyOrMove(source: File, destination: File, operation: FileOperation) {
-        require(operation == FileOperation.COPY || operation == FileOperation.MOVE)
+    private fun moveFile(source: File, destination: File) {
         val sourcePath = source.canonicalFile
         val destinationPath = destination.canonicalFile
         if (source.isDirectory && destinationPath.path.startsWith(sourcePath.path + File.separator)) {
             throw IllegalArgumentException("不能将文件夹复制或移动到其自身内部")
         }
         val target = File(destination, uniqueFileName(destination, source.name))
-        if (!source.copyRecursively(target, overwrite = false)) {
-            throw IllegalStateException("复制失败：${source.name}")
+        try {
+            Files.move(source.toPath(), target.toPath())
+        } catch (error: Exception) {
+            if (!source.renameTo(target)) throw error
         }
-        if (operation == FileOperation.MOVE && !source.deleteRecursively()) {
-            throw IllegalStateException("已复制，但无法删除原文件：${source.name}")
+    }
+
+    private suspend fun copyFiles(
+        sources: List<File>,
+        destination: File,
+        onProgress: (message: String, completed: Long, total: Long) -> Unit
+    ) {
+        var total = 0L
+        sources.forEach { source ->
+            currentCoroutineContext().ensureActive()
+            total = addFileSize(total, fileTreeSize(source))
         }
+
+        var completed = 0L
+        var lastProgressUpdate = 0L
+        fun reportProgress(message: String, force: Boolean = false) {
+            val now = SystemClock.elapsedRealtime()
+            if (force || now - lastProgressUpdate >= 100L || (total > 0L && completed >= total)) {
+                lastProgressUpdate = now
+                onProgress(message, completed, total)
+            }
+        }
+        reportProgress("正在复制...", force = true)
+
+        sources.forEach { source ->
+            currentCoroutineContext().ensureActive()
+            val target = File(destination, uniqueFileName(destination, source.name))
+            val temporaryTarget = temporaryCopyTarget(destination, target.name)
+            try {
+                copyRecursivelyCancellable(source, temporaryTarget) { bytesCopied ->
+                    completed = addFileSize(completed, bytesCopied)
+                    reportProgress("正在复制 ${source.name}...")
+                }
+                currentCoroutineContext().ensureActive()
+                Files.move(temporaryTarget.toPath(), target.toPath())
+                reportProgress("正在复制 ${source.name}...", force = true)
+            } catch (error: Throwable) {
+                temporaryTarget.deleteRecursively()
+                throw error
+            }
+        }
+    }
+
+    private suspend fun copyRecursivelyCancellable(
+        source: File,
+        target: File,
+        onBytesCopied: (Long) -> Unit
+    ) {
+        currentCoroutineContext().ensureActive()
+        if (source.isDirectory) {
+            if (!target.mkdirs() && !target.isDirectory) {
+                throw IllegalStateException("无法创建目录：${target.name}")
+            }
+            val children = source.listFiles()
+                ?: throw IllegalStateException("无法读取目录：${source.name}")
+            children.forEach { child ->
+                copyRecursivelyCancellable(child, File(target, child.name), onBytesCopied)
+            }
+            return
+        }
+
+        target.parentFile?.let { parent ->
+            if (!parent.exists() && !parent.mkdirs()) {
+                throw IllegalStateException("无法创建目录：${parent.name}")
+            }
+        }
+        val buffer = ByteArray(1024 * 1024)
+        FileInputStream(source).use { input ->
+            FileOutputStream(target, false).use { output ->
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    if (count == 0) continue
+                    output.write(buffer, 0, count)
+                    onBytesCopied(count.toLong())
+                }
+            }
+        }
+    }
+
+    private suspend fun fileTreeSize(file: File): Long {
+        currentCoroutineContext().ensureActive()
+        if (file.isFile) return file.length().coerceAtLeast(0L)
+        if (!file.isDirectory) return 0L
+        val children = file.listFiles() ?: return 0L
+        var total = 0L
+        children.forEach { child ->
+            total = addFileSize(total, fileTreeSize(child))
+        }
+        return total
+    }
+
+    private fun addFileSize(current: Long, amount: Long): Long =
+        if (amount > 0L && current > Long.MAX_VALUE - amount) Long.MAX_VALUE else current + amount
+
+    private fun temporaryCopyTarget(destination: File, targetName: String): File {
+        var index = 0
+        var candidate: File
+        do {
+            val suffix = if (index == 0) "" else "-$index"
+            candidate = File(destination, ".${targetName}.copying-${System.nanoTime()}$suffix")
+            index++
+        } while (candidate.exists())
+        return candidate
     }
 
     private fun uniqueFileName(directory: File, originalName: String): String {
@@ -2484,6 +2638,30 @@ class MainActivity : AppCompatActivity() {
                     possibleSubtitleFiles.firstOrNull(),
                     audioOnlyFromVideo
                 )
+            }
+        }
+    }
+
+    private fun updateFileCopyProgress(
+        progress: ArchiveProgressUi,
+        message: String,
+        completed: Long,
+        total: Long
+    ) {
+        runOnUiThread {
+            if (!progress.dialog.isShowing) return@runOnUiThread
+            progress.binding.tvProgressMessage.text = message
+            if (total > 0L) {
+                val ratio = completed.coerceIn(0L, total).toDouble() / total.toDouble()
+                progress.binding.progressBar.isIndeterminate = false
+                progress.binding.progressBar.max = 1000
+                progress.binding.progressBar.progress = (ratio * 1000.0).toInt().coerceIn(0, 1000)
+                progress.binding.tvProgressPercent.text =
+                    "${FileUtils.formatFileSize(completed)} / ${FileUtils.formatFileSize(total)}"
+                progress.binding.tvProgressPercent.visibility = View.VISIBLE
+            } else {
+                progress.binding.progressBar.isIndeterminate = true
+                progress.binding.tvProgressPercent.visibility = View.GONE
             }
         }
     }
