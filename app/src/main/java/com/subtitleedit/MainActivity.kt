@@ -240,6 +240,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        if (stateModel.selectedTopLevelItem == R.id.nav_directory) {
+            saveCurrentDirectoryScrollPosition()
+        }
         directoryWatchingEnabled = false
         stopDirectoryObserver()
         super.onPause()
@@ -345,6 +348,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showTopLevelPage(itemId: Int) {
+        val wasDirectorySelected = stateModel.selectedTopLevelItem == R.id.nav_directory
+        if (wasDirectorySelected && itemId != R.id.nav_directory) {
+            saveCurrentDirectoryScrollPosition()
+        }
         stateModel.selectedTopLevelItem = itemId
         val directorySelected = itemId == R.id.nav_directory
         binding.directoryContent.visibility = if (directorySelected) View.VISIBLE else View.GONE
@@ -354,7 +361,7 @@ class MainActivity : AppCompatActivity() {
 
         if (directorySelected) {
             supportActionBar?.title = getString(R.string.nav_directory)
-            currentDirectory?.let(::loadDirectory)
+            currentDirectory?.let { loadDirectory(it, restoreScrollPosition = true) }
         } else {
             directorySearchJob?.cancel()
             stopDirectoryObserver()
@@ -389,7 +396,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun openDirectoryFromFavorites(directory: File) {
-        if (!loadDirectory(directory)) return
+        if (!loadDirectory(directory, restoreScrollPosition = true)) return
         directoryHistory.clear()
         selectedPaths.clear()
         pendingFileOperation = null
@@ -724,7 +731,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadInitialDirectory() {
         val restored = currentDirectory?.takeIf { it.exists() && it.canRead() }
-        if (loadDirectory(restored ?: getDefaultDirectory())) return
+        if (loadDirectory(restored ?: getDefaultDirectory(), restoreScrollPosition = restored != null)) return
         if (restored == null) return
 
         directoryHistory.clear()
@@ -734,7 +741,7 @@ class MainActivity : AppCompatActivity() {
         loadDirectory(getDefaultDirectory())
     }
     
-    private fun loadDirectory(directory: File): Boolean {
+    private fun loadDirectory(directory: File, restoreScrollPosition: Boolean = false): Boolean {
         if (!directory.exists() || !directory.canRead()) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "无法访问目录：${directory.name}", Toast.LENGTH_SHORT).show()
             return false
@@ -753,12 +760,12 @@ class MainActivity : AppCompatActivity() {
         )
         directoryFiles.clear()
         directoryFiles.addAll(files.distinctBy { it.absolutePath })
-        displayDirectoryFiles()
+        displayDirectoryFiles(restoreScrollPosition = restoreScrollPosition)
         startDirectoryObserver(directory)
         return true
     }
 
-    private fun displayDirectoryFiles() {
+    private fun displayDirectoryFiles(restoreScrollPosition: Boolean = false) {
         directorySearchJob?.cancel()
         directorySearchJob = null
         val searchGeneration = ++directorySearchGeneration
@@ -780,7 +787,8 @@ class MainActivity : AppCompatActivity() {
                 directMatches,
                 showParent = true,
                 relativePathRoot = null,
-                searching = false
+                searching = false,
+                restoreScrollPosition = restoreScrollPosition
             )
             return
         }
@@ -790,7 +798,8 @@ class MainActivity : AppCompatActivity() {
             directMatches,
             showParent = false,
             relativePathRoot = directory,
-            searching = true
+            searching = true,
+            restoreScrollPosition = restoreScrollPosition
         )
 
         val rootPath = directory.absolutePath
@@ -866,7 +875,8 @@ class MainActivity : AppCompatActivity() {
         displayed: List<File>,
         showParent: Boolean,
         relativePathRoot: File?,
-        searching: Boolean
+        searching: Boolean,
+        restoreScrollPosition: Boolean = false
     ) {
         visibleFiles.clear()
         visibleFiles.addAll(displayed)
@@ -878,13 +888,61 @@ class MainActivity : AppCompatActivity() {
         }
         adapterItems.addAll(displayed)
         fileAdapter.setRelativePathRoot(relativePathRoot)
-        fileAdapter.submitList(adapterItems) { fileAdapter.notifyDataSetChanged() }
+        val directoryPath = currentDirectory?.let(::directoryPath)
+        val savedScrollPosition = if (restoreScrollPosition && directoryPath != null) {
+            stateModel.directoryScrollPositions[directoryPath]
+        } else {
+            null
+        }
+        fileAdapter.submitList(adapterItems) {
+            fileAdapter.notifyDataSetChanged()
+            if (restoreScrollPosition && directoryPath != null) {
+                binding.rvFileList.post {
+                    if (currentDirectory?.let(::directoryPath) != directoryPath) return@post
+                    restoreDirectoryScrollPosition(savedScrollPosition)
+                }
+            }
+        }
         updateSelectionUi(invalidateMenu = false)
         binding.tvEmptyStateMessage.setText(
             if (searching) R.string.file_searching else R.string.no_files
         )
         binding.emptyState.visibility = if (adapterItems.isEmpty()) View.VISIBLE else View.GONE
         binding.rvFileList.visibility = if (adapterItems.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    private fun directoryPath(directory: File): String =
+        runCatching { directory.canonicalPath }.getOrElse { directory.absolutePath }
+
+    private fun saveCurrentDirectoryScrollPosition() {
+        val directory = currentDirectory ?: return
+        val layoutManager = binding.rvFileList.layoutManager as? LinearLayoutManager ?: return
+        val firstVisibleIndex = layoutManager.findFirstVisibleItemPosition()
+        if (firstVisibleIndex < 0) return
+
+        val firstVisibleView = layoutManager.findViewByPosition(firstVisibleIndex)
+        val offset = firstVisibleView?.let {
+            layoutManager.getDecoratedTop(it) - binding.rvFileList.paddingTop
+        } ?: 0
+        val firstVisiblePath = fileAdapter.currentList.getOrNull(firstVisibleIndex)?.absolutePath
+        stateModel.directoryScrollPositions[directoryPath(directory)] = DirectoryScrollPosition(
+            firstVisiblePath = firstVisiblePath,
+            firstVisibleIndex = firstVisibleIndex,
+            offset = offset
+        )
+    }
+
+    private fun restoreDirectoryScrollPosition(savedPosition: DirectoryScrollPosition?) {
+        val layoutManager = binding.rvFileList.layoutManager as? LinearLayoutManager ?: return
+        if (fileAdapter.itemCount == 0) return
+
+        val position = savedPosition?.firstVisiblePath?.let { path ->
+            fileAdapter.currentList.indexOfFirst { it.absolutePath == path }
+        }?.takeIf { it >= 0 } ?: savedPosition?.firstVisibleIndex ?: 0
+        layoutManager.scrollToPositionWithOffset(
+            position.coerceIn(0, fileAdapter.itemCount - 1),
+            savedPosition?.offset ?: 0
+        )
     }
 
     private fun shouldDisplayFile(file: File, includeAllFileTypes: Boolean): Boolean {
@@ -992,6 +1050,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun navigateIntoDirectory(directory: File) {
         val previousDirectory = currentDirectory ?: return
+        saveCurrentDirectoryScrollPosition()
         val wasSearching = isFileSearchQueryActive()
         val historyEntries = if (wasSearching) {
             navigationHistoryForSearchResult(previousDirectory, directory)
@@ -1002,7 +1061,7 @@ class MainActivity : AppCompatActivity() {
             clearFileSearch(refreshDirectory = false)
         }
 
-        if (loadDirectory(directory)) {
+        if (loadDirectory(directory, restoreScrollPosition = true)) {
             directoryHistory.addAll(historyEntries)
             if (wasSearching) invalidateOptionsMenu()
         }
@@ -2809,7 +2868,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun navigateDestinationInto(directory: File) {
         val current = currentDirectory ?: return
-        if (loadDirectory(directory)) {
+        saveCurrentDirectoryScrollPosition()
+        if (loadDirectory(directory, restoreScrollPosition = true)) {
             directoryHistory += current
         }
     }
@@ -2823,7 +2883,8 @@ class MainActivity : AppCompatActivity() {
 
         val target = current.parentFile ?: return false
         if (!target.exists() || !target.canRead()) return false
-        if (loadDirectory(target)) {
+        saveCurrentDirectoryScrollPosition()
+        if (loadDirectory(target, restoreScrollPosition = true)) {
             val historyTarget = directoryHistory.lastOrNull()
             val historyPath = historyTarget?.let { history ->
                 runCatching { history.canonicalPath }.getOrElse { history.absolutePath }
@@ -2840,12 +2901,14 @@ class MainActivity : AppCompatActivity() {
     
     private fun goUpLevel() {
         if (directoryHistory.isNotEmpty()) {
+            saveCurrentDirectoryScrollPosition()
             val parent = directoryHistory.removeAt(directoryHistory.size - 1)
-            loadDirectory(parent)
+            loadDirectory(parent, restoreScrollPosition = true)
         } else {
             currentDirectory?.parentFile?.let { parent ->
                 if (parent.exists() && parent.canRead()) {
-                    loadDirectory(parent)
+                    saveCurrentDirectoryScrollPosition()
+                    loadDirectory(parent, restoreScrollPosition = true)
                 }
             }
         }

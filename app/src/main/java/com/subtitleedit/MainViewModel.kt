@@ -7,9 +7,16 @@ import java.io.File
 
 internal enum class FileOperation { COPY, MOVE, EXTRACT }
 
+internal data class DirectoryScrollPosition(
+    val firstVisiblePath: String?,
+    val firstVisibleIndex: Int,
+    val offset: Int
+)
+
 internal class MainViewModel : ViewModel() {
     var currentDirectory: File? = null
     val directoryHistory = mutableListOf<File>()
+    val directoryScrollPositions = mutableMapOf<String, DirectoryScrollPosition>()
     val selectedPaths = linkedSetOf<String>()
     var pendingFileOperation: FileOperation? = null
     var pendingArchiveFile: File? = null
