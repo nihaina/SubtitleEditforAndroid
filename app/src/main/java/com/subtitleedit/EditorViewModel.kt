@@ -38,4 +38,47 @@ internal class EditorViewModel : ViewModel() {
     var clipboardTexts: List<String> = emptyList()
     var mediaType = EditorMediaType.SUBTITLE_ONLY
     val saveCoordinator = EditorSaveCoordinator()
+
+    fun startNewSubtitleDocument() {
+        clearSubtitleDocumentReference()
+        if (!mediaType.hasPlayableMedia) {
+            filePath = ""
+            currentFile = null
+        }
+        documentTitle = titleForSubtitleDocument("未命名")
+        isNewFile = true
+    }
+
+    fun openUriSubtitleDocument(uri: String, subtitleTitle: String) {
+        clearSubtitleDocumentReference()
+        if (!mediaType.hasPlayableMedia) {
+            filePath = ""
+            currentFile = null
+        }
+        documentUri = uri
+        documentTitle = titleForSubtitleDocument(subtitleTitle)
+        isNewFile = false
+    }
+
+    fun saveUriSubtitleDocument(uri: String, subtitleTitle: String) {
+        subtitleFilePath = ""
+        subtitleFile = null
+        documentUri = uri
+        documentTitle = titleForSubtitleDocument(subtitleTitle)
+        isNewFile = false
+    }
+
+    private fun clearSubtitleDocumentReference() {
+        subtitleFilePath = ""
+        subtitleFile = null
+        documentUri = null
+    }
+
+    private fun titleForSubtitleDocument(subtitleTitle: String): String {
+        return if (mediaType.hasPlayableMedia) {
+            currentFile?.name ?: subtitleTitle
+        } else {
+            subtitleTitle
+        }
+    }
 }

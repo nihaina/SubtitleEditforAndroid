@@ -635,15 +635,13 @@ class EditorActivity : AppCompatActivity() {
     private fun openFileFromUri(uri: Uri) {
         try {
             val content = FileUtils.readUri(this, uri)
-            currentFile = null
             // 获取文件名并更新显示
             val fileName = getFileNameFromUri(uri)
-            setDocumentTitle(fileName)
-            stateModel.documentUri = uri.toString()
+            stateModel.openUriSubtitleDocument(uri.toString(), fileName)
+            setDocumentTitle(stateModel.documentTitle)
             takePersistableWritePermission(uri)
             parseContent(content, fileName)
             hasUnsavedChanges = false
-            isNewFile = false
             com.subtitleedit.util.OverwritingToast.makeText(this, "文件已打开：$fileName", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "打开文件失败：${e.message}", Toast.LENGTH_SHORT).show()
@@ -1417,9 +1415,7 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun doNewFile() {
-        filePath = ""
-        currentFile = null
-        isNewFile = true
+        stateModel.startNewSubtitleDocument()
         clearSubtitleEntries()
         // 添加默认字幕行：3秒时长，文本"请输入文本"
         subtitleEntries.add(SubtitleEntry(
@@ -1436,8 +1432,7 @@ class EditorActivity : AppCompatActivity() {
         binding.rvSubtitles.visibility = android.view.View.VISIBLE
         binding.svSourceView.visibility = android.view.View.GONE
         submitSubtitleList(refreshAll = true, clearSelection = true, syncWaveform = true)
-        stateModel.documentUri = null
-        setDocumentTitle("未命名")
+        setDocumentTitle(stateModel.documentTitle)
         currentFormatInfo = "格式：SRT | 条目数：${subtitleEntries.size}"
         supportActionBar?.subtitle = currentFormatInfo
         hasUnsavedChanges = false
@@ -1498,10 +1493,10 @@ class EditorActivity : AppCompatActivity() {
             }
         }
         if (saved) {
-            stateModel.documentUri = uri.toString()
+            val fileName = getFileNameFromUri(uri)
+            stateModel.saveUriSubtitleDocument(uri.toString(), fileName)
             takePersistableWritePermission(uri)
-            isNewFile = false
-            setDocumentTitle(getFileNameFromUri(uri))
+            setDocumentTitle(stateModel.documentTitle)
         }
         return saved
     }
