@@ -1771,7 +1771,17 @@ class EditorActivity : AppCompatActivity() {
             return
         }
         val selectedEntries = requireSelectedEntries("请先选择要转录的字幕") ?: return
-        transcribeController.start(selectedEntries, audioFile, stateModel.selectedAudioStreamIndex)
+        val audioCacheKey = waveformController.getAudioCacheKey(audioFile) ?: run {
+            showShortToast("媒体缓存索引尚未准备完成")
+            return
+        }
+        transcribeController.start(
+            selectedEntries = selectedEntries,
+            timelineEntries = subtitleEntries.toList(),
+            audioFile = audioFile,
+            audioCacheKey = audioCacheKey,
+            audioStreamIndex = stateModel.selectedAudioStreamIndex
+        )
     }
 
     /** 把预览对话框中勾选应用的文本写回字幕列表。 */

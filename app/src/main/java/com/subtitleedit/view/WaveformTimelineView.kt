@@ -8,7 +8,9 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.DashPathEffect
 import android.graphics.Path
+import android.os.SystemClock
 import android.util.AttributeSet
+import android.util.LruCache
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
@@ -81,6 +83,12 @@ class WaveformTimelineView @JvmOverloads constructor(
 
         /** 频谱图每个 chunk 的固定生成宽度（像素），与缩放无关，保证放大后仍清晰 */
         private const val SPECTROGRAM_CHUNK_WIDTH = 2048
+
+        /** 频谱生成失败后等待一段时间再重试，避免播放刷新触发紧密失败循环。 */
+        private const val SPECTROGRAM_RETRY_DELAY_MS = 5_000L
+
+        private const val MIN_SPECTROGRAM_CACHE_BYTES = 16 * 1024 * 1024
+        private const val MAX_SPECTROGRAM_CACHE_BYTES = 48 * 1024 * 1024
     }
 
     // ==================== 数据 ====================
@@ -155,10 +163,20 @@ class WaveformTimelineView @JvmOverloads constructor(
     private var displayMode = DisplayMode.WAVEFORM
 
     // ==================== 频谱图分块 ====================
-    /** 每个 chunk 的频谱图 Bitmap，null = 未生成 */
-    private var spectrogramChunks: Array<Bitmap?> = emptyArray()
+    /** 频谱 Bitmap 使用按字节计费的 LRU，避免浏览长媒体后无限占用堆内存。 */
+    private val spectrogramChunks = object : LruCache<Int, Bitmap>(spectrogramCacheBytes()) {
+        override fun sizeOf(key: Int, value: Bitmap): Int = value.allocationByteCount.coerceAtLeast(1)
+
+        override fun entryRemoved(evicted: Boolean, key: Int, oldValue: Bitmap, newValue: Bitmap?) {
+            spectrogramRequested.remove(key)
+            if (oldValue !== newValue && !oldValue.isRecycled) {
+                oldValue.recycle()
+            }
+        }
+    }
     /** 已发起请求的 chunk 集合，避免重复请求 */
     private val spectrogramRequested = mutableSetOf<Int>()
+    private var spectrogramRetryAfterMs = LongArray(0)
 
     var onSpectrogramChunkRequest: ((chunkIndex: Int, startMs: Long, endMs: Long, widthPx: Int, heightPx: Int) -> Unit)? = null
 
@@ -373,9 +391,9 @@ class WaveformTimelineView @JvmOverloads constructor(
         cancelPendingSingleTap()
         waveformCache?.recycle()
         waveformCache = null
-        spectrogramChunks.forEach { it?.recycle() }
-        spectrogramChunks = emptyArray()
+        spectrogramChunks.evictAll()
         spectrogramRequested.clear()
+        spectrogramRetryAfterMs = LongArray(0)
     }
 
     override fun onDetachedFromWindow() {
@@ -643,12 +661,14 @@ class WaveformTimelineView @JvmOverloads constructor(
             val dstRight = timeToX(visEnd)
             if (dstLeft >= dstRight) continue
 
-            val bmp = spectrogramChunks.getOrNull(chunkIdx)
+            val bmp = spectrogramChunks.get(chunkIdx)
 
             if (bmp == null) {
                 // 占位灰块 + 触发请求（固定宽度，与缩放无关）
                 canvas.drawRect(dstLeft, yOffset, dstRight, yOffset + spectH, placeholderPaint)
-                if (chunkIdx !in spectrogramRequested) {
+                if (chunkIdx !in spectrogramRequested &&
+                    SystemClock.uptimeMillis() >= spectrogramRetryAfterMs.getOrElse(chunkIdx) { 0L }
+                ) {
                     spectrogramRequested.add(chunkIdx)
                     onSpectrogramChunkRequest?.invoke(
                         chunkIdx, chunkStart, chunkEnd,
@@ -1300,8 +1320,9 @@ class WaveformTimelineView @JvmOverloads constructor(
         this.totalChunks = ((durationMs + CHUNK_DURATION_MS - 1) / CHUNK_DURATION_MS).toInt()
         this.chunkData = Array(totalChunks) { null }
         this.chunkRequestedSamples = IntArray(totalChunks)
-        this.spectrogramChunks = Array(totalChunks) { null }
+        this.spectrogramChunks.evictAll()
         this.spectrogramRequested.clear()
+        this.spectrogramRetryAfterMs = LongArray(totalChunks)
         this.isInitialized = true
 
         // 默认视口：从头开始，显示 3 分钟（或音频更短时显示全部）
@@ -1562,23 +1583,56 @@ class WaveformTimelineView @JvmOverloads constructor(
     /**
      * 注入某个 chunk 的频谱图 Bitmap（主线程调用）
      */
-    fun updateSpectrogramChunk(chunkIndex: Int, bmp: Bitmap) {
-        if (chunkIndex !in 0 until totalChunks) return
-        spectrogramChunks[chunkIndex]?.recycle()
-        spectrogramChunks[chunkIndex] = bmp
+    fun updateSpectrogramChunk(chunkIndex: Int, bmp: Bitmap): Boolean {
+        if (chunkIndex !in 0 until totalChunks) {
+            bmp.recycle()
+            return false
+        }
+        val dimensions = getSpectrogramCacheDimensions()
+        if (dimensions == null || bmp.width != dimensions.first || bmp.height != dimensions.second) {
+            bmp.recycle()
+            spectrogramRequested.remove(chunkIndex)
+            spectrogramRetryAfterMs[chunkIndex] = 0L
+            invalidate()
+            return false
+        }
+        spectrogramRetryAfterMs[chunkIndex] = 0L
+        spectrogramChunks.put(chunkIndex, bmp)
         if (displayMode == DisplayMode.SPECTROGRAM) invalidate()
+        return true
+    }
+
+    fun markSpectrogramChunkFailed(chunkIndex: Int) {
+        if (chunkIndex !in 0 until totalChunks) return
+        spectrogramRequested.remove(chunkIndex)
+        spectrogramRetryAfterMs[chunkIndex] =
+            SystemClock.uptimeMillis() + SPECTROGRAM_RETRY_DELAY_MS
+        postDelayed({
+            if (chunkIndex in 0 until totalChunks &&
+                spectrogramChunks.get(chunkIndex) == null &&
+                displayMode == DisplayMode.SPECTROGRAM
+            ) {
+                invalidate()
+            }
+        }, SPECTROGRAM_RETRY_DELAY_MS)
     }
 
     /**
      * 切换模式时重置频谱请求（允许重新请求尺寸变化后的 chunk）
      */
     fun resetSpectrogramCache() {
-        spectrogramChunks.forEachIndexed { i, bmp ->
-            bmp?.recycle()
-            spectrogramChunks[i] = null
-        }
+        spectrogramChunks.evictAll()
         spectrogramRequested.clear()
+        spectrogramRetryAfterMs.fill(0L)
         invalidate()
+    }
+
+    private fun spectrogramCacheBytes(): Int {
+        val target = Runtime.getRuntime().maxMemory() / 8L
+        return target.coerceIn(
+            MIN_SPECTROGRAM_CACHE_BYTES.toLong(),
+            MAX_SPECTROGRAM_CACHE_BYTES.toLong()
+        ).toInt()
     }
 
 }

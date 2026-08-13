@@ -1,25 +1,36 @@
 package com.subtitleedit.audio
 
+import android.content.Context
 import android.util.Log
 import com.arthenica.ffmpegkit.FFmpegKit
+import com.arthenica.ffmpegkit.FFmpegKitConfig
+import com.arthenica.ffmpegkit.FFmpegSession
+import com.arthenica.ffmpegkit.ReturnCode
 import com.subtitleedit.util.FileHashUtils
 import java.io.File
 import java.io.FileInputStream
-import java.io.DataOutputStream
+import java.io.FileOutputStream
 import java.io.RandomAccessFile
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import kotlin.math.min
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * 基于 FFmpeg 的波形数据提取器
- * 
- * 流程：
- * 1. 使用 FFmpeg 将音频解码为 16bit PCM（单声道，44100Hz）
- * 2. 读取 PCM 数据，每 128 个采样点计算一个 WaveFrame（包含 min/max 振幅）
- * 3. 将 WaveFrame 数组保存为 .wave 缓存文件
- * 4. 提供快速读取缓存的接口
- * 
+ * 基于 FFmpeg 的波形数据提取器。
+ *
+ * FFmpeg 将 16-bit 单声道 PCM 写入命名管道，应用边读取边统计 WaveFrame，
+ * 不在磁盘上创建完整 PCM 中间文件。
+ *
  * 缓存格式：
  * - 4 bytes: frameCount (Int)
  * - N * 4 bytes: [min: Short][max: Short]
@@ -27,193 +38,309 @@ import kotlin.math.min
 object FfmpegWaveformExtractor {
 
     private const val TAG = "FfmpegWaveformExtractor"
-    
-    /** 每帧的采样点数（128 samples @ 44100Hz ≈ 2.9ms，对应约 345 帧/秒）*/
+
+    /** 每帧的采样点数（128 samples @ 44100Hz 约 2.9ms） */
     const val SAMPLES_PER_FRAME = 128
-    
+
     /** PCM 采样率 */
     const val SAMPLE_RATE = 44100
-    
-    /** PCM 位深（16bit）*/
-    private const val BITS_PER_SAMPLE = 2  // 2 bytes = 16 bits
 
-    /**
-     * 波形帧数据结构
-     */
+    private const val PCM_READ_BUFFER_SIZE = 32 * 1024
+    private const val PIPE_READER_SHUTDOWN_TIMEOUT_MS = 5_000L
+
     data class WaveFrame(
         val min: Short,
         val max: Short
     )
 
-    /**
-     * 波形缓存文件头
-     */
     data class WaveformHeader(
         val frameCount: Int,
         val sampleRate: Int = SAMPLE_RATE,
         val samplesPerFrame: Int = SAMPLES_PER_FRAME
     )
 
+    private class PipeReaderState {
+        var opened = false
+    }
+
     /**
-     * 从音频文件生成波形缓存
-     * 
-     * @param audioFile 音频文件
-     * @param cacheFile 缓存文件（.wave）
-     * @return 是否成功
+     * 生成一个指定时间范围的波形块。
+     *
+     * 输出先写入同目录的 .part 文件，只有 FFmpeg 和管道读取都成功后才原子发布。
      */
-    fun generateWaveformCache(
+    suspend fun generateWaveformChunk(
+        context: Context,
         audioFile: File,
-        cacheFile: File,
+        outputFile: File,
+        startMs: Long,
+        endMs: Long,
         audioStreamIndex: Int? = null
-    ): Boolean {
-        return try {
-            // 1. 使用 FFmpeg 导出 PCM
-            val pcmFile = File(audioFile.parentFile, "${audioFile.nameWithoutExtension}.pcm")
-            exportPcm(audioFile.absolutePath, pcmFile.absolutePath, audioStreamIndex)
-            
-            if (!pcmFile.exists()) {
-                Log.e(TAG, "PCM 文件生成失败")
-                return false
+    ): Boolean = coroutineScope {
+        require(startMs >= 0L) { "startMs must be non-negative" }
+        require(endMs > startMs) { "endMs must be greater than startMs" }
+
+        val outputDir = outputFile.parentFile
+            ?: throw IllegalArgumentException("Waveform cache must have a parent directory")
+        if (!outputDir.exists() && !outputDir.mkdirs()) {
+            throw IllegalStateException("Unable to create waveform cache directory: ${outputDir.absolutePath}")
+        }
+
+        val partFile = File(
+            outputDir,
+            "${outputFile.name}.${UUID.randomUUID()}.part"
+        )
+        val pipePath = FFmpegKitConfig.registerNewFFmpegPipe(context.applicationContext)
+        if (pipePath.isNullOrBlank()) {
+            Log.e(TAG, "创建 FFmpeg PCM 管道失败")
+            return@coroutineScope false
+        }
+
+        val readerState = PipeReaderState()
+        val sessionRef = AtomicReference<FFmpegSession?>()
+        val sessionComplete = CompletableDeferred<FFmpegSession>()
+        var published = false
+
+        val reader = async(Dispatchers.IO) {
+            FileInputStream(pipePath).use { input ->
+                synchronized(readerState) {
+                    readerState.opened = true
+                }
+                writeWaveformCache(input, partFile)
             }
-            
-            // 2. 从 PCM 构建波形数据
-            val frames = buildWaveform(pcmFile)
-            
-            // 3. 保存波形缓存
-            saveWaveformCache(frames, cacheFile)
-            
-            // 4. 删除临时 PCM 文件
-            pcmFile.delete()
-            
-            Log.d(TAG, "波形缓存生成成功：${cacheFile.absolutePath}, frames=${frames.size}")
+        }
+        reader.invokeOnCompletion { error ->
+            if (error != null && error !is CancellationException) {
+                sessionRef.get()?.cancel()
+            }
+        }
+
+        try {
+            val arguments = buildChunkArguments(
+                inputPath = audioFile.absolutePath,
+                outputPath = pipePath,
+                startMs = startMs,
+                endMs = endMs,
+                audioStreamIndex = audioStreamIndex
+            )
+            Log.d(TAG, "开始生成波形块：${FFmpegKitConfig.argumentsToString(arguments)}")
+
+            val session = FFmpegKit.executeWithArgumentsAsync(arguments) { completedSession ->
+                if (!ReturnCode.isSuccess(completedSession.getReturnCode())) {
+                    unblockPipeReaderIfNeeded(pipePath, readerState)
+                }
+                sessionComplete.complete(completedSession)
+            }
+            sessionRef.set(session)
+            if (reader.isCancelled) {
+                session.cancel()
+            }
+
+            val completedSession = sessionComplete.await()
+            val frameCount = runCatching { reader.await() }
+                .onFailure { error ->
+                    Log.e(TAG, "读取 PCM 管道失败", error)
+                }
+                .getOrElse { return@coroutineScope false }
+
+            if (!ReturnCode.isSuccess(completedSession.getReturnCode())) {
+                Log.e(
+                    TAG,
+                    "波形块 FFmpeg 生成失败：returnCode=${completedSession.getReturnCode()}, " +
+                        "output=${completedSession.getOutput()}"
+                )
+                return@coroutineScope false
+            }
+            if (frameCount <= 0 || !isWaveformCacheValid(partFile)) {
+                Log.e(TAG, "波形块为空或格式无效：${partFile.absolutePath}")
+                return@coroutineScope false
+            }
+
+            publishAtomically(partFile, outputFile)
+            published = true
+            Log.d(
+                TAG,
+                "波形块生成成功：${outputFile.absolutePath}, frames=$frameCount, " +
+                    "range=${startMs}..${endMs}ms"
+            )
             true
+        } catch (e: CancellationException) {
+            sessionRef.get()?.cancel()
+            throw e
         } catch (e: Exception) {
-            Log.e(TAG, "生成波形缓存失败", e)
+            sessionRef.get()?.cancel()
+            Log.e(TAG, "生成波形块失败", e)
             false
-        }
-    }
-
-    /**
-     * 使用 FFmpeg 将音频导出为 16bit PCM（单声道，44100Hz）
-     * 
-     * FFmpeg 命令：
-     * ffmpeg -y -i input.mp3 -f s16le -ac 1 -ar 44100 output.pcm
-     * 
-     * 参数说明：
-     * - -y: 覆盖输出文件
-     * - -f s16le: 输出格式为 16bit 小端 PCM
-     * - -ac 1: 单声道
-     * - -ar 44100: 采样率 44100Hz
-     */
-    private fun exportPcm(
-        inputPath: String,
-        outputPath: String,
-        audioStreamIndex: Int?
-    ): Boolean {
-        val mapOption = audioStreamIndex?.let { "-map 0:$it " }.orEmpty()
-        val cmd = "-y -i \"$inputPath\" $mapOption-f s16le -ac 1 -ar $SAMPLE_RATE \"$outputPath\""
-        
-        Log.d(TAG, "执行 FFmpeg 命令：$cmd")
-        
-        val session = FFmpegKit.execute(cmd)
-        val returnCode = session.getReturnCode()
-        
-        // 使用 ReturnCode 的 isValueSuccess 方法判断
-        return if (returnCode?.isValueSuccess() == true) {
-            Log.d(TAG, "PCM 导出成功")
-            true
-        } else {
-            Log.e(TAG, "PCM 导出失败：returnCode=$returnCode")
-            false
-        }
-    }
-
-    /**
-     * 从 PCM 文件构建波形数据
-     * 
-     * PCM 格式：16bit 小端，单声道，44100Hz
-     * 每 2 字节 = 一个 sample（Short 值，范围 -32768 ~ 32767）
-     * 每 128 samples = 一个 WaveFrame
-     */
-    private fun buildWaveform(pcmFile: File): List<WaveFrame> {
-        val frames = ArrayList<WaveFrame>()
-        val bufferSize = 4096  // 每次读取 4KB
-        val buffer = ByteArray(bufferSize)
-        val samples = ShortArray(bufferSize / 2)
-        
-        FileInputStream(pcmFile).use { input ->
-            while (true) {
-                val read = input.read(buffer)
-                if (read <= 0) break
-                
-                // 将字节数组转换为 Short 数组（小端序）
-                val shortBuffer = ByteBuffer
-                    .wrap(buffer, 0, read)
-                    .order(ByteOrder.LITTLE_ENDIAN)
-                    .asShortBuffer()
-                
-                val sampleCount = shortBuffer.limit()
-                shortBuffer.get(samples, 0, sampleCount)
-                
-                // 每 SAMPLES_PER_FRAME 个采样点计算一个 frame
-                var i = 0
-                while (i < sampleCount) {
-                    val end = min(i + SAMPLES_PER_FRAME, sampleCount)
-                    
-                    var minVal = Short.MAX_VALUE
-                    var maxVal = Short.MIN_VALUE
-                    
-                    for (j in i until end) {
-                        val s = samples[j]
-                        if (s < minVal) minVal = s
-                        if (s > maxVal) maxVal = s
-                    }
-                    
-                    frames.add(WaveFrame(minVal, maxVal))
-                    i += SAMPLES_PER_FRAME
+        } finally {
+            sessionRef.get()?.let { session ->
+                if (session.getReturnCode() == null) {
+                    session.cancel()
                 }
             }
-        }
-        
-        return frames
-    }
-
-    /**
-     * 保存波形缓存到文件
-     * 
-     * 文件格式：
-     * - 4 bytes: frameCount (Int)
-     * - N * 4 bytes: [min: Short][max: Short]
-     */
-    private fun saveWaveformCache(frames: List<WaveFrame>, outputFile: File) {
-        DataOutputStream(outputFile.outputStream()).use { out ->
-            // 写入帧数量
-            out.writeInt(frames.size)
-            
-            // 写入每个帧的 min/max 值
-            frames.forEach { frame ->
-                out.writeShort(frame.min.toInt())
-                out.writeShort(frame.max.toInt())
+            unblockPipeReaderIfNeeded(pipePath, readerState)
+            withContext(NonCancellable) {
+                withTimeoutOrNull(PIPE_READER_SHUTDOWN_TIMEOUT_MS) {
+                    reader.join()
+                }
+            }
+            runCatching { FFmpegKitConfig.closeFFmpegPipe(pipePath) }
+                .onFailure { Log.w(TAG, "关闭 FFmpeg PCM 管道失败：$pipePath", it) }
+            if (!published && partFile.exists() && !partFile.delete()) {
+                Log.w(TAG, "无法删除未完成的波形块：${partFile.absolutePath}")
             }
         }
-        
-        Log.d(TAG, "波形缓存已保存：${outputFile.absolutePath}, size=${outputFile.length()} bytes")
+    }
+
+    private fun buildChunkArguments(
+        inputPath: String,
+        outputPath: String,
+        startMs: Long,
+        endMs: Long,
+        audioStreamIndex: Int?
+    ): Array<String> {
+        val arguments = mutableListOf(
+            "-hide_banner",
+            "-loglevel", "error",
+            "-nostdin",
+            "-y",
+            "-ss", formatSeconds(startMs),
+            "-i", inputPath
+        )
+        if (audioStreamIndex != null) {
+            arguments += listOf("-map", "0:$audioStreamIndex")
+        }
+        arguments += listOf(
+            "-t", formatSeconds(endMs - startMs),
+            "-vn",
+            "-sn",
+            "-dn",
+            "-f", "s16le",
+            "-ac", "1",
+            "-ar", SAMPLE_RATE.toString(),
+            outputPath
+        )
+        return arguments.toTypedArray()
+    }
+
+    private fun formatSeconds(milliseconds: Long): String {
+        val seconds = milliseconds / 1000L
+        val remainder = milliseconds % 1000L
+        return "$seconds.${remainder.toString().padStart(3, '0')}"
     }
 
     /**
-     * 读取波形缓存文件头
-     * 
-     * @return 缓存头信息，如果文件无效则返回 null
+     * 失败发生在 FFmpeg 打开输出端之前时，FIFO 读端会阻塞在 open()。
+     * 短暂打开并关闭一个写端可让读端得到 EOF 并正常退出。
      */
+    private fun unblockPipeReaderIfNeeded(pipePath: String, state: PipeReaderState) {
+        synchronized(state) {
+            if (state.opened) return
+            runCatching {
+                FileOutputStream(pipePath).use { }
+            }.onFailure {
+                Log.w(TAG, "解除 PCM 管道读端阻塞失败：$pipePath", it)
+            }
+        }
+    }
+
+    /**
+     * 按固定缓冲区读取小端 PCM，并直接写入波形缓存，内存占用与媒体时长无关。
+     */
+    private fun writeWaveformCache(input: FileInputStream, outputFile: File): Int {
+        val buffer = ByteArray(PCM_READ_BUFFER_SIZE)
+        var trailingByte = -1
+        var samplesInFrame = 0
+        var minValue = Short.MAX_VALUE
+        var maxValue = Short.MIN_VALUE
+        var frameCount = 0
+
+        RandomAccessFile(outputFile, "rw").use { output ->
+            output.setLength(0L)
+            output.writeInt(0)
+
+            fun acceptSample(sample: Short) {
+                if (sample < minValue) minValue = sample
+                if (sample > maxValue) maxValue = sample
+                samplesInFrame++
+
+                if (samplesInFrame == SAMPLES_PER_FRAME) {
+                    output.writeShort(minValue.toInt())
+                    output.writeShort(maxValue.toInt())
+                    frameCount++
+                    samplesInFrame = 0
+                    minValue = Short.MAX_VALUE
+                    maxValue = Short.MIN_VALUE
+                }
+            }
+
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                if (read == 0) continue
+
+                var offset = 0
+                if (trailingByte >= 0) {
+                    val sample = (trailingByte or (buffer[0].toInt() shl 8)).toShort()
+                    acceptSample(sample)
+                    trailingByte = -1
+                    offset = 1
+                }
+
+                while (offset + 1 < read) {
+                    val sample = (
+                        (buffer[offset].toInt() and 0xff) or
+                            (buffer[offset + 1].toInt() shl 8)
+                        ).toShort()
+                    acceptSample(sample)
+                    offset += 2
+                }
+
+                if (offset < read) {
+                    trailingByte = buffer[offset].toInt() and 0xff
+                }
+            }
+
+            if (trailingByte >= 0) {
+                throw IllegalStateException("PCM 管道包含不完整的 16-bit sample")
+            }
+            if (samplesInFrame > 0) {
+                output.writeShort(minValue.toInt())
+                output.writeShort(maxValue.toInt())
+                frameCount++
+            }
+
+            output.seek(0L)
+            output.writeInt(frameCount)
+            output.fd.sync()
+        }
+
+        return frameCount
+    }
+
+    private fun publishAtomically(partFile: File, outputFile: File) {
+        try {
+            Files.move(
+                partFile.toPath(),
+                outputFile.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(
+                partFile.toPath(),
+                outputFile.toPath(),
+                StandardCopyOption.REPLACE_EXISTING
+            )
+        }
+    }
+
     fun readCacheHeader(cacheFile: File): WaveformHeader? {
         return try {
-            if (!cacheFile.exists() || cacheFile.length() < 4) {
+            if (!cacheFile.isFile || cacheFile.length() < 4L) {
                 return null
             }
-            
+
             RandomAccessFile(cacheFile, "r").use { raf ->
-                val frameCount = raf.readInt()
-                WaveformHeader(frameCount)
+                WaveformHeader(raf.readInt())
             }
         } catch (e: Exception) {
             Log.e(TAG, "读取缓存头失败", e)
@@ -221,130 +348,82 @@ object FfmpegWaveformExtractor {
         }
     }
 
-    /**
-     * 从缓存文件读取指定范围的波形帧
-     * 
-     * @param cacheFile 缓存文件
-     * @param startIndex 起始帧索引
-     * @param count 读取帧数量
-     * @return 波形帧列表
-     */
     fun readWaveformFrames(cacheFile: File, startIndex: Int, count: Int): List<WaveFrame> {
-        val frames = ArrayList<WaveFrame>(count)
-        
-        if (!cacheFile.exists()) {
+        val safeStartIndex = startIndex.coerceAtLeast(0)
+        val safeCount = count.coerceAtLeast(0)
+        val frames = ArrayList<WaveFrame>(safeCount)
+
+        if (!cacheFile.isFile || safeCount == 0) {
             return frames
         }
-        
+
         RandomAccessFile(cacheFile, "r").use { raf ->
-            // 跳过文件头（4 bytes）
-            val headerSize = 4L
-            
-            // 计算起始偏移：header + startIndex * 4 (每个 frame 4 bytes)
-            val offset = headerSize + startIndex * 4L
+            val offset = 4L + safeStartIndex * 4L
+            if (offset >= raf.length()) return frames
             raf.seek(offset)
-            
-            // 读取指定数量的帧
-            for (i in 0 until count) {
-                if (raf.filePointer >= raf.length()) break
-                
-                val min = raf.readShort()
-                val max = raf.readShort()
-                frames.add(WaveFrame(min, max))
+
+            for (index in 0 until safeCount) {
+                if (raf.filePointer + 4L > raf.length()) break
+                frames.add(WaveFrame(raf.readShort(), raf.readShort()))
             }
         }
-        
+
         return frames
     }
 
-    /**
-     * 读取单个波形帧
-     * 
-     * @param cacheFile 缓存文件
-     * @param index 帧索引
-     * @return 波形帧，如果索引无效则返回 null
-     */
     fun readWaveformFrame(cacheFile: File, index: Int): WaveFrame? {
-        if (!cacheFile.exists()) {
+        if (!cacheFile.isFile || index < 0) {
             return null
         }
-        
+
         RandomAccessFile(cacheFile, "r").use { raf ->
-            // 跳过文件头（4 bytes）+ 前面的帧
             val offset = 4L + index * 4L
-            
-            if (offset >= raf.length()) {
+            if (offset + 4L > raf.length()) {
                 return null
             }
-            
+
             raf.seek(offset)
-            val min = raf.readShort()
-            val max = raf.readShort()
-            return WaveFrame(min, max)
+            return WaveFrame(raf.readShort(), raf.readShort())
         }
     }
 
-    /**
-     * 获取缓存文件中的总帧数
-     */
     fun getFrameCount(cacheFile: File): Int {
         return readCacheHeader(cacheFile)?.frameCount ?: 0
     }
 
-    /**
-     * 检查缓存文件是否有效
-     */
-    fun isCacheValid(cacheFile: File, audioFile: File): Boolean {
-        if (!cacheFile.exists()) {
-            return false
-        }
-        
-        // 缓存文件应该比音频文件小很多（通常 < 2MB）
-        if (cacheFile.length() > 10 * 1024 * 1024) {  // 超过 10MB 视为异常
-            return false
-        }
-        
-        // 检查文件头
-        val header = readCacheHeader(cacheFile)
-        return header != null && header.frameCount > 0
+    fun isWaveformCacheValid(cacheFile: File): Boolean {
+        val header = readCacheHeader(cacheFile) ?: return false
+        if (header.frameCount <= 0) return false
+        val expectedLength = 4L + header.frameCount.toLong() * 4L
+        return cacheFile.length() == expectedLength
     }
 
-    /**
-     * 获取缓存文件路径（音频文件同目录下的 MD5 子目录，同名.wave 扩展名）
-     */
+    fun isCacheValid(cacheFile: File, @Suppress("UNUSED_PARAMETER") audioFile: File): Boolean {
+        return isWaveformCacheValid(cacheFile)
+    }
+
     fun getCachePath(audioFile: File): File {
-        val cacheDir = File(audioFile.parentFile, FileHashUtils.md5(audioFile)).apply { mkdirs() }
+        val parent = audioFile.parentFile
+            ?: throw IllegalArgumentException("Audio file must have a parent directory")
+        val cacheDir = File(parent, FileHashUtils.md5(audioFile)).apply { mkdirs() }
         return File(cacheDir, "${audioFile.nameWithoutExtension}.wave")
     }
 
-    /**
-     * 将振幅值（Short）转换为归一化的 Float 值（0.0 - 1.0）
-     */
     fun normalizeAmplitude(value: Short): Float {
         return kotlin.math.abs(value.toFloat()) / 32768f
     }
 
-    /**
-     * 获取帧对应的时间范围（毫秒）
-     * 
-     * @param frameIndex 帧索引
-     * @return Pair(startMs, endMs)
-     */
     fun frameToTimeRange(frameIndex: Int): Pair<Long, Long> {
         val startSample = frameIndex * SAMPLES_PER_FRAME
         val endSample = (frameIndex + 1) * SAMPLES_PER_FRAME
-        
-        val startMs = (startSample * 1000L / SAMPLE_RATE)
-        val endMs = (endSample * 1000L / SAMPLE_RATE)
-        
-        return Pair(startMs, endMs)
+        return Pair(
+            startSample * 1000L / SAMPLE_RATE,
+            endSample * 1000L / SAMPLE_RATE
+        )
     }
 
-    /**
-     * 根据时间（毫秒）获取对应的帧索引
-     */
     fun timeToFrameIndex(timeMs: Long): Int {
-        val sample = (timeMs * SAMPLE_RATE / 1000L).toInt()
-        return sample / SAMPLES_PER_FRAME
+        val sample = timeMs * SAMPLE_RATE / 1000L
+        return (sample / SAMPLES_PER_FRAME).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
     }
 }

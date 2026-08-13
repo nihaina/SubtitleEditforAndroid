@@ -73,6 +73,11 @@ class WhisperRecognizer(
         val endSample: Long
     )
 
+    data class RangeContext(
+        val previousEndTimeMs: Long?,
+        val nextStartTimeMs: Long?
+    )
+
     /**
      * 初始化识别器
      */
@@ -684,6 +689,7 @@ class WhisperRecognizer(
     fun recognizeRanges(
         audioFile: File,
         ranges: List<LongRange>,
+        rangeContexts: List<RangeContext>? = null,
         progressCallback: (current: Int, total: Int) -> Unit,
         isCancelled: () -> Boolean = { false }
     ): Result<List<String>> {
@@ -711,12 +717,23 @@ class WhisperRecognizer(
                     val startMs = range.first.coerceAtLeast(0L)
                     val endMs = range.last.coerceAtLeast(startMs)
                     val (startSample, endSample) = sampleRanges[index]
-                    val previousEnd = if (index > 0) {
+                    val rangeContext = rangeContexts?.getOrNull(index)
+                    val previousEnd = if (rangeContexts != null) {
+                        rangeContext?.previousEndTimeMs
+                            ?.let { timeMsToSample(it, reader.totalSamples) }
+                            ?.coerceIn(0L, startSample)
+                            ?: 0L
+                    } else if (index > 0) {
                         sampleRanges[index - 1].second.coerceIn(0L, startSample)
                     } else {
                         0L
                     }
-                    val nextStart = if (index < sampleRanges.lastIndex) {
+                    val nextStart = if (rangeContexts != null) {
+                        rangeContext?.nextStartTimeMs
+                            ?.let { timeMsToSample(it, reader.totalSamples) }
+                            ?.coerceIn(endSample, reader.totalSamples)
+                            ?: reader.totalSamples
+                    } else if (index < sampleRanges.lastIndex) {
                         sampleRanges[index + 1].first.coerceIn(endSample, reader.totalSamples)
                     } else {
                         reader.totalSamples
@@ -727,6 +744,13 @@ class WhisperRecognizer(
                         previousEnd = previousEnd,
                         nextStart = nextStart,
                         dynamicPaddingEnabled = dynamicPaddingEnabled
+                    )
+                    Log.d(
+                        TAG,
+                        "范围识别 ${index + 1}/${ranges.size}: " +
+                            "目标=${startMs}..${endMs}ms, " +
+                            "窗口=${recognitionWindow.startSample * 1000L / SAMPLE_RATE}.." +
+                            "${(recognitionWindow.startSample + recognitionWindow.sampleCount) * 1000L / SAMPLE_RATE}ms"
                     )
                     val recognitionStartMs = recognitionWindow.startSample * 1000L / SAMPLE_RATE
                     val text = if (recognitionWindow.sampleCount > 0) {
@@ -919,24 +943,38 @@ class WhisperRecognizer(
         nextStart: Long,
         dynamicPaddingEnabled: Boolean
     ): RecognitionWindow {
+        val safeStart = currentStart.coerceAtLeast(0L)
+        val safeEnd = currentEnd.coerceAtLeast(safeStart)
         if (!dynamicPaddingEnabled) {
             return RecognitionWindow(
-                startSample = currentStart,
-                sampleCount = (currentEnd - currentStart).toInt()
+                startSample = safeStart,
+                sampleCount = safeSampleCount(safeEnd - safeStart)
             )
         }
 
         val targetPaddingSamples = (VAD_CONTEXT_PADDING_MS * SAMPLE_RATE) / 1000L
-        val leftPadding = minOf(targetPaddingSamples, (currentStart - previousEnd) / 2)
-        val rightPadding = minOf(targetPaddingSamples, (nextStart - currentEnd) / 2)
-        val startSample = currentStart - leftPadding
-        val endSample = currentEnd + rightPadding
+        val boundedPreviousEnd = previousEnd.coerceIn(0L, safeStart)
+        val boundedNextStart = nextStart.coerceAtLeast(safeEnd)
+        val leftPadding = minOf(targetPaddingSamples, (safeStart - boundedPreviousEnd) / 2)
+        val rightPadding = minOf(targetPaddingSamples, (boundedNextStart - safeEnd) / 2)
+        val startSample = safeStart - leftPadding
+        val endSample = safeEnd + rightPadding
 
         return RecognitionWindow(
             startSample = startSample,
-            sampleCount = (endSample - startSample).toInt()
+            sampleCount = safeSampleCount(endSample - startSample)
         )
     }
+
+    private fun timeMsToSample(timeMs: Long, totalSamples: Long): Long {
+        val safeTimeMs = timeMs.coerceAtLeast(0L)
+        val samples = safeTimeMs / 1000L * SAMPLE_RATE +
+            safeTimeMs % 1000L * SAMPLE_RATE / 1000L
+        return samples.coerceAtMost(totalSamples)
+    }
+
+    private fun safeSampleCount(sampleCount: Long): Int =
+        sampleCount.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
 
     /**
      * Padding 只服务于识别上下文，字幕时间轴仍以原始 VAD 段为准。

@@ -8,17 +8,24 @@ import android.widget.LinearLayout
 import android.widget.Spinner
 import android.widget.TextView
 import com.arthenica.ffmpegkit.FFmpegKit
+import com.arthenica.ffmpegkit.FFmpegSession
 import com.subtitleedit.adapter.TranslationPreviewItem
 import com.subtitleedit.model.SubtitleEntry
-import com.subtitleedit.util.FileHashUtils
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.WhisperRecognizer
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.resume
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 /** 对选中的字幕行按各自时间范围执行离线语音转录，不持有字幕文档本身。 */
@@ -35,7 +42,9 @@ internal class EditorTranscribeController(
 
     fun start(
         selectedEntries: List<Pair<SubtitleEntry, Int>>,
+        timelineEntries: List<SubtitleEntry>,
         audioFile: File,
+        audioCacheKey: String,
         audioStreamIndex: Int? = null
     ) {
         if (selectedEntries.any { it.first.endTime <= it.first.startTime }) {
@@ -100,6 +109,7 @@ internal class EditorTranscribeController(
                 settings.setQuickTranscribeSourceLanguage(selectedLanguage)
                 startTranscription(
                     selectedEntries,
+                    timelineEntries,
                     audioFile,
                     encoderPath,
                     decoderPath,
@@ -107,6 +117,7 @@ internal class EditorTranscribeController(
                     tokensPath,
                     modelType,
                     selectedLanguage,
+                    audioCacheKey,
                     audioStreamIndex
                 )
             }
@@ -158,6 +169,7 @@ internal class EditorTranscribeController(
 
     private fun startTranscription(
         selectedEntries: List<Pair<SubtitleEntry, Int>>,
+        timelineEntries: List<SubtitleEntry>,
         inputFile: File,
         encoderPath: String,
         decoderPath: String,
@@ -165,11 +177,14 @@ internal class EditorTranscribeController(
         tokensPath: String,
         modelType: String,
         sourceLanguage: String,
+        audioCacheKey: String,
         audioStreamIndex: Int?
     ) {
+        val cachedPcmFile = recognitionPcmCacheFile(audioCacheKey, audioStreamIndex)
+        val hasCachedPcm = isRecognitionPcmCacheValid(cachedPcmFile)
         val progressDialog = AlertDialog.Builder(activity)
             .setTitle("正在转录")
-            .setMessage("正在准备音频...")
+            .setMessage(if (hasCachedPcm) "正在使用缓存音频..." else "正在准备音频...")
             .setNegativeButton("取消") { _, _ -> transcribeCancelled = true }
             .setCancelable(false)
             .create()
@@ -178,14 +193,8 @@ internal class EditorTranscribeController(
 
         transcribeJob = scope.launch {
             try {
-                val sourceMd5 = withContext(Dispatchers.IO) { FileHashUtils.md5(inputFile) }
-                val cachedPcmFile = recognitionPcmCacheFile(sourceMd5, audioStreamIndex)
-                progressDialog.setMessage(
-                    if (isRecognitionPcmCacheValid(cachedPcmFile)) "正在使用缓存音频..."
-                    else "正在准备音频..."
-                )
                 val pcmFile = withContext(Dispatchers.IO) {
-                    convertAudioToRecognitionPcm(inputFile, audioStreamIndex, sourceMd5)
+                    convertAudioToRecognitionPcm(inputFile, audioStreamIndex, audioCacheKey)
                 } ?: throw IllegalStateException("音频转换失败")
                 if (transcribeCancelled) return@launch
 
@@ -201,10 +210,14 @@ internal class EditorTranscribeController(
                     modelType = modelType
                 )
                 val ranges = selectedEntries.map { it.first.startTime..it.first.endTime }
+                val rangeContexts = selectedEntries.map { (entry, position) ->
+                    buildRangeContext(entry, position, timelineEntries)
+                }
                 val result = withContext(Dispatchers.IO) {
                     recognizer.recognizeRanges(
                         audioFile = pcmFile,
                         ranges = ranges,
+                        rangeContexts = rangeContexts,
                         progressCallback = { current, total ->
                             activity.runOnUiThread {
                                 progressDialog.setMessage("正在转录第 $current/$total 条...")
@@ -231,34 +244,124 @@ internal class EditorTranscribeController(
     }
 
     /** Returns the quick-transcription cache inside the source media's MD5 directory. */
-    private fun recognitionPcmCacheFile(sourceMd5: String, audioStreamIndex: Int?): File {
-        val mediaCacheDir = File(cacheDir, "quick_transcribe/$sourceMd5").apply { mkdirs() }
+    private fun recognitionPcmCacheFile(audioCacheKey: String, audioStreamIndex: Int?): File {
+        val mediaCacheDir = File(cacheDir, "quick_transcribe/$audioCacheKey").apply { mkdirs() }
         val streamKey = audioStreamIndex?.toString() ?: "default"
         return File(mediaCacheDir, "quick_transcribe_${streamKey}_16k.wav")
     }
 
     private fun isRecognitionPcmCacheValid(file: File): Boolean =
-        file.exists() && file.length() > 44L
+        file.isFile && file.length() > WAV_HEADER_SIZE
 
-    private fun convertAudioToRecognitionPcm(
+    private suspend fun convertAudioToRecognitionPcm(
         inputFile: File,
         audioStreamIndex: Int?,
-        sourceMd5: String
+        audioCacheKey: String
     ): File? {
+        val outputFile = recognitionPcmCacheFile(audioCacheKey, audioStreamIndex)
+        if (isRecognitionPcmCacheValid(outputFile)) return outputFile
+        if (outputFile.exists() && !outputFile.delete()) {
+            Log.w(TAG, "无法删除无效的快速转录缓存：${outputFile.absolutePath}")
+        }
+
+        val parent = outputFile.parentFile ?: return null
+        val partFile = File(parent, ".quick_transcribe_${UUID.randomUUID()}.wav.part")
         return try {
-            val outputFile = recognitionPcmCacheFile(sourceMd5, audioStreamIndex)
-            if (isRecognitionPcmCacheValid(outputFile)) return outputFile
-            if (outputFile.exists()) outputFile.delete()
-            val mapOption = audioStreamIndex?.let { "-map 0:$it " }.orEmpty()
-            val command = "-y -i \"${inputFile.absolutePath}\" $mapOption" +
-                "-ar 16000 -ac 1 -c:a pcm_s16le \"${outputFile.absolutePath}\""
-            val session = FFmpegKit.execute(command)
-            outputFile.takeIf {
-                session.getReturnCode()?.isValueSuccess() == true && isRecognitionPcmCacheValid(it)
+            val arguments = mutableListOf(
+                "-hide_banner",
+                "-loglevel", "error",
+                "-nostdin",
+                "-y",
+                "-i", inputFile.absolutePath
+            )
+            if (audioStreamIndex != null) {
+                arguments += listOf("-map", "0:$audioStreamIndex")
             }
+            arguments += listOf(
+                "-vn",
+                "-sn",
+                "-dn",
+                "-ar", RECOGNITION_SAMPLE_RATE.toString(),
+                "-ac", "1",
+                "-c:a", "pcm_s16le",
+                "-f", "wav",
+                partFile.absolutePath
+            )
+
+            val session = executeFfmpeg(arguments.toTypedArray())
+            if (session.getReturnCode()?.isValueSuccess() != true ||
+                !isRecognitionPcmCacheValid(partFile)
+            ) {
+                Log.e(TAG, "快速转录音频转换失败：${session.getOutput()}")
+                return null
+            }
+
+            publishAtomically(partFile, outputFile)
+            outputFile.takeIf(::isRecognitionPcmCacheValid)
+        } catch (error: CancellationException) {
+            throw error
         } catch (e: Exception) {
             Log.e(TAG, "快速转录音频转换失败", e)
             null
+        } finally {
+            if (partFile.exists() && !partFile.delete()) {
+                Log.w(TAG, "无法删除快速转录临时文件：${partFile.absolutePath}")
+            }
+        }
+    }
+
+    private suspend fun executeFfmpeg(arguments: Array<String>): FFmpegSession {
+        return suspendCancellableCoroutine { continuation ->
+            val sessionRef = AtomicReference<FFmpegSession?>()
+            continuation.invokeOnCancellation {
+                sessionRef.get()?.cancel()
+            }
+            val session = FFmpegKit.executeWithArgumentsAsync(arguments) { completedSession ->
+                if (continuation.isActive) {
+                    continuation.resume(completedSession)
+                }
+            }
+            sessionRef.set(session)
+            if (!continuation.isActive) {
+                session.cancel()
+            }
+        }
+    }
+
+    private fun buildRangeContext(
+        target: SubtitleEntry,
+        targetPosition: Int,
+        timelineEntries: List<SubtitleEntry>
+    ): WhisperRecognizer.RangeContext {
+        val targetStart = target.startTime.coerceAtLeast(0L)
+        val targetEnd = target.endTime.coerceAtLeast(targetStart)
+        val previousEnd = timelineEntries.getOrNull(targetPosition - 1)
+            ?.endTime
+            ?.coerceIn(0L, targetStart)
+        val nextStart = timelineEntries.getOrNull(targetPosition + 1)
+            ?.startTime
+            ?.coerceAtLeast(targetEnd)
+
+        return WhisperRecognizer.RangeContext(
+            previousEndTimeMs = previousEnd,
+            nextStartTimeMs = nextStart
+        )
+    }
+
+    private fun publishAtomically(partFile: File, outputFile: File) {
+        try {
+            Files.move(
+                partFile.toPath(),
+                outputFile.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(
+                partFile.toPath(),
+                outputFile.toPath(),
+                StandardCopyOption.REPLACE_EXISTING
+            )
         }
     }
 
@@ -283,5 +386,7 @@ internal class EditorTranscribeController(
 
     private companion object {
         const val TAG = "EditorActivity"
+        const val RECOGNITION_SAMPLE_RATE = 16_000
+        const val WAV_HEADER_SIZE = 44L
     }
 }
