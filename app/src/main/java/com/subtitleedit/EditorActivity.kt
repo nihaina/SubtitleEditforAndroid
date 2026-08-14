@@ -506,7 +506,7 @@ class EditorActivity : AppCompatActivity() {
             } else {
                 androidx.core.graphics.Insets.NONE
             }
-            view.setPadding(safeArea.left, safeArea.top, safeArea.right, safeArea.bottom)
+            view.setPadding(safeArea.left, 0, safeArea.right, 0)
             insets
         }
         renderVideoFullscreenButton()
@@ -570,6 +570,9 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun hideSystemBarsForVideo() {
+        binding.editorRoot.fitsSystemWindows = false
+        binding.editorRoot.setPadding(0, 0, 0, 0)
+        binding.editorAppBar.fitsSystemWindows = false
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowCompat.getInsetsController(window, binding.editorRoot).apply {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -581,6 +584,9 @@ class EditorActivity : AppCompatActivity() {
         WindowCompat.getInsetsController(window, binding.editorRoot)
             .show(WindowInsetsCompat.Type.systemBars())
         WindowCompat.setDecorFitsSystemWindows(window, true)
+        binding.editorRoot.fitsSystemWindows = true
+        binding.editorAppBar.fitsSystemWindows = true
+        ViewCompat.requestApplyInsets(binding.editorRoot)
     }
 
     private fun createInlineVideoLayoutParams() = LinearLayout.LayoutParams(
