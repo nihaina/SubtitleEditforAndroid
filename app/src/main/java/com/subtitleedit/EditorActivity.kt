@@ -4,6 +4,8 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
@@ -12,8 +14,10 @@ import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -24,6 +28,10 @@ import androidx.activity.viewModels
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.subtitleedit.adapter.SubtitleAdapter
@@ -158,6 +166,9 @@ class EditorActivity : AppCompatActivity() {
     private lateinit var subtitlePreviewController: EditorSubtitlePreviewController
     private var waveformMediaFile: File? = null
     private var waveformAudioStreamIndex: Int? = null
+    private var isVideoFullscreen = false
+    private var previousRequestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    private var videoViewportInlineIndex = 0
 
     // 文件选择器
     private val openFileLauncher = registerForActivityResult(
@@ -475,24 +486,107 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun setupVideoPanel() {
-        binding.videoSection.visibility =
-            if (mediaType == EditorMediaType.VIDEO) View.VISIBLE else View.GONE
+        val isVideo = mediaType == EditorMediaType.VIDEO
+        binding.videoSection.visibility = if (isVideo) View.VISIBLE else View.GONE
+        binding.audioPlaybackControls.visibility = if (isVideo) View.GONE else View.VISIBLE
         if (mediaType != EditorMediaType.VIDEO) return
 
-        applyVideoCollapsedState(stateModel.isVideoCollapsed)
-        binding.btnToggleVideo.setOnClickListener {
-            stateModel.isVideoCollapsed = !stateModel.isVideoCollapsed
-            applyVideoCollapsedState(stateModel.isVideoCollapsed)
+        videoViewportInlineIndex = binding.videoSection.indexOfChild(binding.videoViewportContainer)
+            .coerceAtLeast(0)
+        binding.btnVideoFullscreen.setOnClickListener {
+            playbackController.showVideoControlsForInteraction()
+            toggleVideoFullscreen()
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(binding.videoControlsOverlay) { view, insets ->
+            val safeArea = if (isVideoFullscreen) {
+                insets.getInsets(
+                    WindowInsetsCompat.Type.displayCutout() or
+                        WindowInsetsCompat.Type.systemGestures()
+                )
+            } else {
+                androidx.core.graphics.Insets.NONE
+            }
+            view.setPadding(safeArea.left, safeArea.top, safeArea.right, safeArea.bottom)
+            insets
+        }
+        renderVideoFullscreenButton()
+    }
+
+    private fun toggleVideoFullscreen() {
+        if (isVideoFullscreen) exitVideoFullscreen() else enterVideoFullscreen()
+    }
+
+    private fun enterVideoFullscreen() {
+        if (mediaType != EditorMediaType.VIDEO || isVideoFullscreen) return
+        val viewport = binding.videoViewportContainer
+        (viewport.parent as? ViewGroup)?.removeView(viewport)
+        binding.videoFullscreenHost.addView(
+            viewport,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+        binding.videoFullscreenHost.visibility = View.VISIBLE
+        isVideoFullscreen = true
+        binding.editorAppBar.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        binding.editorContent.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        previousRequestedOrientation = requestedOrientation
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        hideSystemBarsForVideo()
+        ViewCompat.requestApplyInsets(binding.videoControlsOverlay)
+        renderVideoFullscreenButton()
+    }
+
+    private fun exitVideoFullscreen() {
+        if (!isVideoFullscreen) return
+        val viewport = binding.videoViewportContainer
+        binding.videoFullscreenHost.removeView(viewport)
+        binding.videoSection.addView(
+            viewport,
+            videoViewportInlineIndex.coerceAtMost(binding.videoSection.childCount),
+            createInlineVideoLayoutParams()
+        )
+        binding.videoFullscreenHost.visibility = View.GONE
+        isVideoFullscreen = false
+        binding.editorAppBar.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+        binding.editorContent.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+        showSystemBarsAfterVideo()
+        requestedOrientation = previousRequestedOrientation
+        ViewCompat.requestApplyInsets(binding.videoControlsOverlay)
+        renderVideoFullscreenButton()
+    }
+
+    private fun renderVideoFullscreenButton() {
+        if (mediaType != EditorMediaType.VIDEO) return
+        binding.btnVideoFullscreen.setImageResource(
+            if (isVideoFullscreen) R.drawable.ic_video_fullscreen_exit
+            else R.drawable.ic_video_fullscreen
+        )
+        binding.btnVideoFullscreen.contentDescription = getString(
+            if (isVideoFullscreen) R.string.editor_video_exit_fullscreen
+            else R.string.editor_video_fullscreen
+        )
+    }
+
+    private fun hideSystemBarsForVideo() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowCompat.getInsetsController(window, binding.editorRoot).apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.systemBars())
         }
     }
 
-    private fun applyVideoCollapsedState(collapsed: Boolean) {
-        binding.videoViewportContainer.visibility = if (collapsed) View.GONE else View.VISIBLE
-        binding.btnToggleVideo.text = if (collapsed) "▶" else "▼"
-        binding.btnToggleVideo.contentDescription = getString(
-            if (collapsed) R.string.editor_video_expand else R.string.editor_video_collapse
-        )
+    private fun showSystemBarsAfterVideo() {
+        WindowCompat.getInsetsController(window, binding.editorRoot)
+            .show(WindowInsetsCompat.Type.systemBars())
+        WindowCompat.setDecorFitsSystemWindows(window, true)
     }
+
+    private fun createInlineVideoLayoutParams() = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        resources.getDimensionPixelSize(R.dimen.editor_video_height)
+    )
 
     private fun onMediaReady(durationMs: Long, audioStreamIndex: Int?) {
         val ffmpegAudioStreamIndex = audioStreamIndex?.takeIf { it >= 0 }
@@ -2010,6 +2104,10 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun handleBackPressed() {
+        if (isVideoFullscreen) {
+            exitVideoFullscreen()
+            return
+        }
         if (::subtitleAdapter.isInitialized && subtitleAdapter.getSelectedCount() > 0) {
             cancelSelection()
             return
@@ -2062,6 +2160,18 @@ class EditorActivity : AppCompatActivity() {
         translationController.release()
         transcribeController.release()
         super.onDestroy()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && isVideoFullscreen) hideSystemBarsForVideo()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (mediaType == EditorMediaType.VIDEO && !isVideoFullscreen) {
+            binding.videoViewportContainer.layoutParams = createInlineVideoLayoutParams()
+        }
     }
     
     // ==================== 媒体播放器相关方法 ====================

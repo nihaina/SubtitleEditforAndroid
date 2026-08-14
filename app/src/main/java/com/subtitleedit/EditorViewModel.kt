@@ -29,7 +29,6 @@ internal class EditorViewModel : ViewModel() {
     var selectedIndices: Set<Int> = emptySet()
     var playbackPositionMs = 0L
     var playbackSpeed = 1.0f
-    var isVideoCollapsed = false
     var selectedAudioStreamIndex: Int? = null
     var isAudioOnlyFromVideo = false
     var hasUnsavedChanges = false

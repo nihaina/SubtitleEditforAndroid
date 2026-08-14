@@ -2,12 +2,15 @@ package com.subtitleedit.editor
 
 import android.app.AlertDialog
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
 import android.view.Choreographer
 import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.SeekBar
+import com.subtitleedit.R
 import com.subtitleedit.databinding.ActivityEditorBinding
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SettingsManager
@@ -47,7 +50,13 @@ internal class EditorPlaybackController(
     private var lastPlayPauseShowsPause: Boolean? = null
     private var lastTotalTimeText: String? = null
     private var lastCurrentTimeText: String? = null
+    private var lastVideoTimeText: String? = null
     private var lastSeekBarProgress: Int? = null
+    private val videoControlsHandler = Handler(Looper.getMainLooper())
+    private var videoControlsVisible = true
+    private val hideVideoControlsRunnable = Runnable {
+        setVideoControlsVisible(visible = false, animate = true)
+    }
 
     fun bind() {
         if (!mediaType.hasPlayableMedia) return
@@ -68,6 +77,7 @@ internal class EditorPlaybackController(
                     renderControlAvailability()
                     if (mediaType == EditorMediaType.VIDEO) {
                         binding.tvVideoStatus.visibility = View.GONE
+                        showVideoControls(scheduleAutoHide = isPlaying)
                     }
                     onMediaReady(durationMs, audioStreamIndex)
                 }
@@ -75,12 +85,14 @@ internal class EditorPlaybackController(
                 override fun onPlaybackStateChanged() {
                     updatePlayerUi()
                     if (playbackEngine.isPlaying) startProgressUpdate() else stopProgressUpdate()
+                    syncVideoControlsWithPlayback()
                 }
 
                 override fun onCompleted() {
                     isPlaying = false
                     stopProgressUpdate()
                     updatePlayerUi()
+                    showVideoControls(scheduleAutoHide = false)
                 }
 
                 override fun onError(message: String) {
@@ -91,6 +103,7 @@ internal class EditorPlaybackController(
                     if (mediaType == EditorMediaType.VIDEO) {
                         binding.tvVideoStatus.text = message
                         binding.tvVideoStatus.visibility = View.VISIBLE
+                        showVideoControls(scheduleAutoHide = false)
                     }
                     showMessage(message)
                 }
@@ -103,6 +116,9 @@ internal class EditorPlaybackController(
         renderTotalTime()
         renderProgress(currentPositionMs)
         renderControlAvailability()
+        if (mediaType == EditorMediaType.VIDEO) {
+            showVideoControls(scheduleAutoHide = false)
+        }
     }
 
     fun prepare(mediaFile: File) {
@@ -110,6 +126,7 @@ internal class EditorPlaybackController(
         durationMs = 0L
         if (mediaType == EditorMediaType.VIDEO) {
             binding.tvVideoStatus.visibility = View.VISIBLE
+            showVideoControls(scheduleAutoHide = false)
         }
         engine?.prepare(mediaFile)
         renderControlAvailability()
@@ -137,6 +154,7 @@ internal class EditorPlaybackController(
         isPlaying = false
         stopProgressUpdate()
         updatePlayerUi()
+        showVideoControls(scheduleAutoHide = false)
     }
 
     fun replaceVideoSubtitleTrack(file: File?) {
@@ -145,6 +163,7 @@ internal class EditorPlaybackController(
 
     fun release() {
         stopProgressUpdate()
+        videoControlsHandler.removeCallbacksAndMessages(null)
         engine?.release()
         engine = null
         isPlaying = false
@@ -152,6 +171,10 @@ internal class EditorPlaybackController(
 
     fun invalidateHighlightCache() {
         highlightCursor.invalidate()
+    }
+
+    fun showVideoControlsForInteraction() {
+        showVideoControls(scheduleAutoHide = isPlaying)
     }
 
     private fun onProgressFrame() {
@@ -224,28 +247,64 @@ internal class EditorPlaybackController(
     }
 
     private fun bindPlayerControls() {
-        binding.btnPlayPause.setOnClickListener { togglePlayPause() }
-        binding.seekBar.max = 1000
-        binding.seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+        when (mediaType) {
+            EditorMediaType.AUDIO -> {
+                binding.btnPlayPause.setOnClickListener { togglePlayPause() }
+                binding.tvPlaybackSpeed.setOnClickListener { showSpeedInputDialog() }
+                bindSeekBar(binding.seekBar)
+            }
+            EditorMediaType.VIDEO -> {
+                binding.btnVideoPlayPause.setOnClickListener {
+                    togglePlayPause()
+                    showVideoControls(scheduleAutoHide = isPlaying)
+                }
+                binding.tvVideoPlaybackSpeed.setOnClickListener {
+                    showVideoControls(scheduleAutoHide = false)
+                    showSpeedInputDialog()
+                }
+                bindSeekBar(binding.videoSeekBar)
+                binding.mpvView.setOnClickListener {
+                    showVideoControls(scheduleAutoHide = isPlaying)
+                }
+                binding.videoControlsOverlay.setOnClickListener {
+                    setVideoControlsVisible(visible = false, animate = true)
+                }
+            }
+            EditorMediaType.SUBTITLE_ONLY -> Unit
+        }
+    }
+
+    private fun bindSeekBar(seekBar: SeekBar) {
+        seekBar.max = 1000
+        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (!fromUser) return
                 val targetTime = durationMs * progress / 1000L
                 currentPositionMs = targetTime
-                binding.tvCurrentTime.text = TimeUtils.formatForDisplay(targetTime)
+                if (mediaType == EditorMediaType.AUDIO) {
+                    binding.tvCurrentTime.text = TimeUtils.formatForDisplay(targetTime)
+                } else if (mediaType == EditorMediaType.VIDEO) {
+                    renderVideoTime(targetTime)
+                }
                 val wavePosition = if (durationMs > 0L) targetTime.toFloat() / durationMs else 0f
                 binding.waveformTimelineView.setCurrentPosition(wavePosition)
             }
 
             override fun onStartTrackingTouch(seekBar: SeekBar?) {
                 isUserSeeking = true
+                if (mediaType == EditorMediaType.VIDEO) {
+                    showVideoControls(scheduleAutoHide = false)
+                }
             }
 
             override fun onStopTrackingTouch(seekBar: SeekBar?) {
                 isUserSeeking = false
                 seekTo(currentPositionMs)
+                if (mediaType == EditorMediaType.VIDEO && isPlaying) {
+                    scheduleVideoControlsAutoHide()
+                }
             }
         })
-        binding.tvPlaybackSpeed.setOnClickListener { showSpeedInputDialog() }
     }
 
     private fun togglePlayPause() {
@@ -261,6 +320,7 @@ internal class EditorPlaybackController(
             startProgressUpdate()
         }
         updatePlayerUi()
+        syncVideoControlsWithPlayback()
     }
 
     private fun correctPlaybackAfterViewportDrag(positionMs: Long) {
@@ -293,7 +353,7 @@ internal class EditorPlaybackController(
         isUserSeeking = true
         updatePlayerUi()
         isUserSeeking = previousUserSeeking
-        binding.seekBar.progress = if (durationMs > 0L) {
+        activeSeekBar().progress = if (durationMs > 0L) {
             (clampedPositionMs * 1000L / durationMs).toInt().coerceIn(0, 1000)
         } else {
             0
@@ -307,10 +367,14 @@ internal class EditorPlaybackController(
     }
 
     private fun renderProgress(positionMs: Long) {
-        val currentTimeText = TimeUtils.formatForDisplay(positionMs)
-        if (lastCurrentTimeText != currentTimeText) {
-            lastCurrentTimeText = currentTimeText
-            binding.tvCurrentTime.text = currentTimeText
+        if (mediaType == EditorMediaType.AUDIO) {
+            val currentTimeText = TimeUtils.formatForDisplay(positionMs)
+            if (lastCurrentTimeText != currentTimeText) {
+                lastCurrentTimeText = currentTimeText
+                binding.tvCurrentTime.text = currentTimeText
+            }
+        } else if (mediaType == EditorMediaType.VIDEO) {
+            renderVideoTime(positionMs)
         }
         if (!isUserSeeking) {
             val seekBarProgress = if (durationMs > 0L) {
@@ -320,7 +384,7 @@ internal class EditorPlaybackController(
             }
             if (lastSeekBarProgress != seekBarProgress) {
                 lastSeekBarProgress = seekBarProgress
-                binding.seekBar.progress = seekBarProgress
+                activeSeekBar().progress = seekBarProgress
             }
         }
         val wavePosition = if (durationMs > 0L) positionMs.toFloat() / durationMs else 0f
@@ -330,24 +394,55 @@ internal class EditorPlaybackController(
     private fun renderPlayPauseIcon() {
         if (lastPlayPauseShowsPause == isPlaying) return
         lastPlayPauseShowsPause = isPlaying
-        binding.btnPlayPause.setImageResource(
-            if (isPlaying) android.R.drawable.ic_media_pause
-            else android.R.drawable.ic_media_play
-        )
+        when (mediaType) {
+            EditorMediaType.AUDIO -> binding.btnPlayPause.setImageResource(
+                if (isPlaying) android.R.drawable.ic_media_pause
+                else android.R.drawable.ic_media_play
+            )
+            EditorMediaType.VIDEO -> {
+                binding.btnVideoPlayPause.setImageResource(
+                    if (isPlaying) R.drawable.ic_video_pause else R.drawable.ic_video_play
+                )
+                binding.btnVideoPlayPause.contentDescription = context.getString(
+                    if (isPlaying) R.string.editor_video_pause else R.string.editor_video_play
+                )
+            }
+            EditorMediaType.SUBTITLE_ONLY -> Unit
+        }
     }
 
     private fun renderTotalTime() {
+        if (mediaType != EditorMediaType.AUDIO) return
         val text = TimeUtils.formatForDisplay(durationMs)
         if (lastTotalTimeText == text) return
         lastTotalTimeText = text
         binding.tvTotalTime.text = text
     }
 
+    private fun renderVideoTime(positionMs: Long) {
+        val text = "${TimeUtils.formatForDisplay(positionMs)} / " +
+            TimeUtils.formatForDisplay(durationMs)
+        if (lastVideoTimeText == text) return
+        lastVideoTimeText = text
+        binding.tvVideoTime.text = text
+    }
+
     private fun renderControlAvailability() {
         val enabled = engine?.phase?.canAccessPlayer == true
-        binding.btnPlayPause.isEnabled = enabled
-        binding.seekBar.isEnabled = enabled
-        binding.tvPlaybackSpeed.isEnabled = enabled
+        when (mediaType) {
+            EditorMediaType.AUDIO -> {
+                binding.btnPlayPause.isEnabled = enabled
+                binding.seekBar.isEnabled = enabled
+                binding.tvPlaybackSpeed.isEnabled = enabled
+            }
+            EditorMediaType.VIDEO -> {
+                binding.btnVideoPlayPause.isEnabled = enabled
+                binding.btnVideoPlayPause.visibility = if (enabled) View.VISIBLE else View.INVISIBLE
+                binding.videoSeekBar.isEnabled = enabled
+                binding.tvVideoPlaybackSpeed.isEnabled = enabled
+            }
+            EditorMediaType.SUBTITLE_ONLY -> Unit
+        }
     }
 
     private fun updatePlayerUi() {
@@ -388,7 +483,7 @@ internal class EditorPlaybackController(
             setPadding(48, 32, 48, 16)
         }
 
-        AlertDialog.Builder(context)
+        val dialog = AlertDialog.Builder(context)
             .setTitle("设置播放速率")
             .setMessage("请输入倍数（0.25 ~ 4.0）")
             .setView(input)
@@ -401,7 +496,13 @@ internal class EditorPlaybackController(
                 }
             }
             .setNegativeButton("取消", null)
-            .show()
+            .create()
+        dialog.setOnDismissListener {
+            if (mediaType == EditorMediaType.VIDEO && isPlaying) {
+                scheduleVideoControlsAutoHide()
+            }
+        }
+        dialog.show()
 
         input.postDelayed({
             val inputMethodManager = context.getSystemService(Context.INPUT_METHOD_SERVICE)
@@ -417,7 +518,11 @@ internal class EditorPlaybackController(
         } else {
             formatPlaybackSpeedValue(speed) + "×"
         }
-        binding.tvPlaybackSpeed.text = label
+        when (mediaType) {
+            EditorMediaType.AUDIO -> binding.tvPlaybackSpeed.text = label
+            EditorMediaType.VIDEO -> binding.tvVideoPlaybackSpeed.text = label
+            EditorMediaType.SUBTITLE_ONLY -> Unit
+        }
         try {
             engine?.setSpeed(speed)
         } catch (error: Exception) {
@@ -429,4 +534,65 @@ internal class EditorPlaybackController(
 
     private fun formatPlaybackSpeedValue(speed: Float): String =
         String.format(Locale.US, "%.2f", speed).trimEnd('0').trimEnd('.')
+
+    private fun activeSeekBar(): SeekBar = when (mediaType) {
+        EditorMediaType.VIDEO -> binding.videoSeekBar
+        EditorMediaType.AUDIO, EditorMediaType.SUBTITLE_ONLY -> binding.seekBar
+    }
+
+    private fun syncVideoControlsWithPlayback() {
+        if (mediaType != EditorMediaType.VIDEO) return
+        if (isPlaying) {
+            showVideoControls(scheduleAutoHide = true)
+        } else {
+            showVideoControls(scheduleAutoHide = false)
+        }
+    }
+
+    private fun showVideoControls(scheduleAutoHide: Boolean) {
+        if (mediaType != EditorMediaType.VIDEO) return
+        setVideoControlsVisible(visible = true, animate = true)
+        if (scheduleAutoHide) scheduleVideoControlsAutoHide()
+    }
+
+    private fun scheduleVideoControlsAutoHide() {
+        if (mediaType != EditorMediaType.VIDEO || isUserSeeking || !isPlaying) return
+        videoControlsHandler.removeCallbacks(hideVideoControlsRunnable)
+        videoControlsHandler.postDelayed(hideVideoControlsRunnable, VIDEO_CONTROLS_HIDE_DELAY_MS)
+    }
+
+    private fun setVideoControlsVisible(visible: Boolean, animate: Boolean) {
+        if (mediaType != EditorMediaType.VIDEO) return
+        videoControlsHandler.removeCallbacks(hideVideoControlsRunnable)
+        videoControlsVisible = visible
+        binding.videoControlsOverlay.animate().cancel()
+
+        if (visible) {
+            binding.videoControlsOverlay.visibility = View.VISIBLE
+            if (animate && binding.videoControlsOverlay.alpha < 1f) {
+                binding.videoControlsOverlay.animate()
+                    .alpha(1f)
+                    .setDuration(VIDEO_CONTROLS_ANIMATION_MS)
+                    .start()
+            } else {
+                binding.videoControlsOverlay.alpha = 1f
+            }
+        } else if (animate) {
+            binding.videoControlsOverlay.animate()
+                .alpha(0f)
+                .setDuration(VIDEO_CONTROLS_ANIMATION_MS)
+                .withEndAction {
+                    if (!videoControlsVisible) binding.videoControlsOverlay.visibility = View.GONE
+                }
+                .start()
+        } else {
+            binding.videoControlsOverlay.alpha = 0f
+            binding.videoControlsOverlay.visibility = View.GONE
+        }
+    }
+
+    private companion object {
+        const val VIDEO_CONTROLS_HIDE_DELAY_MS = 3_000L
+        const val VIDEO_CONTROLS_ANIMATION_MS = 180L
+    }
 }
