@@ -165,6 +165,12 @@ class ModelSettingsActivity : AppCompatActivity() {
         }
 
         binding.btnSwitchAsrModel.setOnClickListener { showAsrModelPicker() }
+        binding.tvSenseVoiceCpuOption.setOnClickListener {
+            selectSenseVoiceProvider(SettingsManager.SENSEVOICE_PROVIDER_CPU)
+        }
+        binding.tvSenseVoiceNpuOption.setOnClickListener {
+            selectSenseVoiceProvider(SettingsManager.SENSEVOICE_PROVIDER_NPU)
+        }
         binding.tvParakeetTdtOption.setOnClickListener {
             selectParakeetVariant(SettingsManager.ASR_MODEL_PARAKEET_TDT)
         }
@@ -187,26 +193,49 @@ class ModelSettingsActivity : AppCompatActivity() {
             return
         }
         when (modelType) {
-            SettingsManager.ASR_MODEL_SENSEVOICE -> {
-                AlertDialog.Builder(this)
-                    .setTitle("一键下载导入")
-                    .setMessage(
-                        "是否一键下载导入 SenseVoice 模型？\n\n" +
-                            "文件存放至：\n/Download/SubtitleEdit/models/${ModelDownloader.SENSEVOICE_DIRECTORY_NAME}\n\n" +
-                            "约占用 1.09 GB 存储空间。"
-                    )
-                    .setPositiveButton("下载并导入") { _, _ ->
-                        runWithModelStorageAccess { startSenseVoiceDownload() }
-                    }
-                    .setNegativeButton("取消", null)
-                    .show()
-            }
+            SettingsManager.ASR_MODEL_SENSEVOICE -> showSenseVoiceDownloadOptions()
             SettingsManager.ASR_MODEL_PARAKEET_TDT ->
                 confirmParakeetDownload(ModelDownloader.PARAKEET_TDT_MODEL)
             SettingsManager.ASR_MODEL_PARAKEET_CTC_JA ->
                 confirmParakeetDownload(ModelDownloader.PARAKEET_CTC_JA_MODEL)
             else -> showWhisperDownloadModelPicker()
         }
+    }
+
+    private fun showSenseVoiceDownloadOptions() {
+        if (settingsManager.getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU) {
+            val options = ModelDownloader.SENSEVOICE_NPU_MODELS
+            val labels = options.map { "${it.displayName}（${it.sizeLabel}）" }.toTypedArray()
+            AlertDialog.Builder(this)
+                .setTitle("选择 SenseVoice NPU 模型")
+                .setItems(labels) { _, which -> confirmSenseVoiceDownload(options[which]) }
+                .setNegativeButton("取消", null)
+                .show()
+        } else {
+            confirmSenseVoiceDownload(ModelDownloader.SENSEVOICE_CPU_MODEL)
+        }
+    }
+
+    private fun confirmSenseVoiceDownload(option: ModelDownloader.SenseVoiceModelOption) {
+        val isNpu = option.architecture == ModelDownloader.SenseVoiceArchitecture.QNN
+        val location = "/Download/SubtitleEdit/models/${option.directoryName}"
+        val compatibility = if (isNpu) {
+            "\n\n适用于支持 Qualcomm HTP 的 arm64 骁龙设备。"
+        } else {
+            ""
+        }
+        AlertDialog.Builder(this)
+            .setTitle("一键下载导入 SenseVoice ${option.displayName}")
+            .setMessage(
+                "是否一键下载导入该模型？\n\n" +
+                    "文件存放至：\n$location\n\n" +
+                    "${option.sizeLabel} 存储空间。$compatibility"
+            )
+            .setPositiveButton("下载并导入") { _, _ ->
+                runWithModelStorageAccess { startSenseVoiceDownload(option) }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun confirmParakeetDownload(option: ModelDownloader.ParakeetModelOption) {
@@ -249,12 +278,22 @@ class ModelSettingsActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun startSenseVoiceDownload() {
+    private fun startSenseVoiceDownload(option: ModelDownloader.SenseVoiceModelOption) {
         if (modelDownloadJob?.isActive == true) return
+        if (option.architecture == ModelDownloader.SenseVoiceArchitecture.QNN &&
+            "arm64-v8a" !in Build.SUPPORTED_ABIS
+        ) {
+            OverwritingToast.makeText(
+                this,
+                "SenseVoice NPU 模型仅支持 arm64-v8a 骁龙设备",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
 
         val progressDialog = ModelDownloadProgressDialog(
             this,
-            "下载 SenseVoice 模型"
+            "下载 SenseVoice ${option.displayName} 模型"
         ) { modelDownloadJob?.cancel() }
         modelDownloadDialog = progressDialog
         progressDialog.show()
@@ -262,11 +301,19 @@ class ModelSettingsActivity : AppCompatActivity() {
 
         modelDownloadJob = lifecycleScope.launch {
             try {
-                val files = ModelDownloader.downloadSenseVoice { progress ->
+                val files = ModelDownloader.downloadSenseVoice(option) { progress ->
                     runOnUiThread { modelDownloadDialog?.update(progress) }
                 }
                 modelType = SettingsManager.ASR_MODEL_SENSEVOICE
                 settingsManager.setAsrModelType(modelType)
+                settingsManager.setSenseVoiceProvider(
+                    if (option.architecture == ModelDownloader.SenseVoiceArchitecture.QNN) {
+                        SettingsManager.SENSEVOICE_PROVIDER_NPU
+                    } else {
+                        SettingsManager.SENSEVOICE_PROVIDER_CPU
+                    }
+                )
+                option.durationSeconds?.let(settingsManager::setSenseVoiceNpuDurationSeconds)
                 settingsManager.setSenseVoiceModelPath(Uri.fromFile(files.model).toString())
                 settingsManager.setSenseVoiceTokensPath(Uri.fromFile(files.tokens).toString())
                 loadModelPaths()
@@ -274,7 +321,7 @@ class ModelSettingsActivity : AppCompatActivity() {
                 progressDialog.dismiss()
                 OverwritingToast.makeText(
                     this@ModelSettingsActivity,
-                    "SenseVoice 模型已下载、解压并自动选择\n${files.model.parentFile?.absolutePath}",
+                    "SenseVoice ${option.displayName} 模型已下载、解压并自动选择\n${files.model.parentFile?.absolutePath}",
                     Toast.LENGTH_LONG
                 ).show()
             } catch (e: CancellationException) {
@@ -284,7 +331,7 @@ class ModelSettingsActivity : AppCompatActivity() {
                 progressDialog.dismiss()
                 OverwritingToast.makeText(
                     this@ModelSettingsActivity,
-                    "SenseVoice 模型下载失败：${e.message}",
+                    "SenseVoice ${option.displayName} 模型下载失败：${e.message}",
                     Toast.LENGTH_LONG
                 ).show()
             } finally {
@@ -620,35 +667,83 @@ class ModelSettingsActivity : AppCompatActivity() {
             )
 
             val fileName = getFileNameFromUri(uri)
-
-            val isValid = fileName.endsWith(".onnx", ignoreCase = true) && when (modelType) {
-                SettingsManager.ASR_MODEL_SENSEVOICE,
-                SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> true
-                else -> fileName.contains("encoder", ignoreCase = true)
+            val senseVoiceNpu = isSenseVoiceNpu()
+            val isValid = when {
+                senseVoiceNpu -> fileName.equals("libmodel.so", ignoreCase = true)
+                modelType == SettingsManager.ASR_MODEL_SENSEVOICE ||
+                    modelType == SettingsManager.ASR_MODEL_PARAKEET_CTC_JA ->
+                    fileName.endsWith(".onnx", ignoreCase = true)
+                else ->
+                    fileName.contains("encoder", ignoreCase = true) &&
+                        fileName.endsWith(".onnx", ignoreCase = true)
             }
             if (!isValid) {
-                com.subtitleedit.util.OverwritingToast.makeText(
+                OverwritingToast.makeText(
                     this,
-                    if (isSingleFileModel()) "请选择 ONNX 模型文件（以 .onnx 结尾）"
-                    else "请选择 encoder 模型文件（文件名应包含 'encoder' 且以 .onnx 结尾）",
+                    when {
+                        senseVoiceNpu -> "请选择 SenseVoice NPU 模型文件 libmodel.so"
+                        isSingleFileModel() -> "请选择 ONNX 模型文件（以 .onnx 结尾）"
+                        else -> "请选择 encoder 模型文件（文件名应包含 'encoder' 且以 .onnx 结尾）"
+                    },
                     Toast.LENGTH_LONG
                 ).show()
                 return
             }
 
-            encoderPath = uri.toString()
-            when (modelType) {
-                SettingsManager.ASR_MODEL_SENSEVOICE -> settingsManager.setSenseVoiceModelPath(encoderPath)
-                SettingsManager.ASR_MODEL_PARAKEET_TDT -> settingsManager.setParakeetTdtEncoderPath(encoderPath)
-                SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> settingsManager.setParakeetCtcModelPath(encoderPath)
-                else -> settingsManager.setWhisperEncoderPath(encoderPath)
+            if (senseVoiceNpu) {
+                val detectedDuration = detectSenseVoiceNpuDuration(uri, fileName)
+                if (detectedDuration != null) {
+                    saveSelectedEncoder(uri, fileName, detectedDuration)
+                } else {
+                    showSenseVoiceNpuDurationPicker(uri, fileName)
+                }
+            } else {
+                saveSelectedEncoder(uri, fileName)
             }
-            binding.tvEncoderFile.text = fileName
-            updateAsrModelUi()
 
         } catch (e: Exception) {
-            com.subtitleedit.util.OverwritingToast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
+            OverwritingToast.makeText(this, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun saveSelectedEncoder(uri: Uri, fileName: String, npuDurationSeconds: Int? = null) {
+        encoderPath = uri.toString()
+        when (modelType) {
+            SettingsManager.ASR_MODEL_SENSEVOICE -> settingsManager.setSenseVoiceModelPath(encoderPath)
+            SettingsManager.ASR_MODEL_PARAKEET_TDT -> settingsManager.setParakeetTdtEncoderPath(encoderPath)
+            SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> settingsManager.setParakeetCtcModelPath(encoderPath)
+            else -> settingsManager.setWhisperEncoderPath(encoderPath)
+        }
+        npuDurationSeconds?.let(settingsManager::setSenseVoiceNpuDurationSeconds)
+        binding.tvEncoderFile.text = if (npuDurationSeconds != null) {
+            "$fileName（$npuDurationSeconds 秒）"
+        } else {
+            fileName
+        }
+        updateAsrModelUi()
+    }
+
+    private fun detectSenseVoiceNpuDuration(uri: Uri, fileName: String): Int? {
+        val identity = "${uri} $fileName".lowercase(Locale.ROOT)
+        return when {
+            identity.contains("10-seconds") || identity.contains("10_seconds") ||
+                identity.contains("10 seconds") || identity.contains("10%20seconds") -> 10
+            identity.contains("5-seconds") || identity.contains("5_seconds") ||
+                identity.contains("5 seconds") || identity.contains("5%20seconds") -> 5
+            else -> null
+        }
+    }
+
+    private fun showSenseVoiceNpuDurationPicker(uri: Uri, fileName: String) {
+        val durations = intArrayOf(5, 10)
+        val labels = durations.map { "$it 秒模型" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("选择 SenseVoice NPU 模型时长")
+            .setItems(labels) { _, which ->
+                saveSelectedEncoder(uri, fileName, durations[which])
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun handleSelectedDecoder(uri: Uri) {
@@ -816,15 +911,32 @@ class ModelSettingsActivity : AppCompatActivity() {
 
     private fun showModelGuide() {
         val message = when (modelType) {
-            SettingsManager.ASR_MODEL_SENSEVOICE -> """
-                SenseVoice 模型下载指引：
+            SettingsManager.ASR_MODEL_SENSEVOICE ->
+                if (settingsManager.getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU) {
+                    """
+                        SenseVoice NPU 模型下载指引：
 
-                1. 推荐点击“选择模型”右侧的蓝色下载按钮，应用会自动下载、解压并选择模型。
+                        1. 点击蓝色下载按钮选择 5 秒或 10 秒模型，应用会自动下载、解压并选择模型。5秒的模型一次最长只能识别5秒钟,也就是说单句话超过时间会被强制分段,请根据需要自行选择合适的模型。
 
-                2. SenseVoice 支持中文、英语、日语、韩语和粤语，并能识别部分声音事件与情绪。
+                        2. 也可以手动选择 libmodel.so 和 tokens.txt；无法从目录名识别时长时，需要选择 5 秒或 10 秒。
 
-                3. 手动导入需要选择 model.int8.onnx（或 model.onnx）和 tokens.txt。
-            """.trimIndent()
+                        3. NPU 模型使用 Qualcomm QNN HTP，仅支持兼容的 arm64 骁龙设备,首次使用需要一段时间进行初始化。
+
+                        4. 请注意,NPU模型的识别的速度不一定比CPU模型快,甚至可能会更慢,但是一定程度上可以减少转录时的设备负载。
+
+                        5. SenseVoice 支持中文、英语、日语、韩语和粤语，并能识别部分声音事件与情绪。
+                    """.trimIndent()
+                } else {
+                    """
+                        SenseVoice CPU 模型下载指引：
+
+                        1. 推荐点击“选择模型”右侧的蓝色下载按钮，应用会自动下载、解压并选择模型。
+
+                        2. SenseVoice 支持中文、英语、日语、韩语和粤语，并能识别部分声音事件与情绪。
+
+                        3. 手动导入需要选择 model.int8.onnx（或 model.onnx）和 tokens.txt。
+                    """.trimIndent()
+                }
             SettingsManager.ASR_MODEL_PARAKEET_TDT -> """
                 Parakeet TDT 0.6B v3 模型说明：
 
@@ -867,7 +979,18 @@ class ModelSettingsActivity : AppCompatActivity() {
             .setMessage(message)
             .setPositiveButton("确定", null)
             .setNeutralButton("打开 GitHub") { _, _ ->
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models"))
+                val releaseTag = if (
+                    modelType == SettingsManager.ASR_MODEL_SENSEVOICE &&
+                    settingsManager.getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU
+                ) {
+                    "asr-models-qnn"
+                } else {
+                    "asr-models"
+                }
+                val intent = Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse("https://github.com/k2-fsa/sherpa-onnx/releases/tag/$releaseTag")
+                )
                 startActivity(intent)
             }
             .show()
@@ -914,6 +1037,13 @@ class ModelSettingsActivity : AppCompatActivity() {
         updateAsrModelUi()
     }
 
+    private fun selectSenseVoiceProvider(provider: String) {
+        if (provider == settingsManager.getSenseVoiceProvider()) return
+        settingsManager.setSenseVoiceProvider(provider)
+        loadModelPaths()
+        updateAsrModelUi()
+    }
+
     private fun loadModelPaths() {
         when (modelType) {
             SettingsManager.ASR_MODEL_SENSEVOICE -> {
@@ -942,7 +1072,14 @@ class ModelSettingsActivity : AppCompatActivity() {
             }
         }
         discardInaccessibleAsrModels()
-        binding.tvEncoderFile.text = encoderPath.takeIf { it.isNotEmpty() }?.let { getFileNameFromUri(Uri.parse(it)) } ?: "未选择"
+        binding.tvEncoderFile.text = encoderPath.takeIf { it.isNotEmpty() }?.let {
+            val fileName = getFileNameFromUri(Uri.parse(it))
+            if (isSenseVoiceNpu()) {
+                "$fileName（${settingsManager.getSenseVoiceNpuDurationSeconds()} 秒）"
+            } else {
+                fileName
+            }
+        } ?: "未选择"
         binding.tvDecoderFile.text = decoderPath.takeIf { it.isNotEmpty() }?.let { getFileNameFromUri(Uri.parse(it)) } ?: "未选择"
         binding.tvJoinerFile.text = joinerPath.takeIf { it.isNotEmpty() }?.let { getFileNameFromUri(Uri.parse(it)) } ?: "未选择"
         binding.tvTokensFile.text = tokensPath.takeIf { it.isNotEmpty() }?.let { getFileNameFromUri(Uri.parse(it)) } ?: "未选择"
@@ -1012,6 +1149,8 @@ class ModelSettingsActivity : AppCompatActivity() {
 
     private fun updateAsrModelUi() {
         val senseVoice = modelType == SettingsManager.ASR_MODEL_SENSEVOICE
+        val senseVoiceNpu = senseVoice &&
+            settingsManager.getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU
         val parakeetTdt = modelType == SettingsManager.ASR_MODEL_PARAKEET_TDT
         val parakeetCtc = modelType == SettingsManager.ASR_MODEL_PARAKEET_CTC_JA
         val parakeet = parakeetTdt || parakeetCtc
@@ -1022,15 +1161,33 @@ class ModelSettingsActivity : AppCompatActivity() {
         binding.btnDownloadAsrModel.visibility = if (hasSelectedModel) View.GONE else View.VISIBLE
         binding.btnResetAsrModel.visibility = if (hasSelectedModel) View.VISIBLE else View.GONE
         binding.tvEncoderLabel.text = when {
-            senseVoice -> "SenseVoice 模型"
+            senseVoiceNpu -> "SenseVoice NPU 模型"
+            senseVoice -> "SenseVoice CPU 模型"
             parakeetCtc -> "CTC 模型"
             else -> "Encoder 模型"
         }
         binding.btnSelectEncoder.text = if (senseVoice || parakeetCtc) "选择模型" else "选择 Encoder"
+        binding.btnSelectEncoder.visibility = View.VISIBLE
+        binding.btnSelectTokens.visibility = View.VISIBLE
         binding.layoutDecoder.visibility = if (senseVoice || parakeetCtc) View.GONE else View.VISIBLE
         binding.layoutJoiner.visibility = if (parakeetTdt) View.VISIBLE else View.GONE
         binding.btnWhisperConfig.visibility = if (modelType == SettingsManager.ASR_MODEL_WHISPER) View.VISIBLE else View.GONE
+        binding.layoutSenseVoiceProviderOptions.visibility = if (senseVoice) View.VISIBLE else View.GONE
         binding.layoutParakeetVariantOptions.visibility = if (parakeet) View.VISIBLE else View.GONE
+        binding.tvSenseVoiceCpuOption.setTextColor(
+            ContextCompat.getColor(this, if (!senseVoiceNpu) R.color.primary else R.color.on_surface_variant)
+        )
+        binding.tvSenseVoiceNpuOption.setTextColor(
+            ContextCompat.getColor(this, if (senseVoiceNpu) R.color.primary else R.color.on_surface_variant)
+        )
+        binding.tvSenseVoiceCpuOption.setTypeface(
+            null,
+            if (!senseVoiceNpu) Typeface.BOLD else Typeface.NORMAL
+        )
+        binding.tvSenseVoiceNpuOption.setTypeface(
+            null,
+            if (senseVoiceNpu) Typeface.BOLD else Typeface.NORMAL
+        )
         binding.tvParakeetTdtOption.setTextColor(
             ContextCompat.getColor(this, if (parakeetTdt) R.color.primary else R.color.on_surface_variant)
         )
@@ -1044,6 +1201,10 @@ class ModelSettingsActivity : AppCompatActivity() {
     private fun isSingleFileModel(): Boolean =
         modelType == SettingsManager.ASR_MODEL_SENSEVOICE ||
             modelType == SettingsManager.ASR_MODEL_PARAKEET_CTC_JA
+
+    private fun isSenseVoiceNpu(): Boolean =
+        modelType == SettingsManager.ASR_MODEL_SENSEVOICE &&
+            settingsManager.getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU
 
     private fun currentModelDisplayName(): String = when (modelType) {
         SettingsManager.ASR_MODEL_SENSEVOICE -> "SenseVoice"

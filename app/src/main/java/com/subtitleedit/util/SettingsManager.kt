@@ -37,6 +37,11 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_ASR_MODEL_TYPE = "asr_model_type"
         private const val KEY_SENSEVOICE_MODEL_PATH = "sensevoice_model_path"
         private const val KEY_SENSEVOICE_TOKENS_PATH = "sensevoice_tokens_path"
+        private const val KEY_SENSEVOICE_PROVIDER = "sensevoice_provider"
+        private const val KEY_SENSEVOICE_NPU_MODEL_PATH = "sensevoice_npu_model_path"
+        private const val KEY_SENSEVOICE_NPU_TOKENS_PATH = "sensevoice_npu_tokens_path"
+        private const val KEY_SENSEVOICE_NPU_DURATION_SECONDS =
+            "sensevoice_npu_duration_seconds"
         private const val KEY_PARAKEET_TDT_ENCODER_PATH = "parakeet_tdt_encoder_path"
         private const val KEY_PARAKEET_TDT_DECODER_PATH = "parakeet_tdt_decoder_path"
         private const val KEY_PARAKEET_TDT_JOINER_PATH = "parakeet_tdt_joiner_path"
@@ -91,6 +96,9 @@ class SettingsManager private constructor(context: Context) {
         const val ASR_MODEL_SENSEVOICE = "sensevoice"
         const val ASR_MODEL_PARAKEET_TDT = "parakeet_tdt"
         const val ASR_MODEL_PARAKEET_CTC_JA = "parakeet_ctc_ja"
+
+        const val SENSEVOICE_PROVIDER_CPU = "cpu"
+        const val SENSEVOICE_PROVIDER_NPU = "npu"
 
         const val SECONDARY_VAD_MODE_NONE = "none"
         const val SECONDARY_VAD_MODE_UNCOVERED = "uncovered"
@@ -335,23 +343,75 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putString(KEY_ASR_MODEL_TYPE, type).apply()
     }
 
-    fun getSenseVoiceModelPath(): String = prefs.getString(KEY_SENSEVOICE_MODEL_PATH, "") ?: ""
+    fun getSenseVoiceProvider(): String =
+        prefs.getString(KEY_SENSEVOICE_PROVIDER, SENSEVOICE_PROVIDER_CPU)
+            ?.takeIf { it == SENSEVOICE_PROVIDER_CPU || it == SENSEVOICE_PROVIDER_NPU }
+            ?: SENSEVOICE_PROVIDER_CPU
+
+    fun setSenseVoiceProvider(provider: String) {
+        val normalized = if (provider == SENSEVOICE_PROVIDER_NPU) {
+            SENSEVOICE_PROVIDER_NPU
+        } else {
+            SENSEVOICE_PROVIDER_CPU
+        }
+        prefs.edit().putString(KEY_SENSEVOICE_PROVIDER, normalized).apply()
+    }
+
+    fun getSenseVoiceModelPath(provider: String = getSenseVoiceProvider()): String {
+        val key = if (provider == SENSEVOICE_PROVIDER_NPU) {
+            KEY_SENSEVOICE_NPU_MODEL_PATH
+        } else {
+            KEY_SENSEVOICE_MODEL_PATH
+        }
+        return prefs.getString(key, "") ?: ""
+    }
 
     fun setSenseVoiceModelPath(path: String) {
-        prefs.edit().putString(KEY_SENSEVOICE_MODEL_PATH, path).apply()
+        val key = if (getSenseVoiceProvider() == SENSEVOICE_PROVIDER_NPU) {
+            KEY_SENSEVOICE_NPU_MODEL_PATH
+        } else {
+            KEY_SENSEVOICE_MODEL_PATH
+        }
+        prefs.edit().putString(key, path).apply()
     }
 
-    fun getSenseVoiceTokensPath(): String = prefs.getString(KEY_SENSEVOICE_TOKENS_PATH, "") ?: ""
+    fun getSenseVoiceTokensPath(provider: String = getSenseVoiceProvider()): String {
+        val key = if (provider == SENSEVOICE_PROVIDER_NPU) {
+            KEY_SENSEVOICE_NPU_TOKENS_PATH
+        } else {
+            KEY_SENSEVOICE_TOKENS_PATH
+        }
+        return prefs.getString(key, "") ?: ""
+    }
 
     fun setSenseVoiceTokensPath(path: String) {
-        prefs.edit().putString(KEY_SENSEVOICE_TOKENS_PATH, path).apply()
+        val key = if (getSenseVoiceProvider() == SENSEVOICE_PROVIDER_NPU) {
+            KEY_SENSEVOICE_NPU_TOKENS_PATH
+        } else {
+            KEY_SENSEVOICE_TOKENS_PATH
+        }
+        prefs.edit().putString(key, path).apply()
     }
 
-    fun clearSenseVoiceModelPaths() {
-        prefs.edit()
-            .putString(KEY_SENSEVOICE_MODEL_PATH, "")
-            .putString(KEY_SENSEVOICE_TOKENS_PATH, "")
-            .apply()
+    fun getSenseVoiceNpuDurationSeconds(): Int =
+        prefs.getInt(KEY_SENSEVOICE_NPU_DURATION_SECONDS, 5).takeIf { it == 10 } ?: 5
+
+    fun setSenseVoiceNpuDurationSeconds(seconds: Int) {
+        prefs.edit().putInt(KEY_SENSEVOICE_NPU_DURATION_SECONDS, if (seconds == 10) 10 else 5).apply()
+    }
+
+    fun clearSenseVoiceModelPaths(provider: String = getSenseVoiceProvider()) {
+        if (provider == SENSEVOICE_PROVIDER_NPU) {
+            prefs.edit()
+                .putString(KEY_SENSEVOICE_NPU_MODEL_PATH, "")
+                .putString(KEY_SENSEVOICE_NPU_TOKENS_PATH, "")
+                .apply()
+        } else {
+            prefs.edit()
+                .putString(KEY_SENSEVOICE_MODEL_PATH, "")
+                .putString(KEY_SENSEVOICE_TOKENS_PATH, "")
+                .apply()
+        }
     }
 
     fun getParakeetTdtEncoderPath(): String = prefs.getString(KEY_PARAKEET_TDT_ENCODER_PATH, "") ?: ""

@@ -62,7 +62,8 @@ class ModelManagementActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = "模型管理"
         binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
-        binding.tvModelsDirectory.text = "模型目录：${ModelDownloader.modelsDirectory().absolutePath}"
+        binding.tvModelsDirectory.text =
+            "下载模型目录：${ModelDownloader.modelsDirectory().absolutePath}"
 
         if (hasStorageAccess()) loadModels() else requestStorageAccess()
     }
@@ -121,15 +122,26 @@ class ModelManagementActivity : AppCompatActivity() {
     }
 
     private fun scanModels(): List<ModelItem> {
+        val items = mutableListOf<ModelItem>()
         val root = ModelDownloader.modelsDirectory()
         if (!root.isDirectory) return emptyList()
-        val items = mutableListOf<ModelItem>()
         root.listFiles().orEmpty()
             .filterNot { it.name.startsWith(".") || it.name.contains(".part.") || it.name.endsWith(".backup") }
             .forEach { file ->
                 when {
                     file.isDirectory && file.name.startsWith("sherpa-onnx-sense-voice-") -> {
                         items += ModelItem("SenseVoice 模型", "SenseVoice", file, calculateSize(file))
+                    }
+                    file.isDirectory && file.name.startsWith("sherpa-onnx-qnn-") &&
+                        file.name.contains("sense-voice") -> {
+                        val option = ModelDownloader.SENSEVOICE_NPU_MODELS
+                            .firstOrNull { it.directoryName == file.name }
+                        items += ModelItem(
+                            "SenseVoice 模型",
+                            "SenseVoice NPU ${option?.displayName ?: file.name}",
+                            file,
+                            calculateSize(file)
+                        )
                     }
                     file.isDirectory && file.name.startsWith("sherpa-onnx-whisper-") -> {
                         val variant = file.name.removePrefix("sherpa-onnx-whisper-")
@@ -312,12 +324,17 @@ class ModelManagementActivity : AppCompatActivity() {
         if (whisperPaths.any { pointsInsideTarget(it, target) }) {
             settingsManager.clearWhisperModelPaths()
         }
-        val senseVoicePaths = listOf(
-            settingsManager.getSenseVoiceModelPath(),
-            settingsManager.getSenseVoiceTokensPath()
-        )
-        if (senseVoicePaths.any { pointsInsideTarget(it, target) }) {
-            settingsManager.clearSenseVoiceModelPaths()
+        listOf(
+            SettingsManager.SENSEVOICE_PROVIDER_CPU,
+            SettingsManager.SENSEVOICE_PROVIDER_NPU
+        ).forEach { provider ->
+            val senseVoicePaths = listOf(
+                settingsManager.getSenseVoiceModelPath(provider),
+                settingsManager.getSenseVoiceTokensPath(provider)
+            )
+            if (senseVoicePaths.any { pointsInsideTarget(it, target) }) {
+                settingsManager.clearSenseVoiceModelPaths(provider)
+            }
         }
         val parakeetTdtPaths = listOf(
             settingsManager.getParakeetTdtEncoderPath(),

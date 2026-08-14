@@ -229,6 +229,43 @@
                                 android:text="@string/activity_model_settings_text_09" />
 
                             <LinearLayout
+                                android:id="@+id/layoutSenseVoiceProviderOptions"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_gravity="end"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:visibility="gone">
+
+                                <TextView
+                                    android:id="@+id/tvSenseVoiceCpuOption"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="36dp"
+                                    android:background="?attr/selectableItemBackgroundBorderless"
+                                    android:clickable="true"
+                                    android:focusable="true"
+                                    android:gravity="center"
+                                    android:minWidth="44dp"
+                                    android:text="CPU"
+                                    android:textColor="@color/primary"
+                                    android:textSize="12sp" />
+
+                                <TextView
+                                    android:id="@+id/tvSenseVoiceNpuOption"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="36dp"
+                                    android:background="?attr/selectableItemBackgroundBorderless"
+                                    android:clickable="true"
+                                    android:focusable="true"
+                                    android:gravity="center"
+                                    android:minWidth="44dp"
+                                    android:text="NPU"
+                                    android:textColor="@color/on_surface_variant"
+                                    android:textSize="12sp" />
+
+                            </LinearLayout>
+
+                            <LinearLayout
                                 android:id="@+id/layoutParakeetVariantOptions"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"

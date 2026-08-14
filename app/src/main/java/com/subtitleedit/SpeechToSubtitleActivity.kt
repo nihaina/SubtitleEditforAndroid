@@ -687,8 +687,17 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         if (modelType != SettingsManager.ASR_MODEL_SENSEVOICE) {
             appendRuntimeLog("  识别线程：${settingsManager.getSpeechWhisperThreads()}")
         }
-        appendRuntimeLog("  VAD：${if (shouldUseVad()) "启用" else "禁用，固定分段 ${settingsManager.getSpeechFixedSegmentSeconds()} 秒"}")
-        if (shouldUseVad()) {
+        val useVad = shouldUseVad()
+        val fixedSegmentText = if (
+            modelType == SettingsManager.ASR_MODEL_SENSEVOICE &&
+            settingsManager.getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU
+        ) {
+            "NPU 模型固定分段 ${settingsManager.getSenseVoiceNpuDurationSeconds()} 秒"
+        } else {
+            "固定分段 ${settingsManager.getSpeechFixedSegmentSeconds()} 秒"
+        }
+        appendRuntimeLog("  VAD：${if (useVad) "启用" else "禁用，$fixedSegmentText"}")
+        if (useVad) {
             appendRuntimeLog("  VAD 模型：${if (settingsManager.isVadUseBuiltInModel()) "内置 silero_vad.onnx" else displayModelPath(vadModelPath)}")
             appendRuntimeLog("  VAD 阈值：${settingsManager.getVadThreshold()}，最小静音：${settingsManager.getVadMinSilenceDuration()}s，最小语音：${settingsManager.getVadMinSpeechDuration()}s，最大语音：${settingsManager.getVadMaxSpeechDuration()}s")
             appendRuntimeLog("  动态 Padding：${if (settingsManager.isSpeechVadDynamicPaddingEnabled()) "启用（前后最多各 500ms）" else "关闭"}")

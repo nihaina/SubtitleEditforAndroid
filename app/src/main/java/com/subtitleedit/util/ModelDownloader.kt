@@ -34,7 +34,6 @@ object ModelDownloader {
     const val SENSEVOICE_DIRECTORY_NAME =
         "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17"
     const val SEPARATION_DIRECTORY_NAME = "separation"
-    private const val SENSEVOICE_ARCHIVE_NAME = "$SENSEVOICE_DIRECTORY_NAME.tar.bz2"
     private const val DEMIX_MODEL_NAME = "htdemucs_fp16weights.onnx"
     private const val MIN_ONNX_SIZE = 1024L * 1024L
     private const val BUFFER_SIZE = 1024 * 1024
@@ -62,6 +61,21 @@ object ModelDownloader {
     data class SenseVoiceFiles(
         val model: File,
         val tokens: File
+    )
+
+    enum class SenseVoiceArchitecture {
+        ONNX,
+        QNN
+    }
+
+    data class SenseVoiceModelOption(
+        val id: String,
+        val displayName: String,
+        val architecture: SenseVoiceArchitecture,
+        val directoryName: String,
+        val url: String,
+        val sizeLabel: String,
+        val durationSeconds: Int? = null
     )
 
     data class WhisperFiles(
@@ -100,6 +114,41 @@ object ModelDownloader {
         val url: String,
         val sizeLabel: String
     )
+
+    val SENSEVOICE_CPU_MODEL = SenseVoiceModelOption(
+        id = "cpu",
+        displayName = "CPU",
+        architecture = SenseVoiceArchitecture.ONNX,
+        directoryName = SENSEVOICE_DIRECTORY_NAME,
+        url = SENSEVOICE_MODEL_URL,
+        sizeLabel = "约 1.09 GB"
+    )
+
+    val SENSEVOICE_NPU_5S_MODEL = SenseVoiceModelOption(
+        id = "npu-5s",
+        displayName = "sense-voice-2024-07-17-int8 5 秒",
+        architecture = SenseVoiceArchitecture.QNN,
+        directoryName =
+            "sherpa-onnx-qnn-5-seconds-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8-android-aarch64",
+        url =
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models-qnn/sherpa-onnx-qnn-5-seconds-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8-android-aarch64.tar.bz2",
+        sizeLabel = "约 228 MB",
+        durationSeconds = 5
+    )
+
+    val SENSEVOICE_NPU_10S_MODEL = SenseVoiceModelOption(
+        id = "npu-10s",
+        displayName = "sense-voice-2024-07-17-int8 10 秒",
+        architecture = SenseVoiceArchitecture.QNN,
+        directoryName =
+            "sherpa-onnx-qnn-10-seconds-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8-android-aarch64",
+        url =
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models-qnn/sherpa-onnx-qnn-10-seconds-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8-android-aarch64.tar.bz2",
+        sizeLabel = "约 228 MB",
+        durationSeconds = 10
+    )
+
+    val SENSEVOICE_NPU_MODELS = listOf(SENSEVOICE_NPU_5S_MODEL, SENSEVOICE_NPU_10S_MODEL)
 
     val WHISPER_MODELS = listOf(
         WhisperModelOption(
@@ -161,23 +210,29 @@ object ModelDownloader {
     )
 
     suspend fun downloadSenseVoice(
+        option: SenseVoiceModelOption = SENSEVOICE_CPU_MODEL,
         onProgress: (Progress) -> Unit
     ): SenseVoiceFiles = senseVoiceMutex.withLock {
         withContext(kotlinx.coroutines.Dispatchers.IO) {
             val modelsDir = requireModelsDirectory()
-            val targetDir = File(modelsDir, SENSEVOICE_DIRECTORY_NAME)
-            recoverSenseVoiceBackup(targetDir)
-            findSenseVoiceFiles(targetDir)?.let {
-                onProgress(Progress("检测到本地 SenseVoice 模型，跳过下载并直接导入"))
+            val targetDir = File(modelsDir, option.directoryName)
+            recoverSenseVoiceBackup(targetDir, option)
+            findSenseVoiceFiles(targetDir, option.architecture)?.let {
+                onProgress(Progress("检测到本地 SenseVoice ${option.displayName} 模型，跳过下载并直接导入"))
                 return@withContext it
             }
 
-            val archive = File(modelsDir, SENSEVOICE_ARCHIVE_NAME)
+            val archive = File(modelsDir, "${option.directoryName}.tar.bz2")
             if (!archive.isFile || archive.length() == 0L) {
-                downloadFile(SENSEVOICE_MODEL_URL, archive, "正在下载 SenseVoice 模型", onProgress)
+                downloadFile(
+                    option.url,
+                    archive,
+                    "正在下载 SenseVoice ${option.displayName} 模型",
+                    onProgress
+                )
             }
 
-            val stagingDir = File(modelsDir, ".sensevoice_extracting")
+            val stagingDir = File(modelsDir, ".sensevoice_${option.id}_extracting")
             if (stagingDir.exists()) stagingDir.deleteRecursively()
             if (!stagingDir.mkdirs()) throw IOException("无法创建 SenseVoice 解压临时目录")
 
@@ -187,19 +242,25 @@ object ModelDownloader {
                     archive = archive,
                     outputDir = stagingDir,
                     progressMessage = "正在解压 SenseVoice 模型",
-                    shouldWrite = ::isSenseVoiceRequiredFile,
+                    shouldWrite = { isSenseVoiceRequiredFile(it, option.architecture) },
                     onProgress = onProgress
                 )
-                val stagedFiles = findSenseVoiceFiles(stagingDir)
-                    ?: throw IOException("压缩包中未找到可用的 SenseVoice ONNX 模型和 tokens.txt")
+                val stagedFiles = findSenseVoiceFiles(stagingDir, option.architecture)
+                    ?: throw IOException(
+                        if (option.architecture == SenseVoiceArchitecture.QNN) {
+                            "压缩包中未找到可用的 SenseVoice QNN libmodel.so 和 tokens.txt"
+                        } else {
+                            "压缩包中未找到可用的 SenseVoice ONNX 模型和 tokens.txt"
+                        }
+                    )
 
                 val modelRoot = directChildContaining(stagingDir, stagedFiles.model)
                 val tokensRoot = directChildContaining(stagingDir, stagedFiles.tokens)
                 val sourceRoot = if (modelRoot == tokensRoot) modelRoot else stagingDir
-                installSenseVoiceDirectory(sourceRoot, targetDir)
+                installSenseVoiceDirectory(sourceRoot, targetDir, option)
                 if (stagingDir.exists()) stagingDir.deleteRecursively()
 
-                val installedFiles = findSenseVoiceFiles(targetDir)
+                val installedFiles = findSenseVoiceFiles(targetDir, option.architecture)
                     ?: throw IOException("SenseVoice 模型解压完成，但模型文件校验失败")
                 archive.delete()
                 onProgress(Progress("SenseVoice 模型已下载并解压"))
@@ -630,10 +691,18 @@ object ModelDownloader {
         }
     }
 
-    private fun isSenseVoiceRequiredFile(fileName: String): Boolean =
-        fileName.equals("model.int8.onnx", ignoreCase = true) ||
-            fileName.equals("model.onnx", ignoreCase = true) ||
-            fileName.equals("tokens.txt", ignoreCase = true)
+    private fun isSenseVoiceRequiredFile(
+        fileName: String,
+        architecture: SenseVoiceArchitecture
+    ): Boolean = when (architecture) {
+        SenseVoiceArchitecture.ONNX ->
+            fileName.equals("model.int8.onnx", ignoreCase = true) ||
+                fileName.equals("model.onnx", ignoreCase = true) ||
+                fileName.equals("tokens.txt", ignoreCase = true)
+        SenseVoiceArchitecture.QNN ->
+            fileName.equals("libmodel.so", ignoreCase = true) ||
+                fileName.equals("tokens.txt", ignoreCase = true)
+    }
 
     private fun isWhisperRequiredFile(fileName: String): Boolean =
         fileName.endsWith("tokens.txt", ignoreCase = true) ||
@@ -657,18 +726,32 @@ object ModelDownloader {
             ParakeetArchitecture.CTC -> setOf("model.int8.onnx", "tokens.txt")
         }
 
-    private fun findSenseVoiceFiles(root: File): SenseVoiceFiles? {
+    private fun findSenseVoiceFiles(
+        root: File,
+        architecture: SenseVoiceArchitecture
+    ): SenseVoiceFiles? {
         if (!root.isDirectory) return null
         val files = runCatching { root.walkTopDown().filter { it.isFile }.toList() }.getOrNull()
             ?: return null
         val model = files
             .filter {
-                (it.name.equals("model.int8.onnx", ignoreCase = true) ||
-                    it.name.equals("model.onnx", ignoreCase = true)) &&
-                    it.length() >= MIN_ONNX_SIZE
+                val validName = when (architecture) {
+                    SenseVoiceArchitecture.ONNX ->
+                        it.name.equals("model.int8.onnx", ignoreCase = true) ||
+                            it.name.equals("model.onnx", ignoreCase = true)
+                    SenseVoiceArchitecture.QNN ->
+                        it.name.equals("libmodel.so", ignoreCase = true)
+                }
+                validName && it.length() >= MIN_ONNX_SIZE
             }
             .minWithOrNull(
-                compareBy<File> { senseVoiceModelPriority(it.name) }
+                compareBy<File> {
+                    if (architecture == SenseVoiceArchitecture.ONNX) {
+                        senseVoiceModelPriority(it.name)
+                    } else {
+                        0
+                    }
+                }
                     .thenBy { it.absolutePath.length }
             ) ?: return null
         val tokens = files
@@ -813,15 +896,19 @@ object ModelDownloader {
         return if (current.parentFile == root) current else root
     }
 
-    private fun installSenseVoiceDirectory(source: File, destination: File) {
-        val backup = File(destination.parentFile, ".sensevoice_backup")
+    private fun installSenseVoiceDirectory(
+        source: File,
+        destination: File,
+        option: SenseVoiceModelOption
+    ) {
+        val backup = File(destination.parentFile, ".sensevoice_${option.id}_backup")
         backup.deleteRecursively()
         if (destination.exists() && !destination.renameTo(backup)) {
             throw IOException("无法备份旧的 SenseVoice 模型目录")
         }
         try {
             moveDirectory(source, destination)
-            if (findSenseVoiceFiles(destination) == null) {
+            if (findSenseVoiceFiles(destination, option.architecture) == null) {
                 throw IOException("安装后的 SenseVoice 模型校验失败")
             }
             backup.deleteRecursively()
@@ -832,14 +919,14 @@ object ModelDownloader {
         }
     }
 
-    private fun recoverSenseVoiceBackup(destination: File) {
-        val backup = File(destination.parentFile, ".sensevoice_backup")
+    private fun recoverSenseVoiceBackup(destination: File, option: SenseVoiceModelOption) {
+        val backup = File(destination.parentFile, ".sensevoice_${option.id}_backup")
         if (!backup.exists()) return
-        if (findSenseVoiceFiles(destination) != null) {
+        if (findSenseVoiceFiles(destination, option.architecture) != null) {
             backup.deleteRecursively()
             return
         }
-        if (findSenseVoiceFiles(backup) != null) {
+        if (findSenseVoiceFiles(backup, option.architecture) != null) {
             destination.deleteRecursively()
             if (!backup.renameTo(destination)) {
                 moveDirectory(backup, destination)

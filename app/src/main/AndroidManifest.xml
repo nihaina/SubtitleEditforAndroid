@@ -33,6 +33,10 @@
         android:requestLegacyExternalStorage="true"
         tools:targetApi="34">
 
+        <uses-native-library
+            android:name="libcdsprpc.so"
+            android:required="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"

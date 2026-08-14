@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.Context
 import android.content.res.AssetManager
 import android.net.Uri
+import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.k2fsa.sherpa.onnx.*
@@ -36,6 +37,7 @@ class WhisperRecognizer(
     private var recognizer: OfflineRecognizer? = null
     private var vad: Vad? = null
     private var secondaryVad: Vad? = null
+    private var qnnExecutableModelCopy: File? = null
     // 原生识别器只接受文件路径。对 SAF URI 保持描述符存活，避免复制大型模型文件。
     private val modelFileDescriptors = mutableListOf<ParcelFileDescriptor>()
 
@@ -68,6 +70,11 @@ class WhisperRecognizer(
         val endTimeMs: Long
     )
 
+    private data class SenseVoiceNpuRuntimeFiles(
+        val modelPath: String,
+        val contextBinaryPath: String
+    )
+
     private data class SampleRange(
         val startSample: Long,
         val endSample: Long
@@ -83,15 +90,25 @@ class WhisperRecognizer(
      */
     private fun initRecognizer(): Result<Unit> {
         return try {
+            if (isSenseVoiceNpu() && "arm64-v8a" !in Build.SUPPORTED_ABIS) {
+                return Result.failure(Exception("SenseVoice NPU 仅支持 arm64-v8a 骁龙设备"))
+            }
             val primaryFileName = when {
+                isSenseVoiceNpu() -> "libmodel.so"
                 isSenseVoice() -> "sensevoice.onnx"
                 isParakeetCtc() -> "model.int8.onnx"
                 else -> "encoder.int8.onnx"
             }
-            val encoderFile = resolveModelPath(
+            val resolvedEncoderFile = resolveModelPath(
                 encoderPath,
                 primaryFileName
             )
+            val npuRuntimeFiles = if (isSenseVoiceNpu() && resolvedEncoderFile != null) {
+                prepareSenseVoiceNpuRuntimeFiles(resolvedEncoderFile, encoderPath)
+            } else {
+                null
+            }
+            val encoderFile = npuRuntimeFiles?.modelPath ?: resolvedEncoderFile
             val decoderFile = if (requiresDecoder()) {
                 resolveModelPath(decoderPath, "decoder.int8.onnx")
             } else {
@@ -116,9 +133,13 @@ class WhisperRecognizer(
             if (tokensFile == null) {
                 return Result.failure(Exception("无法读取 tokens 文件"))
             }
-
             Log.d(TAG, "模型文件准备完成:")
-            Log.d(TAG, "  ${if (isSingleFileModel()) "model" else "encoder"}: $encoderFile")
+            if (npuRuntimeFiles != null && encoderFile != resolvedEncoderFile) {
+                Log.d(TAG, "  model source: $resolvedEncoderFile")
+                Log.d(TAG, "  model runtime: $encoderFile")
+            } else {
+                Log.d(TAG, "  ${if (isSingleFileModel()) "model" else "encoder"}: $encoderFile")
+            }
             decoderFile?.let { Log.d(TAG, "  decoder: $it") }
             joinerFile?.let { Log.d(TAG, "  joiner: $it") }
             Log.d(TAG, "  tokens: $tokensFile")
@@ -128,23 +149,46 @@ class WhisperRecognizer(
             } else {
                 vad = null
                 secondaryVad = null
-                Log.d(TAG, "已禁用 VAD 分段，将使用固定分段识别")
+                val fixedSegmentSeconds = fixedSegmentDurationSeconds()
+                Log.d(
+                    TAG,
+                    if (isSenseVoiceNpu()) {
+                        "已禁用 VAD 分段，将使用 SenseVoice NPU 模型固定时长 ${fixedSegmentSeconds}s"
+                    } else {
+                        "已禁用 VAD 分段，将使用固定时长 ${fixedSegmentSeconds}s"
+                    }
+                )
             }
 
             val modelConfig = when {
                 isSenseVoice() -> {
                     val senseVoiceLanguage = mapSenseVoiceLanguage(language)
                     Log.d(TAG, "SenseVoice language=$senseVoiceLanguage (selected=$language)")
+                    val qnn = isSenseVoiceNpu()
+                    if (qnn) {
+                        OfflineRecognizer.prependAdspLibraryPath(
+                            context.applicationInfo.nativeLibraryDir
+                        )
+                    }
                     OfflineModelConfig(
                         senseVoice = OfflineSenseVoiceModelConfig(
                             model = encoderFile,
                             language = senseVoiceLanguage,
-                            useInverseTextNormalization = true
+                            useInverseTextNormalization = true,
+                            qnnConfig = if (qnn) {
+                                QnnConfig(
+                                    backendLib = "libQnnHtp.so",
+                                    systemLib = "libQnnSystem.so",
+                                    contextBinary = npuRuntimeFiles!!.contextBinaryPath
+                                )
+                            } else {
+                                QnnConfig()
+                            }
                         ),
                         tokens = tokensFile,
-                        numThreads = 4,
+                        numThreads = if (qnn) 1 else 4,
                         debug = true,
-                        provider = "cpu"
+                        provider = if (qnn) "qnn" else "cpu"
                     )
                 }
                 isParakeetTdt() -> OfflineModelConfig(
@@ -204,8 +248,88 @@ class WhisperRecognizer(
         } catch (e: Exception) {
             Log.e(TAG, "初始化识别器失败", e)
             recognizer = null
+            deleteQnnExecutableModelCopy()
             Result.failure(e)
         }
+    }
+
+    /**
+     * QNN 首次初始化会 dlopen libmodel.so。Android 共享存储不可执行，因此模型仍保存在
+     * 公共目录，但首次生成 model.bin 时使用 codeCacheDir 中的临时可执行副本。
+     */
+    private fun prepareSenseVoiceNpuRuntimeFiles(
+        modelPath: String,
+        modelIdentity: String
+    ): SenseVoiceNpuRuntimeFiles {
+        val sourceModel = File(modelPath)
+        if (!sourceModel.isFile || sourceModel.length() <= 0L) {
+            throw IllegalStateException("SenseVoice NPU 模型文件无效：$modelPath")
+        }
+
+        val runtimeDir = File(context.codeCacheDir, "sensevoice-qnn")
+        if (!runtimeDir.exists() && !runtimeDir.mkdirs()) {
+            throw IllegalStateException("无法创建 SenseVoice NPU 运行时目录")
+        }
+        val durationSeconds = settingsManager().getSenseVoiceNpuDurationSeconds()
+        val modelKey = Integer.toHexString(modelIdentity.hashCode())
+        val contextBinary = if (modelPath.startsWith("/proc/self/fd/")) {
+            File(runtimeDir, "model-${durationSeconds}s-$modelKey.bin")
+        } else {
+            sourceModel.resolveSibling("model.bin")
+        }
+        if (contextBinary.isFile && contextBinary.length() > 0L) {
+            deleteQnnExecutableModelCopy()
+            Log.d(TAG, "使用 QNN context binary: ${contextBinary.absolutePath}")
+            return SenseVoiceNpuRuntimeFiles(sourceModel.absolutePath, contextBinary.absolutePath)
+        }
+        if (contextBinary.exists() && !contextBinary.delete()) {
+            throw IllegalStateException("无法清理无效的 QNN context binary：${contextBinary.absolutePath}")
+        }
+
+        val runtimeModel = File(
+            runtimeDir,
+            "libmodel-${durationSeconds}s-$modelKey.so"
+        )
+        val copyRequired = !runtimeModel.isFile ||
+            runtimeModel.length() != sourceModel.length() ||
+            runtimeModel.lastModified() != sourceModel.lastModified()
+        if (copyRequired) {
+            val temporaryModel = File(runtimeDir, "${runtimeModel.name}.part")
+            temporaryModel.delete()
+            try {
+                sourceModel.inputStream().buffered().use { input ->
+                    temporaryModel.outputStream().buffered().use { output ->
+                        input.copyTo(output, 1024 * 1024)
+                    }
+                }
+                if (temporaryModel.length() != sourceModel.length()) {
+                    throw IllegalStateException("SenseVoice NPU 临时模型复制不完整")
+                }
+                if (runtimeModel.exists() && !runtimeModel.delete()) {
+                    throw IllegalStateException("无法替换 SenseVoice NPU 临时模型")
+                }
+                if (!temporaryModel.renameTo(runtimeModel)) {
+                    temporaryModel.copyTo(runtimeModel, overwrite = true)
+                    temporaryModel.delete()
+                }
+                runtimeModel.setLastModified(sourceModel.lastModified())
+            } finally {
+                temporaryModel.delete()
+            }
+        }
+
+        qnnExecutableModelCopy = runtimeModel
+        Log.d(TAG, "已准备 QNN 临时可执行模型: ${runtimeModel.absolutePath}")
+        return SenseVoiceNpuRuntimeFiles(runtimeModel.absolutePath, contextBinary.absolutePath)
+    }
+
+    private fun deleteQnnExecutableModelCopy() {
+        qnnExecutableModelCopy?.let { model ->
+            if (model.exists() && !model.delete()) {
+                Log.w(TAG, "无法删除 QNN 临时模型: ${model.absolutePath}")
+            }
+        }
+        qnnExecutableModelCopy = null
     }
 
     private fun initializeVadInstances() {
@@ -476,11 +600,19 @@ class WhisperRecognizer(
                         }
                     }
                 } else {
-                    // 没有 VAD，使用固定分段方式，但每次只读取当前 30 秒片段
-                    Log.d(TAG, "未使用 VAD，采用固定时长分段")
+                    // 没有 VAD 时逐段读取，SenseVoice NPU 使用模型自身的固定输入时长。
+                    val segmentDurationSeconds = fixedSegmentDurationSeconds()
+                    Log.d(
+                        TAG,
+                        if (isSenseVoiceNpu()) {
+                            "未使用 VAD，按 SenseVoice NPU 模型固定时长 ${segmentDurationSeconds}s 分段"
+                        } else {
+                            "未使用 VAD，按设置的固定时长 ${segmentDurationSeconds}s 分段"
+                        }
+                    )
 
                     // 计算分段数量
-                    val segmentDurationMs = settingsManager().getSpeechFixedSegmentSeconds() * 1000L
+                    val segmentDurationMs = segmentDurationSeconds * 1000L
                     val segmentCount = ((totalDurationMs + segmentDurationMs - 1) / segmentDurationMs).toInt()
                     val samplesPerSegment = (segmentDurationMs * SAMPLE_RATE / 1000).toInt()
 
@@ -555,6 +687,32 @@ class WhisperRecognizer(
         startTimeMs: Long,
         segmentResultTimeRange: SegmentTimeRange? = null
     ): List<SubtitleSegment> {
+        val maxSamples = senseVoiceNpuMaxSamples()
+        if (maxSamples != null && audioData.size > maxSamples) {
+            return audioData
+                .asList()
+                .chunked(maxSamples)
+                .flatMapIndexed { index, samples ->
+                    val chunkStartTimeMs = startTimeMs +
+                        index.toLong() * maxSamples * 1000L / SAMPLE_RATE
+                    val chunkEndTimeMs = chunkStartTimeMs +
+                        samples.size.toLong() * 1000L / SAMPLE_RATE
+                    val chunkResultRange = segmentResultTimeRange?.let { range ->
+                        val rangeStart = maxOf(range.startTimeMs, chunkStartTimeMs)
+                        val rangeEnd = minOf(range.endTimeMs, chunkEndTimeMs)
+                        if (rangeEnd > rangeStart) SegmentTimeRange(rangeStart, rangeEnd) else null
+                    }
+                    if (segmentResultTimeRange != null && chunkResultRange == null) {
+                        emptyList()
+                    } else {
+                        recognizeSegment(
+                            audioData = samples.toFloatArray(),
+                            startTimeMs = chunkStartTimeMs,
+                            segmentResultTimeRange = chunkResultRange
+                        )
+                    }
+                }
+        }
         val segments = mutableListOf<SubtitleSegment>()
 
         try {
@@ -861,6 +1019,8 @@ class WhisperRecognizer(
             Log.d(TAG, "识别器资源已释放")
         } catch (e: Exception) {
             Log.e(TAG, "释放资源失败", e)
+        } finally {
+            deleteQnnExecutableModelCopy()
         }
     }
 
@@ -873,6 +1033,22 @@ class WhisperRecognizer(
     }
 
     private fun isSenseVoice(): Boolean = modelType == SettingsManager.ASR_MODEL_SENSEVOICE
+
+    private fun isSenseVoiceNpu(): Boolean =
+        isSenseVoice() &&
+            settingsManager().getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU
+
+    private fun fixedSegmentDurationSeconds(): Int = if (isSenseVoiceNpu()) {
+        settingsManager().getSenseVoiceNpuDurationSeconds()
+    } else {
+        settingsManager().getSpeechFixedSegmentSeconds()
+    }
+
+    private fun senseVoiceNpuMaxSamples(): Int? = if (isSenseVoiceNpu()) {
+        settingsManager().getSenseVoiceNpuDurationSeconds() * SAMPLE_RATE
+    } else {
+        null
+    }
 
     private fun isParakeetTdt(): Boolean = modelType == SettingsManager.ASR_MODEL_PARAKEET_TDT
 

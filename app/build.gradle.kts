@@ -123,6 +123,9 @@ android {
 
     packaging {
         jniLibs {
+            // Qualcomm DSP loads HTP skel libraries from applicationInfo.nativeLibraryDir.
+            useLegacyPackaging = true
+            keepDebugSymbols += setOf("**/libQnn*.so")
             // sherpa-onnx and the standalone demixing runtime both provide ORT/libc++.
             // Keep a single copy in the APK; the demixing code remains isolated at API level.
             pickFirsts += setOf("**/libonnxruntime.so", "**/libc++_shared.so")

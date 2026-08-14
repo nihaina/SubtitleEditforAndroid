@@ -44,3 +44,10 @@ libass 0.17.4 provides subtitle rendering and libplacebo 6.338.2 provides the
 GPU rendering pipeline used by libmpv. Their upstream license notices and
 source revisions are retained by the reproducible native build described in
 `native/mpv/README.md`.
+
+## Qualcomm QNN Runtime 2.40.0.251030
+
+The arm64 build includes Qualcomm QNN HTP runtime libraries distributed by the
+sherpa-onnx project in its `asr-models-qnn` release. These libraries enable NPU
+execution on compatible Snapdragon devices and remain subject to the Qualcomm
+software terms applicable to the QNN/QAIRT runtime.
