@@ -26,6 +26,16 @@ class VadTimestampGenerator(private val context: Context) {
         val endSample: Long
     )
 
+    private enum class VadSegmentSource {
+        PRIMARY,
+        SECONDARY
+    }
+
+    private data class SourcedVadSegment(
+        val segment: VadSegment,
+        val tailSource: VadSegmentSource
+    )
+
     /**
      * 生成时间轴
      */
@@ -250,7 +260,10 @@ class VadTimestampGenerator(private val context: Context) {
                     detectSecondarySpeechSegments(reader, range)
                 }
                 Log.d(TAG, "二次 VAD 方案一：新增 ${secondarySegments.size} 个语音段")
-                (primarySegments + secondarySegments).sortedBy { it.startSample }
+                (
+                    primarySegments.map { SourcedVadSegment(it, VadSegmentSource.PRIMARY) } +
+                        secondarySegments.map { SourcedVadSegment(it, VadSegmentSource.SECONDARY) }
+                    ).sortedBy { it.segment.startSample }
             }
 
             SettingsManager.SECONDARY_VAD_MODE_WITHIN_SEGMENTS -> {
@@ -260,18 +273,25 @@ class VadTimestampGenerator(private val context: Context) {
                         startSample = segment.startSample.toLong(),
                         endSample = segment.startSample.toLong() + segment.sampleCount.toLong()
                     )
-                    detectSecondarySpeechSegments(reader, range).ifEmpty { listOf(segment) }
+                    val secondarySegments = detectSecondarySpeechSegments(reader, range)
+                    if (secondarySegments.isEmpty()) {
+                        listOf(SourcedVadSegment(segment, VadSegmentSource.PRIMARY))
+                    } else {
+                        secondarySegments.map { SourcedVadSegment(it, VadSegmentSource.SECONDARY) }
+                    }
                 }
                 Log.d(TAG, "二次 VAD 方案二：生成 ${refinedSegments.size} 个语音段")
-                refinedSegments.sortedBy { it.startSample }
+                refinedSegments.sortedBy { it.segment.startSample }
             }
 
-            else -> primarySegments
+            else -> primarySegments.map { SourcedVadSegment(it, VadSegmentSource.PRIMARY) }
         }
         val settingsManager = SettingsManager.getInstance(context)
-        if (!settingsManager.isSpeechSecondaryVadMergeEnabled()) return processedSegments
+        if (!settingsManager.isSpeechSecondaryVadMergeEnabled()) {
+            return processedSegments.map { it.segment }
+        }
 
-        val mergedSegments = mergeVadSegments(
+        val mergedSegments = mergeCrossSourceVadSegments(
             processedSegments,
             settingsManager.getSpeechSecondaryVadMergeGapMs()
         )
@@ -280,34 +300,38 @@ class VadTimestampGenerator(private val context: Context) {
             "二次 VAD 合并语音段：${processedSegments.size} -> ${mergedSegments.size}，" +
                 "最大间隔 ${settingsManager.getSpeechSecondaryVadMergeGapMs()}ms"
         )
-        return mergedSegments
+        return mergedSegments.map { it.segment }
     }
 
-    private fun mergeVadSegments(
-        segments: List<VadSegment>,
+    private fun mergeCrossSourceVadSegments(
+        segments: List<SourcedVadSegment>,
         maxGapMs: Int
-    ): List<VadSegment> {
-        if (segments.size < 2) return segments.sortedBy { it.startSample }
+    ): List<SourcedVadSegment> {
+        if (segments.size < 2) return segments.sortedBy { it.segment.startSample }
 
         val maxGapSamples = (maxGapMs.toLong() * SAMPLE_RATE) / 1000L
-        val sorted = segments.sortedBy { it.startSample }
-        val merged = mutableListOf<VadSegment>()
+        val sorted = segments.sortedBy { it.segment.startSample }
+        val merged = mutableListOf<SourcedVadSegment>()
         var current = sorted.first()
 
         for (next in sorted.drop(1)) {
-            val currentEnd = current.startSample.toLong() + current.sampleCount.toLong()
-            val nextStart = next.startSample.toLong()
-            if (nextStart - currentEnd <= maxGapSamples) {
-                val mergedStart = current.startSample.toLong()
+            val currentEnd = current.segment.startSample.toLong() + current.segment.sampleCount.toLong()
+            val nextStart = next.segment.startSample.toLong()
+            val hasOppositeSources = current.tailSource != next.tailSource
+            if (hasOppositeSources && nextStart - currentEnd <= maxGapSamples) {
+                val mergedStart = current.segment.startSample.toLong()
                 val mergedEnd = maxOf(
                     currentEnd,
-                    next.startSample.toLong() + next.sampleCount.toLong()
+                    next.segment.startSample.toLong() + next.segment.sampleCount.toLong()
                 )
-                current = VadSegment(
-                    startTime = (mergedStart * 1000L) / SAMPLE_RATE,
-                    endTime = (mergedEnd * 1000L) / SAMPLE_RATE,
-                    startSample = mergedStart.toInt(),
-                    sampleCount = (mergedEnd - mergedStart).toInt()
+                current = SourcedVadSegment(
+                    segment = VadSegment(
+                        startTime = (mergedStart * 1000L) / SAMPLE_RATE,
+                        endTime = (mergedEnd * 1000L) / SAMPLE_RATE,
+                        startSample = mergedStart.toInt(),
+                        sampleCount = (mergedEnd - mergedStart).toInt()
+                    ),
+                    tailSource = next.tailSource
                 )
             } else {
                 merged.add(current)

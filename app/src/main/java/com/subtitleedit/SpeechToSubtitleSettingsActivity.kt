@@ -53,6 +53,16 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         binding.switchVadDynamicPadding.setOnCheckedChangeListener { _, checked ->
             if (!loading) settingsManager.setSpeechVadDynamicPaddingEnabled(checked)
         }
+        binding.switchVadMerge.setOnCheckedChangeListener { _, checked ->
+            if (!loading) settingsManager.setSpeechVadMergeEnabled(checked)
+        }
+        bindSecondaryVadValue(
+            slider = binding.sliderVadMergeGap,
+            input = binding.etVadMergeGap,
+            format = "%.0f",
+            normalize = { value -> snap(value, 50f, 0f, 5000f) },
+            save = { value -> settingsManager.setSpeechVadMergeGapMs(value.toInt()) }
+        )
 
         binding.switchSecondaryVadSchemeOne.setOnCheckedChangeListener { _, checked ->
             updateSecondaryVadMode(SettingsManager.SECONDARY_VAD_MODE_UNCOVERED, checked)
@@ -140,6 +150,13 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         binding.sliderFixedSegmentSeconds.value = segmentSeconds.toFloat()
         binding.etFixedSegmentSeconds.setText(String.format(Locale.US, "%d", segmentSeconds))
         binding.switchVadDynamicPadding.isChecked = settingsManager.isSpeechVadDynamicPaddingEnabled()
+        binding.switchVadMerge.isChecked = settingsManager.isSpeechVadMergeEnabled()
+        loadSecondaryVadValue(
+            binding.sliderVadMergeGap,
+            binding.etVadMergeGap,
+            settingsManager.getSpeechVadMergeGapMs().toFloat(),
+            "%.0f"
+        )
 
         when (settingsManager.getSpeechSecondaryVadMode()) {
             SettingsManager.SECONDARY_VAD_MODE_UNCOVERED -> {

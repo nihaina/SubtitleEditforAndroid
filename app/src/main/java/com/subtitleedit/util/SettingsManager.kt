@@ -56,6 +56,8 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_VAD_MAX_SPEECH_DURATION = "vad_max_speech_duration"
         private const val KEY_STT_FIXED_SEGMENT_SECONDS = "stt_fixed_segment_seconds"
         private const val KEY_STT_VAD_DYNAMIC_PADDING_ENABLED = "stt_vad_dynamic_padding_enabled"
+        private const val KEY_STT_VAD_MERGE_ENABLED = "stt_vad_merge_enabled"
+        private const val KEY_STT_VAD_MERGE_GAP_MS = "stt_vad_merge_gap_ms"
         private const val KEY_STT_SECONDARY_VAD_MODE = "stt_secondary_vad_mode"
         private const val KEY_STT_SECONDARY_VAD_THRESHOLD = "stt_secondary_vad_threshold"
         private const val KEY_STT_SECONDARY_VAD_MIN_SILENCE_DURATION =
@@ -586,6 +588,22 @@ class SettingsManager private constructor(context: Context) {
 
     fun setSpeechVadDynamicPaddingEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_STT_VAD_DYNAMIC_PADDING_ENABLED, enabled).apply()
+    }
+
+    fun isSpeechVadMergeEnabled(): Boolean {
+        return prefs.getBoolean(KEY_STT_VAD_MERGE_ENABLED, false)
+    }
+
+    fun setSpeechVadMergeEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_STT_VAD_MERGE_ENABLED, enabled).apply()
+    }
+
+    fun getSpeechVadMergeGapMs(): Int {
+        return prefs.getInt(KEY_STT_VAD_MERGE_GAP_MS, 200).coerceIn(0, 5000)
+    }
+
+    fun setSpeechVadMergeGapMs(gapMs: Int) {
+        prefs.edit().putInt(KEY_STT_VAD_MERGE_GAP_MS, gapMs.coerceIn(0, 5000)).apply()
     }
 
     fun getSpeechSecondaryVadMode(): String {

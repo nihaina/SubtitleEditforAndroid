@@ -80,6 +80,16 @@ class WhisperRecognizer(
         val endSample: Long
     )
 
+    private enum class VadSegmentSource {
+        PRIMARY,
+        SECONDARY
+    }
+
+    private data class SourcedVadSegment(
+        val segment: VadSegment,
+        val tailSource: VadSegmentSource
+    )
+
     data class RangeContext(
         val previousEndTimeMs: Long?,
         val nextStartTimeMs: Long?
@@ -519,7 +529,11 @@ class WhisperRecognizer(
                         progressCallback(5, "正在进行二次 VAD 检测...", null)
                         applySecondaryVad(reader, primarySegments)
                     } else {
-                        primarySegments
+                        applyRecognitionFlowVadMerge(
+                            primarySegments.map {
+                                SourcedVadSegment(it, VadSegmentSource.PRIMARY)
+                            }
+                        ).map { it.segment }
                     }
 
                     if (segments.isEmpty()) {
@@ -1202,7 +1216,10 @@ class WhisperRecognizer(
                     detectSecondarySpeechSegments(reader, range)
                 }
                 Log.d(TAG, "二次 VAD 方案一：新增 ${secondarySegments.size} 个语音段")
-                (primarySegments + secondarySegments).sortedBy { it.startSample }
+                (
+                    primarySegments.map { SourcedVadSegment(it, VadSegmentSource.PRIMARY) } +
+                        secondarySegments.map { SourcedVadSegment(it, VadSegmentSource.SECONDARY) }
+                    ).sortedBy { it.segment.startSample }
             }
 
             SettingsManager.SECONDARY_VAD_MODE_WITHIN_SEGMENTS -> {
@@ -1212,53 +1229,104 @@ class WhisperRecognizer(
                         startSample = segment.startSample.toLong(),
                         endSample = segment.startSample.toLong() + segment.sampleCount.toLong()
                     )
-                    detectSecondarySpeechSegments(reader, range).ifEmpty { listOf(segment) }
+                    val secondarySegments = detectSecondarySpeechSegments(reader, range)
+                    if (secondarySegments.isEmpty()) {
+                        listOf(SourcedVadSegment(segment, VadSegmentSource.PRIMARY))
+                    } else {
+                        secondarySegments.map { SourcedVadSegment(it, VadSegmentSource.SECONDARY) }
+                    }
                 }
                 Log.d(TAG, "二次 VAD 方案二：生成 ${refinedSegments.size} 个语音段")
-                refinedSegments.sortedBy { it.startSample }
+                refinedSegments.sortedBy { it.segment.startSample }
             }
 
-            else -> primarySegments
+            else -> primarySegments.map { SourcedVadSegment(it, VadSegmentSource.PRIMARY) }
         }
-        if (!settings.isSpeechSecondaryVadMergeEnabled()) return processedSegments
+        val recognitionMergedSegments = applyRecognitionFlowVadMerge(processedSegments)
+        if (!settings.isSpeechSecondaryVadMergeEnabled()) {
+            return recognitionMergedSegments.map { it.segment }
+        }
 
-        val mergedSegments = mergeVadSegments(
-            processedSegments,
+        val mergedSegments = mergeCrossSourceVadSegments(
+            recognitionMergedSegments,
             settings.getSpeechSecondaryVadMergeGapMs()
         )
         Log.d(
             TAG,
-            "二次 VAD 合并语音段：${processedSegments.size} -> ${mergedSegments.size}，" +
+            "二次 VAD 异源合并语音段：${recognitionMergedSegments.size} -> ${mergedSegments.size}，" +
                 "最大间隔 ${settings.getSpeechSecondaryVadMergeGapMs()}ms"
+        )
+        return mergedSegments.map { it.segment }
+    }
+
+    private fun applyRecognitionFlowVadMerge(
+        segments: List<SourcedVadSegment>
+    ): List<SourcedVadSegment> {
+        val settings = settingsManager()
+        if (!settings.isSpeechVadMergeEnabled()) return segments
+
+        val mergedSegments = mergeSameSourceVadSegments(
+            segments,
+            settings.getSpeechVadMergeGapMs()
+        )
+        Log.d(
+            TAG,
+            "识别流程同源合并语音段：${segments.size} -> ${mergedSegments.size}，" +
+                "最大间隔 ${settings.getSpeechVadMergeGapMs()}ms"
         )
         return mergedSegments
     }
 
-    private fun mergeVadSegments(
-        segments: List<VadSegment>,
+    private fun mergeSameSourceVadSegments(
+        segments: List<SourcedVadSegment>,
         maxGapMs: Int
-    ): List<VadSegment> {
-        if (segments.size < 2) return segments.sortedBy { it.startSample }
+    ): List<SourcedVadSegment> = mergeVadSegments(
+        segments = segments,
+        maxGapMs = maxGapMs,
+        canMergeSources = { current, next -> current == next }
+    )
+
+    private fun mergeCrossSourceVadSegments(
+        segments: List<SourcedVadSegment>,
+        maxGapMs: Int
+    ): List<SourcedVadSegment> = mergeVadSegments(
+        segments = segments,
+        maxGapMs = maxGapMs,
+        canMergeSources = { current, next -> current != next }
+    )
+
+    private fun mergeVadSegments(
+        segments: List<SourcedVadSegment>,
+        maxGapMs: Int,
+        canMergeSources: (VadSegmentSource, VadSegmentSource) -> Boolean
+    ): List<SourcedVadSegment> {
+        if (segments.size < 2) return segments.sortedBy { it.segment.startSample }
 
         val maxGapSamples = (maxGapMs.toLong() * SAMPLE_RATE) / 1000L
-        val sorted = segments.sortedBy { it.startSample }
-        val merged = mutableListOf<VadSegment>()
+        val sorted = segments.sortedBy { it.segment.startSample }
+        val merged = mutableListOf<SourcedVadSegment>()
         var current = sorted.first()
 
         for (next in sorted.drop(1)) {
-            val currentEnd = current.startSample.toLong() + current.sampleCount.toLong()
-            val nextStart = next.startSample.toLong()
-            if (nextStart - currentEnd <= maxGapSamples) {
-                val mergedStart = current.startSample.toLong()
+            val currentEnd = current.segment.startSample.toLong() + current.segment.sampleCount.toLong()
+            val nextStart = next.segment.startSample.toLong()
+            if (
+                canMergeSources(current.tailSource, next.tailSource) &&
+                nextStart - currentEnd <= maxGapSamples
+            ) {
+                val mergedStart = current.segment.startSample.toLong()
                 val mergedEnd = maxOf(
                     currentEnd,
-                    next.startSample.toLong() + next.sampleCount.toLong()
+                    next.segment.startSample.toLong() + next.segment.sampleCount.toLong()
                 )
-                current = VadSegment(
-                    startSample = mergedStart.toInt(),
-                    sampleCount = (mergedEnd - mergedStart).toInt(),
-                    startTime = (mergedStart * 1000L) / SAMPLE_RATE,
-                    endTime = (mergedEnd * 1000L) / SAMPLE_RATE
+                current = SourcedVadSegment(
+                    segment = VadSegment(
+                        startSample = mergedStart.toInt(),
+                        sampleCount = (mergedEnd - mergedStart).toInt(),
+                        startTime = (mergedStart * 1000L) / SAMPLE_RATE,
+                        endTime = (mergedEnd * 1000L) / SAMPLE_RATE
+                    ),
+                    tailSource = next.tailSource
                 )
             } else {
                 merged.add(current)

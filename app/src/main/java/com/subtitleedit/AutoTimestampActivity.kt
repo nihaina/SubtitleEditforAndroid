@@ -604,6 +604,7 @@ class AutoTimestampActivity : AppCompatActivity() {
         var group = mutableListOf(entries.first())
         var groupStart = entries.first().entry.startTime
         var groupEnd = entries.first().entry.endTime
+        var groupTailIsGenerated = entries.first().generatedPlaceholder
 
         fun flushGroup() {
             if (group.size == 1) {
@@ -627,14 +628,19 @@ class AutoTimestampActivity : AppCompatActivity() {
         }
 
         for (next in entries.drop(1)) {
-            if (next.entry.startTime - groupEnd <= maxGapMs) {
+            if (
+                groupTailIsGenerated != next.generatedPlaceholder &&
+                next.entry.startTime - groupEnd <= maxGapMs
+            ) {
                 group.add(next)
                 groupEnd = maxOf(groupEnd, next.entry.endTime)
+                groupTailIsGenerated = next.generatedPlaceholder
             } else {
                 flushGroup()
                 group = mutableListOf(next)
                 groupStart = next.entry.startTime
                 groupEnd = next.entry.endTime
+                groupTailIsGenerated = next.generatedPlaceholder
             }
         }
         flushGroup()

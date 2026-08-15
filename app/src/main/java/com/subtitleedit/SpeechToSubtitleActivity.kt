@@ -701,6 +701,13 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             appendRuntimeLog("  VAD 模型：${if (settingsManager.isVadUseBuiltInModel()) "内置 silero_vad.onnx" else displayModelPath(vadModelPath)}")
             appendRuntimeLog("  VAD 阈值：${settingsManager.getVadThreshold()}，最小静音：${settingsManager.getVadMinSilenceDuration()}s，最小语音：${settingsManager.getVadMinSpeechDuration()}s，最大语音：${settingsManager.getVadMaxSpeechDuration()}s")
             appendRuntimeLog("  动态 Padding：${if (settingsManager.isSpeechVadDynamicPaddingEnabled()) "启用（前后最多各 500ms）" else "关闭"}")
+            appendRuntimeLog(
+                "  识别流程合并语音段：${if (settingsManager.isSpeechVadMergeEnabled()) {
+                    "启用，最大间隔 ${settingsManager.getSpeechVadMergeGapMs()}ms"
+                } else {
+                    "关闭"
+                }}"
+            )
             val secondaryVadMode = settingsManager.getSpeechSecondaryVadMode()
             val secondaryVadText = when (secondaryVadMode) {
                 SettingsManager.SECONDARY_VAD_MODE_UNCOVERED -> "方案一（处理未划分区间）"
@@ -716,7 +723,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                         "最大语音 ${settingsManager.getSpeechSecondaryVadMaxSpeechDuration()}s"
                 )
                 appendRuntimeLog(
-                    "  合并语音段：${if (settingsManager.isSpeechSecondaryVadMergeEnabled()) {
+                    "  一次/二次 VAD 合并语音段：${if (settingsManager.isSpeechSecondaryVadMergeEnabled()) {
                         "启用，最大间隔 ${settingsManager.getSpeechSecondaryVadMergeGapMs()}ms"
                     } else {
                         "关闭"
