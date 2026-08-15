@@ -23,6 +23,7 @@ internal class MpvVideoPlaybackEngine(
     private val positionReadPending = AtomicBoolean(false)
     private val positionReadGeneration = AtomicLong(0L)
     private val mpvAccessLock = Any()
+    private val seekStateLock = Any()
     @Volatile private var playbackPhase = PlaybackPhase.IDLE
     @Volatile private var initialized = false
     @Volatile private var cachedPositionMs = 0L
@@ -30,6 +31,10 @@ internal class MpvVideoPlaybackEngine(
     @Volatile private var paused = true
     @Volatile private var eofReached = false
     @Volatile private var seekInProgress = false
+    private var pendingSeek: SeekRequest? = null
+    private var seekCommandInFlight = false
+    private var seekDispatchPosted = false
+    private var seekEventObserved = false
     private var readyNotified = false
 
     override val phase: PlaybackPhase
@@ -65,7 +70,7 @@ internal class MpvVideoPlaybackEngine(
             cachedDurationMs = 0L
             paused = true
             eofReached = false
-            seekInProgress = false
+            resetSeekState()
             readyNotified = false
             view.playFile(file.absolutePath)
         } catch (error: Throwable) {
@@ -90,19 +95,27 @@ internal class MpvVideoPlaybackEngine(
         postMpvAccess { MPVLib.setPropertyBoolean("pause", true) }
     }
 
-    override fun seekTo(positionMs: Long) {
+    override fun seekTo(positionMs: Long, mode: PlaybackSeekMode) {
         if (!phase.canAccessPlayer) return
+        val targetPositionMs = if (cachedDurationMs > 0L) {
+            positionMs.coerceIn(0L, cachedDurationMs)
+        } else {
+            positionMs.coerceAtLeast(0L)
+        }
         positionReadGeneration.incrementAndGet()
-        seekInProgress = true
-        cachedPositionMs = positionMs
+        cachedPositionMs = targetPositionMs
         eofReached = false
-        val generation = positionReadGeneration.get()
-        val posted = postMpvAccess {
-            if (generation == positionReadGeneration.get()) {
-                MPVLib.setPropertyDouble("time-pos", positionMs / 1000.0)
+        val shouldPostDispatch = synchronized(seekStateLock) {
+            pendingSeek = SeekRequest(targetPositionMs, mode)
+            seekInProgress = true
+            if (!seekCommandInFlight && !seekDispatchPosted) {
+                seekDispatchPosted = true
+                true
+            } else {
+                false
             }
         }
-        if (!posted) seekInProgress = false
+        if (shouldPostDispatch) postSeekDispatch()
     }
 
     override fun setSpeed(speed: Float) {
@@ -126,6 +139,7 @@ internal class MpvVideoPlaybackEngine(
         initialized = false
         mpvAccessHandler.removeCallbacksAndMessages(null)
         positionReadPending.set(false)
+        resetSeekState()
         if (wasInitialized) {
             MPVLib.removeLogObserver(this)
             MPVLib.removeObserver(this)
@@ -163,6 +177,99 @@ internal class MpvVideoPlaybackEngine(
             }
         }
         if (!posted) positionReadPending.set(false)
+    }
+
+    private fun postSeekDispatch() {
+        val posted = mpvAccessHandler.post { dispatchPendingSeek() }
+        if (!posted) {
+            synchronized(seekStateLock) {
+                seekDispatchPosted = false
+                pendingSeek = null
+                if (!seekCommandInFlight) seekInProgress = false
+            }
+        }
+    }
+
+    private fun dispatchPendingSeek() {
+        val request = synchronized(seekStateLock) {
+            seekDispatchPosted = false
+            if (!initialized || playbackPhase == PlaybackPhase.RELEASED || seekCommandInFlight) {
+                return
+            }
+            val nextRequest = pendingSeek ?: run {
+                seekInProgress = false
+                return
+            }
+            pendingSeek = null
+            seekCommandInFlight = true
+            seekEventObserved = false
+            nextRequest
+        }
+
+        val submitted = runCatching {
+            synchronized(mpvAccessLock) {
+                if (!initialized || playbackPhase == PlaybackPhase.RELEASED) return@synchronized false
+                MPVLib.command(
+                    arrayOf(
+                        "seek",
+                        (request.positionMs / 1000.0).toString(),
+                        when (request.mode) {
+                            PlaybackSeekMode.EXACT -> "absolute+exact"
+                            PlaybackSeekMode.KEYFRAME -> "absolute+keyframes"
+                        }
+                    )
+                )
+                true
+            }
+        }.getOrElse { error ->
+            Log.e(TAG, "Submitting mpv seek failed", error)
+            false
+        }
+
+        if (!submitted) finishSeek(requireObservedSeekEvent = false)
+    }
+
+    private fun finishSeek(requireObservedSeekEvent: Boolean): Boolean {
+        var shouldPostDispatch = false
+        val settled = synchronized(seekStateLock) {
+            when {
+                seekCommandInFlight -> {
+                    if (requireObservedSeekEvent && !seekEventObserved) return@synchronized false
+                    seekCommandInFlight = false
+                    seekEventObserved = false
+                    if (pendingSeek != null && initialized &&
+                        playbackPhase != PlaybackPhase.RELEASED
+                    ) {
+                        if (!seekDispatchPosted) {
+                            seekDispatchPosted = true
+                            shouldPostDispatch = true
+                        }
+                        false
+                    } else {
+                        pendingSeek = null
+                        seekInProgress = false
+                        true
+                    }
+                }
+                pendingSeek != null || seekDispatchPosted -> false
+                else -> {
+                    seekInProgress = false
+                    true
+                }
+            }
+        }
+        if (shouldPostDispatch) postSeekDispatch()
+        return settled
+    }
+
+    private fun resetSeekState() {
+        synchronized(seekStateLock) {
+            pendingSeek = null
+            seekCommandInFlight = false
+            seekDispatchPosted = false
+            seekEventObserved = false
+            seekInProgress = false
+        }
     }
 
     private fun postMpvAccess(action: () -> Unit): Boolean {
@@ -211,11 +318,18 @@ internal class MpvVideoPlaybackEngine(
                     paused = MPVLib.getPropertyBoolean("pause") ?: true
                     notifyReadyState()
                 }
-                MPVLib.MpvEvent.SEEK -> seekInProgress = true
+                MPVLib.MpvEvent.SEEK -> {
+                    synchronized(seekStateLock) {
+                        if (seekCommandInFlight) seekEventObserved = true
+                        seekInProgress = true
+                    }
+                }
                 MPVLib.MpvEvent.PLAYBACK_RESTART -> {
-                    seekInProgress = false
-                    requestPositionRead()
-                    listener?.onPlaybackStateChanged()
+                    val settled = finishSeek(requireObservedSeekEvent = true)
+                    if (settled) {
+                        requestPositionRead()
+                        listener?.onPlaybackStateChanged()
+                    }
                 }
                 MPVLib.MpvEvent.END_FILE -> {
                     paused = true
@@ -265,4 +379,9 @@ internal class MpvVideoPlaybackEngine(
         const val TAG = "MpvVideoEngine"
         const val DEFAULT_AUDIO_STREAM = -1
     }
+
+    private data class SeekRequest(
+        val positionMs: Long,
+        val mode: PlaybackSeekMode
+    )
 }

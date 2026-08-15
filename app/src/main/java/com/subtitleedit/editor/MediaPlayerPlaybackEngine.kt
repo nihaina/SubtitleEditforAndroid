@@ -79,7 +79,7 @@ internal class MediaPlayerPlaybackEngine : EditorPlaybackEngine {
         listener?.onPlaybackStateChanged()
     }
 
-    override fun seekTo(positionMs: Long) {
+    override fun seekTo(positionMs: Long, mode: PlaybackSeekMode) {
         val mediaPlayer = player?.takeIf { phase.canAccessPlayer } ?: return
         val targetMs = positionMs.coerceIn(0L, durationMs.coerceAtLeast(0L))
         cachedSeekPositionMs = targetMs

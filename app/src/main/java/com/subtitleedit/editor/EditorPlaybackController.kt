@@ -224,8 +224,8 @@ internal class EditorPlaybackController(
         binding.waveformTimelineView.onTimelineClickListener = { position ->
             seekTo((durationMs * position).toLong())
         }
-        binding.waveformTimelineView.onDraggedViewportPlayheadCorrection = { positionMs ->
-            correctPlaybackAfterViewportDrag(positionMs)
+        binding.waveformTimelineView.onDraggedViewportPlayheadCorrection = { positionMs, isFinal ->
+            correctPlaybackAfterViewportDrag(positionMs, isFinal)
         }
         binding.waveformTimelineView.onLimitedPlaybackRangeChange = { subtitleIndex ->
             limitedPlaybackEntry = subtitleIndex?.let { subtitles().getOrNull(it) }
@@ -323,11 +323,17 @@ internal class EditorPlaybackController(
         syncVideoControlsWithPlayback()
     }
 
-    private fun correctPlaybackAfterViewportDrag(positionMs: Long) {
+    private fun correctPlaybackAfterViewportDrag(positionMs: Long, isFinal: Boolean) {
+        if (isFinal && mediaType != EditorMediaType.VIDEO) return
         val playbackEngine = engine?.takeIf { it.phase.canAccessPlayer } ?: return
         val correctedPositionMs = positionMs.coerceIn(0L, durationMs)
         val wasPlaying = playbackEngine.isPlaying
-        playbackEngine.seekTo(correctedPositionMs)
+        val seekMode = if (mediaType == EditorMediaType.VIDEO && !isFinal) {
+            PlaybackSeekMode.KEYFRAME
+        } else {
+            PlaybackSeekMode.EXACT
+        }
+        playbackEngine.seekTo(correctedPositionMs, seekMode)
         isPlaying = wasPlaying
         updatePlayerUiAtKnownPosition(correctedPositionMs)
         if (wasPlaying) startProgressUpdate() else stopProgressUpdate()
