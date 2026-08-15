@@ -122,7 +122,6 @@ class WaveformTimelineView @JvmOverloads constructor(
     private var dragStartEndTime = 0L
     private var isDraggingWaveform = false
     private var dragStartVisibleStartMs = 0L
-    private var draggedViewportCorrectionMs: Long? = null
     private var downOnSelectedSubtitle = false  // ACTION_DOWN 时是否点在已选中字幕上
     private var activePointerId = MotionEvent.INVALID_POINTER_ID
     private var lastActiveTouchX = 0f
@@ -202,7 +201,7 @@ class WaveformTimelineView @JvmOverloads constructor(
     var onSelectedIndicesChangeListener: ((Set<Int>) -> Unit)? = null
     var onTimelineClickListener: ((Float) -> Unit)? = null
     var onSubtitleChangeListener: ((List<SubtitleEntry>) -> Unit)? = null
-    var onDraggedViewportPlayheadCorrection: ((positionMs: Long, isFinal: Boolean) -> Unit)? = null
+    var onDraggedViewportPlayheadCorrection: ((positionMs: Long) -> Unit)? = null
     var onLimitedPlaybackRangeChange: ((subtitleIndex: Int?) -> Unit)? = null
     var onLimitedPlaybackStartRequest: ((subtitleIndex: Int) -> Unit)? = null
     var onSubtitleStartSeekRequest: ((positionMs: Long) -> Unit)? = null
@@ -1026,7 +1025,6 @@ class WaveformTimelineView @JvmOverloads constructor(
                 dragStartX = event.x
                 lastActiveTouchX = event.x
                 suppressTapSelection = false
-                draggedViewportCorrectionMs = null
 
                 if (isInSubtitleArea(event.y)) {
                     val idx = findSubtitleIndexAtX(event.x)
@@ -1136,11 +1134,6 @@ class WaveformTimelineView @JvmOverloads constructor(
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (dragMode != DragMode.NONE) onSubtitleChangeListener?.invoke(subtitles.toList())
-                if (isDraggingWaveform) {
-                    draggedViewportCorrectionMs?.let { positionMs ->
-                        onDraggedViewportPlayheadCorrection?.invoke(positionMs, true)
-                    }
-                }
 
                 downOnSelectedSubtitle = false
                 dragMode = DragMode.NONE
@@ -1148,7 +1141,6 @@ class WaveformTimelineView @JvmOverloads constructor(
                 isDraggingWaveform = false
                 isPinching = false
                 activePointerId = MotionEvent.INVALID_POINTER_ID
-                draggedViewportCorrectionMs = null
                 return true
             }
         }
@@ -1164,8 +1156,7 @@ class WaveformTimelineView @JvmOverloads constructor(
 
         val correctedPositionMs = visibleStartMs.coerceIn(0L, durationMs)
         currentPosition = correctedPositionMs.toFloat() / durationMs
-        draggedViewportCorrectionMs = correctedPositionMs
-        onDraggedViewportPlayheadCorrection?.invoke(correctedPositionMs, false)
+        onDraggedViewportPlayheadCorrection?.invoke(correctedPositionMs)
     }
 
     private fun notifyIfLimitedPlaybackRangeOutOfView() {
@@ -1489,7 +1480,6 @@ class WaveformTimelineView @JvmOverloads constructor(
         dragMode = DragMode.NONE
         currentSubtitle = null
         isDraggingWaveform = false
-        draggedViewportCorrectionMs = null
         isPinching = false
         isTimestampingMode = true
         timestampStartMs = startMs

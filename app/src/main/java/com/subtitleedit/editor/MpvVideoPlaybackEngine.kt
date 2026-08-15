@@ -95,7 +95,7 @@ internal class MpvVideoPlaybackEngine(
         postMpvAccess { MPVLib.setPropertyBoolean("pause", true) }
     }
 
-    override fun seekTo(positionMs: Long, mode: PlaybackSeekMode) {
+    override fun seekTo(positionMs: Long) {
         if (!phase.canAccessPlayer) return
         val targetPositionMs = if (cachedDurationMs > 0L) {
             positionMs.coerceIn(0L, cachedDurationMs)
@@ -106,7 +106,7 @@ internal class MpvVideoPlaybackEngine(
         cachedPositionMs = targetPositionMs
         eofReached = false
         val shouldPostDispatch = synchronized(seekStateLock) {
-            pendingSeek = SeekRequest(targetPositionMs, mode)
+            pendingSeek = SeekRequest(targetPositionMs)
             seekInProgress = true
             if (!seekCommandInFlight && !seekDispatchPosted) {
                 seekDispatchPosted = true
@@ -213,10 +213,7 @@ internal class MpvVideoPlaybackEngine(
                     arrayOf(
                         "seek",
                         (request.positionMs / 1000.0).toString(),
-                        when (request.mode) {
-                            PlaybackSeekMode.EXACT -> "absolute+exact"
-                            PlaybackSeekMode.KEYFRAME -> "absolute+keyframes"
-                        }
+                        "absolute+exact"
                     )
                 )
                 true
@@ -381,7 +378,6 @@ internal class MpvVideoPlaybackEngine(
     }
 
     private data class SeekRequest(
-        val positionMs: Long,
-        val mode: PlaybackSeekMode
+        val positionMs: Long
     )
 }

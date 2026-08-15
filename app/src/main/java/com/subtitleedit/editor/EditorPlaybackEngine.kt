@@ -13,11 +13,6 @@ internal enum class PlaybackPhase {
         get() = this == READY
 }
 
-internal enum class PlaybackSeekMode {
-    EXACT,
-    KEYFRAME
-}
-
 internal interface EditorPlaybackEngine {
     interface Listener {
         fun onReady(durationMs: Long, audioStreamIndex: Int?)
@@ -35,7 +30,7 @@ internal interface EditorPlaybackEngine {
     fun prepare(file: File)
     fun play()
     fun pause()
-    fun seekTo(positionMs: Long, mode: PlaybackSeekMode = PlaybackSeekMode.EXACT)
+    fun seekTo(positionMs: Long)
     fun setSpeed(speed: Float)
     fun release()
 }

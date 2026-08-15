@@ -11,6 +11,7 @@ internal class EditorMpvView @JvmOverloads constructor(
     override fun initOptions() {
         writeFontConfig()
         MPVLib.setOptionString("profile", "fast")
+        MPVLib.setOptionString("hr-seek-framedrop", "yes")
         setVo("gpu-next")
         MPVLib.setOptionString("gpu-context", "android")
         MPVLib.setOptionString("opengl-es", "yes")
