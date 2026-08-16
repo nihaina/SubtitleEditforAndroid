@@ -33,10 +33,6 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         setupToolbar()
         setupListeners()
         loadSettings()
-        binding.tvWhisperThreadsTitle.visibility = View.GONE
-        binding.tvWhisperThreadsHint.visibility = View.GONE
-        binding.layoutWhisperThreads.visibility = View.GONE
-        binding.cardHotwords.visibility = View.GONE
     }
 
     private fun setupToolbar() {
@@ -111,10 +107,6 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
             save = settingsManager::setSpeechSecondaryVadMaxSpeechDuration
         )
 
-        binding.switchHotwords.setOnCheckedChangeListener { _, checked ->
-            if (!loading) settingsManager.setSpeechHotwordsEnabled(checked)
-        }
-
         binding.sliderFixedSegmentSeconds.addOnChangeListener { _, value, fromUser ->
             if (fromUser) binding.etFixedSegmentSeconds.setText(String.format(Locale.US, "%d", value.toInt()))
             if (!loading) settingsManager.setSpeechFixedSegmentSeconds(value.toInt())
@@ -128,20 +120,6 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
             }
             if (!loading) settingsManager.setSpeechFixedSegmentSeconds(clamped)
         })
-
-        binding.btnSaveHotwords.setOnClickListener {
-            settingsManager.setSpeechHotwords(binding.etHotwords.text?.toString().orEmpty())
-            OverwritingToast.makeText(this, "热词已保存", Toast.LENGTH_SHORT).show()
-        }
-
-        binding.sliderHotwordsScore.addOnChangeListener { _, value, _ ->
-            binding.tvHotwordsScore.text = String.format(Locale.getDefault(), "%.1f", value)
-            if (!loading) settingsManager.setSpeechHotwordsScore(value)
-        }
-        binding.sliderWhisperThreads.addOnChangeListener { _, value, _ ->
-            binding.tvWhisperThreads.text = String.format(Locale.getDefault(), "%d", value.toInt())
-            if (!loading) settingsManager.setSpeechWhisperThreads(value.toInt())
-        }
 
         binding.switchSenseVoiceTimestampExperiment.setOnCheckedChangeListener { _, checked ->
             if (loading) return@setOnCheckedChangeListener
@@ -230,17 +208,6 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
             settingsManager.getSpeechSecondaryVadMaxSpeechDuration(),
             "%.1f"
         )
-
-        binding.switchHotwords.isChecked = settingsManager.isSpeechHotwordsEnabled()
-        binding.etHotwords.setText(settingsManager.getSpeechHotwords())
-
-        val hotwordsScore = settingsManager.getSpeechHotwordsScore()
-        binding.sliderHotwordsScore.value = hotwordsScore
-        binding.tvHotwordsScore.text = String.format(Locale.getDefault(), "%.1f", hotwordsScore)
-
-        val whisperThreads = settingsManager.getSpeechWhisperThreads()
-        binding.sliderWhisperThreads.value = whisperThreads.toFloat()
-        binding.tvWhisperThreads.text = String.format(Locale.getDefault(), "%d", whisperThreads)
 
         val tokenTimestampModelAvailable = hasUsableTokenTimestampModel()
         binding.switchSenseVoiceTimestampExperiment.isEnabled = tokenTimestampModelAvailable

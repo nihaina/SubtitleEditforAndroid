@@ -34,8 +34,143 @@
             android:padding="16dp">
 
             <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardSenseVoiceTimestampExperiment"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                app:cardCornerRadius="8dp"
+                app:cardElevation="2dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/activity_speech_to_subtitle_settings_text_41"
+                        android:textColor="@color/on_surface"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchSenseVoiceTimestampExperiment"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:minHeight="40dp"
+                        android:text="@string/activity_speech_to_subtitle_settings_text_42"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/tvSenseVoiceTimestampExperimentHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/activity_speech_to_subtitle_settings_text_43"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="12sp" />
+
+                    <TextView
+                        android:id="@+id/tvSenseVoiceTimestampModelMissing"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="@string/activity_speech_to_subtitle_settings_text_47"
+                        android:textColor="@color/error"
+                        android:textSize="12sp"
+                        android:visibility="gone" />
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchSenseVoiceTimestampDiscardText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:minHeight="40dp"
+                        android:text="@string/activity_speech_to_subtitle_settings_text_48"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/tvSenseVoiceTimestampDiscardTextHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/activity_speech_to_subtitle_settings_text_49"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="12sp" />
+
+                    <LinearLayout
+                        android:id="@+id/layoutSenseVoiceTimestampGap"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="14dp"
+                            android:text="@string/activity_speech_to_subtitle_settings_text_44"
+                            android:textColor="@color/on_surface"
+                            android:textSize="14sp" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="@string/activity_speech_to_subtitle_settings_text_45"
+                            android:textColor="@color/on_surface_variant"
+                            android:textSize="12sp" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.slider.Slider
+                                android:id="@+id/sliderSenseVoiceTimestampGap"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:stepSize="50"
+                                android:value="500"
+                                android:valueFrom="100"
+                                android:valueTo="2000" />
+
+                            <com.google.android.material.textfield.TextInputLayout
+                                style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
+                                android:layout_width="100dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="8dp"
+                                app:suffixText="毫秒">
+
+                                <com.google.android.material.textfield.TextInputEditText
+                                    android:id="@+id/etSenseVoiceTimestampGap"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center"
+                                    android:inputType="number"
+                                    android:maxLines="1"
+                                    android:text="@string/activity_speech_to_subtitle_settings_text_46"
+                                    android:textSize="14sp" />
+
+                            </com.google.android.material.textfield.TextInputLayout>
+
+                        </LinearLayout>
+
+                    </LinearLayout>
+
+                </LinearLayout>
+
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
                 app:cardCornerRadius="8dp"
                 app:cardElevation="2dp">
 
@@ -198,52 +333,6 @@
                                 android:textSize="14sp" />
 
                         </com.google.android.material.textfield.TextInputLayout>
-
-                    </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/tvWhisperThreadsTitle"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_05"
-                        android:textColor="@color/on_surface"
-                        android:textSize="14sp" />
-
-                    <TextView
-                        android:id="@+id/tvWhisperThreadsHint"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_06"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="12sp" />
-
-                    <LinearLayout
-                        android:id="@+id/layoutWhisperThreads"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <com.google.android.material.slider.Slider
-                            android:id="@+id/sliderWhisperThreads"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:stepSize="1"
-                            android:value="4"
-                            android:valueFrom="1"
-                            android:valueTo="8" />
-
-                        <TextView
-                            android:id="@+id/tvWhisperThreads"
-                            android:layout_width="56dp"
-                            android:layout_height="wrap_content"
-                            android:gravity="center"
-                            android:text="@string/activity_speech_to_subtitle_settings_text_07"
-                            android:textColor="@color/on_surface"
-                            android:textSize="14sp" />
 
                     </LinearLayout>
 
@@ -616,245 +705,6 @@
                                     android:inputType="numberDecimal"
                                     android:maxLines="1"
                                     android:text="@string/activity_speech_to_subtitle_settings_text_34"
-                                    android:textSize="14sp" />
-
-                            </com.google.android.material.textfield.TextInputLayout>
-
-                        </LinearLayout>
-
-                    </LinearLayout>
-
-                </LinearLayout>
-
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/cardHotwords"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                app:cardCornerRadius="8dp"
-                app:cardElevation="2dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchHotwords"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_08"
-                        android:textColor="@color/on_surface"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_09"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="12sp" />
-
-                    <com.google.android.material.textfield.TextInputLayout
-                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:hint="@string/activity_speech_to_subtitle_settings_hint_01">
-
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/etHotwords"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:gravity="top"
-                            android:inputType="textMultiLine"
-                            android:minLines="3"
-                            android:textSize="14sp" />
-
-                    </com.google.android.material.textfield.TextInputLayout>
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_10"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="12sp" />
-
-                    <Button
-                        android:id="@+id/btnSaveHotwords"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_11" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="14dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_12"
-                        android:textColor="@color/on_surface"
-                        android:textSize="14sp" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <com.google.android.material.slider.Slider
-                            android:id="@+id/sliderHotwordsScore"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:stepSize="0.1"
-                            android:value="1.5"
-                            android:valueFrom="0.5"
-                            android:valueTo="5.0" />
-
-                        <TextView
-                            android:id="@+id/tvHotwordsScore"
-                            android:layout_width="56dp"
-                            android:layout_height="wrap_content"
-                            android:gravity="center"
-                            android:text="@string/activity_speech_to_subtitle_settings_text_13"
-                            android:textColor="@color/on_surface"
-                            android:textSize="14sp" />
-
-                    </LinearLayout>
-
-                </LinearLayout>
-
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/cardSenseVoiceTimestampExperiment"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                app:cardCornerRadius="8dp"
-                app:cardElevation="2dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_41"
-                        android:textColor="@color/on_surface"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchSenseVoiceTimestampExperiment"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:minHeight="40dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_42"
-                        android:textColor="@color/on_surface"
-                        android:textSize="14sp" />
-
-                    <TextView
-                        android:id="@+id/tvSenseVoiceTimestampExperimentHint"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_43"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="12sp" />
-
-                    <TextView
-                        android:id="@+id/tvSenseVoiceTimestampModelMissing"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_47"
-                        android:textColor="@color/error"
-                        android:textSize="12sp"
-                        android:visibility="gone" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchSenseVoiceTimestampDiscardText"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:minHeight="40dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_48"
-                        android:textColor="@color/on_surface"
-                        android:textSize="14sp" />
-
-                    <TextView
-                        android:id="@+id/tvSenseVoiceTimestampDiscardTextHint"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_49"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="12sp" />
-
-                    <LinearLayout
-                        android:id="@+id/layoutSenseVoiceTimestampGap"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical">
-
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="14dp"
-                            android:text="@string/activity_speech_to_subtitle_settings_text_44"
-                            android:textColor="@color/on_surface"
-                            android:textSize="14sp" />
-
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
-                            android:text="@string/activity_speech_to_subtitle_settings_text_45"
-                            android:textColor="@color/on_surface_variant"
-                            android:textSize="12sp" />
-
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:gravity="center_vertical"
-                            android:orientation="horizontal">
-
-                            <com.google.android.material.slider.Slider
-                                android:id="@+id/sliderSenseVoiceTimestampGap"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:stepSize="50"
-                                android:value="500"
-                                android:valueFrom="100"
-                                android:valueTo="2000" />
-
-                            <com.google.android.material.textfield.TextInputLayout
-                                style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
-                                android:layout_width="100dp"
-                                android:layout_height="wrap_content"
-                                android:layout_marginStart="8dp"
-                                app:suffixText="毫秒">
-
-                                <com.google.android.material.textfield.TextInputEditText
-                                    android:id="@+id/etSenseVoiceTimestampGap"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:gravity="center"
-                                    android:inputType="number"
-                                    android:maxLines="1"
-                                    android:text="@string/activity_speech_to_subtitle_settings_text_46"
                                     android:textSize="14sp" />
 
                             </com.google.android.material.textfield.TextInputLayout>

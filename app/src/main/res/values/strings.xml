@@ -234,16 +234,17 @@
     <string name="activity_speech_to_subtitle_settings_text_02">固定分段时长</string>
     <string name="activity_speech_to_subtitle_settings_text_03">未使用 VAD 分段时生效</string>
     <string name="activity_speech_to_subtitle_settings_text_04" translatable="false">30</string>
-    <string name="activity_speech_to_subtitle_settings_text_05">Whisper 线程数</string>
-    <string name="activity_speech_to_subtitle_settings_text_06">线程越多速度可能越快，但内存和发热也会增加</string>
-    <string name="activity_speech_to_subtitle_settings_text_07" translatable="false">4</string>
-    <string name="activity_speech_to_subtitle_settings_text_08">启用热词</string>
-    <string name="activity_speech_to_subtitle_settings_text_09">提高特定词汇的识别倾向，仍会输出完整字幕</string>
-    <string name="activity_speech_to_subtitle_settings_hint_01">热词</string>
-    <string name="activity_speech_to_subtitle_settings_text_10">每行一个词或短语</string>
-    <string name="activity_speech_to_subtitle_settings_text_11">保存热词</string>
-    <string name="activity_speech_to_subtitle_settings_text_12">热词权重</string>
-    <string name="activity_speech_to_subtitle_settings_text_13" translatable="false">1.5</string>
+    <string name="activity_whisper_settings_title">Whisper 配置</string>
+    <string name="activity_whisper_settings_threads_title">Whisper 线程数</string>
+    <string name="activity_whisper_settings_threads_hint">线程越多速度可能越快，但内存和发热也会增加</string>
+    <string name="activity_whisper_settings_threads_default" translatable="false">4</string>
+    <string name="activity_whisper_settings_hotwords_title">启用热词</string>
+    <string name="activity_whisper_settings_hotwords_hint">提高特定词汇的识别倾向，仍会输出完整字幕</string>
+    <string name="activity_whisper_settings_hotwords_input_hint">热词</string>
+    <string name="activity_whisper_settings_hotwords_format_hint">每行一个词或短语</string>
+    <string name="activity_whisper_settings_hotwords_save">保存热词</string>
+    <string name="activity_whisper_settings_hotwords_score_title">热词权重</string>
+    <string name="activity_whisper_settings_hotwords_score_default" translatable="false">1.5</string>
     <string name="activity_speech_to_subtitle_settings_text_14">动态 Padding</string>
     <string name="activity_speech_to_subtitle_settings_text_15">为 VAD 语音段和快速转录区间动态加入最多前后各 500 毫秒的上下文，适用于所有识别模型；只扩展模型输入，不改变最终字幕边界</string>
     <string name="activity_speech_to_subtitle_settings_text_16">二次 VAD</string>

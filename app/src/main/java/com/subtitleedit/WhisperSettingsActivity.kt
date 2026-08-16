@@ -1,35 +1,27 @@
 package com.subtitleedit
 
 import android.os.Bundle
-import android.view.View
 import androidx.appcompat.app.AppCompatActivity
-import com.subtitleedit.databinding.ActivitySpeechToSubtitleSettingsBinding
+import com.subtitleedit.databinding.ActivityWhisperSettingsBinding
 import com.subtitleedit.util.SettingsManager
 import java.util.Locale
 
 /** Whisper-specific controls. Shared recognition-flow settings are configured globally. */
 class WhisperSettingsActivity : AppCompatActivity() {
-    private lateinit var binding: ActivitySpeechToSubtitleSettingsBinding
+    private lateinit var binding: ActivityWhisperSettingsBinding
     private lateinit var settings: SettingsManager
     private var loading = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivitySpeechToSubtitleSettingsBinding.inflate(layoutInflater)
+        binding = ActivityWhisperSettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
         ToolCardShadow.removeFrom(binding.root)
         settings = SettingsManager.getInstance(this)
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "Whisper 配置"
+        supportActionBar?.title = getString(R.string.activity_whisper_settings_title)
         binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
-        binding.tvRecognitionFlowTitle.visibility = View.GONE
-        binding.switchVadDynamicPadding.visibility = View.GONE
-        binding.tvVadDynamicPaddingHint.visibility = View.GONE
-        binding.tvFixedSegmentTitle.visibility = View.GONE
-        binding.tvFixedSegmentHint.visibility = View.GONE
-        binding.layoutFixedSegment.visibility = View.GONE
-        binding.cardSecondaryVad.visibility = View.GONE
 
         binding.sliderWhisperThreads.addOnChangeListener { _, value, _ ->
             binding.tvWhisperThreads.text = String.format(Locale.getDefault(), "%d", value.toInt())
