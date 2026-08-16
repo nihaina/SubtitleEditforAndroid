@@ -109,7 +109,7 @@
     <string name="activity_ai_settings_hint_03">源语言（留空自动检测）</string>
     <string name="activity_ai_settings_hint_04">目标语言</string>
     <string name="activity_ai_settings_hint_05">AI 提示词（可选）</string>
-    <string name="activity_auto_timestamp_text_01">使用 VAD（语音活动检测）自动检测音频中的语音段，生成带时间轴的字幕模板。生成的字幕内容为请输入文本，您可以在字幕编辑器中填写实际内容。</string>
+    <string name="activity_auto_timestamp_text_01">自动检测音频中的语音段并生成带时间轴的字幕模板。生成的字幕内容为请输入文本，您可以在字幕编辑器中填写实际内容。</string>
     <string name="activity_auto_timestamp_text_02">音频/视频文件（可多选）</string>
     <string name="activity_auto_timestamp_text_03">选择文件（可多选）</string>
     <string name="activity_auto_timestamp_text_04">未选择</string>
@@ -121,10 +121,11 @@
     <string name="activity_auto_timestamp_text_10">运行日志与预览</string>
     <string name="activity_auto_timestamp_text_11">等待生成...</string>
     <string name="activity_auto_timestamp_text_12">二次处理</string>
-    <string name="activity_auto_timestamp_text_13">以已有字幕时间段作为已覆盖区域，对音视频中全部未覆盖区间执行方案一二次 VAD</string>
+    <string name="activity_auto_timestamp_text_13">以已有字幕时间段作为已覆盖区域，对音视频中的全部未覆盖区间再次自动打轴</string>
     <string name="activity_auto_timestamp_text_14">字幕文件（SRT/LRC）</string>
     <string name="activity_auto_timestamp_text_15">选择字幕文件</string>
     <string name="activity_auto_timestamp_text_16">未选择字幕文件</string>
+    <string name="activity_auto_timestamp_text_17">SenseVoice 实验打轴开启时不可使用二次处理</string>
     <string name="activity_batch_convert_text_01">转换设置</string>
     <string name="activity_batch_convert_text_02">选择输出目录</string>
     <string name="activity_batch_convert_text_03">输出目录：Download/SubtitleEdit/Convert（默认）</string>
@@ -270,6 +271,13 @@
     <string name="activity_speech_to_subtitle_settings_text_38">设为 0 时仅合并重叠或首尾相接的语音段</string>
     <string name="activity_speech_to_subtitle_settings_text_39" translatable="false">200</string>
     <string name="activity_speech_to_subtitle_settings_text_40">分别合并第一次 VAD 内部和第二次 VAD 内部间隔不超过指定时间的相邻语音段，无论是否启用二次 VAD 都生效</string>
+    <string name="activity_speech_to_subtitle_settings_text_41">实验功能</string>
+    <string name="activity_speech_to_subtitle_settings_text_42">使用 SenseVoice token 时间戳打轴</string>
+    <string name="activity_speech_to_subtitle_settings_text_43">实验功能不一定稳定，开启后所有打轴流程使用 SenseVoice 替代 VAD 检测与分段；ASR 识别及 padding 机制不受影响，打轴时间会显著提高</string>
+    <string name="activity_speech_to_subtitle_settings_text_44">切分时间</string>
+    <string name="activity_speech_to_subtitle_settings_text_45">相邻 token 的时间间隔达到该值时切分，较短间隔将合并为同一字幕段</string>
+    <string name="activity_speech_to_subtitle_settings_text_46" translatable="false">500</string>
+    <string name="activity_speech_to_subtitle_settings_text_47">未检测到可用的 SenseVoice 模型，请先在模型设置中下载或导入</string>
     <string name="activity_speech_to_subtitle_text_01">选择音频/视频文件（可多选）</string>
     <string name="activity_speech_to_subtitle_text_02">支持 MP3, WAV, FLAC, MP4, MKV 等格式</string>
     <string name="activity_speech_to_subtitle_text_03">源语言</string>
@@ -304,7 +312,7 @@
     <string name="activity_tools_contentdescription_05">音视频转换</string>
     <string name="activity_tools_text_07">视频转音频/格式转换 (MP3/AAC/MP4 等)</string>
     <string name="activity_tools_contentdescription_06">自动打轴</string>
-    <string name="activity_tools_text_08">使用 VAD 自动检测语音段并生成时间轴</string>
+    <string name="activity_tools_text_08">自动检测语音段并生成时间轴</string>
     <string name="activity_vocal_separation_settings_text_01">通用四轨模型</string>
     <string name="activity_vocal_separation_settings_text_02">未选择通用四轨模型</string>
     <string name="activity_vocal_separation_settings_text_03">选择通用四轨模型</string>

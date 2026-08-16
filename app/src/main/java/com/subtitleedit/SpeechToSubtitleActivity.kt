@@ -19,6 +19,7 @@ import com.arthenica.ffmpegkit.FFmpegKit
 import com.subtitleedit.databinding.ActivitySpeechToSubtitleBinding
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.DirectoryDisplayPath
+import com.subtitleedit.util.SenseVoiceTimestampGenerator
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.SubtitleOutputWriter
@@ -326,6 +327,17 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
      * 开始转换
      */
     private fun startConversion() {
+        if (
+            shouldUseSenseVoiceTimestampExperiment() &&
+            !isSenseVoiceTimestampExperimentConfigured()
+        ) {
+            com.subtitleedit.util.OverwritingToast.makeText(
+                this,
+                "实验打轴需要先在模型设置中配置 SenseVoice int8 模型和 tokens.txt",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
         if (selectedMediaFiles.isEmpty() || !isCurrentAsrModelComplete()) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "请先选择文件和模型", Toast.LENGTH_SHORT).show()
             return
@@ -510,6 +522,11 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     }
 
     private fun shouldUseVad(): Boolean {
+        return !settingsManager.isSpeechSenseVoiceTimestampEnabled() &&
+            shouldPrepareTimeline()
+    }
+
+    private fun shouldPrepareTimeline(): Boolean {
         val format = formatOptions[binding.spinnerOutputFormat.selectedItemPosition]
         if (format != "TXT") {
             return true
@@ -575,34 +592,48 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
 
             showProgress("$progressPrefix 正在识别语音...", 10)
             val selectedLanguage = languageOptions[binding.spinnerSourceLanguage.selectedItemPosition]
-            appendRuntimeLog("识别：初始化 ${currentAsrModelDisplayName()} 模型并开始识别")
-            if (modelType == SettingsManager.ASR_MODEL_SENSEVOICE) {
-                appendRuntimeLog("SenseVoice 指定语言：$selectedLanguage (${senseVoiceLanguageCode(selectedLanguage)})")
-            }
-            val recognizer = WhisperRecognizer(
-                encoderPath = encoderPath,
-                decoderPath = decoderPath,
-                joinerPath = joinerPath,
-                tokensPath = tokensPath,
-                vadModelPath = getActiveVadModelPath(),
-                useVad = shouldUseVad(),
-                language = selectedLanguage,
-                contentResolver = contentResolver,
-                context = this@SpeechToSubtitleActivity,
-                modelType = modelType
-            )
-
-            val recognitionResult = withContext(Dispatchers.IO) {
-                recognizer.recognize(
-                    audioFile = pcmFile,
-                    progressCallback = { progress, status, segmentResult ->
-                        runOnUiThread {
-                            showProgress("$progressPrefix $status", 10 + (progress * 0.8).toInt())
-                            segmentResult?.let(::appendRecognizedSegment)
-                        }
-                    },
-                    isCancelled = { isCancelled }
+            val timestampExperiment = isSenseVoiceTimestampExperimentConfigured()
+            val recognitionResult = if (timestampExperiment) {
+                recognizeWithSenseVoiceTimeline(
+                    pcmFile = pcmFile,
+                    selectedLanguage = selectedLanguage,
+                    progressPrefix = progressPrefix
                 )
+            } else {
+                appendRuntimeLog("识别：初始化 ${currentAsrModelDisplayName()} 模型并开始识别")
+                if (modelType == SettingsManager.ASR_MODEL_SENSEVOICE) {
+                    appendRuntimeLog(
+                        "SenseVoice 指定语言：$selectedLanguage " +
+                            "(${senseVoiceLanguageCode(selectedLanguage)})"
+                    )
+                }
+                val recognizer = WhisperRecognizer(
+                    encoderPath = encoderPath,
+                    decoderPath = decoderPath,
+                    joinerPath = joinerPath,
+                    tokensPath = tokensPath,
+                    vadModelPath = getActiveVadModelPath(),
+                    useVad = shouldUseVad(),
+                    language = selectedLanguage,
+                    contentResolver = contentResolver,
+                    context = this@SpeechToSubtitleActivity,
+                    modelType = modelType
+                )
+                withContext(Dispatchers.IO) {
+                    recognizer.recognize(
+                        audioFile = pcmFile,
+                        progressCallback = { progress, status, segmentResult ->
+                            runOnUiThread {
+                                showProgress(
+                                    "$progressPrefix $status",
+                                    10 + (progress * 0.8).toInt()
+                                )
+                                segmentResult?.let(::appendRecognizedSegment)
+                            }
+                        },
+                        isCancelled = { isCancelled }
+                    )
+                }
             }
 
             if (isCancelled) return Result.failure(Exception("用户取消"))
@@ -621,6 +652,84 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         } finally {
             withContext(NonCancellable + Dispatchers.IO) {
                 taskCacheDir.deleteRecursively()
+            }
+        }
+    }
+
+    private suspend fun recognizeWithSenseVoiceTimeline(
+        pcmFile: File,
+        selectedLanguage: String,
+        progressPrefix: String
+    ): Result<List<WhisperRecognizer.SubtitleSegment>> {
+        appendRuntimeLog("实验打轴：初始化 SenseVoice int8 模型，仅生成时间轴")
+        appendRuntimeLog(
+            "SenseVoice 指定语言：$selectedLanguage " +
+                "(${senseVoiceLanguageCode(selectedLanguage)})"
+        )
+        val timelineResult = withContext(Dispatchers.IO) {
+            SenseVoiceTimestampGenerator(this@SpeechToSubtitleActivity).generateSegments(
+                pcmFile = pcmFile,
+                language = selectedLanguage,
+                progressCallback = { progress, status ->
+                    runOnUiThread {
+                        showProgress(
+                            "$progressPrefix 实验打轴：$status",
+                            10 + (progress * 0.4).toInt()
+                        )
+                    }
+                },
+                isCancelled = { isCancelled }
+            )
+        }
+        if (isCancelled) return Result.failure(Exception("用户取消"))
+
+        val timelineSegments = timelineResult.getOrElse { return Result.failure(it) }
+        val ranges = timelineSegments.map { it.startTime..it.endTime }
+        appendRuntimeLog("实验打轴完成：生成 ${ranges.size} 个时间范围，已丢弃 SenseVoice 文本")
+
+        appendRuntimeLog("识别：初始化 ${currentAsrModelDisplayName()}，按实验时间轴生成字幕文本")
+        val textRecognizer = WhisperRecognizer(
+            encoderPath = encoderPath,
+            decoderPath = decoderPath,
+            joinerPath = joinerPath,
+            tokensPath = tokensPath,
+            vadModelPath = "",
+            useVad = false,
+            language = selectedLanguage,
+            contentResolver = contentResolver,
+            context = this@SpeechToSubtitleActivity,
+            modelType = modelType
+        )
+        val textResult = withContext(Dispatchers.IO) {
+            textRecognizer.recognizeRanges(
+                audioFile = pcmFile,
+                ranges = ranges,
+                progressCallback = { current, total ->
+                    runOnUiThread {
+                        val rangeProgress = if (total > 0) current * 40 / total else 40
+                        showProgress(
+                            "$progressPrefix 正在按实验时间轴识别第 $current/$total 段...",
+                            50 + rangeProgress
+                        )
+                    }
+                },
+                isCancelled = { isCancelled }
+            )
+        }
+        if (isCancelled) return Result.failure(Exception("用户取消"))
+
+        return textResult.mapCatching { texts ->
+            if (texts.size != ranges.size) {
+                error("按时间轴识别结果数量与时间范围不一致")
+            }
+            ranges.mapIndexed { index, range ->
+                WhisperRecognizer.SubtitleSegment(
+                    startTime = range.first,
+                    endTime = range.last,
+                    text = texts[index]
+                )
+            }.also { segments ->
+                segments.forEach(::appendRecognizedSegment)
             }
         }
     }
@@ -687,6 +796,28 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         if (modelType != SettingsManager.ASR_MODEL_SENSEVOICE) {
             appendRuntimeLog("  识别线程：${settingsManager.getSpeechWhisperThreads()}")
         }
+        if (isSenseVoiceTimestampExperimentConfigured()) {
+            appendRuntimeLog("  VAD：禁用，由 SenseVoice 实验 token 时间戳打轴替代")
+            appendRuntimeLog(
+                "  实验打轴模型：${displayModelPath(senseVoiceTimestampModelPath())}"
+            )
+            appendRuntimeLog(
+                "  实验打轴 Tokens：${displayModelPath(senseVoiceTimestampTokensPath())}"
+            )
+            appendRuntimeLog(
+                "  Token 切分间隔：${settingsManager.getSpeechSenseVoiceTimestampGapMs()}ms"
+            )
+            appendRuntimeLog(
+                "  动态 Padding：${if (settingsManager.isSpeechVadDynamicPaddingEnabled()) "启用（前后最多各 500ms）" else "关闭"}"
+            )
+            if (
+                modelType == SettingsManager.ASR_MODEL_WHISPER ||
+                modelType == SettingsManager.ASR_MODEL_PARAKEET_TDT
+            ) {
+                appendRuntimeLog("  热词：${if (settingsManager.isSpeechHotwordsEnabled()) "启用，权重 ${settingsManager.getSpeechHotwordsScore()}" else "未启用"}")
+            }
+            return
+        }
         val useVad = shouldUseVad()
         val fixedSegmentText = if (
             modelType == SettingsManager.ASR_MODEL_SENSEVOICE &&
@@ -746,12 +877,28 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         }
     }
 
-    private fun currentAsrModelDisplayName(): String = when (modelType) {
+    private fun currentAsrModelDisplayName(): String = asrModelDisplayName(modelType)
+
+    private fun asrModelDisplayName(type: String): String = when (type) {
         SettingsManager.ASR_MODEL_SENSEVOICE -> "SenseVoice"
         SettingsManager.ASR_MODEL_PARAKEET_TDT -> "Parakeet TDT 0.6B v3"
         SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> "Parakeet CTC 0.6B 日语"
         else -> "Whisper"
     }
+
+    private fun isSenseVoiceTimestampExperimentConfigured(): Boolean {
+        return shouldUseSenseVoiceTimestampExperiment() &&
+            SenseVoiceTimestampGenerator.isConfigured(this)
+    }
+
+    private fun shouldUseSenseVoiceTimestampExperiment(): Boolean =
+        settingsManager.isSpeechSenseVoiceTimestampEnabled() && shouldPrepareTimeline()
+
+    private fun senseVoiceTimestampModelPath(): String =
+        SenseVoiceTimestampGenerator.modelPath(settingsManager)
+
+    private fun senseVoiceTimestampTokensPath(): String =
+        SenseVoiceTimestampGenerator.tokensPath(settingsManager)
 
     private fun getActiveVadModelPath(): String {
         return if (settingsManager.isVadUseBuiltInModel()) "" else vadModelPath

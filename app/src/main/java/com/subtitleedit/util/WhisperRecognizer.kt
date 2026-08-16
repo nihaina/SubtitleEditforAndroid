@@ -25,7 +25,9 @@ class WhisperRecognizer(
     private val language: String = "auto",
     private val contentResolver: ContentResolver,
     private val context: Context,
-    private val modelType: String = SettingsManager.ASR_MODEL_WHISPER
+    private val modelType: String = SettingsManager.ASR_MODEL_WHISPER,
+    private val senseVoiceTimestampExperiment: Boolean = false,
+    private val senseVoiceTimestampGapMs: Int = 500
 ) {
 
     companion object {
@@ -47,7 +49,8 @@ class WhisperRecognizer(
     data class SubtitleSegment(
         val startTime: Long,  // 毫秒
         val endTime: Long,    // 毫秒
-        val text: String
+        val text: String,
+        val timestampGapBoundaryBefore: Boolean = false
     )
 
     /**
@@ -680,10 +683,34 @@ class WhisperRecognizer(
                 }
             }
 
+            val sortedSegments = allSegments.sortedBy { it.startTime }
+            val finalSegments = if (senseVoiceTimestampExperiment) {
+                SenseVoiceTimestampSegmenter.mergeShortGaps(
+                    segments = sortedSegments.map {
+                        SenseVoiceTimestampSegmenter.Segment(
+                            startTimeMs = it.startTime,
+                            endTimeMs = it.endTime,
+                            text = it.text,
+                            hardBoundaryBefore = it.timestampGapBoundaryBefore
+                        )
+                    },
+                    splitGapMs = senseVoiceTimestampGapMs
+                ).map {
+                    SubtitleSegment(
+                        startTime = it.startTimeMs,
+                        endTime = it.endTimeMs,
+                        text = it.text,
+                        timestampGapBoundaryBefore = it.hardBoundaryBefore
+                    )
+                }
+            } else {
+                sortedSegments
+            }
+
             progressCallback(100, "识别完成", null)
 
-            Log.d(TAG, "识别完成，共生成 ${allSegments.size} 个字幕片段")
-            Result.success(allSegments.sortedBy { it.startTime })
+            Log.d(TAG, "识别完成，共生成 ${finalSegments.size} 个字幕片段")
+            Result.success(finalSegments)
 
         } catch (e: Exception) {
             Log.e(TAG, "识别失败", e)
@@ -766,7 +793,32 @@ class WhisperRecognizer(
             Log.d(TAG, "识别结果: $text")
 
             if (text.isNotEmpty()) {
-                if (usesSegmentLevelResult() && segmentResultTimeRange != null) {
+                if (senseVoiceTimestampExperiment) {
+                    val tokenSegments = SenseVoiceTimestampSegmenter.split(
+                        tokens = result.tokens,
+                        timestamps = result.timestamps,
+                        audioStartTimeMs = startTimeMs,
+                        audioEndTimeMs = startTimeMs + audioData.size.toLong() * 1000L / SAMPLE_RATE,
+                        splitGapMs = senseVoiceTimestampGapMs
+                    )
+                    if (tokenSegments.isEmpty()) {
+                        Log.w(TAG, "SenseVoice 未返回有效 token 时间戳，跳过当前输入窗口")
+                    } else {
+                        segments += tokenSegments.map {
+                            SubtitleSegment(
+                                startTime = it.startTimeMs,
+                                endTime = it.endTimeMs,
+                                text = it.text,
+                                timestampGapBoundaryBefore = it.hardBoundaryBefore
+                            )
+                        }
+                        Log.d(
+                            TAG,
+                            "SenseVoice token 时间戳生成 ${tokenSegments.size} 个字幕段，" +
+                                "切分间隔 ${senseVoiceTimestampGapMs}ms"
+                        )
+                    }
+                } else if (usesSegmentLevelResult() && segmentResultTimeRange != null) {
                     segments.add(
                         SubtitleSegment(
                             startTime = segmentResultTimeRange.startTimeMs,
@@ -1070,7 +1122,8 @@ class WhisperRecognizer(
 
     private fun isParakeet(): Boolean = isParakeetTdt() || isParakeetCtc()
 
-    private fun usesSegmentLevelResult(): Boolean = isSenseVoice() || isParakeet()
+    private fun usesSegmentLevelResult(): Boolean =
+        (isSenseVoice() && !senseVoiceTimestampExperiment) || isParakeet()
 
     private fun shouldUseDynamicPadding(): Boolean =
         settingsManager().isSpeechVadDynamicPaddingEnabled()

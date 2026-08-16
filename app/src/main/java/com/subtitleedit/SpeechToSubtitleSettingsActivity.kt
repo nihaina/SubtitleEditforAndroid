@@ -10,6 +10,7 @@ import com.google.android.material.slider.Slider
 import com.google.android.material.textfield.TextInputEditText
 import com.subtitleedit.databinding.ActivitySpeechToSubtitleSettingsBinding
 import com.subtitleedit.util.OverwritingToast
+import com.subtitleedit.util.SenseVoiceTimestampGenerator
 import com.subtitleedit.util.SettingsManager
 import java.util.Locale
 
@@ -141,6 +142,28 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
             binding.tvWhisperThreads.text = String.format(Locale.getDefault(), "%d", value.toInt())
             if (!loading) settingsManager.setSpeechWhisperThreads(value.toInt())
         }
+
+        binding.switchSenseVoiceTimestampExperiment.setOnCheckedChangeListener { _, checked ->
+            if (loading) return@setOnCheckedChangeListener
+            if (checked && !hasUsableSenseVoiceTimestampModel()) {
+                binding.switchSenseVoiceTimestampExperiment.isChecked = false
+                OverwritingToast.makeText(
+                    this,
+                    getString(R.string.activity_speech_to_subtitle_settings_text_47),
+                    Toast.LENGTH_LONG
+                ).show()
+                return@setOnCheckedChangeListener
+            }
+            settingsManager.setSpeechSenseVoiceTimestampEnabled(checked)
+            updateSenseVoiceTimestampControls()
+        }
+        bindSecondaryVadValue(
+            slider = binding.sliderSenseVoiceTimestampGap,
+            input = binding.etSenseVoiceTimestampGap,
+            format = "%.0f",
+            normalize = { value -> snap(value, 50f, 100f, 2000f) },
+            save = { value -> settingsManager.setSpeechSenseVoiceTimestampGapMs(value.toInt()) }
+        )
     }
 
     private fun loadSettings() {
@@ -216,7 +239,37 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         binding.sliderWhisperThreads.value = whisperThreads.toFloat()
         binding.tvWhisperThreads.text = String.format(Locale.getDefault(), "%d", whisperThreads)
 
+        val senseVoiceTimestampModelAvailable = hasUsableSenseVoiceTimestampModel()
+        if (!senseVoiceTimestampModelAvailable && settingsManager.isSpeechSenseVoiceTimestampEnabled()) {
+            settingsManager.setSpeechSenseVoiceTimestampEnabled(false)
+        }
+        binding.switchSenseVoiceTimestampExperiment.isEnabled = senseVoiceTimestampModelAvailable
+        binding.switchSenseVoiceTimestampExperiment.isChecked =
+            senseVoiceTimestampModelAvailable &&
+                settingsManager.isSpeechSenseVoiceTimestampEnabled()
+        binding.tvSenseVoiceTimestampModelMissing.visibility =
+            if (senseVoiceTimestampModelAvailable) View.GONE else View.VISIBLE
+        loadSecondaryVadValue(
+            binding.sliderSenseVoiceTimestampGap,
+            binding.etSenseVoiceTimestampGap,
+            settingsManager.getSpeechSenseVoiceTimestampGapMs().toFloat(),
+            "%.0f"
+        )
+
         loading = false
+        updateSenseVoiceTimestampControls()
+    }
+
+    private fun updateSenseVoiceTimestampControls() {
+        val enabled = binding.switchSenseVoiceTimestampExperiment.isEnabled &&
+            binding.switchSenseVoiceTimestampExperiment.isChecked
+        binding.layoutSenseVoiceTimestampGap.alpha = if (enabled) 1f else 0.5f
+        binding.sliderSenseVoiceTimestampGap.isEnabled = enabled
+        binding.etSenseVoiceTimestampGap.isEnabled = enabled
+    }
+
+    private fun hasUsableSenseVoiceTimestampModel(): Boolean {
+        return SenseVoiceTimestampGenerator.isConfigured(this)
     }
 
     private fun updateSecondaryVadMode(mode: String, checked: Boolean) {

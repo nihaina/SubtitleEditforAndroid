@@ -18,6 +18,7 @@ import com.subtitleedit.databinding.ActivityAutoTimestampBinding
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.SenseVoiceTimestampGenerator
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleParser
@@ -30,7 +31,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * 自动打轴页面 - 使用 VAD 自动检测语音段并生成时间轴
+ * 自动打轴页面 - 自动检测语音段并生成时间轴
  */
 class AutoTimestampActivity : AppCompatActivity() {
 
@@ -87,8 +88,7 @@ class AutoTimestampActivity : AppCompatActivity() {
         setupButtons()
         setupScrollableLogs()
         setupDefaultOutputDir()
-        updateSecondaryProcessingState(binding.switchSecondaryProcessing.isChecked)
-        updateGenerateButtonState()
+        updateSecondaryProcessingAvailability()
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -109,6 +109,11 @@ class AutoTimestampActivity : AppCompatActivity() {
                 }
             }
         })
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateSecondaryProcessingAvailability()
     }
 
     private fun setupToolbar() {
@@ -236,6 +241,28 @@ class AutoTimestampActivity : AppCompatActivity() {
         binding.tvSubtitleFile.alpha = if (enabled) 1f else 0.55f
     }
 
+    private fun updateSecondaryProcessingAvailability() {
+        val senseVoiceTimestampEnabled =
+            settingsManager.isSpeechSenseVoiceTimestampEnabled()
+        if (senseVoiceTimestampEnabled && binding.switchSecondaryProcessing.isChecked) {
+            binding.switchSecondaryProcessing.isChecked = false
+        }
+        binding.switchSecondaryProcessing.isEnabled = !senseVoiceTimestampEnabled
+        binding.switchSecondaryProcessing.alpha =
+            if (senseVoiceTimestampEnabled) 0.55f else 1f
+        binding.tvSecondaryProcessingHint.text = getString(
+            if (senseVoiceTimestampEnabled) {
+                R.string.activity_auto_timestamp_text_17
+            } else {
+                R.string.activity_auto_timestamp_text_13
+            }
+        )
+        updateSecondaryProcessingState(
+            !senseVoiceTimestampEnabled && binding.switchSecondaryProcessing.isChecked
+        )
+        updateGenerateButtonState()
+    }
+
     private fun updateGenerateButtonState() {
         val subtitleReady = !binding.switchSecondaryProcessing.isChecked ||
             selectedSubtitleFile != null
@@ -277,7 +304,23 @@ class AutoTimestampActivity : AppCompatActivity() {
                 return
             }
         }
-        if (!settingsManager.isVadUseBuiltInModel() && settingsManager.getVadModelPath().isBlank()) {
+        val senseVoiceTimestampEnabled = settingsManager.isSpeechSenseVoiceTimestampEnabled()
+        if (
+            senseVoiceTimestampEnabled &&
+            !SenseVoiceTimestampGenerator.isConfigured(this)
+        ) {
+            com.subtitleedit.util.OverwritingToast.makeText(
+                this,
+                "实验打轴需要先在模型设置中配置 SenseVoice int8 模型和 tokens.txt",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        if (
+            !senseVoiceTimestampEnabled &&
+            !settingsManager.isVadUseBuiltInModel() &&
+            settingsManager.getVadModelPath().isBlank()
+        ) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "请先选择外部 VAD 模型，或在模型设置中勾选使用内置", Toast.LENGTH_SHORT).show()
             return
         }
@@ -464,24 +507,71 @@ class AutoTimestampActivity : AppCompatActivity() {
                 emptyList()
             }
 
-            val segments = withContext(Dispatchers.IO) {
-                val generator = VadTimestampGenerator(this@AutoTimestampActivity)
-                if (refinementSubtitle != null) {
-                    generator.generateUncoveredSegments(
-                        pcmFile = pcmFile,
-                        occupiedTimeRangesMs = originalEntries.map { entry ->
-                            entry.startTime to entry.endTime
+            val senseVoiceTimestampEnabled =
+                settingsManager.isSpeechSenseVoiceTimestampEnabled()
+            val segmentsResult = withContext(Dispatchers.IO) {
+                if (senseVoiceTimestampEnabled) {
+                    val generator = SenseVoiceTimestampGenerator(this@AutoTimestampActivity)
+                    val result = if (refinementSubtitle != null) {
+                        generator.generateUncoveredSegments(
+                            pcmFile = pcmFile,
+                            occupiedTimeRangesMs = originalEntries.map { entry ->
+                                entry.startTime to entry.endTime
+                            },
+                            progressCallback = { progress, status ->
+                                runOnUiThread {
+                                    binding.tvStatus.text =
+                                        "$progressPrefix SenseVoice 打轴：$status ($progress%)"
+                                }
+                            },
+                            isCancelled = { isCancelled }
+                        )
+                    } else {
+                        generator.generateSegments(
+                            pcmFile = pcmFile,
+                            progressCallback = { progress, status ->
+                                runOnUiThread {
+                                    binding.tvStatus.text =
+                                        "$progressPrefix SenseVoice 打轴：$status ($progress%)"
+                                }
+                            },
+                            isCancelled = { isCancelled }
+                        )
+                    }
+                    result.map { generatedSegments ->
+                        generatedSegments.map { segment ->
+                            VadTimestampGenerator.VadSegment(
+                                startTime = segment.startTime,
+                                endTime = segment.endTime
+                            )
                         }
-                    )
+                    }
                 } else {
-                    generator.generateSegments(pcmFile)
+                    runCatching {
+                        val generator = VadTimestampGenerator(this@AutoTimestampActivity)
+                        if (refinementSubtitle != null) {
+                            generator.generateUncoveredSegments(
+                                pcmFile = pcmFile,
+                                occupiedTimeRangesMs = originalEntries.map { entry ->
+                                    entry.startTime to entry.endTime
+                                }
+                            )
+                        } else {
+                            generator.generateSegments(pcmFile)
+                        }
+                    }
                 }
             }
+            val segments = segmentsResult.getOrElse { return Result.failure(it) }
             if (refinementSubtitle == null && segments.isEmpty()) {
                 return Result.failure(Exception("未检测到任何语音段"))
             }
             appendOperationLog(
-                if (refinementSubtitle != null) {
+                if (senseVoiceTimestampEnabled && refinementSubtitle != null) {
+                    "SenseVoice：在未覆盖区间生成 ${segments.size} 个新增时间段"
+                } else if (senseVoiceTimestampEnabled) {
+                    "SenseVoice：生成 ${segments.size} 个时间段"
+                } else if (refinementSubtitle != null) {
                     "二次 VAD：在未覆盖区间检测到 ${segments.size} 个新增语音段"
                 } else {
                     "VAD：检测到 ${segments.size} 个语音段"
@@ -582,7 +672,10 @@ class AutoTimestampActivity : AppCompatActivity() {
             compareBy<MergeableSubtitleEntry> { it.entry.startTime }
                 .thenBy { it.entry.endTime }
         )
-        val outputEntries = if (settingsManager.isSpeechSecondaryVadMergeEnabled()) {
+        val outputEntries = if (
+            !settingsManager.isSpeechSenseVoiceTimestampEnabled() &&
+            settingsManager.isSpeechSecondaryVadMergeEnabled()
+        ) {
             mergeSubtitleEntries(
                 sortedEntries,
                 settingsManager.getSpeechSecondaryVadMergeGapMs()
@@ -734,6 +827,23 @@ class AutoTimestampActivity : AppCompatActivity() {
     }
 
     private fun appendVadConfig(secondaryProcessing: Boolean) {
+        if (settingsManager.isSpeechSenseVoiceTimestampEnabled()) {
+            appendOperationLog("SenseVoice 实验打轴配置：")
+            appendOperationLog(
+                "  模型：${Uri.parse(SenseVoiceTimestampGenerator.modelPath(settingsManager)).lastPathSegment}"
+            )
+            appendOperationLog(
+                "  Tokens：${Uri.parse(SenseVoiceTimestampGenerator.tokensPath(settingsManager)).lastPathSegment}"
+            )
+            appendOperationLog(
+                "  Token 切分间隔：${settingsManager.getSpeechSenseVoiceTimestampGapMs()}ms"
+            )
+            appendOperationLog("  VAD 检测与分段设置：不使用")
+            if (secondaryProcessing) {
+                appendOperationLog("  二次处理：排除已有字幕覆盖范围")
+            }
+            return
+        }
         appendOperationLog("VAD 配置：")
         appendOperationLog("  模型：${getVadModelDisplayText()}")
         appendOperationLog("  采样率：16000Hz，线程：2，provider：cpu")
