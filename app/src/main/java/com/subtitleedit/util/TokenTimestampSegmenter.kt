@@ -2,7 +2,7 @@ package com.subtitleedit.util
 
 import kotlin.math.roundToLong
 
-internal object SenseVoiceTimestampSegmenter {
+internal object TokenTimestampSegmenter {
 
     data class Segment(
         val startTimeMs: Long,
@@ -22,7 +22,6 @@ internal object SenseVoiceTimestampSegmenter {
         if (
             tokens.isEmpty() ||
             tokens.size != timestamps.size ||
-            tokens.size != durations.size ||
             audioEndTimeMs <= audioStartTimeMs
         ) {
             return emptyList()
@@ -30,24 +29,23 @@ internal object SenseVoiceTimestampSegmenter {
 
         val gapThreshold = splitGapMs.coerceIn(100, 2000).toLong()
         val alignedTokens = tokens.indices.mapNotNull { index ->
-            val token = tokens[index]
             val timestamp = timestamps[index]
-            val duration = durations[index]
-            if (token.isEmpty() || !timestamp.isFinite() || !duration.isFinite() || duration <= 0f) {
+            val duration = durations.getOrNull(index)
+                ?.takeIf { it.isFinite() && it > 0f }
+                ?: 0f
+            if (!timestamp.isFinite()) {
                 null
             } else {
                 TimedToken(
-                    text = token,
+                    text = normalizeToken(tokens[index]),
                     startTimeMs = (timestamp.coerceAtLeast(0f) * 1000f).roundToLong(),
                     durationMs = (duration * 1000f).roundToLong().coerceAtLeast(1L)
                 )
             }
-        }
+        }.filter { it.text.isNotEmpty() }
         if (alignedTokens.isEmpty()) return emptyList()
 
         val maxLocalTimeMs = audioEndTimeMs - audioStartTimeMs
-        // CTC tokens are usually single-frame spikes. Keep their exact blank-gap
-        // boundaries for splitting, but give each resulting segment limited context.
         val boundaryContextMs = (gapThreshold / 2L).coerceIn(100L, 500L)
         var previousStartTimeMs = 0L
         val normalizedTokens = alignedTokens.map { token ->
@@ -83,8 +81,7 @@ internal object SenseVoiceTimestampSegmenter {
                     hardBoundaryBefore = hardBoundaryBefore
                 )
                 currentText = StringBuilder()
-                segmentStartTimeMs =
-                    audioStartTimeMs + next.startTimeMs - boundaryExtensionMs
+                segmentStartTimeMs = audioStartTimeMs + next.startTimeMs - boundaryExtensionMs
                 hardBoundaryBefore = true
             }
         }
@@ -133,8 +130,12 @@ internal object SenseVoiceTimestampSegmenter {
     ) {
         val normalizedText = text.trim()
         if (normalizedText.isEmpty()) return
-        val safeEndTimeMs = endTimeMs.coerceAtLeast(startTimeMs + 1L)
-        output += Segment(startTimeMs, safeEndTimeMs, normalizedText, hardBoundaryBefore)
+        output += Segment(
+            startTimeMs = startTimeMs,
+            endTimeMs = endTimeMs.coerceAtLeast(startTimeMs + 1L),
+            text = normalizedText,
+            hardBoundaryBefore = hardBoundaryBefore
+        )
     }
 
     private fun joinText(left: String, right: String): String {
@@ -144,6 +145,10 @@ internal object SenseVoiceTimestampSegmenter {
             left.last().code < 128 && right.first().code < 128
         return if (needsSpace) "$left $right" else left + right
     }
+
+    private fun normalizeToken(token: String): String = token
+        .replace('\u2581', ' ')
+        .replace('\u0120', ' ')
 
     private data class TimedToken(
         val text: String,

@@ -26,8 +26,8 @@ class WhisperRecognizer(
     private val contentResolver: ContentResolver,
     private val context: Context,
     private val modelType: String = SettingsManager.ASR_MODEL_WHISPER,
-    private val senseVoiceTimestampExperiment: Boolean = false,
-    private val senseVoiceTimestampGapMs: Int = 500
+    private val tokenTimestampExperiment: Boolean = false,
+    private val tokenTimestampGapMs: Int = 500
 ) {
 
     companion object {
@@ -684,17 +684,17 @@ class WhisperRecognizer(
             }
 
             val sortedSegments = allSegments.sortedBy { it.startTime }
-            val finalSegments = if (senseVoiceTimestampExperiment) {
-                SenseVoiceTimestampSegmenter.mergeShortGaps(
+            val finalSegments = if (shouldUseTokenTimestampExperiment()) {
+                TokenTimestampSegmenter.mergeShortGaps(
                     segments = sortedSegments.map {
-                        SenseVoiceTimestampSegmenter.Segment(
+                        TokenTimestampSegmenter.Segment(
                             startTimeMs = it.startTime,
                             endTimeMs = it.endTime,
                             text = it.text,
                             hardBoundaryBefore = it.timestampGapBoundaryBefore
                         )
                     },
-                    splitGapMs = senseVoiceTimestampGapMs
+                    splitGapMs = tokenTimestampGapMs
                 ).map {
                     SubtitleSegment(
                         startTime = it.startTimeMs,
@@ -793,17 +793,17 @@ class WhisperRecognizer(
             Log.d(TAG, "识别结果: $text")
 
             if (text.isNotEmpty()) {
-                if (senseVoiceTimestampExperiment) {
-                    val tokenSegments = SenseVoiceTimestampSegmenter.split(
+                if (shouldUseTokenTimestampExperiment()) {
+                    val tokenSegments = TokenTimestampSegmenter.split(
                         tokens = result.tokens,
                         timestamps = result.timestamps,
                         durations = result.durations,
                         audioStartTimeMs = startTimeMs,
                         audioEndTimeMs = startTimeMs + audioData.size.toLong() * 1000L / SAMPLE_RATE,
-                        splitGapMs = senseVoiceTimestampGapMs
+                        splitGapMs = tokenTimestampGapMs
                     )
                     if (tokenSegments.isEmpty()) {
-                        Log.w(TAG, "SenseVoice 未返回有效 token 时间戳和持续时间，跳过当前输入窗口")
+                        Log.w(TAG, "${modelDisplayName()} 未返回有效 token 时间戳，跳过当前输入窗口")
                     } else {
                         segments += tokenSegments.map {
                             SubtitleSegment(
@@ -815,8 +815,8 @@ class WhisperRecognizer(
                         }
                         Log.d(
                             TAG,
-                            "SenseVoice token 时间戳生成 ${tokenSegments.size} 个字幕段，" +
-                                "切分间隔 ${senseVoiceTimestampGapMs}ms"
+                            "${modelDisplayName()} token 时间戳生成 ${tokenSegments.size} 个字幕段，" +
+                                "切分间隔 ${tokenTimestampGapMs}ms"
                         )
                     }
                 } else if (usesSegmentLevelResult() && segmentResultTimeRange != null) {
@@ -1124,7 +1124,10 @@ class WhisperRecognizer(
     private fun isParakeet(): Boolean = isParakeetTdt() || isParakeetCtc()
 
     private fun usesSegmentLevelResult(): Boolean =
-        (isSenseVoice() && !senseVoiceTimestampExperiment) || isParakeet()
+        (isSenseVoice() && !shouldUseTokenTimestampExperiment()) || isParakeet()
+
+    private fun shouldUseTokenTimestampExperiment(): Boolean =
+        tokenTimestampExperiment && modelType != SettingsManager.ASR_MODEL_WHISPER
 
     private fun shouldUseDynamicPadding(): Boolean =
         settingsManager().isSpeechVadDynamicPaddingEnabled()

@@ -4,7 +4,7 @@ import android.content.Context
 import android.net.Uri
 import java.io.File
 
-class SenseVoiceTimestampGenerator(context: Context) {
+class TokenTimestampGenerator(context: Context) {
 
     data class Segment(
         val startTime: Long,
@@ -21,25 +21,26 @@ class SenseVoiceTimestampGenerator(context: Context) {
         progressCallback: (progress: Int, status: String) -> Unit = { _, _ -> },
         isCancelled: () -> Boolean = { false }
     ): Result<List<Segment>> {
-        if (!isConfigured(appContext)) {
+        val modelConfig = currentModelConfig(settingsManager)
+        if (!isConfigured(appContext, modelConfig)) {
             return Result.failure(
-                Exception("实验打轴需要先在模型设置中配置 SenseVoice int8 模型和 tokens.txt")
+                Exception("实验打轴需要先配置当前非 Whisper ASR 模型")
             )
         }
 
         val recognizer = WhisperRecognizer(
-            encoderPath = modelPath(settingsManager),
-            decoderPath = "",
-            joinerPath = "",
-            tokensPath = tokensPath(settingsManager),
+            encoderPath = modelConfig.encoderPath,
+            decoderPath = modelConfig.decoderPath,
+            joinerPath = modelConfig.joinerPath,
+            tokensPath = modelConfig.tokensPath,
             vadModelPath = "",
             useVad = false,
             language = language,
             contentResolver = appContext.contentResolver,
             context = appContext,
-            modelType = SettingsManager.ASR_MODEL_SENSEVOICE,
-            senseVoiceTimestampExperiment = true,
-            senseVoiceTimestampGapMs = settingsManager.getSpeechSenseVoiceTimestampGapMs()
+            modelType = modelConfig.modelType,
+            tokenTimestampExperiment = true,
+            tokenTimestampGapMs = settingsManager.getSpeechTokenTimestampGapMs()
         )
         return recognizer.recognize(
             audioFile = pcmFile,
@@ -51,7 +52,7 @@ class SenseVoiceTimestampGenerator(context: Context) {
             recognizedSegments.map { segment ->
                 Segment(segment.startTime, segment.endTime, segment.text)
             }.ifEmpty {
-                error("SenseVoice 未生成有效 token 时间轴")
+                error("当前模型未生成有效 token 时间轴")
             }
         }
     }
@@ -128,24 +129,63 @@ class SenseVoiceTimestampGenerator(context: Context) {
     }
 
     companion object {
+        fun isSupported(settingsManager: SettingsManager): Boolean =
+            settingsManager.getAsrModelType() != SettingsManager.ASR_MODEL_WHISPER
+
         fun isConfigured(context: Context): Boolean {
             val settings = SettingsManager.getInstance(context.applicationContext)
-            val modelPath = modelPath(settings)
-            val tokensPath = tokensPath(settings)
-            return Uri.parse(modelPath).lastPathSegment.equals(
-                "model.int8.onnx",
-                ignoreCase = true
-            ) && Uri.parse(tokensPath).lastPathSegment.equals(
-                "tokens.txt",
-                ignoreCase = true
-            ) && canReadPath(context, modelPath) && canReadPath(context, tokensPath)
+            return isConfigured(context, currentModelConfig(settings))
         }
 
         fun modelPath(settingsManager: SettingsManager): String =
-            settingsManager.getSenseVoiceModelPath(SettingsManager.SENSEVOICE_PROVIDER_CPU)
+            currentModelConfig(settingsManager).encoderPath
 
         fun tokensPath(settingsManager: SettingsManager): String =
-            settingsManager.getSenseVoiceTokensPath(SettingsManager.SENSEVOICE_PROVIDER_CPU)
+            currentModelConfig(settingsManager).tokensPath
+
+        fun modelDisplayName(settingsManager: SettingsManager): String = when (
+            settingsManager.getAsrModelType()
+        ) {
+            SettingsManager.ASR_MODEL_SENSEVOICE -> "SenseVoice"
+            SettingsManager.ASR_MODEL_PARAKEET_TDT -> "Parakeet TDT"
+            SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> "Parakeet CTC 日语"
+            else -> "Whisper"
+        }
+
+        private fun currentModelConfig(settings: SettingsManager): ModelConfig =
+            when (val modelType = settings.getAsrModelType()) {
+                SettingsManager.ASR_MODEL_SENSEVOICE -> ModelConfig(
+                    modelType = modelType,
+                    encoderPath = settings.getSenseVoiceModelPath(),
+                    tokensPath = settings.getSenseVoiceTokensPath()
+                )
+                SettingsManager.ASR_MODEL_PARAKEET_TDT -> ModelConfig(
+                    modelType = modelType,
+                    encoderPath = settings.getParakeetTdtEncoderPath(),
+                    decoderPath = settings.getParakeetTdtDecoderPath(),
+                    joinerPath = settings.getParakeetTdtJoinerPath(),
+                    tokensPath = settings.getParakeetTdtTokensPath()
+                )
+                SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> ModelConfig(
+                    modelType = modelType,
+                    encoderPath = settings.getParakeetCtcModelPath(),
+                    tokensPath = settings.getParakeetCtcTokensPath()
+                )
+                else -> ModelConfig(modelType = SettingsManager.ASR_MODEL_WHISPER)
+            }
+
+        private fun isConfigured(context: Context, config: ModelConfig): Boolean {
+            if (config.modelType == SettingsManager.ASR_MODEL_WHISPER) return false
+            val requiredPaths = buildList {
+                add(config.encoderPath)
+                add(config.tokensPath)
+                if (config.modelType == SettingsManager.ASR_MODEL_PARAKEET_TDT) {
+                    add(config.decoderPath)
+                    add(config.joinerPath)
+                }
+            }
+            return requiredPaths.all { canReadPath(context, it) }
+        }
 
         private fun canReadPath(context: Context, path: String): Boolean {
             if (path.isBlank()) return false
@@ -159,5 +199,13 @@ class SenseVoiceTimestampGenerator(context: Context) {
                 } == true
             }.getOrDefault(false)
         }
+
+        private data class ModelConfig(
+            val modelType: String,
+            val encoderPath: String = "",
+            val decoderPath: String = "",
+            val joinerPath: String = "",
+            val tokensPath: String = ""
+        )
     }
 }

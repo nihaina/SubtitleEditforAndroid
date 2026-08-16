@@ -18,10 +18,10 @@ import com.subtitleedit.databinding.ActivityAutoTimestampBinding
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
-import com.subtitleedit.util.SenseVoiceTimestampGenerator
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleParser
+import com.subtitleedit.util.TokenTimestampGenerator
 import com.subtitleedit.util.VadTimestampGenerator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -242,23 +242,22 @@ class AutoTimestampActivity : AppCompatActivity() {
     }
 
     private fun updateSecondaryProcessingAvailability() {
-        val senseVoiceTimestampEnabled =
-            settingsManager.isSpeechSenseVoiceTimestampEnabled()
-        if (senseVoiceTimestampEnabled && binding.switchSecondaryProcessing.isChecked) {
+        val tokenTimestampExperimentEnabled = isTokenTimestampExperimentEnabled()
+        if (tokenTimestampExperimentEnabled && binding.switchSecondaryProcessing.isChecked) {
             binding.switchSecondaryProcessing.isChecked = false
         }
-        binding.switchSecondaryProcessing.isEnabled = !senseVoiceTimestampEnabled
+        binding.switchSecondaryProcessing.isEnabled = !tokenTimestampExperimentEnabled
         binding.switchSecondaryProcessing.alpha =
-            if (senseVoiceTimestampEnabled) 0.55f else 1f
+            if (tokenTimestampExperimentEnabled) 0.55f else 1f
         binding.tvSecondaryProcessingHint.text = getString(
-            if (senseVoiceTimestampEnabled) {
+            if (tokenTimestampExperimentEnabled) {
                 R.string.activity_auto_timestamp_text_17
             } else {
                 R.string.activity_auto_timestamp_text_13
             }
         )
         updateSecondaryProcessingState(
-            !senseVoiceTimestampEnabled && binding.switchSecondaryProcessing.isChecked
+            !tokenTimestampExperimentEnabled && binding.switchSecondaryProcessing.isChecked
         )
         updateGenerateButtonState()
     }
@@ -304,20 +303,20 @@ class AutoTimestampActivity : AppCompatActivity() {
                 return
             }
         }
-        val senseVoiceTimestampEnabled = settingsManager.isSpeechSenseVoiceTimestampEnabled()
+        val tokenTimestampExperimentEnabled = isTokenTimestampExperimentEnabled()
         if (
-            senseVoiceTimestampEnabled &&
-            !SenseVoiceTimestampGenerator.isConfigured(this)
+            tokenTimestampExperimentEnabled &&
+            !TokenTimestampGenerator.isConfigured(this)
         ) {
             com.subtitleedit.util.OverwritingToast.makeText(
                 this,
-                "实验打轴需要先在模型设置中配置 SenseVoice int8 模型和 tokens.txt",
+                "实验打轴需要先在模型设置中配置当前非 Whisper ASR 模型",
                 Toast.LENGTH_LONG
             ).show()
             return
         }
         if (
-            !senseVoiceTimestampEnabled &&
+            !tokenTimestampExperimentEnabled &&
             !settingsManager.isVadUseBuiltInModel() &&
             settingsManager.getVadModelPath().isBlank()
         ) {
@@ -507,11 +506,11 @@ class AutoTimestampActivity : AppCompatActivity() {
                 emptyList()
             }
 
-            val senseVoiceTimestampEnabled =
-                settingsManager.isSpeechSenseVoiceTimestampEnabled()
+            val tokenTimestampExperimentEnabled = isTokenTimestampExperimentEnabled()
             val segmentsResult = withContext(Dispatchers.IO) {
-                if (senseVoiceTimestampEnabled) {
-                    val generator = SenseVoiceTimestampGenerator(this@AutoTimestampActivity)
+                if (tokenTimestampExperimentEnabled) {
+                    val generator = TokenTimestampGenerator(this@AutoTimestampActivity)
+                    val modelName = TokenTimestampGenerator.modelDisplayName(settingsManager)
                     val result = if (refinementSubtitle != null) {
                         generator.generateUncoveredSegments(
                             pcmFile = pcmFile,
@@ -521,7 +520,7 @@ class AutoTimestampActivity : AppCompatActivity() {
                             progressCallback = { progress, status ->
                                 runOnUiThread {
                                     binding.tvStatus.text =
-                                        "$progressPrefix SenseVoice 打轴：$status ($progress%)"
+                                        "$progressPrefix $modelName token 打轴：$status ($progress%)"
                                 }
                             },
                             isCancelled = { isCancelled }
@@ -532,7 +531,7 @@ class AutoTimestampActivity : AppCompatActivity() {
                             progressCallback = { progress, status ->
                                 runOnUiThread {
                                     binding.tvStatus.text =
-                                        "$progressPrefix SenseVoice 打轴：$status ($progress%)"
+                                        "$progressPrefix $modelName token 打轴：$status ($progress%)"
                                 }
                             },
                             isCancelled = { isCancelled }
@@ -567,10 +566,10 @@ class AutoTimestampActivity : AppCompatActivity() {
                 return Result.failure(Exception("未检测到任何语音段"))
             }
             appendOperationLog(
-                if (senseVoiceTimestampEnabled && refinementSubtitle != null) {
-                    "SenseVoice：在未覆盖区间生成 ${segments.size} 个新增时间段"
-                } else if (senseVoiceTimestampEnabled) {
-                    "SenseVoice：生成 ${segments.size} 个时间段"
+                if (tokenTimestampExperimentEnabled && refinementSubtitle != null) {
+                    "Token 时间戳实验打轴：在未覆盖区间生成 ${segments.size} 个新增时间段"
+                } else if (tokenTimestampExperimentEnabled) {
+                    "Token 时间戳实验打轴：生成 ${segments.size} 个时间段"
                 } else if (refinementSubtitle != null) {
                     "二次 VAD：在未覆盖区间检测到 ${segments.size} 个新增语音段"
                 } else {
@@ -673,7 +672,7 @@ class AutoTimestampActivity : AppCompatActivity() {
                 .thenBy { it.entry.endTime }
         )
         val outputEntries = if (
-            !settingsManager.isSpeechSenseVoiceTimestampEnabled() &&
+            !isTokenTimestampExperimentEnabled() &&
             settingsManager.isSpeechSecondaryVadMergeEnabled()
         ) {
             mergeSubtitleEntries(
@@ -826,17 +825,22 @@ class AutoTimestampActivity : AppCompatActivity() {
         }
     }
 
+    private fun isTokenTimestampExperimentEnabled(): Boolean =
+        settingsManager.isSpeechTokenTimestampEnabled() &&
+            TokenTimestampGenerator.isSupported(settingsManager)
+
     private fun appendVadConfig(secondaryProcessing: Boolean) {
-        if (settingsManager.isSpeechSenseVoiceTimestampEnabled()) {
-            appendOperationLog("SenseVoice 实验打轴配置：")
+        if (isTokenTimestampExperimentEnabled()) {
+            appendOperationLog("Token 时间戳实验打轴配置：")
             appendOperationLog(
-                "  模型：${Uri.parse(SenseVoiceTimestampGenerator.modelPath(settingsManager)).lastPathSegment}"
+                "  模型：${TokenTimestampGenerator.modelDisplayName(settingsManager)} " +
+                    "(${Uri.parse(TokenTimestampGenerator.modelPath(settingsManager)).lastPathSegment})"
             )
             appendOperationLog(
-                "  Tokens：${Uri.parse(SenseVoiceTimestampGenerator.tokensPath(settingsManager)).lastPathSegment}"
+                "  Tokens：${Uri.parse(TokenTimestampGenerator.tokensPath(settingsManager)).lastPathSegment}"
             )
             appendOperationLog(
-                "  Token 切分间隔：${settingsManager.getSpeechSenseVoiceTimestampGapMs()}ms"
+                "  Token 切分间隔：${settingsManager.getSpeechTokenTimestampGapMs()}ms"
             )
             appendOperationLog("  VAD 检测与分段设置：不使用")
             if (secondaryProcessing) {

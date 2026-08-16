@@ -125,7 +125,7 @@
     <string name="activity_auto_timestamp_text_14">字幕文件（SRT/LRC）</string>
     <string name="activity_auto_timestamp_text_15">选择字幕文件</string>
     <string name="activity_auto_timestamp_text_16">未选择字幕文件</string>
-    <string name="activity_auto_timestamp_text_17">SenseVoice 实验打轴开启时不可使用二次处理</string>
+    <string name="activity_auto_timestamp_text_17">Token 时间戳实验打轴开启时不可使用二次处理</string>
     <string name="activity_batch_convert_text_01">转换设置</string>
     <string name="activity_batch_convert_text_02">选择输出目录</string>
     <string name="activity_batch_convert_text_03">输出目录：Download/SubtitleEdit/Convert（默认）</string>
@@ -272,14 +272,14 @@
     <string name="activity_speech_to_subtitle_settings_text_39" translatable="false">200</string>
     <string name="activity_speech_to_subtitle_settings_text_40">分别合并第一次 VAD 内部和第二次 VAD 内部间隔不超过指定时间的相邻语音段，无论是否启用二次 VAD 都生效</string>
     <string name="activity_speech_to_subtitle_settings_text_41">实验功能</string>
-    <string name="activity_speech_to_subtitle_settings_text_42">使用 SenseVoice token 时间戳打轴</string>
-    <string name="activity_speech_to_subtitle_settings_text_43">实验功能不一定稳定，开启后所有打轴流程使用 SenseVoice 替代 VAD 检测与分段；ASR 识别及 padding 机制不受影响，打轴时间会显著提高</string>
+    <string name="activity_speech_to_subtitle_settings_text_42">使用 token 时间戳划分语音段</string>
+    <string name="activity_speech_to_subtitle_settings_text_43">实验功能不一定稳定，开启后所有打轴流程使用当前 ASR 模型的 token 时间戳替代 VAD 检测与分段；支持 SenseVoice 和 Parakeet，Whisper 受模型限制不支持；ASR 识别及 padding 机制不受影响，打轴时间会显著提高</string>
     <string name="activity_speech_to_subtitle_settings_text_44">切分时间</string>
     <string name="activity_speech_to_subtitle_settings_text_45">相邻 token 的时间间隔达到该值时切分，较短间隔将合并为同一字幕段</string>
     <string name="activity_speech_to_subtitle_settings_text_46" translatable="false">500</string>
-    <string name="activity_speech_to_subtitle_settings_text_47">未检测到可用的 SenseVoice 模型，请先在模型设置中下载或导入</string>
-    <string name="activity_speech_to_subtitle_settings_text_48">不保留 SenseVoice 切分文本</string>
-    <string name="activity_speech_to_subtitle_settings_text_49">开启后丢弃 SenseVoice 切分出的文本，改用当前 ASR 模型重新识别</string>
+    <string name="activity_speech_to_subtitle_settings_text_47">当前 ASR 模型为 Whisper 或模型文件配置不完整，请先在模型设置中选择并配置非 Whisper 模型</string>
+    <string name="activity_speech_to_subtitle_settings_text_48">不保留实验打轴切分文本</string>
+    <string name="activity_speech_to_subtitle_settings_text_49">开启后丢弃实验打轴模型切分出的文本，改用当前 ASR 模型按时间范围重新识别</string>
     <string name="activity_speech_to_subtitle_text_01">选择音频/视频文件（可多选）</string>
     <string name="activity_speech_to_subtitle_text_02">支持 MP3, WAV, FLAC, MP4, MKV 等格式</string>
     <string name="activity_speech_to_subtitle_text_03">源语言</string>
