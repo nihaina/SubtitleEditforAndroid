@@ -47,7 +47,7 @@ DEFADE26209F72CF4FA9769B18052C842833D6BEF12924595D26F03B995548CA
 
 ## ✅ 集成已完成
 
-sherpa-onnx v1.13.5 已成功集成到项目中。
+sherpa-onnx v1.13.5 及项目内的 SenseVoice CTC duration 补丁已成功集成。
 
 ### 集成内容
 
@@ -58,6 +58,8 @@ sherpa-onnx v1.13.5 已成功集成到项目中。
 2. **Native 库文件**
 
    - 位置：`app/src/main/jniLibs/`
+   - 四个 ABI 的 `libsherpa-onnx-jni.so` 均由 v1.13.5 应用项目补丁后重新构建
+   - arm64-v8a 额外启用 `SHERPA_ONNX_ENABLE_QNN=ON`
    - 支持架构：
      - arm64-v8a (主流 64 位设备)
      - armeabi-v7a (32 位设备)
@@ -78,6 +80,13 @@ val recognizer = OfflineRecognizer(config)
 
 - 原始包：`sherpa-onnx-v1.13.5-android.tar.bz2` (45MB)
 - 下载地址：https://github.com/k2-fsa/sherpa-onnx/releases/tag/v1.13.5
+- JNI 补丁：`app/libs/sherpa-onnx-v1.13.5-sensevoice-ctc-durations.patch`
+
+在 sherpa-onnx v1.13.5 源码根目录应用补丁：
+
+```bash
+git apply /path/to/SubtitleEditforAndroid/app/libs/sherpa-onnx-v1.13.5-sensevoice-ctc-durations.patch
+```
 
 ### 注意事项
 

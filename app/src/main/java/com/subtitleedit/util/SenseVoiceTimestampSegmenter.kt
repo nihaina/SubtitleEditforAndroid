@@ -14,11 +14,17 @@ internal object SenseVoiceTimestampSegmenter {
     fun split(
         tokens: Array<String>,
         timestamps: FloatArray,
+        durations: FloatArray,
         audioStartTimeMs: Long,
         audioEndTimeMs: Long,
         splitGapMs: Int
     ): List<Segment> {
-        if (tokens.isEmpty() || tokens.size != timestamps.size || audioEndTimeMs <= audioStartTimeMs) {
+        if (
+            tokens.isEmpty() ||
+            tokens.size != timestamps.size ||
+            tokens.size != durations.size ||
+            audioEndTimeMs <= audioStartTimeMs
+        ) {
             return emptyList()
         }
 
@@ -26,55 +32,70 @@ internal object SenseVoiceTimestampSegmenter {
         val alignedTokens = tokens.indices.mapNotNull { index ->
             val token = tokens[index]
             val timestamp = timestamps[index]
-            if (token.isEmpty() || !timestamp.isFinite()) {
+            val duration = durations[index]
+            if (token.isEmpty() || !timestamp.isFinite() || !duration.isFinite() || duration <= 0f) {
                 null
             } else {
                 TimedToken(
                     text = token,
-                    timeMs = (timestamp.coerceAtLeast(0f) * 1000f).roundToLong()
+                    startTimeMs = (timestamp.coerceAtLeast(0f) * 1000f).roundToLong(),
+                    durationMs = (duration * 1000f).roundToLong().coerceAtLeast(1L)
                 )
             }
         }
         if (alignedTokens.isEmpty()) return emptyList()
 
         val maxLocalTimeMs = audioEndTimeMs - audioStartTimeMs
-        var previousTimeMs = 0L
+        // CTC tokens are usually single-frame spikes. Keep their exact blank-gap
+        // boundaries for splitting, but give each resulting segment limited context.
+        val boundaryContextMs = (gapThreshold / 2L).coerceIn(100L, 500L)
+        var previousStartTimeMs = 0L
         val normalizedTokens = alignedTokens.map { token ->
-            val normalizedTime = token.timeMs
-                .coerceIn(0L, maxLocalTimeMs)
-                .coerceAtLeast(previousTimeMs)
-            previousTimeMs = normalizedTime
-            token.copy(timeMs = normalizedTime)
+            val normalizedStartTimeMs = token.startTimeMs
+                .coerceIn(0L, maxLocalTimeMs - 1L)
+                .coerceAtLeast(previousStartTimeMs)
+            val normalizedEndTimeMs = (normalizedStartTimeMs + token.durationMs)
+                .coerceIn(normalizedStartTimeMs + 1L, maxLocalTimeMs)
+            previousStartTimeMs = normalizedStartTimeMs
+            token.copy(
+                startTimeMs = normalizedStartTimeMs,
+                endTimeMs = normalizedEndTimeMs
+            )
         }
 
         val segments = mutableListOf<Segment>()
-        var segmentStartTimeMs = audioStartTimeMs + normalizedTokens.first().timeMs
+        var segmentStartTimeMs = audioStartTimeMs +
+            (normalizedTokens.first().startTimeMs - boundaryContextMs).coerceAtLeast(0L)
         var currentText = StringBuilder()
         var hardBoundaryBefore = false
 
         normalizedTokens.forEachIndexed { index, token ->
             currentText.append(token.text)
             val next = normalizedTokens.getOrNull(index + 1)
-            if (next != null && next.timeMs - token.timeMs >= gapThreshold) {
+            val blankGapMs = next?.let { it.startTimeMs - token.endTimeMs }
+            if (next != null && blankGapMs != null && blankGapMs >= gapThreshold) {
+                val boundaryExtensionMs = minOf(boundaryContextMs, blankGapMs / 2L)
                 addSegment(
                     output = segments,
                     startTimeMs = segmentStartTimeMs,
-                    endTimeMs = audioStartTimeMs + token.timeMs,
+                    endTimeMs = audioStartTimeMs + token.endTimeMs + boundaryExtensionMs,
                     text = currentText.toString(),
                     hardBoundaryBefore = hardBoundaryBefore
                 )
                 currentText = StringBuilder()
-                segmentStartTimeMs = audioStartTimeMs + next.timeMs
+                segmentStartTimeMs =
+                    audioStartTimeMs + next.startTimeMs - boundaryExtensionMs
                 hardBoundaryBefore = true
             }
         }
 
-        val tailPaddingMs = (gapThreshold / 2L).coerceIn(100L, 500L)
-        val lastTokenTimeMs = audioStartTimeMs + normalizedTokens.last().timeMs
         addSegment(
             output = segments,
             startTimeMs = segmentStartTimeMs,
-            endTimeMs = minOf(audioEndTimeMs, lastTokenTimeMs + tailPaddingMs),
+            endTimeMs = audioStartTimeMs + minOf(
+                maxLocalTimeMs,
+                normalizedTokens.last().endTimeMs + boundaryContextMs
+            ),
             text = currentText.toString(),
             hardBoundaryBefore = hardBoundaryBefore
         )
@@ -126,6 +147,8 @@ internal object SenseVoiceTimestampSegmenter {
 
     private data class TimedToken(
         val text: String,
-        val timeMs: Long
+        val startTimeMs: Long,
+        val durationMs: Long,
+        val endTimeMs: Long = startTimeMs + durationMs
     )
 }

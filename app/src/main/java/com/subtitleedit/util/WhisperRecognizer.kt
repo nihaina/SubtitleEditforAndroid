@@ -797,12 +797,13 @@ class WhisperRecognizer(
                     val tokenSegments = SenseVoiceTimestampSegmenter.split(
                         tokens = result.tokens,
                         timestamps = result.timestamps,
+                        durations = result.durations,
                         audioStartTimeMs = startTimeMs,
                         audioEndTimeMs = startTimeMs + audioData.size.toLong() * 1000L / SAMPLE_RATE,
                         splitGapMs = senseVoiceTimestampGapMs
                     )
                     if (tokenSegments.isEmpty()) {
-                        Log.w(TAG, "SenseVoice 未返回有效 token 时间戳，跳过当前输入窗口")
+                        Log.w(TAG, "SenseVoice 未返回有效 token 时间戳和持续时间，跳过当前输入窗口")
                     } else {
                         segments += tokenSegments.map {
                             SubtitleSegment(

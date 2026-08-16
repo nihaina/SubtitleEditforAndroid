@@ -10,7 +10,7 @@ data class OfflineRecognizerResult(
     val emotion: String,
     val event: String,
 
-    // valid only for TDT models
+    // Valid for TDT and supported CTC greedy search models.
     val durations: FloatArray,
 )
 

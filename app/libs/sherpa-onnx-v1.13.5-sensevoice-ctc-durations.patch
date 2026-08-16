@@ -1,0 +1,91 @@
+diff --git a/sherpa-onnx/csrc/offline-ctc-decoder.h b/sherpa-onnx/csrc/offline-ctc-decoder.h
+--- a/sherpa-onnx/csrc/offline-ctc-decoder.h
++++ b/sherpa-onnx/csrc/offline-ctc-decoder.h
+@@ -26,6 +26,12 @@ struct OfflineCtcDecoderResult {
+   ///
+   /// tokens.size() == timestamps.size()
+   std::vector<int32_t> timestamps;
++
++  /// durations[i] contains the number of consecutive output frames assigned
++  /// to tokens[i]. It is populated by greedy search decoders.
++  ///
++  /// tokens.size() == durations.size() when durations is available.
++  std::vector<int32_t> durations;
+ };
+ 
+ class OfflineCtcDecoder {
+diff --git a/sherpa-onnx/csrc/offline-ctc-greedy-search-decoder.cc b/sherpa-onnx/csrc/offline-ctc-greedy-search-decoder.cc
+--- a/sherpa-onnx/csrc/offline-ctc-greedy-search-decoder.cc
++++ b/sherpa-onnx/csrc/offline-ctc-greedy-search-decoder.cc
+@@ -42,6 +42,9 @@ std::vector<OfflineCtcDecoderResult> OfflineCtcGreedySearchDecoder::Decode(
+       if (y != blank_id_ && y != prev_id) {
+         r.tokens.push_back(y);
+         r.timestamps.push_back(t);
++        r.durations.push_back(1);
++      } else if (y != blank_id_ && y == prev_id && !r.durations.empty()) {
++        ++r.durations.back();
+       }
+       prev_id = y;
+     }  // for (int32_t t = 0; ...)
+diff --git a/sherpa-onnx/csrc/offline-recognizer-sense-voice-impl.h b/sherpa-onnx/csrc/offline-recognizer-sense-voice-impl.h
+--- a/sherpa-onnx/csrc/offline-recognizer-sense-voice-impl.h
++++ b/sherpa-onnx/csrc/offline-recognizer-sense-voice-impl.h
+@@ -31,6 +31,7 @@ OfflineRecognitionResult ConvertSenseVoiceResult(
+   OfflineRecognitionResult r;
+   r.tokens.reserve(src.tokens.size());
+   r.timestamps.reserve(src.timestamps.size());
++  r.durations.reserve(src.durations.size());
+ 
+   std::string text;
+ 
+@@ -52,6 +53,10 @@ OfflineRecognitionResult ConvertSenseVoiceResult(
+     r.timestamps.push_back(time);
+   }
+ 
++  for (int32_t i = start; i < src.durations.size(); ++i) {
++    r.durations.push_back(frame_shift_s * src.durations[i]);
++  }
++
+   r.words = std::move(src.words);
+ 
+   if (!is_funasr_nano) {
+diff --git a/sherpa-onnx/csrc/offline-stream.h b/sherpa-onnx/csrc/offline-stream.h
+--- a/sherpa-onnx/csrc/offline-stream.h
++++ b/sherpa-onnx/csrc/offline-stream.h
+@@ -38,8 +38,9 @@ struct OfflineRecognitionResult {
+   /// timestamps[i] records the time in seconds when tokens[i] is decoded.
+   std::vector<float> timestamps;
+ 
+-  /// durations[i] contains the duration (in seconds) for tokens[i] (TDT models
+-  /// only)
++  /// durations[i] contains the duration (in seconds) for tokens[i]. It is
++  /// available for TDT models and CTC greedy search models that expose token
++  /// runs.
+   std::vector<float> durations;
+ 
+   /// ys_log_probs[i] contains the log probability (confidence) for tokens[i].
+diff --git a/sherpa-onnx/csrc/rknn/offline-ctc-greedy-search-decoder-rknn.cc b/sherpa-onnx/csrc/rknn/offline-ctc-greedy-search-decoder-rknn.cc
+--- a/sherpa-onnx/csrc/rknn/offline-ctc-greedy-search-decoder-rknn.cc
++++ b/sherpa-onnx/csrc/rknn/offline-ctc-greedy-search-decoder-rknn.cc
+@@ -27,6 +27,9 @@ OfflineCtcDecoderResult OfflineCtcGreedySearchDecoderRknn::Decode(
+     if (y != blank_id_ && y != prev_id) {
+       ans.tokens.push_back(y);
+       ans.timestamps.push_back(t);
++      ans.durations.push_back(1);
++    } else if (y != blank_id_ && y == prev_id && !ans.durations.empty()) {
++      ++ans.durations.back();
+     }
+     prev_id = y;
+   }  // for (int32_t t = 0; ...)
+diff --git a/sherpa-onnx/kotlin-api/OfflineRecognizer.kt b/sherpa-onnx/kotlin-api/OfflineRecognizer.kt
+--- a/sherpa-onnx/kotlin-api/OfflineRecognizer.kt
++++ b/sherpa-onnx/kotlin-api/OfflineRecognizer.kt
+@@ -10,7 +10,7 @@ data class OfflineRecognizerResult(
+     val emotion: String,
+     val event: String,
+ 
+-    // valid only for TDT models
++    // Valid for TDT and supported CTC greedy search models.
+     val durations: FloatArray,
+ )
+ 
