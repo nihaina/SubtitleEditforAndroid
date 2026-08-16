@@ -22,11 +22,32 @@ AAR SHA-256：
 F4F34356D184CDB08C6CA96A35504D29931708E93EC0071E69C627DB9835C30B
 ```
 
+## ONNX Runtime Java
+
+ONNX Runtime 1.27.1 的 Java API 位于：
+
+```text
+app/libs/onnxruntime-java-1.27.1.jar
+```
+
+四个 ABI 对应的 `libonnxruntime4j_jni.so` 位于 `app/src/main/jniLibs/`。
+这些文件提取自 sherpa-onnx Android 构建使用的上游包：
+
+```text
+https://github.com/csukuangfj/onnxruntime-libs/releases/download/v1.27.1/onnxruntime-android-1.27.1.zip
+```
+
+原始包 SHA-256：
+
+```text
+DEFADE26209F72CF4FA9769B18052C842833D6BEF12924595D26F03B995548CA
+```
+
 ## sherpa-onnx
 
 ## ✅ 集成已完成
 
-sherpa-onnx v1.13.4 已成功集成到项目中。
+sherpa-onnx v1.13.5 已成功集成到项目中。
 
 ### 集成内容
 
@@ -55,8 +76,8 @@ val recognizer = OfflineRecognizer(config)
 
 ### 源文件
 
-- 原始包：`sherpa-onnx-v1.13.4-android.tar.bz2` (45MB)
-- 下载地址：https://github.com/k2-fsa/sherpa-onnx/releases/tag/v1.13.4
+- 原始包：`sherpa-onnx-v1.13.5-android.tar.bz2` (45MB)
+- 下载地址：https://github.com/k2-fsa/sherpa-onnx/releases/tag/v1.13.5
 
 ### 注意事项
 

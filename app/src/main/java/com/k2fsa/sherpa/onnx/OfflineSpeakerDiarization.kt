@@ -44,6 +44,9 @@ class OfflineSpeakerDiarization(
         } else {
             newFromFile(config)
         }
+        require(ptr != 0L) {
+            "Invalid OfflineSpeakerDiarizationConfig: failed to create native OfflineSpeakerDiarization"
+        }
     }
 
     protected fun finalize() {

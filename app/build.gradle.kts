@@ -172,7 +172,7 @@ dependencies {
 
     // Standalone ONNX Runtime Java API for HTDemucs vocal separation.
     // Match the ONNX Runtime shared library already shipped with sherpa-onnx.
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.27.0")
+    implementation(files("libs/onnxruntime-java-1.27.1.jar"))
 
     // sherpa-onnx for Whisper speech recognition
     // Kotlin API 源码已集成到 app/src/main/java/com/k2fsa/sherpa/onnx/

@@ -8,6 +8,7 @@ data class OfflineSpeechDenoiserGtcrnModelConfig(
 
 data class OfflineSpeechDenoiserDpdfNetModelConfig(
     var model: String = "",
+    var attenuationLimitDb: Float = 0.0f,
 )
 
 data class OfflineSpeechDenoiserModelConfig(
@@ -33,6 +34,9 @@ class OfflineSpeechDenoiser(
             newFromAsset(assetManager, config)
         } else {
             newFromFile(config)
+        }
+        require(ptr != 0L) {
+            "Invalid OfflineSpeechDenoiserConfig: failed to create native OfflineSpeechDenoiser"
         }
     }
 

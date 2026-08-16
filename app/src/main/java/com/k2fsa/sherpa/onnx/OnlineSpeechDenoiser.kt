@@ -18,6 +18,9 @@ class OnlineSpeechDenoiser(
         } else {
             newFromFile(config)
         }
+        require(ptr != 0L) {
+            "Invalid OnlineSpeechDenoiserConfig: failed to create native OnlineSpeechDenoiser"
+        }
     }
 
     protected fun finalize() {
