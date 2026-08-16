@@ -278,6 +278,8 @@
     <string name="activity_speech_to_subtitle_settings_text_45">相邻 token 的时间间隔达到该值时切分，较短间隔将合并为同一字幕段</string>
     <string name="activity_speech_to_subtitle_settings_text_46" translatable="false">500</string>
     <string name="activity_speech_to_subtitle_settings_text_47">未检测到可用的 SenseVoice 模型，请先在模型设置中下载或导入</string>
+    <string name="activity_speech_to_subtitle_settings_text_48">不保留 SenseVoice 切分文本</string>
+    <string name="activity_speech_to_subtitle_settings_text_49">开启后丢弃 SenseVoice 切分出的文本，改用当前 ASR 模型重新识别</string>
     <string name="activity_speech_to_subtitle_text_01">选择音频/视频文件（可多选）</string>
     <string name="activity_speech_to_subtitle_text_02">支持 MP3, WAV, FLAC, MP4, MKV 等格式</string>
     <string name="activity_speech_to_subtitle_text_03">源语言</string>

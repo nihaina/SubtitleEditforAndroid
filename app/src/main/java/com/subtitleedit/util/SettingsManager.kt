@@ -76,6 +76,8 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_STT_HOTWORDS_SCORE = "stt_hotwords_score"
         private const val KEY_STT_SENSEVOICE_TIMESTAMP_ENABLED =
             "stt_sensevoice_timestamp_enabled"
+        private const val KEY_STT_SENSEVOICE_TIMESTAMP_DISCARD_TEXT_ENABLED =
+            "stt_sensevoice_timestamp_discard_text_enabled"
         private const val KEY_STT_SENSEVOICE_TIMESTAMP_GAP_MS =
             "stt_sensevoice_timestamp_gap_ms"
         private const val KEY_QUICK_TRANSCRIBE_SOURCE_LANGUAGE = "quick_transcribe_source_language"
@@ -728,6 +730,14 @@ class SettingsManager private constructor(context: Context) {
 
     fun setSpeechSenseVoiceTimestampEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_STT_SENSEVOICE_TIMESTAMP_ENABLED, enabled).apply()
+    }
+
+    fun isSpeechSenseVoiceTimestampDiscardTextEnabled(): Boolean {
+        return prefs.getBoolean(KEY_STT_SENSEVOICE_TIMESTAMP_DISCARD_TEXT_ENABLED, false)
+    }
+
+    fun setSpeechSenseVoiceTimestampDiscardTextEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_STT_SENSEVOICE_TIMESTAMP_DISCARD_TEXT_ENABLED, enabled).apply()
     }
 
     fun getSpeechSenseVoiceTimestampGapMs(): Int {

@@ -157,6 +157,9 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
             settingsManager.setSpeechSenseVoiceTimestampEnabled(checked)
             updateSenseVoiceTimestampControls()
         }
+        binding.switchSenseVoiceTimestampDiscardText.setOnCheckedChangeListener { _, checked ->
+            if (!loading) settingsManager.setSpeechSenseVoiceTimestampDiscardTextEnabled(checked)
+        }
         bindSecondaryVadValue(
             slider = binding.sliderSenseVoiceTimestampGap,
             input = binding.etSenseVoiceTimestampGap,
@@ -249,6 +252,8 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
                 settingsManager.isSpeechSenseVoiceTimestampEnabled()
         binding.tvSenseVoiceTimestampModelMissing.visibility =
             if (senseVoiceTimestampModelAvailable) View.GONE else View.VISIBLE
+        binding.switchSenseVoiceTimestampDiscardText.isChecked =
+            settingsManager.isSpeechSenseVoiceTimestampDiscardTextEnabled()
         loadSecondaryVadValue(
             binding.sliderSenseVoiceTimestampGap,
             binding.etSenseVoiceTimestampGap,
@@ -263,6 +268,9 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
     private fun updateSenseVoiceTimestampControls() {
         val enabled = binding.switchSenseVoiceTimestampExperiment.isEnabled &&
             binding.switchSenseVoiceTimestampExperiment.isChecked
+        binding.switchSenseVoiceTimestampDiscardText.isEnabled = enabled
+        binding.switchSenseVoiceTimestampDiscardText.alpha = if (enabled) 1f else 0.5f
+        binding.tvSenseVoiceTimestampDiscardTextHint.alpha = if (enabled) 1f else 0.5f
         binding.layoutSenseVoiceTimestampGap.alpha = if (enabled) 1f else 0.5f
         binding.sliderSenseVoiceTimestampGap.isEnabled = enabled
         binding.etSenseVoiceTimestampGap.isEnabled = enabled

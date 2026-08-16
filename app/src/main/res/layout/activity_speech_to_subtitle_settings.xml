@@ -783,6 +783,25 @@
                         android:textSize="12sp"
                         android:visibility="gone" />
 
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchSenseVoiceTimestampDiscardText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:minHeight="40dp"
+                        android:text="@string/activity_speech_to_subtitle_settings_text_48"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/tvSenseVoiceTimestampDiscardTextHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/activity_speech_to_subtitle_settings_text_49"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="12sp" />
+
                     <LinearLayout
                         android:id="@+id/layoutSenseVoiceTimestampGap"
                         android:layout_width="match_parent"

@@ -684,6 +684,22 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         if (isCancelled) return Result.failure(Exception("用户取消"))
 
         val timelineSegments = timelineResult.getOrElse { return Result.failure(it) }
+        if (!settingsManager.isSpeechSenseVoiceTimestampDiscardTextEnabled()) {
+            appendRuntimeLog(
+                "实验打轴完成：生成 ${timelineSegments.size} 个字幕段，保留 SenseVoice 文本"
+            )
+            return Result.success(
+                timelineSegments.map { segment ->
+                    WhisperRecognizer.SubtitleSegment(
+                        startTime = segment.startTime,
+                        endTime = segment.endTime,
+                        text = segment.text
+                    )
+                }.also { segments ->
+                    segments.forEach(::appendRecognizedSegment)
+                }
+            )
+        }
         val ranges = timelineSegments.map { it.startTime..it.endTime }
         appendRuntimeLog("实验打轴完成：生成 ${ranges.size} 个时间范围，已丢弃 SenseVoice 文本")
 

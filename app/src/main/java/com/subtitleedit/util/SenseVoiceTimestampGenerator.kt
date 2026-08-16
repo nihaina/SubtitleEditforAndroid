@@ -8,7 +8,8 @@ class SenseVoiceTimestampGenerator(context: Context) {
 
     data class Segment(
         val startTime: Long,
-        val endTime: Long
+        val endTime: Long,
+        val text: String = ""
     )
 
     private val appContext = context.applicationContext
@@ -48,7 +49,7 @@ class SenseVoiceTimestampGenerator(context: Context) {
             isCancelled = isCancelled
         ).mapCatching { recognizedSegments ->
             recognizedSegments.map { segment ->
-                Segment(segment.startTime, segment.endTime)
+                Segment(segment.startTime, segment.endTime, segment.text)
             }.ifEmpty {
                 error("SenseVoice 未生成有效 token 时间轴")
             }
