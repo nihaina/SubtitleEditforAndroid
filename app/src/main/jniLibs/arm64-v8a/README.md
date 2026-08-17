@@ -15,7 +15,9 @@ In any case, libonnxruntime.so is always needed.
 `libsherpa-onnx-jni.so` is built from sherpa-onnx v1.13.5 with
 `SHERPA_ONNX_ENABLE_QNN=ON` and ONNX Runtime 1.27.1.
 
-The QNN 2.40.0.251030 runtime libraries are taken from the upstream
-`asr-models-qnn` release. V68, V69, V73, V75, V79, and V81 HTP Stub/Skel
-libraries are packaged so the runtime can select the architecture supported by
-the current Snapdragon device.
+The `qnn` build flavor additionally packages the QNN 2.40.0.251030 runtime
+libraries taken from the upstream `asr-models-qnn` release. V68, V69, V73,
+V75, V79, and V81 HTP Stub/Skel libraries are included so the runtime can
+select the architecture supported by the current Snapdragon device. The
+`standard` build intentionally omits these libraries; the app points users to
+the project's Releases page when SenseVoice NPU is selected.

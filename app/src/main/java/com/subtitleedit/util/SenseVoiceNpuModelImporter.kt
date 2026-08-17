@@ -88,6 +88,9 @@ class SenseVoiceNpuModelImporter(
         if ("arm64-v8a" !in Build.SUPPORTED_ABIS) {
             throw IllegalStateException("SenseVoice NPU 仅支持 arm64-v8a 骁龙设备")
         }
+        if (!QnnRuntimeAvailability.isAvailable(context)) {
+            throw IllegalStateException("当前安装包不包含 QNN 运行库，请安装 arm64 QNN 版")
+        }
         require(durationSeconds == 5 || durationSeconds == 10) {
             "SenseVoice NPU 模型时长必须为 5 秒或 10 秒"
         }
@@ -133,28 +136,34 @@ class SenseVoiceNpuModelImporter(
 
             onStatus("正在初始化 NPU 并生成 BIN 模型，首次处理可能需要较长时间")
             val generatedBinary = File(sessionDir, CONTEXT_BINARY_NAME)
-            OfflineRecognizer.prependAdspLibraryPath(context.applicationInfo.nativeLibraryDir)
-            val recognizer = OfflineRecognizer(
-                assetManager = null,
-                config = OfflineRecognizerConfig(
-                    featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = FEATURE_DIM),
-                    modelConfig = OfflineModelConfig(
-                        senseVoice = OfflineSenseVoiceModelConfig(
-                            model = runtimeModel.absolutePath,
-                            qnnConfig = QnnConfig(
-                                backendLib = QNN_BACKEND_LIBRARY,
-                                systemLib = QNN_SYSTEM_LIBRARY,
-                                contextBinary = generatedBinary.absolutePath
-                            )
-                        ),
-                        tokens = runtimeTokens.absolutePath,
-                        numThreads = 1,
-                        debug = true,
-                        provider = "qnn"
+            val adspLibraryDir = QnnRuntimeAvailability.prepareAdspLibraryDir(context)
+            OfflineRecognizer.prependAdspLibraryPath(adspLibraryDir.absolutePath)
+            var recognizer: OfflineRecognizer? = null
+            try {
+                recognizer = OfflineRecognizer(
+                    assetManager = null,
+                    config = OfflineRecognizerConfig(
+                        featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = FEATURE_DIM),
+                        modelConfig = OfflineModelConfig(
+                            senseVoice = OfflineSenseVoiceModelConfig(
+                                model = runtimeModel.absolutePath,
+                                qnnConfig = QnnConfig(
+                                    backendLib = QNN_BACKEND_LIBRARY,
+                                    systemLib = QNN_SYSTEM_LIBRARY,
+                                    contextBinary = generatedBinary.absolutePath
+                                )
+                            ),
+                            tokens = runtimeTokens.absolutePath,
+                            numThreads = 1,
+                            debug = true,
+                            provider = "qnn"
+                        )
                     )
                 )
-            )
-            recognizer.release()
+            } finally {
+                recognizer?.release()
+                QnnRuntimeAvailability.deletePreparedAdspLibraryDir(context)
+            }
 
             if (!generatedBinary.isFile || generatedBinary.length() <= 0L) {
                 throw IOException("QNN 初始化完成，但未生成有效的 model.bin")

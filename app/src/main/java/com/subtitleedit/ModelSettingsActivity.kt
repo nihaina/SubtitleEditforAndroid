@@ -23,6 +23,7 @@ import com.subtitleedit.databinding.ActivityModelSettingsBinding
 import com.subtitleedit.util.ModelDownloadProgressDialog
 import com.subtitleedit.util.ModelDownloader
 import com.subtitleedit.util.OverwritingToast
+import com.subtitleedit.util.QnnRuntimeAvailability
 import com.subtitleedit.util.SenseVoiceNpuModelImporter
 import com.subtitleedit.util.SenseVoiceNpuModelPathPolicy
 import com.subtitleedit.util.SettingsManager
@@ -138,6 +139,7 @@ class ModelSettingsActivity : AppCompatActivity() {
 
     private fun setupButtons() {
         binding.btnSelectEncoder.setOnClickListener {
+            if (isSenseVoiceNpu() && !ensureQnnRuntimeAvailable()) return@setOnClickListener
             encoderPickerLauncher.launch(arrayOf("*/*"))
         }
         binding.btnDownloadAsrModel.setOnClickListener { showAsrDownloadOptions() }
@@ -152,6 +154,7 @@ class ModelSettingsActivity : AppCompatActivity() {
         }
 
         binding.btnSelectTokens.setOnClickListener {
+            if (isSenseVoiceNpu() && !ensureQnnRuntimeAvailable()) return@setOnClickListener
             tokensPickerLauncher.launch(arrayOf("*/*"))
         }
 
@@ -196,6 +199,7 @@ class ModelSettingsActivity : AppCompatActivity() {
             OverwritingToast.makeText(this, "模型正在下载", Toast.LENGTH_SHORT).show()
             return
         }
+        if (isSenseVoiceNpu() && !ensureQnnRuntimeAvailable()) return
         when (modelType) {
             SettingsManager.ASR_MODEL_SENSEVOICE -> showSenseVoiceDownloadOptions()
             SettingsManager.ASR_MODEL_PARAKEET_TDT ->
@@ -208,6 +212,7 @@ class ModelSettingsActivity : AppCompatActivity() {
 
     private fun showSenseVoiceDownloadOptions() {
         if (settingsManager.getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU) {
+            if (!ensureQnnRuntimeAvailable()) return
             val options = ModelDownloader.SENSEVOICE_NPU_MODELS
             val labels = options.map { "${it.displayName}（${it.sizeLabel}）" }.toTypedArray()
             AlertDialog.Builder(this)
@@ -285,7 +290,9 @@ class ModelSettingsActivity : AppCompatActivity() {
 
     private fun startSenseVoiceDownload(option: ModelDownloader.SenseVoiceModelOption) {
         if (modelDownloadJob?.isActive == true) return
-        if (option.architecture == ModelDownloader.SenseVoiceArchitecture.QNN &&
+        val isNpu = option.architecture == ModelDownloader.SenseVoiceArchitecture.QNN
+        if (isNpu && !ensureQnnRuntimeAvailable()) return
+        if (isNpu &&
             "arm64-v8a" !in Build.SUPPORTED_ABIS
         ) {
             OverwritingToast.makeText(
@@ -741,6 +748,7 @@ class ModelSettingsActivity : AppCompatActivity() {
 
     private fun migrateLegacySenseVoiceNpuSelectionIfNeeded() {
         if (!isSenseVoiceNpu() || encoderPath.isBlank()) return
+        if (!QnnRuntimeAvailability.isAvailable(this)) return
         if (SenseVoiceNpuModelPathPolicy.isContextBinarySelection(encoderPath)) return
         startSenseVoiceNpuImport(
             Uri.parse(encoderPath),
@@ -750,6 +758,7 @@ class ModelSettingsActivity : AppCompatActivity() {
 
     private fun handleSelectedEncoder(uri: Uri) {
         try {
+            if (isSenseVoiceNpu() && !ensureQnnRuntimeAvailable()) return
             val fileName = getFileNameFromUri(uri)
             val senseVoiceNpu = isSenseVoiceNpu()
             if (!senseVoiceNpu) {
@@ -833,6 +842,7 @@ class ModelSettingsActivity : AppCompatActivity() {
 
     private fun startSenseVoiceNpuImport(modelUri: Uri, durationSeconds: Int) {
         if (modelDownloadJob?.isActive == true) return
+        if (!ensureQnnRuntimeAvailable()) return
         if ("arm64-v8a" !in Build.SUPPORTED_ABIS) {
             OverwritingToast.makeText(
                 this,
@@ -992,6 +1002,7 @@ class ModelSettingsActivity : AppCompatActivity() {
 
     private fun handleSelectedTokens(uri: Uri) {
         try {
+            if (isSenseVoiceNpu() && !ensureQnnRuntimeAvailable()) return
             contentResolver.takePersistableUriPermission(
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
@@ -1226,6 +1237,11 @@ class ModelSettingsActivity : AppCompatActivity() {
     }
 
     private fun selectSenseVoiceProvider(provider: String) {
+        if (provider == SettingsManager.SENSEVOICE_PROVIDER_NPU &&
+            !ensureQnnRuntimeAvailable()
+        ) {
+            return
+        }
         if (provider == settingsManager.getSenseVoiceProvider()) return
         settingsManager.setSenseVoiceProvider(provider)
         loadModelPaths()
@@ -1392,6 +1408,13 @@ class ModelSettingsActivity : AppCompatActivity() {
             null,
             if (senseVoiceNpu) Typeface.BOLD else Typeface.NORMAL
         )
+        val qnnRuntimeAvailable = QnnRuntimeAvailability.isAvailable(this)
+        binding.tvSenseVoiceNpuOption.alpha = if (qnnRuntimeAvailable) 1f else 0.55f
+        binding.tvSenseVoiceNpuOption.contentDescription = if (qnnRuntimeAvailable) {
+            "选择 SenseVoice NPU"
+        } else {
+            "SenseVoice NPU，需要安装 QNN 版"
+        }
         binding.tvParakeetTdtOption.setTextColor(
             ContextCompat.getColor(this, if (parakeetTdt) R.color.primary else R.color.on_surface_variant)
         )
@@ -1409,6 +1432,30 @@ class ModelSettingsActivity : AppCompatActivity() {
     private fun isSenseVoiceNpu(): Boolean =
         modelType == SettingsManager.ASR_MODEL_SENSEVOICE &&
             settingsManager.getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU
+
+    private fun ensureQnnRuntimeAvailable(): Boolean {
+        if (QnnRuntimeAvailability.isAvailable(this)) return true
+        AlertDialog.Builder(this)
+            .setTitle("需要安装 QNN 版")
+            .setMessage(
+                "当前安装包不包含 Qualcomm QNN 运行库，无法使用 SenseVoice NPU 模型。\n\n" +
+                    "请前往项目发布页下载相同版本或更新版本的 arm64 QNN 安装包，并直接覆盖安装。已有模型和软件数据不会被清除。"
+            )
+            .setPositiveButton("打开下载页") { _, _ -> openQnnEditionReleases() }
+            .setNegativeButton("取消", null)
+            .show()
+        return false
+    }
+
+    private fun openQnnEditionReleases() {
+        val intent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse(QnnRuntimeAvailability.QNN_EDITION_RELEASES_URL)
+        )
+        runCatching { startActivity(intent) }.onFailure {
+            OverwritingToast.makeText(this, "无法打开下载页", Toast.LENGTH_LONG).show()
+        }
+    }
 
     private fun currentModelDisplayName(): String = when (modelType) {
         SettingsManager.ASR_MODEL_SENSEVOICE -> "SenseVoice"

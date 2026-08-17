@@ -106,6 +106,11 @@ class WhisperRecognizer(
             if (isSenseVoiceNpu() && "arm64-v8a" !in Build.SUPPORTED_ABIS) {
                 return Result.failure(Exception("SenseVoice NPU 仅支持 arm64-v8a 骁龙设备"))
             }
+            if (isSenseVoiceNpu() && !QnnRuntimeAvailability.isAvailable(context)) {
+                return Result.failure(
+                    Exception("当前安装包不包含 QNN 运行库，请安装 arm64 QNN 版")
+                )
+            }
             val useNpuContextBinary = isSenseVoiceNpu() &&
                 isSenseVoiceNpuContextBinary(encoderPath)
             val primaryFileName = when {
@@ -187,9 +192,9 @@ class WhisperRecognizer(
                     Log.d(TAG, "SenseVoice language=$senseVoiceLanguage (selected=$language)")
                     val qnn = isSenseVoiceNpu()
                     if (qnn) {
-                        OfflineRecognizer.prependAdspLibraryPath(
-                            context.applicationInfo.nativeLibraryDir
-                        )
+                        val adspLibraryDir =
+                            QnnRuntimeAvailability.prepareAdspLibraryDir(context)
+                        OfflineRecognizer.prependAdspLibraryPath(adspLibraryDir.absolutePath)
                     }
                     OfflineModelConfig(
                         senseVoice = OfflineSenseVoiceModelConfig(
@@ -270,6 +275,7 @@ class WhisperRecognizer(
             Log.e(TAG, "初始化识别器失败", e)
             recognizer = null
             deleteQnnExecutableModelCopy()
+            QnnRuntimeAvailability.deletePreparedAdspLibraryDir(context)
             Result.failure(e)
         }
     }
@@ -1096,6 +1102,7 @@ class WhisperRecognizer(
             Log.e(TAG, "释放资源失败", e)
         } finally {
             deleteQnnExecutableModelCopy()
+            QnnRuntimeAvailability.deletePreparedAdspLibraryDir(context)
         }
     }
 

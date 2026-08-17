@@ -88,11 +88,17 @@
    ```
 2. 打开项目
 3. 同步 Gradle 依赖
-4. 构建 Debug APK
+4. 构建 Debug APK（普通版或 QNN 版）
 
    ```bash
-   ./gradlew assembleDebug
+   ./gradlew :app:assembleStandardDebug  # 不包含 QNN 运行库
+   ./gradlew :app:assembleQnnDebug       # arm64 QNN 版
    ```
+
+   Release 构建使用对应的 `assembleStandardRelease` 和
+   `assembleQnnRelease` 任务。导出的 APK 位于
+   `app/build/outputs/apk/<flavor>/<buildType>/export/`，普通版提供所有
+   ABI，QNN 版仅提供 arm64-v8a APK。
 5. 运行应用
 
 ## 使用说明

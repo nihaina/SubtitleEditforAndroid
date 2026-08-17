@@ -47,7 +47,8 @@ source revisions are retained by the reproducible native build described in
 
 ## Qualcomm QNN Runtime 2.40.0.251030
 
-The arm64 build includes Qualcomm QNN HTP runtime libraries distributed by the
-sherpa-onnx project in its `asr-models-qnn` release. These libraries enable NPU
-execution on compatible Snapdragon devices and remain subject to the Qualcomm
-software terms applicable to the QNN/QAIRT runtime.
+The optional arm64 QNN build includes Qualcomm QNN HTP runtime libraries
+distributed by the sherpa-onnx project in its `asr-models-qnn` release. These
+libraries enable NPU execution on compatible Snapdragon devices and remain
+subject to the Qualcomm software terms applicable to the QNN/QAIRT runtime.
+The standard build omits these libraries.

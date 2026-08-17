@@ -1,14 +1,20 @@
 import groovy.json.JsonSlurper
+import com.android.build.api.variant.FilterConfiguration
 
 plugins {
     id("com.android.application")
 }
 
-fun registerApkExport(variantName: String) {
+fun registerApkExport(
+    variantName: String,
+    outputPath: String,
+    artifactSuffix: String = "",
+    arm64Only: Boolean = false
+) {
     val taskName = "export${variantName.replaceFirstChar { it.uppercase() }}Apks"
     val exportTask = tasks.register(taskName) {
         doLast {
-            val outputDir = layout.buildDirectory.dir("outputs/apk/$variantName").get().asFile
+            val outputDir = layout.buildDirectory.dir("outputs/apk/$outputPath").get().asFile
             val metadataFile = outputDir.resolve("output-metadata.json")
             if (!metadataFile.isFile) {
                 logger.lifecycle("未找到 $variantName APK 元数据，跳过导出")
@@ -28,10 +34,12 @@ fun registerApkExport(variantName: String) {
                     ?.mapNotNull { (it as? Map<*, *>)?.get("value") as? String }
                     ?.firstOrNull()
                     ?: "universal"
+                if (arm64Only && architecture != "arm64-v8a") return@forEach
                 val source = outputDir.resolve(sourceName)
                 if (source.isFile) {
+                    val suffix = artifactSuffix.takeIf { it.isNotBlank() }?.let { "-$it" } ?: ""
                     source.copyTo(
-                        exportDir.resolve("SubtitleEdit-release-$versionName-$architecture.apk"),
+                        exportDir.resolve("SubtitleEdit-release-$versionName-$architecture$suffix.apk"),
                         overwrite = true
                     )
                 }
@@ -46,8 +54,10 @@ fun registerApkExport(variantName: String) {
     }
 }
 
-registerApkExport("debug")
-registerApkExport("release")
+registerApkExport("standardDebug", "standard/debug")
+registerApkExport("qnnDebug", "qnn/debug", artifactSuffix = "qnn", arm64Only = true)
+registerApkExport("standardRelease", "standard/release")
+registerApkExport("qnnRelease", "qnn/release", artifactSuffix = "qnn", arm64Only = true)
 
 val archiveLicenseAssetsDir = layout.buildDirectory.dir("generated/archiveLicenseAssets")
 val generateArchiveLicenseAssets by tasks.registering(Sync::class) {
@@ -123,8 +133,9 @@ android {
 
     packaging {
         jniLibs {
-            // Qualcomm DSP loads HTP skel libraries from applicationInfo.nativeLibraryDir.
-            useLegacyPackaging = true
+            // Keep native libraries uncompressed in the APK to minimize installed size.
+            // QNN HTP Skel libraries are extracted to codeCacheDir only while NPU is active.
+            useLegacyPackaging = false
             keepDebugSymbols += setOf("**/libQnn*.so")
             // sherpa-onnx and the standalone demixing runtime both provide ORT/libc++.
             // Keep a single copy in the APK; the demixing code remains isolated at API level.
@@ -132,10 +143,32 @@ android {
         }
     }
 
+    flavorDimensions += "qnnRuntime"
+    productFlavors {
+        create("standard") {
+            dimension = "qnnRuntime"
+        }
+        create("qnn") {
+            dimension = "qnnRuntime"
+        }
+    }
+
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
+        }
+    }
+}
+
+androidComponents {
+    onVariants(selector().withFlavor("qnnRuntime", "qnn")) { variant ->
+        variant.outputs.forEach { output ->
+            val isArm64 = output.filters.any { filter ->
+                filter.filterType == FilterConfiguration.FilterType.ABI &&
+                    filter.identifier == "arm64-v8a"
+            }
+            output.enabled.set(isArm64)
         }
     }
 }
