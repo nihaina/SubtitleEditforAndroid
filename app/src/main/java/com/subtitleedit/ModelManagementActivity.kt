@@ -25,6 +25,7 @@ import com.google.android.material.card.MaterialCardView
 import com.subtitleedit.databinding.ActivityModelManagementBinding
 import com.subtitleedit.util.ModelDownloader
 import com.subtitleedit.util.OverwritingToast
+import com.subtitleedit.util.SenseVoiceNpuModelImporter
 import com.subtitleedit.util.SettingsManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -63,7 +64,8 @@ class ModelManagementActivity : AppCompatActivity() {
         supportActionBar?.title = "模型管理"
         binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
         binding.tvModelsDirectory.text =
-            "下载模型目录：${ModelDownloader.modelsDirectory().absolutePath}"
+            "下载模型目录：${ModelDownloader.modelsDirectory().absolutePath}\n" +
+                "NPU BIN 模型保存在应用内部目录"
 
         if (hasStorageAccess()) loadModels() else requestStorageAccess()
     }
@@ -124,60 +126,71 @@ class ModelManagementActivity : AppCompatActivity() {
     private fun scanModels(): List<ModelItem> {
         val items = mutableListOf<ModelItem>()
         val root = ModelDownloader.modelsDirectory()
-        if (!root.isDirectory) return emptyList()
-        root.listFiles().orEmpty()
-            .filterNot { it.name.startsWith(".") || it.name.contains(".part.") || it.name.endsWith(".backup") }
-            .forEach { file ->
-                when {
-                    file.isDirectory && file.name.startsWith("sherpa-onnx-sense-voice-") -> {
-                        items += ModelItem("SenseVoice 模型", "SenseVoice", file, calculateSize(file))
-                    }
-                    file.isDirectory && file.name.startsWith("sherpa-onnx-qnn-") &&
-                        file.name.contains("sense-voice") -> {
-                        val option = ModelDownloader.SENSEVOICE_NPU_MODELS
-                            .firstOrNull { it.directoryName == file.name }
-                        items += ModelItem(
-                            "SenseVoice 模型",
-                            "SenseVoice NPU ${option?.displayName ?: file.name}",
-                            file,
-                            calculateSize(file)
-                        )
-                    }
-                    file.isDirectory && file.name.startsWith("sherpa-onnx-whisper-") -> {
-                        val variant = file.name.removePrefix("sherpa-onnx-whisper-")
-                        items += ModelItem(
-                            "Whisper 模型",
-                            "Whisper ${formatVariantName(variant)}",
-                            file,
-                            calculateSize(file)
-                        )
-                    }
-                    file.isDirectory && file.name == ModelDownloader.PARAKEET_TDT_MODEL.directoryName -> {
-                        items += ModelItem(
-                            "Parakeet 模型",
-                            ModelDownloader.PARAKEET_TDT_MODEL.displayName,
-                            file,
-                            calculateSize(file)
-                        )
-                    }
-                    file.isDirectory && file.name == ModelDownloader.PARAKEET_CTC_JA_MODEL.directoryName -> {
-                        items += ModelItem(
-                            "Parakeet 模型",
-                            ModelDownloader.PARAKEET_CTC_JA_MODEL.displayName,
-                            file,
-                            calculateSize(file)
-                        )
-                    }
-                    file.isDirectory && file.name == ModelDownloader.SEPARATION_DIRECTORY_NAME -> {
-                        file.listFiles().orEmpty().filterNot { it.name.startsWith(".") }.forEach { model ->
-                            items += ModelItem("人声分离模型", model.name, model, calculateSize(model))
+        if (root.isDirectory) {
+            root.listFiles().orEmpty()
+                .filterNot { it.name.startsWith(".") || it.name.contains(".part.") || it.name.endsWith(".backup") }
+                .forEach { file ->
+                    when {
+                        file.isDirectory && file.name.startsWith("sherpa-onnx-sense-voice-") -> {
+                            items += ModelItem("SenseVoice 模型", "SenseVoice", file, calculateSize(file))
+                        }
+                        file.isDirectory && file.name.startsWith("sherpa-onnx-qnn-") &&
+                            file.name.contains("sense-voice") -> {
+                            val option = ModelDownloader.SENSEVOICE_NPU_MODELS
+                                .firstOrNull { it.directoryName == file.name }
+                            items += ModelItem(
+                                "SenseVoice 模型",
+                                "SenseVoice NPU ${option?.displayName ?: file.name}",
+                                file,
+                                calculateSize(file)
+                            )
+                        }
+                        file.isDirectory && file.name.startsWith("sherpa-onnx-whisper-") -> {
+                            val variant = file.name.removePrefix("sherpa-onnx-whisper-")
+                            items += ModelItem(
+                                "Whisper 模型",
+                                "Whisper ${formatVariantName(variant)}",
+                                file,
+                                calculateSize(file)
+                            )
+                        }
+                        file.isDirectory && file.name == ModelDownloader.PARAKEET_TDT_MODEL.directoryName -> {
+                            items += ModelItem(
+                                "Parakeet 模型",
+                                ModelDownloader.PARAKEET_TDT_MODEL.displayName,
+                                file,
+                                calculateSize(file)
+                            )
+                        }
+                        file.isDirectory && file.name == ModelDownloader.PARAKEET_CTC_JA_MODEL.directoryName -> {
+                            items += ModelItem(
+                                "Parakeet 模型",
+                                ModelDownloader.PARAKEET_CTC_JA_MODEL.displayName,
+                                file,
+                                calculateSize(file)
+                            )
+                        }
+                        file.isDirectory && file.name == ModelDownloader.SEPARATION_DIRECTORY_NAME -> {
+                            file.listFiles().orEmpty().filterNot { it.name.startsWith(".") }.forEach { model ->
+                                items += ModelItem("人声分离模型", model.name, model, calculateSize(model))
+                            }
+                        }
+                        else -> {
+                            items += ModelItem("其他模型文件", file.name, file, calculateSize(file))
                         }
                     }
-                    else -> {
-                        items += ModelItem("其他模型文件", file.name, file, calculateSize(file))
-                    }
                 }
-            }
+        }
+        val npuImporter = SenseVoiceNpuModelImporter(this, contentResolver)
+        listOf(5, 10).mapNotNull(npuImporter::findInstalledModel).forEach { model ->
+            val directory = requireNotNull(model.contextBinary.parentFile)
+            items += ModelItem(
+                "SenseVoice 模型",
+                "SenseVoice NPU ${model.durationSeconds} 秒 BIN",
+                directory,
+                calculateSize(directory)
+            )
+        }
         val categoryOrder = mapOf(
             "SenseVoice 模型" to 0,
             "Whisper 模型" to 1,

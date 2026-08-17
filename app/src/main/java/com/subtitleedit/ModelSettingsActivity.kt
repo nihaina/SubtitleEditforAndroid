@@ -23,10 +23,14 @@ import com.subtitleedit.databinding.ActivityModelSettingsBinding
 import com.subtitleedit.util.ModelDownloadProgressDialog
 import com.subtitleedit.util.ModelDownloader
 import com.subtitleedit.util.OverwritingToast
+import com.subtitleedit.util.SenseVoiceNpuModelImporter
+import com.subtitleedit.util.SenseVoiceNpuModelPathPolicy
 import com.subtitleedit.util.SettingsManager
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 
@@ -220,7 +224,8 @@ class ModelSettingsActivity : AppCompatActivity() {
         val isNpu = option.architecture == ModelDownloader.SenseVoiceArchitecture.QNN
         val location = "/Download/SubtitleEdit/models/${option.directoryName}"
         val compatibility = if (isNpu) {
-            "\n\n适用于支持 Qualcomm HTP 的 arm64 骁龙设备。"
+            "\n\n下载完成后会立即生成内部 model.bin，并清理已导入的 libmodel.so。" +
+                "\n适用于支持 Qualcomm HTP 的 arm64 骁龙设备。"
         } else {
             ""
         }
@@ -301,27 +306,98 @@ class ModelSettingsActivity : AppCompatActivity() {
 
         modelDownloadJob = lifecycleScope.launch {
             try {
-                val files = ModelDownloader.downloadSenseVoice(option) { progress ->
-                    runOnUiThread { modelDownloadDialog?.update(progress) }
+                val isNpu = option.architecture == ModelDownloader.SenseVoiceArchitecture.QNN
+                val importer = SenseVoiceNpuModelImporter(
+                    this@ModelSettingsActivity,
+                    contentResolver
+                )
+                val previousNpuModelPath = if (isNpu) {
+                    settingsManager.getSenseVoiceModelPath(SettingsManager.SENSEVOICE_PROVIDER_NPU)
+                } else {
+                    ""
                 }
+                val previousNpuTokensPath = if (isNpu) {
+                    settingsManager.getSenseVoiceTokensPath(SettingsManager.SENSEVOICE_PROVIDER_NPU)
+                } else {
+                    ""
+                }
+                var downloadedFiles: ModelDownloader.SenseVoiceFiles? = null
+                var reusedGeneratedModel = false
+                val selectedFiles = if (isNpu) {
+                    val durationSeconds = option.durationSeconds
+                        ?: throw IllegalStateException("SenseVoice NPU 模型缺少时长信息")
+                    modelDownloadDialog?.update(
+                        ModelDownloader.Progress("正在检查已生成的 SenseVoice NPU BIN 模型")
+                    )
+                    val installed = withContext(Dispatchers.IO) {
+                        importer.findInstalledModel(durationSeconds)
+                    }
+                    if (installed != null) {
+                        reusedGeneratedModel = true
+                        installed.contextBinary to installed.tokens
+                    } else {
+                        val files = ModelDownloader.downloadSenseVoice(option) { progress ->
+                            runOnUiThread { modelDownloadDialog?.update(progress) }
+                        }
+                        downloadedFiles = files
+                        val imported = withContext(Dispatchers.IO) {
+                            importer.importFromFiles(
+                                modelFile = files.model,
+                                tokensFile = files.tokens,
+                                durationSeconds = durationSeconds
+                            ) { message ->
+                                runOnUiThread {
+                                    modelDownloadDialog?.update(ModelDownloader.Progress(message))
+                                }
+                            }
+                        }
+                        imported.contextBinary to imported.tokens
+                    }
+                } else {
+                    val files = ModelDownloader.downloadSenseVoice(option) { progress ->
+                        runOnUiThread { modelDownloadDialog?.update(progress) }
+                    }
+                    downloadedFiles = files
+                    files.model to files.tokens
+                }
+                val selectedModel = Uri.fromFile(selectedFiles.first).toString()
+                val selectedTokens = Uri.fromFile(selectedFiles.second).toString()
                 modelType = SettingsManager.ASR_MODEL_SENSEVOICE
                 settingsManager.setAsrModelType(modelType)
                 settingsManager.setSenseVoiceProvider(
-                    if (option.architecture == ModelDownloader.SenseVoiceArchitecture.QNN) {
+                    if (isNpu) {
                         SettingsManager.SENSEVOICE_PROVIDER_NPU
                     } else {
                         SettingsManager.SENSEVOICE_PROVIDER_CPU
                     }
                 )
                 option.durationSeconds?.let(settingsManager::setSenseVoiceNpuDurationSeconds)
-                settingsManager.setSenseVoiceModelPath(Uri.fromFile(files.model).toString())
-                settingsManager.setSenseVoiceTokensPath(Uri.fromFile(files.tokens).toString())
+                settingsManager.setSenseVoiceModelPath(selectedModel)
+                settingsManager.setSenseVoiceTokensPath(selectedTokens)
+                if (isNpu) {
+                    withContext(Dispatchers.IO) {
+                        importer.deleteManagedContextBinary(
+                            previousNpuModelPath,
+                            except = selectedFiles.first
+                        )
+                        downloadedFiles?.model?.delete()
+                    }
+                    releasePersistedReadPermission(previousNpuModelPath)
+                    releasePersistedReadPermission(previousNpuTokensPath)
+                }
                 loadModelPaths()
                 updateAsrModelUi()
                 progressDialog.dismiss()
                 OverwritingToast.makeText(
                     this@ModelSettingsActivity,
-                    "SenseVoice ${option.displayName} 模型已下载、解压并自动选择\n${files.model.parentFile?.absolutePath}",
+                    if (reusedGeneratedModel) {
+                        "检测到已生成的 SenseVoice ${option.displayName} BIN 模型，已直接导入"
+                    } else if (isNpu) {
+                        "SenseVoice ${option.displayName} 已生成 BIN 模型并自动选择"
+                    } else {
+                        "SenseVoice ${option.displayName} 模型已下载、解压并自动选择\n" +
+                            "${downloadedFiles?.model?.parentFile?.absolutePath}"
+                    },
                     Toast.LENGTH_LONG
                 ).show()
             } catch (e: CancellationException) {
@@ -331,7 +407,7 @@ class ModelSettingsActivity : AppCompatActivity() {
                 progressDialog.dismiss()
                 OverwritingToast.makeText(
                     this@ModelSettingsActivity,
-                    "SenseVoice ${option.displayName} 模型下载失败：${e.message}",
+                    "SenseVoice ${option.displayName} 模型下载或导入失败：${e.message}",
                     Toast.LENGTH_LONG
                 ).show()
             } finally {
@@ -472,6 +548,8 @@ class ModelSettingsActivity : AppCompatActivity() {
         binding.btnDownloadAsrModel.isEnabled = enabled
         binding.btnResetAsrModel.isEnabled = enabled
         binding.btnSwitchAsrModel.isEnabled = enabled
+        binding.btnSelectEncoder.isEnabled = enabled
+        binding.btnSelectTokens.isEnabled = enabled
     }
 
     private fun runWithModelStorageAccess(action: () -> Unit) {
@@ -657,17 +735,29 @@ class ModelSettingsActivity : AppCompatActivity() {
 
         binding.sliderMaxSpeech.value = maxSpeech
         binding.etMaxSpeech.setText(String.format(Locale.US, "%.1f", maxSpeech))
+
+        migrateLegacySenseVoiceNpuSelectionIfNeeded()
+    }
+
+    private fun migrateLegacySenseVoiceNpuSelectionIfNeeded() {
+        if (!isSenseVoiceNpu() || encoderPath.isBlank()) return
+        if (SenseVoiceNpuModelPathPolicy.isContextBinarySelection(encoderPath)) return
+        startSenseVoiceNpuImport(
+            Uri.parse(encoderPath),
+            settingsManager.getSenseVoiceNpuDurationSeconds()
+        )
     }
 
     private fun handleSelectedEncoder(uri: Uri) {
         try {
-            contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-
             val fileName = getFileNameFromUri(uri)
             val senseVoiceNpu = isSenseVoiceNpu()
+            if (!senseVoiceNpu) {
+                contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
             val isValid = when {
                 senseVoiceNpu -> fileName.equals("libmodel.so", ignoreCase = true)
                 modelType == SettingsManager.ASR_MODEL_SENSEVOICE ||
@@ -693,9 +783,9 @@ class ModelSettingsActivity : AppCompatActivity() {
             if (senseVoiceNpu) {
                 val detectedDuration = detectSenseVoiceNpuDuration(uri, fileName)
                 if (detectedDuration != null) {
-                    saveSelectedEncoder(uri, fileName, detectedDuration)
+                    startSenseVoiceNpuImport(uri, detectedDuration)
                 } else {
-                    showSenseVoiceNpuDurationPicker(uri, fileName)
+                    showSenseVoiceNpuDurationPicker(uri)
                 }
             } else {
                 saveSelectedEncoder(uri, fileName)
@@ -706,7 +796,7 @@ class ModelSettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun saveSelectedEncoder(uri: Uri, fileName: String, npuDurationSeconds: Int? = null) {
+    private fun saveSelectedEncoder(uri: Uri, fileName: String) {
         encoderPath = uri.toString()
         when (modelType) {
             SettingsManager.ASR_MODEL_SENSEVOICE -> settingsManager.setSenseVoiceModelPath(encoderPath)
@@ -714,12 +804,7 @@ class ModelSettingsActivity : AppCompatActivity() {
             SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> settingsManager.setParakeetCtcModelPath(encoderPath)
             else -> settingsManager.setWhisperEncoderPath(encoderPath)
         }
-        npuDurationSeconds?.let(settingsManager::setSenseVoiceNpuDurationSeconds)
-        binding.tvEncoderFile.text = if (npuDurationSeconds != null) {
-            "$fileName（$npuDurationSeconds 秒）"
-        } else {
-            fileName
-        }
+        binding.tvEncoderFile.text = fileName
         updateAsrModelUi()
     }
 
@@ -734,16 +819,119 @@ class ModelSettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun showSenseVoiceNpuDurationPicker(uri: Uri, fileName: String) {
+    private fun showSenseVoiceNpuDurationPicker(uri: Uri) {
         val durations = intArrayOf(5, 10)
         val labels = durations.map { "$it 秒模型" }.toTypedArray()
         AlertDialog.Builder(this)
             .setTitle("选择 SenseVoice NPU 模型时长")
             .setItems(labels) { _, which ->
-                saveSelectedEncoder(uri, fileName, durations[which])
+                startSenseVoiceNpuImport(uri, durations[which])
             }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    private fun startSenseVoiceNpuImport(modelUri: Uri, durationSeconds: Int) {
+        if (modelDownloadJob?.isActive == true) return
+        if ("arm64-v8a" !in Build.SUPPORTED_ABIS) {
+            OverwritingToast.makeText(
+                this,
+                "SenseVoice NPU 模型仅支持 arm64-v8a 骁龙设备",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        val selectedTokensPath = settingsManager.getSenseVoiceTokensPath(
+            SettingsManager.SENSEVOICE_PROVIDER_NPU
+        )
+        if (selectedTokensPath.isBlank() || !canReadSavedUri(selectedTokensPath)) {
+            OverwritingToast.makeText(
+                this,
+                "请先选择 SenseVoice NPU 模型对应的 tokens.txt，再导入 libmodel.so",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        val progressDialog = ModelDownloadProgressDialog(
+            this,
+            "导入 SenseVoice NPU 模型"
+        ) { modelDownloadJob?.cancel() }
+        modelDownloadDialog = progressDialog
+        progressDialog.show()
+        setAsrModelActionsEnabled(false)
+
+        modelDownloadJob = lifecycleScope.launch {
+            val importer = SenseVoiceNpuModelImporter(
+                this@ModelSettingsActivity,
+                contentResolver
+            )
+            val previousModelPath = settingsManager.getSenseVoiceModelPath(
+                SettingsManager.SENSEVOICE_PROVIDER_NPU
+            )
+            try {
+                val imported = withContext(Dispatchers.IO) {
+                    importer.importFromUris(
+                        modelUri = modelUri,
+                        tokensUri = Uri.parse(selectedTokensPath),
+                        durationSeconds = durationSeconds
+                    ) { message ->
+                        runOnUiThread {
+                            modelDownloadDialog?.update(ModelDownloader.Progress(message))
+                        }
+                    }
+                }
+                val importedUri = Uri.fromFile(imported.contextBinary).toString()
+                modelType = SettingsManager.ASR_MODEL_SENSEVOICE
+                settingsManager.setAsrModelType(modelType)
+                settingsManager.setSenseVoiceProvider(SettingsManager.SENSEVOICE_PROVIDER_NPU)
+                settingsManager.setSenseVoiceNpuDurationSeconds(durationSeconds)
+                settingsManager.setSenseVoiceModelPath(importedUri)
+                settingsManager.setSenseVoiceTokensPath(Uri.fromFile(imported.tokens).toString())
+                withContext(Dispatchers.IO) {
+                    importer.deleteManagedContextBinary(
+                        previousModelPath,
+                        except = imported.contextBinary
+                    )
+                    deleteManagedDownloadedNpuSource(modelUri)
+                }
+                releasePersistedReadPermission(previousModelPath)
+                releasePersistedReadPermission(modelUri.toString())
+                releasePersistedReadPermission(selectedTokensPath)
+                loadModelPaths()
+                updateAsrModelUi()
+                progressDialog.dismiss()
+                OverwritingToast.makeText(
+                    this@ModelSettingsActivity,
+                    "SenseVoice NPU BIN 模型已生成并自动选择",
+                    Toast.LENGTH_LONG
+                ).show()
+            } catch (e: CancellationException) {
+                progressDialog.dismiss()
+                throw e
+            } catch (e: Exception) {
+                progressDialog.dismiss()
+                OverwritingToast.makeText(
+                    this@ModelSettingsActivity,
+                    "SenseVoice NPU 模型导入失败：${e.message}",
+                    Toast.LENGTH_LONG
+                ).show()
+            } finally {
+                setAsrModelActionsEnabled(true)
+                if (modelDownloadDialog === progressDialog) modelDownloadDialog = null
+                modelDownloadJob = null
+            }
+        }
+    }
+
+    private fun deleteManagedDownloadedNpuSource(modelUri: Uri) {
+        if (modelUri.scheme != "file") return
+        val source = modelUri.path?.let(::File) ?: return
+        if (!source.name.equals("libmodel.so", ignoreCase = true)) return
+        val modelsRoot = runCatching { ModelDownloader.modelsDirectory().canonicalFile }.getOrNull()
+            ?: return
+        val candidate = runCatching { source.canonicalFile }.getOrNull() ?: return
+        if (SenseVoiceNpuModelPathPolicy.isInside(modelsRoot, candidate)) candidate.delete()
     }
 
     private fun handleSelectedDecoder(uri: Uri) {
@@ -916,9 +1104,9 @@ class ModelSettingsActivity : AppCompatActivity() {
                     """
                         SenseVoice NPU 模型下载指引：
 
-                        1. 点击蓝色下载按钮选择 5 秒或 10 秒模型，应用会自动下载、解压并选择模型。5秒的模型一次最长只能识别5秒钟,也就是说单句话超过时间会被强制分段,请根据需要自行选择合适的模型。
+                        1. 点击蓝色下载按钮选择 5 秒或 10 秒模型，应用会自动下载、解压、生成 model.bin 并选择。5秒的模型一次最长只能识别5秒钟,也就是说单句话超过时间会被强制分段,请根据需要自行选择合适的模型。
 
-                        2. 也可以手动选择 libmodel.so 和 tokens.txt；无法从目录名识别时长时，需要选择 5 秒或 10 秒。
+                        2. 手动导入时请先选择 tokens.txt，再选择 libmodel.so；应用会立即生成并索引 model.bin，不会保留对 libmodel.so 的授权。
 
                         3. NPU 模型使用 Qualcomm QNN HTP，仅支持兼容的 arm64 骁龙设备,首次使用需要一段时间进行初始化。
 
@@ -1140,6 +1328,22 @@ class ModelSettingsActivity : AppCompatActivity() {
             contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
         }
     }.getOrDefault(false)
+
+    private fun releasePersistedReadPermission(uriString: String) {
+        if (uriString.isBlank()) return
+        val uri = Uri.parse(uriString)
+        if (uri.scheme != "content") return
+        val hasPersistedReadPermission = contentResolver.persistedUriPermissions.any {
+            it.uri == uri && it.isReadPermission
+        }
+        if (!hasPersistedReadPermission) return
+        runCatching {
+            contentResolver.releasePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        }
+    }
 
     private fun showAccessExpiredMessage() {
         if (accessWarningShown) return

@@ -106,7 +106,10 @@ class WhisperRecognizer(
             if (isSenseVoiceNpu() && "arm64-v8a" !in Build.SUPPORTED_ABIS) {
                 return Result.failure(Exception("SenseVoice NPU 仅支持 arm64-v8a 骁龙设备"))
             }
+            val useNpuContextBinary = isSenseVoiceNpu() &&
+                isSenseVoiceNpuContextBinary(encoderPath)
             val primaryFileName = when {
+                useNpuContextBinary -> "model.bin"
                 isSenseVoiceNpu() -> "libmodel.so"
                 isSenseVoice() -> "sensevoice.onnx"
                 isParakeetCtc() -> "model.int8.onnx"
@@ -116,10 +119,13 @@ class WhisperRecognizer(
                 encoderPath,
                 primaryFileName
             )
-            val npuRuntimeFiles = if (isSenseVoiceNpu() && resolvedEncoderFile != null) {
-                prepareSenseVoiceNpuRuntimeFiles(resolvedEncoderFile, encoderPath)
-            } else {
-                null
+            val npuRuntimeFiles = when {
+                !isSenseVoiceNpu() || resolvedEncoderFile == null -> null
+                useNpuContextBinary -> SenseVoiceNpuRuntimeFiles(
+                    modelPath = "",
+                    contextBinaryPath = resolvedEncoderFile
+                )
+                else -> prepareSenseVoiceNpuRuntimeFiles(resolvedEncoderFile, encoderPath)
             }
             val encoderFile = npuRuntimeFiles?.modelPath ?: resolvedEncoderFile
             val decoderFile = if (requiresDecoder()) {
@@ -147,7 +153,9 @@ class WhisperRecognizer(
                 return Result.failure(Exception("无法读取 tokens 文件"))
             }
             Log.d(TAG, "模型文件准备完成:")
-            if (npuRuntimeFiles != null && encoderFile != resolvedEncoderFile) {
+            if (useNpuContextBinary) {
+                Log.d(TAG, "  QNN context binary: ${npuRuntimeFiles?.contextBinaryPath}")
+            } else if (npuRuntimeFiles != null && encoderFile != resolvedEncoderFile) {
                 Log.d(TAG, "  model source: $resolvedEncoderFile")
                 Log.d(TAG, "  model runtime: $encoderFile")
             } else {
@@ -1104,6 +1112,10 @@ class WhisperRecognizer(
     private fun isSenseVoiceNpu(): Boolean =
         isSenseVoice() &&
             settingsManager().getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU
+
+    private fun isSenseVoiceNpuContextBinary(path: String): Boolean {
+        return SenseVoiceNpuModelPathPolicy.isContextBinarySelection(path)
+    }
 
     private fun fixedSegmentDurationSeconds(): Int = if (isSenseVoiceNpu()) {
         settingsManager().getSenseVoiceNpuDurationSeconds()
