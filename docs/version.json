@@ -1,7 +1,7 @@
 {
-  "versionCode": 4,
-  "versionName": "1.1.4",
+  "versionCode": 5,
+  "versionName": "1.1.5",
   "downloadUrl": "https://github.com/nihaina/SubtitleEditforAndroid/releases/latest",
-  "releaseNotes": "添加二次vad处理，可以更精准的进行自动打轴，使用时推荐使用方案一并开启语音段合并\n增大vad参数调整范围\n文件搜索可以跨子目录搜索\n可以添加常用目录\n添加视频播放支持",
+  "releaseNotes": "添加新的语音转字幕方法，不使用vad打轴，极大提高识别准确度\n字幕内容搜索添加全词匹配和大小写区分\n适配SenseVoice的qnn模型，支持NPU加速（仅骁龙888以上处理器）\n文件缓存改用MD5匹配，建议更新后清理软件缓存\n波形图改用分块加载，显著提高加载速度\n修改视频编辑时的页面布局\n修复在编辑过程中新建字幕和打开字幕无法识别音视频\n修复解压缩文件时进度条的进度显示\n修复移动文件时速度过慢\nqnn的库占用较大，软件大概膨胀到270mb左右，后续会进行优化",
   "forceUpdate": false
 }
