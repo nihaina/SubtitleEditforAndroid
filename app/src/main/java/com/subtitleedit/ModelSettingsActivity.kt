@@ -48,7 +48,7 @@ class ModelSettingsActivity : AppCompatActivity() {
     private var joinerPath: String = ""
     private var tokensPath: String = ""
     private var vadModelPath: String = ""
-    private var modelType: String = SettingsManager.ASR_MODEL_WHISPER
+    private var modelType: String = SettingsManager.ASR_MODEL_SENSEVOICE
     private var updatingVadThreshold = false
     private var accessWarningShown = false
     private var modelDownloadJob: Job? = null
@@ -1197,20 +1197,20 @@ class ModelSettingsActivity : AppCompatActivity() {
 
     private fun showAsrModelPicker() {
         val types = arrayOf(
-            SettingsManager.ASR_MODEL_WHISPER,
             SettingsManager.ASR_MODEL_SENSEVOICE,
-            SettingsManager.ASR_MODEL_PARAKEET_TDT
+            SettingsManager.ASR_MODEL_PARAKEET_TDT,
+            SettingsManager.ASR_MODEL_WHISPER
         )
         val labels = arrayOf(
-            "Whisper",
             "SenseVoice",
-            "Parakeet"
+            "Parakeet",
+            "Whisper"
         )
         val checked = when (modelType) {
-            SettingsManager.ASR_MODEL_SENSEVOICE -> 1
+            SettingsManager.ASR_MODEL_SENSEVOICE -> 0
             SettingsManager.ASR_MODEL_PARAKEET_TDT,
-            SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> 2
-            else -> 0
+            SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> 1
+            else -> 2
         }
         AlertDialog.Builder(this)
             .setTitle("选择识别模型")

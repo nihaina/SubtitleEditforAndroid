@@ -343,9 +343,9 @@ class SettingsManager private constructor(context: Context) {
             .apply()
     }
 
-    fun getAsrModelType(): String = prefs.getString(KEY_ASR_MODEL_TYPE, ASR_MODEL_WHISPER)
+    fun getAsrModelType(): String = prefs.getString(KEY_ASR_MODEL_TYPE, ASR_MODEL_SENSEVOICE)
         ?.takeIf { it in ASR_MODEL_TYPES }
-        ?: ASR_MODEL_WHISPER
+        ?: ASR_MODEL_SENSEVOICE
 
     fun setAsrModelType(type: String) {
         prefs.edit().putString(KEY_ASR_MODEL_TYPE, type).apply()
