@@ -467,11 +467,7 @@ class EditorActivity : AppCompatActivity() {
             onSelectedIndexChanged = { index ->
                 if (index in subtitleEntries.indices) {
                     (binding.rvSubtitles.layoutManager as? LinearLayoutManager)?.let { manager ->
-                        val firstVisible = manager.findFirstVisibleItemPosition()
-                        val lastVisible = manager.findLastVisibleItemPosition()
-                        if (index !in firstVisible..lastVisible) {
-                            manager.scrollToPositionWithOffset(index, 0)
-                        }
+                        manager.scrollToPositionWithOffset(index, 0)
                     }
                 }
             },
