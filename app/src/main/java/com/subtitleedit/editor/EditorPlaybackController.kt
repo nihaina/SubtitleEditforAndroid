@@ -144,7 +144,6 @@ internal class EditorPlaybackController(
             return
         }
         currentPositionMs = clampedTime
-        highlightSubtitleAtTime(currentPositionMs)
         updatePlayerUiAtKnownPosition(clampedTime)
         if (isPlaying) startProgressUpdate()
     }
@@ -191,7 +190,6 @@ internal class EditorPlaybackController(
             }
         }
         renderProgress(currentPositionMs)
-        highlightSubtitleAtTime(currentPositionMs)
 
         val rangeTarget = limitedPlaybackEntry
         if (isLimitedRangePlaybackActive && rangeTarget != null) {
@@ -281,13 +279,7 @@ internal class EditorPlaybackController(
                 if (!fromUser) return
                 val targetTime = durationMs * progress / 1000L
                 currentPositionMs = targetTime
-                if (mediaType == EditorMediaType.AUDIO) {
-                    binding.tvCurrentTime.text = TimeUtils.formatForDisplay(targetTime)
-                } else if (mediaType == EditorMediaType.VIDEO) {
-                    renderVideoTime(targetTime)
-                }
-                val wavePosition = if (durationMs > 0L) targetTime.toFloat() / durationMs else 0f
-                binding.waveformTimelineView.setCurrentPosition(wavePosition)
+                renderProgress(targetTime)
             }
 
             override fun onStartTrackingTouch(seekBar: SeekBar?) {
@@ -348,7 +340,6 @@ internal class EditorPlaybackController(
     private fun updatePlayerUiAtKnownPosition(positionMs: Long) {
         val clampedPositionMs = positionMs.coerceIn(0L, durationMs)
         currentPositionMs = clampedPositionMs
-        highlightSubtitleAtTime(clampedPositionMs)
         val previousUserSeeking = isUserSeeking
         isUserSeeking = true
         updatePlayerUi()
@@ -389,6 +380,7 @@ internal class EditorPlaybackController(
         }
         val wavePosition = if (durationMs > 0L) positionMs.toFloat() / durationMs else 0f
         binding.waveformTimelineView.setCurrentPosition(wavePosition)
+        highlightSubtitleAtTime(positionMs)
     }
 
     private fun renderPlayPauseIcon() {
