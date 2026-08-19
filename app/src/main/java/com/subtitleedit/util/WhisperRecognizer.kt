@@ -699,7 +699,7 @@ class WhisperRecognizer(
 
             val sortedSegments = allSegments.sortedBy { it.startTime }
             val finalSegments = if (shouldUseTokenTimestampExperiment()) {
-                TokenTimestampSegmenter.mergeShortGaps(
+                val tokenSegments = TokenTimestampSegmenter.mergeShortGaps(
                     segments = sortedSegments.map {
                         TokenTimestampSegmenter.Segment(
                             startTimeMs = it.startTime,
@@ -709,7 +709,23 @@ class WhisperRecognizer(
                         )
                     },
                     splitGapMs = tokenTimestampGapMs
-                ).map {
+                )
+                val settings = settingsManager()
+                val mergedSegments = if (settings.isSpeechTokenTimestampMergeEnabled()) {
+                    TokenTimestampSegmenter.mergeSegments(
+                        segments = tokenSegments,
+                        maxGapMs = settings.getSpeechTokenTimestampMergeGapMs()
+                    ).also {
+                        Log.d(
+                            TAG,
+                            "实验打轴合并语音段：${tokenSegments.size} -> ${it.size}，" +
+                                "最大间隔 ${settings.getSpeechTokenTimestampMergeGapMs()}ms"
+                        )
+                    }
+                } else {
+                    tokenSegments
+                }
+                mergedSegments.map {
                     SubtitleSegment(
                         startTime = it.startTimeMs,
                         endTime = it.endTimeMs,

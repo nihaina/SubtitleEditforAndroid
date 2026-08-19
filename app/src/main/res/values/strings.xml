@@ -288,6 +288,11 @@
     <string name="activity_speech_to_subtitle_settings_text_47">当前 ASR 模型为 Whisper 或模型文件配置不完整，请先在模型设置中选择并配置非 Whisper 模型</string>
     <string name="activity_speech_to_subtitle_settings_text_48">不保留实验打轴切分文本</string>
     <string name="activity_speech_to_subtitle_settings_text_49">开启后丢弃实验打轴模型切分出的文本，改用当前 ASR 模型按时间范围重新识别</string>
+    <string name="activity_speech_to_subtitle_settings_text_50">合并语音段</string>
+    <string name="activity_speech_to_subtitle_settings_text_51">开启后，在实验打轴按切分时间生成的最终时间轴中，合并间隔不超过指定时间的相邻字幕段，并按顺序拼接字幕内容</string>
+    <string name="activity_speech_to_subtitle_settings_text_52">最大合并间隔</string>
+    <string name="activity_speech_to_subtitle_settings_text_53">设为 0 时仅合并重叠或首尾相接的字幕段</string>
+    <string name="activity_speech_to_subtitle_settings_text_54" translatable="false">200</string>
     <string name="activity_speech_to_subtitle_text_01">选择音频/视频文件（可多选）</string>
     <string name="activity_speech_to_subtitle_text_02">支持 MP3, WAV, FLAC, MP4, MKV 等格式</string>
     <string name="activity_speech_to_subtitle_text_03">源语言</string>

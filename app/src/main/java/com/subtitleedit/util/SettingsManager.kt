@@ -80,6 +80,10 @@ class SettingsManager private constructor(context: Context) {
             "stt_token_timestamp_discard_text_enabled"
         private const val KEY_STT_TOKEN_TIMESTAMP_GAP_MS =
             "stt_token_timestamp_gap_ms"
+        private const val KEY_STT_TOKEN_TIMESTAMP_MERGE_ENABLED =
+            "stt_token_timestamp_merge_enabled"
+        private const val KEY_STT_TOKEN_TIMESTAMP_MERGE_GAP_MS =
+            "stt_token_timestamp_merge_gap_ms"
         private const val KEY_QUICK_TRANSCRIBE_SOURCE_LANGUAGE = "quick_transcribe_source_language"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_TTS_ENGINE = "tts_engine"
@@ -746,6 +750,22 @@ class SettingsManager private constructor(context: Context) {
 
     fun setSpeechTokenTimestampGapMs(gapMs: Int) {
         prefs.edit().putInt(KEY_STT_TOKEN_TIMESTAMP_GAP_MS, gapMs.coerceIn(100, 2000)).apply()
+    }
+
+    fun isSpeechTokenTimestampMergeEnabled(): Boolean {
+        return prefs.getBoolean(KEY_STT_TOKEN_TIMESTAMP_MERGE_ENABLED, false)
+    }
+
+    fun setSpeechTokenTimestampMergeEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_STT_TOKEN_TIMESTAMP_MERGE_ENABLED, enabled).apply()
+    }
+
+    fun getSpeechTokenTimestampMergeGapMs(): Int {
+        return prefs.getInt(KEY_STT_TOKEN_TIMESTAMP_MERGE_GAP_MS, 200).coerceIn(0, 5000)
+    }
+
+    fun setSpeechTokenTimestampMergeGapMs(gapMs: Int) {
+        prefs.edit().putInt(KEY_STT_TOKEN_TIMESTAMP_MERGE_GAP_MS, gapMs.coerceIn(0, 5000)).apply()
     }
 
     fun getQuickTranscribeSourceLanguage(): String =

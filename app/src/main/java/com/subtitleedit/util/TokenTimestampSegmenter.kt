@@ -121,6 +121,28 @@ internal object TokenTimestampSegmenter {
         return merged
     }
 
+    fun mergeSegments(segments: List<Segment>, maxGapMs: Int): List<Segment> {
+        if (segments.size < 2) return segments
+
+        val gapThreshold = maxGapMs.coerceIn(0, 5000).toLong()
+        val merged = mutableListOf<Segment>()
+        var current = segments.first()
+        for (next in segments.drop(1)) {
+            val gapMs = next.startTimeMs - current.endTimeMs
+            if (gapMs <= gapThreshold) {
+                current = current.copy(
+                    endTimeMs = maxOf(current.endTimeMs, next.endTimeMs),
+                    text = joinText(current.text, next.text)
+                )
+            } else {
+                merged += current
+                current = next
+            }
+        }
+        merged += current
+        return merged
+    }
+
     private fun addSegment(
         output: MutableList<Segment>,
         startTimeMs: Long,

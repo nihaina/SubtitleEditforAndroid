@@ -842,6 +842,13 @@ class AutoTimestampActivity : AppCompatActivity() {
             appendOperationLog(
                 "  Token 切分间隔：${settingsManager.getSpeechTokenTimestampGapMs()}ms"
             )
+            appendOperationLog(
+                "  合并语音段：${if (settingsManager.isSpeechTokenTimestampMergeEnabled()) {
+                    "启用，最大间隔 ${settingsManager.getSpeechTokenTimestampMergeGapMs()}ms"
+                } else {
+                    "关闭"
+                }}"
+            )
             appendOperationLog("  VAD 检测与分段设置：不使用")
             if (secondaryProcessing) {
                 appendOperationLog("  二次处理：排除已有字幕覆盖范围")

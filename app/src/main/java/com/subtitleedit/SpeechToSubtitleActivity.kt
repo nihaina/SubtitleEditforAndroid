@@ -827,6 +827,13 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                 "  Token 切分间隔：${settingsManager.getSpeechTokenTimestampGapMs()}ms"
             )
             appendRuntimeLog(
+                "  合并语音段：${if (settingsManager.isSpeechTokenTimestampMergeEnabled()) {
+                    "启用，最大间隔 ${settingsManager.getSpeechTokenTimestampMergeGapMs()}ms"
+                } else {
+                    "关闭"
+                }}"
+            )
+            appendRuntimeLog(
                 "  动态 Padding：${if (settingsManager.isSpeechVadDynamicPaddingEnabled()) "启用（前后最多各 500ms）" else "关闭"}"
             )
             if (
