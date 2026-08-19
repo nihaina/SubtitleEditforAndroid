@@ -240,4 +240,74 @@ class SubtitleEntryOpsTest {
         assertEquals(2000L, entries[0].startTime)
         assertEquals(4000L, entries[1].startTime)
     }
+
+    // ==================== mergeAdjacent ====================
+
+    @Test
+    fun mergeAdjacent_mergesGapAtBoundaryAndJoinsTextInOrder() {
+        val entries = listOf(
+            SubtitleEntry(index = 1, startTime = 0, endTime = 1000, text = "a"),
+            SubtitleEntry(index = 2, startTime = 1200, endTime = 2000, text = "b"),
+            SubtitleEntry(index = 3, startTime = 2500, endTime = 3000, text = "c")
+        )
+
+        val merged = SubtitleEntryOps.mergeAdjacent(entries, maxGapMs = 200)
+
+        assertEquals(2, merged.size)
+        assertEquals(0L, merged[0].startTime)
+        assertEquals(2000L, merged[0].endTime)
+        assertEquals("a；b", merged[0].text)
+        assertEquals("c", merged[1].text)
+    }
+
+    @Test
+    fun mergeAdjacent_mergesConsecutiveMatchingEntriesIntoOneGroup() {
+        val entries = listOf(
+            SubtitleEntry(startTime = 0, endTime = 1000, text = "a"),
+            SubtitleEntry(startTime = 1100, endTime = 2000, text = "b"),
+            SubtitleEntry(startTime = 2100, endTime = 3000, text = "c")
+        )
+
+        val merged = SubtitleEntryOps.mergeAdjacent(entries, maxGapMs = 100)
+
+        assertEquals(1, merged.size)
+        assertEquals("a；b；c", merged.single().text)
+        assertEquals(3000L, merged.single().endTime)
+    }
+
+    @Test
+    fun mergeAdjacent_mergesOverlapsButUsesEachOriginalAdjacentGap() {
+        val entries = listOf(
+            SubtitleEntry(startTime = 0, endTime = 5000, text = "a"),
+            SubtitleEntry(startTime = 1000, endTime = 2000, text = "b"),
+            SubtitleEntry(startTime = 4000, endTime = 4500, text = "c")
+        )
+
+        val merged = SubtitleEntryOps.mergeAdjacent(entries, maxGapMs = 100)
+
+        assertEquals(2, merged.size)
+        assertEquals("a；b", merged[0].text)
+        assertEquals(5000L, merged[0].endTime)
+        assertEquals("c", merged[1].text)
+    }
+
+    @Test
+    fun mergeAdjacent_doesNotModifyOriginalEntries() {
+        val entries = listOf(
+            SubtitleEntry(startTime = 0, endTime = 1000, text = "a"),
+            SubtitleEntry(startTime = 1000, endTime = 2000, text = "b", endTimeModified = true)
+        )
+
+        val merged = SubtitleEntryOps.mergeAdjacent(entries, maxGapMs = 0)
+
+        assertNotSame(entries[0], merged[0])
+        assertEquals("a", entries[0].text)
+        assertEquals(1000L, entries[0].endTime)
+        assertEquals(true, merged[0].endTimeModified)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun mergeAdjacent_rejectsNegativeGap() {
+        SubtitleEntryOps.mergeAdjacent(emptyList(), maxGapMs = -1)
+    }
 }

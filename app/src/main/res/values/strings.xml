@@ -57,6 +57,13 @@
     <string name="menu_undo">撤销</string>
     <string name="menu_redo">重做</string>
     <string name="menu_source_view">切换视图</string>
+    <string name="menu_merge_subtitles">字幕合并</string>
+    <string name="merge_subtitles_gap_hint">时间间隔</string>
+    <string name="merge_subtitles_gap_unit" translatable="false">ms</string>
+    <string name="merge_subtitles_invalid_gap">请输入大于或等于 0 的时间间隔</string>
+    <string name="merge_subtitles_requires_entries">至少需要两条字幕才能合并</string>
+    <string name="merge_subtitles_no_match">没有符合条件的相邻字幕</string>
+    <string name="merge_subtitles_result">合并完成，字幕条目减少 %1$d 条</string>
     <string name="menu_search">搜索</string>
     <string name="menu_save_draft">保存草稿</string>
     <string name="menu_drafts">草稿箱</string>

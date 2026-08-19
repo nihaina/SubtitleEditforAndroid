@@ -47,6 +47,10 @@
                 android:title="@string/menu_source_view"
                 app:showAsAction="never" />
             <item
+                android:id="@+id/menu_merge_subtitles"
+                android:title="@string/menu_merge_subtitles"
+                app:showAsAction="never" />
+            <item
                 android:id="@+id/menu_save_draft"
                 android:title="@string/menu_save_draft"
                 app:showAsAction="never" />

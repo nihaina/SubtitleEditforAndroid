@@ -335,6 +335,10 @@ class EditorActivity : AppCompatActivity() {
                 toggleSourceView()
                 true
             }
+            R.id.menu_merge_subtitles -> {
+                showMergeSubtitlesDialog()
+                true
+            }
             R.id.menu_search -> {
                 searchController.show()
                 true
@@ -1661,6 +1665,61 @@ class EditorActivity : AppCompatActivity() {
         showOffsetInputDialog("时间偏移") { totalOffset ->
             applyOffset(totalOffset, longClickPos)
         }
+    }
+
+    private fun showMergeSubtitlesDialog() {
+        if (!ensureListMode()) return
+        if (subtitleEntries.size < 2) {
+            showShortToast(getString(R.string.merge_subtitles_requires_entries))
+            return
+        }
+
+        val layout = createDialogInputContainer()
+        val (gapRow, gapInput) = createLabeledNumberInputRow(
+            hint = getString(R.string.merge_subtitles_gap_hint),
+            label = getString(R.string.merge_subtitles_gap_unit),
+            defaultValue = "",
+            allowSigned = false
+        )
+        layout.addView(gapRow)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.menu_merge_subtitles)
+            .setView(layout)
+            .setPositiveButton(R.string.confirm, null)
+            .setNegativeButton(R.string.cancel, null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val maxGapMs = gapInput.text.toString().trim().toLongOrNull()
+                if (maxGapMs == null || maxGapMs < 0L) {
+                    gapInput.error = getString(R.string.merge_subtitles_invalid_gap)
+                    return@setOnClickListener
+                }
+                mergeSubtitles(maxGapMs)
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+        gapInput.requestFocus()
+    }
+
+    private fun mergeSubtitles(maxGapMs: Long) {
+        val mergedEntries = SubtitleEntryOps.mergeAdjacent(subtitleEntries, maxGapMs)
+        val removedCount = subtitleEntries.size - mergedEntries.size
+        if (removedCount == 0) {
+            showShortToast(getString(R.string.merge_subtitles_no_match))
+            return
+        }
+
+        cutPasteController.clear()
+        replaceSubtitleEntries(mergedEntries)
+        submitSubtitleList(
+            refreshAll = true,
+            clearSelection = true,
+            markChanged = true
+        )
+        showShortToast(getString(R.string.merge_subtitles_result, removedCount))
     }
 
     private fun showOffsetInputDialog(

@@ -72,4 +72,29 @@ object SubtitleEntryOps {
     fun applyOffsetAll(entries: Iterable<SubtitleEntry>, offsetMs: Long) {
         entries.forEach { applyOffset(it, offsetMs) }
     }
+
+    fun mergeAdjacent(entries: List<SubtitleEntry>, maxGapMs: Long): List<SubtitleEntry> {
+        require(maxGapMs >= 0L) { "maxGapMs must not be negative" }
+        if (entries.isEmpty()) return emptyList()
+
+        val result = mutableListOf(entries.first().copy())
+        var previousEntry = entries.first()
+
+        entries.drop(1).forEach { entry ->
+            val shouldMerge = entry.startTime <= previousEntry.endTime ||
+                entry.startTime - previousEntry.endTime <= maxGapMs
+            if (shouldMerge) {
+                val merged = result.last()
+                merged.startTime = minOf(merged.startTime, entry.startTime)
+                merged.endTime = maxOf(merged.endTime, entry.endTime)
+                merged.text = "${merged.text}；${entry.text}"
+                merged.endTimeModified = merged.endTimeModified || entry.endTimeModified
+            } else {
+                result.add(entry.copy())
+            }
+            previousEntry = entry
+        }
+
+        return result
+    }
 }
