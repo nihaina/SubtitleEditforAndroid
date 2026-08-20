@@ -49,6 +49,11 @@ internal class EditorTranslationController(
         val sourceLanguage = settingsManager.getAiSourceLanguage()
         val targetLanguage = settingsManager.getAiTargetLanguage()
         val customPrompt = settingsManager.getAiTranslationPrompt()
+        val baseUrl = settingsManager.getAiBaseUrl(provider)
+        if (baseUrl.isBlank()) {
+            showTranslationError("请先在设置中填写自定义 API 请求地址")
+            return
+        }
 
         // 显示翻译确认对话框
         val sourceLangText = if (sourceLanguage == "自动检测") "自动检测" else sourceLanguage
@@ -66,7 +71,8 @@ internal class EditorTranslationController(
                     model,
                     sourceLanguage,
                     targetLanguage,
-                    customPrompt
+                    customPrompt,
+                    baseUrl
                 )
             }
             .setNegativeButton("取消", null)
@@ -88,7 +94,8 @@ internal class EditorTranslationController(
         model: String,
         sourceLanguage: String,
         targetLanguage: String,
-        customPrompt: String
+        customPrompt: String,
+        baseUrl: String
     ) {
         // 显示翻译进度对话框
         val progressDialog = AlertDialog.Builder(activity)
@@ -107,7 +114,7 @@ internal class EditorTranslationController(
         isTranslating = true
 
         val aiTranslator =
-            AiTranslator(provider, apiKey, model, sourceLanguage, targetLanguage, customPrompt)
+            AiTranslator(provider, apiKey, model, sourceLanguage, targetLanguage, customPrompt, baseUrl)
         activeAiTranslator = aiTranslator
         val textsToTranslate = selectedEntries.map { it.first.text }
 

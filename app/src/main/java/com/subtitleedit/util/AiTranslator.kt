@@ -23,7 +23,8 @@ class AiTranslator(
     private val model: String,
     private val sourceLanguage: String,
     private val targetLanguage: String,
-    private val customPrompt: String = ""
+    private val customPrompt: String = "",
+    private val baseUrl: String = ""
 ) {
     companion object {
         private const val MAX_LINES_PER_REQUEST = 300
@@ -39,7 +40,9 @@ class AiTranslator(
         .build()
 
     private val providerConfig = AiProviderConfig.getProvider(provider)
-    private val apiUrl = providerConfig.apiUrl
+    private val apiUrl = AiProviderConfig.chatCompletionsUrl(
+        baseUrl.ifBlank { providerConfig.baseUrl }
+    )
     @Volatile private var activeCall: Call? = null
 
     fun cancel() {
@@ -102,10 +105,11 @@ class AiTranslator(
         var currentBatch = mutableListOf<String>()
         var currentChars = 0
         texts.forEach { text ->
-            if (text.length > MAX_CHARS_PER_REQUEST) {
+            val encodedText = encodeSubtitleText(text)
+            if (encodedText.length > MAX_CHARS_PER_REQUEST) {
                 throw IOException("单条字幕超过 ${MAX_CHARS_PER_REQUEST} 个字符，无法稳定翻译，请先拆分该字幕")
             }
-            val indexedLength = text.length + 16
+            val indexedLength = encodedText.length + 16
             if (currentBatch.isNotEmpty() &&
                 (currentBatch.size >= MAX_LINES_PER_REQUEST || currentChars + indexedLength > MAX_CHARS_PER_REQUEST)
             ) {
@@ -130,7 +134,7 @@ class AiTranslator(
 
         // 构建带索引的文本内容，方便后续解析
         val indexedContent = texts.mapIndexed { index, text ->
-            "[${index + 1}] ${text}"
+            "[${index + 1}] ${encodeSubtitleText(text)}"
         }.joinToString("\n")
 
         val messages = JSONArray().apply {
@@ -154,8 +158,15 @@ class AiTranslator(
             put("model", model)
             put("messages", messages)
             put("stream", false)
-            put("temperature", 0.3)
+            // DeepSeek's thinking-mode API does not support temperature. Thinking is
+            // explicitly disabled below for deterministic subtitle output.
+            if (provider != AiProviderConfig.DEEPSEEK) {
+                put("temperature", 0.3)
+            }
             put("max_tokens", (texts.sumOf { it.length } * 2).coerceIn(1024, 8192))
+            if (provider == AiProviderConfig.DEEPSEEK) {
+                put("thinking", JSONObject().put("type", "disabled"))
+            }
         }
 
         val mediaType = "application/json".toMediaType()
@@ -234,7 +245,8 @@ class AiTranslator(
 你是一个专业的字幕翻译助手。$sourceLangText，请将用户提供的字幕文本翻译成$targetLanguage。
 $additionalInstructions
 
-用户会提供最多 500 条带编号的字幕文本，格式为：[编号] 内容。若有后续消息，它们属于同一份字幕，必须延续此前上下文。
+用户会提供最多 300 条带编号的字幕文本，格式为：[编号] 内容。每个编号对应一个字幕时间段。
+原字幕内的换行会写成字面量 \n；请将其视为同一条字幕内容的一部分，并在译文中原样保留。若有后续消息，它们属于同一份字幕，必须延续此前上下文。
 
 请按以下要求处理：
 1. 只返回翻译结果，不要添加任何解释或其他内容
@@ -263,6 +275,7 @@ $additionalInstructions
             .filter { it.isNotBlank() && !it.startsWith("```") }
             .toList()
 
+        var currentIndex: Int? = null
         for (line in lines) {
             // 匹配 [数字] 格式
             val match = Regex("""^\[(\d+)\]\s*(.*)$""").find(line)
@@ -273,13 +286,44 @@ $additionalInstructions
                     throw IOException("翻译结果编号或内容无效：$line")
                 }
                 if (result[index - 1] != null) throw IOException("翻译结果包含重复编号：[$index]")
-                result[index - 1] = text
+                result[index - 1] = decodeSubtitleText(text)
+                currentIndex = index - 1
             } else {
-                throw IOException("翻译结果格式无效，缺少编号：$line")
+                val continuationIndex = currentIndex
+                    ?: throw IOException("翻译结果格式无效，缺少编号：$line")
+                result[continuationIndex] = "${result[continuationIndex]}\n${decodeSubtitleText(line)}"
             }
         }
         if (result.any { it == null }) throw IOException("翻译结果不完整，请重试")
         return result.map { it!! }
+    }
+
+    /** Encodes line breaks inside one subtitle time range without creating extra numbered rows. */
+    private fun encodeSubtitleText(text: String): String =
+        text.replace("\\", "\\\\")
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+            .replace("\n", "\\n")
+
+    private fun decodeSubtitleText(text: String): String = buildString {
+        var index = 0
+        while (index < text.length) {
+            val character = text[index]
+            if (character == '\\' && index + 1 < text.length) {
+                when (text[index + 1]) {
+                    'n' -> append('\n')
+                    '\\' -> append('\\')
+                    else -> {
+                        append(character)
+                        append(text[index + 1])
+                    }
+                }
+                index += 2
+            } else {
+                append(character)
+                index++
+            }
+        }
     }
 
     /**
@@ -305,7 +349,9 @@ $additionalInstructions
                 })
             })
             put("stream", false)
-            put("temperature", 0.3)
+            if (provider != AiProviderConfig.DEEPSEEK) {
+                put("temperature", 0.3)
+            }
             put("max_tokens", 2048)
         }
 

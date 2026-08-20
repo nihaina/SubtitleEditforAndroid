@@ -24,6 +24,7 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_AI_SOURCE_LANGUAGE = "ai_source_language"
         private const val KEY_AI_TARGET_LANGUAGE = "ai_target_language"
         private const val KEY_AI_TRANSLATION_PROMPT = "ai_translation_prompt"
+        private const val KEY_AI_CUSTOM_BASE_URL = "ai_custom_base_url"
         private const val KEY_WAVEFORM_CACHE_LOCATION = "waveform_cache_location"
         private const val KEY_LOOP_SELECTED_SUBTITLE = "loop_selected_subtitle"
         private const val KEY_SHOW_ALL_FILE_TYPES = "show_all_file_types"
@@ -204,12 +205,26 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun getAiApiKey(provider: String): String {
-        return prefs.getString(providerKey(KEY_AI_API_KEY, provider), null)
+        val stored = prefs.getString(providerKey(KEY_AI_API_KEY, provider), null)
             ?: if (provider == AiProviderConfig.SILICONFLOW) prefs.getString(KEY_AI_API_KEY, "") ?: "" else ""
+        val apiKey = AiApiKeyStore.decrypt(stored)
+        if (stored.isNotEmpty() && !AiApiKeyStore.isEncrypted(stored)) {
+            // Migrate keys written by older versions when they are read.
+            prefs.edit()
+                .putString(providerKey(KEY_AI_API_KEY, provider), AiApiKeyStore.encrypt(apiKey))
+                .remove(KEY_AI_API_KEY)
+                .apply()
+        } else if (provider == AiProviderConfig.SILICONFLOW && prefs.contains(KEY_AI_API_KEY)) {
+            // Remove any stale legacy global copy after the provider-scoped value exists.
+            prefs.edit().remove(KEY_AI_API_KEY).apply()
+        }
+        return apiKey
     }
 
     fun setAiApiKey(provider: String, apiKey: String) {
-        prefs.edit().putString(providerKey(KEY_AI_API_KEY, provider), apiKey).apply()
+        prefs.edit()
+            .putString(providerKey(KEY_AI_API_KEY, provider), AiApiKeyStore.encrypt(apiKey))
+            .apply()
     }
 
     /**
@@ -274,6 +289,21 @@ class SettingsManager private constructor(context: Context) {
 
     fun setAiTranslationPrompt(prompt: String) {
         prefs.edit().putString(KEY_AI_TRANSLATION_PROMPT, prompt).apply()
+    }
+
+    fun getAiBaseUrl(provider: String = getAiProvider()): String {
+        val config = AiProviderConfig.getProvider(provider)
+        return if (config.customEndpoint) {
+            prefs.getString(KEY_AI_CUSTOM_BASE_URL, "") ?: ""
+        } else {
+            config.baseUrl
+        }
+    }
+
+    fun setAiBaseUrl(provider: String, baseUrl: String) {
+        if (AiProviderConfig.getProvider(provider).customEndpoint) {
+            prefs.edit().putString(KEY_AI_CUSTOM_BASE_URL, baseUrl).apply()
+        }
     }
     
     /**

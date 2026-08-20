@@ -117,13 +117,30 @@
                         android:visibility="gone" />
 
                     <TextView
-                        android:id="@+id/tvProviderHint"
+                        android:id="@+id/tvProviderWebsite"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:textColor="@color/on_surface_variant"
                         android:textSize="12sp"
                         android:layout_marginTop="-8dp"
                         android:layout_marginBottom="16dp" />
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/tilApiBaseUrl"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="API 请求地址（Base URL 或完整 Chat Completions 地址）"
+                        android:layout_marginBottom="16dp"
+                        android:visibility="gone"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etApiBaseUrl"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="textUri" />
+
+                    </com.google.android.material.textfield.TextInputLayout>
 
                     <com.google.android.material.textfield.TextInputLayout
                         android:layout_width="match_parent"

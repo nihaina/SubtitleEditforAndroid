@@ -3,10 +3,12 @@ package com.subtitleedit
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
+import android.text.method.LinkMovementMethod
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.text.HtmlCompat
 import com.subtitleedit.databinding.ActivityAiSettingsBinding
 import com.subtitleedit.util.AiProviderConfig
 import com.subtitleedit.util.SettingsManager
@@ -69,8 +71,14 @@ class AiSettingsActivity : AppCompatActivity() {
         suppressTextSave = true
         binding.tvProviderTitle.text = "AI 翻译设置（${config.displayName}）"
         binding.tilApiKey.hint = "${config.displayName} API Key"
-        binding.tvProviderHint.text = "请求地址：${config.apiUrl}"
+        binding.tvProviderWebsite.text = HtmlCompat.fromHtml(
+            "官网：<a href=\"${config.websiteUrl}\">${config.websiteUrl}</a>",
+            HtmlCompat.FROM_HTML_MODE_LEGACY
+        )
+        binding.tvProviderWebsite.movementMethod = LinkMovementMethod.getInstance()
         binding.etApiKey.setText(settingsManager.getAiApiKey(provider))
+        binding.tilApiBaseUrl.visibility = if (config.customEndpoint) View.VISIBLE else View.GONE
+        binding.etApiBaseUrl.setText(if (config.customEndpoint) settingsManager.getAiBaseUrl(provider) else "")
         val savedModel = settingsManager.getAiModel(provider)
         if (config.models.isNotEmpty()) {
             binding.tilModel.visibility = View.GONE
@@ -100,6 +108,7 @@ class AiSettingsActivity : AppCompatActivity() {
         } else {
             settingsManager.setAiModel(selectedProvider, binding.etModel.text?.toString()?.trim().orEmpty())
         }
+        settingsManager.setAiBaseUrl(selectedProvider, binding.etApiBaseUrl.text?.toString()?.trim().orEmpty())
     }
 
     private fun setupSave() {
@@ -115,6 +124,13 @@ class AiSettingsActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 if (!suppressTextSave) settingsManager.setAiModel(selectedProvider, s.toString().trim())
+            }
+        })
+        binding.etApiBaseUrl.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                if (!suppressTextSave) settingsManager.setAiBaseUrl(selectedProvider, s.toString().trim())
             }
         })
         binding.spinnerModel.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {

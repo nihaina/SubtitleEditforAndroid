@@ -10,7 +10,12 @@ class AiProviderConfigTest {
     @Test
     fun providers_areInSettingsSpinnerOrder() {
         assertEquals(
-            listOf(AiProviderConfig.SILICONFLOW, AiProviderConfig.DEEPSEEK, AiProviderConfig.OPENAI),
+            listOf(
+                AiProviderConfig.SILICONFLOW,
+                AiProviderConfig.DEEPSEEK,
+                AiProviderConfig.OPENAI,
+                AiProviderConfig.CUSTOM
+            ),
             AiProviderConfig.providers.map { it.id }
         )
     }
@@ -19,7 +24,10 @@ class AiProviderConfigTest {
     fun providers_haveDisplayNameUrlAndDefaultModel() {
         AiProviderConfig.providers.forEach { provider ->
             assertTrue("${provider.id} 缺少显示名", provider.displayName.isNotBlank())
-            assertTrue("${provider.id} 的 apiUrl 应为 https", provider.apiUrl.startsWith("https://"))
+            if (!provider.customEndpoint) {
+                assertTrue("${provider.id} 的 baseUrl 应为 https", provider.baseUrl.startsWith("https://"))
+            }
+            assertTrue("${provider.id} 的官网地址应为 https", provider.websiteUrl.startsWith("https://"))
             assertTrue("${provider.id} 缺少默认模型", provider.defaultModel.isNotBlank())
         }
     }
