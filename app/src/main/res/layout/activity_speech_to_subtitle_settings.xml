@@ -54,6 +54,35 @@
                         android:textSize="16sp"
                         android:textStyle="bold" />
 
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/activity_speech_to_subtitle_settings_text_55"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchVadDynamicPadding"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:checked="true"
+                        android:minHeight="36dp"
+                        android:text="@string/activity_speech_to_subtitle_settings_text_14"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/tvVadDynamicPaddingHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/activity_speech_to_subtitle_settings_text_15"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="12sp" />
+
                     <com.google.android.material.switchmaterial.SwitchMaterial
                         android:id="@+id/switchSenseVoiceTimestampExperiment"
                         android:layout_width="match_parent"
@@ -243,128 +272,11 @@
 
                     </LinearLayout>
 
-                </LinearLayout>
-
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                app:cardCornerRadius="8dp"
-                app:cardElevation="2dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <TextView
-                        android:id="@+id/tvRecognitionFlowTitle"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_01"
-                        android:textColor="@color/on_surface"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchVadDynamicPadding"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:checked="true"
-                        android:minHeight="36dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_14"
-                        android:textColor="@color/on_surface"
-                        android:textSize="14sp" />
-
-                    <TextView
-                        android:id="@+id/tvVadDynamicPaddingHint"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_15"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="12sp" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchVadMerge"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
-                        android:minHeight="40dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_35"
-                        android:textColor="@color/on_surface"
-                        android:textSize="14sp" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_40"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="12sp" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_37"
-                        android:textColor="@color/on_surface"
-                        android:textSize="14sp" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_38"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="12sp" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <com.google.android.material.slider.Slider
-                            android:id="@+id/sliderVadMergeGap"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:stepSize="50"
-                            android:value="200"
-                            android:valueFrom="0"
-                            android:valueTo="5000" />
-
-                        <com.google.android.material.textfield.TextInputLayout
-                            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
-                            android:layout_width="104dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="8dp"
-                            app:suffixText="毫秒">
-
-                            <com.google.android.material.textfield.TextInputEditText
-                                android:id="@+id/etVadMergeGap"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:gravity="center"
-                                android:inputType="number"
-                                android:maxLines="1"
-                                android:text="@string/activity_speech_to_subtitle_settings_text_39"
-                                android:textSize="14sp" />
-
-                        </com.google.android.material.textfield.TextInputLayout>
-
-                    </LinearLayout>
-
                     <TextView
                         android:id="@+id/tvFixedSegmentTitle"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
+                        android:layout_marginTop="16dp"
                         android:text="@string/activity_speech_to_subtitle_settings_text_02"
                         android:textColor="@color/on_surface"
                         android:textSize="14sp" />
@@ -413,6 +325,335 @@
                                 android:textSize="14sp" />
 
                         </com.google.android.material.textfield.TextInputLayout>
+
+                    </LinearLayout>
+
+                </LinearLayout>
+
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                app:cardCornerRadius="8dp"
+                app:cardElevation="2dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:id="@+id/tvRecognitionFlowTitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/activity_speech_to_subtitle_settings_text_01"
+                        android:textColor="@color/on_surface"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchVadMerge"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:minHeight="40dp"
+                        android:text="@string/activity_speech_to_subtitle_settings_text_35"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/tvVadMergeHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/activity_speech_to_subtitle_settings_text_40"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="12sp" />
+
+                    <TextView
+                        android:id="@+id/tvVadMergeGapTitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/activity_speech_to_subtitle_settings_text_37"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/tvVadMergeGapHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/activity_speech_to_subtitle_settings_text_38"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="12sp" />
+
+                    <LinearLayout
+                        android:id="@+id/layoutVadMergeGap"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.slider.Slider
+                            android:id="@+id/sliderVadMergeGap"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:stepSize="50"
+                            android:value="200"
+                            android:valueFrom="0"
+                            android:valueTo="5000" />
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
+                            android:layout_width="104dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            app:suffixText="毫秒">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/etVadMergeGap"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center"
+                                android:inputType="number"
+                                android:maxLines="1"
+                                android:text="@string/activity_speech_to_subtitle_settings_text_39"
+                                android:textSize="14sp" />
+
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/layoutVadParameters"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/activity_speech_to_subtitle_settings_text_56"
+                            android:textColor="@color/on_surface"
+                            android:textSize="14sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="12dp"
+                            android:text="@string/activity_speech_to_subtitle_settings_text_57"
+                            android:textColor="@color/on_surface"
+                            android:textSize="14sp" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="@string/activity_speech_to_subtitle_settings_text_58"
+                            android:textColor="@color/on_surface_variant"
+                            android:textSize="12sp" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.slider.Slider
+                                android:id="@+id/sliderVadThreshold"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:stepSize="0.01"
+                                android:value="0.3"
+                                android:valueFrom="0.01"
+                                android:valueTo="0.9" />
+
+                            <com.google.android.material.textfield.TextInputLayout
+                                style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
+                                android:layout_width="80dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="8dp">
+
+                                <com.google.android.material.textfield.TextInputEditText
+                                    android:id="@+id/etVadThreshold"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center"
+                                    android:inputType="numberDecimal"
+                                    android:maxLines="1"
+                                    android:text="@string/activity_model_settings_text_21"
+                                    android:textSize="14sp" />
+
+                            </com.google.android.material.textfield.TextInputLayout>
+
+                        </LinearLayout>
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="12dp"
+                            android:text="@string/activity_speech_to_subtitle_settings_text_59"
+                            android:textColor="@color/on_surface"
+                            android:textSize="14sp" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="@string/activity_speech_to_subtitle_settings_text_60"
+                            android:textColor="@color/on_surface_variant"
+                            android:textSize="12sp" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.slider.Slider
+                                android:id="@+id/sliderMinSilence"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:stepSize="0.01"
+                                android:value="0.3"
+                                android:valueFrom="0.01"
+                                android:valueTo="2.0" />
+
+                            <com.google.android.material.textfield.TextInputLayout
+                                style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
+                                android:layout_width="90dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="8dp"
+                                app:suffixText="秒">
+
+                                <com.google.android.material.textfield.TextInputEditText
+                                    android:id="@+id/etMinSilence"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center"
+                                    android:inputType="numberDecimal"
+                                    android:maxLines="1"
+                                    android:text="@string/activity_model_settings_text_21"
+                                    android:textSize="14sp" />
+
+                            </com.google.android.material.textfield.TextInputLayout>
+
+                        </LinearLayout>
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="12dp"
+                            android:text="@string/activity_speech_to_subtitle_settings_text_61"
+                            android:textColor="@color/on_surface"
+                            android:textSize="14sp" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="@string/activity_speech_to_subtitle_settings_text_62"
+                            android:textColor="@color/on_surface_variant"
+                            android:textSize="12sp" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.slider.Slider
+                                android:id="@+id/sliderMinSpeech"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:stepSize="0.01"
+                                android:value="0.25"
+                                android:valueFrom="0.01"
+                                android:valueTo="1.0" />
+
+                            <com.google.android.material.textfield.TextInputLayout
+                                style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
+                                android:layout_width="90dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="8dp"
+                                app:suffixText="秒">
+
+                                <com.google.android.material.textfield.TextInputEditText
+                                    android:id="@+id/etMinSpeech"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center"
+                                    android:inputType="numberDecimal"
+                                    android:maxLines="1"
+                                    android:text="@string/activity_model_settings_text_26"
+                                    android:textSize="14sp" />
+
+                            </com.google.android.material.textfield.TextInputLayout>
+
+                        </LinearLayout>
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="12dp"
+                            android:text="@string/activity_speech_to_subtitle_settings_text_63"
+                            android:textColor="@color/on_surface"
+                            android:textSize="14sp" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="@string/activity_speech_to_subtitle_settings_text_64"
+                            android:textColor="@color/on_surface_variant"
+                            android:textSize="12sp" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.slider.Slider
+                                android:id="@+id/sliderMaxSpeech"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:stepSize="1.0"
+                                android:value="10.0"
+                                android:valueFrom="1.0"
+                                android:valueTo="60.0" />
+
+                            <com.google.android.material.textfield.TextInputLayout
+                                style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
+                                android:layout_width="90dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="8dp"
+                                app:suffixText="秒">
+
+                                <com.google.android.material.textfield.TextInputEditText
+                                    android:id="@+id/etMaxSpeech"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center"
+                                    android:inputType="numberDecimal"
+                                    android:maxLines="1"
+                                    android:text="@string/activity_model_settings_text_29"
+                                    android:textSize="14sp" />
+
+                            </com.google.android.material.textfield.TextInputLayout>
+
+                        </LinearLayout>
 
                     </LinearLayout>
 
@@ -505,6 +746,7 @@
                         android:textSize="14sp" />
 
                     <TextView
+                        android:id="@+id/tvSecondaryVadMergeHint"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
@@ -513,6 +755,7 @@
                         android:textSize="12sp" />
 
                     <TextView
+                        android:id="@+id/tvSecondaryVadMergeGapTitle"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="12dp"
@@ -521,6 +764,7 @@
                         android:textSize="14sp" />
 
                     <TextView
+                        android:id="@+id/tvSecondaryVadMergeGapHint"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
@@ -529,6 +773,7 @@
                         android:textSize="12sp" />
 
                     <LinearLayout
+                        android:id="@+id/layoutSecondaryVadMergeGap"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:gravity="center_vertical"

@@ -237,7 +237,7 @@
     <string name="activity_settings_text_14">在文件列表中显示字幕和音频之外的文件</string>
     <string name="activity_settings_text_15">显示隐藏文件</string>
     <string name="activity_settings_text_16">显示以“.”开头文件和文件夹</string>
-    <string name="activity_speech_to_subtitle_settings_text_01">识别流程</string>
+    <string name="activity_speech_to_subtitle_settings_text_01">VAD相关</string>
     <string name="activity_speech_to_subtitle_settings_text_02">固定分段时长</string>
     <string name="activity_speech_to_subtitle_settings_text_03">未使用 VAD 分段时生效</string>
     <string name="activity_speech_to_subtitle_settings_text_04" translatable="false">30</string>
@@ -293,6 +293,16 @@
     <string name="activity_speech_to_subtitle_settings_text_52">最大合并间隔</string>
     <string name="activity_speech_to_subtitle_settings_text_53">设为 0 时仅合并重叠或首尾相接的字幕段</string>
     <string name="activity_speech_to_subtitle_settings_text_54" translatable="false">200</string>
+    <string name="activity_speech_to_subtitle_settings_text_55">ASR转录</string>
+    <string name="activity_speech_to_subtitle_settings_text_56">VAD 参数设置</string>
+    <string name="activity_speech_to_subtitle_settings_text_57">检测阈值</string>
+    <string name="activity_speech_to_subtitle_settings_text_58">值越低越容易检测到语音，但可能误判噪音</string>
+    <string name="activity_speech_to_subtitle_settings_text_59">最小静音时长</string>
+    <string name="activity_speech_to_subtitle_settings_text_60">静音超过此时长才会分段</string>
+    <string name="activity_speech_to_subtitle_settings_text_61">最小语音时长</string>
+    <string name="activity_speech_to_subtitle_settings_text_62">短于此时长的语音会被忽略</string>
+    <string name="activity_speech_to_subtitle_settings_text_63">最大语音时长</string>
+    <string name="activity_speech_to_subtitle_settings_text_64">超过此时长会强制分段</string>
     <string name="activity_speech_to_subtitle_text_01">选择音频/视频文件（可多选）</string>
     <string name="activity_speech_to_subtitle_text_02">支持 MP3, WAV, FLAC, MP4, MKV 等格式</string>
     <string name="activity_speech_to_subtitle_text_03">源语言</string>

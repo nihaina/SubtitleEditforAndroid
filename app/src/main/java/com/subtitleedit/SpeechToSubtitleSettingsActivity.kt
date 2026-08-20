@@ -50,8 +50,40 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         binding.switchVadDynamicPadding.setOnCheckedChangeListener { _, checked ->
             if (!loading) settingsManager.setSpeechVadDynamicPaddingEnabled(checked)
         }
+        binding.sliderVadThreshold.setLabelFormatter { value ->
+            String.format(Locale.US, "%.2f", normalizeVadThreshold(value))
+        }
+        bindSecondaryVadValue(
+            slider = binding.sliderVadThreshold,
+            input = binding.etVadThreshold,
+            format = "%.2f",
+            normalize = ::normalizeVadThreshold,
+            save = settingsManager::setVadThreshold
+        )
+        bindSecondaryVadValue(
+            slider = binding.sliderMinSilence,
+            input = binding.etMinSilence,
+            format = "%.2f",
+            normalize = { value -> snap(value, 0.01f, 0.01f, 2.0f) },
+            save = settingsManager::setVadMinSilenceDuration
+        )
+        bindSecondaryVadValue(
+            slider = binding.sliderMinSpeech,
+            input = binding.etMinSpeech,
+            format = "%.2f",
+            normalize = { value -> snap(value, 0.01f, 0.01f, 1.0f) },
+            save = settingsManager::setVadMinSpeechDuration
+        )
+        bindSecondaryVadValue(
+            slider = binding.sliderMaxSpeech,
+            input = binding.etMaxSpeech,
+            format = "%.1f",
+            normalize = { value -> snap(value, 1.0f, 1.0f, 60.0f) },
+            save = settingsManager::setVadMaxSpeechDuration
+        )
         binding.switchVadMerge.setOnCheckedChangeListener { _, checked ->
             if (!loading) settingsManager.setSpeechVadMergeEnabled(checked)
+            updateVadMergeControls()
         }
         bindSecondaryVadValue(
             slider = binding.sliderVadMergeGap,
@@ -69,6 +101,7 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         }
         binding.switchSecondaryVadMerge.setOnCheckedChangeListener { _, checked ->
             if (!loading) settingsManager.setSpeechSecondaryVadMergeEnabled(checked)
+            updateSecondaryVadMergeControls()
         }
         bindSecondaryVadValue(
             slider = binding.sliderSecondaryVadMergeGap,
@@ -165,6 +198,30 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         binding.sliderFixedSegmentSeconds.value = segmentSeconds.toFloat()
         binding.etFixedSegmentSeconds.setText(String.format(Locale.US, "%d", segmentSeconds))
         binding.switchVadDynamicPadding.isChecked = settingsManager.isSpeechVadDynamicPaddingEnabled()
+        loadSecondaryVadValue(
+            binding.sliderVadThreshold,
+            binding.etVadThreshold,
+            settingsManager.getVadThreshold(),
+            "%.2f"
+        )
+        loadSecondaryVadValue(
+            binding.sliderMinSilence,
+            binding.etMinSilence,
+            settingsManager.getVadMinSilenceDuration(),
+            "%.2f"
+        )
+        loadSecondaryVadValue(
+            binding.sliderMinSpeech,
+            binding.etMinSpeech,
+            settingsManager.getVadMinSpeechDuration(),
+            "%.2f"
+        )
+        loadSecondaryVadValue(
+            binding.sliderMaxSpeech,
+            binding.etMaxSpeech,
+            settingsManager.getVadMaxSpeechDuration(),
+            "%.1f"
+        )
         binding.switchVadMerge.isChecked = settingsManager.isSpeechVadMergeEnabled()
         loadSecondaryVadValue(
             binding.sliderVadMergeGap,
@@ -245,7 +302,29 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         )
 
         loading = false
+        updateVadMergeControls()
+        updateSecondaryVadMergeControls()
         updateSenseVoiceTimestampControls()
+    }
+
+    private fun updateVadMergeControls() {
+        val enabled = binding.switchVadMerge.isChecked
+        val alpha = if (enabled) 1f else 0.5f
+        binding.tvVadMergeGapTitle.alpha = alpha
+        binding.tvVadMergeGapHint.alpha = alpha
+        binding.layoutVadMergeGap.alpha = alpha
+        binding.sliderVadMergeGap.isEnabled = enabled
+        binding.etVadMergeGap.isEnabled = enabled
+    }
+
+    private fun updateSecondaryVadMergeControls() {
+        val enabled = binding.switchSecondaryVadMerge.isChecked
+        val alpha = if (enabled) 1f else 0.5f
+        binding.tvSecondaryVadMergeGapTitle.alpha = alpha
+        binding.tvSecondaryVadMergeGapHint.alpha = alpha
+        binding.layoutSecondaryVadMergeGap.alpha = alpha
+        binding.sliderSecondaryVadMergeGap.isEnabled = enabled
+        binding.etSecondaryVadMergeGap.isEnabled = enabled
     }
 
     private fun updateSenseVoiceTimestampControls() {
@@ -343,6 +422,10 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
     }
 
     private fun normalizeSecondaryVadThreshold(value: Float): Float {
+        return snap(value, 0.01f, 0.01f, 0.9f)
+    }
+
+    private fun normalizeVadThreshold(value: Float): Float {
         return snap(value, 0.01f, 0.01f, 0.9f)
     }
 

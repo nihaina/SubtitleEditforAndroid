@@ -8,8 +8,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
-import android.text.Editable
-import android.text.TextWatcher
 import android.graphics.Typeface
 import android.view.View
 import android.widget.ArrayAdapter
@@ -49,26 +47,10 @@ class ModelSettingsActivity : AppCompatActivity() {
     private var tokensPath: String = ""
     private var vadModelPath: String = ""
     private var modelType: String = SettingsManager.ASR_MODEL_SENSEVOICE
-    private var updatingVadThreshold = false
     private var accessWarningShown = false
     private var modelDownloadJob: Job? = null
     private var modelDownloadDialog: ModelDownloadProgressDialog? = null
     private var pendingStorageAction: (() -> Unit)? = null
-
-    private companion object {
-        private const val VAD_THRESHOLD_MIN = 0.01f
-        private const val VAD_THRESHOLD_MAX = 0.9f
-        private const val VAD_THRESHOLD_STEP = 0.01f
-        private const val VAD_MIN_SILENCE_MIN = 0.01f
-        private const val VAD_MIN_SILENCE_MAX = 2.0f
-        private const val VAD_MIN_SILENCE_STEP = 0.01f
-        private const val VAD_MIN_SPEECH_MIN = 0.01f
-        private const val VAD_MIN_SPEECH_MAX = 1.0f
-        private const val VAD_MIN_SPEECH_STEP = 0.01f
-        private const val VAD_MAX_SPEECH_MIN = 1.0f
-        private const val VAD_MAX_SPEECH_MAX = 60.0f
-        private const val VAD_MAX_SPEECH_STEP = 1.0f
-    }
 
     // Encoder 文件选择器
     private val encoderPickerLauncher = registerForActivityResult(
@@ -122,7 +104,6 @@ class ModelSettingsActivity : AppCompatActivity() {
 
         setupToolbar()
         setupButtons()
-        setupVadSettings()
         loadSavedSettings()
     }
 
@@ -601,119 +582,6 @@ class ModelSettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun setupVadSettings() {
-        binding.sliderVadThreshold.valueFrom = VAD_THRESHOLD_MIN
-        binding.sliderVadThreshold.valueTo = VAD_THRESHOLD_MAX
-        binding.sliderVadThreshold.stepSize = VAD_THRESHOLD_STEP
-        binding.sliderVadThreshold.setLabelFormatter { value ->
-            String.format(Locale.US, "%.2f", normalizeVadThreshold(value))
-        }
-
-        // VAD 阈值
-        binding.sliderVadThreshold.addOnChangeListener { _, value, fromUser ->
-            if (updatingVadThreshold) return@addOnChangeListener
-            val snapped = normalizeVadThreshold(value)
-            if (fromUser) {
-                updatingVadThreshold = true
-                if (!floatEquals(binding.sliderVadThreshold.value, snapped)) {
-                    binding.sliderVadThreshold.value = snapped
-                }
-                binding.etVadThreshold.setText(String.format(Locale.US, "%.2f", snapped))
-                binding.etVadThreshold.setSelection(binding.etVadThreshold.text?.length ?: 0)
-                updatingVadThreshold = false
-            }
-            settingsManager.setVadThreshold(snapped)
-        }
-        binding.etVadThreshold.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                if (updatingVadThreshold) return
-                val text = s.toString()
-                if (text.isBlank() || text.endsWith(".")) return
-                val v = text.toFloatOrNull() ?: return
-                val clamped = v.coerceIn(VAD_THRESHOLD_MIN, VAD_THRESHOLD_MAX)
-                val snapped = normalizeVadThreshold(clamped)
-                val normalized = String.format(Locale.US, "%.2f", snapped)
-                val decimalLength = text.substringAfter('.', "").takeIf { text.contains('.') }?.length ?: 0
-                val shouldNormalizeText = decimalLength >= 2 || text.toFloatOrNull() != clamped
-                updatingVadThreshold = true
-                if (!floatEquals(binding.sliderVadThreshold.value, snapped)) {
-                    binding.sliderVadThreshold.value = snapped
-                }
-                if (shouldNormalizeText && text != normalized) {
-                    binding.etVadThreshold.setText(normalized)
-                    binding.etVadThreshold.setSelection(binding.etVadThreshold.text?.length ?: 0)
-                }
-                updatingVadThreshold = false
-                settingsManager.setVadThreshold(snapped)
-            }
-        })
-
-        // 最小静音时长
-        binding.sliderMinSilence.addOnChangeListener { _, value, fromUser ->
-            if (fromUser) binding.etMinSilence.setText(String.format(Locale.US, "%.2f", value))
-            settingsManager.setVadMinSilenceDuration(value)
-        }
-        binding.etMinSilence.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                val v = s.toString().toFloatOrNull() ?: return
-                val snapped = snapVadValue(
-                    v,
-                    VAD_MIN_SILENCE_STEP,
-                    VAD_MIN_SILENCE_MIN,
-                    VAD_MIN_SILENCE_MAX
-                )
-                if (binding.sliderMinSilence.value != snapped) binding.sliderMinSilence.value = snapped
-                settingsManager.setVadMinSilenceDuration(snapped)
-            }
-        })
-
-        // 最小语音时长
-        binding.sliderMinSpeech.addOnChangeListener { _, value, fromUser ->
-            if (fromUser) binding.etMinSpeech.setText(String.format(Locale.US, "%.2f", value))
-            settingsManager.setVadMinSpeechDuration(value)
-        }
-        binding.etMinSpeech.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                val v = s.toString().toFloatOrNull() ?: return
-                val snapped = snapVadValue(
-                    v,
-                    VAD_MIN_SPEECH_STEP,
-                    VAD_MIN_SPEECH_MIN,
-                    VAD_MIN_SPEECH_MAX
-                )
-                if (binding.sliderMinSpeech.value != snapped) binding.sliderMinSpeech.value = snapped
-                settingsManager.setVadMinSpeechDuration(snapped)
-            }
-        })
-
-        // 最大语音时长
-        binding.sliderMaxSpeech.addOnChangeListener { _, value, fromUser ->
-            if (fromUser) binding.etMaxSpeech.setText(String.format(Locale.US, "%.1f", value))
-            settingsManager.setVadMaxSpeechDuration(value)
-        }
-        binding.etMaxSpeech.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                val v = s.toString().toFloatOrNull() ?: return
-                val snapped = snapVadValue(
-                    v,
-                    VAD_MAX_SPEECH_STEP,
-                    VAD_MAX_SPEECH_MIN,
-                    VAD_MAX_SPEECH_MAX
-                )
-                if (binding.sliderMaxSpeech.value != snapped) binding.sliderMaxSpeech.value = snapped
-                settingsManager.setVadMaxSpeechDuration(snapped)
-            }
-        })
-    }
-
     private fun loadSavedSettings() {
         // 加载模型路径
         modelType = settingsManager.getAsrModelType()
@@ -723,25 +591,6 @@ class ModelSettingsActivity : AppCompatActivity() {
         binding.cbUseBuiltInVad.isChecked = settingsManager.isVadUseBuiltInModel()
         updateVadModelUi()
         updateAsrModelUi()
-
-        // 加载 VAD 参数
-        val threshold = settingsManager.getVadThreshold()
-        val minSilence = settingsManager.getVadMinSilenceDuration()
-        val minSpeech = settingsManager.getVadMinSpeechDuration()
-        val maxSpeech = settingsManager.getVadMaxSpeechDuration()
-
-        settingsManager.setVadThreshold(threshold)
-        binding.sliderVadThreshold.value = threshold
-        binding.etVadThreshold.setText(String.format(Locale.US, "%.2f", threshold))
-
-        binding.sliderMinSilence.value = minSilence
-        binding.etMinSilence.setText(String.format(Locale.US, "%.2f", minSilence))
-
-        binding.sliderMinSpeech.value = minSpeech
-        binding.etMinSpeech.setText(String.format(Locale.US, "%.2f", minSpeech))
-
-        binding.sliderMaxSpeech.value = maxSpeech
-        binding.etMaxSpeech.setText(String.format(Locale.US, "%.1f", maxSpeech))
 
         migrateLegacySenseVoiceNpuSelectionIfNeeded()
     }
@@ -1075,24 +924,6 @@ class ModelSettingsActivity : AppCompatActivity() {
             vadModelPath.isNotBlank() -> "当前使用：外部模型 ${getFileNameFromUri(Uri.parse(vadModelPath))}"
             else -> "当前使用：外部模型（未选择）"
         }
-    }
-
-    private fun normalizeVadThreshold(threshold: Float): Float {
-        return snapVadValue(
-            threshold,
-            VAD_THRESHOLD_STEP,
-            VAD_THRESHOLD_MIN,
-            VAD_THRESHOLD_MAX
-        )
-    }
-
-    private fun snapVadValue(value: Float, step: Float, min: Float, max: Float): Float {
-        val clamped = value.coerceIn(min, max)
-        return (Math.round((clamped - min) / step) * step + min).coerceIn(min, max)
-    }
-
-    private fun floatEquals(a: Float, b: Float): Boolean {
-        return kotlin.math.abs(a - b) < 0.0001f
     }
 
     private fun getFileNameFromUri(uri: Uri): String {
