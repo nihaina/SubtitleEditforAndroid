@@ -12,7 +12,11 @@ data class SubtitleEntry(
     var endTime: Long = 0L,        // 结束时间 (毫秒)
     var text: String = "",         // 字幕文本
     // 标记 endTime 是否被用户修改过（用于 LRC 格式保存）
-    var endTimeModified: Boolean = false
+    var endTimeModified: Boolean = false,
+    // WebVTT cue identifier；其它格式保持为空
+    var cueIdentifier: String = "",
+    // WebVTT 时间轴后的 cue settings；其它格式保持为空
+    var cueSettings: String = ""
 ) {
     /**
      * 格式化时间戳为 SRT 格式 (HH:MM:SS,mmm)
@@ -42,6 +46,14 @@ data class SubtitleEntry(
      * 复制当前条目
      */
     fun copy(): SubtitleEntry {
-        return SubtitleEntry(index, startTime, endTime, text, endTimeModified)
+        return SubtitleEntry(
+            index,
+            startTime,
+            endTime,
+            text,
+            endTimeModified,
+            cueIdentifier,
+            cueSettings
+        )
     }
 }

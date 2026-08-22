@@ -90,7 +90,7 @@ class BatchConvertActivity : AppCompatActivity() {
     
     private fun setupFormatSpinners() {
         // 目标格式
-        val formats = arrayOf("SRT", "LRC")
+        val formats = arrayOf("SRT", "LRC", "WebVTT")
         val targetAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, formats)
         targetAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         binding.spinnerTargetFormat.adapter = targetAdapter
@@ -101,6 +101,7 @@ class BatchConvertActivity : AppCompatActivity() {
                 targetFormat = when (position) {
                     0 -> SubtitleParser.SubtitleFormat.SRT
                     1 -> SubtitleParser.SubtitleFormat.LRC
+                    2 -> SubtitleParser.SubtitleFormat.VTT
                     else -> SubtitleParser.SubtitleFormat.LRC
                 }
             }
@@ -226,6 +227,7 @@ class BatchConvertActivity : AppCompatActivity() {
                 val targetExtension = when (targetFormat) {
                     SubtitleParser.SubtitleFormat.SRT -> "srt"
                     SubtitleParser.SubtitleFormat.LRC -> "lrc"
+                    SubtitleParser.SubtitleFormat.VTT -> "vtt"
                     else -> "txt"
                 }
                 
@@ -294,6 +296,7 @@ class BatchConvertActivity : AppCompatActivity() {
             val targetExtension = when (targetFormat) {
                 SubtitleParser.SubtitleFormat.SRT -> "srt"
                 SubtitleParser.SubtitleFormat.LRC -> "lrc"
+                SubtitleParser.SubtitleFormat.VTT -> "vtt"
                 else -> "txt"
             }
             val nameWithoutExt = convertFile.fileName.substringBeforeLast(".")

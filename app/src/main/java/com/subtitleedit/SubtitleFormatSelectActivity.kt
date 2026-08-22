@@ -18,8 +18,8 @@ class SubtitleFormatSelectActivity : AppCompatActivity() {
     private val filePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@registerForActivityResult
         val name = queryDisplayName(uri) ?: "未知文件"
-        if (name.substringAfterLast('.', "").lowercase() !in setOf("srt", "lrc", "txt")) {
-            OverwritingToast.makeText(this, "请选择 SRT、LRC 或 TXT 字幕文件", Toast.LENGTH_LONG).show()
+        if (name.substringAfterLast('.', "").lowercase() !in setOf("srt", "lrc", "txt", "vtt")) {
+            OverwritingToast.makeText(this, "请选择 SRT、LRC、TXT 或 VTT 字幕文件", Toast.LENGTH_LONG).show()
             return@registerForActivityResult
         }
         runCatching {

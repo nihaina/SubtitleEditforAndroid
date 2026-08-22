@@ -18,7 +18,7 @@ import android.widget.ScrollView
  * - 拖拽期间 requestDisallowInterceptTouchEvent 防止父布局抢事件
  * - 自绘滚动条补偿 ScrollView canvas 的 scrollY 平移，确保 thumb 位置固定在屏幕上
  */
-class DraggableScrollView @JvmOverloads constructor(
+open class DraggableScrollView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0

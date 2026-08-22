@@ -44,7 +44,9 @@ class SubtitleEntryTest {
             startTime = 1000,
             endTime = 2000,
             text = "hello",
-            endTimeModified = true
+            endTimeModified = true,
+            cueIdentifier = "cue-1",
+            cueSettings = "align:start"
         )
         val copied = original.copy()
         assertEquals(3, copied.index)
@@ -52,6 +54,8 @@ class SubtitleEntryTest {
         assertEquals(2000L, copied.endTime)
         assertEquals("hello", copied.text)
         assertTrue(copied.endTimeModified)
+        assertEquals("cue-1", copied.cueIdentifier)
+        assertEquals("align:start", copied.cueSettings)
     }
 
     @Test

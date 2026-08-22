@@ -96,8 +96,8 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
     private fun loadSubtitle() {
         try {
             val content = FileUtils.readUri(this, sourceUri, charset)
-            format = SubtitleParser.detectFormat(content)
-            entries = SubtitleParser.parse(content, charset)
+            format = SubtitleParser.detectFormat(content, fileName)
+            entries = SubtitleParser.parseDocument(content, fileName).entries
             if (format == SubtitleParser.SubtitleFormat.UNKNOWN || entries.isEmpty()) {
                 throw IllegalArgumentException("未识别到有效字幕内容")
             }
@@ -322,6 +322,14 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
                 SubtitleParser.SubtitleFormat.SRT -> SubtitleParser.toSRT(outputEntries)
                 SubtitleParser.SubtitleFormat.LRC -> SubtitleParser.toLRC(outputEntries)
                 SubtitleParser.SubtitleFormat.TXT -> SubtitleParser.toTXT(outputEntries)
+                SubtitleParser.SubtitleFormat.VTT -> {
+                    val document = SubtitleParser.parseDocument(
+                        FileUtils.readUri(this, sourceUri, charset),
+                        fileName,
+                        SubtitleParser.SubtitleFormat.VTT
+                    )
+                    SubtitleParser.toVTT(outputEntries, document.header, document.footer)
+                }
                 else -> throw IllegalStateException("不支持的字幕格式")
             }
             contentResolver.openOutputStream(sourceUri, "wt")?.use {

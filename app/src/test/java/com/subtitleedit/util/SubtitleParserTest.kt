@@ -53,6 +53,16 @@ class SubtitleParserTest {
         assertEquals(SubtitleParser.SubtitleFormat.UNKNOWN, SubtitleParser.detectFormat("   \n  "))
     }
 
+    @Test
+    fun detectFormat_vttUsesContentEvenWithWrongExtension() {
+        val content = "WEBVTT\n\n00:00.000 --> 00:01.000\nHello"
+        assertEquals(
+            SubtitleParser.SubtitleFormat.VTT,
+            SubtitleParser.detectFormat(content, "wrong.srt")
+        )
+        assertEquals(SubtitleParser.SubtitleFormat.VTT, SubtitleParser.detectFormat("WEBVTT\n", "empty.vtt"))
+    }
+
     // ==================== parseSRT ====================
 
     @Test
@@ -119,6 +129,14 @@ class SubtitleParserTest {
         assertEquals(2000L, entries[0].endTime)
     }
 
+    @Test
+    fun parseSRT_acceptsMissingNumbersAndCommonBrokenArrow() {
+        val content = "00:00:01,000 —> 00:00:02,000\nA\n00:00:03,000 -> 00:00:04,000\nB"
+        val entries = SubtitleParser.parseSRT(content)
+        assertEquals(2, entries.size)
+        assertEquals(listOf("A", "B"), entries.map { it.text })
+    }
+
     // ==================== parseLRC ====================
 
     @Test
@@ -171,6 +189,151 @@ class SubtitleParserTest {
     fun parseLRC_assignsSequentialIndices() {
         val entries = SubtitleParser.parseLRC("[00:01.00]A\n[00:02.00]B\n[00:03.00]C")
         assertEquals(listOf(1, 2, 3), entries.map { it.index })
+    }
+
+    @Test
+    fun parseLRC_supportsMultipleTagsAndOffset() {
+        val document = SubtitleParser.parseDocument(
+            "[ti:Title]\n[offset:500]\n[00:01.00][00:02.00]Same\n[00:03.00]Next",
+            "song.lrc"
+        )
+        assertEquals(3, document.entries.size)
+        assertEquals(listOf(1500L, 2500L, 3500L), document.entries.map { it.startTime })
+        assertEquals("[ti:Title]", document.header)
+        assertEquals(listOf("Same", "Same", "Next"), document.entries.map { it.text })
+    }
+
+    // ==================== parseVTT / toVTT ====================
+
+    @Test
+    fun parseVTT_preservesHeaderIdentifierAndSettings() {
+        val content = """
+            WEBVTT - Example
+
+            STYLE
+            ::cue(.red) { color: red; }
+
+            intro
+            00:01.000 --> 00:03.250 line:90% align:start
+            <c.red>Hello</c>
+            World
+        """.trimIndent()
+
+        val document = SubtitleParser.parseDocument(content, "sample.vtt")
+        assertEquals(SubtitleParser.SubtitleFormat.VTT, document.format)
+        assertTrue(document.header.contains("STYLE"))
+        assertEquals(1, document.entries.size)
+        assertEquals(1000L, document.entries[0].startTime)
+        assertEquals(3250L, document.entries[0].endTime)
+        assertEquals("intro", document.entries[0].cueIdentifier)
+        assertEquals("line:90% align:start", document.entries[0].cueSettings)
+        assertEquals("<c.red>Hello</c>\nWorld", document.entries[0].text)
+    }
+
+    @Test
+    fun vttRoundTrip_preservesCueData() {
+        val original = """
+            WEBVTT
+
+            cue-1
+            00:00:01.000 --> 00:00:02.500 position:50%
+            Hello
+        """.trimIndent()
+        val document = SubtitleParser.parseDocument(original, "sample.vtt")
+        val reparsed = SubtitleParser.parseDocument(SubtitleParser.serialize(document), "sample.vtt")
+        assertEquals(1, reparsed.entries.size)
+        assertEquals(1000L, reparsed.entries[0].startTime)
+        assertEquals(2500L, reparsed.entries[0].endTime)
+        assertEquals("cue-1", reparsed.entries[0].cueIdentifier)
+        assertEquals("position:50%", reparsed.entries[0].cueSettings)
+        assertEquals("Hello", reparsed.entries[0].text)
+    }
+
+    @Test
+    fun parseVTT_preservesBlocksAfterCuesInFooter() {
+        val content = """
+            WEBVTT
+
+            00:00.000 --> 00:01.000
+            First
+
+            NOTE trailing note
+            remains outside cues
+
+            REGION
+            id:bottom
+            width:80%
+        """.trimIndent()
+
+        val document = SubtitleParser.parseDocument(content, "sample.vtt")
+        assertEquals(1, document.entries.size)
+        assertTrue(document.footer.contains("NOTE trailing note"))
+        assertTrue(document.footer.contains("REGION"))
+
+        val reparsed = SubtitleParser.parseDocument(SubtitleParser.serialize(document), "sample.vtt")
+        assertEquals("First", reparsed.entries.single().text)
+        assertTrue(reparsed.footer.contains("remains outside cues"))
+        assertTrue(reparsed.footer.contains("id:bottom"))
+    }
+
+    @Test
+    fun parseVTT_appliesAndConsumesXTimestampMap() {
+        val content = """
+            WEBVTT
+            X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000
+
+            00:01.000 --> 00:02.500
+            Shifted
+        """.trimIndent()
+
+        val document = SubtitleParser.parseDocument(content, "segment.vtt")
+        assertEquals(11_000L, document.entries.single().startTime)
+        assertEquals(12_500L, document.entries.single().endTime)
+        assertFalse(document.header.contains("X-TIMESTAMP-MAP", ignoreCase = true))
+
+        val serialized = SubtitleParser.serialize(document)
+        assertFalse(serialized.contains("X-TIMESTAMP-MAP", ignoreCase = true))
+        val reparsed = SubtitleParser.parseDocument(serialized, "segment.vtt")
+        assertEquals(11_000L, reparsed.entries.single().startTime)
+    }
+
+    @Test
+    fun parseVTT_supportsMultipleXTimestampMaps() {
+        val content = """
+            WEBVTT
+
+            X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000
+
+            00:01.000 --> 00:02.000
+            First
+
+            X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:1800000
+
+            00:01.000 --> 00:02.000
+            Second
+        """.trimIndent()
+
+        val document = SubtitleParser.parseDocument(content, "segments.vtt")
+        assertEquals(listOf(11_000L, 21_000L), document.entries.map { it.startTime })
+    }
+
+    @Test
+    fun parseVTT_doesNotTreatPostCueNoteAsCueText() {
+        val content = """
+            WEBVTT
+
+            cue
+            00:00.000 --> 00:01.000 align:center
+            Text
+
+            NOTE ignored by cue parser
+            00:05.000 --> 00:06.000 is text inside the note
+        """.trimIndent()
+
+        val document = SubtitleParser.parseDocument(content, "note.vtt")
+        assertEquals(1, document.entries.size)
+        assertEquals("Text", document.entries.single().text)
+        assertTrue(document.footer.startsWith("NOTE ignored"))
     }
 
     // ==================== toSRT / toLRC / TXT ====================
@@ -307,6 +470,17 @@ class SubtitleParserTest {
             SubtitleParser.SubtitleFormat.SRT
         )
         assertTrue(srt.contains("00:00:01,000 --> 00:00:02,000"))
+    }
+
+    @Test
+    fun convertFormat_vttToSrt() {
+        val srt = SubtitleParser.convertFormat(
+            "WEBVTT\n\n00:01.000 --> 00:02.000\nHello",
+            SubtitleParser.SubtitleFormat.VTT,
+            SubtitleParser.SubtitleFormat.SRT
+        )
+        assertTrue(srt.contains("00:00:01,000 --> 00:00:02,000"))
+        assertTrue(srt.contains("Hello"))
     }
 
     @Test

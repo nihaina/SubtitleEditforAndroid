@@ -118,6 +118,7 @@ object SubtitleOutputWriter {
         return when (extension.lowercase()) {
             "srt" -> "application/x-subrip"
             "lrc" -> "application/x-lrc"
+            "vtt" -> "text/vtt"
             "txt" -> "text/plain"
             else -> "application/octet-stream"
         }

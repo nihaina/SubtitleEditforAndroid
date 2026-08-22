@@ -640,32 +640,23 @@
             android:padding="8dp"
             tools:listitem="@layout/item_subtitle" />
 
-        <!-- 源视图编辑器（用于 TXT 文件或手动切换） -->
-        <com.subtitleedit.view.DraggableScrollView
-            android:id="@+id/svSourceView"
+        <!-- 源视图完整保存文档，仅为可见行挂载 EditText，避免全文布局压力。 -->
+        <FrameLayout
+            android:id="@+id/sourceViewContainer"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:fillViewport="true"
-            android:scrollbars="none"
-            android:overScrollMode="always"
             android:visibility="gone">
 
-            <EditText
+            <com.subtitleedit.view.SourceEditorView
                 android:id="@+id/etSourceView"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="top|start"
-                android:padding="12dp"
-                android:textSize="14sp"
-                android:fontFamily="monospace"
-                android:inputType="textMultiLine|textNoSuggestions"
+                android:layout_height="match_parent"
+                android:fillViewport="true"
+                android:overScrollMode="always"
                 android:scrollbars="none"
-                android:importantForAutofill="no"
-                android:background="@null"
-                android:isScrollContainer="false"
                 tools:text="Line 1\nLine 2\nLine 3" />
 
-        </com.subtitleedit.view.DraggableScrollView>
+        </FrameLayout>
 
     </LinearLayout>
 

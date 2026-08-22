@@ -269,6 +269,7 @@ class SubtitleAdapter(
         private val tvIndex: TextView = itemView.findViewById(R.id.tvIndex)
         private val tvStartTime: TextView = itemView.findViewById(R.id.tvStartTime)
         private val tvEndTime: TextView = itemView.findViewById(R.id.tvEndTime)
+        private val tvFormatMetadata: TextView = itemView.findViewById(R.id.tvFormatMetadata)
         private val tvSubtitleText: TextView = itemView.findViewById(R.id.tvSubtitleText)
         private val ivSelected: ImageView = itemView.findViewById(R.id.ivSelected)
         private val btnJumpToTime: ImageView = itemView.findViewById(R.id.btnJumpToTime)
@@ -301,6 +302,12 @@ class SubtitleAdapter(
             // 设置时间轴
             tvStartTime.text = TimeUtils.formatForInput(entry.startTime)
             tvEndTime.text = TimeUtils.formatForInput(entry.endTime)
+            val formatMetadata = buildList {
+                if (entry.cueIdentifier.isNotBlank()) add("ID: ${entry.cueIdentifier}")
+                if (entry.cueSettings.isNotBlank()) add(entry.cueSettings)
+            }.joinToString(" · ")
+            tvFormatMetadata.text = formatMetadata
+            tvFormatMetadata.visibility = if (formatMetadata.isBlank()) View.GONE else View.VISIBLE
 
             // 检查时间是否有效
             // 1. 开始时间大于等于结束时间 - 两个时间都标红
@@ -448,7 +455,9 @@ class SubtitleAdapter(
             return oldItem.index == newItem.index &&
                    oldItem.startTime == newItem.startTime &&
                    oldItem.endTime == newItem.endTime &&
-                   oldItem.text == newItem.text
+                   oldItem.text == newItem.text &&
+                   oldItem.cueIdentifier == newItem.cueIdentifier &&
+                   oldItem.cueSettings == newItem.cueSettings
         }
     }
 }

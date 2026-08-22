@@ -1,15 +1,11 @@
 package com.subtitleedit
 
-import android.animation.Animator
-import android.animation.AnimatorListenerAdapter
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
-import android.text.Editable
-import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuItem
@@ -19,9 +15,7 @@ import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
-import com.subtitleedit.view.DraggableScrollView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -60,7 +54,11 @@ import java.io.File
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 
@@ -114,6 +112,14 @@ class EditorActivity : AppCompatActivity() {
     private var sourceViewContent: String
         get() = stateModel.sourceViewContent
         set(value) { stateModel.sourceViewContent = value }
+
+    // 大文件切换时，避免 TextWatcher 在 setText/逐字编辑期间反复复制整份文本。
+    private var suppressSourceViewChanges = false
+    private var sourceViewHasPendingEdits = false
+    private var sourceViewTransitionJob: Job? = null
+    private var sourceViewPreviewJob: Job? = null
+    private var sourceViewEntryCount = 0
+    private var sourceViewEditGeneration = 0L
     
     // 切换视图前保存的滚动位置
     private var savedScrollPosition: Int
@@ -210,6 +216,7 @@ class EditorActivity : AppCompatActivity() {
         const val EXTRA_SUBTITLE_FILE_PATH = "extra_subtitle_file_path"
         private const val MENU_SELECT_ALL = 0x20001
         private const val MENU_SELECT_RANGE = 0x20002
+
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -396,17 +403,14 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun setupSourceView() {
-        binding.etSourceView.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                if (isSourceViewMode) {
-                    hasUnsavedChanges = true
-                    sourceViewContent = s?.toString() ?: ""
-                    scheduleSubtitlePreview()
-                }
+        binding.etSourceView.addOnDocumentChangedListener {
+            if (isSourceViewMode && !suppressSourceViewChanges) {
+                hasUnsavedChanges = true
+                sourceViewHasPendingEdits = true
+                sourceViewEditGeneration++
+                scheduleSourceViewPreview()
             }
-        })
+        }
     }
     
     private fun setupSearchController() {
@@ -415,11 +419,10 @@ class EditorActivity : AppCompatActivity() {
             binding = binding,
             subtitleAdapter = subtitleAdapter,
             isSourceViewMode = { isSourceViewMode },
+            ignoreSourceChanges = { suppressSourceViewChanges },
             entries = { subtitleEntries },
             replaceSourceContent = { content ->
-                binding.etSourceView.setText(content)
-                sourceViewContent = content
-                hasUnsavedChanges = true
+                replaceSourceViewContent(content)
             },
             applyEntryUpdates = { updates ->
                 updates.forEach { update ->
@@ -625,8 +628,35 @@ class EditorActivity : AppCompatActivity() {
             format = currentFormat,
             entries = subtitleEntries,
             sourceViewMode = isSourceViewMode,
-            sourceContent = sourceViewContent
+            sourceContent = if (isSourceViewMode) sourceViewContent else originalFileContent
         )
+    }
+
+    /**
+     * 源码视图也保持 mpv 预览，但不在每次键入时复制完整 Editable。
+     * 防抖后只有最新文本会进入后台转换/写入流程。
+     */
+    private fun scheduleSourceViewPreview() {
+        if (mediaType != EditorMediaType.VIDEO || !::subtitlePreviewController.isInitialized) return
+        sourceViewPreviewJob?.cancel()
+        val editGeneration = sourceViewEditGeneration
+        sourceViewPreviewJob = lifecycleScope.launch {
+            kotlinx.coroutines.delay(350L)
+            if (
+                !isSourceViewMode ||
+                suppressSourceViewChanges ||
+                editGeneration != sourceViewEditGeneration
+            ) {
+                return@launch
+            }
+            val sourceSnapshot = snapshotSourceViewContentIfNeeded()
+            subtitlePreviewController.schedule(
+                format = currentFormat,
+                entries = emptyList(),
+                sourceViewMode = true,
+                sourceContent = sourceSnapshot
+            )
+        }
     }
 
     private fun setupAiControllers() {
@@ -680,13 +710,13 @@ class EditorActivity : AppCompatActivity() {
         setDocumentTitle(stateModel.documentTitle)
         if (isSourceViewMode) {
             binding.rvSubtitles.visibility = View.GONE
-            binding.svSourceView.visibility = View.VISIBLE
+            binding.sourceViewContainer.visibility = View.VISIBLE
             val wasUnsaved = hasUnsavedChanges
-            binding.etSourceView.setText(sourceViewContent)
+            configureSourceViewEditor(sourceViewContent)
             hasUnsavedChanges = wasUnsaved
-            binding.svSourceView.post { binding.svSourceView.scrollTo(0, savedScrollPosition) }
+            binding.etSourceView.post { binding.etSourceView.scrollTo(0, savedScrollPosition) }
         } else {
-            binding.svSourceView.visibility = View.GONE
+            binding.sourceViewContainer.visibility = View.GONE
             binding.rvSubtitles.visibility = View.VISIBLE
             submitSubtitleList(
                 refreshAll = true,
@@ -785,7 +815,8 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun parseContent(content: String, fileName: String? = null) {
-        currentFormat = SubtitleParser.detectFormat(content, fileName)
+        val document = SubtitleParser.parseDocument(content, fileName)
+        currentFormat = document.format
         
         // 始终保存原始文件内容
         originalFileContent = content
@@ -794,7 +825,7 @@ class EditorActivity : AppCompatActivity() {
             sourceViewContent = originalFileContent
             enterSourceViewMode()
         } else {
-            replaceSubtitleEntries(SubtitleParser.parse(content, currentFormat))
+            replaceSubtitleEntries(document.entries)
             exitSourceViewMode()
         }
         
@@ -811,89 +842,85 @@ class EditorActivity : AppCompatActivity() {
     }
     
     /**
-     * 进入源视图模式（带动画，保持滚动位置）
+     * 进入源码视图。
+     *
+     * 大型字幕不使用淡入淡出：动画期间 RecyclerView、TextView 布局和 mpv 预览会短暂
+     * 并存，正是日志中 native heap 峰值与 ANR 的高风险窗口。
      */
-    private fun enterSourceViewMode() {
+    private fun enterSourceViewMode(onFinished: (() -> Unit)? = null) {
         isSourceViewMode = true
-        if (::searchController.isInitialized) searchController.onEditorModeChanged()
+        sourceViewHasPendingEdits = false
+        sourceViewEditGeneration++
+        if (::searchController.isInitialized) searchController.clearSourceWorkForTransition()
         
         // 保存 RecyclerView 的滚动位置
         val layoutManager = binding.rvSubtitles.layoutManager as LinearLayoutManager
         savedFirstVisibleItemPosition = layoutManager.findFirstVisibleItemPosition()
         val firstView = layoutManager.findViewByPosition(savedFirstVisibleItemPosition)
         savedScrollPosition = firstView?.top ?: 0
-        
-        // 设置源视图内容
-        binding.etSourceView.setText(sourceViewContent)
-        
-        // 淡出字幕列表，淡入源视图
-        binding.rvSubtitles.animate()
-            .alpha(0f)
-            .setDuration(150)
-            .setListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    binding.rvSubtitles.visibility = android.view.View.GONE
-                    binding.svSourceView.alpha = 0f
-                    binding.svSourceView.visibility = android.view.View.VISIBLE
-                    binding.svSourceView.animate()
-                        .alpha(1f)
-                        .setDuration(150)
-                        .setListener(object : AnimatorListenerAdapter() {
-                            override fun onAnimationEnd(animation: Animator) {
-                                // 恢复滚动位置 - 根据可见项计算滚动位置
-                                if (savedFirstVisibleItemPosition >= 0 && savedFirstVisibleItemPosition < subtitleEntries.size) {
-                                    // 估算滚动位置（每行约 80dp）
-                                    val estimatedScroll = savedFirstVisibleItemPosition * 80 - savedScrollPosition
-                                    binding.svSourceView.scrollTo(0, estimatedScroll.coerceAtLeast(0))
-                                }
-                            }
-                        })
-                }
-            })
+        sourceViewEntryCount = subtitleEntries.size
+
+        binding.rvSubtitles.visibility = View.GONE
+        binding.sourceViewContainer.visibility = View.GONE
+
+        configureSourceViewEditor(sourceViewContent)
+
+        binding.rvSubtitles.animate().cancel()
+        binding.sourceViewContainer.animate().cancel()
+        binding.rvSubtitles.alpha = 1f
+        binding.sourceViewContainer.alpha = 1f
+        binding.sourceViewContainer.visibility = View.VISIBLE
+        binding.etSourceView.post {
+            if (savedFirstVisibleItemPosition >= 0 &&
+                savedFirstVisibleItemPosition < sourceViewEntryCount
+            ) {
+                val estimatedScroll = savedFirstVisibleItemPosition * 80 - savedScrollPosition
+                binding.etSourceView.scrollTo(0, estimatedScroll.coerceAtLeast(0))
+            }
+            onFinished?.invoke()
+        }
         
         updateSourceViewMenuTitle()
     }
     
-    /**
-     * 退出源视图模式（带动画，保持滚动位置）
-     */
-    private fun exitSourceViewMode() {
+    /** 退出源码视图。源码 Editable 已由调用方先清空，避免它与列表同时存在。 */
+    private fun exitSourceViewMode(
+        sourceScrollPosition: Int? = null,
+        onFinished: (() -> Unit)? = null
+    ) {
         isSourceViewMode = false
-        if (::searchController.isInitialized) searchController.onEditorModeChanged()
+        if (::searchController.isInitialized) searchController.clearSourceWorkForTransition()
         
         // 保存 ScrollView 的滚动位置
-        savedScrollPosition = binding.svSourceView.scrollY
+        savedScrollPosition = sourceScrollPosition ?: binding.etSourceView.scrollY
         
         // 刷新字幕列表
-        submitSubtitleList(refreshAll = true, updateFormat = false, syncWaveform = false)
-        
-        // 淡出源视图，淡入字幕列表
-        binding.svSourceView.animate()
-            .alpha(0f)
-            .setDuration(150)
-            .setListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    binding.svSourceView.visibility = android.view.View.GONE
-                    binding.rvSubtitles.alpha = 0f
-                    binding.rvSubtitles.visibility = android.view.View.VISIBLE
-                    binding.rvSubtitles.animate()
-                        .alpha(1f)
-                        .setDuration(150)
-                        .setListener(object : AnimatorListenerAdapter() {
-                            override fun onAnimationEnd(animation: Animator) {
-                                // 恢复滚动位置 - 根据滚动位置计算可见项
-                                val layoutManager = binding.rvSubtitles.layoutManager as LinearLayoutManager
-                                if (subtitleEntries.isNotEmpty()) {
-                                    val estimatedPosition = savedScrollPosition / 80
-                                    layoutManager.scrollToPositionWithOffset(
-                                        estimatedPosition.coerceIn(0, subtitleEntries.lastIndex),
-                                        0
-                                    )
-                                }
-                            }
-                        })
-                }
-            })
+        submitSubtitleList(
+            refreshAll = true,
+            updateFormat = false,
+            // 源视图解析会创建新的 SubtitleEntry 对象；波形必须换绑到这批新对象，
+            // 否则拖拽会继续修改切换前的旧条目，甚至把旧数据写回列表。
+            syncWaveform = true,
+            schedulePreview = false
+        )
+
+        binding.rvSubtitles.animate().cancel()
+        binding.sourceViewContainer.animate().cancel()
+        binding.sourceViewContainer.alpha = 1f
+        binding.sourceViewContainer.visibility = View.GONE
+        binding.rvSubtitles.alpha = 1f
+        binding.rvSubtitles.visibility = View.VISIBLE
+        binding.rvSubtitles.post {
+            val layoutManager = binding.rvSubtitles.layoutManager as LinearLayoutManager
+            if (subtitleEntries.isNotEmpty()) {
+                val estimatedPosition = savedScrollPosition / 80
+                layoutManager.scrollToPositionWithOffset(
+                    estimatedPosition.coerceIn(0, subtitleEntries.lastIndex),
+                    0
+                )
+            }
+            onFinished?.invoke()
+        }
         
         updateSourceViewMenuTitle()
     }
@@ -902,6 +929,10 @@ class EditorActivity : AppCompatActivity() {
      * 切换源视图模式
      */
     private fun toggleSourceView() {
+        if (sourceViewTransitionJob?.isActive == true) {
+            showShortToast("正在切换视图，请稍候")
+            return
+        }
         if (currentFormat.isSourceOnly) {
             showShortToast("${getFormatDisplayName(currentFormat)} 文件使用源码视图编辑")
             return
@@ -929,7 +960,7 @@ class EditorActivity : AppCompatActivity() {
                     saveFile(SaveContinuation.ENTER_SOURCE_VIEW)
                 }
                 .setNeutralButton("直接切换（丢弃更改）") { _, _ ->
-                    reloadAndEnterSourceView()
+                    reloadAndEnterSourceView(forceDiskReload = true)
                 }
                 .setNegativeButton("取消", null)
                 .show()
@@ -941,45 +972,120 @@ class EditorActivity : AppCompatActivity() {
     /**
      * 重新从磁盘读取原始文件后进入源视图
      */
-    private fun reloadAndEnterSourceView() {
-        val file = getCurrentSubtitleFile()
+    private fun reloadAndEnterSourceView(forceDiskReload: Boolean = false) {
+        sourceViewTransitionJob?.cancel()
+        sourceViewTransitionJob = lifecycleScope.launch {
+            try {
+                sourceViewPreviewJob?.cancelAndJoin()
+                val file = getCurrentSubtitleFile()
+                val freshContent = when {
+                    !forceDiskReload && originalFileContent.isNotEmpty() -> originalFileContent
+                    file != null && file.exists() -> withContext(Dispatchers.IO) {
+                        FileUtils.readFile(file, currentCharset)
+                    }
+                    else -> withContext(Dispatchers.Default) {
+                        serializeEntriesForFormat(currentFormat)
+                    }
+                }
 
-        if (file != null && file.exists()) {
-            // 有文件：重新读取磁盘内容，保证与已保存状态一致
-            val freshContent = readFileOrNull(file, "读取文件失败") ?: return
-            originalFileContent = freshContent
-            sourceViewContent = freshContent
-        } else {
-            // 无文件（从剪贴板/URI 打开，或新建未保存）：退而序列化当前列表
-            sourceViewContent = serializeEntriesForFormat(currentFormat)
-            originalFileContent = sourceViewContent
-            showShortToast("文件尚未保存，已从当前列表生成源视图内容")
+                originalFileContent = freshContent
+                sourceViewContent = freshContent
+                if (file == null || !file.exists()) {
+                    showShortToast("文件尚未保存，已从当前列表生成源视图内容")
+                }
+                enterSourceViewMode {
+                    sourceViewTransitionJob = null
+                    // 用完整源码内容重新建立 mpv 字幕轨。
+                    scheduleSubtitlePreview()
+                    showShortToast("已切换到源视图")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                sourceViewTransitionJob = null
+                showShortToast("读取文件失败：${e.message}")
+            }
         }
-
-        enterSourceViewMode()
-        showShortToast("已切换到源视图")
     }
 
     /**
      * 源视图 → 列表视图：解析源视图中当前编辑的内容
      */
     private fun doExitSourceView() {
-        val editedContent = binding.etSourceView.text.toString()
-        try {
-            replaceSubtitleEntries(SubtitleParser.parse(editedContent, currentFormat))
-            // 将源视图内容同步回 originalFileContent，使再次切换时内容一致
-            originalFileContent = editedContent
-            sourceViewContent   = editedContent
-            // 标记有未保存更改（用户在源视图里编辑了内容）
-            if (isSourceContentModifiedComparedToFile(editedContent)) {
-                hasUnsavedChanges = true
+        if (sourceViewTransitionJob?.isActive == true) return
+        val sourceScrollPosition = binding.etSourceView.scrollY
+        val editedContent = snapshotSourceViewContentIfNeeded()
+        val changedFromSavedContent = editedContent != originalFileContent
+        // 先清空 Editable，再在后台构建条目列表，避免大文件切换时两份完整文本并存。
+        binding.etSourceView.setDocumentEnabled(false)
+        setSourceViewEditorText("")
+        showShortToast("正在解析字幕…")
+        sourceViewTransitionJob = lifecycleScope.launch {
+            try {
+                sourceViewPreviewJob?.cancelAndJoin()
+                val document = withContext(Dispatchers.Default) {
+                    SubtitleParser.parseDocument(editedContent, format = currentFormat)
+                }
+                replaceSubtitleEntries(document.entries)
+                originalFileContent = editedContent
+                sourceViewContent = editedContent
+                if (changedFromSavedContent) {
+                    hasUnsavedChanges = true
+                }
+                exitSourceViewMode(sourceScrollPosition) {
+                    binding.etSourceView.setDocumentEnabled(true)
+                    sourceViewTransitionJob = null
+                    updateFormatInfo()
+                    // 等源码 Editable、解析临时对象和列表提交完成一个帧周期后，
+                    // 再重建 mpv 字幕轨，避免切换瞬间额外复制所有条目。
+                    sourceViewPreviewJob = lifecycleScope.launch {
+                        kotlinx.coroutines.delay(350L)
+                        if (!isSourceViewMode) scheduleSubtitlePreview()
+                    }
+                    showShortToast("已切换到列表视图")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                configureSourceViewEditor(editedContent)
+                binding.etSourceView.setDocumentEnabled(true)
+                sourceViewTransitionJob = null
+                showShortToast("解析失败：${e.message}")
             }
-            exitSourceViewMode()
-            updateFormatInfo()
-            showShortToast("已切换到列表视图")
-        } catch (e: Exception) {
-            showShortToast("解析失败：${e.message}")
         }
+    }
+
+    private fun setSourceViewEditorText(content: String) {
+        suppressSourceViewChanges = true
+        try {
+            binding.etSourceView.setDocumentText(content)
+        } finally {
+            suppressSourceViewChanges = false
+        }
+    }
+
+    private fun configureSourceViewEditor(content: String) {
+        setSourceViewEditorText(content)
+        binding.etSourceView.setDocumentEnabled(true)
+    }
+
+    /** 搜索替换直接重写完整源码内容。 */
+    private fun replaceSourceViewContent(content: String) {
+        setSourceViewEditorText(content)
+        hasUnsavedChanges = true
+        sourceViewHasPendingEdits = true
+        sourceViewEditGeneration++
+        scheduleSourceViewPreview()
+    }
+
+    private fun snapshotSourceViewContentIfNeeded(): String {
+        if (!isSourceViewMode || !sourceViewHasPendingEdits) return sourceViewContent
+        val visibleContent = binding.etSourceView.getDocumentText()
+        val snapshot = visibleContent
+        sourceViewContent = snapshot
+        // originalFileContent 始终保留保存时的基线，用于准确判断“编辑后又恢复原文”的情况。
+        sourceViewHasPendingEdits = false
+        return snapshot
     }
 
     /**
@@ -1016,6 +1122,9 @@ class EditorActivity : AppCompatActivity() {
         val hasClipboard = clipboardTexts.isNotEmpty()
         
         val regularActions = mutableListOf<Pair<String, () -> Unit>>()
+        if (currentFormat == SubtitleParser.SubtitleFormat.VTT) {
+            regularActions.add("WebVTT Cue 属性" to { showWebVttCueDialog(position) })
+        }
         regularActions.add("时间偏移" to { showOffsetDialog(position) })
         if (hasClipboard) {
             regularActions.add("向前粘贴 (${clipboardTexts.size}项)" to {
@@ -1356,6 +1465,69 @@ class EditorActivity : AppCompatActivity() {
             .setNegativeButton("取消", null)
             .show()
     }
+
+    /** Subtitle Edit 将 cue identifier/settings 作为 WebVTT 的格式字段单独编辑。 */
+    private fun showWebVttCueDialog(position: Int) {
+        if (!ensureListMode() || currentFormat != SubtitleParser.SubtitleFormat.VTT) return
+        val entry = subtitleEntries.getOrNull(position) ?: return
+        val layout = createDialogInputContainer()
+        val identifierInput = EditText(this).apply {
+            hint = "Cue identifier（可选）"
+            setText(entry.cueIdentifier)
+            isSingleLine = true
+        }
+        val settingsInput = EditText(this).apply {
+            hint = "例如：line:90% position:50% align:start"
+            setText(entry.cueSettings)
+            isSingleLine = true
+        }
+        layout.addView(TextView(this).apply { text = "Cue identifier" })
+        layout.addView(identifierInput)
+        layout.addView(TextView(this).apply {
+            text = "Cue settings（line / position / size / align / vertical / region）"
+        })
+        layout.addView(settingsInput)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("WebVTT Cue 属性")
+            .setView(layout)
+            .setPositiveButton("确定", null)
+            .setNegativeButton("取消", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val identifier = identifierInput.text.toString().trim()
+                val settings = settingsInput.text.toString().trim()
+                val error = validateWebVttCueProperties(identifier, settings)
+                if (error != null) {
+                    showShortToast(error)
+                    return@setOnClickListener
+                }
+                entry.cueIdentifier = identifier
+                entry.cueSettings = settings
+                onEntryUpdated(position, "WebVTT Cue 属性已更新")
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun validateWebVttCueProperties(identifier: String, settings: String): String? {
+        if (identifier.contains('\n') || identifier.contains("-->")) {
+            return "Cue identifier 不能包含换行或 -->"
+        }
+        if (settings.contains('\n') || settings.contains("-->")) {
+            return "Cue settings 不能包含换行或 -->"
+        }
+        val allowedKeys = setOf("vertical", "line", "position", "size", "align", "region")
+        val invalid = settings.split(Regex("\\s+"))
+            .filter { it.isNotBlank() }
+            .firstOrNull { token ->
+                val separator = token.indexOf(':')
+                separator <= 0 || token.substring(0, separator).lowercase() !in allowedKeys
+            }
+        return invalid?.let { "无法识别的 Cue setting：$it" }
+    }
     
     /**
      * 复制选中的字幕（支持多行）
@@ -1485,6 +1657,7 @@ class EditorActivity : AppCompatActivity() {
         updateFormat: Boolean = true,
         syncWaveform: Boolean = true,
         markChanged: Boolean = false,
+        schedulePreview: Boolean = true,
         afterSubmit: (() -> Unit)? = null
     ) {
         renumberEntries(force = refreshAll)
@@ -1504,7 +1677,7 @@ class EditorActivity : AppCompatActivity() {
         if (markChanged) markAsChanged()
         if (::playbackController.isInitialized) playbackController.invalidateHighlightCache()
         if (::searchController.isInitialized) searchController.onDocumentChanged()
-        scheduleSubtitlePreview()
+        if (schedulePreview) scheduleSubtitlePreview()
     }
     
     private fun newFile() {
@@ -1530,7 +1703,7 @@ class EditorActivity : AppCompatActivity() {
         currentFormat = SubtitleParser.SubtitleFormat.SRT
         isSourceViewMode = false
         binding.rvSubtitles.visibility = android.view.View.VISIBLE
-        binding.svSourceView.visibility = android.view.View.GONE
+        binding.sourceViewContainer.visibility = android.view.View.GONE
         submitSubtitleList(refreshAll = true, clearSelection = true, syncWaveform = true)
         setDocumentTitle(stateModel.documentTitle)
         currentFormatInfo = "格式：SRT | 条目数：${subtitleEntries.size}"
@@ -1978,7 +2151,7 @@ class EditorActivity : AppCompatActivity() {
     private fun updateFormatInfo() {
         val formatName = getFormatDisplayName(currentFormat)
         val countInfo = if (isSourceViewMode) {
-            val lines = sourceViewContent.lines().size
+            val lines = if (sourceViewContent.isEmpty()) 0 else sourceViewContent.count { it == '\n' } + 1
             "行数：$lines"
         } else {
             "条目数：${subtitleEntries.size}"
@@ -2021,17 +2194,33 @@ class EditorActivity : AppCompatActivity() {
     ): String {
         return when (format) {
             SubtitleParser.SubtitleFormat.SRT -> SubtitleParser.toSRT(entries)
-            SubtitleParser.SubtitleFormat.LRC -> SubtitleParser.toLRC(entries)
+            SubtitleParser.SubtitleFormat.LRC -> SubtitleParser.toLRC(
+                entries,
+                SubtitleParser.parseDocument(
+                    originalFileContent,
+                    format = SubtitleParser.SubtitleFormat.LRC
+                ).header
+            )
             SubtitleParser.SubtitleFormat.TXT -> SubtitleParser.toTXT(entries)
             SubtitleParser.SubtitleFormat.ASS,
-            SubtitleParser.SubtitleFormat.SSA,
-            SubtitleParser.SubtitleFormat.VTT -> sourceViewContent
+            SubtitleParser.SubtitleFormat.SSA -> sourceViewContent
+            SubtitleParser.SubtitleFormat.VTT -> {
+                val originalDocument = SubtitleParser.parseDocument(
+                    originalFileContent,
+                    format = SubtitleParser.SubtitleFormat.VTT
+                )
+                SubtitleParser.toVTT(
+                    entries,
+                    originalDocument.header.ifBlank { "WEBVTT" },
+                    originalDocument.footer
+                )
+            }
             else -> SubtitleParser.toSRT(entries)
         }
     }
 
     private fun getCurrentEditableContent(requireNonEmptyList: Boolean = false): String? {
-        if (isSourceViewMode) return sourceViewContent
+        if (isSourceViewMode) return snapshotSourceViewContentIfNeeded()
         if (requireNonEmptyList && subtitleEntries.isEmpty()) {
             showShortToast("没有内容可保存")
             return null
@@ -2120,11 +2309,6 @@ class EditorActivity : AppCompatActivity() {
         return if (mediaType.hasPlayableMedia) subtitleFile else currentFile
     }
 
-    private fun isSourceContentModifiedComparedToFile(editedContent: String): Boolean {
-        val file = getCurrentSubtitleFile() ?: return true
-        return editedContent != FileUtils.readFile(file, currentCharset)
-    }
-
     private fun readFileOrNull(file: File, failurePrefix: String): String? {
         return try {
             FileUtils.readFile(file, currentCharset)
@@ -2143,6 +2327,8 @@ class EditorActivity : AppCompatActivity() {
         return try {
             val content = getCurrentEditableContent() ?: return false
             writeAction(content)
+            originalFileContent = content
+            if (isSourceViewMode) sourceViewContent = content
             hasUnsavedChanges = false
             showShortToast("保存成功")
             true
@@ -2191,6 +2377,11 @@ class EditorActivity : AppCompatActivity() {
     }
     
     override fun onStop() {
+        // 防抖预览尚未来得及执行时，旋转/切后台会销毁 Editable；在这里一次性提交当前
+        // 源码编辑，避免丢失未刷新的内容。
+        if (isSourceViewMode && sourceViewHasPendingEdits) {
+            snapshotSourceViewContentIfNeeded()
+        }
         if (::playbackController.isInitialized) {
             stateModel.playbackPositionMs = playbackController.currentPositionMs
             stateModel.playbackSpeed = playbackController.playbackSpeed
@@ -2199,7 +2390,7 @@ class EditorActivity : AppCompatActivity() {
         if (::subtitleAdapter.isInitialized) {
             stateModel.selectedIndices = subtitleAdapter.getSelectedPositions()
             if (isSourceViewMode) {
-                savedScrollPosition = binding.svSourceView.scrollY
+                savedScrollPosition = binding.etSourceView.scrollY
             } else {
                 val layoutManager = binding.rvSubtitles.layoutManager as? LinearLayoutManager
                 val position = layoutManager?.findFirstVisibleItemPosition() ?: -1
@@ -2213,6 +2404,8 @@ class EditorActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        sourceViewTransitionJob?.cancel()
+        sourceViewPreviewJob?.cancel()
         ttsController.release()
         if (::subtitlePreviewController.isInitialized) subtitlePreviewController.release()
         audioFilePreparer.release()
@@ -2377,7 +2570,7 @@ class EditorActivity : AppCompatActivity() {
         isSourceViewMode = false
         sourceViewContent = ""
         originalFileContent = ""
-        binding.svSourceView.visibility = View.GONE
+        binding.sourceViewContainer.visibility = View.GONE
         binding.rvSubtitles.visibility = View.VISIBLE
         submitSubtitleList(refreshAll = true, syncWaveform = false)
     }

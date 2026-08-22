@@ -1,16 +1,11 @@
 package com.subtitleedit.editor
 
 import android.content.Context
-import android.graphics.Typeface
 import android.text.Editable
-import android.text.Spannable
 import android.text.TextWatcher
-import android.text.style.BackgroundColorSpan
-import android.text.style.StyleSpan
 import android.view.KeyEvent
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
-import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import com.subtitleedit.R
 import com.subtitleedit.adapter.SubtitleAdapter
@@ -29,6 +24,7 @@ class EditorSearchController(
     private val binding: ActivityEditorBinding,
     private val subtitleAdapter: SubtitleAdapter,
     private val isSourceViewMode: () -> Boolean,
+    private val ignoreSourceChanges: () -> Boolean,
     private val entries: () -> List<SubtitleEntry>,
     private val replaceSourceContent: (String) -> Unit,
     private val applyEntryUpdates: (List<SearchReplaceOps.TextUpdate>) -> Unit,
@@ -36,12 +32,16 @@ class EditorSearchController(
     private val showMessage: (String) -> Unit
 ) {
     private val engine = SearchReplaceEngine()
-    private val sourceHighlightSpans = mutableListOf<Any>()
     private var listResultEntries: List<SubtitleEntry> = emptyList()
     private var matchCase = false
     private var wholeWord = false
     private var applyingSourceReplacement = false
     private var applyingEntryReplacement = false
+
+    private companion object {
+        // 单字符搜索可能命中数万处；只为有限数量的结果设置 Span，避免搜索本身耗尽内存。
+        const val MAX_SOURCE_HIGHLIGHT_SPANS = 250
+    }
 
     init {
         bindSearchBar()
@@ -82,6 +82,14 @@ class EditorSearchController(
             scrollToCurrent = false,
             retainCurrentListResult = true
         )
+    }
+
+    /** 在源码视图切换前丢弃搜索结果和高亮，避免旧 Spannable 继续保留大文本。 */
+    fun clearSourceWorkForTransition() {
+        applyingSourceReplacement = false
+        engine.clearResults()
+        clearSourceHighlights()
+        updateResultCount()
     }
 
     private fun bindSearchBar() {
@@ -141,17 +149,13 @@ class EditorSearchController(
     }
 
     private fun bindSourceChanges() {
-        binding.etSourceView.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
-
-            override fun afterTextChanged(s: Editable?) {
-                if (applyingSourceReplacement || !isSourceViewMode()) return
-                if (isSearchVisible() && engine.query.isNotEmpty()) {
-                    searchInSourceView(announce = false, scrollToCurrent = false)
-                }
+        binding.etSourceView.addOnDocumentChangedListener {
+            if (!applyingSourceReplacement && !ignoreSourceChanges() && isSourceViewMode() &&
+                isSearchVisible() && engine.query.isNotEmpty()
+            ) {
+                searchInSourceView(announce = false, scrollToCurrent = false)
             }
-        })
+        }
     }
 
     private fun replaceOne() {
@@ -163,7 +167,7 @@ class EditorSearchController(
     }
 
     private fun replaceOneInSourceView() {
-        val content = binding.etSourceView.text?.toString().orEmpty()
+        val content = binding.etSourceView.getDocumentText()
         val position = engine.currentResultPositionOrNull()
         val query = engine.query
         if (
@@ -240,7 +244,7 @@ class EditorSearchController(
 
     private fun replaceAllInSourceView(query: String) {
         val result = SearchReplaceOps.replaceAllInContent(
-            content = binding.etSourceView.text?.toString().orEmpty(),
+            content = binding.etSourceView.getDocumentText(),
             query = query,
             replacement = binding.etReplace.text?.toString().orEmpty(),
             matchCase = matchCase,
@@ -313,7 +317,7 @@ class EditorSearchController(
         announce: Boolean = true,
         scrollToCurrent: Boolean = true
     ) {
-        val content = binding.etSourceView.text?.toString().orEmpty()
+        val content = binding.etSourceView.getDocumentText()
         listResultEntries = emptyList()
         if (engine.query.isEmpty() || content.isEmpty()) {
             engine.clearResults()
@@ -385,36 +389,28 @@ class EditorSearchController(
 
     private fun highlightSourceResults(scrollToCurrent: Boolean) {
         clearSourceHighlights()
-        val editable = binding.etSourceView.text ?: return
         val query = engine.query
         if (query.isEmpty() || engine.results.isEmpty()) return
 
-        val normalColor = ContextCompat.getColor(context, R.color.inverse_primary)
-        engine.results.forEach { start ->
-            addSourceSpan(editable, BackgroundColorSpan(normalColor), start, start + query.length)
-            addSourceSpan(editable, StyleSpan(Typeface.BOLD), start, start + query.length)
+        val current = engine.currentResultPositionOrNull()
+        val positions = LinkedHashSet<Int>().apply {
+            addAll(engine.results.take(MAX_SOURCE_HIGHLIGHT_SPANS))
+            current?.let(::add)
         }
-        engine.currentResultPositionOrNull()?.let { start ->
-            addSourceSpan(
-                editable,
-                BackgroundColorSpan(ContextCompat.getColor(context, R.color.secondary)),
-                start,
-                start + query.length
-            )
-            if (scrollToCurrent) scrollSourceViewToOffset(start)
-        }
-    }
-
-    private fun addSourceSpan(editable: Editable, span: Any, start: Int, end: Int) {
-        if (start !in 0 until editable.length || end > editable.length) return
-        editable.setSpan(span, start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-        sourceHighlightSpans += span
+        binding.etSourceView.setSearchHighlights(
+            positions.map { start ->
+                com.subtitleedit.view.SourceEditorView.Highlight(
+                    start = start,
+                    end = (start + query.length).coerceAtMost(binding.etSourceView.getDocumentText().length),
+                    current = start == current
+                )
+            }
+        )
+        if (scrollToCurrent) current?.let(::scrollSourceViewToOffset)
     }
 
     private fun clearSourceHighlights() {
-        val editable = binding.etSourceView.text
-        sourceHighlightSpans.forEach { editable?.removeSpan(it) }
-        sourceHighlightSpans.clear()
+        binding.etSourceView.clearSearchHighlights()
     }
 
     private fun clearHighlights() {
@@ -423,13 +419,7 @@ class EditorSearchController(
     }
 
     private fun scrollSourceViewToOffset(offset: Int) {
-        binding.etSourceView.post {
-            val layout = binding.etSourceView.layout ?: return@post
-            val safeOffset = offset.coerceIn(0, binding.etSourceView.length())
-            val lineTop = layout.getLineTop(layout.getLineForOffset(safeOffset))
-            val targetY = (lineTop - binding.svSourceView.height / 3).coerceAtLeast(0)
-            binding.svSourceView.smoothScrollTo(0, targetY)
-        }
+        binding.etSourceView.scrollToDocumentOffset(offset)
     }
 
     private fun moveToPrevious() {

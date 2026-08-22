@@ -320,12 +320,12 @@
     <string name="activity_subtitle_format_editor_text_05">添加句末标点</string>
     <string name="activity_subtitle_format_editor_text_06">应用</string>
     <string name="activity_subtitle_format_select_text_01">选择要格式化的字幕文件</string>
-    <string name="activity_subtitle_format_select_text_02">支持 SRT、LRC 和 TXT；格式化完成后可预览并写回原文件。</string>
+    <string name="activity_subtitle_format_select_text_02">支持 SRT、LRC、TXT 和 VTT；格式化完成后可预览并写回原文件。</string>
     <string name="activity_subtitle_format_select_text_03">选择字幕文件</string>
     <string name="activity_subtitle_format_select_text_04">尚未选择文件</string>
     <string name="activity_subtitle_format_select_text_05">确定并编辑</string>
     <string name="activity_tools_text_01">字幕格式转换</string>
-    <string name="activity_tools_text_02">批量转换字幕格式（SRT/LRC）</string>
+    <string name="activity_tools_text_02">批量转换字幕格式（SRT/LRC/VTT）</string>
     <string name="activity_tools_contentdescription_01">进入</string>
     <string name="activity_tools_contentdescription_02">字幕格式化</string>
     <string name="activity_tools_text_03">格式化工具</string>

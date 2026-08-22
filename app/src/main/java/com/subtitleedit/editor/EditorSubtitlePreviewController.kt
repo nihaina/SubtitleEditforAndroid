@@ -19,7 +19,6 @@ internal class EditorSubtitlePreviewController(
 ) {
     private val sessionDir = File(cacheDir, "mpv-subtitles/${UUID.randomUUID()}")
     private var updateJob: Job? = null
-
     fun schedule(
         format: SubtitleParser.SubtitleFormat,
         entries: List<SubtitleEntry>,

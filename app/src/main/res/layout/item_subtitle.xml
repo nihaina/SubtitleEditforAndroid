@@ -79,6 +79,22 @@
                     tools:text="00:00:04,000" />
             </LinearLayout>
 
+            <!-- WebVTT cue identifier/settings；无属性时由适配器隐藏 -->
+            <TextView
+                android:id="@+id/tvFormatMetadata"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:fontFamily="monospace"
+                android:maxLines="1"
+                android:paddingHorizontal="4dp"
+                android:textColor="@color/on_surface"
+                android:textSize="11sp"
+                android:visibility="gone"
+                tools:text="ID: intro · line:90% align:start"
+                tools:visibility="visible" />
+
             <!-- 字幕文本 -->
             <TextView
                 android:id="@+id/tvSubtitleText"
