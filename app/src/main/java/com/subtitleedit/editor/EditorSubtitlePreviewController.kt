@@ -54,7 +54,11 @@ internal class EditorSubtitlePreviewController(
             format == SubtitleParser.SubtitleFormat.VTT
         val content = when {
             rawSourceFormat -> sourceContent
-            sourceViewMode -> SubtitleParser.toSRT(SubtitleParser.parse(sourceContent, format))
+            sourceViewMode -> if (entries.isNotEmpty() || sourceContent.isBlank()) {
+                SubtitleParser.toSRT(entries)
+            } else {
+                SubtitleParser.toSRT(SubtitleParser.parse(sourceContent, format))
+            }
             else -> SubtitleParser.toSRT(entries)
         }
         if (content.isBlank()) return null

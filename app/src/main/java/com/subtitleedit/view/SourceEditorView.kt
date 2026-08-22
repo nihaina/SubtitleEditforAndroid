@@ -117,7 +117,8 @@ class SourceEditorView @JvmOverloads constructor(
         documentChangedListeners += listener
     }
 
-    fun setDocumentText(value: String) {
+    fun setDocumentText(value: String, preserveScroll: Boolean = false) {
+        val previousScroll = if (preserveScroll) scrollY else 0
         removeCallbacks(windowRebindRunnable)
         windowRebindPosted = false
         commitWindowTextIfNeeded()
@@ -126,8 +127,13 @@ class SourceEditorView @JvmOverloads constructor(
         windowStartLine = 0
         windowEndLine = 0
         cursorDocumentOffset = 0
-        scrollTo(0, 0)
-        ensureWindowForViewport(0, force = true)
+        scrollTo(0, previousScroll.coerceAtLeast(0))
+        ensureWindowForViewport(previousScroll, force = true)
+        if (preserveScroll) {
+            post {
+                scrollTo(0, previousScroll.coerceIn(0, max(0, computeVerticalScrollRange() - height)))
+            }
+        }
         invalidate()
     }
 
