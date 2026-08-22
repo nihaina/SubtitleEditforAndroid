@@ -1,7 +1,7 @@
 {
-  "versionCode": 5,
-  "versionName": "1.1.5",
+  "versionCode": 6,
+  "versionName": "1.1.6",
   "downloadUrl": "https://github.com/nihaina/SubtitleEditforAndroid/releases/latest",
-  "releaseNotes": "添加新的语音转字幕方法，不使用vad打轴，极大提高识别准确度\n字幕内容搜索添加全词匹配和大小写区分\n适配SenseVoice的qnn模型，支持NPU加速（仅骁龙888以上处理器）\n文件缓存改用MD5匹配，建议更新后清理软件缓存\n波形图改用分块加载，显著提高加载速度\n修改视频编辑时的页面布局\n修复在编辑过程中新建字幕和打开字幕无法识别音视频\n修复解压缩文件时进度条的进度显示\n修复移动文件时速度过慢\nqnn运行库占用较大，要使用NPU模型需要单独安装app-qnn-arm64-v8a-debug.apk，和普通版可以相互覆盖安装",
+  "releaseNotes": "1.将SenseVoice设为默认模型\n2.VAD参数设置迁移至语音转字幕高级配置页面\n3.实验打轴功能添加合并语音段\n4.修复过大的字幕文件，切换至源视图时闪退的问题\n5.字幕编辑器里添加按时间合并字幕功能\n6.修复AI翻译deepseek平台无法翻译的问题\n7.AI翻译新增对new api的适配，现在可以自定义使用其他模型\n8.添加对WebVTT格式的支持",
   "forceUpdate": false
 }

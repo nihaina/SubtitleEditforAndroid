@@ -783,7 +783,7 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun isSpeechTokenTimestampMergeEnabled(): Boolean {
-        return prefs.getBoolean(KEY_STT_TOKEN_TIMESTAMP_MERGE_ENABLED, false)
+        return prefs.getBoolean(KEY_STT_TOKEN_TIMESTAMP_MERGE_ENABLED, true)
     }
 
     fun setSpeechTokenTimestampMergeEnabled(enabled: Boolean) {
