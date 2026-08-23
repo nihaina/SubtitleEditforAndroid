@@ -116,6 +116,14 @@
     <string name="activity_ai_settings_hint_03">源语言（留空自动检测）</string>
     <string name="activity_ai_settings_hint_04">目标语言</string>
     <string name="activity_ai_settings_hint_05">AI 提示词（可选）</string>
+    <string name="ai_api_key_show">显示 API Key</string>
+    <string name="ai_api_key_hide">隐藏 API Key</string>
+    <string name="ai_api_key_copy">复制 API Key</string>
+    <string name="ai_api_key_empty">请先填写 API Key</string>
+    <string name="ai_api_key_copied">API Key 已复制</string>
+    <string name="ai_api_key_auth_title">验证身份</string>
+    <string name="ai_api_key_auth_subtitle">查看或复制 API Key</string>
+    <string name="ai_api_key_auth_error">身份验证未完成</string>
     <string name="activity_auto_timestamp_text_01">自动检测音频中的语音段并生成带时间轴的字幕模板。生成的字幕内容为请输入文本，您可以在字幕编辑器中填写实际内容。</string>
     <string name="activity_auto_timestamp_text_02">音频/视频文件（可多选）</string>
     <string name="activity_auto_timestamp_text_03">选择文件（可多选）</string>

@@ -13,9 +13,17 @@ class SettingsManager private constructor(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences(
         PREFS_NAME, Context.MODE_PRIVATE
     )
+    private val credentialPrefs: SharedPreferences = context.getSharedPreferences(
+        CREDENTIAL_PREFS_NAME, Context.MODE_PRIVATE
+    )
+
+    init {
+        migrateAiApiKeys()
+    }
     
     companion object {
         private const val PREFS_NAME = "subtitle_edit_settings"
+        private const val CREDENTIAL_PREFS_NAME = "subtitle_edit_credentials"
         
         private const val KEY_DEFAULT_ENCODING = "default_encoding"
         private const val KEY_AI_PROVIDER = "ai_provider"
@@ -205,26 +213,15 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun getAiApiKey(provider: String): String {
-        val stored = prefs.getString(providerKey(KEY_AI_API_KEY, provider), null)
-            ?: if (provider == AiProviderConfig.SILICONFLOW) prefs.getString(KEY_AI_API_KEY, "") ?: "" else ""
-        val apiKey = AiApiKeyStore.decrypt(stored)
-        if (stored.isNotEmpty() && !AiApiKeyStore.isEncrypted(stored)) {
-            // Migrate keys written by older versions when they are read.
-            prefs.edit()
-                .putString(providerKey(KEY_AI_API_KEY, provider), AiApiKeyStore.encrypt(apiKey))
-                .remove(KEY_AI_API_KEY)
-                .apply()
-        } else if (provider == AiProviderConfig.SILICONFLOW && prefs.contains(KEY_AI_API_KEY)) {
-            // Remove any stale legacy global copy after the provider-scoped value exists.
-            prefs.edit().remove(KEY_AI_API_KEY).apply()
-        }
-        return apiKey
+        val stored = credentialPrefs.getString(providerKey(KEY_AI_API_KEY, provider), "").orEmpty()
+        return AiApiKeyStore.decrypt(stored)
     }
 
     fun setAiApiKey(provider: String, apiKey: String) {
-        prefs.edit()
+        credentialPrefs.edit()
             .putString(providerKey(KEY_AI_API_KEY, provider), AiApiKeyStore.encrypt(apiKey))
             .apply()
+        removeLegacyAiApiKey(provider)
     }
 
     /**
@@ -918,6 +915,43 @@ class SettingsManager private constructor(context: Context) {
 
     private fun providerKey(base: String, provider: String): String {
         return "${base}_$provider"
+    }
+
+    private fun migrateAiApiKeys() {
+        AiProviderConfig.providers.forEach { providerConfig ->
+            val provider = providerConfig.id
+            val scopedKey = providerKey(KEY_AI_API_KEY, provider)
+            val credentialValue = credentialPrefs.getString(scopedKey, null)
+            val legacyValue = prefs.getString(scopedKey, null)
+                ?: if (provider == AiProviderConfig.SILICONFLOW) {
+                    prefs.getString(KEY_AI_API_KEY, null)
+                } else {
+                    null
+                }
+
+            val valueToMigrate = when {
+                credentialValue != null && AiApiKeyStore.needsMigration(credentialValue) -> credentialValue
+                credentialValue == null -> legacyValue
+                else -> null
+            } ?: return@forEach
+
+            val apiKey = AiApiKeyStore.decrypt(valueToMigrate)
+            val migrated = runCatching {
+                credentialPrefs.edit()
+                    .putString(scopedKey, AiApiKeyStore.encrypt(apiKey))
+                    .commit()
+            }.getOrDefault(false)
+            if (migrated) removeLegacyAiApiKey(provider)
+        }
+    }
+
+    private fun removeLegacyAiApiKey(provider: String) {
+        prefs.edit()
+            .remove(providerKey(KEY_AI_API_KEY, provider))
+            .apply {
+                if (provider == AiProviderConfig.SILICONFLOW) remove(KEY_AI_API_KEY)
+            }
+            .apply()
     }
 
     private fun normalizeVadThreshold(threshold: Float): Float {

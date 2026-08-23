@@ -1,16 +1,26 @@
 package com.subtitleedit
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.os.Bundle
+import android.os.PersistableBundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.text.method.LinkMovementMethod
+import android.text.method.PasswordTransformationMethod
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
 import androidx.core.text.HtmlCompat
 import com.subtitleedit.databinding.ActivityAiSettingsBinding
+import com.subtitleedit.util.AiKeyAccessSession
 import com.subtitleedit.util.AiProviderConfig
+import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SettingsManager
 
 class AiSettingsActivity : AppCompatActivity() {
@@ -19,6 +29,36 @@ class AiSettingsActivity : AppCompatActivity() {
     private lateinit var settingsManager: SettingsManager
     private var selectedProvider: String = AiProviderConfig.SILICONFLOW
     private var suppressTextSave = false
+    private var isApiKeyVisible = false
+    private var authenticationInProgress = false
+    private var pendingSensitiveAction: (() -> Unit)? = null
+
+    private val biometricPrompt by lazy {
+        BiometricPrompt(
+            this,
+            ContextCompat.getMainExecutor(this),
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    super.onAuthenticationSucceeded(result)
+                    authenticationInProgress = false
+                    AiKeyAccessSession.authorize()
+                    pendingSensitiveAction.also { pendingSensitiveAction = null }?.invoke()
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    super.onAuthenticationError(errorCode, errString)
+                    authenticationInProgress = false
+                    pendingSensitiveAction = null
+                    if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
+                        errorCode != BiometricPrompt.ERROR_CANCELED &&
+                        errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON
+                    ) {
+                        showToast("${getString(R.string.ai_api_key_auth_error)}：$errString")
+                    }
+                }
+            }
+        )
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,9 +73,16 @@ class AiSettingsActivity : AppCompatActivity() {
         supportActionBar?.title = "AI 翻译设置"
         binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
 
+        setupApiKeyActions()
         setupProviderSpinner()
         loadSettings()
         setupSave()
+    }
+
+    override fun onStop() {
+        setApiKeyVisible(false)
+        AiKeyAccessSession.reset()
+        super.onStop()
     }
 
     private fun setupProviderSpinner() {
@@ -77,6 +124,7 @@ class AiSettingsActivity : AppCompatActivity() {
         )
         binding.tvProviderWebsite.movementMethod = LinkMovementMethod.getInstance()
         binding.etApiKey.setText(settingsManager.getAiApiKey(provider))
+        setApiKeyVisible(false)
         binding.tilApiBaseUrl.visibility = if (config.customEndpoint) View.VISIBLE else View.GONE
         binding.etApiBaseUrl.setText(if (config.customEndpoint) settingsManager.getAiBaseUrl(provider) else "")
         val savedModel = settingsManager.getAiModel(provider)
@@ -97,6 +145,97 @@ class AiSettingsActivity : AppCompatActivity() {
             binding.etModel.setText(savedModel)
         }
         suppressTextSave = false
+    }
+
+    private fun setupApiKeyActions() {
+        binding.tilApiKey.setEndIconOnClickListener {
+            if (isApiKeyVisible) {
+                setApiKeyVisible(false)
+            } else {
+                requestSensitiveAccess { setApiKeyVisible(true) }
+            }
+        }
+        binding.btnCopyApiKey.setOnClickListener {
+            if (binding.etApiKey.text.isNullOrEmpty()) {
+                showToast(getString(R.string.ai_api_key_empty))
+                return@setOnClickListener
+            }
+            requestSensitiveAccess(::copyApiKey)
+        }
+    }
+
+    private fun setApiKeyVisible(visible: Boolean) {
+        isApiKeyVisible = visible
+        val selection = binding.etApiKey.selectionStart.coerceAtLeast(0)
+        binding.etApiKey.transformationMethod = if (visible) {
+            null
+        } else {
+            PasswordTransformationMethod.getInstance()
+        }
+        binding.tilApiKey.setEndIconDrawable(
+            if (visible) R.drawable.ic_visibility_off else R.drawable.ic_visibility
+        )
+        binding.tilApiKey.setEndIconContentDescription(
+            if (visible) R.string.ai_api_key_hide else R.string.ai_api_key_show
+        )
+        binding.etApiKey.setSelection(selection.coerceAtMost(binding.etApiKey.length()))
+    }
+
+    private fun requestSensitiveAccess(action: () -> Unit) {
+        if (AiKeyAccessSession.isAuthorized) {
+            action()
+            return
+        }
+        if (authenticationInProgress) return
+
+        authenticationInProgress = true
+        pendingSensitiveAction = action
+        runCatching {
+            biometricPrompt.authenticate(createPromptInfo())
+        }.onFailure { error ->
+            authenticationInProgress = false
+            pendingSensitiveAction = null
+            showToast(
+                error.message?.takeIf { it.isNotBlank() }
+                    ?: getString(R.string.ai_api_key_auth_error)
+            )
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun createPromptInfo(): BiometricPrompt.PromptInfo {
+        val builder = BiometricPrompt.PromptInfo.Builder()
+            .setTitle(getString(R.string.ai_api_key_auth_title))
+            .setSubtitle(getString(R.string.ai_api_key_auth_subtitle))
+            .setConfirmationRequired(false)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            builder.setAllowedAuthenticators(
+                BiometricManager.Authenticators.BIOMETRIC_WEAK or
+                    BiometricManager.Authenticators.DEVICE_CREDENTIAL
+            )
+        } else {
+            builder.setDeviceCredentialAllowed(true)
+        }
+        return builder.build()
+    }
+
+    private fun copyApiKey() {
+        val apiKey = binding.etApiKey.text?.toString().orEmpty()
+        if (apiKey.isEmpty()) {
+            showToast(getString(R.string.ai_api_key_empty))
+            return
+        }
+        val clip = ClipData.newPlainText("API Key", apiKey).apply {
+            description.extras = PersistableBundle().apply {
+                putBoolean("android.content.extra.IS_SENSITIVE", true)
+            }
+        }
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
+        showToast(getString(R.string.ai_api_key_copied))
+    }
+
+    private fun showToast(message: String) {
+        OverwritingToast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
     private fun saveCurrentProviderFields() {
