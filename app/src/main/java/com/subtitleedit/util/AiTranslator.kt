@@ -66,6 +66,12 @@ class AiTranslator(
             get() = error == null
     }
 
+    class TranslationCancelledException(
+        val translations: List<String>,
+        val continuationContext: String,
+        message: String?
+    ) : CancellationException(message ?: "翻译已取消")
+
     suspend fun translateTexts(
         texts: List<String>,
         progressCallback: ((Int, Int) -> Unit)? = null,
@@ -94,7 +100,11 @@ class AiTranslator(
 
             TranslationRunResult(translatedTexts, previousContext)
         } catch (e: CancellationException) {
-            throw e
+            throw TranslationCancelledException(
+                translatedTexts.toList(),
+                previousContext,
+                e.message
+            )
         } catch (e: Exception) {
             TranslationRunResult(translatedTexts, previousContext, e)
         }

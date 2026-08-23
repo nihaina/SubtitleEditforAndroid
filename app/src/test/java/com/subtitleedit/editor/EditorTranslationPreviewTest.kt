@@ -1,6 +1,7 @@
 package com.subtitleedit.editor
 
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.util.AiTranslator
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -30,5 +31,17 @@ class EditorTranslationPreviewTest {
         val items = buildTranslationPreviewItems(selectedEntries, listOf("一", "二", "三"))
 
         assertTrue(items.all { it.apply })
+    }
+
+    @Test
+    fun translationCancellation_carriesCompletedBatchState() {
+        val exception = AiTranslator.TranslationCancelledException(
+            translations = listOf("一", "二"),
+            continuationContext = "上一批上下文",
+            message = "用户取消翻译"
+        )
+
+        assertEquals(listOf("一", "二"), exception.translations)
+        assertEquals("上一批上下文", exception.continuationContext)
     }
 }

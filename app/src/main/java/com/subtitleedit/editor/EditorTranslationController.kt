@@ -27,6 +27,7 @@ internal class EditorTranslationController(
     private var translateJob: Job? = null
     private var isTranslating = false
     private var translateCancelled = false
+    private var userCancelledTranslation = false
     private var activeAiTranslator: AiTranslator? = null
 
     private data class TranslationSession(
@@ -88,6 +89,7 @@ internal class EditorTranslationController(
 
     fun release() {
         if (isTranslating) {
+            userCancelledTranslation = false
             translateCancelled = true
             activeAiTranslator?.cancel()
             translateJob?.cancel()
@@ -117,6 +119,7 @@ internal class EditorTranslationController(
             .setTitle("正在翻译")
             .setMessage("正在翻译第 $completedBeforeRun/$totalCount 条...")
             .setNegativeButton("取消") { _, _ ->
+                userCancelledTranslation = true
                 translateCancelled = true
                 activeAiTranslator?.cancel()
                 translateJob?.cancel(CancellationException("用户取消翻译"))
@@ -126,6 +129,7 @@ internal class EditorTranslationController(
         progressDialog.show()
 
         translateCancelled = false
+        userCancelledTranslation = false
         isTranslating = true
         activeAiTranslator = session.translator
         val textsToTranslate = session.selectedEntries
@@ -149,8 +153,11 @@ internal class EditorTranslationController(
 
                 session.translatedTexts.addAll(result.translations)
                 session.continuationContext = result.continuationContext
+                if (translateCancelled) {
+                    handleTranslationCancellation(session, progressDialog)
+                    return@launch
+                }
                 finishTranslation(progressDialog)
-                if (translateCancelled) return@launch
 
                 if (result.isComplete) {
                     showTranslationResult(session.selectedEntries, session.translatedTexts)
@@ -160,14 +167,29 @@ internal class EditorTranslationController(
                         result.error?.message ?: "未知错误"
                     )
                 }
-            } catch (e: CancellationException) {
-                // 协程被取消（例如 Activity 销毁）不是翻译失败，收尾但不弹提示
-                finishTranslation(progressDialog)
-                throw e
+            } catch (e: AiTranslator.TranslationCancelledException) {
+                session.translatedTexts.addAll(e.translations)
+                session.continuationContext = e.continuationContext
+                handleTranslationCancellation(session, progressDialog)
+            } catch (_: CancellationException) {
+                handleTranslationCancellation(session, progressDialog)
             } catch (e: Exception) {
                 finishTranslation(progressDialog)
                 showTranslationError(e.message ?: "未知错误")
             }
+        }
+    }
+
+    private fun handleTranslationCancellation(
+        session: TranslationSession,
+        progressDialog: AlertDialog
+    ) {
+        val shouldShowPartialResult =
+            userCancelledTranslation && session.translatedTexts.isNotEmpty()
+        finishTranslation(progressDialog)
+        userCancelledTranslation = false
+        if (shouldShowPartialResult) {
+            showTranslationResult(session.selectedEntries, session.translatedTexts)
         }
     }
 
