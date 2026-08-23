@@ -54,7 +54,8 @@
                         android:id="@+id/btnPickFile"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="@string/activity_media_convert_text_02"/>
+                        android:text="@string/activity_media_convert_text_02"
+                        android:maxLines="2"/>
 
                     <TextView
                         android:id="@+id/tvNoSource"
@@ -72,6 +73,8 @@
                         android:layout_height="wrap_content"
                         android:textSize="13sp"
                         android:textStyle="bold"
+                        android:maxLines="12"
+                        android:ellipsize="end"
                         android:paddingTop="6dp"
                         android:visibility="gone"/>
 
@@ -82,6 +85,8 @@
                         android:textSize="12sp"
                         android:textColor="#9E9E9E"
                         android:fontFamily="monospace"
+                        android:maxLines="40"
+                        android:ellipsize="end"
                         android:paddingTop="4dp"
                         android:visibility="gone"/>
 

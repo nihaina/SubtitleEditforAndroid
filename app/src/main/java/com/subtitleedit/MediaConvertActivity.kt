@@ -5,13 +5,9 @@ import android.content.Intent
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
-import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.view.View
 import android.widget.*
-import android.widget.Space
-import android.widget.TableLayout
-import android.widget.TableRow
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
@@ -34,130 +30,106 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.nio.charset.StandardCharsets
 import java.util.Locale
 
 /**
- * 媒体格式转换界面
- *
- * 支持：
- * - 视频格式：MP4, MKV, AVI, MOV, WebM, FLV, TS, M4V, 3GP, WMV
- * - 音频格式：MP3, AAC, WAV, FLAC, OGG, M4A, OPUS, WMA, AC3
- * - 仅提取音频（视频 → 音频）
- * - 高级选项：视频编码器、音频编码器、分辨率、码率、CRF、采样率、声道数
+ * 音视频格式转换。
+ * 输入通过 FFmpegKit 的 SAF 协议直接交给 FFmpeg/FFprobe 处理，输出只使用
+ * 应用缓存中的临时文件，避免复制用户选择的源文件。
  */
 class MediaConvertActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMediaConvertBinding
 
-    // ==================== 格式定义 ====================
-
     data class FormatInfo(
         val extension: String,
         val displayName: String,
-        val videoCodecs: List<String>,   // 空 = 纯音频格式
+        val formatName: String,
+        val videoCodecs: List<String>,
         val audioCodecs: List<String>,
         val isAudioOnly: Boolean = false
     )
 
-    private val FORMAT_LIST = listOf(
-        // 视频格式
-        FormatInfo("mp4",  "MP4",  listOf("copy","libx264","mpeg4"),          listOf("copy","aac","libmp3lame","ac3")),
-        FormatInfo("mkv",  "MKV",  listOf("copy","libx264","libvpx-vp9"),     listOf("copy","aac","libmp3lame","libopus","libvorbis","flac","ac3")),
-        FormatInfo("avi",  "AVI",  listOf("copy","libx264","mpeg4"),           listOf("copy","libmp3lame","aac","ac3")),
-        FormatInfo("mov",  "MOV",  listOf("copy","libx264","mpeg4"),           listOf("copy","aac","libmp3lame","ac3")),
-        FormatInfo("webm", "WebM", listOf("copy","libvpx","libvpx-vp9"),      listOf("copy","libvorbis","libopus")),
-        FormatInfo("flv",  "FLV",  listOf("copy","libx264","flv1"),            listOf("copy","aac","libmp3lame")),
-        FormatInfo("ts",   "TS",   listOf("copy","libx264","mpeg2video"),      listOf("copy","aac","libmp3lame","ac3")),
-        FormatInfo("m4v",  "M4V",  listOf("copy","libx264","mpeg4"),           listOf("copy","aac")),
-        FormatInfo("3gp",  "3GP",  listOf("copy","libx264","mpeg4"),           listOf("copy","aac","libmp3lame")),
-        FormatInfo("wmv",  "WMV",  listOf("copy","wmv2","msmpeg4v3"),          listOf("copy","wmav2")),
-        // 纯音频格式
-        FormatInfo("mp3",  "MP3",  emptyList(), listOf("libmp3lame"),           isAudioOnly = true),
-        FormatInfo("aac",  "AAC",  emptyList(), listOf("aac"),                  isAudioOnly = true),
-        FormatInfo("m4a",  "M4A",  emptyList(), listOf("aac"),                  isAudioOnly = true),
-        FormatInfo("wav",  "WAV",  emptyList(), listOf("pcm_s16le","pcm_s24le","pcm_f32le"), isAudioOnly = true),
-        FormatInfo("flac", "FLAC", emptyList(), listOf("flac"),                 isAudioOnly = true),
-        FormatInfo("ogg",  "OGG",  emptyList(), listOf("libvorbis","libopus"),  isAudioOnly = true),
-        FormatInfo("opus", "OPUS", emptyList(), listOf("libopus"),              isAudioOnly = true),
-        FormatInfo("wma",  "WMA",  emptyList(), listOf("wmav2"),                isAudioOnly = true),
-        FormatInfo("ac3",  "AC3",  emptyList(), listOf("ac3"),                  isAudioOnly = true),
+    private data class SelectedMediaFile(
+        val uri: Uri,
+        val fileName: String,
+        var mediaInfo: String = "正在读取媒体信息..."
     )
 
-    private val RESOLUTIONS = listOf(
+    private data class OutputResult(val uri: Uri, val fileName: String)
+
+    /* 外部编码器与本地 FFmpegKit 8.1.0-mpv1 AAR 的实际构建能力保持一致。 */
+    private val formatList = listOf(
+        FormatInfo("mp4", "MP4", "mp4", listOf("mpeg4", "libx264", "copy"), listOf("aac", "libmp3lame", "copy")),
+        FormatInfo("mkv", "MKV", "matroska", listOf("mpeg4", "libx264", "libvpx-vp9", "copy"), listOf("aac", "libmp3lame", "libopus", "libvorbis", "flac", "ac3", "copy")),
+        FormatInfo("avi", "AVI", "avi", listOf("mpeg4", "libx264", "copy"), listOf("libmp3lame", "aac", "ac3", "copy")),
+        FormatInfo("mov", "MOV", "mov", listOf("mpeg4", "libx264", "copy"), listOf("aac", "libmp3lame", "ac3", "copy")),
+        FormatInfo("webm", "WebM", "webm", listOf("libvpx", "libvpx-vp9", "copy"), listOf("libvorbis", "libopus", "copy")),
+        FormatInfo("flv", "FLV", "flv", listOf("libx264", "flv1", "mpeg4", "copy"), listOf("aac", "libmp3lame", "copy")),
+        FormatInfo("ts", "TS", "mpegts", listOf("libx264", "mpeg2video", "mpeg4", "copy"), listOf("aac", "libmp3lame", "ac3", "copy")),
+        FormatInfo("m4v", "M4V", "mp4", listOf("mpeg4", "libx264", "copy"), listOf("aac", "libmp3lame", "copy")),
+        FormatInfo("3gp", "3GP", "3gp", listOf("mpeg4", "libx264", "copy"), listOf("aac", "libmp3lame", "copy")),
+        FormatInfo("wmv", "WMV", "asf", listOf("wmv2", "msmpeg4v3", "copy"), listOf("wmav2", "copy")),
+        FormatInfo("mp3", "MP3", "mp3", emptyList(), listOf("libmp3lame"), isAudioOnly = true),
+        FormatInfo("aac", "AAC", "adts", emptyList(), listOf("aac"), isAudioOnly = true),
+        FormatInfo("m4a", "M4A", "ipod", emptyList(), listOf("aac"), isAudioOnly = true),
+        FormatInfo("wav", "WAV", "wav", emptyList(), listOf("pcm_s16le", "pcm_s24le", "pcm_f32le"), isAudioOnly = true),
+        FormatInfo("flac", "FLAC", "flac", emptyList(), listOf("flac"), isAudioOnly = true),
+        FormatInfo("ogg", "OGG", "ogg", emptyList(), listOf("vorbis", "opus"), isAudioOnly = true),
+        FormatInfo("opus", "OPUS", "opus", emptyList(), listOf("opus"), isAudioOnly = true),
+        FormatInfo("wma", "WMA", "asf", emptyList(), listOf("wmav2"), isAudioOnly = true),
+        FormatInfo("ac3", "AC3", "ac3", emptyList(), listOf("ac3"), isAudioOnly = true)
+    )
+
+    private val resolutions = listOf(
         "原始分辨率", "3840x2160 (4K)", "2560x1440 (2K)", "1920x1080 (1080p)",
         "1280x720 (720p)", "854x480 (480p)", "640x360 (360p)", "426x240 (240p)"
     )
-    private val SAMPLE_RATES = listOf("原始采样率", "48000 Hz", "44100 Hz", "22050 Hz", "16000 Hz", "8000 Hz")
-    private val CHANNELS     = listOf("原始声道", "立体声 (2ch)", "单声道 (1ch)")
-    private val CRF_LABELS   = listOf("无损 / 最高质量", "极高质量 (CRF 18)", "高质量 (CRF 23)",
-                                       "中等质量 (CRF 28)", "低质量 (CRF 33)", "自定义")
-    private val CRF_VALUES    = listOf("-1", "18", "23", "28", "33", "custom")
+    private val sampleRates = listOf("原始采样率", "48000 Hz", "44100 Hz", "22050 Hz", "16000 Hz", "8000 Hz")
+    private val channels = listOf("原始声道", "立体声 (2ch)", "单声道 (1ch)")
+    private val qualityLabels = listOf("原始质量", "高质量 (18)", "较高质量 (23)", "中等质量 (28)", "低质量 (33)", "自定义")
+    private val qualityValues = listOf("-1", "18", "23", "28", "33", "custom")
 
-    // ==================== 状态 ====================
-
-    private var sourceUri: Uri? = null
-    private var sourceFileName: String = ""
-    private var sourceMimeType: String = ""
-    private var isSourceVideo: Boolean = false
-
+    private val selectedMediaFiles = mutableListOf<SelectedMediaFile>()
     private var selectedFormat: FormatInfo? = null
-    private var convertJob: Job? = null
-    private var currentSession: FFmpegSession? = null
-    private var outputUri: Uri? = null
-    private var outputDirectoryUri: Uri? = null
-
-    // 所有格式按钮（用于统一取消选中）
-    private val allFormatButtons = mutableListOf<TextView>()
     private var selectedFormatButton: TextView? = null
-
-    // ==================== 文件选择器 ====================
+    private val allFormatButtons = mutableListOf<TextView>()
+    private var outputDirectoryUri: Uri? = null
+    private var outputUris = mutableListOf<Uri>()
+    private var conversionJob: Job? = null
+    private var probeJob: Job? = null
+    private var currentSession: FFmpegSession? = null
+    private var isConverting = false
 
     private val pickFileLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        uri?.let { onSourceFileSelected(it) }
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) handleSelectedFiles(uris)
     }
 
-    // 目录选择器
     private val directoryPickerLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        if (uri != null) {
-            contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-            outputDirectoryUri = uri
-            binding.tvOutputDir.text = "输出目录：${DirectoryDisplayPath.fromUri(this, uri)}"
-        }
-    }
-
-    // ==================== 生命周期 ====================
+    ) { uri -> uri?.let { handleSelectedOutputDir(it) } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMediaConvertBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
         setupToolbar()
         setupFormatGroup()
         setupAdvancedOptions()
         setupOutputDirectory()
         setupButtons()
-        updateUI()
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            cleanupStaleConvertCache()
-        }
+        setupDefaultOutputDirectory()
+        updateUi()
     }
 
     override fun onDestroy() {
-        super.onDestroy()
+        probeJob?.cancel()
+        conversionJob?.cancel()
         currentSession?.cancel()
+        super.onDestroy()
     }
-
-    // ==================== 初始化 ====================
 
     private fun setupToolbar() {
         setSupportActionBar(binding.toolbar)
@@ -167,140 +139,85 @@ class MediaConvertActivity : AppCompatActivity() {
     }
 
     private fun setupFormatGroup() {
-        allFormatButtons.clear()
-        selectedFormatButton = null
-
-        buildFormatGrid(
-            container   = binding.rgVideoFormats,
-            formats     = FORMAT_LIST.filter { !it.isAudioOnly },
-            cols        = 5
-        )
-        buildFormatGrid(
-            container   = binding.rgAudioFormats,
-            formats     = FORMAT_LIST.filter { it.isAudioOnly },
-            cols        = 5
-        )
+        buildFormatGrid(binding.rgVideoFormats, formatList.filterNot { it.isAudioOnly }, 5)
+        buildFormatGrid(binding.rgAudioFormats, formatList.filter { it.isAudioOnly }, 5)
     }
 
-    /**
-     * 将 formats 按 cols 列分行填入 container（RadioGroup 仅作垂直 LinearLayout 使用）。
-     * 每个格子是等宽 TextView，不含圆圈。
-     */
-    private fun buildFormatGrid(container: RadioGroup, formats: List<FormatInfo>, cols: Int) {
+    private fun buildFormatGrid(container: RadioGroup, formats: List<FormatInfo>, columns: Int) {
         container.removeAllViews()
         container.orientation = RadioGroup.VERTICAL
-
-        formats.chunked(cols).forEach { row ->
+        formats.chunked(columns).forEach { row ->
             val rowLayout = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                layoutParams = RadioGroup.LayoutParams(
-                    RadioGroup.LayoutParams.MATCH_PARENT,
-                    RadioGroup.LayoutParams.WRAP_CONTENT
-                )
+                layoutParams = RadioGroup.LayoutParams(-1, -2)
             }
-
-            row.forEach { fmt ->
-                val btn = makeFormatButton(fmt)
-                allFormatButtons.add(btn)
-                rowLayout.addView(btn)
+            row.forEach { format ->
+                val button = makeFormatButton(format)
+                allFormatButtons += button
+                rowLayout.addView(button)
             }
-
-            // 用空白填满剩余列，保证每行等宽
-            repeat(cols - row.size) {
+            repeat(columns - row.size) {
                 rowLayout.addView(Space(this).apply {
                     layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
                 })
             }
-
             container.addView(rowLayout)
         }
     }
 
-    private fun makeFormatButton(fmt: FormatInfo): TextView {
-        val btn = TextView(this).apply {
-            text      = fmt.displayName
+    private fun makeFormatButton(format: FormatInfo): TextView = TextView(this).apply {
+        text = format.displayName
+        textSize = 12f
+        isSingleLine = true
+        gravity = android.view.Gravity.CENTER
+        setTextColor(android.graphics.Color.parseColor("#CCCCCC"))
+        background = makeButtonBackground(false)
+        layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(3, 3, 3, 3) }
+        setPadding(0, 14, 0, 14)
+        setOnClickListener { selectFormat(this, format) }
+    }
+
+    private fun makeButtonBackground(selected: Boolean) = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = 6f
+        if (selected) setColor(android.graphics.Color.parseColor("#1976D2"))
+        else {
+            setColor(android.graphics.Color.parseColor("#2C2C2C"))
+            setStroke(1, android.graphics.Color.parseColor("#555555"))
+        }
+    }
+
+    private fun selectFormat(button: TextView, format: FormatInfo) {
+        selectedFormatButton?.apply {
+            background = makeButtonBackground(false)
             setTextColor(android.graphics.Color.parseColor("#CCCCCC"))
-            tag       = fmt.extension
-            textSize  = 12f
-            isSingleLine = true
-            gravity   = android.view.Gravity.CENTER
-            background = makeButtonBackground(isSelected = false)
-            layoutParams = LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                setMargins(3, 3, 3, 3)
-            }
-            setPadding(0, 14, 0, 14)
-            setOnClickListener { onFormatButtonClicked(this, fmt) }
         }
-        return btn
-    }
-
-    /** 生成按钮背景 Drawable：选中时蓝色填充，未选中时深灰边框 */
-    private fun makeButtonBackground(isSelected: Boolean): GradientDrawable {
-        return GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = 6f
-            if (isSelected) {
-                setColor(android.graphics.Color.parseColor("#1976D2"))
-                setStroke(0, android.graphics.Color.TRANSPARENT)
-            } else {
-                setColor(android.graphics.Color.parseColor("#2C2C2C"))
-                setStroke(1, android.graphics.Color.parseColor("#555555"))
-            }
-        }
-    }
-
-    private fun onFormatButtonClicked(btn: TextView, fmt: FormatInfo) {
-        // 取消上一个选中
-        selectedFormatButton?.let {
-            it.background = makeButtonBackground(isSelected = false)
-            it.setTextColor(android.graphics.Color.parseColor("#CCCCCC"))
-        }
-
-        if (selectedFormatButton === btn) {
-            // 再次点击同一个：取消选中
+        if (selectedFormatButton === button) {
             selectedFormatButton = null
             selectedFormat = null
         } else {
-            btn.background = makeButtonBackground(isSelected = true)
-            btn.setTextColor(android.graphics.Color.WHITE)
-            selectedFormatButton = btn
-            selectedFormat = fmt
+            button.background = makeButtonBackground(true)
+            button.setTextColor(android.graphics.Color.WHITE)
+            selectedFormatButton = button
+            selectedFormat = format
         }
-
         updateCodecSpinners()
-        updateUI()
+        updateUi()
     }
 
     private fun setupAdvancedOptions() {
-        // 视频编码器：未选择格式时显示占位
-        binding.spinnerVideoCodec.adapter = ArrayAdapter(this,
-            android.R.layout.simple_spinner_dropdown_item, listOf("（请先选择视频格式）"))
-
-        // 音频编码器：未选择格式时显示占位
-        binding.spinnerAudioCodec.adapter = ArrayAdapter(this,
-            android.R.layout.simple_spinner_dropdown_item, listOf("（请先选择格式）"))
-
-        // 分辨率
-        binding.spinnerResolution.adapter = ArrayAdapter(this,
-            android.R.layout.simple_spinner_dropdown_item, RESOLUTIONS)
-        // 采样率
-        binding.spinnerSampleRate.adapter = ArrayAdapter(this,
-            android.R.layout.simple_spinner_dropdown_item, SAMPLE_RATES)
-        // 声道
-        binding.spinnerChannels.adapter = ArrayAdapter(this,
-            android.R.layout.simple_spinner_dropdown_item, CHANNELS)
-        // CRF / 质量
-        binding.spinnerCrf.adapter = ArrayAdapter(this,
-            android.R.layout.simple_spinner_dropdown_item, CRF_LABELS)
+        binding.spinnerVideoCodec.adapter = spinnerAdapter(listOf("（请先选择视频格式）"))
+        binding.spinnerAudioCodec.adapter = spinnerAdapter(listOf("（请先选择格式）"))
+        binding.spinnerResolution.adapter = spinnerAdapter(resolutions)
+        binding.spinnerSampleRate.adapter = spinnerAdapter(sampleRates)
+        binding.spinnerChannels.adapter = spinnerAdapter(channels)
+        binding.spinnerCrf.adapter = spinnerAdapter(qualityLabels)
         binding.spinnerCrf.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                binding.etCustomCrf.visibility =
-                    if (CRF_VALUES[pos] == "custom") View.VISIBLE else View.GONE
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                binding.etCustomCrf.visibility = if (qualityValues.getOrNull(position) == "custom") View.VISIBLE else View.GONE
             }
-            override fun onNothingSelected(p: AdapterView<*>?) {}
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
-        // 展开/折叠高级选项
         binding.btnToggleAdvanced.setOnClickListener {
             val expanded = binding.layoutAdvanced.visibility == View.VISIBLE
             binding.layoutAdvanced.visibility = if (expanded) View.GONE else View.VISIBLE
@@ -308,608 +225,468 @@ class MediaConvertActivity : AppCompatActivity() {
         }
     }
 
-    private fun setupOutputDirectory() {
-        binding.btnSelectOutputDir.setOnClickListener {
-            directoryPickerLauncher.launch(null)
+    private fun spinnerAdapter(values: List<String>) = ArrayAdapter(
+        this, android.R.layout.simple_spinner_item, values
+    ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+
+    private fun updateCodecSpinners() {
+        val format = selectedFormat
+        if (format == null) {
+            binding.spinnerVideoCodec.adapter = spinnerAdapter(listOf("（请先选择视频格式）"))
+            binding.spinnerAudioCodec.adapter = spinnerAdapter(listOf("（请先选择格式）"))
+            binding.layoutVideoCodec.visibility = View.GONE
+            binding.layoutResolution.visibility = View.GONE
+            binding.layoutCrf.visibility = View.GONE
+            return
         }
+        binding.layoutVideoCodec.visibility = if (format.isAudioOnly) View.GONE else View.VISIBLE
+        binding.layoutResolution.visibility = if (format.isAudioOnly) View.GONE else View.VISIBLE
+        binding.layoutCrf.visibility = if (format.isAudioOnly) View.GONE else View.VISIBLE
+        if (!format.isAudioOnly) binding.spinnerVideoCodec.adapter = spinnerAdapter(format.videoCodecs)
+        binding.spinnerAudioCodec.adapter = spinnerAdapter(format.audioCodecs)
+    }
+
+    private fun setupOutputDirectory() {
+        binding.btnSelectOutputDir.setOnClickListener { directoryPickerLauncher.launch(null) }
     }
 
     private fun setupButtons() {
-        binding.btnPickFile.setOnClickListener {
-            pickFileLauncher.launch(arrayOf("video/*", "audio/*"))
-        }
-        binding.btnConvert.setOnClickListener { startConvert() }
-        binding.btnCancel.setOnClickListener  { cancelConvert() }
-        binding.btnShareOutput.setOnClickListener { shareOutput() }
+        binding.btnPickFile.setOnClickListener { pickFileLauncher.launch(arrayOf("video/*", "audio/*")) }
+        binding.btnConvert.setOnClickListener { startConversionRequest() }
+        binding.btnCancel.setOnClickListener { cancelConversion() }
+        binding.btnShareOutput.setOnClickListener { shareOutputs() }
     }
 
-    /**
-     * 获取转换输出目录：Download/SubtitleEdit/Convert
-     * 如果目录不存在则创建
-     */
-    private fun getConvertOutputDirectory(): File {
-        val subtitleEditDir = File(FileUtils.getDownloadDirectory(), "SubtitleEdit")
-        val convertDir = File(subtitleEditDir, "Convert")
-        if (!convertDir.exists()) {
-            convertDir.mkdirs()
-        }
-        return convertDir
+    private fun setupDefaultOutputDirectory() {
+        val directory = File(FileUtils.getDownloadDirectory(), "SubtitleEdit/Convert")
+        if (!directory.exists()) directory.mkdirs()
+        outputDirectoryUri = Uri.fromFile(directory)
+        binding.tvOutputDir.text = "输出目录：${directory.absolutePath}"
     }
 
-    private fun copyFileToOutputDirectory(sourceFile: File, fileName: String): Uri? {
-        return try {
-            val finalOutputUri = outputDirectoryUri ?: run {
-                // 默认使用 Download/SubtitleEdit/Convert 目录
-                val convertDir = getConvertOutputDirectory()
-                Uri.fromFile(convertDir)
+    private fun handleSelectedOutputDir(uri: Uri) {
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            outputDirectoryUri = uri
+            binding.tvOutputDir.text = "输出目录：${DirectoryDisplayPath.fromUri(this, uri)}"
+        } catch (error: Exception) {
+            com.subtitleedit.util.OverwritingToast.makeText(this, "选择目录失败：${error.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun handleSelectedFiles(uris: List<Uri>) {
+        probeJob?.cancel()
+        selectedMediaFiles.clear()
+        uris.distinct().forEach { uri ->
+            try {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: Exception) {
+                // 某些 provider 不允许持久化权限，当前任务仍可使用临时授权。
             }
-
-            if (finalOutputUri.scheme == "file") {
-                // 使用传统 File API
-                val dir = File(finalOutputUri.path!!)
-                val outputFile = File(dir, fileName)
-                if (outputFile.exists()) {
-                    outputFile.delete()
-                }
-                FileInputStream(sourceFile).use { ins ->
-                    FileOutputStream(outputFile).use { out -> ins.copyTo(out) }
-                }
-                Uri.fromFile(outputFile)
-            } else {
-                // 使用 DocumentFile
-                var documentFile = DocumentFile.fromTreeUri(this, finalOutputUri)
-                if (documentFile == null) {
-                    documentFile = DocumentFile.fromSingleUri(this, finalOutputUri)
-                }
-
-                if (documentFile == null || !documentFile.canWrite()) {
-                    // 使用 DocumentsContract 创建文件
-                    val newFileUri = DocumentsContract.createDocument(
-                        contentResolver,
-                        finalOutputUri,
-                        getMimeTypeFromFileName(fileName),
-                        fileName
-                    )
-                    if (newFileUri != null) {
-                        contentResolver.openOutputStream(newFileUri, "wt")?.use { outputStream ->
-                            FileInputStream(sourceFile).use { ins ->
-                                ins.copyTo(outputStream)
-                            }
-                        }
-                        return newFileUri
-                    } else {
-                        throw Exception("无法创建文件：$fileName")
-                    }
-                }
-
-                // 查找并删除已存在的同名文件
-                val existingFile = documentFile.findFile(fileName)
-                if (existingFile != null && existingFile.exists()) {
-                    existingFile.delete()
-                }
-
-                // 创建新文件
-                val mimeType = getMimeTypeFromFileName(fileName)
-                val newFile = documentFile.createFile(mimeType, fileName)
-                if (newFile != null) {
-                    contentResolver.openOutputStream(newFile.uri, "wt")?.use { outputStream ->
-                        FileInputStream(sourceFile).use { ins ->
-                            ins.copyTo(outputStream)
-                        }
-                    }
-                    newFile.uri
-                } else {
-                    throw Exception("无法创建文件：$fileName")
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
+            selectedMediaFiles += SelectedMediaFile(uri, getFileName(uri))
         }
-    }
-
-    private fun getMimeTypeFromFileName(fileName: String): String {
-        return when {
-            fileName.endsWith(".mp4", ignoreCase = true) -> "video/mp4"
-            fileName.endsWith(".mkv", ignoreCase = true) -> "video/x-matroska"
-            fileName.endsWith(".avi", ignoreCase = true) -> "video/x-msvideo"
-            fileName.endsWith(".mov", ignoreCase = true) -> "video/quicktime"
-            fileName.endsWith(".webm", ignoreCase = true) -> "video/webm"
-            fileName.endsWith(".flv", ignoreCase = true) -> "video/x-flv"
-            fileName.endsWith(".ts", ignoreCase = true) -> "video/mp2t"
-            fileName.endsWith(".m4v", ignoreCase = true) -> "video/x-m4v"
-            fileName.endsWith(".3gp", ignoreCase = true) -> "video/3gpp"
-            fileName.endsWith(".wmv", ignoreCase = true) -> "video/x-ms-wmv"
-            fileName.endsWith(".mp3", ignoreCase = true) -> "audio/mpeg"
-            fileName.endsWith(".aac", ignoreCase = true) -> "audio/aac"
-            fileName.endsWith(".m4a", ignoreCase = true) -> "audio/mp4"
-            fileName.endsWith(".wav", ignoreCase = true) -> "audio/wav"
-            fileName.endsWith(".flac", ignoreCase = true) -> "audio/flac"
-            fileName.endsWith(".ogg", ignoreCase = true) -> "audio/ogg"
-            fileName.endsWith(".opus", ignoreCase = true) -> "audio/opus"
-            fileName.endsWith(".wma", ignoreCase = true) -> "audio/x-ms-wma"
-            fileName.endsWith(".ac3", ignoreCase = true) -> "audio/ac3"
-            else -> "*/*"
-        }
-    }
-
-    // ==================== 文件选中 ====================
-
-    private fun onSourceFileSelected(uri: Uri) {
-        sourceUri = uri
-        sourceFileName = getFileName(uri)
-        sourceMimeType = contentResolver.getType(uri) ?: ""
-        isSourceVideo  = sourceMimeType.startsWith("video/")
-
-        binding.tvSourceFile.text = sourceFileName
-        binding.tvSourceInfo.text = "正在读取媒体信息..."
-        binding.tvSourceInfo.visibility = View.VISIBLE
-
-        // 重置格式选择
-        selectedFormatButton?.let {
-            it.background = makeButtonBackground(isSelected = false)
-            it.setTextColor(android.graphics.Color.parseColor("#CCCCCC"))
+        selectedFormat = null
+        selectedFormatButton?.apply {
+            background = makeButtonBackground(false)
+            setTextColor(android.graphics.Color.parseColor("#CCCCCC"))
         }
         selectedFormatButton = null
-        selectedFormat = null
+        updateCodecSpinners()
+        renderSelectedFiles()
+        updateUi()
+        probeSelectedFiles()
+    }
 
-        // 优先通过 FFmpegKit SAF 协议直接探测；不支持直读的 provider 才回退缓存。
-        lifecycleScope.launch {
-            val info = withContext(Dispatchers.IO) {
-                probeMediaInfo(uri, sourceFileName)
-            }
-            if (sourceUri == uri) {
-                binding.tvSourceInfo.text = info
-                updateUI()
+    private fun probeSelectedFiles() {
+        val snapshotUris = selectedMediaFiles.map { it.uri }
+        probeJob = lifecycleScope.launch {
+            snapshotUris.forEachIndexed { index, uri ->
+                if (selectedMediaFiles.none { it.uri == uri }) return@forEachIndexed
+                val file = selectedMediaFiles.first { it.uri == uri }
+                val info = withContext(Dispatchers.IO) { probeUri(file.uri) }
+                val current = selectedMediaFiles.firstOrNull { it.uri == uri } ?: return@forEachIndexed
+                current.mediaInfo = info
+                renderSelectedFiles()
+                appendLog("媒体信息 ${index + 1}/${snapshotUris.size}：${file.fileName}\n")
             }
         }
+    }
 
-        updateUI()
+    private fun probeUri(uri: Uri): String {
+        var safInput: String? = null
+        return try {
+            val input = FFmpegKitConfig.getSafParameterForRead(this, uri)
+            safInput = input
+            readMediaInfo(input) ?: "无法读取媒体信息：FFprobe 无法解析"
+        } catch (error: Exception) {
+            "无法读取媒体信息：${error.message ?: "未知错误"}"
+        } finally {
+            safInput?.let { FFmpegKitConfig.unregisterSafProtocolUrl(it) }
+        }
+    }
+
+    private fun renderSelectedFiles() {
+        if (selectedMediaFiles.isEmpty()) {
+            binding.tvSourceFile.text = ""
+            binding.tvSourceInfo.text = ""
+            binding.tvNoSource.visibility = View.VISIBLE
+            binding.tvSourceFile.visibility = View.GONE
+            binding.tvSourceInfo.visibility = View.GONE
+            return
+        }
+        binding.tvNoSource.visibility = View.GONE
+        binding.tvSourceFile.visibility = View.VISIBLE
+        binding.tvSourceInfo.visibility = View.VISIBLE
+        binding.tvSourceFile.text = "已选择 ${selectedMediaFiles.size} 个文件"
+        binding.tvSourceInfo.text = selectedMediaFiles.mapIndexed { index, file ->
+            "${index + 1}. ${file.fileName}\n${file.mediaInfo}"
+        }.joinToString("\n\n")
     }
 
     private fun getFileName(uri: Uri): String {
-        var name = "media_file"
-        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val col = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (cursor.moveToFirst() && col >= 0) name = cursor.getString(col)
+        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (cursor.moveToFirst() && index >= 0) return cursor.getString(index)
         }
-        return name
+        return uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { null } ?: "media_file"
     }
 
-    private fun copyUriToCache(uri: Uri, name: String, taskCacheDir: File): File? {
-        return runCatching {
-            val safeName = name.replace(Regex("[^A-Za-z0-9._-]"), "_")
-            val destination = File(taskCacheDir, "input_$safeName")
-            contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(destination).use { output -> input.copyTo(output) }
-            } ?: return null
-            destination.takeIf { it.isFile && it.length() > 0L }
-        }.getOrNull()
-    }
-
-    private fun probeMediaInfo(uri: Uri, fileName: String): String {
-        var safInput: String? = null
-        try {
-            safInput = FFmpegKitConfig.getSafParameterForRead(this, uri)
-            readMediaInfo(safInput)?.let { return it }
-        } catch (_: Exception) {
-            // Some document providers do not expose a seekable descriptor.
-        } finally {
-            FFmpegKitConfig.unregisterSafProtocolUrl(safInput)
-        }
-
-        val probeCache = createConvertTaskCache("probe")
-        return try {
-            val cachedInput = copyUriToCache(uri, fileName, probeCache)
-                ?: return "无法读取媒体信息"
-            readMediaInfo(cachedInput.absolutePath) ?: "无法读取媒体信息"
-        } finally {
-            probeCache.deleteRecursively()
-        }
-    }
-
-    private fun readMediaInfo(input: String): String? {
-        val session = FFprobeKit.getMediaInformation(input)
-        val info = session.getMediaInformation() ?: return null
-        val sb = StringBuilder()
-        sb.append("时长：${formatDuration(info.getDuration()?.toDoubleOrNull() ?: 0.0)}\n")
-        sb.append("比特率：${info.getBitrate() ?: "未知"} kb/s\n")
-        info.getStreams().forEach { stream ->
-            when (stream.getType()) {
-                "video" -> sb.append("视频：${stream.getCodec()} ${stream.getWidth()}x${stream.getHeight()}" +
-                        " @${stream.getAverageFrameRate()} fps\n")
-                "audio" -> sb.append("音频：${stream.getCodec()} ${stream.getSampleRate()} Hz" +
-                        " ${stream.getChannelLayout()}\n")
-            }
-        }
-        return sb.toString().trimEnd()
-    }
-
-    private fun formatDuration(sec: Double): String {
-        val h = (sec / 3600).toInt()
-        val m = ((sec % 3600) / 60).toInt()
-        val s = (sec % 60).toInt()
-        return if (h > 0) "%d:%02d:%02d".format(Locale.getDefault(), h, m, s)
-        else "%d:%02d".format(Locale.getDefault(), m, s)
-    }
-
-    // ==================== 格式选中 ====================
-
-    private fun updateCodecSpinners() {
-        val fmt = selectedFormat
-
-        if (fmt == null) {
-            // 未选择格式：重置所有编码器选项为占位文字
-            binding.spinnerVideoCodec.adapter = ArrayAdapter(this,
-                android.R.layout.simple_spinner_dropdown_item, listOf("（请先选择视频格式）"))
-            binding.spinnerAudioCodec.adapter = ArrayAdapter(this,
-                android.R.layout.simple_spinner_dropdown_item, listOf("（请先选择格式）"))
-            binding.layoutVideoCodec.visibility = View.GONE
-            binding.layoutResolution.visibility = View.GONE
-            binding.layoutCrf.visibility        = View.GONE
+    private fun startConversionRequest() {
+        val format = selectedFormat
+        if (selectedMediaFiles.isEmpty()) {
+            com.subtitleedit.util.OverwritingToast.makeText(this, "请先选择音视频文件", Toast.LENGTH_SHORT).show()
             return
         }
-
-        val isAudioOnly = fmt.isAudioOnly
-
-        // 视频编码器 / 分辨率 / CRF：仅视频输出时显示
-        binding.layoutVideoCodec.visibility = if (!isAudioOnly) View.VISIBLE else View.GONE
-        binding.layoutResolution.visibility = if (!isAudioOnly) View.VISIBLE else View.GONE
-        binding.layoutCrf.visibility        = if (!isAudioOnly) View.VISIBLE else View.GONE
-
-        if (!isAudioOnly) {
-            binding.spinnerVideoCodec.adapter = ArrayAdapter(this,
-                android.R.layout.simple_spinner_dropdown_item, fmt.videoCodecs)
+        if (format == null) {
+            com.subtitleedit.util.OverwritingToast.makeText(this, "请选择输出格式", Toast.LENGTH_SHORT).show()
+            return
         }
-
-        // 音频编码器：始终更新为当前格式的编码器列表
-        binding.spinnerAudioCodec.adapter = ArrayAdapter(this,
-            android.R.layout.simple_spinner_dropdown_item, fmt.audioCodecs)
+        val outputDir = outputDirectoryUri ?: run {
+            com.subtitleedit.util.OverwritingToast.makeText(this, "输出目录未设置", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val desiredNames = selectedMediaFiles.map { desiredOutputName(it.fileName, format) }
+        val duplicateNames = desiredNames.groupingBy { it.lowercase(Locale.ROOT) }.eachCount().any { it.value > 1 }
+        val existingNames = desiredNames.any { outputFileExists(outputDir, it) }
+        if (duplicateNames || existingNames) {
+            AlertDialog.Builder(this)
+                .setTitle("文件名冲突")
+                .setMessage("输出目录中已有同名文件，或所选文件会生成同名输出。请选择处理方式。")
+                .setPositiveButton("覆盖") { _, _ -> beginConversion(true) }
+                .setNeutralButton("自动重命名") { _, _ -> beginConversion(false) }
+                .setNegativeButton("取消", null)
+                .show()
+        } else {
+            beginConversion(false)
+        }
     }
 
-    // ==================== 转换 ====================
-
-    private fun startConvert() {
-        val uri = sourceUri ?: run {
-            com.subtitleedit.util.OverwritingToast.makeText(this, "请先选择源文件", Toast.LENGTH_SHORT).show(); return
-        }
-        val fmt = selectedFormat ?: run {
-            com.subtitleedit.util.OverwritingToast.makeText(this, "请选择输出格式", Toast.LENGTH_SHORT).show(); return
-        }
-
-        convertJob = lifecycleScope.launch {
-            setConvertingState(true)
-            binding.progressBar.progress = 0
-            binding.tvLog.text = ""
-            outputUri = null
-
-            val taskCacheDir = createConvertTaskCache("convert")
-            val baseName = File(sourceFileName).nameWithoutExtension
-            val tempOutFile = File(taskCacheDir, "output.${fmt.extension}")
-            var safInput: String? = null
-
+    private fun beginConversion(overwriteOutput: Boolean) {
+        if (isConverting) return
+        isConverting = true
+        outputUris.clear()
+        binding.tvLog.text = ""
+        setConvertingState(true)
+        conversionJob = lifecycleScope.launch {
+            val format = selectedFormat ?: return@launch
+            val reservedNames = mutableSetOf<String>()
+            val failures = mutableListOf<String>()
+            var successCount = 0
             try {
-                // SAF 直读避免对大媒体文件做一次完整的前置复制。
-                safInput = withContext(Dispatchers.IO) {
-                    runCatching { FFmpegKitConfig.getSafParameterForRead(this@MediaConvertActivity, uri) }
-                        .getOrNull()
-                }
-
-                var session = safInput
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let {
-                        appendLog("正在直接读取源文件...\n")
-                        executeConversion(it, tempOutFile, fmt)
-                    }
-
-                if (session == null || shouldRetryWithCachedInput(session)) {
-                    if (session != null && ReturnCode.isCancel(session.getReturnCode())) {
-                        appendLog("\n⚠️ 已取消转换")
-                        return@launch
-                    }
-
-                    appendLog("\n直读不可用，正在使用临时缓存重试...\n")
-                    tempOutFile.delete()
-                    val cachedInput = withContext(Dispatchers.IO) {
-                        copyUriToCache(uri, sourceFileName, taskCacheDir)
-                    } ?: throw Exception("无法读取源文件")
-                    session = executeConversion(cachedInput.absolutePath, tempOutFile, fmt)
-                }
-
-                binding.progressBar.progress = 100
-
-                if (ReturnCode.isSuccess(session.getReturnCode())) {
-                    // 5. 将文件复制到输出目录
-                    val outputFileName = "${baseName}.${fmt.extension}"
-                    val outputSize = tempOutFile.length()
-                    val finalOutputUri = withContext(Dispatchers.IO) {
-                        copyFileToOutputDirectory(tempOutFile, outputFileName)
-                    }
-                    
-                    if (finalOutputUri != null) {
-                        outputUri = finalOutputUri
-                        val outputPath = outputDirectoryUri?.let { DirectoryDisplayPath.fromUri(this@MediaConvertActivity, it) }
-                            ?: getConvertOutputDirectory().absolutePath
-                        appendLog("\n✅ 转换成功！\n输出目录：$outputPath\n输出文件：$outputFileName\n文件大小：${formatSize(outputSize)}")
-                        binding.btnShareOutput.visibility = View.VISIBLE
-                    } else {
-                        appendLog("\n⚠️ 转换成功但复制文件失败")
-                    }
-                } else if (ReturnCode.isCancel(session.getReturnCode())) {
-                    appendLog("\n⚠️ 已取消转换")
-                } else {
-                    // 打印 FFmpeg 完整错误日志，方便定位具体原因
-                    val failLog = session.getAllLogsAsString().ifBlank { "无日志" }
-                    // 从完整日志里提取关键错误行（含 "Error" 或 "Invalid" 或 "Unknown"）
-                    val keyLines = failLog.lines()
-                        .filter { it.contains("Error", ignoreCase = true)
-                               || it.contains("Invalid", ignoreCase = true)
-                               || it.contains("Unknown", ignoreCase = true)
-                               || it.contains("No such", ignoreCase = true) }
-                        .takeLast(8)
-                        .joinToString("\n")
-                    appendLog("\n❌ 转换失败\n关键错误：\n${keyLines.ifBlank { failLog.takeLast(300) }}")
-                }
-
-            } catch (e: CancellationException) {
-                currentSession?.cancel()
-                withContext(NonCancellable) {
-                    repeat(50) {
-                        val state = currentSession?.getState()?.name
-                        if (state == null || state == "COMPLETED" || state == "FAILED" || state == "CANCELLED") {
-                            return@withContext
-                        }
-                        delay(100)
+                selectedMediaFiles.toList().forEachIndexed { index, file ->
+                    if (!isConverting) return@forEachIndexed
+                    val desiredName = desiredOutputName(file.fileName, format)
+                    val overwrite = overwriteOutput && reservedNames.add(desiredName.lowercase(Locale.ROOT))
+                    val result = convertFile(file, index, selectedMediaFiles.size, format, desiredName, overwrite, reservedNames)
+                    result.onSuccess {
+                        successCount++
+                        outputUris += it.uri
+                    }.onFailure {
+                        failures += file.fileName
+                        appendLog("\n❌ ${file.fileName}：${it.message ?: "转换失败"}\n")
                     }
                 }
-                throw e
-            } catch (e: Exception) {
-                appendLog("\n❌ 错误：${e.message}")
+                if (isConverting) {
+                    binding.progressBar.progress = 100
+                    appendLog("\n处理完成：成功 $successCount，失败 ${failures.size}\n")
+                    if (failures.isNotEmpty()) appendLog("失败文件：${failures.joinToString("、")}\n")
+                }
+            } catch (_: CancellationException) {
+                appendLog("\n⚠️ 已取消转换\n")
             } finally {
-                FFmpegKitConfig.unregisterSafProtocolUrl(safInput)
-                currentSession = null
-                withContext(NonCancellable + Dispatchers.IO) {
-                    taskCacheDir.deleteRecursively()
-                }
-                if (!isDestroyed) setConvertingState(false)
+                isConverting = false
+                setConvertingState(false)
             }
+        }
+    }
+
+    private suspend fun convertFile(
+        file: SelectedMediaFile,
+        index: Int,
+        total: Int,
+        format: FormatInfo,
+        desiredName: String,
+        overwrite: Boolean,
+        reservedNames: MutableSet<String>
+    ): Result<OutputResult> {
+        val cache = createTaskCache("convert")
+        var safInput: String? = null
+        return try {
+            val prefix = "[${index + 1}/$total]"
+            appendLog("\n$prefix 开始处理：${file.fileName}\n")
+            val input = withContext(Dispatchers.IO) {
+                FFmpegKitConfig.getSafParameterForRead(this@MediaConvertActivity, file.uri)
+            }
+            safInput = input
+            appendLog("$prefix 正在转换...\n")
+            val output = File(cache, "output.${format.extension}")
+            val session = executeConversion(input, output, format) { local ->
+                val overall = ((index * 100L + local) / total).toInt().coerceIn(0, 99)
+                if (!isDestroyed) runOnUiThread { binding.progressBar.progress = overall }
+            }
+            if (!ReturnCode.isSuccess(session.getReturnCode()) || !output.isFile || output.length() <= 0L) {
+                val detail = session.getAllLogsAsString().takeLast(800).ifBlank { "FFmpeg 未返回有效输出" }
+                return Result.failure(IllegalStateException(detail))
+            }
+            val copied = withContext(Dispatchers.IO) {
+                copyFileToOutputDirectory(output, desiredName, overwrite, reservedNames)
+            } ?: return Result.failure(IllegalStateException("无法写入输出目录"))
+            appendLog("$prefix 完成：${copied.fileName}\n")
+            Result.success(copied)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Result.failure(error)
+        } finally {
+            safInput?.let { FFmpegKitConfig.unregisterSafProtocolUrl(it) }
+            withContext(NonCancellable + Dispatchers.IO) { cache.deleteRecursively() }
         }
     }
 
     private suspend fun executeConversion(
         input: String,
         output: File,
-        format: FormatInfo
+        format: FormatInfo,
+        onProgress: (Int) -> Unit
     ): FFmpegSession {
-        val command = buildFFmpegCommand(input, output.absolutePath, format)
-        appendLog("执行命令：\nffmpeg $command\n")
-
+        val command = buildFfmpegCommand(input, output.absolutePath, format)
+        appendLog("执行命令：ffmpeg $command\n")
         var lastProgress = 0
         val session = withContext(Dispatchers.IO) {
             FFmpegKit.executeAsync(
                 command,
-                { /* completion is observed through session state */ },
+                { },
                 { log -> runOnUiThread { appendLog(log.message) } },
                 { statistics ->
-                    val progress = if (statistics.time > 0) {
-                        (lastProgress + 1).coerceAtMost(95)
-                    } else 0
-                    lastProgress = progress
-                    runOnUiThread { binding.progressBar.progress = progress }
+                    if (statistics.time > 0) {
+                        lastProgress = (lastProgress + 1).coerceAtMost(95)
+                        onProgress(lastProgress)
+                    }
                 }
             )
         }
         currentSession = session
-
-        while (!session.getState().name.let {
-                it == "COMPLETED" || it == "FAILED" || it == "CANCELLED"
-            }) {
-            delay(100)
-        }
+        while (session.getState().name !in setOf("COMPLETED", "FAILED")) delay(100)
         return session
     }
 
-    private fun shouldRetryWithCachedInput(session: FFmpegSession): Boolean {
-        if (ReturnCode.isSuccess(session.getReturnCode()) || ReturnCode.isCancel(session.getReturnCode())) {
-            return false
+    private fun buildFfmpegCommand(input: String, output: String, format: FormatInfo): String {
+        val videoCodec = if (!format.isAudioOnly) binding.spinnerVideoCodec.selectedItem?.toString() ?: "mpeg4" else ""
+        val audioCodec = binding.spinnerAudioCodec.selectedItem?.toString() ?: format.audioCodecs.firstOrNull() ?: "aac"
+        val command = StringBuilder("-y -hide_banner -i \"$input\"")
+        if (format.isAudioOnly) {
+            command.append(" -map 0:a:0 -vn -c:a $audioCodec")
+        } else {
+            command.append(" -map 0:v:0 -c:v $videoCodec")
+            command.append(" -map 0:a:0? -c:a $audioCodec -sn -dn")
+            if (videoCodec != "copy") {
+                selectedQuality()?.let { quality ->
+                    when (videoCodec) {
+                        "libx264" -> command.append(" -crf $quality")
+                        "libvpx", "libvpx-vp9" -> command.append(" -crf $quality -b:v 0")
+                        else -> command.append(" -q:v $quality")
+                    }
+                }
+                val resolution = binding.spinnerResolution.selectedItemPosition
+                if (resolution > 0) command.append(" -vf scale=${resolutions[resolution].substringBefore(' ')}")
+                binding.etVideoBitrate.text.toString().trim().toIntOrNull()?.takeIf { it > 0 }?.let { command.append(" -b:v ${it}k") }
+            }
         }
-
-        val log = session.getAllLogsAsString().lowercase()
-        return listOf(
-            "error opening input",
-            "error opening input file",
-            "failed to open input",
-            "invalid data found when processing input",
-            "illegal seek",
-            "could not seek",
-            "failed to seek",
-            "operation not permitted",
-            "input/output error",
-            "moov atom not found"
-        ).any(log::contains)
+        if (audioCodec != "copy") {
+            if (audioCodec == "opus" || audioCodec == "vorbis") command.append(" -strict -2")
+            binding.etAudioBitrate.text.toString().trim().toIntOrNull()?.takeIf { it > 0 }?.let { command.append(" -b:a ${it}k") }
+            val sampleRate = binding.spinnerSampleRate.selectedItemPosition
+            if (sampleRate > 0) command.append(" -ar ${sampleRates[sampleRate].substringBefore(' ')}")
+            val channel = binding.spinnerChannels.selectedItemPosition
+            if (channel > 0) command.append(" -ac ${if (channel == 1) 2 else 1}")
+        }
+        command.append(" -f ${format.formatName} \"$output\"")
+        return command.toString()
     }
 
-    /**
-     * 根据用户选项构建 FFmpeg 命令字符串
-     */
-    private fun buildFFmpegCommand(srcPath: String, outPath: String, fmt: FormatInfo): String {
-        val sb = StringBuilder()
-        sb.append("-y -i \"$srcPath\"")
+    private fun selectedQuality(): Int? {
+        val value = qualityValues.getOrNull(binding.spinnerCrf.selectedItemPosition) ?: return null
+        val number = if (value == "custom") binding.etCustomCrf.text.toString().toIntOrNull() else value.toIntOrNull()
+        return number?.coerceIn(1, 31)?.takeIf { value != "-1" }
+    }
 
-        val isAudioOnly = fmt.isAudioOnly
+    private fun desiredOutputName(sourceName: String, format: FormatInfo): String {
+        val base = sourceName.substringBeforeLast('.', sourceName).ifBlank { "media_file" }
+        return "$base.${format.extension}"
+    }
 
-        // ---- 视频流 ----
-        if (!isAudioOnly) {
-            val vcodec = binding.spinnerVideoCodec.selectedItem?.toString() ?: "libx264"
-            sb.append(" -c:v $vcodec")
-
-            // CRF
-            val crfIdx   = binding.spinnerCrf.selectedItemPosition
-            val crfValue = CRF_VALUES.getOrElse(crfIdx) { "23" }
-            if (crfValue != "-1") {
-                val crf = if (crfValue == "custom") {
-                    binding.etCustomCrf.text.toString().toIntOrNull()?.toString() ?: "23"
-                } else crfValue
-                // vp8/vp9 用 -crf，其他用 -crf
-                when {
-                    vcodec.startsWith("libvpx") -> sb.append(" -crf $crf -b:v 0")
-                    vcodec == "prores"           -> { /* prores 不用 crf */ }
-                    else                         -> sb.append(" -crf $crf")
+    private fun readMediaInfo(path: String): String? {
+        val session = FFprobeKit.getMediaInformation(path)
+        val info = session.getMediaInformation() ?: return null
+        return buildString {
+            append("时长：${formatDuration(info.getDuration()?.toDoubleOrNull() ?: 0.0)}\n")
+            append("比特率：${info.getBitrate() ?: "未知"} kb/s\n")
+            info.getStreams().forEach { stream ->
+                when (stream.getType()) {
+                    "video" -> append("视频：${stream.getCodec()} ${stream.getWidth()}x${stream.getHeight()} @${stream.getAverageFrameRate()} fps\n")
+                    "audio" -> append("音频：${stream.getCodec()} ${stream.getSampleRate()} Hz ${stream.getChannelLayout()}\n")
                 }
             }
-
-            // 分辨率
-            val resIdx = binding.spinnerResolution.selectedItemPosition
-            if (resIdx > 0) {
-                val res = RESOLUTIONS[resIdx].substringBefore(" ") // e.g. "1920x1080"
-                sb.append(" -vf scale=$res")
-            }
-
-            // 视频码率（如果填写了）
-            val vBitrate = binding.etVideoBitrate.text.toString().trim()
-            if (vBitrate.isNotEmpty()) sb.append(" -b:v ${vBitrate}k")
-
-        } else {
-            // 纯音频输出：去掉视频流
-            sb.append(" -vn")
-        }
-
-        // ---- 音频流 ----
-        val acodec = binding.spinnerAudioCodec.selectedItem?.toString() ?: "aac"
-        if (acodec.startsWith("pcm_")) {
-            // WAV 无损，不需要码率
-            sb.append(" -c:a $acodec")
-        } else {
-            sb.append(" -c:a $acodec")
-
-            // 音频码率
-            val aBitrate = binding.etAudioBitrate.text.toString().trim()
-            if (aBitrate.isNotEmpty()) sb.append(" -b:a ${aBitrate}k")
-
-            // 采样率
-            val srIdx = binding.spinnerSampleRate.selectedItemPosition
-            if (srIdx > 0) {
-                val sr = SAMPLE_RATES[srIdx].substringBefore(" ")
-                sb.append(" -ar $sr")
-            }
-
-            // 声道数
-            val chIdx = binding.spinnerChannels.selectedItemPosition
-            if (chIdx > 0) {
-                val ch = if (chIdx == 1) "2" else "1"
-                sb.append(" -ac $ch")
-            }
-        }
-
-        // 格式强制指定（FFmpeg 内部名称与扩展名不一定相同）
-        val formatName = when (fmt.extension) {
-            "mp4"  -> "mp4"
-            "mkv"  -> "matroska"    // ← mkv 容器名是 matroska
-            "avi"  -> "avi"
-            "mov"  -> "mov"
-            "webm" -> "webm"
-            "flv"  -> "flv"
-            "ts"   -> "mpegts"
-            "m4v"  -> "mp4"         // ← m4v 本质是 mp4 容器
-            "3gp"  -> "3gp"
-            "wmv"  -> "asf"         // ← wmv/asf 容器名是 asf
-            "mp3"  -> "mp3"
-            "aac"  -> "adts"
-            "m4a"  -> "ipod"
-            "wav"  -> "wav"
-            "flac" -> "flac"
-            "ogg"  -> "ogg"
-            "opus" -> "opus"
-            "wma"  -> "asf"
-            "ac3"  -> "ac3"
-            else   -> fmt.extension
-        }
-        sb.append(" -f $formatName")
-
-        sb.append(" \"$outPath\"")
-        return sb.toString()
+        }.trimEnd()
     }
 
-    private fun cancelConvert() {
+    private fun formatDuration(seconds: Double): String {
+        val h = (seconds / 3600).toInt()
+        val m = ((seconds % 3600) / 60).toInt()
+        val s = (seconds % 60).toInt()
+        return if (h > 0) "%d:%02d:%02d".format(Locale.getDefault(), h, m, s)
+        else "%d:%02d".format(Locale.getDefault(), m, s)
+    }
+
+    private fun outputFileExists(directoryUri: Uri, fileName: String): Boolean {
+        if (directoryUri.scheme == "file") return File(directoryUri.path ?: return false, fileName).exists()
+        return DocumentFile.fromTreeUri(this, directoryUri)?.findFile(fileName)?.exists() == true
+    }
+
+    private fun uniqueOutputName(directoryUri: Uri, requestedName: String, reservedNames: Set<String>): String {
+        if (!outputFileExists(directoryUri, requestedName) && requestedName.lowercase(Locale.ROOT) !in reservedNames) return requestedName
+        val stem = requestedName.substringBeforeLast('.')
+        val extension = requestedName.substringAfterLast('.', "")
+        var index = 1
+        while (true) {
+            val candidate = "$stem ($index)${if (extension.isBlank()) "" else ".$extension"}"
+            if (!outputFileExists(directoryUri, candidate) && candidate.lowercase(Locale.ROOT) !in reservedNames) return candidate
+            index++
+        }
+    }
+
+    private fun copyFileToOutputDirectory(
+        sourceFile: File,
+        requestedName: String,
+        overwrite: Boolean,
+        reservedNames: MutableSet<String>
+    ): OutputResult? = runCatching {
+        val directoryUri = outputDirectoryUri ?: return null
+        val outputName = if (overwrite) requestedName else uniqueOutputName(directoryUri, requestedName, reservedNames)
+        if (directoryUri.scheme == "file") {
+            val directory = File(directoryUri.path ?: throw IllegalStateException("输出目录无效"))
+            if (!directory.exists() && !directory.mkdirs()) throw IllegalStateException("无法创建输出目录")
+            val target = File(directory, outputName)
+            FileInputStream(sourceFile).use { input -> FileOutputStream(target, false).use { input.copyTo(it) } }
+            if (!target.isFile || target.length() <= 0L) throw IllegalStateException("输出文件为空")
+            return OutputResult(Uri.fromFile(target), outputName)
+        }
+        val directory = DocumentFile.fromTreeUri(this, directoryUri)
+            ?: throw IllegalStateException("无法访问输出目录")
+        if (overwrite) directory.findFile(outputName)?.delete()
+        val target = directory.createFile(getMimeType(outputName), outputName)
+            ?: throw IllegalStateException("无法创建输出文件：$outputName")
+        val stream = contentResolver.openOutputStream(target.uri, "wt")
+            ?: throw IllegalStateException("无法写入输出文件：$outputName")
+        stream.use { output -> FileInputStream(sourceFile).use { it.copyTo(output) } }
+        if (target.length() == 0L) {
+            target.delete()
+            throw IllegalStateException("输出文件为空")
+        }
+        OutputResult(target.uri, target.name ?: outputName)
+    }.getOrNull()
+
+    private fun getMimeType(name: String): String = when (name.substringAfterLast('.', "").lowercase(Locale.ROOT)) {
+        "mp4", "m4v" -> "video/mp4"
+        "mkv" -> "video/x-matroska"
+        "avi" -> "video/x-msvideo"
+        "mov" -> "video/quicktime"
+        "webm" -> "video/webm"
+        "flv" -> "video/x-flv"
+        "ts" -> "video/mp2t"
+        "3gp" -> "video/3gpp"
+        "wmv" -> "video/x-ms-wmv"
+        "mp3" -> "audio/mpeg"
+        "aac" -> "audio/aac"
+        "m4a" -> "audio/mp4"
+        "wav" -> "audio/wav"
+        "flac" -> "audio/flac"
+        "ogg" -> "audio/ogg"
+        "opus" -> "audio/opus"
+        "wma" -> "audio/x-ms-wma"
+        "ac3" -> "audio/ac3"
+        else -> "application/octet-stream"
+    }
+
+    private fun createTaskCache(purpose: String): File = File(
+        cacheDir, "media_convert_${purpose}_${System.currentTimeMillis()}_${System.nanoTime()}"
+    ).apply { mkdirs() }
+
+    private fun cancelConversion() {
+        if (!isConverting) return
+        isConverting = false
         currentSession?.cancel()
-        convertJob?.cancel()
-        appendLog("\n⚠️ 正在取消...")
+        conversionJob?.cancel()
+        appendLog("\n⚠️ 正在取消...\n")
+        setConvertingState(false)
     }
 
-    private fun createConvertTaskCache(purpose: String): File {
-        return File(
-            cacheDir,
-            "media_convert_${purpose}_${System.currentTimeMillis()}_${System.nanoTime()}"
-        ).apply { mkdirs() }
-    }
-
-    private fun cleanupStaleConvertCache() {
-        val staleBefore = System.currentTimeMillis() - 60 * 60 * 1000L
-        cacheDir.listFiles()?.forEach { file ->
-            val isLegacyCache = file.name.startsWith("convert_src_") ||
-                file.name.startsWith("convert_out_")
-            val isStaleTaskCache = file.name.startsWith("media_convert_") &&
-                file.lastModified() < staleBefore
-            if (isLegacyCache || isStaleTaskCache) {
-                file.deleteRecursively()
+    private fun shareOutputs() {
+        if (outputUris.isEmpty()) return
+        val shareUris = outputUris.mapNotNull { uri ->
+            if (uri.scheme == "file") {
+                uri.path?.let { path -> androidx.core.content.FileProvider.getUriForFile(this, "${packageName}.provider", File(path)) }
+            } else uri
+        }
+        if (shareUris.isEmpty()) return
+        val intent = if (shareUris.size == 1) {
+            Intent(Intent.ACTION_SEND).apply {
+                type = "*/*"
+                putExtra(Intent.EXTRA_STREAM, shareUris.first())
+            }
+        } else {
+            Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                type = "*/*"
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(shareUris))
             }
         }
-    }
-
-    // ==================== 输出分享 ====================
-
-    private fun shareOutput() {
-        val finalUri = outputUri ?: return
-        val shareUri = if (finalUri.scheme == "file") {
-            val file = finalUri.path?.let(::File) ?: return
-            androidx.core.content.FileProvider.getUriForFile(
-                this,
-                "${packageName}.provider",
-                file
-            )
-        } else {
-            finalUri
-        }
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = contentResolver.getType(shareUri) ?: "*/*"
-            putExtra(Intent.EXTRA_STREAM, shareUri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         startActivity(Intent.createChooser(intent, "分享转换结果"))
     }
 
-    // ==================== 辅助 ====================
-
     private fun setConvertingState(converting: Boolean) {
-        binding.btnConvert.isEnabled    = !converting
-        binding.btnPickFile.isEnabled   = !converting
-        binding.btnCancel.visibility    = if (converting) View.VISIBLE else View.GONE
-        binding.btnShareOutput.visibility =
-            if (!converting && outputUri != null) View.VISIBLE else View.GONE
-        binding.progressBar.visibility  = if (converting) View.VISIBLE else View.VISIBLE
-        if (!converting) binding.progressBar.visibility = View.VISIBLE  // 保留显示最终值
+        binding.btnConvert.isEnabled = !converting && selectedMediaFiles.isNotEmpty() && selectedFormat != null
+        binding.btnPickFile.isEnabled = !converting
+        binding.btnSelectOutputDir.isEnabled = !converting
+        binding.btnCancel.visibility = if (converting) View.VISIBLE else View.GONE
+        binding.btnShareOutput.visibility = if (!converting && outputUris.isNotEmpty()) View.VISIBLE else View.GONE
+        binding.progressBar.visibility = View.VISIBLE
     }
 
-    private fun updateUI() {
-        val hasSource = sourceUri != null
-        val hasFmt    = selectedFormat != null
-        binding.btnConvert.isEnabled  = hasSource && hasFmt
-        binding.groupFormatSelect.visibility = if (hasSource) View.VISIBLE else View.VISIBLE
-        // 无源文件时提示
-        binding.tvNoSource.visibility = if (!hasSource) View.VISIBLE else View.GONE
+    private fun updateUi() {
+        binding.btnConvert.isEnabled = !isConverting && selectedMediaFiles.isNotEmpty() && selectedFormat != null
+        binding.groupFormatSelect.visibility = if (selectedMediaFiles.isEmpty()) View.GONE else View.VISIBLE
+        renderSelectedFiles()
     }
 
-    private fun appendLog(msg: String) {
-        if (msg.isBlank()) return
-        val current = binding.tvLog.text.toString()
-        binding.tvLog.text = current + msg
-        // 滚动到底部
-        binding.scrollLog.post { binding.scrollLog.fullScroll(View.FOCUS_DOWN) }
-    }
-
-    private fun formatSize(bytes: Long): String = when {
-        bytes < 1024L        -> "$bytes B"
-        bytes < 1024L * 1024 -> "${"%.1f".format(Locale.getDefault(), bytes / 1024.0)} KB"
-        else                 -> "${"%.2f".format(Locale.getDefault(), bytes / 1024.0 / 1024.0)} MB"
+    private fun appendLog(message: String) {
+        if (message.isBlank() || isDestroyed) return
+        runOnUiThread {
+            val current = binding.tvLog.text.toString()
+            binding.tvLog.text = (current + message).takeLast(16000)
+            binding.scrollLog.post { binding.scrollLog.fullScroll(View.FOCUS_DOWN) }
+        }
     }
 }

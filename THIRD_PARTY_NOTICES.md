@@ -35,8 +35,10 @@ license text is distributed at `assets/licenses/mpv-android-LICENSE.txt`.
 
 FFmpegKit Next 8.1.0 is used to build FFmpeg n8.1.2 and the Java/JNI command
 API. libmpv is linked against the same FFmpeg shared libraries packaged by
-FFmpegKit Next. The enabled FFmpeg configuration is LGPL-compatible; libmpv
-and the combined application remain governed by GPLv3 as described above.
+FFmpegKit Next. The local build enables libmp3lame, libx264, libvpx, libvorbis
+and libopus; x264 is GPL-licensed, so this FFmpegKit build and the combined
+application are distributed under GPLv3. The reproducible build options are
+documented in `app/libs/README.md` and `native/mpv/README.md`.
 
 ## libass and libplacebo
 

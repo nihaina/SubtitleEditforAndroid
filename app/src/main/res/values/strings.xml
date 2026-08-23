@@ -173,7 +173,7 @@
     <string name="directory_item_count">%1$d项</string>
     <string name="read_failed">读取失败</string>
     <string name="activity_media_convert_text_01">源文件</string>
-    <string name="activity_media_convert_text_02">选择音视频文件</string>
+    <string name="activity_media_convert_text_02">选择音视频文件（可多选）</string>
     <string name="activity_media_convert_text_03">未选择文件</string>
     <string name="activity_media_convert_text_04">输出目录：Download/SubtitleEdit/Convert</string>
     <string name="activity_media_convert_text_05">视频格式</string>
