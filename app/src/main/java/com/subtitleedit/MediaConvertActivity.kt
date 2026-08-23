@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.view.View
 import android.widget.*
@@ -31,6 +32,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 音视频格式转换。
@@ -54,6 +56,11 @@ class MediaConvertActivity : AppCompatActivity() {
         val uri: Uri,
         val fileName: String,
         var mediaInfo: String = "正在读取媒体信息..."
+    )
+
+    private data class SourceProbe(
+        val hasVideo: Boolean,
+        val durationSeconds: Double?
     )
 
     private data class OutputResult(val uri: Uri, val fileName: String)
@@ -89,6 +96,10 @@ class MediaConvertActivity : AppCompatActivity() {
     private val channels = listOf("原始声道", "立体声 (2ch)", "单声道 (1ch)")
     private val qualityLabels = listOf("原始质量", "高质量 (18)", "较高质量 (23)", "中等质量 (28)", "低质量 (33)", "自定义")
     private val qualityValues = listOf("-1", "18", "23", "28", "33", "custom")
+    private val audioExtensions = setOf(
+        "mp3", "aac", "m4a", "m4b", "wav", "flac", "ogg", "oga", "opus", "wma", "ac3",
+        "amr", "aif", "aiff", "ape", "mka", "alac", "tta", "wv", "mid", "midi", "3ga"
+    )
 
     private val selectedMediaFiles = mutableListOf<SelectedMediaFile>()
     private var selectedFormat: FormatInfo? = null
@@ -436,13 +447,28 @@ class MediaConvertActivity : AppCompatActivity() {
         return try {
             val prefix = "[${index + 1}/$total]"
             appendLog("\n$prefix 开始处理：${file.fileName}\n")
+            val sourceProbe = if (format.isAudioOnly) {
+                null
+            } else {
+                withContext(Dispatchers.IO) {
+                    val probed = probeSourceUri(file.uri)
+                    if (isLikelyAudioFile(file)) {
+                        SourceProbe(hasVideo = false, durationSeconds = probed?.durationSeconds)
+                    } else {
+                        probed ?: SourceProbe(hasVideo = true, durationSeconds = null)
+                    }
+                }
+            }
             val input = withContext(Dispatchers.IO) {
                 FFmpegKitConfig.getSafParameterForRead(this@MediaConvertActivity, file.uri)
             }
             safInput = input
+            if (sourceProbe?.hasVideo == false) {
+                appendLog("$prefix 未检测到视频流，将生成黑色画面并保留音频。\n")
+            }
             appendLog("$prefix 正在转换...\n")
             val output = File(cache, "output.${format.extension}")
-            val session = executeConversion(input, output, format) { local ->
+            val session = executeConversion(input, output, format, sourceProbe) { local ->
                 val overall = ((index * 100L + local) / total).toInt().coerceIn(0, 99)
                 if (!isDestroyed) runOnUiThread { binding.progressBar.progress = overall }
             }
@@ -469,11 +495,13 @@ class MediaConvertActivity : AppCompatActivity() {
         input: String,
         output: File,
         format: FormatInfo,
+        sourceProbe: SourceProbe?,
         onProgress: (Int) -> Unit
     ): FFmpegSession {
-        val command = buildFfmpegCommand(input, output.absolutePath, format)
+        val command = buildFfmpegCommand(input, output.absolutePath, format, sourceProbe)
         appendLog("执行命令：ffmpeg $command\n")
         var lastProgress = 0
+        val lastProgressAt = AtomicLong(SystemClock.elapsedRealtime())
         val session = withContext(Dispatchers.IO) {
             FFmpegKit.executeAsync(
                 command,
@@ -481,6 +509,7 @@ class MediaConvertActivity : AppCompatActivity() {
                 { log -> runOnUiThread { appendLog(log.message) } },
                 { statistics ->
                     if (statistics.time > 0) {
+                        lastProgressAt.set(SystemClock.elapsedRealtime())
                         lastProgress = (lastProgress + 1).coerceAtMost(95)
                         onProgress(lastProgress)
                     }
@@ -488,19 +517,65 @@ class MediaConvertActivity : AppCompatActivity() {
             )
         }
         currentSession = session
-        while (session.getState().name !in setOf("COMPLETED", "FAILED")) delay(100)
+        while (session.getState().name !in setOf("COMPLETED", "FAILED")) {
+            delay(100)
+            if (SystemClock.elapsedRealtime() - lastProgressAt.get() > 120_000L) {
+                session.cancel()
+                var attempts = 0
+                while (session.getState().name !in setOf("COMPLETED", "FAILED") && attempts < 50) {
+                    delay(100)
+                    attempts++
+                }
+                throw IllegalStateException("FFmpeg 超过 120 秒没有读取到有效媒体数据，可能是源文件损坏或无法 seek")
+            }
+        }
         return session
     }
 
-    private fun buildFfmpegCommand(input: String, output: String, format: FormatInfo): String {
-        val videoCodec = if (!format.isAudioOnly) binding.spinnerVideoCodec.selectedItem?.toString() ?: "mpeg4" else ""
+    private fun buildFfmpegCommand(
+        input: String,
+        output: String,
+        format: FormatInfo,
+        sourceProbe: SourceProbe? = SourceProbe(hasVideo = true, durationSeconds = null)
+    ): String {
+        val syntheticVideo = !format.isAudioOnly && sourceProbe?.hasVideo == false
+        val selectedVideoCodec = if (!format.isAudioOnly) {
+            binding.spinnerVideoCodec.selectedItem?.toString() ?: "mpeg4"
+        } else {
+            ""
+        }
+        val videoCodec = if (syntheticVideo && selectedVideoCodec == "copy") {
+            fallbackVideoCodec(format)
+        } else {
+            selectedVideoCodec
+        }
         val audioCodec = binding.spinnerAudioCodec.selectedItem?.toString() ?: format.audioCodecs.firstOrNull() ?: "aac"
-        val command = StringBuilder("-y -hide_banner -i \"$input\"")
+        val resolutionPosition = binding.spinnerResolution.selectedItemPosition
+        val command = StringBuilder("-y -hide_banner")
+        if (syntheticVideo) {
+            val size = if (resolutionPosition > 0) {
+                resolutions[resolutionPosition].substringBefore(' ')
+            } else {
+                "1280x720"
+            }
+            command.append(" -f lavfi -i \"color=c=black:s=$size:r=30\"")
+            command.append(" -i \"$input\"")
+        } else {
+            command.append(" -i \"$input\"")
+        }
         if (format.isAudioOnly) {
             command.append(" -map 0:a:0 -vn -c:a $audioCodec")
+        } else if (syntheticVideo) {
+            command.append(" -map 0:v:0 -map 1:a:0 -shortest -c:v $videoCodec -c:a $audioCodec")
+            sourceProbe?.durationSeconds?.takeIf { it > 0.0 }?.let { duration ->
+                command.append(" -t ${formatFfmpegDuration(duration)}")
+            }
         } else {
             command.append(" -map 0:v:0 -c:v $videoCodec")
-            command.append(" -map 0:a:0? -c:a $audioCodec -sn -dn")
+            command.append(" -map 0:a:0? -c:a $audioCodec")
+        }
+        if (!format.isAudioOnly) {
+            command.append(" -sn -dn")
             if (videoCodec != "copy") {
                 selectedQuality()?.let { quality ->
                     when (videoCodec) {
@@ -509,8 +584,9 @@ class MediaConvertActivity : AppCompatActivity() {
                         else -> command.append(" -q:v $quality")
                     }
                 }
-                val resolution = binding.spinnerResolution.selectedItemPosition
-                if (resolution > 0) command.append(" -vf scale=${resolutions[resolution].substringBefore(' ')}")
+                if (!syntheticVideo && resolutionPosition > 0) {
+                    command.append(" -vf scale=${resolutions[resolutionPosition].substringBefore(' ')}")
+                }
                 binding.etVideoBitrate.text.toString().trim().toIntOrNull()?.takeIf { it > 0 }?.let { command.append(" -b:v ${it}k") }
             }
         }
@@ -524,6 +600,35 @@ class MediaConvertActivity : AppCompatActivity() {
         }
         command.append(" -f ${format.formatName} \"$output\"")
         return command.toString()
+    }
+
+    private fun fallbackVideoCodec(format: FormatInfo): String {
+        return format.videoCodecs.firstOrNull { it != "copy" } ?: "mpeg4"
+    }
+
+    private fun probeSourceUri(uri: Uri): SourceProbe? {
+        var safInput: String? = null
+        return try {
+            val input = FFmpegKitConfig.getSafParameterForRead(this, uri)
+            safInput = input
+            val info = FFprobeKit.getMediaInformation(input).getMediaInformation() ?: return null
+            SourceProbe(
+                hasVideo = info.getStreams().any { it.getType() == "video" },
+                durationSeconds = info.getDuration()?.toDoubleOrNull()?.takeIf { it > 0.0 }
+            )
+        } catch (_: Exception) {
+            null
+        } finally {
+            safInput?.let { FFmpegKitConfig.unregisterSafProtocolUrl(it) }
+        }
+    }
+
+    private fun formatFfmpegDuration(seconds: Double): String =
+        String.format(Locale.US, "%.3f", seconds)
+
+    private fun isLikelyAudioFile(file: SelectedMediaFile): Boolean {
+        if (runCatching { contentResolver.getType(file.uri) }.getOrNull()?.startsWith("audio/") == true) return true
+        return file.fileName.substringAfterLast('.', "").lowercase(Locale.ROOT) in audioExtensions
     }
 
     private fun selectedQuality(): Int? {
