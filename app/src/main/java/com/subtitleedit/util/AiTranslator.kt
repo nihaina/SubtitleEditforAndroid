@@ -54,25 +54,36 @@ class AiTranslator(
      * @param texts 要翻译的文本列表
      * @param progressCallback 进度回调 (当前进度，总进度)
      * @param isCancelled 取消检查回调
-     * @return 翻译后的文本列表
+     * @param continuationContext 重试时沿用的上一成功批次上下文
+     * @return 本次已完成的译文、续传上下文与可选失败信息
      */
+    data class TranslationRunResult(
+        val translations: List<String>,
+        val continuationContext: String,
+        val error: Throwable? = null
+    ) {
+        val isComplete: Boolean
+            get() = error == null
+    }
+
     suspend fun translateTexts(
         texts: List<String>,
         progressCallback: ((Int, Int) -> Unit)? = null,
-        isCancelled: () -> Boolean = { false }
-    ): Result<List<String>> = withContext(Dispatchers.IO) {
+        isCancelled: () -> Boolean = { false },
+        continuationContext: String = ""
+    ): TranslationRunResult = withContext(Dispatchers.IO) {
+        val translatedTexts = mutableListOf<String>()
+        var previousContext = continuationContext
         try {
             // 批量翻译：将所有文本合并成一个大请求
             if (texts.isEmpty()) {
-                return@withContext Result.success(emptyList())
+                return@withContext TranslationRunResult(emptyList(), previousContext)
             }
 
             if (isCancelled()) {
                 throw CancellationException("翻译已取消")
             }
 
-            val translatedTexts = mutableListOf<String>()
-            var previousContext = ""
             buildBatches(texts).forEachIndexed { batchIndex, batch ->
                 if (isCancelled()) throw CancellationException("翻译已取消")
                 val batchResult = translateBatch(batch, previousContext, batchIndex, isCancelled)
@@ -81,11 +92,11 @@ class AiTranslator(
                 progressCallback?.invoke(translatedTexts.size, texts.size)
             }
 
-            Result.success(translatedTexts)
+            TranslationRunResult(translatedTexts, previousContext)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Result.failure(e)
+            TranslationRunResult(translatedTexts, previousContext, e)
         }
     }
 
