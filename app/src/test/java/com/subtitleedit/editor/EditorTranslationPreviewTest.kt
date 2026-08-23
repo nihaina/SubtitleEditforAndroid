@@ -24,6 +24,7 @@ class EditorTranslationPreviewTest {
         assertTrue(items[0].apply)
         assertTrue(items[1].apply)
         assertFalse(items[2].apply)
+        assertFalse(items[2].suspectedProblem)
     }
 
     @Test
@@ -35,13 +36,25 @@ class EditorTranslationPreviewTest {
 
     @Test
     fun translationCancellation_carriesCompletedBatchState() {
+        val conversationState = AiTranslator.ConversationState(
+            listOf(AiTranslator.ChatMessage("system", "系统提示"))
+        )
         val exception = AiTranslator.TranslationCancelledException(
             translations = listOf("一", "二"),
-            continuationContext = "上一批上下文",
+            conversationState = conversationState,
             message = "用户取消翻译"
         )
 
         assertEquals(listOf("一", "二"), exception.translations)
-        assertEquals("上一批上下文", exception.continuationContext)
+        assertEquals(conversationState, exception.conversationState)
+    }
+
+    @Test
+    fun blankReturnedTranslation_isAppliedAndMarkedAsSuspect() {
+        val items = buildTranslationPreviewItems(selectedEntries, listOf("一", "", "三"))
+
+        assertTrue(items[1].apply)
+        assertTrue(items[1].suspectedProblem)
+        assertFalse(items[0].suspectedProblem)
     }
 }

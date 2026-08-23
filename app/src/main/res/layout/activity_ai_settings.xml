@@ -169,46 +169,13 @@
                     <com.google.android.material.textfield.TextInputLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:hint="@string/activity_ai_settings_hint_03"
-                        android:layout_marginBottom="16dp"
-                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
-
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/etSourceLanguage"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content" />
-
-                    </com.google.android.material.textfield.TextInputLayout>
-
-                    <com.google.android.material.textfield.TextInputLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
                         android:hint="@string/activity_ai_settings_hint_04"
-                        android:layout_marginBottom="16dp"
                         style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
 
                         <com.google.android.material.textfield.TextInputEditText
                             android:id="@+id/etTargetLanguage"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content" />
-
-                    </com.google.android.material.textfield.TextInputLayout>
-
-                    <com.google.android.material.textfield.TextInputLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:hint="@string/activity_ai_settings_hint_05"
-                        app:helperText="用于补充术语、语气或翻译规则；固定输出格式仍由应用控制"
-                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
-
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/etTranslationPrompt"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:gravity="top|start"
-                            android:inputType="textMultiLine|textCapSentences"
-                            android:maxLines="6"
-                            android:minLines="3" />
 
                     </com.google.android.material.textfield.TextInputLayout>
 

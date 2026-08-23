@@ -113,9 +113,7 @@
     <string name="activity_ai_settings_hint_01" translatable="false">API Key</string>
     <string name="activity_ai_settings_hint_02">模型名称</string>
     <string name="activity_ai_settings_text_03">模型</string>
-    <string name="activity_ai_settings_hint_03">源语言（留空自动检测）</string>
     <string name="activity_ai_settings_hint_04">目标语言</string>
-    <string name="activity_ai_settings_hint_05">AI 提示词（可选）</string>
     <string name="ai_api_key_show">显示 API Key</string>
     <string name="ai_api_key_hide">隐藏 API Key</string>
     <string name="ai_api_key_copy">复制 API Key</string>
@@ -397,6 +395,9 @@
     <string name="item_subtitle_contentdescription_02">跳转到字幕时间</string>
     <string name="item_subtitle_contentdescription_03">设置字幕时间</string>
     <string name="item_translation_preview_contentdescription_01">应用此行翻译</string>
+    <string name="translation_preview_suspect_warning">部分翻译结果疑似有误</string>
+    <string name="translation_preview_suspect_dialog_title">疑似有误的字幕</string>
+    <string name="translation_preview_suspect_row">第 %1$d 条字幕</string>
     <string name="menu_drafts_title_01">返回根目录</string>
     <string name="menu_main_title_01">工具</string>
     <string name="menu_main_title_02">设置</string>

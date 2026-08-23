@@ -108,9 +108,7 @@ class AiSettingsActivity : AppCompatActivity() {
         selectedProvider = settingsManager.getAiProvider()
         binding.spinnerAiProvider.setSelection(AiProviderConfig.indexOf(selectedProvider))
         loadProviderFields(selectedProvider)
-        binding.etSourceLanguage.setText(settingsManager.getAiSourceLanguage())
         binding.etTargetLanguage.setText(settingsManager.getAiTargetLanguage())
-        binding.etTranslationPrompt.setText(settingsManager.getAiTranslationPrompt())
     }
 
     private fun loadProviderFields(provider: String) {
@@ -281,25 +279,11 @@ class AiSettingsActivity : AppCompatActivity() {
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
-        binding.etSourceLanguage.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                settingsManager.setAiSourceLanguage(s.toString().trim())
-            }
-        })
         binding.etTargetLanguage.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 settingsManager.setAiTargetLanguage(s.toString().trim())
-            }
-        })
-        binding.etTranslationPrompt.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                settingsManager.setAiTranslationPrompt(s.toString().trim())
             }
         })
     }

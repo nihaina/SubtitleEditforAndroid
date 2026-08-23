@@ -11,7 +11,8 @@ data class TranslationPreviewItem(
     val entryPosition: Int,
     val originalText: String,
     var translatedText: String,
-    var apply: Boolean = true
+    var apply: Boolean = true,
+    var suspectedProblem: Boolean = false
 )
 
 class TranslationPreviewAdapter(

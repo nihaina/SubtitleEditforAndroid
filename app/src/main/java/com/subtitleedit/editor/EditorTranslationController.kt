@@ -34,7 +34,7 @@ internal class EditorTranslationController(
         val selectedEntries: List<Pair<SubtitleEntry, Int>>,
         val translator: AiTranslator,
         val translatedTexts: MutableList<String> = mutableListOf(),
-        var continuationContext: String = ""
+        var conversationState: AiTranslator.ConversationState = AiTranslator.ConversationState()
     )
 
     /** 显示 AI 翻译对话框 */
@@ -54,9 +54,11 @@ internal class EditorTranslationController(
         }
 
         val model = settingsManager.getAiModel()
-        val sourceLanguage = settingsManager.getAiSourceLanguage()
         val targetLanguage = settingsManager.getAiTargetLanguage()
-        val customPrompt = settingsManager.getAiTranslationPrompt()
+        if (targetLanguage.isBlank()) {
+            showTranslationError("请先设置目标语言")
+            return
+        }
         val baseUrl = settingsManager.getAiBaseUrl(provider)
         if (baseUrl.isBlank()) {
             showTranslationError("请先在设置中填写自定义 API 请求地址")
@@ -64,12 +66,11 @@ internal class EditorTranslationController(
         }
 
         // 显示翻译确认对话框
-        val sourceLangText = if (sourceLanguage == "自动检测") "自动检测" else sourceLanguage
         AlertDialog.Builder(activity)
             .setTitle("AI 翻译")
             .setMessage(
                 "将使用 $providerName / $model 翻译选中的 ${selectedEntries.size} 条字幕\n" +
-                    "源语言：$sourceLangText\n目标语言：$targetLanguage\n\n点击「开始翻译」继续"
+                    "目标语言：$targetLanguage\n\n按顺序流式翻译，点击「开始翻译」继续"
             )
             .setPositiveButton("开始翻译") { _, _ ->
                 startTranslation(
@@ -77,9 +78,7 @@ internal class EditorTranslationController(
                     provider,
                     apiKey,
                     model,
-                    sourceLanguage,
                     targetLanguage,
-                    customPrompt,
                     baseUrl
                 )
             }
@@ -101,13 +100,10 @@ internal class EditorTranslationController(
         provider: String,
         apiKey: String,
         model: String,
-        sourceLanguage: String,
         targetLanguage: String,
-        customPrompt: String,
         baseUrl: String
     ) {
-        val aiTranslator =
-            AiTranslator(provider, apiKey, model, sourceLanguage, targetLanguage, customPrompt, baseUrl)
+        val aiTranslator = AiTranslator(provider, apiKey, model, targetLanguage, baseUrl)
         continueTranslation(TranslationSession(selectedEntries, aiTranslator))
     }
 
@@ -122,7 +118,6 @@ internal class EditorTranslationController(
                 userCancelledTranslation = true
                 translateCancelled = true
                 activeAiTranslator?.cancel()
-                translateJob?.cancel(CancellationException("用户取消翻译"))
             }
             .setCancelable(false)
             .create()
@@ -140,6 +135,7 @@ internal class EditorTranslationController(
             try {
                 val result = session.translator.translateTexts(
                     texts = textsToTranslate,
+                    startNumber = completedBeforeRun + 1,
                     progressCallback = { current, _ ->
                         activity.runOnUiThread {
                             progressDialog.setMessage(
@@ -148,11 +144,11 @@ internal class EditorTranslationController(
                         }
                     },
                     isCancelled = { translateCancelled },
-                    continuationContext = session.continuationContext
+                    conversationState = session.conversationState
                 )
 
                 session.translatedTexts.addAll(result.translations)
-                session.continuationContext = result.continuationContext
+                session.conversationState = result.conversationState
                 if (translateCancelled) {
                     handleTranslationCancellation(session, progressDialog)
                     return@launch
@@ -169,7 +165,7 @@ internal class EditorTranslationController(
                 }
             } catch (e: AiTranslator.TranslationCancelledException) {
                 session.translatedTexts.addAll(e.translations)
-                session.continuationContext = e.continuationContext
+                session.conversationState = e.conversationState
                 handleTranslationCancellation(session, progressDialog)
             } catch (_: CancellationException) {
                 handleTranslationCancellation(session, progressDialog)
@@ -228,7 +224,8 @@ internal class EditorTranslationController(
             previewItems = previewItems,
             onApply = applyTexts,
             neutralButtonText = "保存草稿",
-            onNeutral = saveDraft
+            onNeutral = saveDraft,
+            suspectedProblem = { it.suspectedProblem }
         )
     }
 
@@ -255,6 +252,7 @@ internal fun buildTranslationPreviewItems(
         entryPosition = position,
         originalText = entry.text,
         translatedText = translatedText.orEmpty(),
-        apply = translatedText != null
+        apply = translatedText != null,
+        suspectedProblem = translatedText != null && translatedText.isBlank()
     )
 }

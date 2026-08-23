@@ -29,9 +29,7 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_AI_PROVIDER = "ai_provider"
         private const val KEY_AI_API_KEY = "ai_api_key"
         private const val KEY_AI_MODEL = "ai_model"
-        private const val KEY_AI_SOURCE_LANGUAGE = "ai_source_language"
         private const val KEY_AI_TARGET_LANGUAGE = "ai_target_language"
-        private const val KEY_AI_TRANSLATION_PROMPT = "ai_translation_prompt"
         private const val KEY_AI_CUSTOM_BASE_URL = "ai_custom_base_url"
         private const val KEY_WAVEFORM_CACHE_LOCATION = "waveform_cache_location"
         private const val KEY_LOOP_SELECTED_SUBTITLE = "loop_selected_subtitle"
@@ -254,20 +252,6 @@ class SettingsManager private constructor(context: Context) {
     }
 
     /**
-     * 获取 AI 翻译源语言
-     */
-    fun getAiSourceLanguage(): String {
-        return prefs.getString(KEY_AI_SOURCE_LANGUAGE, "自动检测") ?: "自动检测"
-    }
-    
-    /**
-     * 设置 AI 翻译源语言
-     */
-    fun setAiSourceLanguage(language: String) {
-        prefs.edit().putString(KEY_AI_SOURCE_LANGUAGE, language).apply()
-    }
-    
-    /**
      * 获取 AI 翻译目标语言
      */
     fun getAiTargetLanguage(): String {
@@ -279,13 +263,6 @@ class SettingsManager private constructor(context: Context) {
      */
     fun setAiTargetLanguage(language: String) {
         prefs.edit().putString(KEY_AI_TARGET_LANGUAGE, language).apply()
-    }
-
-    fun getAiTranslationPrompt(): String =
-        prefs.getString(KEY_AI_TRANSLATION_PROMPT, "") ?: ""
-
-    fun setAiTranslationPrompt(prompt: String) {
-        prefs.edit().putString(KEY_AI_TRANSLATION_PROMPT, prompt).apply()
     }
 
     fun getAiBaseUrl(provider: String = getAiProvider()): String {
