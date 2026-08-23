@@ -12,6 +12,8 @@ app/libs/ffmpeg-kit-next-maven/com/arthenica/ffmpeg-kit-next/8.1.0/
 ```bash
 ./nix-android.sh \
   -p android-r27d \
+  --enable-android-zlib \
+  --enable-android-media-codec \
   --enable-gpl \
   --enable-lame \
   --enable-libvpx \
@@ -21,14 +23,14 @@ app/libs/ffmpeg-kit-next-maven/com/arthenica/ffmpeg-kit-next/8.1.0/
   --disable-arm-v7a-neon
 ```
 
-当前本地产物按上述配置构建，额外包含 `libmp3lame`、`libx264`、`libvpx`、
+当前本地产物按上述配置构建，启用 Android zlib 与 MediaCodec，并额外包含 `libmp3lame`、`libx264`、`libvpx`、
 `libvorbis` 和 `libopus` 编码器。启用 `x264` 后，FFmpegKit 产物按 GPLv3
 分发；不要将它与未启用 GPL 的旧 AAR 混用。
 
 AAR SHA-256：
 
 ```text
-81C8C58B3944AD6063A99B0D6F3543CE17C1751B1DA9126196F6059F1FB52E3C
+CA186ABB26A43B45D1DBC526A10787544D5BF150F23C192532DF4E46D8F2733A
 ```
 
 ## ONNX Runtime Java

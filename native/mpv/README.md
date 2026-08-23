@@ -18,8 +18,9 @@ Pinned inputs:
 - libplacebo v6.338.2
 
 The FFmpegKit prefix used by this runtime is built with the media-conversion
-codecs `libmp3lame`, `libx264`, `libvpx`, `libvorbis` and `libopus` enabled.
-Rebuild that prefix with the same options before regenerating this runtime.
+codecs `libmp3lame`, `libx264`, `libvpx`, `libvorbis` and `libopus` enabled,
+plus Android zlib and MediaCodec support. Rebuild that prefix with the same
+options before regenerating this runtime.
 
 The generated mpv AAR intentionally excludes all `libav*.so` files. They are
 provided only by `ffmpeg-kit-next:8.1.0-mpv1`.
