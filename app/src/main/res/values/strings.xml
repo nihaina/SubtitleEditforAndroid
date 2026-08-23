@@ -114,6 +114,7 @@
     <string name="activity_ai_settings_hint_02">模型名称</string>
     <string name="activity_ai_settings_text_03">模型</string>
     <string name="activity_ai_settings_hint_04">目标语言</string>
+    <string name="activity_ai_settings_hint_context_window">上下文上限（Token，默认 262144）</string>
     <string name="ai_api_key_show">显示 API Key</string>
     <string name="ai_api_key_hide">隐藏 API Key</string>
     <string name="ai_api_key_copy">复制 API Key</string>
@@ -161,7 +162,7 @@
     <string name="activity_editor_contentdescription_08">播放/暂停</string>
     <string name="activity_editor_text_08" translatable="false">1.0×</string>
     <string name="activity_editor_contentdescription_09">播放速度</string>
-    <string name="activity_log_text_01">com.subtitleedit 最近 24 小时</string>
+    <string name="activity_log_text_01">com.subtitleedit 最近 1 小时</string>
     <string name="activity_log_text_02">刷新</string>
     <string name="activity_log_text_03">导出</string>
     <string name="activity_log_text_04">简单</string>

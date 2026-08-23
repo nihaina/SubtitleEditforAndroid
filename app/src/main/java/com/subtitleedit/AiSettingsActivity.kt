@@ -109,6 +109,7 @@ class AiSettingsActivity : AppCompatActivity() {
         binding.spinnerAiProvider.setSelection(AiProviderConfig.indexOf(selectedProvider))
         loadProviderFields(selectedProvider)
         binding.etTargetLanguage.setText(settingsManager.getAiTargetLanguage())
+        binding.etContextWindowTokens.setText(settingsManager.getAiContextWindowTokens().toString())
     }
 
     private fun loadProviderFields(provider: String) {
@@ -286,5 +287,19 @@ class AiSettingsActivity : AppCompatActivity() {
                 settingsManager.setAiTargetLanguage(s.toString().trim())
             }
         })
+        binding.etContextWindowTokens.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                s?.toString()?.toIntOrNull()?.let(settingsManager::setAiContextWindowTokens)
+            }
+        })
+        binding.etContextWindowTokens.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                binding.etContextWindowTokens.setText(
+                    settingsManager.getAiContextWindowTokens().toString()
+                )
+            }
+        }
     }
 }

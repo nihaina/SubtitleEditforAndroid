@@ -3,6 +3,8 @@ package com.subtitleedit.util
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaType
@@ -13,9 +15,18 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 
 private const val MAX_LINES_PER_TRANSLATION_REQUEST = 300
+private const val AI_TRANSLATION_LOG_TAG = "AiTranslator"
+const val DEFAULT_AI_CONTEXT_WINDOW_TOKENS = 256 * 1024
+const val MIN_AI_CONTEXT_WINDOW_TOKENS = 4 * 1024
+const val MAX_AI_CONTEXT_WINDOW_TOKENS = 2 * 1024 * 1024
+private const val RECENT_FULL_CONTEXT_BATCHES = 2
+private const val COMPACTED_LINES_PER_BATCH = 24
+private const val CONTEXT_KEEP_RATIO = 0.5
+private const val MIN_COMPLETION_RESERVE_TOKENS = 1_024
 private val NUMBERED_TRANSLATION_LINE =
     Regex("""^\s*(?:\[(\d+)]|(\d+)\s*[.．、:：])\s*(.*)$""")
 
@@ -130,7 +141,8 @@ class AiTranslator(
     private val apiKey: String,
     private val model: String,
     private val targetLanguage: String,
-    private val baseUrl: String = ""
+    private val baseUrl: String = "",
+    contextWindowTokens: Int = DEFAULT_AI_CONTEXT_WINDOW_TOKENS
 ) {
     companion object {
         private const val MAX_RETRY_COUNT = 3
@@ -158,7 +170,15 @@ class AiTranslator(
     private data class BatchResult(
         val translations: List<String>,
         val userContent: String,
-        val assistantContent: String
+        val assistantContent: String,
+        val conversationBeforeBatch: ConversationState
+    )
+
+    private data class TranslationLogContext(
+        val startNumber: Int,
+        val endNumber: Int,
+        val messages: List<ChatMessage>,
+        val estimatedInputTokens: Int
     )
 
     private class NonRetryableApiException(message: String) : IOException(message)
@@ -173,6 +193,11 @@ class AiTranslator(
         .readTimeout(0, TimeUnit.SECONDS)
         .writeTimeout(0, TimeUnit.SECONDS)
         .build()
+    private val translationMutex = Mutex()
+    private val contextWindowTokens = contextWindowTokens.coerceIn(
+        MIN_AI_CONTEXT_WINDOW_TOKENS,
+        MAX_AI_CONTEXT_WINDOW_TOKENS
+    )
 
     private val providerConfig = AiProviderConfig.getProvider(provider)
     private val apiUrl = AiProviderConfig.chatCompletionsUrl(
@@ -196,55 +221,57 @@ class AiTranslator(
         progressCallback: ((Int, Int) -> Unit)? = null,
         isCancelled: () -> Boolean = { false },
         conversationState: ConversationState = ConversationState()
-    ): TranslationRunResult = withContext(Dispatchers.IO) {
-        require(startNumber > 0) { "字幕起始编号必须大于 0" }
-        val translatedTexts = mutableListOf<String>()
-        var currentConversation = ensureSystemMessage(conversationState)
+    ): TranslationRunResult = translationMutex.withLock {
+        withContext(Dispatchers.IO) {
+            require(startNumber > 0) { "字幕起始编号必须大于 0" }
+            val translatedTexts = mutableListOf<String>()
+            var currentConversation = ensureSystemMessage(conversationState)
 
-        try {
-            if (texts.isEmpty()) {
-                return@withContext TranslationRunResult(emptyList(), currentConversation)
-            }
-            if (isCancelled()) throw CancellationException("翻译已取消")
-
-            splitSubtitleTranslationBatches(texts).forEach { batch ->
+            try {
+                if (texts.isEmpty()) {
+                    return@withContext TranslationRunResult(emptyList(), currentConversation)
+                }
                 if (isCancelled()) throw CancellationException("翻译已取消")
-                val completedBeforeBatch = translatedTexts.size
-                val batchStartNumber = startNumber + completedBeforeBatch
-                val batchResult = translateBatch(
-                    texts = batch,
-                    conversationState = currentConversation,
-                    startNumber = batchStartNumber,
-                    isCancelled = isCancelled,
-                    streamingProgress = { receivedCount ->
-                        progressCallback?.invoke(completedBeforeBatch + receivedCount, texts.size)
-                    }
-                )
-                translatedTexts.addAll(batchResult.translations)
-                currentConversation = ConversationState(
-                    currentConversation.messages +
-                        ChatMessage("user", batchResult.userContent) +
-                        ChatMessage("assistant", batchResult.assistantContent)
-                )
-                progressCallback?.invoke(translatedTexts.size, texts.size)
-            }
 
-            TranslationRunResult(translatedTexts, currentConversation)
-        } catch (error: BatchTranslationCancelledException) {
-            translatedTexts.addAll(error.translations)
-            throw TranslationCancelledException(
-                translatedTexts.toList(),
-                currentConversation,
-                error.message
-            )
-        } catch (error: CancellationException) {
-            throw TranslationCancelledException(
-                translatedTexts.toList(),
-                currentConversation,
-                error.message
-            )
-        } catch (error: Exception) {
-            TranslationRunResult(translatedTexts, currentConversation, error)
+                splitSubtitleTranslationBatches(texts).forEach { batch ->
+                    if (isCancelled()) throw CancellationException("翻译已取消")
+                    val completedBeforeBatch = translatedTexts.size
+                    val batchStartNumber = startNumber + completedBeforeBatch
+                    val batchResult = translateBatch(
+                        texts = batch,
+                        conversationState = currentConversation,
+                        startNumber = batchStartNumber,
+                        isCancelled = isCancelled,
+                        streamingProgress = { receivedCount ->
+                            progressCallback?.invoke(completedBeforeBatch + receivedCount, texts.size)
+                        }
+                    )
+                    translatedTexts.addAll(batchResult.translations)
+                    currentConversation = ConversationState(
+                        batchResult.conversationBeforeBatch.messages +
+                            ChatMessage("user", batchResult.userContent) +
+                            ChatMessage("assistant", batchResult.assistantContent)
+                    )
+                    progressCallback?.invoke(translatedTexts.size, texts.size)
+                }
+
+                TranslationRunResult(translatedTexts, currentConversation)
+            } catch (error: BatchTranslationCancelledException) {
+                translatedTexts.addAll(error.translations)
+                throw TranslationCancelledException(
+                    translatedTexts.toList(),
+                    currentConversation,
+                    error.message
+                )
+            } catch (error: CancellationException) {
+                throw TranslationCancelledException(
+                    translatedTexts.toList(),
+                    currentConversation,
+                    error.message
+                )
+            } catch (error: Exception) {
+                TranslationRunResult(translatedTexts, currentConversation, error)
+            }
         }
     }
 
@@ -263,7 +290,14 @@ class AiTranslator(
         streamingProgress: (Int) -> Unit
     ): BatchResult {
         val userContent = buildNumberedSubtitleContent(texts, startNumber)
-        val requestMessages = conversationState.messages + ChatMessage("user", userContent)
+        val boundedConversation = compactConversationForRequest(conversationState, userContent)
+        val requestMessages = boundedConversation.messages + ChatMessage("user", userContent)
+        val logContext = TranslationLogContext(
+            startNumber = startNumber,
+            endNumber = startNumber + texts.size - 1,
+            messages = requestMessages,
+            estimatedInputTokens = estimateMessagesTokens(requestMessages)
+        )
         val jsonBody = JSONObject().apply {
             put("model", model)
             put("messages", JSONArray().apply {
@@ -293,8 +327,9 @@ class AiTranslator(
             executeWithRetry(
                 request = request,
                 isCancelled = isCancelled,
-                onAttemptStarted = progressTracker::reset,
-                onDelta = progressTracker::append
+                onAttemptStarted = { progressTracker.reset() },
+                onDelta = progressTracker::append,
+                logContext = logContext
             )
         } catch (error: CancellationException) {
             throw BatchTranslationCancelledException(
@@ -306,21 +341,130 @@ class AiTranslator(
         return BatchResult(
             translations = parseNumberedTranslation(responseContent, startNumber, texts.size),
             userContent = userContent,
-            assistantContent = responseContent
+            assistantContent = responseContent,
+            conversationBeforeBatch = boundedConversation
         )
+    }
+
+    /**
+     * Keeps the current request inside the configured model context window. Recent batches remain
+     * complete; older pairs keep only a small numbered tail before the oldest pairs are discarded.
+     */
+    internal fun compactConversationForRequest(
+        conversationState: ConversationState,
+        pendingUserContent: String
+    ): ConversationState {
+        val conversation = ensureSystemMessage(conversationState)
+        val pendingMessage = ChatMessage("user", pendingUserContent)
+        val completionReserve = maxOf(
+            MIN_COMPLETION_RESERVE_TOKENS.toLong(),
+            estimateTextTokens(pendingUserContent).toLong() * 3L / 2L
+        ).coerceAtMost(Int.MAX_VALUE.toLong())
+        val inputLimit = contextWindowTokens.toLong() - completionReserve
+        val systemMessages = conversation.messages.takeWhile { it.role == "system" }
+            .ifEmpty { listOf(ChatMessage("system", buildTranslationSystemPrompt(targetLanguage))) }
+        val baseMessages = systemMessages + pendingMessage
+        val baseTokens = estimateMessagesTokens(baseMessages)
+        if (baseTokens.toLong() > inputLimit) {
+            throw IOException(
+                "当前 300 行字幕预计需要 ${baseTokens + completionReserve} tokens，" +
+                    "超过上下文上限 $contextWindowTokens，请提高上下文上限或缩短单行字幕"
+            )
+        }
+
+        if (estimateMessagesTokens(conversation.messages + pendingMessage).toLong() <= inputLimit) {
+            return conversation
+        }
+
+        val history = conversation.messages.drop(systemMessages.size)
+        val pairs = history.chunked(2).mapNotNull { messages ->
+            if (messages.size == 2 && messages[0].role == "user" &&
+                messages[1].role == "assistant"
+            ) {
+                messages
+            } else {
+                null
+            }
+        }
+        val targetInputTokens = baseTokens.toLong() +
+            ((inputLimit - baseTokens) * CONTEXT_KEEP_RATIO).toLong()
+        val selectedPairs = ArrayDeque<List<ChatMessage>>()
+        val recentFullStart = (pairs.size - RECENT_FULL_CONTEXT_BATCHES).coerceAtLeast(0)
+
+        for (index in pairs.indices.reversed()) {
+            val pair = pairs[index]
+            val compactedPair = compactPair(pair)
+            val candidates = if (index >= recentFullStart && compactedPair != pair) {
+                listOf(pair, compactedPair)
+            } else {
+                listOf(compactedPair)
+            }
+            val accepted = candidates.firstOrNull { candidate ->
+                val messages = systemMessages + candidate + selectedPairs.flatten() + pendingMessage
+                estimateMessagesTokens(messages).toLong() <= targetInputTokens
+            }
+            if (accepted != null) {
+                selectedPairs.addFirst(accepted)
+                continue
+            }
+
+            if (selectedPairs.isEmpty()) {
+                val fallback = candidates.firstOrNull { candidate ->
+                    estimateMessagesTokens(systemMessages + candidate + pendingMessage).toLong() <= inputLimit
+                }
+                if (fallback != null) selectedPairs.addFirst(fallback)
+            }
+            break
+        }
+
+        return ConversationState(systemMessages + selectedPairs.flatten())
+    }
+
+    internal fun estimateConversationTokens(messages: List<ChatMessage>): Int =
+        estimateMessagesTokens(messages)
+
+    private fun compactPair(pair: List<ChatMessage>): List<ChatMessage> = pair.map { message ->
+        message.copy(content = compactNumberedContent(message.content))
+    }
+
+    private fun compactNumberedContent(content: String): String {
+        val numberedLines = content.lineSequence()
+            .map { it.trimEnd('\r') }
+            .filter { NUMBERED_TRANSLATION_LINE.matches(it) }
+            .toList()
+        if (numberedLines.isNotEmpty()) {
+            return numberedLines.takeLast(COMPACTED_LINES_PER_BATCH).joinToString("\n")
+        }
+        return content.takeLast(2_048)
+    }
+
+    private fun estimateMessagesTokens(messages: List<ChatMessage>): Int {
+        val estimate = 3L + messages.sumOf { message ->
+            6L + estimateTextTokens(message.role) + estimateTextTokens(message.content)
+        }
+        return estimate.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    }
+
+    private fun estimateTextTokens(text: String): Int {
+        if (text.isEmpty()) return 0
+        val utf8Bytes = text.toByteArray(StandardCharsets.UTF_8).size.toLong()
+        return ((utf8Bytes + 1L) / 2L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
     }
 
     private suspend fun executeWithRetry(
         request: Request,
         isCancelled: () -> Boolean,
-        onAttemptStarted: () -> Unit,
-        onDelta: (String) -> Unit
+        onAttemptStarted: (Int) -> Unit,
+        onDelta: (String) -> Unit,
+        logContext: TranslationLogContext
     ): String {
         var lastError: IOException? = null
         repeat(MAX_RETRY_COUNT) { attempt ->
             if (isCancelled()) throw CancellationException("翻译已取消")
+            val attemptNumber = attempt + 1
             try {
-                onAttemptStarted()
+                onAttemptStarted(attemptNumber)
+                logTranslationRequest(logContext, attemptNumber)
                 val call = client.newCall(request)
                 activeCall = call
                 if (isCancelled()) {
@@ -330,6 +474,13 @@ class AiTranslator(
                 call.execute().use { response ->
                     if (!response.isSuccessful) {
                         val responseText = response.body?.string().orEmpty()
+                        logTranslationResponse(
+                            context = logContext,
+                            attempt = attemptNumber,
+                            content = responseText,
+                            complete = false,
+                            status = "HTTP ${response.code}"
+                        )
                         val error = IOException(formatApiError(response.code, responseText))
                         if (response.code !in listOf(408, 429) && response.code !in 500..599) {
                             throw NonRetryableApiException(error.message ?: "API 请求失败")
@@ -342,15 +493,50 @@ class AiTranslator(
                             delay(retryAfterMs ?: (1_000L shl attempt))
                         }
                     } else {
-                        val responseBody = response.body ?: throw IOException("响应为空")
-                        return readStreamingContent(responseBody, onDelta)
+                        val responseBody = response.body
+                        if (responseBody == null) {
+                            logTranslationResponse(
+                                context = logContext,
+                                attempt = attemptNumber,
+                                content = "",
+                                complete = false,
+                                status = "HTTP ${response.code}，响应体为空"
+                            )
+                            throw IOException("响应为空")
+                        }
+                        return readStreamingContent(
+                            responseBody = responseBody,
+                            onDelta = onDelta,
+                            onCaptured = { content, complete ->
+                                logTranslationResponse(
+                                    context = logContext,
+                                    attempt = attemptNumber,
+                                    content = content,
+                                    complete = complete,
+                                    status = "HTTP ${response.code}"
+                                )
+                            }
+                        )
                             .ifBlank { throw IOException("响应为空") }
                     }
                 }
             } catch (error: NonRetryableApiException) {
                 throw error
             } catch (error: IOException) {
-                if (isCancelled()) throw CancellationException("翻译已取消")
+                if (isCancelled()) {
+                    RuntimeLogManager.i(
+                        AI_TRANSLATION_LOG_TAG,
+                        "AI_TRANSLATION_ATTEMPT_CANCELLED batch=${logContext.startNumber}-${logContext.endNumber} " +
+                            "attempt=$attemptNumber"
+                    )
+                    throw CancellationException("翻译已取消")
+                }
+                RuntimeLogManager.w(
+                    AI_TRANSLATION_LOG_TAG,
+                    "AI_TRANSLATION_ATTEMPT_ERROR batch=${logContext.startNumber}-${logContext.endNumber} " +
+                        "attempt=$attemptNumber message=${error.message}",
+                    error
+                )
                 lastError = error
                 if (attempt < MAX_RETRY_COUNT - 1) delay(1_000L shl attempt)
             } finally {
@@ -360,33 +546,100 @@ class AiTranslator(
         throw lastError ?: IOException("请求失败")
     }
 
-    private fun readStreamingContent(responseBody: ResponseBody, onDelta: (String) -> Unit): String {
+    internal fun readStreamingContent(
+        responseBody: ResponseBody,
+        onCaptured: (String, Boolean) -> Unit = { _, _ -> },
+        onDelta: (String) -> Unit
+    ): String {
         val streamedContent = StringBuilder()
         val plainResponse = StringBuilder()
         var receivedServerEvent = false
+        var capturedContent = ""
+        var completed = false
         val source = responseBody.source()
 
-        while (true) {
-            val line = source.readUtf8Line() ?: break
-            if (line.startsWith("data:")) {
-                receivedServerEvent = true
-                val data = line.removePrefix("data:").trimStart()
-                if (data.isBlank() || data == "[DONE]") continue
-                val delta = extractStreamDelta(data)
-                if (delta.isNotEmpty()) {
-                    streamedContent.append(delta)
-                    onDelta(delta)
+        try {
+            while (true) {
+                val line = source.readUtf8Line() ?: break
+                if (line.startsWith("data:")) {
+                    receivedServerEvent = true
+                    val data = line.removePrefix("data:").trimStart()
+                    if (data == "[DONE]") break
+                    if (data.isBlank()) continue
+                    val delta = extractStreamDelta(data)
+                    if (delta.isNotEmpty()) {
+                        streamedContent.append(delta)
+                        onDelta(delta)
+                    }
+                } else if (!receivedServerEvent && line.isNotBlank()) {
+                    if (plainResponse.isNotEmpty()) plainResponse.append('\n')
+                    plainResponse.append(line)
                 }
-            } else if (!receivedServerEvent && line.isNotBlank()) {
-                if (plainResponse.isNotEmpty()) plainResponse.append('\n')
-                plainResponse.append(line)
             }
-        }
 
-        if (receivedServerEvent) return streamedContent.toString()
-        val content = extractRegularResponseContent(plainResponse.toString())
-        if (content.isNotEmpty()) onDelta(content)
-        return content
+            capturedContent = if (receivedServerEvent) {
+                streamedContent.toString()
+            } else {
+                extractRegularResponseContent(plainResponse.toString()).also { content ->
+                    if (content.isNotEmpty()) onDelta(content)
+                }
+            }
+            completed = true
+            return capturedContent
+        } finally {
+            if (!completed) {
+                capturedContent = if (receivedServerEvent) {
+                    streamedContent.toString()
+                } else {
+                    plainResponse.toString()
+                }
+            }
+            runCatching { onCaptured(capturedContent, completed) }
+        }
+    }
+
+    private fun logTranslationRequest(context: TranslationLogContext, attempt: Int) {
+        RuntimeLogManager.i(
+            AI_TRANSLATION_LOG_TAG,
+            buildString {
+                appendLine("AI_TRANSLATION_REQUEST_BEGIN")
+                appendLine(
+                    "batch=${context.startNumber}-${context.endNumber} attempt=$attempt/$MAX_RETRY_COUNT " +
+                        "provider=$provider model=$model contextWindowTokens=$contextWindowTokens " +
+                        "estimatedInputTokens=${context.estimatedInputTokens}"
+                )
+                context.messages.forEachIndexed { index, message ->
+                    appendLine("--- message[$index] role=${message.role} ---")
+                    append(message.content)
+                    if (!message.content.endsWith('\n')) appendLine()
+                }
+                append("AI_TRANSLATION_REQUEST_END")
+            }
+        )
+    }
+
+    private fun logTranslationResponse(
+        context: TranslationLogContext,
+        attempt: Int,
+        content: String,
+        complete: Boolean,
+        status: String
+    ) {
+        val message = buildString {
+            appendLine("AI_TRANSLATION_RESPONSE_BEGIN")
+            appendLine(
+                "batch=${context.startNumber}-${context.endNumber} attempt=$attempt/$MAX_RETRY_COUNT " +
+                    "complete=$complete status=$status chars=${content.length}"
+            )
+            append(content)
+            if (!content.endsWith('\n')) appendLine()
+            append("AI_TRANSLATION_RESPONSE_END")
+        }
+        if (complete) {
+            RuntimeLogManager.i(AI_TRANSLATION_LOG_TAG, message)
+        } else {
+            RuntimeLogManager.w(AI_TRANSLATION_LOG_TAG, message)
+        }
     }
 
     private fun extractStreamDelta(data: String): String {
@@ -401,6 +654,9 @@ class AiTranslator(
         val choices = event.optJSONArray("choices") ?: return ""
         if (choices.length() == 0) return ""
         val choice = choices.optJSONObject(0) ?: return ""
+        if (choice.optString("finish_reason") == "length") {
+            throw NonRetryableApiException("AI 输出达到长度上限，当前批次未完整返回")
+        }
         val delta = choice.optJSONObject("delta")
         val content = delta?.opt("content")
             ?: choice.optJSONObject("message")?.opt("content")

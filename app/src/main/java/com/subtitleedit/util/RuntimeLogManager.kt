@@ -11,6 +11,7 @@ import java.io.FileWriter
 import java.io.OutputStream
 import java.io.PrintWriter
 import java.io.StringWriter
+import java.text.ParsePosition
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -19,7 +20,7 @@ object RuntimeLogManager {
     private const val LOG_DIR = "runtime_logs"
     private const val PREFS_NAME = "runtime_logs"
     private const val KEY_CLEAR_TIME = "clear_time"
-    private const val RETENTION_MS = 24L * 60L * 60L * 1000L
+    private const val RETENTION_MS = 60L * 60L * 1000L
     private const val MAX_LOGCAT_CRASH_LINES = 400
     private const val MAX_SIMPLE_DISPLAY_LINES = 1_000
     private const val MAX_DETAILED_DISPLAY_LINES = 1_600
@@ -29,6 +30,9 @@ object RuntimeLogManager {
 
     private val fileTimeFormat = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
     private val displayTimeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+    private val logRecordPrefix = Regex(
+        """^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?:INFO|WARN|ERROR|FATAL|LOGCAT)/"""
+    )
     private val lock = Any()
 
     @Volatile
@@ -70,7 +74,7 @@ object RuntimeLogManager {
         }
     }
 
-    fun captureLastDay(context: Context, mode: DisplayMode): Snapshot {
+    fun captureRecent(context: Context, mode: DisplayMode): Snapshot {
         ensureInstalled(context)
         val now = System.currentTimeMillis()
         val appContext = context.applicationContext
@@ -89,8 +93,8 @@ object RuntimeLogManager {
         val content = buildString {
             appendLine("SubtitleEdit for Android 运行日志")
             appendLine("包名：$packageName")
-            appendLine("采集时间：${displayTimeFormat.format(Date(now))}")
-            appendLine("有效范围：本应用最近 24 小时，且不早于上次清空时间")
+            appendLine("采集时间：${formatDisplayTime(now)}")
+            appendLine("有效范围：本应用最近 1 小时，且不早于上次清空时间")
             appendLine("显示模式：${if (mode == DisplayMode.SIMPLE) "简单（已隐藏常规系统与调试输出）" else "详细"}")
             appendLine("来源：应用启动后实时文件日志、页面生命周期、崩溃兜底记录、后台 logcat")
             appendLine()
@@ -105,7 +109,7 @@ object RuntimeLogManager {
     }
 
     /** 将当前模式的完整日志流式写出，避免导出时在内存中拼接大字符串。 */
-    fun exportLastDay(context: Context, mode: DisplayMode, output: OutputStream) {
+    fun exportRecent(context: Context, mode: DisplayMode, output: OutputStream) {
         ensureInstalled(context)
         val now = System.currentTimeMillis()
         val appContext = context.applicationContext
@@ -116,8 +120,8 @@ object RuntimeLogManager {
         output.bufferedWriter(Charsets.UTF_8).use { writer ->
             writer.appendLine("SubtitleEdit for Android 运行日志")
             writer.appendLine("包名：${appContext.packageName}")
-            writer.appendLine("采集时间：${displayTimeFormat.format(Date(now))}")
-            writer.appendLine("有效范围：本应用最近 24 小时，且不早于上次清空时间")
+            writer.appendLine("采集时间：${formatDisplayTime(now)}")
+            writer.appendLine("有效范围：本应用最近 1 小时，且不早于上次清空时间")
             writer.appendLine("导出模式：${if (mode == DisplayMode.SIMPLE) "简单（已隐藏常规系统与调试输出）" else "详细"}")
             writer.appendLine()
             forEachPersistedLogLine(appContext, since) { line ->
@@ -203,7 +207,7 @@ object RuntimeLogManager {
     }
 
     private fun writeLocked(level: String, tag: String, message: String, throwable: Throwable? = null) {
-        val timestamp = displayTimeFormat.format(Date())
+        val timestamp = formatDisplayTime(System.currentTimeMillis())
         writer?.apply {
             write("$timestamp $level/$tag: $message")
             newLine()
@@ -212,6 +216,20 @@ object RuntimeLogManager {
                 newLine()
             }
             flush()
+        }
+    }
+
+    private fun formatDisplayTime(timestamp: Long): String = synchronized(displayTimeFormat) {
+        displayTimeFormat.format(Date(timestamp))
+    }
+
+    private fun parseLogTimestamp(line: String): Long? {
+        val value = logRecordPrefix.find(line)?.groupValues?.getOrNull(1) ?: return null
+        return synchronized(displayTimeFormat) {
+            val position = ParsePosition(0)
+            displayTimeFormat.parse(value, position)
+                ?.takeIf { position.index == value.length }
+                ?.time
         }
     }
 
@@ -228,10 +246,22 @@ object RuntimeLogManager {
             .orEmpty()
         val files = if (activeFile != null) historicalFiles + activeFile else historicalFiles
         files.distinct().forEach { file ->
-            consumer("===== ${file.name} =====")
+            var emittedFileHeader = false
+            var includeRecord = false
             runCatching {
                 file.bufferedReader(Charsets.UTF_8).useLines { lines ->
-                    lines.forEach(consumer)
+                    lines.forEach { line ->
+                        parseLogTimestamp(line)?.let { timestamp ->
+                            includeRecord = timestamp >= since
+                        }
+                        if (includeRecord) {
+                            if (!emittedFileHeader) {
+                                consumer("===== ${file.name} =====")
+                                emittedFileHeader = true
+                            }
+                            consumer(line)
+                        }
+                    }
                 }
             }.onFailure {
                 consumer("读取失败：${it.message}")

@@ -120,19 +120,19 @@ class LogActivity : AppCompatActivity() {
         val generation = ++refreshGeneration
         binding.btnRefresh.isEnabled = false
         binding.btnExport.isEnabled = false
-        binding.tvLogInfo.text = "正在读取本应用最近 24 小时日志..."
+        binding.tvLogInfo.text = "正在读取本应用最近 1 小时日志..."
         binding.logSectionList.adapter = null
 
         lifecycleScope.launch {
             val snapshot = withContext(Dispatchers.IO) {
-                RuntimeLogManager.captureLastDay(this@LogActivity, displayMode)
+                RuntimeLogManager.captureRecent(this@LogActivity, displayMode)
             }
             if (generation != refreshGeneration) return@launch
             allSections = buildLogSections(snapshot.content)
             updatePageFilterOptions()
             hasLoadedLog = true
             binding.tvLogInfo.text = buildString {
-                append("${snapshot.packageName} 最近 24 小时，显示 ${snapshot.matchedLineCount} 行")
+                append("${snapshot.packageName} 最近 1 小时，显示 ${snapshot.matchedLineCount} 行")
                 if (snapshot.isPreviewTruncated) append("（预览已限制）")
             }
             binding.btnRefresh.isEnabled = true
@@ -148,7 +148,7 @@ class LogActivity : AppCompatActivity() {
             listOf(LogSection("暂无可读取的日志", "", "", 0))
         )
         allSections = emptyList()
-        binding.tvLogInfo.text = "${packageName} 最近 24 小时"
+        binding.tvLogInfo.text = "${packageName} 最近 1 小时"
         OverwritingToast.makeText(this, "日志已清空", Toast.LENGTH_SHORT).show()
     }
 
@@ -170,7 +170,7 @@ class LogActivity : AppCompatActivity() {
                     val file = dir.createFile("text/plain", fileName)
                         ?: throw IllegalStateException("无法创建日志文件")
                     contentResolver.openOutputStream(file.uri, "wt")?.use { output ->
-                        RuntimeLogManager.exportLastDay(this@LogActivity, displayMode, output)
+                        RuntimeLogManager.exportRecent(this@LogActivity, displayMode, output)
                     } ?: throw IllegalStateException("无法写入日志文件")
                     fileName
                 }

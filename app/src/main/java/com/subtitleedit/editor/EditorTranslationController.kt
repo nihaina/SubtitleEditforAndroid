@@ -60,6 +60,7 @@ internal class EditorTranslationController(
             return
         }
         val baseUrl = settingsManager.getAiBaseUrl(provider)
+        val contextWindowTokens = settingsManager.getAiContextWindowTokens()
         if (baseUrl.isBlank()) {
             showTranslationError("请先在设置中填写自定义 API 请求地址")
             return
@@ -70,7 +71,7 @@ internal class EditorTranslationController(
             .setTitle("AI 翻译")
             .setMessage(
                 "将使用 $providerName / $model 翻译选中的 ${selectedEntries.size} 条字幕\n" +
-                    "目标语言：$targetLanguage\n\n按顺序流式翻译，点击「开始翻译」继续"
+                    "目标语言：$targetLanguage\n\n每 300 条字幕按顺序流式翻译，点击「开始翻译」继续"
             )
             .setPositiveButton("开始翻译") { _, _ ->
                 startTranslation(
@@ -79,7 +80,8 @@ internal class EditorTranslationController(
                     apiKey,
                     model,
                     targetLanguage,
-                    baseUrl
+                    baseUrl,
+                    contextWindowTokens
                 )
             }
             .setNegativeButton("取消", null)
@@ -101,9 +103,17 @@ internal class EditorTranslationController(
         apiKey: String,
         model: String,
         targetLanguage: String,
-        baseUrl: String
+        baseUrl: String,
+        contextWindowTokens: Int
     ) {
-        val aiTranslator = AiTranslator(provider, apiKey, model, targetLanguage, baseUrl)
+        val aiTranslator = AiTranslator(
+            provider = provider,
+            apiKey = apiKey,
+            model = model,
+            targetLanguage = targetLanguage,
+            baseUrl = baseUrl,
+            contextWindowTokens = contextWindowTokens
+        )
         continueTranslation(TranslationSession(selectedEntries, aiTranslator))
     }
 
