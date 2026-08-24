@@ -740,7 +740,8 @@ class EditorActivity : AppCompatActivity() {
             previewDialog = previewDialog,
             applyTexts = { appliedItems -> applyPreviewTexts(appliedItems, "翻译") },
             saveDraft = ::saveTranslationDraft,
-            showMessage = ::showShortToast
+            showMessage = ::showShortToast,
+            subtitleFormatProvider = { currentFormat }
         )
         transcribeController = EditorTranscribeController(
             activity = this,

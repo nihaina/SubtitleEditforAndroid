@@ -9,6 +9,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
+import com.subtitleedit.util.SubtitleParser.SubtitleFormat
 
 class AiTranslationProtocolTest {
 
@@ -223,6 +224,96 @@ class AiTranslationProtocolTest {
         assertEquals(
             "1\n00:00:02,000 --> 00:00:03,500\nhello\n\n翻译成中文，以原格式输出",
             buildTranslationUserContent(subtitles, "中文")
+        )
+    }
+
+    @Test
+    fun lrcInput_addsLocalSequenceWithoutConvertingStyleText() {
+        val subtitles = listOf(
+            SubtitleEntry(index = 1, startTime = 1_000, endTime = 2_000, text = "<b>字幕一</b>"),
+            SubtitleEntry(index = 2, startTime = 3_250, endTime = 4_000, text = "字幕二")
+        )
+
+        assertEquals(
+            "1\n[00:01.00]<b>字幕一</b>\n\n" +
+                "2\n[00:03.25]字幕二",
+            buildSubtitleTranslationContent(subtitles, SubtitleFormat.LRC)
+        )
+    }
+
+    @Test
+    fun lrcResponse_isMatchedByLocalSequenceAndPreservesBlankText() {
+        val expected = listOf(
+            SubtitleEntry(index = 1, startTime = 1_000, endTime = 2_000, text = "source one"),
+            SubtitleEntry(index = 2, startTime = 3_250, endTime = 4_000, text = "source two")
+        )
+
+        assertEquals(
+            listOf("译文一", ""),
+            parseSubtitleTranslation(
+                "2\n[00:03.25]\n\n1\n[00:01.00]译文一",
+                expected,
+                SubtitleFormat.LRC
+            )
+        )
+    }
+
+    @Test
+    fun vttInputAndResponse_preserveCuePropertiesAndStyleText() {
+        val expected = listOf(
+            SubtitleEntry(
+                index = 7,
+                startTime = 1_000,
+                endTime = 2_000,
+                text = "<c.red>Hello</c>",
+                cueIdentifier = "123",
+                cueSettings = "align:start"
+            )
+        )
+
+        assertEquals(
+            "7\n123\n00:00:01.000 --> 00:00:02.000 align:start\n<c.red>Hello</c>",
+            buildSubtitleTranslationContent(expected, SubtitleFormat.VTT)
+        )
+        assertEquals(
+            listOf("<c.red>你好</c>"),
+            parseSubtitleTranslation(
+                "7\n123\n00:00:01.000 --> 00:00:02.000 align:start\n<c.red>你好</c>",
+                expected,
+                SubtitleFormat.VTT
+            )
+        )
+    }
+
+    @Test
+    fun indexedResponse_rejectsChangedOriginalFormatTime() {
+        val expected = listOf(
+            SubtitleEntry(index = 1, startTime = 1_000, endTime = 2_000, text = "source")
+        )
+
+        val error = assertThrows(IOException::class.java) {
+            parseSubtitleTranslation(
+                "1\n[00:01.50]译文",
+                expected,
+                SubtitleFormat.LRC
+            )
+        }
+        assertTrue(error.message.orEmpty().contains("序号 1 的时间轴与原字幕不一致"))
+    }
+
+    @Test
+    fun lrcInput_roundsToItsSerializedCentisecondPrecisionForValidation() {
+        val expected = listOf(
+            SubtitleEntry(index = 1, startTime = 1_005, endTime = 2_000, text = "source")
+        )
+
+        assertEquals(
+            listOf("译文"),
+            parseSubtitleTranslation(
+                "1\n[00:01.01]译文",
+                expected,
+                SubtitleFormat.LRC
+            )
         )
     }
 

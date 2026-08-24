@@ -9,6 +9,7 @@ import com.subtitleedit.util.AiProviderConfig
 import com.subtitleedit.util.AiTranslator
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.util.SubtitleParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,7 +23,10 @@ internal class EditorTranslationController(
     private val previewDialog: EditorTextPreviewDialog,
     private val applyTexts: (List<TranslationPreviewItem>) -> Unit,
     private val saveDraft: (List<TranslationPreviewItem>) -> Unit,
-    private val showMessage: (String) -> Unit
+    private val showMessage: (String) -> Unit,
+    private val subtitleFormatProvider: () -> SubtitleParser.SubtitleFormat = {
+        SubtitleParser.SubtitleFormat.SRT
+    }
 ) {
     private var translateJob: Job? = null
     private var isTranslating = false
@@ -112,7 +116,8 @@ internal class EditorTranslationController(
             model = model,
             targetLanguage = targetLanguage,
             baseUrl = baseUrl,
-            contextWindowTokens = contextWindowTokens
+            contextWindowTokens = contextWindowTokens,
+            subtitleFormat = subtitleFormatProvider()
         )
         continueTranslation(TranslationSession(selectedEntries, aiTranslator))
     }
