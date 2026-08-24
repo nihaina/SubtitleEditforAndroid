@@ -71,7 +71,7 @@ internal class EditorTranslationController(
             .setTitle("AI 翻译")
             .setMessage(
                 "将使用 $providerName / $model 翻译选中的 ${selectedEntries.size} 条字幕\n" +
-                    "目标语言：$targetLanguage\n\n每 300 条字幕按顺序流式翻译，点击「开始翻译」继续"
+                    "目标语言：$targetLanguage\n\n每 300 条字幕以原时间轴格式流式翻译，点击「开始翻译」继续"
             )
             .setPositiveButton("开始翻译") { _, _ ->
                 startTranslation(
@@ -137,15 +137,15 @@ internal class EditorTranslationController(
         userCancelledTranslation = false
         isTranslating = true
         activeAiTranslator = session.translator
-        val textsToTranslate = session.selectedEntries
+        val subtitlesToTranslate = session.selectedEntries
             .drop(completedBeforeRun)
-            .map { it.first.text }
+            .map { it.first }
 
         translateJob = scope.launch(Dispatchers.Main) {
             try {
-                val result = session.translator.translateTexts(
-                    texts = textsToTranslate,
-                    startNumber = completedBeforeRun + 1,
+                val result = session.translator.translateSubtitles(
+                    subtitles = subtitlesToTranslate,
+                    startPosition = completedBeforeRun + 1,
                     progressCallback = { current, _ ->
                         activity.runOnUiThread {
                             progressDialog.setMessage(

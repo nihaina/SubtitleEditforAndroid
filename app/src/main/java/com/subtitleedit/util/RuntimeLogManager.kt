@@ -284,11 +284,11 @@ object RuntimeLogManager {
             logcat.contains("ANR")
     }
 
-    private class PreviewCollector(
+    internal class PreviewCollector(
         private val maxLines: Int,
         private val maxChars: Int
     ) {
-        private val lines = ArrayDeque<String>()
+        private val lines = ArrayDeque<PreviewLine>()
         private var charCount = 0
         var matchedLineCount = 0
             private set
@@ -297,22 +297,37 @@ object RuntimeLogManager {
 
         fun add(rawLine: String) {
             matchedLineCount++
-            val line = if (rawLine.length > MAX_DISPLAY_LINE_CHARS) {
+            val preserveAiResponse = isInsideAiResponse ||
+                rawLine.contains("AI_TRANSLATION_RESPONSE_BEGIN")
+            val line = if (!preserveAiResponse && rawLine.length > MAX_DISPLAY_LINE_CHARS) {
                 rawLine.take(MAX_DISPLAY_LINE_CHARS) + " [单行已截断]"
             } else {
                 rawLine
             }
-            lines.addLast(line)
+            val entry = PreviewLine(line, preserveAiResponse)
+            lines.addLast(entry)
             charCount += line.length + 1
+            if (rawLine.contains("AI_TRANSLATION_RESPONSE_BEGIN")) {
+                isInsideAiResponse = true
+            }
+            if (rawLine.contains("AI_TRANSLATION_RESPONSE_END")) {
+                isInsideAiResponse = false
+            }
             while (lines.size > maxLines || charCount > maxChars) {
-                charCount -= lines.removeFirst().length + 1
+                val removableIndex = lines.indexOfFirst { !it.preserve }
+                if (removableIndex < 0) break
+                val removed = lines.removeAt(removableIndex)
+                charCount -= removed.text.length + 1
                 isTruncated = true
             }
         }
 
         fun isEmpty(): Boolean = lines.isEmpty()
 
-        fun content(): String = lines.joinToString(separator = "\n")
+        fun content(): String = lines.joinToString(separator = "\n") { it.text }
+
+        private data class PreviewLine(val text: String, val preserve: Boolean)
+        private var isInsideAiResponse = false
     }
 
     private fun createLifecycleCallbacks(): Application.ActivityLifecycleCallbacks {

@@ -1,5 +1,6 @@
 package com.subtitleedit.util
 
+import com.subtitleedit.model.SubtitleEntry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -12,128 +13,209 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.ResponseBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 
-private const val MAX_LINES_PER_TRANSLATION_REQUEST = 300
+private const val MAX_SUBTITLES_PER_TRANSLATION_REQUEST = 300
 private const val AI_TRANSLATION_LOG_TAG = "AiTranslator"
 const val DEFAULT_AI_CONTEXT_WINDOW_TOKENS = 256 * 1024
 const val MIN_AI_CONTEXT_WINDOW_TOKENS = 4 * 1024
 const val MAX_AI_CONTEXT_WINDOW_TOKENS = 2 * 1024 * 1024
-private const val RECENT_FULL_CONTEXT_BATCHES = 2
-private const val COMPACTED_LINES_PER_BATCH = 24
 private const val CONTEXT_KEEP_RATIO = 0.5
 private const val MIN_COMPLETION_RESERVE_TOKENS = 1_024
-private val NUMBERED_TRANSLATION_LINE =
-    Regex("""^\s*(?:\[(\d+)]|(\d+)\s*[.．、:：])\s*(.*)$""")
+private val TIMED_SUBTITLE_LINE = Regex(
+    """^[ \t]*(\d{1,3}:\d{2}:\d{2}[,.]\d{3})[ \t]*(?:-->|->|—>|——>)[ \t]*(\d{1,3}:\d{2}:\d{2}[,.]\d{3})[ \t]*\r?$""",
+    RegexOption.MULTILINE
+)
+private val TRANSLATION_TIMESTAMP =
+    Regex("""^(\d{1,3}):(\d{2}):(\d{2})[,.](\d{3})$""")
+private val SRT_SEQUENCE_BEFORE_CUE = Regex("""\n[ \t]*\d+[ \t]*\n[ \t]*$""")
+private val MARKDOWN_FENCE_LINE = Regex("""(?m)^[ \t]*```[^\r\n]*\r?$""")
 
 internal fun buildTranslationSystemPrompt(targetLanguage: String): String =
     "帮我翻译成${targetLanguage}，以原格式输出"
 
-internal fun buildNumberedSubtitleContent(texts: List<String>, startNumber: Int): String =
-    texts.mapIndexed { index, text ->
-        "${startNumber + index}.${encodeSubtitleText(text)}"
-    }.joinToString("\n")
-
-internal fun splitSubtitleTranslationBatches(texts: List<String>): List<List<String>> =
-    texts.chunked(MAX_LINES_PER_TRANSLATION_REQUEST)
-
-/**
- * Extracts only numbered rows. Unnumbered model commentary is intentionally ignored, while a
- * numbered row with no content remains a valid empty translation.
- */
-internal fun parseNumberedTranslation(
-    content: String,
-    expectedStartNumber: Int,
-    expectedCount: Int
-): List<String> {
-    val expectedEndNumber = expectedStartNumber + expectedCount - 1
-    val translations = mutableMapOf<Int, String>()
-
-    content.lineSequence().forEach { rawLine ->
-        val match = NUMBERED_TRANSLATION_LINE.matchEntire(rawLine.trimEnd('\r'))
-            ?: return@forEach
-        val number = (match.groupValues[1].ifEmpty { match.groupValues[2] }).toIntOrNull()
-            ?: return@forEach
-        if (number !in expectedStartNumber..expectedEndNumber) return@forEach
-        if (translations.containsKey(number)) {
-            throw IOException("翻译结果包含重复编号：$number")
-        }
-        translations[number] = decodeSubtitleText(match.groupValues[3].trim())
+internal fun buildTimedSubtitleContent(
+    subtitles: List<SubtitleEntry>,
+    startPosition: Int = 1
+): String = subtitles.mapIndexed { offset, subtitle ->
+    val sequence = subtitle.index.takeIf { it > 0 } ?: (startPosition + offset)
+    buildString {
+        append(sequence)
+        append('\n')
+        append(subtitle.getTimeAxisSRT())
+        append('\n')
+        append(normalizeSubtitleText(subtitle.text))
     }
+}.joinToString("\n\n")
 
-    val missingNumbers = (expectedStartNumber..expectedEndNumber)
-        .filterNot(translations::containsKey)
-    if (missingNumbers.isNotEmpty()) {
-        val preview = missingNumbers.take(10).joinToString("、")
-        val suffix = if (missingNumbers.size > 10) "等 ${missingNumbers.size} 条" else ""
-        throw IOException("翻译结果缺少编号：$preview$suffix")
-    }
-    return (expectedStartNumber..expectedEndNumber).map { translations.getValue(it) }
+internal fun buildTranslationUserContent(
+    subtitles: List<SubtitleEntry>,
+    targetLanguage: String,
+    startPosition: Int = 1
+): String = buildString {
+    append(buildTimedSubtitleContent(subtitles, startPosition))
+    append("\n\n")
+    append("翻译成")
+    append(targetLanguage)
+    append("，以原格式输出")
 }
 
-/** Returns only the continuous numbered prefix that was fully terminated before cancellation. */
-internal fun parseCompletedTranslationPrefix(
+internal fun splitSubtitleTranslationBatches(
+    subtitles: List<SubtitleEntry>
+): List<List<SubtitleEntry>> = subtitles.chunked(MAX_SUBTITLES_PER_TRANSLATION_REQUEST)
+
+internal fun parseTimedSubtitleTranslation(
     content: String,
-    expectedStartNumber: Int,
-    expectedCount: Int
+    expectedSubtitles: List<SubtitleEntry>
 ): List<String> {
-    val expectedEndNumber = expectedStartNumber + expectedCount - 1
-    val translations = mutableMapOf<Int, String>()
-    content.lineSequence().forEach { rawLine ->
-        val match = NUMBERED_TRANSLATION_LINE.matchEntire(rawLine.trimEnd('\r'))
-            ?: return@forEach
-        val number = (match.groupValues[1].ifEmpty { match.groupValues[2] }).toIntOrNull()
-            ?: return@forEach
-        if (number in expectedStartNumber..expectedEndNumber &&
-            !translations.containsKey(number)
-        ) {
-            translations[number] = decodeSubtitleText(match.groupValues[3].trim())
+    val expectedKeys = expectedSubtitles.map(SubtitleEntry::translationTimeRange)
+    val expectedCounts = expectedKeys.groupingBy { it }.eachCount()
+    val allReturnedBlocks = extractTimedSubtitleBlocks(content)
+    val returnedBlocks = allReturnedBlocks
+        .filter { it.timeRange in expectedCounts }
+    val returnedCounts = returnedBlocks.groupingBy { it.timeRange }.eachCount()
+
+    val duplicateRange = returnedCounts.entries.firstOrNull { (timeRange, count) ->
+        count > expectedCounts.getValue(timeRange)
+    }
+    if (duplicateRange != null) {
+        throw IOException("翻译结果包含重复时间轴：${duplicateRange.key.format()}")
+    }
+
+    val remainingReturnedCounts = returnedCounts.toMutableMap()
+    val missingSubtitles = expectedSubtitles.mapIndexedNotNull { index, subtitle ->
+        val timeRange = expectedKeys[index]
+        val remaining = remainingReturnedCounts.getOrDefault(timeRange, 0)
+        if (remaining > 0) {
+            remainingReturnedCounts[timeRange] = remaining - 1
+            null
+        } else {
+            subtitle to timeRange
         }
     }
+    if (missingSubtitles.isNotEmpty()) {
+        val preview = missingSubtitles.take(10).joinToString("、") { (subtitle, timeRange) ->
+            val label = subtitle.index.takeIf { it > 0 }?.let { "原字幕 $it" } ?: "原字幕"
+            "$label（${timeRange.format()}）"
+        }
+        val suffix = if (missingSubtitles.size > 10) "等 ${missingSubtitles.size} 条" else ""
+        val unexpectedCount = allReturnedBlocks.size - returnedBlocks.size
+        throw IOException(
+            "AI 返回 ${returnedBlocks.size}/${expectedSubtitles.size} 个匹配时间轴" +
+                (if (unexpectedCount > 0) "，另有 $unexpectedCount 个非本批次时间轴" else "") +
+                "；缺少：$preview$suffix。AI 序号仅供显示，匹配以时间轴为准"
+        )
+    }
+
+    val translationsByTime = returnedBlocks.groupByTo(
+        destination = mutableMapOf(),
+        keySelector = TimedSubtitleBlock::timeRange,
+        valueTransform = TimedSubtitleBlock::text
+    ).mapValues { (_, translations) -> ArrayDeque(translations) }
+
+    return expectedKeys.map { timeRange ->
+        translationsByTime.getValue(timeRange).removeFirst()
+    }
+}
+
+/** Returns only complete consecutive blocks; the trailing block may still be streaming. */
+internal fun parseCompletedTimedTranslationPrefix(
+    content: String,
+    expectedSubtitles: List<SubtitleEntry>
+): List<String> {
+    val expectedKeys = expectedSubtitles.map(SubtitleEntry::translationTimeRange)
+    val expectedKeySet = expectedKeys.toSet()
+    val completedBlocks = extractTimedSubtitleBlocks(content)
+        .dropLast(1)
+        .filter { it.timeRange in expectedKeySet }
+    val translationsByTime = completedBlocks.groupByTo(
+        destination = mutableMapOf(),
+        keySelector = TimedSubtitleBlock::timeRange,
+        valueTransform = TimedSubtitleBlock::text
+    ).mapValues { (_, translations) -> ArrayDeque(translations) }
 
     return buildList {
-        for (number in expectedStartNumber..expectedEndNumber) {
-            val translation = translations[number] ?: break
-            add(translation)
+        for (timeRange in expectedKeys) {
+            val translations = translationsByTime[timeRange]
+            if (translations == null || translations.isEmpty()) break
+            add(translations.removeFirst())
         }
     }
 }
 
-private fun numberedTranslationLineNumber(line: String): Int? {
-    val match = NUMBERED_TRANSLATION_LINE.matchEntire(line.trimEnd('\r')) ?: return null
-    return (match.groupValues[1].ifEmpty { match.groupValues[2] }).toIntOrNull()
+private data class TranslationTimeRange(val startTimeMs: Long, val endTimeMs: Long) {
+    fun format(): String =
+        "${TimeUtils.formatSRT(startTimeMs)} --> ${TimeUtils.formatSRT(endTimeMs)}"
 }
 
-private fun encodeSubtitleText(text: String): String =
-    text.replace("\\", "\\\\")
-        .replace("\r\n", "\n")
-        .replace("\r", "\n")
-        .replace("\n", "\\n")
+private data class TimedSubtitleBlock(
+    val timeRange: TranslationTimeRange,
+    val text: String
+)
 
-private fun decodeSubtitleText(text: String): String = buildString {
-    var index = 0
-    while (index < text.length) {
-        val character = text[index]
-        if (character == '\\' && index + 1 < text.length) {
-            when (text[index + 1]) {
-                'n' -> append('\n')
-                '\\' -> append('\\')
-                else -> {
-                    append(character)
-                    append(text[index + 1])
-                }
-            }
-            index += 2
-        } else {
-            append(character)
-            index++
-        }
+private fun SubtitleEntry.translationTimeRange() = TranslationTimeRange(startTime, endTime)
+
+private fun extractTimedSubtitleBlocks(content: String): List<TimedSubtitleBlock> {
+    val normalizedContent = limitToSrtCodeBlock(normalizeSubtitleText(content))
+    val matches = TIMED_SUBTITLE_LINE.findAll(normalizedContent).toList()
+    return matches.mapIndexedNotNull { index, match ->
+        val startTime = parseTranslationTimestamp(match.groupValues[1])
+            ?: return@mapIndexedNotNull null
+        val endTime = parseTranslationTimestamp(match.groupValues[2])
+            ?: return@mapIndexedNotNull null
+        val blockEnd = matches.getOrNull(index + 1)?.range?.first ?: normalizedContent.length
+        val blockText = normalizedContent.substring(match.range.last + 1, blockEnd)
+            .removePrefix("\n")
+            .replace(SRT_SEQUENCE_BEFORE_CUE, "\n")
+            .trim('\n')
+            .removeTrailingMarkdownFence()
+        TimedSubtitleBlock(TranslationTimeRange(startTime, endTime), blockText)
     }
 }
+
+private fun limitToSrtCodeBlock(content: String): String {
+    val timeStart = TIMED_SUBTITLE_LINE.find(content)?.range?.first ?: return content
+    val fences = MARKDOWN_FENCE_LINE.findAll(content).toList()
+    val openingFence = fences.lastOrNull { it.range.first < timeStart }
+    val closingFence = fences.firstOrNull { it.range.first > timeStart }
+    return if (openingFence != null && closingFence != null) {
+        content.substring(0, closingFence.range.first)
+    } else {
+        content
+    }
+}
+
+private fun timedSubtitleLineRange(line: String): TranslationTimeRange? {
+    val match = TIMED_SUBTITLE_LINE.matchEntire(line.trimEnd('\r')) ?: return null
+    val startTime = parseTranslationTimestamp(match.groupValues[1]) ?: return null
+    val endTime = parseTranslationTimestamp(match.groupValues[2]) ?: return null
+    return TranslationTimeRange(startTime, endTime)
+}
+
+private fun parseTranslationTimestamp(value: String): Long? {
+    val match = TRANSLATION_TIMESTAMP.matchEntire(value) ?: return null
+    val hours = match.groupValues[1].toLongOrNull() ?: return null
+    val minutes = match.groupValues[2].toLongOrNull()?.takeIf { it < 60 } ?: return null
+    val seconds = match.groupValues[3].toLongOrNull()?.takeIf { it < 60 } ?: return null
+    val millis = match.groupValues[4].toLongOrNull() ?: return null
+    return hours * 3_600_000L + minutes * 60_000L + seconds * 1_000L + millis
+}
+
+private fun String.removeTrailingMarkdownFence(): String {
+    val lines = lines().toMutableList()
+    while (lines.lastOrNull()?.trim() == "```") {
+        lines.removeLast()
+    }
+    return lines.joinToString("\n").trimEnd('\n')
+}
+
+private fun normalizeSubtitleText(text: String): String =
+    text.replace("\r\n", "\n").replace('\r', '\n')
 
 /** Uses an OpenAI-compatible Chat Completions endpoint for streamed subtitle translation. */
 class AiTranslator(
@@ -175,8 +257,8 @@ class AiTranslator(
     )
 
     private data class TranslationLogContext(
-        val startNumber: Int,
-        val endNumber: Int,
+        val startPosition: Int,
+        val endPosition: Int,
         val messages: List<ChatMessage>,
         val estimatedInputTokens: Int
     )
@@ -215,35 +297,37 @@ class AiTranslator(
      * Sends batches one at a time. A successful user/assistant pair is appended to the state
      * before the next batch, matching a normal multi-turn chat conversation.
      */
-    suspend fun translateTexts(
-        texts: List<String>,
-        startNumber: Int = 1,
+    suspend fun translateSubtitles(
+        subtitles: List<SubtitleEntry>,
+        startPosition: Int = 1,
         progressCallback: ((Int, Int) -> Unit)? = null,
         isCancelled: () -> Boolean = { false },
         conversationState: ConversationState = ConversationState()
     ): TranslationRunResult = translationMutex.withLock {
         withContext(Dispatchers.IO) {
-            require(startNumber > 0) { "字幕起始编号必须大于 0" }
+            require(startPosition > 0) { "字幕起始位置必须大于 0" }
             val translatedTexts = mutableListOf<String>()
-            var currentConversation = ensureSystemMessage(conversationState)
+            var currentConversation = normalizeConversation(conversationState)
 
             try {
-                if (texts.isEmpty()) {
+                if (subtitles.isEmpty()) {
                     return@withContext TranslationRunResult(emptyList(), currentConversation)
                 }
                 if (isCancelled()) throw CancellationException("翻译已取消")
 
-                splitSubtitleTranslationBatches(texts).forEach { batch ->
+                splitSubtitleTranslationBatches(subtitles).forEach { batch ->
                     if (isCancelled()) throw CancellationException("翻译已取消")
                     val completedBeforeBatch = translatedTexts.size
-                    val batchStartNumber = startNumber + completedBeforeBatch
                     val batchResult = translateBatch(
-                        texts = batch,
+                        subtitles = batch,
                         conversationState = currentConversation,
-                        startNumber = batchStartNumber,
+                        batchStartPosition = startPosition + completedBeforeBatch,
                         isCancelled = isCancelled,
                         streamingProgress = { receivedCount ->
-                            progressCallback?.invoke(completedBeforeBatch + receivedCount, texts.size)
+                            progressCallback?.invoke(
+                                completedBeforeBatch + receivedCount,
+                                subtitles.size
+                            )
                         }
                     )
                     translatedTexts.addAll(batchResult.translations)
@@ -252,7 +336,7 @@ class AiTranslator(
                             ChatMessage("user", batchResult.userContent) +
                             ChatMessage("assistant", batchResult.assistantContent)
                     )
-                    progressCallback?.invoke(translatedTexts.size, texts.size)
+                    progressCallback?.invoke(translatedTexts.size, subtitles.size)
                 }
 
                 TranslationRunResult(translatedTexts, currentConversation)
@@ -275,26 +359,26 @@ class AiTranslator(
         }
     }
 
-    private fun ensureSystemMessage(conversationState: ConversationState): ConversationState {
-        if (conversationState.messages.isNotEmpty()) return conversationState
-        return ConversationState(
-            listOf(ChatMessage("system", buildTranslationSystemPrompt(targetLanguage)))
-        )
-    }
+    private fun normalizeConversation(conversationState: ConversationState): ConversationState =
+        conversationState
 
     private suspend fun translateBatch(
-        texts: List<String>,
+        subtitles: List<SubtitleEntry>,
         conversationState: ConversationState,
-        startNumber: Int,
+        batchStartPosition: Int,
         isCancelled: () -> Boolean,
         streamingProgress: (Int) -> Unit
     ): BatchResult {
-        val userContent = buildNumberedSubtitleContent(texts, startNumber)
+        val userContent = buildTranslationUserContent(
+            subtitles = subtitles,
+            targetLanguage = targetLanguage,
+            startPosition = batchStartPosition
+        )
         val boundedConversation = compactConversationForRequest(conversationState, userContent)
         val requestMessages = boundedConversation.messages + ChatMessage("user", userContent)
         val logContext = TranslationLogContext(
-            startNumber = startNumber,
-            endNumber = startNumber + texts.size - 1,
+            startPosition = batchStartPosition,
+            endPosition = batchStartPosition + subtitles.size - 1,
             messages = requestMessages,
             estimatedInputTokens = estimateMessagesTokens(requestMessages)
         )
@@ -306,6 +390,9 @@ class AiTranslator(
                 }
             })
             put("stream", true)
+            if (apiUrl.toHttpUrlOrNull()?.host != "api.mistral.ai") {
+                put("stream_options", JSONObject().put("include_usage", true))
+            }
             if (provider == AiProviderConfig.DEEPSEEK) {
                 put("thinking", JSONObject().put("type", "disabled"))
             }
@@ -318,9 +405,8 @@ class AiTranslator(
             .addHeader("Accept", "text/event-stream")
             .build()
 
-        val progressTracker = NumberedStreamProgress(
-            expectedStartNumber = startNumber,
-            expectedCount = texts.size,
+        val progressTracker = TimedStreamProgress(
+            expectedSubtitles = subtitles,
             onProgress = streamingProgress
         )
         val responseContent = try {
@@ -338,23 +424,31 @@ class AiTranslator(
             )
         }
         progressTracker.finish()
+        val translations = try {
+            parseTimedSubtitleTranslation(responseContent, subtitles)
+        } catch (error: IOException) {
+            RuntimeLogManager.e(
+                AI_TRANSLATION_LOG_TAG,
+                "AI_TRANSLATION_PARSE_ERROR batch=${logContext.startPosition}-${logContext.endPosition} " +
+                    "responseChars=${responseContent.length} message=${error.message}",
+                error
+            )
+            throw error
+        }
         return BatchResult(
-            translations = parseNumberedTranslation(responseContent, startNumber, texts.size),
+            translations = translations,
             userContent = userContent,
             assistantContent = responseContent,
             conversationBeforeBatch = boundedConversation
         )
     }
 
-    /**
-     * Keeps the current request inside the configured model context window. Recent batches remain
-     * complete; older pairs keep only a small numbered tail before the oldest pairs are discarded.
-     */
+    /** Keeps complete user/assistant turns inside the configured context window. */
     internal fun compactConversationForRequest(
         conversationState: ConversationState,
         pendingUserContent: String
     ): ConversationState {
-        val conversation = ensureSystemMessage(conversationState)
+        val conversation = normalizeConversation(conversationState)
         val pendingMessage = ChatMessage("user", pendingUserContent)
         val completionReserve = maxOf(
             MIN_COMPLETION_RESERVE_TOKENS.toLong(),
@@ -362,12 +456,11 @@ class AiTranslator(
         ).coerceAtMost(Int.MAX_VALUE.toLong())
         val inputLimit = contextWindowTokens.toLong() - completionReserve
         val systemMessages = conversation.messages.takeWhile { it.role == "system" }
-            .ifEmpty { listOf(ChatMessage("system", buildTranslationSystemPrompt(targetLanguage))) }
         val baseMessages = systemMessages + pendingMessage
         val baseTokens = estimateMessagesTokens(baseMessages)
         if (baseTokens.toLong() > inputLimit) {
             throw IOException(
-                "当前 300 行字幕预计需要 ${baseTokens + completionReserve} tokens，" +
+                "当前 300 条字幕预计需要 ${baseTokens + completionReserve} tokens，" +
                     "超过上下文上限 $contextWindowTokens，请提高上下文上限或缩短单行字幕"
             )
         }
@@ -389,19 +482,14 @@ class AiTranslator(
         val targetInputTokens = baseTokens.toLong() +
             ((inputLimit - baseTokens) * CONTEXT_KEEP_RATIO).toLong()
         val selectedPairs = ArrayDeque<List<ChatMessage>>()
-        val recentFullStart = (pairs.size - RECENT_FULL_CONTEXT_BATCHES).coerceAtLeast(0)
 
         for (index in pairs.indices.reversed()) {
             val pair = pairs[index]
-            val compactedPair = compactPair(pair)
-            val candidates = if (index >= recentFullStart && compactedPair != pair) {
-                listOf(pair, compactedPair)
+            val messages = systemMessages + pair + selectedPairs.flatten() + pendingMessage
+            val accepted = if (estimateMessagesTokens(messages).toLong() <= targetInputTokens) {
+                pair
             } else {
-                listOf(compactedPair)
-            }
-            val accepted = candidates.firstOrNull { candidate ->
-                val messages = systemMessages + candidate + selectedPairs.flatten() + pendingMessage
-                estimateMessagesTokens(messages).toLong() <= targetInputTokens
+                null
             }
             if (accepted != null) {
                 selectedPairs.addFirst(accepted)
@@ -409,10 +497,10 @@ class AiTranslator(
             }
 
             if (selectedPairs.isEmpty()) {
-                val fallback = candidates.firstOrNull { candidate ->
-                    estimateMessagesTokens(systemMessages + candidate + pendingMessage).toLong() <= inputLimit
+                val pairTokens = estimateMessagesTokens(systemMessages + pair + pendingMessage)
+                if (pairTokens.toLong() <= inputLimit) {
+                    selectedPairs.addFirst(pair)
                 }
-                if (fallback != null) selectedPairs.addFirst(fallback)
             }
             break
         }
@@ -422,21 +510,6 @@ class AiTranslator(
 
     internal fun estimateConversationTokens(messages: List<ChatMessage>): Int =
         estimateMessagesTokens(messages)
-
-    private fun compactPair(pair: List<ChatMessage>): List<ChatMessage> = pair.map { message ->
-        message.copy(content = compactNumberedContent(message.content))
-    }
-
-    private fun compactNumberedContent(content: String): String {
-        val numberedLines = content.lineSequence()
-            .map { it.trimEnd('\r') }
-            .filter { NUMBERED_TRANSLATION_LINE.matches(it) }
-            .toList()
-        if (numberedLines.isNotEmpty()) {
-            return numberedLines.takeLast(COMPACTED_LINES_PER_BATCH).joinToString("\n")
-        }
-        return content.takeLast(2_048)
-    }
 
     private fun estimateMessagesTokens(messages: List<ChatMessage>): Int {
         val estimate = 3L + messages.sumOf { message ->
@@ -451,6 +524,7 @@ class AiTranslator(
         return ((utf8Bytes + 1L) / 2L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
     }
 
+    /** Retries only transient transport/API failures; subtitle format is validated once afterward. */
     private suspend fun executeWithRetry(
         request: Request,
         isCancelled: () -> Boolean,
@@ -504,7 +578,7 @@ class AiTranslator(
                             )
                             throw IOException("响应为空")
                         }
-                        return readStreamingContent(
+                        val content = readStreamingContent(
                             responseBody = responseBody,
                             onDelta = onDelta,
                             onCaptured = { content, complete ->
@@ -518,6 +592,7 @@ class AiTranslator(
                             }
                         )
                             .ifBlank { throw IOException("响应为空") }
+                        return content
                     }
                 }
             } catch (error: NonRetryableApiException) {
@@ -526,14 +601,14 @@ class AiTranslator(
                 if (isCancelled()) {
                     RuntimeLogManager.i(
                         AI_TRANSLATION_LOG_TAG,
-                        "AI_TRANSLATION_ATTEMPT_CANCELLED batch=${logContext.startNumber}-${logContext.endNumber} " +
+                        "AI_TRANSLATION_ATTEMPT_CANCELLED batch=${logContext.startPosition}-${logContext.endPosition} " +
                             "attempt=$attemptNumber"
                     )
                     throw CancellationException("翻译已取消")
                 }
                 RuntimeLogManager.w(
                     AI_TRANSLATION_LOG_TAG,
-                    "AI_TRANSLATION_ATTEMPT_ERROR batch=${logContext.startNumber}-${logContext.endNumber} " +
+                    "AI_TRANSLATION_ATTEMPT_ERROR batch=${logContext.startPosition}-${logContext.endPosition} " +
                         "attempt=$attemptNumber message=${error.message}",
                     error
                 )
@@ -554,6 +629,7 @@ class AiTranslator(
         val streamedContent = StringBuilder()
         val plainResponse = StringBuilder()
         var receivedServerEvent = false
+        var receivedDoneEvent = false
         var capturedContent = ""
         var completed = false
         val source = responseBody.source()
@@ -564,7 +640,10 @@ class AiTranslator(
                 if (line.startsWith("data:")) {
                     receivedServerEvent = true
                     val data = line.removePrefix("data:").trimStart()
-                    if (data == "[DONE]") break
+                    if (data == "[DONE]") {
+                        receivedDoneEvent = true
+                        break
+                    }
                     if (data.isBlank()) continue
                     val delta = extractStreamDelta(data)
                     if (delta.isNotEmpty()) {
@@ -584,7 +663,10 @@ class AiTranslator(
                     if (content.isNotEmpty()) onDelta(content)
                 }
             }
-            completed = true
+            // A streamed response is complete only after the provider's explicit DONE event.
+            // EOF without DONE is retained for diagnostics and final parsing, but must not be
+            // reported as a successful transport completion.
+            completed = !receivedServerEvent || receivedDoneEvent
             return capturedContent
         } finally {
             if (!completed) {
@@ -604,7 +686,7 @@ class AiTranslator(
             buildString {
                 appendLine("AI_TRANSLATION_REQUEST_BEGIN")
                 appendLine(
-                    "batch=${context.startNumber}-${context.endNumber} attempt=$attempt/$MAX_RETRY_COUNT " +
+                    "batch=${context.startPosition}-${context.endPosition} attempt=$attempt/$MAX_RETRY_COUNT " +
                         "provider=$provider model=$model contextWindowTokens=$contextWindowTokens " +
                         "estimatedInputTokens=${context.estimatedInputTokens}"
                 )
@@ -628,8 +710,9 @@ class AiTranslator(
         val message = buildString {
             appendLine("AI_TRANSLATION_RESPONSE_BEGIN")
             appendLine(
-                "batch=${context.startNumber}-${context.endNumber} attempt=$attempt/$MAX_RETRY_COUNT " +
-                    "complete=$complete status=$status chars=${content.length}"
+                "batch=${context.startPosition}-${context.endPosition} attempt=$attempt/$MAX_RETRY_COUNT " +
+                    "complete=$complete status=$status chars=${content.length} " +
+                    "payload=unfiltered_assistant_content_before_parsing"
             )
             append(content)
             if (!content.endsWith('\n')) appendLine()
@@ -643,24 +726,29 @@ class AiTranslator(
     }
 
     private fun extractStreamDelta(data: String): String {
-        val event = try {
-            JSONObject(data)
-        } catch (error: Exception) {
-            throw IOException("流式响应格式无效", error)
+        return buildString {
+            data.trim()
+                .split('\n')
+                .map(String::trim)
+                .filter(String::isNotEmpty)
+                .forEach { jsonLine ->
+                    val event = try {
+                        JSONObject(jsonLine)
+                    } catch (error: Exception) {
+                        throw IOException("流式响应格式无效", error)
+                    }
+                    event.optJSONObject("error")?.let { error ->
+                        throw IOException(error.optString("message").ifBlank { "AI 服务返回错误" })
+                    }
+                    val choices = event.optJSONArray("choices") ?: return@forEach
+                    if (choices.length() == 0) return@forEach
+                    val choice = choices.optJSONObject(0) ?: return@forEach
+                    val delta = choice.optJSONObject("delta")
+                    val content = delta?.opt("content")
+                        ?: choice.optJSONObject("message")?.opt("content")
+                    append(jsonContentToText(content))
+                }
         }
-        event.optJSONObject("error")?.let { error ->
-            throw IOException(error.optString("message").ifBlank { "AI 服务返回错误" })
-        }
-        val choices = event.optJSONArray("choices") ?: return ""
-        if (choices.length() == 0) return ""
-        val choice = choices.optJSONObject(0) ?: return ""
-        if (choice.optString("finish_reason") == "length") {
-            throw NonRetryableApiException("AI 输出达到长度上限，当前批次未完整返回")
-        }
-        val delta = choice.optJSONObject("delta")
-        val content = delta?.opt("content")
-            ?: choice.optJSONObject("message")?.opt("content")
-        return jsonContentToText(content)
     }
 
     private fun extractRegularResponseContent(responseText: String): String {
@@ -700,20 +788,20 @@ class AiTranslator(
         return "API 请求失败：$code - $detail"
     }
 
-    private class NumberedStreamProgress(
-        private val expectedStartNumber: Int,
-        expectedCount: Int,
+    private class TimedStreamProgress(
+        private val expectedSubtitles: List<SubtitleEntry>,
         private val onProgress: (Int) -> Unit
     ) {
-        private val expectedEndNumber = expectedStartNumber + expectedCount - 1
+        private val expectedTimeRanges = expectedSubtitles
+            .map(SubtitleEntry::translationTimeRange)
+            .toSet()
         private val currentLine = StringBuilder()
         private val completedContent = StringBuilder()
-        private val receivedNumbers = mutableSetOf<Int>()
+        private var reportedCount = 0
 
         fun reset() {
             currentLine.setLength(0)
             completedContent.setLength(0)
-            receivedNumbers.clear()
         }
 
         fun append(delta: String) {
@@ -728,24 +816,52 @@ class AiTranslator(
 
         fun finish() {
             consumeCurrentLine()
+            reportProgress(countCompletedTimedTranslations(completedContent.toString(), false))
         }
 
-        fun completedTranslations(): List<String> = parseCompletedTranslationPrefix(
+        fun completedTranslations(): List<String> = parseCompletedTimedTranslationPrefix(
             completedContent.toString(),
-            expectedStartNumber,
-            expectedEndNumber - expectedStartNumber + 1
+            expectedSubtitles
         )
 
         private fun consumeCurrentLine() {
             val line = currentLine.toString()
             currentLine.setLength(0)
             completedContent.append(line).append('\n')
-            val number = numberedTranslationLineNumber(line)
-            if (number != null && number in expectedStartNumber..expectedEndNumber &&
-                receivedNumbers.add(number)
-            ) {
-                onProgress(receivedNumbers.size)
+            val timeRange = timedSubtitleLineRange(line)
+            if (timeRange in expectedTimeRanges) {
+                // Progress is diagnostic only. Count every completed time-matched block so one
+                // missing or out-of-order cue cannot make the UI appear frozen forever. Final
+                // validation still requires every expected time range and preserves source order.
+                val completedCount = countCompletedTimedTranslations(completedContent.toString())
+                reportProgress(completedCount)
             }
+        }
+
+        private fun reportProgress(completedCount: Int) {
+            if (completedCount > reportedCount) {
+                reportedCount = completedCount
+                onProgress(completedCount)
+            }
+        }
+
+        private fun countCompletedTimedTranslations(
+            content: String,
+            excludeTrailingBlock: Boolean = true
+        ): Int {
+            val expectedCounts = expectedSubtitles
+                .map(SubtitleEntry::translationTimeRange)
+                .groupingBy { it }
+                .eachCount()
+                .toMutableMap()
+            val blocks = extractTimedSubtitleBlocks(content)
+            return (if (excludeTrailingBlock) blocks.dropLast(1) else blocks)
+                .count { block ->
+                    val remaining = expectedCounts[block.timeRange] ?: return@count false
+                    if (remaining <= 0) return@count false
+                    expectedCounts[block.timeRange] = remaining - 1
+                    true
+                }
         }
     }
 }
