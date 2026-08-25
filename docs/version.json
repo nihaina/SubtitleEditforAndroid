@@ -1,7 +1,7 @@
 {
-  "versionCode": 6,
-  "versionName": "1.1.6",
+  "versionCode": 7,
+  "versionName": "1.1.7",
   "downloadUrl": "https://github.com/nihaina/SubtitleEditforAndroid/releases/latest",
-  "releaseNotes": "1.将SenseVoice设为默认模型\n2.VAD参数设置迁移至语音转字幕高级配置页面\n3.实验打轴功能添加合并语音段\n4.修复过大的字幕文件，切换至源视图时闪退的问题\n5.字幕编辑器里添加按时间合并字幕功能\n6.修复AI翻译deepseek平台无法翻译的问题\n7.AI翻译新增对new api的适配，现在可以自定义使用其他模型\n8.添加对WebVTT格式的支持",
+  "releaseNotes": "1.修复音视频格式转换功能，现在可以批量进行转换，并且支持音频转视频\n2.修改翻译流程，降低翻译的失败率，提高翻译质量，失败后可以重试，取消后也会保留原有翻译结果，翻译速度略有降低\n3.添加自动翻译工具，可以批量翻译字幕文件，语音转字幕可以自动将结果添加进该工具\n4.api改用Android store存储，可以查看复制已添加的api\n5.设置里添加持久化保持输出目录选项\n6.添加ai对话入口，该入口只用于查看ai的翻译记录，如果翻译结果丢失，可尝试从此处找回，对话功能后续不会进行维护，有聊天需求请使用专门的ai聊天软件",
   "forceUpdate": false
 }
