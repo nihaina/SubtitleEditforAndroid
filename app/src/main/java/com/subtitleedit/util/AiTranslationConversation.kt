@@ -10,6 +10,7 @@ import com.subtitleedit.chat.ChatTools
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser.SubtitleFormat
 import kotlinx.coroutines.CancellationException
+import java.util.UUID
 
 /**
  * Subtitle translation is a small adapter over the shared chat module: it only prepares a
@@ -25,7 +26,9 @@ class AiTranslationConversation(
     baseUrl: String,
     contextWindowTokens: Int,
     private val subtitleFormat: SubtitleFormat = SubtitleFormat.SRT,
-    reasoningLevel: AiProviderConfig.ReasoningLevel = AiProviderConfig.defaultReasoningLevel(provider)
+    reasoningLevel: AiProviderConfig.ReasoningLevel = AiProviderConfig.defaultReasoningLevel(provider),
+    /** Stable ID for one editor translation operation, including all split batches and retries. */
+    private val historySessionId: String = UUID.randomUUID().toString()
 ) {
     data class TranslationRunResult(
         val translations: List<String>,
@@ -53,7 +56,6 @@ class AiTranslationConversation(
         tools = ChatTools.create(context.applicationContext)
     )
     private val historyStore = ChatHistoryStore(context)
-    private var historySessionId: String? = null
 
     fun cancel() = conversation.cancel()
 
@@ -94,7 +96,7 @@ class AiTranslationConversation(
                 if (streamedContent.isEmpty()) {
                     streamedContent.append(result.text)
                 }
-                historySessionId = historyStore.append(
+                historyStore.append(
                     id = historySessionId,
                     title = "翻译为$targetLanguage · ${subtitles.size} 条字幕",
                     type = ChatHistoryStore.TYPE_TRANSLATION,

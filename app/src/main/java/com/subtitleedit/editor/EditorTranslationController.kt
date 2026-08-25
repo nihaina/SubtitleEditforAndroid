@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 /** Manages AI translation confirmation, progress and result preview. */
 internal class EditorTranslationController(
@@ -38,7 +39,8 @@ internal class EditorTranslationController(
     private data class TranslationSession(
         val selectedEntries: List<Pair<SubtitleEntry, Int>>,
         val translator: AiTranslationConversation,
-        val translatedTexts: MutableList<String> = mutableListOf()
+        val translatedTexts: MutableList<String> = mutableListOf(),
+        var completedCount: Int = 0
     )
 
     fun start(selectedEntries: List<Pair<SubtitleEntry, Int>>) {
@@ -110,6 +112,8 @@ internal class EditorTranslationController(
         contextWindowTokens: Int,
         reasoningLevel: AiProviderConfig.ReasoningLevel
     ) {
+        // One editor action owns one history record; all subtitle batches and retries share it.
+        val historySessionId = UUID.randomUUID().toString()
         val translator = AiTranslationConversation(
             context = activity,
             provider = provider,
@@ -119,15 +123,19 @@ internal class EditorTranslationController(
             baseUrl = baseUrl,
             contextWindowTokens = contextWindowTokens,
             subtitleFormat = subtitleFormatProvider(),
-            reasoningLevel = reasoningLevel
+            reasoningLevel = reasoningLevel,
+            historySessionId = historySessionId
         )
         continueTranslation(TranslationSession(selectedEntries, translator))
     }
 
     private fun continueTranslation(session: TranslationSession) {
-        val completedBeforeRun = session.translatedTexts.size
+        // Keep the retry cursor independent from the dialog lifecycle. A failed request
+        // must resume at the first subtitle of the failed batch, not recreate the whole run.
+        val completedBeforeRun = session.completedCount
+            .coerceIn(0, session.selectedEntries.size)
         val totalCount = session.selectedEntries.size
-        val dialog = createTranslationDialog(totalCount)
+        val dialog = createTranslationDialog(totalCount, completedBeforeRun)
         translateCancelled = false
         userCancelledTranslation = false
         isTranslating = true
@@ -150,6 +158,7 @@ internal class EditorTranslationController(
                 )
 
                 session.translatedTexts.addAll(result.translations)
+                session.completedCount = session.translatedTexts.size
                 if (translateCancelled) {
                     handleTranslationCancellation(session, dialog)
                     return@launch
@@ -166,6 +175,7 @@ internal class EditorTranslationController(
                 }
             } catch (error: AiTranslationConversation.TranslationCancelledException) {
                 session.translatedTexts.addAll(error.translations)
+                session.completedCount = session.translatedTexts.size
                 handleTranslationCancellation(session, dialog)
             } catch (_: CancellationException) {
                 handleTranslationCancellation(session, dialog)
@@ -176,10 +186,10 @@ internal class EditorTranslationController(
         }
     }
 
-    private fun createTranslationDialog(totalCount: Int): AlertDialog =
+    private fun createTranslationDialog(totalCount: Int, completedCount: Int): AlertDialog =
         AlertDialog.Builder(activity)
             .setTitle("AI 翻译")
-            .setMessage("正在翻译 0/$totalCount 条")
+            .setMessage("正在翻译 $completedCount/$totalCount 条")
             .setNegativeButton("取消") { _, _ ->
                 userCancelledTranslation = true
                 translateCancelled = true
