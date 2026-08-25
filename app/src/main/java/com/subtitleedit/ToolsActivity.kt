@@ -19,6 +19,7 @@ class ToolsActivity : AppCompatActivity() {
         ToolCardShadow.remove(
             binding.cardBatchConvert,
             binding.cardSubtitleFormat,
+            binding.cardAutoTranslate,
             binding.cardVocalSeparation,
             binding.cardSpeechToSubtitle,
             binding.cardMediaConvert,
@@ -47,6 +48,10 @@ class ToolsActivity : AppCompatActivity() {
 
         binding.cardSubtitleFormat.setOnClickListener {
             startActivity(Intent(this, SubtitleFormatSelectActivity::class.java))
+        }
+
+        binding.cardAutoTranslate.setOnClickListener {
+            startActivity(Intent(this, AutoTranslateActivity::class.java))
         }
 
         binding.cardMediaConvert.setOnClickListener {

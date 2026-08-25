@@ -350,6 +350,15 @@
     <string name="activity_tools_text_07">视频转音频/格式转换 (MP3/AAC/MP4 等)</string>
     <string name="activity_tools_contentdescription_06">自动打轴</string>
     <string name="activity_tools_text_08">自动检测语音段并生成时间轴</string>
+    <string name="activity_tools_contentdescription_07">自动翻译</string>
+    <string name="activity_tools_text_09">使用 AI 同时翻译多个字幕文件</string>
+    <string name="auto_translate">自动翻译</string>
+    <string name="activity_auto_translate_text_01">翻译设置</string>
+    <string name="activity_auto_translate_text_02">选择输出目录</string>
+    <string name="activity_auto_translate_text_03">输出目录：Download/SubtitleEdit/Translate（默认）</string>
+    <string name="activity_auto_translate_text_04">待翻译文件</string>
+    <string name="activity_auto_translate_text_05">添加文件</string>
+    <string name="activity_auto_translate_text_06">开始翻译</string>
     <string name="activity_vocal_separation_settings_text_01">通用四轨模型</string>
     <string name="activity_vocal_separation_settings_text_02">未选择通用四轨模型</string>
     <string name="activity_vocal_separation_settings_text_03">选择通用四轨模型</string>

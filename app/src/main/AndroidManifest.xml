@@ -119,6 +119,11 @@
             android:theme="@style/Theme.SubtitleEditforAndroid" />
 
         <activity
+            android:name=".AutoTranslateActivity"
+            android:exported="false"
+            android:theme="@style/Theme.SubtitleEditforAndroid" />
+
+        <activity
             android:name=".FileManagementSettingsActivity"
             android:exported="false"
             android:theme="@style/Theme.SubtitleEditforAndroid" />

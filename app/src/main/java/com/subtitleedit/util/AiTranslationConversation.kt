@@ -28,7 +28,8 @@ class AiTranslationConversation(
     private val subtitleFormat: SubtitleFormat = SubtitleFormat.SRT,
     reasoningLevel: AiProviderConfig.ReasoningLevel = AiProviderConfig.defaultReasoningLevel(provider),
     /** Stable ID for one editor translation operation, including all split batches and retries. */
-    private val historySessionId: String = UUID.randomUUID().toString()
+    private val historySessionId: String = UUID.randomUUID().toString(),
+    private val historyTitle: String? = null
 ) {
     data class TranslationRunResult(
         val translations: List<String>,
@@ -98,7 +99,7 @@ class AiTranslationConversation(
                 }
                 historyStore.append(
                     id = historySessionId,
-                    title = "翻译为$targetLanguage · ${subtitles.size} 条字幕",
+                    title = historyTitle ?: "翻译为$targetLanguage · ${subtitles.size} 条字幕",
                     type = ChatHistoryStore.TYPE_TRANSLATION,
                     messages = result.messages
                 )
