@@ -6,6 +6,7 @@ import com.subtitleedit.chat.ChatBackendConfig
 import com.subtitleedit.chat.ChatConversation
 import com.subtitleedit.chat.ChatHistoryStore
 import com.subtitleedit.chat.ChatReasoningLevel
+import com.subtitleedit.chat.ChatTools
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser.SubtitleFormat
 import kotlinx.coroutines.CancellationException
@@ -26,18 +27,6 @@ class AiTranslationConversation(
     private val subtitleFormat: SubtitleFormat = SubtitleFormat.SRT,
     reasoningLevel: AiProviderConfig.ReasoningLevel = AiProviderConfig.defaultReasoningLevel(provider)
 ) {
-    sealed class TranslationUiEvent {
-        data class Request(
-            val content: String,
-            val startPosition: Int,
-            val endPosition: Int
-        ) : TranslationUiEvent()
-
-        data class ReasoningDelta(val text: String) : TranslationUiEvent()
-        data class AssistantDelta(val text: String) : TranslationUiEvent()
-        object ProcessingResponse : TranslationUiEvent()
-    }
-
     data class TranslationRunResult(
         val translations: List<String>,
         val error: Throwable? = null
@@ -60,7 +49,8 @@ class AiTranslationConversation(
             contextWindowTokens = contextWindowTokens,
             reasoningLevel = ChatReasoningLevel.valueOf(reasoningLevel.name),
             modelSupportsReasoning = AiProviderConfig.modelCapabilities(provider, model).reasoning
-        )
+        ),
+        tools = ChatTools.create(context.applicationContext)
     )
     private val historyStore = ChatHistoryStore(context)
     private var historySessionId: String? = null
@@ -71,7 +61,6 @@ class AiTranslationConversation(
         subtitles: List<SubtitleEntry>,
         startPosition: Int = 1,
         progressCallback: ((Int, Int) -> Unit)? = null,
-        conversationCallback: ((TranslationUiEvent) -> Unit)? = null,
         isCancelled: () -> Boolean = { false }
     ): TranslationRunResult {
         require(startPosition > 0) { "字幕起始位置必须大于 0" }
@@ -93,39 +82,23 @@ class AiTranslationConversation(
                     startPosition = activeBatchStart,
                     format = subtitleFormat
                 )
-                conversationCallback?.invoke(
-                    TranslationUiEvent.Request(
-                        content = userContent,
-                        startPosition = activeBatchStart,
-                        endPosition = activeBatchStart + batch.size - 1
-                    )
-                )
                 val result = conversation.sendUserMessage(
                     content = userContent,
                     onEvent = { event ->
-                        when (event) {
-                            is ChatBackend.Event.ReasoningDelta -> conversationCallback?.invoke(
-                                TranslationUiEvent.ReasoningDelta(event.text)
-                            )
-                            is ChatBackend.Event.TextDelta -> {
-                                streamedContent.append(event.text)
-                                conversationCallback?.invoke(TranslationUiEvent.AssistantDelta(event.text))
-                            }
-                            else -> Unit
+                        if (event is ChatBackend.Event.TextDelta) {
+                            streamedContent.append(event.text)
                         }
                     },
                     isCancelled = isCancelled
                 )
                 if (streamedContent.isEmpty()) {
                     streamedContent.append(result.text)
-                    conversationCallback?.invoke(TranslationUiEvent.AssistantDelta(result.text))
                 }
-                conversationCallback?.invoke(TranslationUiEvent.ProcessingResponse)
-                historySessionId = historyStore.save(
+                historySessionId = historyStore.append(
                     id = historySessionId,
                     title = "翻译为$targetLanguage · ${subtitles.size} 条字幕",
                     type = ChatHistoryStore.TYPE_TRANSLATION,
-                    messages = conversation.snapshot()
+                    messages = result.messages
                 )
                 val batchTranslations = parseSubtitleTranslation(
                     content = result.text,

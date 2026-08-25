@@ -28,9 +28,6 @@ private val VTT_TIMED_LINE = Regex(
     RegexOption.MULTILINE
 )
 
-internal fun buildTranslationSystemPrompt(targetLanguage: String): String =
-    buildTranslationInstruction(targetLanguage)
-
 private fun buildTranslationInstruction(targetLanguage: String): String =
     "帮我翻译成${targetLanguage}，以原格式输出"
 

@@ -122,7 +122,7 @@ class ChatActivity : AppCompatActivity() {
                 val result = conversation.sendUserMessage(content, onEvent = ::handleBackendEvent)
                 finishAssistantResponse(assistantIndex, result.text) { setSending(false) }
                 waitingForVisualCompletion = true
-                saveCurrentConversation(content)
+                saveCurrentConversation(content, result.messages)
             } catch (_: CancellationException) {
                 clearPendingStreamUpdates()
                 val assistant = messages.getOrNull(assistantIndex) as? ChatUiMessage.Assistant
@@ -278,27 +278,38 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun showHistory() {
-        val sessions = historyStore.list()
-        if (sessions.isEmpty()) {
-            Toast.makeText(this, "暂无会话记录", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val labels = sessions.map { session ->
-            val type = if (session.type == ChatHistoryStore.TYPE_TRANSLATION) "AI 翻译" else "AI 对话"
-            "$type · ${session.title}"
-        }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("会话记录")
-            .setItems(labels) { _, which -> openHistory(sessions[which]) }
-            .setNegativeButton("取消", null)
-            .setNeutralButton("清空记录") { _, _ ->
-                historyStore.clear()
-                startNewConversation()
+        lifecycleScope.launch {
+            val sessions = historyStore.list()
+            if (sessions.isEmpty()) {
+                Toast.makeText(this@ChatActivity, "暂无会话记录", Toast.LENGTH_SHORT).show()
+                return@launch
             }
-            .show()
+            val labels = sessions.map { session ->
+                val type = if (session.type == ChatHistoryStore.TYPE_TRANSLATION) "AI 翻译" else "AI 对话"
+                "$type · ${session.title}"
+            }.toTypedArray()
+            AlertDialog.Builder(this@ChatActivity)
+                .setTitle("会话记录")
+                .setItems(labels) { _, which -> openHistory(sessions[which].id) }
+                .setNegativeButton("取消", null)
+                .setNeutralButton("清空记录") { _, _ ->
+                    lifecycleScope.launch {
+                        historyStore.clear()
+                        startNewConversation()
+                    }
+                }
+                .show()
+        }
     }
 
-    private fun openHistory(session: ChatHistoryStore.Session) {
+    private fun openHistory(sessionId: String) {
+        lifecycleScope.launch {
+            val session = historyStore.load(sessionId) ?: return@launch
+            openLoadedHistory(session)
+        }
+    }
+
+    private fun openLoadedHistory(session: ChatHistoryStore.Session) {
         sendJob?.cancel()
         clearPendingStreamUpdates()
         conversation.cancel()
@@ -325,18 +336,20 @@ class ChatActivity : AppCompatActivity() {
         scrollToBottom()
     }
 
-    private suspend fun saveCurrentConversation(firstUserText: String) {
-        val snapshot = conversation.snapshot()
-        val title = snapshot.firstOrNull { it.role == "user" }
+    private suspend fun saveCurrentConversation(
+        firstUserText: String,
+        newMessages: List<ChatBackend.ChatMessage>
+    ) {
+        val title = newMessages.firstOrNull { it.role == "user" }
             ?.content
             ?.lineSequence()
             ?.firstOrNull()
             .orEmpty()
-        currentSessionId = historyStore.save(
+        currentSessionId = historyStore.append(
             id = currentSessionId,
             title = title.ifBlank { firstUserText.lineSequence().firstOrNull().orEmpty() },
             type = ChatHistoryStore.TYPE_CHAT,
-            messages = snapshot
+            messages = newMessages
         )
     }
 
@@ -363,12 +376,6 @@ class ChatActivity : AppCompatActivity() {
         private const val EXTRA_CONFIGURATION_ID = "chat.configuration_id"
         private const val STREAM_FLUSH_MS = 16L
         private const val STREAM_RENDER_CHARS_PER_FRAME = 24
-        private const val DEFAULT_CHAT_SYSTEM_PROMPT = """
-            You are a capable, accurate, and helpful AI assistant. Reply in the user's language
-            unless they request another language. Give direct, complete answers; distinguish facts
-            from uncertainty, and ask a concise clarifying question when important information is missing.
-        """
-
         fun createIntent(context: Context, configuration: ChatLaunchConfiguration): Intent {
             val configurationId = ChatLaunchRegistry.put(configuration)
             return Intent(context, ChatActivity::class.java)
@@ -383,7 +390,7 @@ class ChatActivity : AppCompatActivity() {
         initialMessages: List<ChatBackend.ChatMessage> = emptyList()
     ) = ChatConversation(
         config = configuration.backendConfig,
-        systemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT.trimIndent(),
+        tools = ChatTools.create(applicationContext),
         initialMessages = initialMessages
     )
 }

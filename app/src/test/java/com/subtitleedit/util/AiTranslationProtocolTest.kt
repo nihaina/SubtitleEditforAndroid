@@ -12,14 +12,6 @@ import java.io.IOException
 class AiTranslationProtocolTest {
 
     @Test
-    fun translationInstruction_containsOnlyTheRequestedChineseInstruction() {
-        assertEquals(
-            "帮我翻译成中文，以原格式输出",
-            buildTranslationSystemPrompt("中文")
-        )
-    }
-
-    @Test
     fun batches_areAlwaysSplitAtThreeHundredSubtitles() {
         val batches = splitSubtitleTranslationBatches(
             List(601) { index -> testSubtitle(index + 1, "字幕${index + 1}") }
