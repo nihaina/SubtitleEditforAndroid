@@ -166,6 +166,11 @@
             android:theme="@style/Theme.SubtitleEditforAndroid" />
 
         <activity
+            android:name=".chat.ChatActivity"
+            android:exported="false"
+            android:theme="@style/Theme.SubtitleEditforAndroid" />
+
+        <activity
             android:name=".TtsSettingsActivity"
             android:exported="false"
             android:theme="@style/Theme.SubtitleEditforAndroid" />

@@ -4,9 +4,9 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
-import com.subtitleedit.chat.databinding.ItemChatAssistantBinding
-import com.subtitleedit.chat.databinding.ItemChatStatusBinding
-import com.subtitleedit.chat.databinding.ItemChatUserBinding
+import com.subtitleedit.databinding.ItemChatAssistantBinding
+import com.subtitleedit.databinding.ItemChatStatusBinding
+import com.subtitleedit.databinding.ItemChatUserBinding
 
 internal sealed class ChatUiMessage {
     data class User(val text: String, val messageId: String = "") : ChatUiMessage()

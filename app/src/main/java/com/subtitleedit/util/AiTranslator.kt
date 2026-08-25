@@ -6,6 +6,8 @@ import java.io.IOException
 import java.util.Locale
 
 private const val MAX_SUBTITLES_PER_TRANSLATION_REQUEST = 300
+private const val TRANSLATION_BLOCK_START = "start"
+private const val TRANSLATION_BLOCK_END = "end"
 const val DEFAULT_AI_CONTEXT_WINDOW_TOKENS = 256 * 1024
 const val MIN_AI_CONTEXT_WINDOW_TOKENS = 4 * 1024
 const val MAX_AI_CONTEXT_WINDOW_TOKENS = 2 * 1024 * 1024
@@ -27,22 +29,38 @@ private val VTT_TIMED_LINE = Regex(
     """^\s*([^\s]+)\s+-->\s+([^\s]+)(?:\s+(.*?))?\s*$""",
     RegexOption.MULTILINE
 )
+private val TRANSLATION_BLOCK_START_LINE = Regex(
+    """^[ \t]*$TRANSLATION_BLOCK_START[ \t]*$""",
+    setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE)
+)
+private val MARKED_TRANSLATION_BLOCK = Regex(
+    """(?ms)^[ \t]*$TRANSLATION_BLOCK_START[ \t]*\r?\n(.*?)^[ \t]*$TRANSLATION_BLOCK_END[ \t]*(?:\r?\n|$)""",
+    RegexOption.IGNORE_CASE
+)
 
 private fun buildTranslationInstruction(targetLanguage: String): String =
     "帮我翻译成${targetLanguage}，以原格式输出"
+
+private fun wrapTranslationBlock(content: String): String = buildString {
+    append(TRANSLATION_BLOCK_START)
+    append('\n')
+    append(content)
+    append('\n')
+    append(TRANSLATION_BLOCK_END)
+}
 
 internal fun buildTimedSubtitleContent(
     subtitles: List<SubtitleEntry>,
     startPosition: Int = 1
 ): String = subtitles.mapIndexed { offset, subtitle ->
     val sequence = subtitle.index.takeIf { it > 0 } ?: (startPosition + offset)
-    buildString {
+    wrapTranslationBlock(buildString {
         append(sequence)
         append('\n')
         append(subtitle.getTimeAxisSRT())
         append('\n')
         append(normalizeSubtitleText(subtitle.text))
-    }
+    })
 }.joinToString("\n\n")
 
 internal fun buildTranslationUserContent(
@@ -63,17 +81,17 @@ internal fun buildSubtitleTranslationContent(
 ): String = when (format) {
     SubtitleFormat.LRC -> subtitles.mapIndexed { offset, subtitle ->
         val sequence = subtitle.index.takeIf { it > 0 } ?: (startPosition + offset)
-        buildString {
+        wrapTranslationBlock(buildString {
             append(sequence)
             append('\n')
             append(TimeUtils.formatLRC(subtitle.startTime))
             append(normalizeSubtitleText(subtitle.text))
-        }
+        })
     }.joinToString("\n\n")
 
     SubtitleFormat.VTT -> subtitles.mapIndexed { offset, subtitle ->
         val sequence = subtitle.index.takeIf { it > 0 } ?: (startPosition + offset)
-        buildString {
+        wrapTranslationBlock(buildString {
             append(sequence)
             append('\n')
             if (subtitle.cueIdentifier.isNotBlank()) {
@@ -89,7 +107,7 @@ internal fun buildSubtitleTranslationContent(
             }
             append('\n')
             append(normalizeSubtitleText(subtitle.text))
-        }
+        })
     }.joinToString("\n\n")
 
     else -> buildTimedSubtitleContent(subtitles, startPosition)
@@ -258,7 +276,8 @@ private fun extractIndexedSubtitleBlocks(
     content: String,
     format: SubtitleFormat
 ): List<IndexedSubtitleBlock> {
-    val normalizedContent = limitToIndexedCodeBlock(normalizeSubtitleText(content), format)
+    val normalizedContent = markedTranslationContent(content)
+        ?: limitToIndexedCodeBlock(normalizeSubtitleText(content), format)
     if (format == SubtitleFormat.VTT) {
         return extractIndexedVttSubtitleBlocks(normalizedContent)
     }
@@ -398,8 +417,12 @@ internal fun parseCompletedTimedTranslationPrefix(
 ): List<String> {
     val expectedKeys = expectedSubtitles.map(SubtitleEntry::translationTimeRange)
     val expectedKeySet = expectedKeys.toSet()
-    val completedBlocks = extractTimedSubtitleBlocks(content)
-        .dropLast(1)
+    val extractedBlocks = extractTimedSubtitleBlocks(content)
+    val completedBlocks = (if (markedTranslationContent(content) != null) {
+        extractedBlocks
+    } else {
+        extractedBlocks.dropLast(1)
+    })
         .filter { it.timeRange in expectedKeySet }
     val translationsByTime = completedBlocks.groupByTo(
         destination = mutableMapOf(),
@@ -429,7 +452,12 @@ internal fun parseCompletedIndexedTranslationPrefix(
             endTimeMs = subtitle.endTime.takeIf { format == SubtitleFormat.VTT }
         )
     }
-    val completedBlocks = extractIndexedSubtitleBlocks(content, format).dropLast(1)
+    val extractedBlocks = extractIndexedSubtitleBlocks(content, format)
+    val completedBlocks = (if (markedTranslationContent(content) != null) {
+        extractedBlocks
+    } else {
+        extractedBlocks.dropLast(1)
+    })
         .filter { block ->
             val expected = expectedKeys.firstOrNull { it.sequence == block.sequence } ?: return@filter false
             block.startTimeMs == expected.startTimeMs &&
@@ -458,7 +486,8 @@ private data class TimedSubtitleBlock(
 private fun SubtitleEntry.translationTimeRange() = TranslationTimeRange(startTime, endTime)
 
 private fun extractTimedSubtitleBlocks(content: String): List<TimedSubtitleBlock> {
-    val normalizedContent = limitToSrtCodeBlock(normalizeSubtitleText(content))
+    val normalizedContent = markedTranslationContent(content)
+        ?: limitToSrtCodeBlock(normalizeSubtitleText(content))
     val matches = TIMED_SUBTITLE_LINE.findAll(normalizedContent).toList()
     return matches.mapIndexedNotNull { index, match ->
         val startTime = parseTranslationTimestamp(match.groupValues[1])
@@ -473,6 +502,19 @@ private fun extractTimedSubtitleBlocks(content: String): List<TimedSubtitleBlock
             .removeTrailingMarkdownFence()
         TimedSubtitleBlock(TranslationTimeRange(startTime, endTime), blockText)
     }
+}
+
+/**
+ * Returns only complete protocol blocks when the response contains the block markers.
+ * A null result means the response uses the legacy unmarked format and should use the
+ * existing parser. An empty result means markers were started but no complete block arrived.
+ */
+private fun markedTranslationContent(content: String): String? {
+    val normalized = normalizeSubtitleText(content)
+    if (!TRANSLATION_BLOCK_START_LINE.containsMatchIn(normalized)) return null
+    return MARKED_TRANSLATION_BLOCK.findAll(normalized)
+        .map { it.groupValues[1].trim('\n', '\r') }
+        .joinToString("\n\n")
 }
 
 private fun limitToSrtCodeBlock(content: String): String {

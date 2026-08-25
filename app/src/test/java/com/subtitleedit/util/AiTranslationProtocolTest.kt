@@ -35,8 +35,8 @@ class AiTranslationProtocolTest {
         )
 
         assertEquals(
-            "1\n00:00:01,000 --> 00:00:02,000\n字幕一\n\n" +
-                "2\n00:00:03,000 --> 00:00:04,000\n两行\n字幕",
+            "start\n1\n00:00:01,000 --> 00:00:02,000\n字幕一\nend\n\n" +
+                "start\n2\n00:00:03,000 --> 00:00:04,000\n两行\n字幕\nend",
             content
         )
         assertFalse(content.contains("1.字幕一"))
@@ -47,7 +47,8 @@ class AiTranslationProtocolTest {
         val subtitles = listOf(testSubtitle(1, "hello"))
 
         assertEquals(
-            "帮我翻译成中文，以原格式输出\n\n1\n00:00:02,000 --> 00:00:03,500\nhello",
+            "帮我翻译成中文，以原格式输出\n\n" +
+                "start\n1\n00:00:02,000 --> 00:00:03,500\nhello\nend",
             buildTranslationUserContent(subtitles, "中文")
         )
     }
@@ -60,8 +61,8 @@ class AiTranslationProtocolTest {
         )
 
         assertEquals(
-            "1\n[00:01.00]<b>字幕一</b>\n\n" +
-                "2\n[00:03.25]字幕二",
+            "start\n1\n[00:01.00]<b>字幕一</b>\nend\n\n" +
+                "start\n2\n[00:03.25]字幕二\nend",
             buildSubtitleTranslationContent(subtitles, SubtitleFormat.LRC)
         )
     }
@@ -97,7 +98,7 @@ class AiTranslationProtocolTest {
         )
 
         assertEquals(
-            "7\n123\n00:00:01.000 --> 00:00:02.000 align:start\n<c.red>Hello</c>",
+            "start\n7\n123\n00:00:01.000 --> 00:00:02.000 align:start\n<c.red>Hello</c>\nend",
             buildSubtitleTranslationContent(expected, SubtitleFormat.VTT)
         )
         assertEquals(
@@ -237,6 +238,35 @@ class AiTranslationProtocolTest {
                     "599\n${expected[1].getTimeAxisSRT()}\n译文二",
                 expected
             )
+        )
+    }
+
+    @Test
+    fun parser_usesMarkedBlocksAndIgnoresCommentaryOutsideThem() {
+        val expected = listOf(
+            testSubtitle(301, "source one"),
+            testSubtitle(302, "source two")
+        )
+
+        val content = """
+            翻译结果如下：
+            start
+            301
+            ${expected[0].getTimeAxisSRT()}
+            译文一
+            end
+            这里是模型补充说明，不应写入字幕。
+            start
+            302
+            ${expected[1].getTimeAxisSRT()}
+            译文二
+            end
+            以上翻译完成。
+        """.trimIndent()
+
+        assertEquals(
+            listOf("译文一", "译文二"),
+            parseTimedSubtitleTranslation(content, expected)
         )
     }
 
