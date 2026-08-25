@@ -35,6 +35,10 @@ import java.io.File
  */
 class AutoTimestampActivity : AppCompatActivity() {
 
+    private companion object {
+        const val OUTPUT_DIRECTORY_KEY = "auto_timestamp"
+    }
+
     private lateinit var binding: ActivityAutoTimestampBinding
     private val selectedMediaFiles = mutableListOf<SelectedMediaFile>()
     private var selectedSubtitleFile: SelectedMediaFile? = null
@@ -172,6 +176,14 @@ class AutoTimestampActivity : AppCompatActivity() {
     }
 
     private fun setupDefaultOutputDir() {
+        val savedUri = settingsManager.getPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY)
+            ?.let(Uri::parse)
+        if (savedUri != null) {
+            outputDirUri = savedUri
+            binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, savedUri)
+            return
+        }
+
         try {
             val defaultPath = File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
@@ -277,6 +289,7 @@ class AutoTimestampActivity : AppCompatActivity() {
 
             outputDirUri = uri
             binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, uri)
+            settingsManager.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
 
         } catch (e: Exception) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "选择目录失败：${e.message}", Toast.LENGTH_LONG).show()

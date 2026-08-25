@@ -30,6 +30,10 @@ import java.io.File
 import java.util.Locale
 
 class VocalSeparationActivity : AppCompatActivity() {
+    private companion object {
+        const val OUTPUT_DIRECTORY_KEY = "vocal_separation"
+    }
+
     private lateinit var binding: ActivityVocalSeparationBinding
     private lateinit var settings: SettingsManager
     private val selectedFiles = mutableListOf<SelectedMediaFile>()
@@ -158,7 +162,7 @@ class VocalSeparationActivity : AppCompatActivity() {
     }
 
     private fun handleOutputDirectory(uri: Uri) {
-        runCatching {
+        val permissionSaved = runCatching {
             contentResolver.takePersistableUriPermission(
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
@@ -166,9 +170,20 @@ class VocalSeparationActivity : AppCompatActivity() {
         }.onFailure { OverwritingToast.makeText(this, "目录权限保存失败：${it.message}", Toast.LENGTH_LONG).show() }
         outputDirUri = uri
         binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, uri)
+        if (permissionSaved.isSuccess) {
+            settings.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
+        }
     }
 
     private fun setupDefaultOutputDir() {
+        val savedUri = settings.getPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY)
+            ?.let(Uri::parse)
+        if (savedUri != null) {
+            outputDirUri = savedUri
+            binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, savedUri)
+            return
+        }
+
         val path = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
             "SubtitleEdit/Output"

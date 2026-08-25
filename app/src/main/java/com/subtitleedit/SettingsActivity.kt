@@ -19,6 +19,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySettingsBinding
     private lateinit var settingsManager: SettingsManager
+    private var loadingSettings = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,10 +36,17 @@ class SettingsActivity : AppCompatActivity() {
         setupModelManagement()
         setupAiSettings()
         setupLogSettings()
+        // 先回填开关状态，再注册监听器，避免界面初始化或状态恢复时把默认值写回设置。
+        loadSettings()
         setupPlaybackSettings()
         setupUpdateSettings()
         setupThemeSettings()
         setupAbout()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // View 状态恢复可能发生在 onCreate 之后，以持久化设置为准重新回填。
         loadSettings()
     }
 
@@ -114,7 +122,9 @@ class SettingsActivity : AppCompatActivity() {
     private fun setupPlaybackSettings() {
         // 循环播放开关即时保存
         binding.switchLoopSelectedSubtitle.setOnCheckedChangeListener { _, isChecked ->
-            settingsManager.setLoopSelectedSubtitleEnabled(isChecked)
+            if (!loadingSettings) {
+                settingsManager.setLoopSelectedSubtitleEnabled(isChecked)
+            }
         }
     }
 
@@ -134,7 +144,14 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun setupUpdateSettings() {
         binding.switchCheckUpdatesOnStartup.setOnCheckedChangeListener { _, isChecked ->
-            settingsManager.setCheckUpdatesOnStartup(isChecked)
+            if (!loadingSettings) {
+                settingsManager.setCheckUpdatesOnStartup(isChecked)
+            }
+        }
+        binding.switchPreserveOutputDirectories.setOnCheckedChangeListener { _, isChecked ->
+            if (!loadingSettings) {
+                settingsManager.setOutputDirectoryPersistenceEnabled(isChecked)
+            }
         }
     }
 
@@ -256,11 +273,15 @@ class SettingsActivity : AppCompatActivity() {
     // ==================== 读写设置 ====================
 
     private fun loadSettings() {
+        loadingSettings = true
         updateEncodingLabel()
 
         // 选中字幕循环播放
         binding.switchLoopSelectedSubtitle.isChecked = settingsManager.isLoopSelectedSubtitleEnabled()
         binding.switchCheckUpdatesOnStartup.isChecked = settingsManager.shouldCheckUpdatesOnStartup()
+        binding.switchPreserveOutputDirectories.isChecked =
+            settingsManager.isOutputDirectoryPersistenceEnabled()
+        loadingSettings = false
     }
 
     private fun setupAbout() {

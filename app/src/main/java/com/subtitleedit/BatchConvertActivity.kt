@@ -15,6 +15,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.subtitleedit.databinding.ActivityBatchConvertBinding
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleParser
 import java.io.File
@@ -25,7 +26,12 @@ import java.nio.charset.StandardCharsets
  */
 class BatchConvertActivity : AppCompatActivity() {
 
+    private companion object {
+        const val OUTPUT_DIRECTORY_KEY = "batch_convert"
+    }
+
     private lateinit var binding: ActivityBatchConvertBinding
+    private lateinit var settingsManager: SettingsManager
     // 存储 URI 和文件名的数据类
     data class ConvertFile(val uri: Uri, val fileName: String, val fileSize: Long)
     private val convertFiles = mutableListOf<ConvertFile>()
@@ -62,6 +68,7 @@ class BatchConvertActivity : AppCompatActivity() {
             // 保存用户选择的输出目录 URI
             outputDirectoryUri = uri
             binding.tvOutputDir.text = "输出目录：${DirectoryDisplayPath.fromUri(this, uri)}"
+            settingsManager.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
         }
     }
 
@@ -71,11 +78,13 @@ class BatchConvertActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityBatchConvertBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        settingsManager = SettingsManager.getInstance(this)
         
         setupToolbar()
         setupFormatSpinners()
         setupRecyclerView()
         setupButtons()
+        restoreOutputDirectory()
     }
     
     private fun setupToolbar() {
@@ -149,7 +158,15 @@ class BatchConvertActivity : AppCompatActivity() {
     }
     
     private fun openDirectoryPicker() {
-        directoryPickerLauncher.launch(null)
+        directoryPickerLauncher.launch(outputDirectoryUri)
+    }
+
+    private fun restoreOutputDirectory() {
+        val savedUri = settingsManager.getPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY)
+            ?.let(Uri::parse)
+            ?: return
+        outputDirectoryUri = savedUri
+        binding.tvOutputDir.text = "输出目录：${DirectoryDisplayPath.fromUri(this, savedUri)}"
     }
     
     private fun getFileNameFromUri(uri: Uri): String? {

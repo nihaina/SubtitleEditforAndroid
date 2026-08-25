@@ -40,6 +40,8 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_FILE_SORT_FIELD = "file_sort_field"
         private const val KEY_FILE_SORT_DIRECTION = "file_sort_direction"
         private const val KEY_CHECK_UPDATES_ON_STARTUP = "check_updates_on_startup"
+        private const val KEY_PRESERVE_OUTPUT_DIRECTORIES = "preserve_output_directories"
+        private const val KEY_OUTPUT_DIRECTORY_PREFIX = "output_directory_"
         private const val KEY_WHISPER_ENCODER_PATH = "whisper_encoder_path"
         private const val KEY_WHISPER_DECODER_PATH = "whisper_decoder_path"
         private const val KEY_WHISPER_TOKENS_PATH = "whisper_tokens_path"
@@ -842,6 +844,30 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putBoolean(KEY_CHECK_UPDATES_ON_STARTUP, enabled).apply()
     }
 
+    /** 是否在重新打开工具时恢复用户上次选择的输出目录。 */
+    fun isOutputDirectoryPersistenceEnabled(): Boolean {
+        return prefs.getBoolean(KEY_PRESERVE_OUTPUT_DIRECTORIES, false)
+    }
+
+    fun setOutputDirectoryPersistenceEnabled(enabled: Boolean) {
+        // 该设置会直接影响各工具启动时的目录选择，点击后立即落盘，避免快速退出应用时丢失。
+        prefs.edit().putBoolean(KEY_PRESERVE_OUTPUT_DIRECTORIES, enabled).commit()
+    }
+
+    /**
+     * 获取指定工具上次选择的输出目录 URI。关闭“输出目录保持”时始终不恢复。
+     */
+    fun getPersistedOutputDirectory(tool: String): String? {
+        if (!isOutputDirectoryPersistenceEnabled()) return null
+        return prefs.getString(outputDirectoryKey(tool), null)?.takeIf { it.isNotBlank() }
+    }
+
+    /** 仅在“输出目录保持”开启时记录指定工具的输出目录。 */
+    fun setPersistedOutputDirectory(tool: String, uri: String) {
+        if (!isOutputDirectoryPersistenceEnabled()) return
+        prefs.edit().putString(outputDirectoryKey(tool), uri).apply()
+    }
+
     fun isShowAllFileTypesEnabled(): Boolean =
         prefs.getBoolean(KEY_SHOW_ALL_FILE_TYPES, true)
 
@@ -937,6 +963,8 @@ class SettingsManager private constructor(context: Context) {
     private fun providerKey(base: String, provider: String): String {
         return "${base}_$provider"
     }
+
+    private fun outputDirectoryKey(tool: String): String = KEY_OUTPUT_DIRECTORY_PREFIX + tool
 
     private fun migrateAiApiKeys() {
         AiProviderConfig.providers.forEach { providerConfig ->

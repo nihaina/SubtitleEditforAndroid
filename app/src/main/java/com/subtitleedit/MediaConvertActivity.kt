@@ -21,6 +21,7 @@ import com.arthenica.ffmpegkit.ReturnCode
 import com.subtitleedit.databinding.ActivityMediaConvertBinding
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.SettingsManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -40,6 +41,10 @@ import java.util.concurrent.atomic.AtomicLong
  * 应用缓存中的临时文件，避免复制用户选择的源文件。
  */
 class MediaConvertActivity : AppCompatActivity() {
+
+    private companion object {
+        const val OUTPUT_DIRECTORY_KEY = "media_convert"
+    }
 
     private lateinit var binding: ActivityMediaConvertBinding
 
@@ -106,6 +111,7 @@ class MediaConvertActivity : AppCompatActivity() {
     private var selectedFormatButton: TextView? = null
     private val allFormatButtons = mutableListOf<TextView>()
     private var outputDirectoryUri: Uri? = null
+    private lateinit var settingsManager: SettingsManager
     private var outputUris = mutableListOf<Uri>()
     private var conversionJob: Job? = null
     private var probeJob: Job? = null
@@ -126,12 +132,13 @@ class MediaConvertActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMediaConvertBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        settingsManager = SettingsManager.getInstance(this)
         setupToolbar()
         setupFormatGroup()
         setupAdvancedOptions()
         setupOutputDirectory()
         setupButtons()
-        setupDefaultOutputDirectory()
+        setupInitialOutputDirectory()
         updateUi()
     }
 
@@ -258,7 +265,7 @@ class MediaConvertActivity : AppCompatActivity() {
     }
 
     private fun setupOutputDirectory() {
-        binding.btnSelectOutputDir.setOnClickListener { directoryPickerLauncher.launch(null) }
+        binding.btnSelectOutputDir.setOnClickListener { directoryPickerLauncher.launch(outputDirectoryUri) }
     }
 
     private fun setupButtons() {
@@ -275,6 +282,17 @@ class MediaConvertActivity : AppCompatActivity() {
         binding.tvOutputDir.text = "输出目录：${directory.absolutePath}"
     }
 
+    private fun setupInitialOutputDirectory() {
+        val savedUri = settingsManager.getPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY)
+            ?.let(Uri::parse)
+        if (savedUri != null) {
+            outputDirectoryUri = savedUri
+            binding.tvOutputDir.text = "输出目录：${DirectoryDisplayPath.fromUri(this, savedUri)}"
+        } else {
+            setupDefaultOutputDirectory()
+        }
+    }
+
     private fun handleSelectedOutputDir(uri: Uri) {
         try {
             contentResolver.takePersistableUriPermission(
@@ -282,6 +300,7 @@ class MediaConvertActivity : AppCompatActivity() {
             )
             outputDirectoryUri = uri
             binding.tvOutputDir.text = "输出目录：${DirectoryDisplayPath.fromUri(this, uri)}"
+            settingsManager.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
         } catch (error: Exception) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "选择目录失败：${error.message}", Toast.LENGTH_LONG).show()
         }

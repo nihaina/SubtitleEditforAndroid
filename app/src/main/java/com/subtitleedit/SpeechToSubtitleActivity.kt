@@ -58,6 +58,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     private var lastProgressLog = ""
 
     private companion object {
+        const val OUTPUT_DIRECTORY_KEY = "speech_to_subtitle"
         private const val MAX_VISIBLE_LOG_CHARS = 16_000
         private const val LOG_RENDER_INTERVAL_MS = 100L
     }
@@ -274,6 +275,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
 
             outputDirUri = uri
             binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, uri)
+            settingsManager.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
 
         } catch (e: Exception) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "选择目录失败：${e.message}", Toast.LENGTH_LONG).show()
@@ -284,6 +286,14 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
      * 设置默认输出目录
      */
     private fun setupDefaultOutputDir() {
+        val savedUri = settingsManager.getPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY)
+            ?.let(Uri::parse)
+        if (savedUri != null) {
+            outputDirUri = savedUri
+            binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, savedUri)
+            return
+        }
+
         try {
             val defaultPath = File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),

@@ -161,6 +161,7 @@ class ToolsFragment : Fragment() {
 class SettingsFragment : Fragment() {
     private var binding: ActivitySettingsBinding? = null
     private val settings by lazy { SettingsManager.getInstance(requireContext()) }
+    private var loadingSettings = false
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, state: Bundle?): View {
         val viewBinding = ActivitySettingsBinding.inflate(inflater, container, false)
@@ -169,6 +170,11 @@ class SettingsFragment : Fragment() {
         setup(viewBinding)
         load(viewBinding)
         return viewBinding.root
+    }
+
+    override fun onResume() {
+        super.onResume()
+        binding?.let(::load)
     }
 
     private fun setup(b: ActivitySettingsBinding) {
@@ -181,16 +187,26 @@ class SettingsFragment : Fragment() {
         b.layoutLog.setOnClickListener { open(LogActivity::class.java) }
         b.layoutAbout.setOnClickListener { open(AboutActivity::class.java) }
         b.layoutClearCache.setOnClickListener { showClearCacheDialog() }
-        b.switchLoopSelectedSubtitle.setOnCheckedChangeListener { _, checked -> settings.setLoopSelectedSubtitleEnabled(checked) }
-        b.switchCheckUpdatesOnStartup.setOnCheckedChangeListener { _, checked -> settings.setCheckUpdatesOnStartup(checked) }
+        b.switchLoopSelectedSubtitle.setOnCheckedChangeListener { _, checked ->
+            if (!loadingSettings) settings.setLoopSelectedSubtitleEnabled(checked)
+        }
+        b.switchCheckUpdatesOnStartup.setOnCheckedChangeListener { _, checked ->
+            if (!loadingSettings) settings.setCheckUpdatesOnStartup(checked)
+        }
+        b.switchPreserveOutputDirectories.setOnCheckedChangeListener { _, checked ->
+            if (!loadingSettings) settings.setOutputDirectoryPersistenceEnabled(checked)
+        }
     }
 
     private fun load(b: ActivitySettingsBinding) {
+        loadingSettings = true
         updateEncodingLabel()
         b.switchLoopSelectedSubtitle.isChecked = settings.isLoopSelectedSubtitleEnabled()
         b.switchCheckUpdatesOnStartup.isChecked = settings.shouldCheckUpdatesOnStartup()
+        b.switchPreserveOutputDirectories.isChecked = settings.isOutputDirectoryPersistenceEnabled()
         updateThemeLabel()
         refreshCacheSize()
+        loadingSettings = false
     }
 
     private fun showThemeDialog() {

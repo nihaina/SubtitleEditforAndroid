@@ -247,6 +247,8 @@
     <string name="activity_settings_text_14">在文件列表中显示字幕和音频之外的文件</string>
     <string name="activity_settings_text_15">显示隐藏文件</string>
     <string name="activity_settings_text_16">显示以“.”开头文件和文件夹</string>
+    <string name="activity_settings_text_17">输出目录保持</string>
+    <string name="activity_settings_text_18">开启后，工具会记住上次手动选择的输出目录</string>
     <string name="activity_speech_to_subtitle_settings_text_01">VAD相关</string>
     <string name="activity_speech_to_subtitle_settings_text_02">固定分段时长</string>
     <string name="activity_speech_to_subtitle_settings_text_03">未使用 VAD 分段时生效</string>
