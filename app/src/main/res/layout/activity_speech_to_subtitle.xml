@@ -159,6 +159,14 @@
                     android:minHeight="48dp" />
 
                 <com.google.android.material.switchmaterial.SwitchMaterial
+                    android:id="@+id/switchAddToAutoTranslate"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="@string/activity_speech_to_subtitle_text_10"
+                    android:textColor="@color/on_surface" />
+
+                <com.google.android.material.switchmaterial.SwitchMaterial
                     android:id="@+id/switchDisableVadForTxt"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"

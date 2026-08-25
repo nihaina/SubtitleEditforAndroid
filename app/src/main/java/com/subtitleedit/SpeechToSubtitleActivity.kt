@@ -14,6 +14,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.subtitleedit.databinding.ActivitySpeechToSubtitleBinding
@@ -408,6 +409,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                 var successCount = 0
                 val failedFiles = mutableListOf<String>()
                 val writtenOutputBaseNames = mutableSetOf<String>()
+                val autoTranslateFiles = mutableListOf<Uri>()
 
                 for ((index, file) in selectedMediaFiles.withIndex()) {
                     if (isCancelled) break
@@ -417,7 +419,10 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                     val result = convertFile(file, index + 1, selectedMediaFiles.size, shouldOverwrite)
                     if (isCancelled) break
 
-                    result.onSuccess { successCount++ }
+                    result.onSuccess { outputUri ->
+                        successCount++
+                        autoTranslateFiles += outputUri
+                    }
                         .onFailure { error ->
                             failedFiles.add(file.fileName)
                             appendRuntimeLog("处理失败：${error.message ?: "未知错误"}")
@@ -430,6 +435,9 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                         if (failedFiles.isEmpty()) "" else "，失败 ${failedFiles.size}"
                     appendRuntimeLog(summary)
                     com.subtitleedit.util.OverwritingToast.makeText(this@SpeechToSubtitleActivity, summary, Toast.LENGTH_LONG).show()
+                    if (binding.switchAddToAutoTranslate.isChecked && autoTranslateFiles.isNotEmpty()) {
+                        openAutoTranslate(autoTranslateFiles)
+                    }
                 }
 
             } catch (e: Exception) {
@@ -573,7 +581,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         fileIndex: Int,
         fileCount: Int,
         overwriteOutput: Boolean
-    ): Result<Unit> {
+    ): Result<Uri> {
         val taskCacheDir = File(
             cacheDir,
             "speech_to_subtitle_${System.currentTimeMillis()}_${System.nanoTime()}"
@@ -656,7 +664,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             val outputFileName = saveSubtitleFile(file.fileName, subtitleContent, overwriteOutput, segments.size)
             appendRuntimeLog("已保存字幕：$outputFileName")
             showProgress("$progressPrefix 完成", 100)
-            Result.success(Unit)
+            Result.success(resolveOutputFileUri(outputFileName))
         } catch (e: Exception) {
             Result.failure(e)
         } finally {
@@ -925,6 +933,27 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     private fun isTokenTimestampExperimentConfigured(): Boolean {
         return shouldUseTokenTimestampExperiment() &&
             TokenTimestampGenerator.isConfigured(this)
+    }
+
+    private fun resolveOutputFileUri(fileName: String): Uri {
+        val directoryUri = outputDirUri ?: throw IllegalStateException("输出目录未设置")
+        if (directoryUri.scheme == "file") {
+            return Uri.fromFile(File(directoryUri.path ?: throw IllegalStateException("输出目录无效"), fileName))
+        }
+        return DocumentFile.fromTreeUri(this, directoryUri)
+            ?.findFile(fileName)
+            ?.uri
+            ?: throw IllegalStateException("无法定位已生成的字幕文件")
+    }
+
+    private fun openAutoTranslate(files: List<Uri>) {
+        val intent = Intent(this, AutoTranslateActivity::class.java)
+            .putParcelableArrayListExtra(
+                AutoTranslateActivity.EXTRA_INITIAL_FILE_URIS,
+                ArrayList(files)
+            )
+        startActivity(intent)
+        finish()
     }
 
     private fun shouldUseTokenTimestampExperiment(): Boolean =

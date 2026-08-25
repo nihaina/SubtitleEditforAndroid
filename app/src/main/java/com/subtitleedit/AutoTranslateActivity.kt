@@ -37,9 +37,10 @@ import java.util.UUID
 /** Multiple-file AI subtitle translation. Each source file owns one history session. */
 class AutoTranslateActivity : AppCompatActivity() {
 
-    private companion object {
-        const val OUTPUT_DIRECTORY_KEY = "auto_translate"
-        const val MAX_CONSECUTIVE_ERRORS = 5
+    companion object {
+        private const val OUTPUT_DIRECTORY_KEY = "auto_translate"
+        private const val MAX_CONSECUTIVE_ERRORS = 5
+        const val EXTRA_INITIAL_FILE_URIS = "auto_translate_initial_file_uris"
     }
 
     private lateinit var binding: ActivityAutoTranslateBinding
@@ -129,6 +130,7 @@ class AutoTranslateActivity : AppCompatActivity() {
             }
         })
         restoreOutputDirectory()
+        addInitialFiles(intent.getParcelableArrayListExtra<Uri>(EXTRA_INITIAL_FILE_URIS).orEmpty())
     }
 
     private fun setupToolbar() {
@@ -156,6 +158,20 @@ class AutoTranslateActivity : AppCompatActivity() {
             ?: return
         outputDirectoryUri = uri
         binding.tvOutputDir.text = "输出目录：${DirectoryDisplayPath.fromUri(this, uri)}"
+    }
+
+    private fun addInitialFiles(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        uris.forEach { uri ->
+            if (files.any { it.uri == uri }) return@forEach
+            files += AutoTranslateFile(
+                uri = uri,
+                fileName = getFileNameFromUri(uri) ?: "未知文件",
+                fileSize = getFileSizeFromUri(uri)
+            )
+        }
+        adapter.notifyDataSetChanged()
+        updateFileListVisibility()
     }
 
     private fun startQueuedFiles() {

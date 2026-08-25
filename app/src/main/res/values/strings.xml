@@ -324,6 +324,7 @@
     <string name="activity_speech_to_subtitle_text_07">正在分析音频...</string>
     <string name="activity_speech_to_subtitle_text_08">运行日志与识别内容：</string>
     <string name="activity_speech_to_subtitle_text_09">等待识别...</string>
+    <string name="activity_speech_to_subtitle_text_10">转录结果添加进自动翻译</string>
     <string name="activity_subtitle_format_editor_text_01">清除句内内容</string>
     <string name="activity_subtitle_format_editor_text_02">空格</string>
     <string name="activity_subtitle_format_editor_text_03">清除句末标点</string>
