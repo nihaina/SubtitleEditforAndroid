@@ -1,5 +1,6 @@
 package com.subtitleedit
 
+import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.os.Bundle
@@ -17,9 +18,16 @@ import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.core.text.HtmlCompat
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import com.subtitleedit.chat.ChatActivity
+import com.subtitleedit.chat.ChatBackendConfig
+import com.subtitleedit.chat.ChatLaunchConfiguration
+import com.subtitleedit.chat.ChatReasoningLevel
 import com.subtitleedit.databinding.ActivityAiSettingsBinding
 import com.subtitleedit.util.AiKeyAccessSession
 import com.subtitleedit.util.AiProviderConfig
+import com.subtitleedit.util.AiModelClient
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SettingsManager
 
@@ -75,6 +83,9 @@ class AiSettingsActivity : AppCompatActivity() {
 
         setupApiKeyActions()
         setupProviderSpinner()
+        setupReasoningSettings()
+        setupModelListAction()
+        binding.btnOpenAiChat.setOnClickListener { openAiChat() }
         loadSettings()
         setupSave()
     }
@@ -109,7 +120,6 @@ class AiSettingsActivity : AppCompatActivity() {
         binding.spinnerAiProvider.setSelection(AiProviderConfig.indexOf(selectedProvider))
         loadProviderFields(selectedProvider)
         binding.etTargetLanguage.setText(settingsManager.getAiTargetLanguage())
-        binding.etContextWindowTokens.setText(settingsManager.getAiContextWindowTokens().toString())
     }
 
     private fun loadProviderFields(provider: String) {
@@ -125,7 +135,16 @@ class AiSettingsActivity : AppCompatActivity() {
         binding.etApiKey.setText(settingsManager.getAiApiKey(provider))
         setApiKeyVisible(false)
         binding.tilApiBaseUrl.visibility = if (config.customEndpoint) View.VISIBLE else View.GONE
+        binding.btnFetchModels.visibility = if (config.customEndpoint) View.VISIBLE else View.GONE
         binding.etApiBaseUrl.setText(if (config.customEndpoint) settingsManager.getAiBaseUrl(provider) else "")
+        binding.etContextWindowTokens.setText(
+            settingsManager.getAiContextWindowTokens(provider).toString()
+        )
+        binding.spinnerReasoningLevel.setSelection(
+            AiProviderConfig.ReasoningLevel.entries.indexOf(
+                settingsManager.getAiReasoningLevel(provider)
+            )
+        )
         val savedModel = settingsManager.getAiModel(provider)
         if (config.models.isNotEmpty()) {
             binding.tilModel.visibility = View.GONE
@@ -161,6 +180,108 @@ class AiSettingsActivity : AppCompatActivity() {
             }
             requestSensitiveAccess(::copyApiKey)
         }
+    }
+
+    private fun setupReasoningSettings() {
+        val adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_item,
+            AiProviderConfig.ReasoningLevel.entries.map { it.displayName }
+        )
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        binding.spinnerReasoningLevel.adapter = adapter
+        binding.spinnerReasoningLevel.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (!suppressTextSave) {
+                    settingsManager.setAiReasoningLevel(
+                        AiProviderConfig.ReasoningLevel.entries[position]
+                    )
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+    }
+
+    private fun setupModelListAction() {
+        binding.btnFetchModels.setOnClickListener {
+            val baseUrl = binding.etApiBaseUrl.text?.toString()?.trim().orEmpty()
+            if (baseUrl.isBlank()) {
+                showToast("请先填写 API 请求地址")
+                return@setOnClickListener
+            }
+            val apiKey = binding.etApiKey.text?.toString()?.trim().orEmpty()
+            binding.btnFetchModels.isEnabled = false
+            lifecycleScope.launch {
+                try {
+                    val models = AiModelClient.fetchModels(baseUrl, apiKey)
+                    if (models.isEmpty()) {
+                        showToast("模型列表为空")
+                    } else {
+                        showModelChooser(models)
+                    }
+                } catch (error: Exception) {
+                    showToast(error.message ?: "获取模型列表失败")
+                } finally {
+                    binding.btnFetchModels.isEnabled = true
+                }
+            }
+        }
+    }
+
+    private fun showModelChooser(models: List<String>) {
+        val current = binding.etModel.text?.toString().orEmpty()
+        val checked = models.indexOf(current).takeIf { it >= 0 } ?: -1
+        var selected = checked
+        AlertDialog.Builder(this)
+            .setTitle("选择模型（${models.size}）")
+            .setSingleChoiceItems(models.toTypedArray(), checked) { _, which -> selected = which }
+            .setPositiveButton("使用模型") { _, _ ->
+                if (selected >= 0) binding.etModel.setText(models[selected])
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun openAiChat() {
+        saveCurrentProviderFields()
+        val config = AiProviderConfig.getProvider(selectedProvider)
+        val apiKey = settingsManager.getAiApiKey(selectedProvider)
+        if (apiKey.isBlank()) {
+            showToast(getString(R.string.ai_api_key_empty))
+            return
+        }
+        val baseUrl = settingsManager.getAiBaseUrl(selectedProvider)
+        if (baseUrl.isBlank()) {
+            showToast("请先填写 API 请求地址")
+            return
+        }
+        val model = settingsManager.getAiModel(selectedProvider)
+        if (model.isBlank()) {
+            showToast("请先填写模型名称")
+            return
+        }
+        startActivity(
+            ChatActivity.createIntent(
+                this,
+                ChatLaunchConfiguration(
+                    providerName = config.displayName,
+                    backendConfig = ChatBackendConfig(
+                        providerId = selectedProvider,
+                        apiKey = apiKey,
+                        model = model,
+                        baseUrl = baseUrl,
+                        contextWindowTokens = settingsManager.getAiContextWindowTokens(selectedProvider),
+                        reasoningLevel = ChatReasoningLevel.valueOf(
+                            settingsManager.getAiReasoningLevel(selectedProvider).name
+                        ),
+                        modelSupportsReasoning = AiProviderConfig
+                            .modelCapabilities(selectedProvider, model)
+                            .reasoning
+                    )
+                )
+            )
+        )
     }
 
     private fun setApiKeyVisible(visible: Boolean) {
@@ -247,6 +368,12 @@ class AiSettingsActivity : AppCompatActivity() {
             settingsManager.setAiModel(selectedProvider, binding.etModel.text?.toString()?.trim().orEmpty())
         }
         settingsManager.setAiBaseUrl(selectedProvider, binding.etApiBaseUrl.text?.toString()?.trim().orEmpty())
+        binding.etContextWindowTokens.text?.toString()?.toIntOrNull()?.let {
+            settingsManager.setAiContextWindowTokens(it, selectedProvider)
+        }
+        AiProviderConfig.ReasoningLevel.entries
+            .getOrNull(binding.spinnerReasoningLevel.selectedItemPosition)
+            ?.let { settingsManager.setAiReasoningLevel(it, selectedProvider) }
     }
 
     private fun setupSave() {

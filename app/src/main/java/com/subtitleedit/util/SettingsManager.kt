@@ -32,6 +32,7 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_AI_TARGET_LANGUAGE = "ai_target_language"
         private const val KEY_AI_CUSTOM_BASE_URL = "ai_custom_base_url"
         private const val KEY_AI_CONTEXT_WINDOW_TOKENS = "ai_context_window_tokens"
+        private const val KEY_AI_REASONING_LEVEL = "ai_reasoning_level"
         private const val KEY_WAVEFORM_CACHE_LOCATION = "waveform_cache_location"
         private const val KEY_LOOP_SELECTED_SUBTITLE = "loop_selected_subtitle"
         private const val KEY_SHOW_ALL_FILE_TYPES = "show_all_file_types"
@@ -266,16 +267,46 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putString(KEY_AI_TARGET_LANGUAGE, language).apply()
     }
 
-    fun getAiContextWindowTokens(): Int = prefs.getInt(
-        KEY_AI_CONTEXT_WINDOW_TOKENS,
-        DEFAULT_AI_CONTEXT_WINDOW_TOKENS
-    ).coerceIn(MIN_AI_CONTEXT_WINDOW_TOKENS, MAX_AI_CONTEXT_WINDOW_TOKENS)
+    fun getAiContextWindowTokens(provider: String = getAiProvider()): Int {
+        val scopedKey = providerKey(KEY_AI_CONTEXT_WINDOW_TOKENS, provider)
+        val default = AiProviderConfig.defaultContextWindowTokens(provider)
+        val stored = if (prefs.contains(scopedKey)) {
+            prefs.getInt(scopedKey, default)
+        } else if (provider == AiProviderConfig.DEEPSEEK) {
+            // DeepSeek has a separate 1M default; do not let the old global 256K
+            // value silently override it after upgrading.
+            default
+        } else {
+            prefs.getInt(KEY_AI_CONTEXT_WINDOW_TOKENS, default)
+        }
+        return stored.coerceIn(MIN_AI_CONTEXT_WINDOW_TOKENS, MAX_AI_CONTEXT_WINDOW_TOKENS)
+    }
 
-    fun setAiContextWindowTokens(tokens: Int) {
+    fun setAiContextWindowTokens(
+        tokens: Int,
+        provider: String = getAiProvider()
+    ) {
         prefs.edit().putInt(
-            KEY_AI_CONTEXT_WINDOW_TOKENS,
+            providerKey(KEY_AI_CONTEXT_WINDOW_TOKENS, provider),
             tokens.coerceIn(MIN_AI_CONTEXT_WINDOW_TOKENS, MAX_AI_CONTEXT_WINDOW_TOKENS)
         ).apply()
+    }
+
+    fun getAiReasoningLevel(provider: String = getAiProvider()): AiProviderConfig.ReasoningLevel =
+        prefs.getString(
+            providerKey(KEY_AI_REASONING_LEVEL, provider),
+            AiProviderConfig.defaultReasoningLevel(provider).name
+        )
+            ?.let { value ->
+                runCatching { AiProviderConfig.ReasoningLevel.valueOf(value) }.getOrNull()
+            }
+            ?: AiProviderConfig.defaultReasoningLevel(provider)
+
+    fun setAiReasoningLevel(
+        level: AiProviderConfig.ReasoningLevel,
+        provider: String = getAiProvider()
+    ) {
+        prefs.edit().putString(providerKey(KEY_AI_REASONING_LEVEL, provider), level.name).apply()
     }
 
     fun getAiBaseUrl(provider: String = getAiProvider()): String {

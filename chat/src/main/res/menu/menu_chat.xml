@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/action_chat_history"
+        android:icon="@drawable/ic_history"
+        android:title="会话记录"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/action_clear_chat"
+        android:contentDescription="清空对话"
+        android:icon="@drawable/ic_delete"
+        android:title="清空对话"
+        app:showAsAction="ifRoom" />
+</menu>

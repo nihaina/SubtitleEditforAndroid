@@ -123,6 +123,16 @@
 
                     </com.google.android.material.textfield.TextInputLayout>
 
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnFetchModels"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="-12dp"
+                        android:layout_marginBottom="8dp"
+                        android:text="@string/activity_ai_settings_fetch_models"
+                        android:visibility="gone" />
+
                     <TextView
                         android:id="@+id/tvModelLabel"
                         android:layout_width="wrap_content"
@@ -194,6 +204,29 @@
                             android:layout_height="wrap_content" />
 
                     </com.google.android.material.textfield.TextInputLayout>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/activity_ai_settings_reasoning_title"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="14sp" />
+
+                    <Spinner
+                        android:id="@+id/spinnerReasoningLevel"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="8dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnOpenAiChat"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/activity_ai_settings_open_chat"
+                        app:icon="@drawable/ic_ai_translate" />
 
                 </LinearLayout>
 

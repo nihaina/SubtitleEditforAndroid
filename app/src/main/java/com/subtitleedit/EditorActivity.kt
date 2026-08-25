@@ -217,7 +217,7 @@ class EditorActivity : AppCompatActivity() {
         const val EXTRA_SUBTITLE_FILE_PATH = "extra_subtitle_file_path"
         private const val MENU_SELECT_ALL = 0x20001
         private const val MENU_SELECT_RANGE = 0x20002
-
+        private const val BULK_NOTIFY_THRESHOLD = 200
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -1683,7 +1683,10 @@ class EditorActivity : AppCompatActivity() {
         markChanged: Boolean = true
     ) {
         val positionList = positions.toList()
-        if (includeNeighbors) {
+        if (positionList.size > BULK_NOTIFY_THRESHOLD) {
+            // Bulk translation/replace operations must not enqueue one RecyclerView update per row.
+            subtitleAdapter.refreshAllItems()
+        } else if (includeNeighbors) {
             notifyPositionsWithNeighbors(positionList)
         } else {
             positionList
@@ -1715,7 +1718,11 @@ class EditorActivity : AppCompatActivity() {
                 allAffected.add(next)
             }
         }
-        allAffected.sorted().forEach { subtitleAdapter.notifyItemChanged(it) }
+        if (allAffected.size > BULK_NOTIFY_THRESHOLD) {
+            subtitleAdapter.refreshAllItems()
+        } else {
+            allAffected.sorted().forEach { subtitleAdapter.notifyItemChanged(it) }
+        }
     }
 
     private fun syncWaveformSubtitles() {
@@ -2128,9 +2135,9 @@ class EditorActivity : AppCompatActivity() {
         if (!ensureListMode() || subtitleEntries.isEmpty()) return
 
         if (subtitleAdapter.getSelectedCount() == subtitleEntries.size) {
-            subtitleAdapter.clearSelection()
+            subtitleAdapter.setAllSelection(false)
         } else {
-            subtitleAdapter.setSelectionByIndices(subtitleEntries.indices.toSet())
+            subtitleAdapter.setAllSelection(true)
         }
         updateSelectedCountDisplay()
     }

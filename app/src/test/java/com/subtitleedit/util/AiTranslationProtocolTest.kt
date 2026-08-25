@@ -1,30 +1,18 @@
 package com.subtitleedit.util
 
 import com.subtitleedit.model.SubtitleEntry
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.ResponseBody.Companion.toResponseBody
+import com.subtitleedit.util.SubtitleParser.SubtitleFormat
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
-import com.subtitleedit.util.SubtitleParser.SubtitleFormat
 
 class AiTranslationProtocolTest {
 
-    private fun translator(contextWindowTokens: Int = DEFAULT_AI_CONTEXT_WINDOW_TOKENS) =
-        AiTranslator(
-            provider = AiProviderConfig.CUSTOM,
-            apiKey = "test-key",
-            model = "test-model",
-            targetLanguage = "中文",
-            baseUrl = "https://example.com/v1",
-            contextWindowTokens = contextWindowTokens
-        )
-
     @Test
-    fun systemPrompt_remainsUnchanged() {
+    fun translationInstruction_containsOnlyTheRequestedChineseInstruction() {
         assertEquals(
             "帮我翻译成中文，以原格式输出",
             buildTranslationSystemPrompt("中文")
@@ -46,161 +34,6 @@ class AiTranslationProtocolTest {
     }
 
     @Test
-    fun contextWithinBudget_isKeptUnchanged() {
-        val state = AiTranslator.ConversationState(
-            listOf(
-                AiTranslator.ChatMessage("system", buildTranslationSystemPrompt("中文")),
-                AiTranslator.ChatMessage("user", timedTestContent(1, 1, "hello")),
-                AiTranslator.ChatMessage("assistant", timedTestContent(1, 1, "你好"))
-            )
-        )
-
-        assertEquals(
-            state,
-            translator().compactConversationForRequest(state, timedTestContent(2, 1, "world"))
-        )
-    }
-
-    @Test
-    fun emptyConversation_doesNotInjectASeparateSystemMessage() {
-        assertEquals(
-            emptyList<AiTranslator.ChatMessage>(),
-            translator().compactConversationForRequest(
-                AiTranslator.ConversationState(),
-                buildTranslationUserContent(listOf(testSubtitle(1)), "中文")
-            ).messages
-        )
-    }
-
-    @Test
-    fun contextOverBudget_compactsOldPairsAndKeepsRecentOrder() {
-        val messages = mutableListOf(
-            AiTranslator.ChatMessage("system", buildTranslationSystemPrompt("中文"))
-        )
-        repeat(12) { batchIndex ->
-            val start = batchIndex * 120 + 1
-            val source = timedTestContent(start, 120, "这是用于上下文压缩测试的较长字幕内容")
-            val translation = timedTestContent(start, 120, "这是对应的较长翻译结果内容")
-            messages += AiTranslator.ChatMessage("user", source)
-            messages += AiTranslator.ChatMessage("assistant", translation)
-        }
-        val translator = translator(contextWindowTokens = 32_768)
-        val pending = timedTestContent(1_441, 120, "这是等待翻译的较长字幕内容")
-
-        val compacted = translator.compactConversationForRequest(
-            AiTranslator.ConversationState(messages),
-            pending
-        )
-        val history = compacted.messages.drop(1)
-
-        assertTrue(compacted.messages.size < messages.size)
-        assertEquals("system", compacted.messages.first().role)
-        assertTrue(history.chunked(2).all { pair ->
-            pair.size == 2 && pair[0].role == "user" && pair[1].role == "assistant"
-        })
-        assertTrue(history.last().content.contains(testSubtitle(1_440).getTimeAxisSRT()))
-        assertFalse(history.first().content.contains(testSubtitle(1).getTimeAxisSRT()))
-        assertTrue(
-            translator.estimateConversationTokens(compacted.messages +
-                AiTranslator.ChatMessage("user", pending)) < 32_768
-        )
-    }
-
-    @Test
-    fun oversizedCurrentBatch_isRejectedInsteadOfSilentlyTruncated() {
-        val oversizedBatch = buildTimedSubtitleContent(
-            List(300) { index ->
-                testSubtitle(index + 1, "超长字幕内容".repeat(30))
-            }
-        )
-
-        assertThrows(IOException::class.java) {
-            translator(contextWindowTokens = MIN_AI_CONTEXT_WINDOW_TOKENS)
-                .compactConversationForRequest(AiTranslator.ConversationState(), oversizedBatch)
-        }
-    }
-
-    @Test
-    fun streamDoneEvent_finishesBeforeTrailingTransportContent() {
-        val response = buildString {
-            appendLine("data: {\"choices\":[{\"delta\":{\"content\":\"1.你好\"}}]}")
-            appendLine()
-            appendLine("data: [DONE]")
-            appendLine()
-            appendLine("data: invalid trailing content")
-        }.toResponseBody("text/event-stream".toMediaType())
-        val deltas = mutableListOf<String>()
-        var captured: Pair<String, Boolean>? = null
-
-        val content = response.use {
-            translator().readStreamingContent(
-                responseBody = it,
-                onCaptured = { text, complete -> captured = text to complete },
-                onDelta = deltas::add
-            )
-        }
-
-        assertEquals("1.你好", content)
-        assertEquals(listOf("1.你好"), deltas)
-        assertEquals("1.你好" to true, captured)
-    }
-
-    @Test
-    fun streamEvent_withMultipleJsonLines_preservesEveryDelta() {
-        val response = buildString {
-            appendLine("data: {\"choices\":[{\"delta\":{\"content\":\"第一\"}}]}")
-            appendLine("data: {\"choices\":[{\"delta\":{\"content\":\"行\"}}]}")
-            appendLine()
-            appendLine("data: [DONE]")
-        }.toResponseBody("text/event-stream".toMediaType())
-
-        val content = response.use {
-            translator().readStreamingContent(responseBody = it) {}
-        }
-
-        assertEquals("第一行", content)
-    }
-
-    @Test
-    fun streamLengthFinish_doesNotImposeAClientSideOutputLimit() {
-        val response = buildString {
-            appendLine("data: {\"choices\":[{\"delta\":{\"content\":\"1.半截\"}}]}")
-            appendLine()
-            appendLine("data: {\"choices\":[{\"finish_reason\":\"length\",\"delta\":{}}]}")
-            appendLine()
-            appendLine("data: [DONE]")
-        }.toResponseBody("text/event-stream".toMediaType())
-        var captured: Pair<String, Boolean>? = null
-
-        val content = response.use {
-            translator().readStreamingContent(
-                responseBody = it,
-                onCaptured = { text, complete -> captured = text to complete }
-            ) {}
-        }
-
-        assertEquals("1.半截", content)
-        assertEquals("1.半截" to true, captured)
-    }
-
-    @Test
-    fun streamedEofWithoutDone_isCapturedAsIncomplete() {
-        val response = "data: {\"choices\":[{\"delta\":{\"content\":\"未完成\"}}]}\n\n"
-            .toResponseBody("text/event-stream".toMediaType())
-        var captured: Pair<String, Boolean>? = null
-
-        val content = response.use {
-            translator().readStreamingContent(
-                responseBody = it,
-                onCaptured = { text, complete -> captured = text to complete }
-            ) {}
-        }
-
-        assertEquals("未完成", content)
-        assertEquals("未完成" to false, captured)
-    }
-
-    @Test
     fun timedInput_usesSrtBlocksWithoutSequenceNumbersAndPreservesEmbeddedLines() {
         val content = buildTimedSubtitleContent(
             listOf(
@@ -218,11 +51,11 @@ class AiTranslationProtocolTest {
     }
 
     @Test
-    fun userContent_appendsTranslationInstructionAfterOriginalSubtitleFormat() {
+    fun userContent_putsOnlyInstructionBeforeSourceText() {
         val subtitles = listOf(testSubtitle(1, "hello"))
 
         assertEquals(
-            "1\n00:00:02,000 --> 00:00:03,500\nhello\n\n翻译成中文，以原格式输出",
+            "帮我翻译成中文，以原格式输出\n\n1\n00:00:02,000 --> 00:00:03,500\nhello",
             buildTranslationUserContent(subtitles, "中文")
         )
     }

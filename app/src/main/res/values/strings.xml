@@ -113,8 +113,11 @@
     <string name="activity_ai_settings_hint_01" translatable="false">API Key</string>
     <string name="activity_ai_settings_hint_02">模型名称</string>
     <string name="activity_ai_settings_text_03">模型</string>
+    <string name="activity_ai_settings_fetch_models">从请求地址获取模型列表</string>
+    <string name="activity_ai_settings_reasoning_title">思考强度</string>
+    <string name="activity_ai_settings_open_chat">打开 AI 对话</string>
     <string name="activity_ai_settings_hint_04">目标语言</string>
-    <string name="activity_ai_settings_hint_context_window">上下文上限（Token，默认 262144）</string>
+    <string name="activity_ai_settings_hint_context_window">上下文上限（Token）</string>
     <string name="ai_api_key_show">显示 API Key</string>
     <string name="ai_api_key_hide">隐藏 API Key</string>
     <string name="ai_api_key_copy">复制 API Key</string>

@@ -13,8 +13,21 @@ data class SubtitleFormattingOptions(
 enum class PunctuationReplacementScope { INNER, END }
 
 object SubtitleTextFormatter {
-    fun format(text: String, options: SubtitleFormattingOptions): String =
-        text.split('\n').joinToString("\n") { formatLine(it, options) }
+    fun format(text: String, options: SubtitleFormattingOptions): String {
+        if ('\n' !in text) return formatLine(text, options)
+
+        // Avoid split/joinToString allocating a list for every line of a large cue.
+        return buildString(text.length) {
+            var lineStart = 0
+            while (lineStart <= text.length) {
+                val lineEnd = text.indexOf('\n', lineStart).let { if (it >= 0) it else text.length }
+                append(formatLine(text.substring(lineStart, lineEnd), options))
+                if (lineEnd == text.length) break
+                append('\n')
+                lineStart = lineEnd + 1
+            }
+        }
+    }
 
     private fun formatLine(source: String, options: SubtitleFormattingOptions): String {
         var line = applyReplacement(source, options)

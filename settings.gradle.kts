@@ -33,3 +33,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "SubtitleEditforAndroid"
 include(":app")
+include(":chat")

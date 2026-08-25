@@ -17,6 +17,7 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.subtitleedit.adapter.SubtitleFormatPreviewAdapter
 import com.subtitleedit.adapter.SubtitleFormatPreviewItem
@@ -30,6 +31,10 @@ import com.subtitleedit.util.SubtitleFormattingOptions
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.SubtitleTextFormatter
 import java.nio.charset.Charset
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class SubtitleFormatEditorActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySubtitleFormatEditorBinding
@@ -40,6 +45,7 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
     private var format = SubtitleParser.SubtitleFormat.UNKNOWN
     private var entries: List<SubtitleEntry> = emptyList()
     private var hasChanges = false
+    private var formattingJob: Job? = null
     private val innerPunctuationChecks = linkedMapOf<Char, TextView>()
     private val endPunctuationChecks = linkedMapOf<Char, TextView>()
     private val addEndPunctuationValues = listOf("", "。", ".", "！", "!", "？", "?", "，", ",", "…")
@@ -81,38 +87,45 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
         return true
     }
 
-    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
-        R.id.menu_format_select_all -> {
-            adapter.selectAll(!adapter.areAllSelected())
-            true
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.menu_format_select_all -> {
+                if (::adapter.isInitialized) adapter.selectAll(!adapter.areAllSelected())
+                true
+            }
+            R.id.menu_format_select_range -> {
+                if (::adapter.isInitialized) showRangeDialog()
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
         }
-        R.id.menu_format_select_range -> {
-            showRangeDialog()
-            true
-        }
-        else -> super.onOptionsItemSelected(item)
     }
 
     private fun loadSubtitle() {
-        try {
-            val content = FileUtils.readUri(this, sourceUri, charset)
-            format = SubtitleParser.detectFormat(content, fileName)
-            entries = SubtitleParser.parseDocument(content, fileName).entries
-            if (format == SubtitleParser.SubtitleFormat.UNKNOWN || entries.isEmpty()) {
-                throw IllegalArgumentException("未识别到有效字幕内容")
+        lifecycleScope.launch {
+            try {
+                val document = withContext(Dispatchers.IO) {
+                    val content = FileUtils.readUri(this@SubtitleFormatEditorActivity, sourceUri, charset)
+                    SubtitleParser.parseDocument(content, fileName)
+                }
+                format = document.format
+                entries = document.entries
+                if (format == SubtitleParser.SubtitleFormat.UNKNOWN || entries.isEmpty()) {
+                    throw IllegalArgumentException("未识别到有效字幕内容")
+                }
+                val items = entries.mapIndexed { index, entry ->
+                    SubtitleFormatPreviewItem(index, entry.text)
+                }
+                adapter = SubtitleFormatPreviewAdapter(items) { item, position ->
+                    showTextEditDialog(item, position)
+                }
+                binding.rvPreview.layoutManager = LinearLayoutManager(this@SubtitleFormatEditorActivity)
+                binding.rvPreview.adapter = adapter
+                binding.tvFileInfo.text = "$fileName · ${entries.size} 行 · ${format.name}"
+            } catch (e: Exception) {
+                OverwritingToast.makeText(this@SubtitleFormatEditorActivity, "读取字幕失败：${e.message}", Toast.LENGTH_LONG).show()
+                finish()
             }
-            val items = entries.mapIndexed { index, entry ->
-                SubtitleFormatPreviewItem(index, entry.text)
-            }
-            adapter = SubtitleFormatPreviewAdapter(items) { item, position ->
-                showTextEditDialog(item, position)
-            }
-            binding.rvPreview.layoutManager = LinearLayoutManager(this)
-            binding.rvPreview.adapter = adapter
-            binding.tvFileInfo.text = "$fileName · ${entries.size} 行 · ${format.name}"
-        } catch (e: Exception) {
-            OverwritingToast.makeText(this, "读取字幕失败：${e.message}", Toast.LENGTH_LONG).show()
-            finish()
         }
     }
 
@@ -207,6 +220,7 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
     }
 
     private fun applyFormatting() {
+        if (!::adapter.isInitialized || formattingJob?.isActive == true) return
         val selected = adapter.items.filter { it.selected }
         if (selected.isEmpty()) {
             OverwritingToast.makeText(this, "请先勾选要格式化的字幕", Toast.LENGTH_SHORT).show()
@@ -220,17 +234,27 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
             OverwritingToast.makeText(this, "请先选择格式化项目", Toast.LENGTH_SHORT).show()
             return
         }
-        var changed = 0
-        selected.forEach { item ->
-            val formatted = SubtitleTextFormatter.format(item.text, options)
-            if (formatted != item.text) {
-                item.text = formatted
-                changed++
+        binding.btnApplyFormat.isEnabled = false
+        formattingJob = lifecycleScope.launch {
+            try {
+                val changed = withContext(Dispatchers.Default) {
+                    var count = 0
+                    selected.forEach { item ->
+                        val formatted = SubtitleTextFormatter.format(item.text, options)
+                        if (formatted != item.text) {
+                            item.text = formatted
+                            count++
+                        }
+                    }
+                    count
+                }
+                adapter.notifyDataSetChanged()
+                hasChanges = hasChanges || changed > 0
+                OverwritingToast.makeText(this@SubtitleFormatEditorActivity, "已格式化 $changed 条字幕", Toast.LENGTH_SHORT).show()
+            } finally {
+                binding.btnApplyFormat.isEnabled = true
             }
         }
-        adapter.notifyDataSetChanged()
-        hasChanges = hasChanges || changed > 0
-        OverwritingToast.makeText(this, "已格式化 $changed 条字幕", Toast.LENGTH_SHORT).show()
     }
 
     private fun collectOptions(): SubtitleFormattingOptions {
@@ -305,6 +329,14 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
     }
 
     private fun confirmSave() {
+        if (!::adapter.isInitialized || entries.isEmpty()) {
+            OverwritingToast.makeText(this, "字幕尚未加载完成", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (formattingJob?.isActive == true) {
+            OverwritingToast.makeText(this, "格式化尚未完成，请稍候", Toast.LENGTH_SHORT).show()
+            return
+        }
         AlertDialog.Builder(this)
             .setTitle("保存格式化结果")
             .setMessage("将覆盖原文件 $fileName，确定继续？")
@@ -314,6 +346,7 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
     }
 
     private fun saveToSource() {
+        if (!::adapter.isInitialized || entries.isEmpty()) return
         try {
             val outputEntries = entries.mapIndexed { index, entry ->
                 entry.copy(text = adapter.items[index].text)

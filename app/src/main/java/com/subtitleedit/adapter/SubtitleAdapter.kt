@@ -84,6 +84,7 @@ class SubtitleAdapter(
     companion object {
         const val PAYLOAD_SELECTION = "selection"
         const val PAYLOAD_PLAYING   = "playing"
+        private const val SELECTION_REFRESH_THRESHOLD = 200
     }
 
     fun isSelected(position: Int): Boolean {
@@ -92,27 +93,30 @@ class SubtitleAdapter(
     }
 
     fun getSelectedPositions(): Set<Int> {
-        // 返回当前选中的 position 列表（用于通知刷新）
-        return selectedEntries.mapNotNull { entry ->
-            val index = currentList.indexOfFirst { it === entry }
-            if (index >= 0) index else null
-        }.toSet()
+        // 单次扫描当前列表。逐个对 selectedEntries 调用 indexOfFirst 会在全选大文件时退化为 O(n²)。
+        return currentList.mapIndexedNotNullTo(mutableSetOf()) { index, entry ->
+            index.takeIf { selectedEntries.contains(entry) }
+        }
     }
 
     fun getSelectedEntries(): List<Pair<SubtitleEntry, Int>> {
-        // 返回选中的条目及其当前位置
-        return selectedEntries.mapNotNull { entry ->
-            val index = currentList.indexOfFirst { it === entry }
-            if (index >= 0) Pair(entry, index) else null
-        }.sortedBy { it.second }
+        // 当前列表本身已经按字幕顺序排列，单次扫描即可得到有序结果。
+        return currentList.mapIndexedNotNull { index, entry ->
+            if (selectedEntries.contains(entry)) Pair(entry, index) else null
+        }
     }
 
     fun clearSelection() {
-        // 获取所有需要刷新的位置
         val positionsToNotify = getSelectedPositions()
+        val selectedCount = selectedEntries.size
         selectedEntries.clear()
-        positionsToNotify.forEach { position ->
-            notifyItemChanged(position)
+        if (selectedCount == 0) return
+        if (selectedCount > SELECTION_REFRESH_THRESHOLD) {
+            notifyDataSetChanged()
+        } else {
+            positionsToNotify.forEach { position ->
+                notifyItemChanged(position, PAYLOAD_SELECTION)
+            }
         }
     }
 
@@ -124,18 +128,33 @@ class SubtitleAdapter(
                 selectedEntries.add(currentList[idx])
             }
         }
-        // 刷新旧的和新的选中位置
-        (oldPositions + indices).forEach { position ->
-            if (position >= 0 && position < currentList.size) {
-                notifyItemChanged(position, PAYLOAD_SELECTION)
+        val changedCount = oldPositions.size + indices.size
+        if (changedCount > SELECTION_REFRESH_THRESHOLD) {
+            notifyDataSetChanged()
+        } else {
+            // 刷新旧的和新的选中位置
+            (oldPositions.asSequence() + indices.asSequence()).forEach { position ->
+                if (position >= 0 && position < currentList.size) {
+                    notifyItemChanged(position, PAYLOAD_SELECTION)
+                }
             }
         }
+    }
+
+    /** Selects or clears the complete list without allocating an index set. */
+    fun setAllSelection(selected: Boolean) {
+        if (selected) {
+            currentList.forEach { selectedEntries.add(it) }
+        } else {
+            selectedEntries.clear()
+        }
+        notifyDataSetChanged()
     }
 
     fun getSelectedCount(): Int {
         return selectedEntries.size
     }
-    
+
     /**
      * 根据条目对象移除选中状态（用于删除操作后保持其他选中状态）
      */

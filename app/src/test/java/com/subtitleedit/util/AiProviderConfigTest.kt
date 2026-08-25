@@ -55,6 +55,24 @@ class AiProviderConfigTest {
     }
 
     @Test
+    fun deepseek_usesOfficialV1EndpointAndOneMillionContextDefaults() {
+        assertEquals(
+            "https://api.deepseek.com/v1/chat/completions",
+            AiProviderConfig.chatCompletionsUrl(
+                AiProviderConfig.getProvider(AiProviderConfig.DEEPSEEK).baseUrl
+            )
+        )
+        assertEquals(
+            1_000_000,
+            AiProviderConfig.defaultContextWindowTokens(AiProviderConfig.DEEPSEEK)
+        )
+        assertEquals(
+            AiProviderConfig.ReasoningLevel.MEDIUM,
+            AiProviderConfig.defaultReasoningLevel(AiProviderConfig.DEEPSEEK)
+        )
+    }
+
+    @Test
     fun getProvider_unknownOrEmptyId_fallsBackToFirst() {
         assertSame(AiProviderConfig.providers.first(), AiProviderConfig.getProvider("不存在的服务商"))
         assertSame(AiProviderConfig.providers.first(), AiProviderConfig.getProvider(""))
@@ -71,5 +89,41 @@ class AiProviderConfigTest {
     fun indexOf_unknownId_fallsBackToZero() {
         assertEquals(0, AiProviderConfig.indexOf("不存在的服务商"))
         assertEquals(0, AiProviderConfig.indexOf(""))
+    }
+
+    @Test
+    fun modelsUrl_acceptsBaseOrChatCompletionsAddress() {
+        assertEquals(
+            "https://example.com/v1/models",
+            AiProviderConfig.modelsUrl("https://example.com/v1")
+        )
+        assertEquals(
+            "https://example.com/v1/models",
+            AiProviderConfig.modelsUrl("https://example.com/v1/chat/completions")
+        )
+        assertEquals(
+            "https://example.com/v1/models",
+            AiProviderConfig.modelsUrl("https://example.com/v1/models")
+        )
+    }
+
+    @Test
+    fun modelCapabilities_recognizeCommonReasoningAndToolFamilies() {
+        val capabilities = AiProviderConfig.modelCapabilities(
+            AiProviderConfig.CUSTOM,
+            "deepseek-reasoner"
+        )
+        assertTrue(capabilities.reasoning)
+        assertTrue(capabilities.tools)
+    }
+
+    @Test
+    fun modelClient_parsesOpenAiCompatibleModelList() {
+        assertEquals(
+            listOf("alpha", "beta"),
+            AiModelClient.parseModelIds(
+                "{\"data\":[{\"id\":\"beta\"},{\"id\":\"alpha\"},{\"id\":\"beta\"}]}"
+            )
+        )
     }
 }

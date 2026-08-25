@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="end"
+    android:paddingVertical="4dp">
+
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end"
+        android:maxWidth="420dp"
+        android:minWidth="64dp"
+        app:cardBackgroundColor="?attr/colorPrimary"
+        app:cardCornerRadius="8dp">
+
+        <TextView
+            android:id="@+id/tvMessage"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:padding="12dp"
+            android:textColor="?attr/colorOnPrimary"
+            android:textIsSelectable="true"
+            android:textSize="16sp" />
+
+    </com.google.android.material.card.MaterialCardView>
+
+</LinearLayout>
