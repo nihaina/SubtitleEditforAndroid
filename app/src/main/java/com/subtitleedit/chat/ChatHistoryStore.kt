@@ -62,14 +62,18 @@ class ChatHistoryStore(context: Context) {
         database.runInTransaction {
             val dao = database.historyDao()
             val existing = dao.getSession(sessionId)
-            dao.upsertSession(
-                ChatHistorySessionEntity(
-                    sessionId,
-                    existing?.title ?: title.take(TITLE_MAX_CHARS).ifBlank { "未命名对话" },
-                    existing?.type ?: normalizeType(type),
-                    now
+            if (existing == null) {
+                dao.insertSession(
+                    ChatHistorySessionEntity(
+                        sessionId,
+                        title.take(TITLE_MAX_CHARS).ifBlank { "未命名对话" },
+                        normalizeType(type),
+                        now
+                    )
                 )
-            )
+            } else {
+                dao.touchSession(sessionId, now)
+            }
             val nextPosition = dao.nextPosition(sessionId)
             dao.insertMessages(messages.mapIndexed { index, message ->
                 message.toEntity(sessionId, nextPosition + index)
@@ -161,14 +165,17 @@ class ChatHistoryStore(context: Context) {
                 val dao = database.historyDao()
                 legacySessions.forEach { session ->
                     dao.deleteMessages(session.id)
-                    dao.upsertSession(
+                    val title = session.title.take(TITLE_MAX_CHARS).ifBlank { "未命名对话" }
+                    val type = normalizeType(session.type)
+                    dao.insertSession(
                         ChatHistorySessionEntity(
                             session.id,
-                            session.title.take(TITLE_MAX_CHARS).ifBlank { "未命名对话" },
-                            normalizeType(session.type),
+                            title,
+                            type,
                             session.updatedAt
                         )
                     )
+                    dao.updateSession(session.id, title, type, session.updatedAt)
                     dao.insertMessages(session.messages.mapIndexed { index, message ->
                         message.toEntity(session.id, index)
                     })

@@ -9,8 +9,14 @@ import java.util.List;
 
 @Dao
 public interface ChatHistoryDao {
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    void upsertSession(ChatHistorySessionEntity session);
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    void insertSession(ChatHistorySessionEntity session);
+
+    @Query("UPDATE chat_sessions SET title = :title, type = :type, updatedAt = :updatedAt WHERE id = :id")
+    void updateSession(String id, String title, String type, long updatedAt);
+
+    @Query("UPDATE chat_sessions SET updatedAt = :updatedAt WHERE id = :id")
+    void touchSession(String id, long updatedAt);
 
     @Insert
     void insertMessages(List<ChatHistoryMessageEntity> messages);
