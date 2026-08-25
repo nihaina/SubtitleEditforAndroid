@@ -3,6 +3,7 @@ package com.subtitleedit
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -13,6 +14,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -130,7 +132,7 @@ class AutoTranslateActivity : AppCompatActivity() {
             }
         })
         restoreOutputDirectory()
-        addInitialFiles(intent.getParcelableArrayListExtra<Uri>(EXTRA_INITIAL_FILE_URIS).orEmpty())
+        addInitialFiles(initialFileUris())
     }
 
     private fun setupToolbar() {
@@ -172,6 +174,13 @@ class AutoTranslateActivity : AppCompatActivity() {
         }
         adapter.notifyDataSetChanged()
         updateFileListVisibility()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun initialFileUris(): List<Uri> = if (Build.VERSION.SDK_INT >= 33) {
+        intent.getParcelableArrayListExtra(EXTRA_INITIAL_FILE_URIS, Uri::class.java).orEmpty()
+    } else {
+        intent.getParcelableArrayListExtra<Uri>(EXTRA_INITIAL_FILE_URIS).orEmpty()
     }
 
     private fun startQueuedFiles() {
@@ -431,16 +440,41 @@ class AutoTranslateActivity : AppCompatActivity() {
         return dir
     }
 
-    private fun getFileNameFromUri(uri: Uri): String? = runCatching {
-        contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
-            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
-    }.getOrNull()
+    private fun getFileNameFromUri(uri: Uri): String? {
+        val displayName = runCatching {
+            contentResolver.query(
+                uri,
+                arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getString(0) else null
+            }
+        }.getOrNull()
+        if (!displayName.isNullOrBlank()) return displayName
 
-    private fun getFileSizeFromUri(uri: Uri): Long = runCatching {
-        contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)
-            ?.use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else 0L }
-            ?: 0L
-    }.getOrDefault(0L)
+        return when (uri.scheme) {
+            "file" -> uri.path?.let(::File)?.name
+            else -> DocumentFile.fromSingleUri(this, uri)?.name
+        }
+    }
+
+    private fun getFileSizeFromUri(uri: Uri): Long {
+        val size = runCatching {
+            contentResolver.query(
+                uri,
+                arrayOf(android.provider.OpenableColumns.SIZE),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else 0L
+            } ?: 0L
+        }.getOrDefault(0L)
+        if (size > 0L) return size
+        return if (uri.scheme == "file") uri.path?.let(::File)?.length() ?: 0L else 0L
+    }
 
     private inner class AutoTranslateAdapter(
         private val onItemClick: (AutoTranslateFile) -> Unit,
