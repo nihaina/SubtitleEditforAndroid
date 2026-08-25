@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.text.Editable
@@ -12,6 +13,7 @@ import android.text.TextWatcher
 import android.text.style.BackgroundColorSpan
 import android.util.AttributeSet
 import android.view.Gravity
+import android.view.View
 import android.widget.EditText
 import android.widget.FrameLayout
 import com.subtitleedit.R
@@ -97,6 +99,9 @@ class SourceEditorView @JvmOverloads constructor(
             setHorizontallyScrolling(true)
             isScrollContainer = false
             isSaveEnabled = false
+            // Window rebinding changes the editor text/selection while the parent is flinging.
+            // Do not let focus handling ask ScrollView to reveal the transient selection.
+            setRevealOnFocusHint(false)
             setTextColor(textPaint.color)
             setHintTextColor(textPaint.color)
             addTextChangedListener(object : TextWatcher {
@@ -176,6 +181,17 @@ class SourceEditorView @JvmOverloads constructor(
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         ensureWindowForViewport(scrollY, force = true)
+    }
+
+    override fun requestChildRectangleOnScreen(
+        child: View,
+        rectangle: Rect,
+        immediate: Boolean
+    ): Boolean {
+        // setText()/setSelection() can request the transient window's cursor rectangle. If
+        // ScrollView honors that request during a fling, it jumps back to the rebind target.
+        return if (bindingWindow) false
+        else super.requestChildRectangleOnScreen(child, rectangle, immediate)
     }
 
     private val windowRebindRunnable = Runnable {
