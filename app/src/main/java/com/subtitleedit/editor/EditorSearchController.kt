@@ -27,7 +27,7 @@ class EditorSearchController(
     private val ignoreSourceChanges: () -> Boolean,
     private val entries: () -> List<SubtitleEntry>,
     private val replaceSourceContent: (String) -> Unit,
-    private val applyEntryUpdates: (List<SearchReplaceOps.TextUpdate>) -> Unit,
+    private val applyEntryUpdates: (List<SearchReplaceOps.TextUpdate>) -> Int,
     private val confirmReplaceAll: (matchCount: Int, onConfirm: () -> Unit) -> Unit,
     private val showMessage: (String) -> Unit
 ) {
@@ -218,9 +218,10 @@ class EditorSearchController(
             return
         }
 
+        val removedCount: Int
         applyingEntryReplacement = true
         try {
-            applyEntryUpdates(listOf(SearchReplaceOps.TextUpdate(position, newText)))
+            removedCount = applyEntryUpdates(listOf(SearchReplaceOps.TextUpdate(position, newText)))
         } finally {
             applyingEntryReplacement = false
         }
@@ -230,7 +231,9 @@ class EditorSearchController(
             announce = false,
             scrollToCurrent = false
         )
-        showMessage("已替换 1 处")
+        showMessage(
+            if (removedCount > 0) "替换后文本为空，已删除该条字幕" else "已替换 1 处"
+        )
     }
 
     private fun replaceAll() {
@@ -285,14 +288,21 @@ class EditorSearchController(
         }
 
         confirmReplaceAll(matchCount) {
+            val removedCount: Int
             applyingEntryReplacement = true
             try {
-                applyEntryUpdates(updates)
+                removedCount = applyEntryUpdates(updates)
             } finally {
                 applyingEntryReplacement = false
             }
             clearSearchInputAfterReplace()
-            showMessage("已替换 $matchCount 处")
+            showMessage(
+                if (removedCount > 0) {
+                    "已替换 $matchCount 处，删除 $removedCount 条空字幕"
+                } else {
+                    "已替换 $matchCount 处"
+                }
+            )
         }
     }
 

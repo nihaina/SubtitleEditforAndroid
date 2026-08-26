@@ -15,6 +15,7 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.util.SubtitleEntryOps
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -87,6 +88,8 @@ class WaveformTimelineView @JvmOverloads constructor(
         /** 频谱生成失败后等待一段时间再重试，避免播放刷新触发紧密失败循环。 */
         private const val SPECTROGRAM_RETRY_DELAY_MS = 5_000L
 
+        private const val MIN_SUBTITLE_DURATION_MS = 100L
+
         private const val MIN_SPECTROGRAM_CACHE_BYTES = 16 * 1024 * 1024
         private const val MAX_SPECTROGRAM_CACHE_BYTES = 48 * 1024 * 1024
     }
@@ -117,6 +120,7 @@ class WaveformTimelineView @JvmOverloads constructor(
 
     private var dragMode = DragMode.NONE
     private var currentSubtitle: SubtitleEntry? = null
+    private var currentSubtitleIndex = -1
     private var dragStartX = 0f
     private var dragStartStartTime = 0L
     private var dragStartEndTime = 0L
@@ -1031,6 +1035,7 @@ class WaveformTimelineView @JvmOverloads constructor(
                     val sub = subtitles.getOrNull(idx)
                     if (sub != null && idx >= 0) {
                         currentSubtitle = sub
+                        currentSubtitleIndex = idx
                         if (idx in selectedIndices) {
                             // 已选中：DOWN 时保持 NONE，等 MOVE 时确认真正拖动再设置 dragMode
                             downOnSelectedSubtitle = true
@@ -1044,13 +1049,16 @@ class WaveformTimelineView @JvmOverloads constructor(
                     } else {
                         downOnSelectedSubtitle = false
                         currentSubtitle = null
+                        currentSubtitleIndex = -1
                     }
                     isDraggingWaveform = false
                 } else {
                     downOnSelectedSubtitle = false
                     isDraggingWaveform = true
                     dragStartVisibleStartMs = visibleStartMs
-                    dragMode = DragMode.NONE; currentSubtitle = null
+                    dragMode = DragMode.NONE
+                    currentSubtitle = null
+                    currentSubtitleIndex = -1
                 }
                 return true
             }
@@ -1107,21 +1115,41 @@ class WaveformTimelineView @JvmOverloads constructor(
                 if (dragMode == DragMode.NONE || currentSubtitle == null) return true
                 val s = currentSubtitle!!
                 val dt = xToTime(touchX) - xToTime(dragStartX)
+                val previous = subtitles.getOrNull(currentSubtitleIndex - 1)
+                val next = subtitles.getOrNull(currentSubtitleIndex + 1)
 
                 var changed = false
                 when (dragMode) {
                     DragMode.MOVE -> {
-                        val dur = dragStartEndTime - dragStartStartTime
-                        s.startTime = (dragStartStartTime + dt).coerceAtLeast(0L)
-                        s.endTime = s.startTime + dur
+                        val range = SubtitleEntryOps.clampMoveToNeighbors(
+                            originalStartTime = dragStartStartTime,
+                            originalEndTime = dragStartEndTime,
+                            desiredStartTime = dragStartStartTime + dt,
+                            previousEndTime = previous?.endTime,
+                            nextStartTime = next?.startTime
+                        )
+                        s.startTime = range.startTime
+                        s.endTime = range.endTime
                         changed = true
                     }
                     DragMode.RESIZE_START -> {
-                        s.startTime = (dragStartStartTime + dt).coerceIn(0L, s.endTime - 100L)
+                        s.startTime = SubtitleEntryOps.clampStartToNeighbors(
+                            originalStartTime = dragStartStartTime,
+                            currentEndTime = s.endTime,
+                            desiredStartTime = dragStartStartTime + dt,
+                            previousEndTime = previous?.endTime,
+                            minimumDurationMs = MIN_SUBTITLE_DURATION_MS
+                        )
                         changed = true
                     }
                     DragMode.RESIZE_END -> {
-                        s.endTime = (dragStartEndTime + dt).coerceAtLeast(s.startTime + 100L)
+                        s.endTime = SubtitleEntryOps.clampEndToNeighbors(
+                            originalEndTime = dragStartEndTime,
+                            currentStartTime = s.startTime,
+                            desiredEndTime = dragStartEndTime + dt,
+                            nextStartTime = next?.startTime,
+                            minimumDurationMs = MIN_SUBTITLE_DURATION_MS
+                        )
                         s.endTimeModified = true
                         changed = true
                     }
@@ -1138,6 +1166,7 @@ class WaveformTimelineView @JvmOverloads constructor(
                 downOnSelectedSubtitle = false
                 dragMode = DragMode.NONE
                 currentSubtitle = null
+                currentSubtitleIndex = -1
                 isDraggingWaveform = false
                 isPinching = false
                 activePointerId = MotionEvent.INVALID_POINTER_ID
@@ -1479,6 +1508,7 @@ class WaveformTimelineView @JvmOverloads constructor(
         downOnSelectedSubtitle = false
         dragMode = DragMode.NONE
         currentSubtitle = null
+        currentSubtitleIndex = -1
         isDraggingWaveform = false
         isPinching = false
         isTimestampingMode = true

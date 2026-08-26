@@ -1,5 +1,7 @@
 package com.subtitleedit.util
 
+import com.subtitleedit.model.SubtitleEntry
+
 object SearchReplaceOps {
     data class TextUpdate(
         val index: Int,
@@ -9,6 +11,11 @@ object SearchReplaceOps {
     data class ReplaceAllInTextResult(
         val newContent: String,
         val matchCount: Int
+    )
+
+    data class ApplyEntryUpdatesResult(
+        val updatedCount: Int,
+        val removedCount: Int
     )
 
     fun replaceTextIfChanged(
@@ -73,6 +80,34 @@ object SearchReplaceOps {
             }
         }
         return updates
+    }
+
+    fun applyEntryUpdates(
+        entries: MutableList<SubtitleEntry>,
+        updates: List<TextUpdate>
+    ): ApplyEntryUpdatesResult {
+        val validUpdates = linkedMapOf<Int, String>()
+        updates.forEach { update ->
+            if (update.index in entries.indices) validUpdates[update.index] = update.newText
+        }
+
+        validUpdates.forEach { (index, newText) ->
+            if (newText.isNotBlank()) entries[index].text = newText
+        }
+
+        val removedIndices = validUpdates
+            .filterValues { it.isBlank() }
+            .keys
+            .sortedDescending()
+        removedIndices.forEach(entries::removeAt)
+        if (removedIndices.isNotEmpty()) {
+            entries.forEachIndexed { index, entry -> entry.index = index + 1 }
+        }
+
+        return ApplyEntryUpdatesResult(
+            updatedCount = validUpdates.size - removedIndices.size,
+            removedCount = removedIndices.size
+        )
     }
 
     fun replaceInContentAt(

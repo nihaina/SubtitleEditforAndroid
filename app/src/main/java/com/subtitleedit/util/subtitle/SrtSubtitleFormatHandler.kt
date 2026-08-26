@@ -51,19 +51,17 @@ object SrtSubtitleFormatHandler : SubtitleFormatHandler {
             }
 
             val text = textLines.dropLastWhile { it.isBlank() }.joinToString("\n")
-            if (text.isNotEmpty()) {
-                entries += SubtitleEntry(
-                    index = entries.size + 1,
-                    startTime = timeCodes.first,
-                    endTime = timeCodes.second,
-                    text = if (fileName?.endsWith(".wsrt", ignoreCase = true) == true) {
-                        text.replace(Regex("<3\\d>"), "<i>")
-                            .replace(Regex("</3\\d>"), "</i>")
-                    } else {
-                        text
-                    }
-                )
-            }
+            entries += SubtitleEntry(
+                index = entries.size + 1,
+                startTime = timeCodes.first,
+                endTime = timeCodes.second,
+                text = if (fileName?.endsWith(".wsrt", ignoreCase = true) == true) {
+                    text.replace(Regex("<3\\d>"), "<i>")
+                        .replace(Regex("</3\\d>"), "</i>")
+                } else {
+                    text
+                }
+            )
 
             while (index < lines.size && lines[index].isBlank()) index++
             if (index < lines.size && lines[index].trim().toIntOrNull() != null &&

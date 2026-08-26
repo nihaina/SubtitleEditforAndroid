@@ -241,6 +241,68 @@ class SubtitleEntryOpsTest {
         assertEquals(4000L, entries[1].startTime)
     }
 
+    // ==================== waveform drag bounds ====================
+
+    @Test
+    fun clampMoveToNeighbors_stopsAtPreviousAndNextBoundaries() {
+        val againstPrevious = SubtitleEntryOps.clampMoveToNeighbors(
+            originalStartTime = 2000,
+            originalEndTime = 3000,
+            desiredStartTime = 500,
+            previousEndTime = 1000,
+            nextStartTime = 5000
+        )
+        assertEquals(1000L, againstPrevious.startTime)
+        assertEquals(2000L, againstPrevious.endTime)
+
+        val againstNext = SubtitleEntryOps.clampMoveToNeighbors(
+            originalStartTime = 2000,
+            originalEndTime = 3000,
+            desiredStartTime = 6000,
+            previousEndTime = 1000,
+            nextStartTime = 5000
+        )
+        assertEquals(4000L, againstNext.startTime)
+        assertEquals(5000L, againstNext.endTime)
+    }
+
+    @Test
+    fun clampMoveToNeighbors_withoutRoomKeepsOriginalRange() {
+        val result = SubtitleEntryOps.clampMoveToNeighbors(
+            originalStartTime = 2000,
+            originalEndTime = 4000,
+            desiredStartTime = 2500,
+            previousEndTime = 1500,
+            nextStartTime = 3000
+        )
+        assertEquals(2000L, result.startTime)
+        assertEquals(4000L, result.endTime)
+    }
+
+    @Test
+    fun clampStartToNeighbors_stopsExactlyAtPreviousEnd() {
+        val result = SubtitleEntryOps.clampStartToNeighbors(
+            originalStartTime = 2000,
+            currentEndTime = 4000,
+            desiredStartTime = 500,
+            previousEndTime = 1500,
+            minimumDurationMs = 100
+        )
+        assertEquals(1500L, result)
+    }
+
+    @Test
+    fun clampEndToNeighbors_stopsExactlyAtNextStart() {
+        val result = SubtitleEntryOps.clampEndToNeighbors(
+            originalEndTime = 3000,
+            currentStartTime = 2000,
+            desiredEndTime = 6000,
+            nextStartTime = 5000,
+            minimumDurationMs = 100
+        )
+        assertEquals(5000L, result)
+    }
+
     // ==================== mergeAdjacent ====================
 
     @Test

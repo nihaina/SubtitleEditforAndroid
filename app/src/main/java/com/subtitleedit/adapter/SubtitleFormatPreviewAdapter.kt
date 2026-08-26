@@ -9,13 +9,13 @@ import androidx.recyclerview.widget.RecyclerView
 import com.subtitleedit.R
 
 data class SubtitleFormatPreviewItem(
-    val entryPosition: Int,
+    var entryPosition: Int,
     var text: String,
     var selected: Boolean = true
 )
 
 class SubtitleFormatPreviewAdapter(
-    val items: List<SubtitleFormatPreviewItem>,
+    val items: MutableList<SubtitleFormatPreviewItem>,
     private val onEditRequested: (SubtitleFormatPreviewItem, Int) -> Unit
 ) : RecyclerView.Adapter<SubtitleFormatPreviewAdapter.ViewHolder>() {
 

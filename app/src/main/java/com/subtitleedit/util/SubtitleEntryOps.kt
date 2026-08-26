@@ -5,6 +5,11 @@ import com.subtitleedit.model.SubtitleEntry
 object SubtitleEntryOps {
     private const val DEFAULT_INSERT_DURATION_MS = 3_000L
 
+    data class TimingRange(
+        val startTime: Long,
+        val endTime: Long
+    )
+
     fun deepCopy(entry: SubtitleEntry): SubtitleEntry {
         return entry.copy()
     }
@@ -71,6 +76,60 @@ object SubtitleEntryOps {
 
     fun applyOffsetAll(entries: Iterable<SubtitleEntry>, offsetMs: Long) {
         entries.forEach { applyOffset(it, offsetMs) }
+    }
+
+    fun clampMoveToNeighbors(
+        originalStartTime: Long,
+        originalEndTime: Long,
+        desiredStartTime: Long,
+        previousEndTime: Long?,
+        nextStartTime: Long?
+    ): TimingRange {
+        val duration = originalEndTime - originalStartTime
+        if (duration <= 0L) return TimingRange(originalStartTime, originalEndTime)
+
+        val minimumStart = maxOf(0L, previousEndTime ?: 0L)
+        val maximumStart = nextStartTime?.minus(duration) ?: (Long.MAX_VALUE - duration)
+        if (maximumStart < minimumStart) {
+            return TimingRange(originalStartTime, originalEndTime)
+        }
+
+        val startTime = desiredStartTime.coerceIn(minimumStart, maximumStart)
+        return TimingRange(startTime, startTime + duration)
+    }
+
+    fun clampStartToNeighbors(
+        originalStartTime: Long,
+        currentEndTime: Long,
+        desiredStartTime: Long,
+        previousEndTime: Long?,
+        minimumDurationMs: Long
+    ): Long {
+        require(minimumDurationMs > 0L) { "minimumDurationMs must be positive" }
+        val minimumStart = maxOf(0L, previousEndTime ?: 0L)
+        val maximumStart = currentEndTime - minimumDurationMs
+        return if (maximumStart < minimumStart) {
+            originalStartTime
+        } else {
+            desiredStartTime.coerceIn(minimumStart, maximumStart)
+        }
+    }
+
+    fun clampEndToNeighbors(
+        originalEndTime: Long,
+        currentStartTime: Long,
+        desiredEndTime: Long,
+        nextStartTime: Long?,
+        minimumDurationMs: Long
+    ): Long {
+        require(minimumDurationMs > 0L) { "minimumDurationMs must be positive" }
+        val minimumEnd = currentStartTime + minimumDurationMs
+        val maximumEnd = nextStartTime ?: Long.MAX_VALUE
+        return if (maximumEnd < minimumEnd) {
+            originalEndTime
+        } else {
+            desiredEndTime.coerceIn(minimumEnd, maximumEnd)
+        }
     }
 
     fun mergeAdjacent(entries: List<SubtitleEntry>, maxGapMs: Long): List<SubtitleEntry> {

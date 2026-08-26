@@ -1,5 +1,6 @@
 package com.subtitleedit.util
 
+import com.subtitleedit.model.SubtitleEntry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -103,6 +104,29 @@ class SearchReplaceOpsTest {
             emptyList<SearchReplaceOps.TextUpdate>(),
             SearchReplaceOps.collectTextUpdates(listOf("a", "b"), "", "x")
         )
+    }
+
+    @Test
+    fun applyEntryUpdates_removesEntriesMadeBlankAndRenumbersRemainingEntries() {
+        val entries = mutableListOf(
+            SubtitleEntry(index = 1, text = "delete"),
+            SubtitleEntry(index = 2, text = "keep"),
+            SubtitleEntry(index = 3, text = "also delete")
+        )
+
+        val result = SearchReplaceOps.applyEntryUpdates(
+            entries,
+            listOf(
+                SearchReplaceOps.TextUpdate(0, ""),
+                SearchReplaceOps.TextUpdate(1, "updated"),
+                SearchReplaceOps.TextUpdate(2, "   ")
+            )
+        )
+
+        assertEquals(1, result.updatedCount)
+        assertEquals(2, result.removedCount)
+        assertEquals(listOf("updated"), entries.map { it.text })
+        assertEquals(listOf(1), entries.map { it.index })
     }
 
     // ==================== replaceInContentAt ====================

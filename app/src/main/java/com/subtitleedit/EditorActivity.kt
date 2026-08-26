@@ -46,6 +46,7 @@ import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.CutPasteController
 import com.subtitleedit.util.SubtitlePasteOps
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.util.SearchReplaceOps
 import com.subtitleedit.util.SubtitleEntryOps
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
@@ -426,10 +427,13 @@ class EditorActivity : AppCompatActivity() {
                 replaceSourceViewContent(content)
             },
             applyEntryUpdates = { updates ->
-                updates.forEach { update ->
-                    subtitleEntries.getOrNull(update.index)?.text = update.newText
+                val result = SearchReplaceOps.applyEntryUpdates(subtitleEntries, updates)
+                if (result.removedCount > 0) {
+                    submitSubtitleList(refreshAll = true, markChanged = true)
+                } else {
+                    notifyEntriesChanged(updates.map { it.index }, includeNeighbors = false)
                 }
-                notifyEntriesChanged(updates.map { it.index }, includeNeighbors = false)
+                result.removedCount
             },
             confirmReplaceAll = ::showReplaceAllConfirm,
             showMessage = ::showShortToast

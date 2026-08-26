@@ -14,8 +14,10 @@ object WebVttSubtitleFormatHandler : SubtitleFormatHandler {
     private val mpegTsPattern = Regex("""MPEGTS\s*:\s*(\d+)""", RegexOption.IGNORE_CASE)
 
     override fun isMine(lines: List<String>, fileName: String?): Boolean {
-        return lines.firstOrNull()?.trimStart('\uFEFF')
-            ?.startsWith("WEBVTT", ignoreCase = true) == true
+        if (hasWebVttSignature(lines)) return true
+
+        val extension = fileName?.substringAfterLast('.', "")?.lowercase().orEmpty()
+        return extension in extensions && lines.any { parseTimeLine(it) != null }
     }
 
     override fun load(lines: List<String>, fileName: String?): SubtitleDocument {
@@ -25,20 +27,21 @@ object WebVttSubtitleFormatHandler : SubtitleFormatHandler {
         var index = 0
         var timestampOffsetMs = 0L
 
-        if (lines.firstOrNull()?.trimStart('\uFEFF')
-                ?.startsWith("WEBVTT", ignoreCase = true) == true
-        ) {
+        if (hasWebVttSignature(lines)) {
             header += lines.first().trimStart('\uFEFF')
             index = 1
-        } else {
-            header += "WEBVTT"
-        }
 
-        // The signature may be followed by header metadata without a blank separator.
-        while (index < lines.size && lines[index].isNotBlank()) {
-            updateTimestampOffset(lines[index])?.let { timestampOffsetMs = it }
-                ?: header.add(lines[index])
-            index++
+            // The signature may be followed by header metadata without a blank separator.
+            while (index < lines.size && lines[index].isNotBlank()) {
+                if (parseTimeLine(lines[index]) != null) break
+                updateTimestampOffset(lines[index])?.let { timestampOffsetMs = it }
+                    ?: header.add(lines[index])
+                index++
+            }
+        } else {
+            // Subtitle Edit also loads headerless WebVTT when the file extension selected
+            // this handler. Add the required signature only when serializing it again.
+            header += "WEBVTT"
         }
         while (index < lines.size && lines[index].isBlank()) index++
 
@@ -215,4 +218,8 @@ object WebVttSubtitleFormatHandler : SubtitleFormatHandler {
         .dropWhile { it.isBlank() }
         .dropLastWhile { it.isBlank() }
         .joinToString("\n")
+
+    private fun hasWebVttSignature(lines: List<String>): Boolean =
+        lines.firstOrNull()?.trimStart('\uFEFF')
+            ?.startsWith("WEBVTT", ignoreCase = true) == true
 }

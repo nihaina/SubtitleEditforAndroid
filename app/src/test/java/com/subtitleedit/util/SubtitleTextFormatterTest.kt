@@ -59,6 +59,12 @@ class SubtitleTextFormatterTest {
         assertEquals("Hi", SubtitleTextFormatter.format("Hi。 ", options))
     }
 
+    @Test
+    fun endPunctuation_canClearPunctuationOnlyText() {
+        val options = SubtitleFormattingOptions(endPunctuation = setOf('!', '。'))
+        assertEquals("", SubtitleTextFormatter.format("!。!!", options))
+    }
+
     // ==================== addEndPunctuation ====================
 
     @Test

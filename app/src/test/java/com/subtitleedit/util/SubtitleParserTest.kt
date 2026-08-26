@@ -63,6 +63,16 @@ class SubtitleParserTest {
         assertEquals(SubtitleParser.SubtitleFormat.VTT, SubtitleParser.detectFormat("WEBVTT\n", "empty.vtt"))
     }
 
+    @Test
+    fun detectFormat_headerlessVttRequiresVttExtension() {
+        val content = "00:01.000 --> 00:02.000\nHello"
+        assertEquals(
+            SubtitleParser.SubtitleFormat.VTT,
+            SubtitleParser.detectFormat(content, "sample.vtt")
+        )
+        assertEquals(SubtitleParser.SubtitleFormat.TXT, SubtitleParser.detectFormat(content))
+    }
+
     // ==================== parseSRT ====================
 
     @Test
@@ -89,12 +99,22 @@ class SubtitleParserTest {
     }
 
     @Test
-    fun parseSRT_dropsEntriesWithoutText() {
+    fun parseSRT_preservesEntriesWithoutText() {
         val content = "1\n00:00:01,000 --> 00:00:02,000\n\n2\n00:00:03,000 --> 00:00:04,000\nKept"
         val entries = SubtitleParser.parseSRT(content)
-        assertEquals(1, entries.size)
-        assertEquals("Kept", entries[0].text)
-        assertEquals(1, entries[0].index)
+        assertEquals(2, entries.size)
+        assertEquals("", entries[0].text)
+        assertEquals(1000L, entries[0].startTime)
+        assertEquals(2000L, entries[0].endTime)
+        assertEquals("Kept", entries[1].text)
+        assertEquals(listOf(1, 2), entries.map { it.index })
+    }
+
+    @Test
+    fun detectFormat_srtWithOnlyEmptyCue() {
+        val content = "1\n00:00:01,000 --> 00:00:02,000\n"
+        assertEquals(SubtitleParser.SubtitleFormat.SRT, SubtitleParser.detectFormat(content))
+        assertEquals("", SubtitleParser.parseSRT(content).single().text)
     }
 
     @Test
@@ -140,15 +160,15 @@ class SubtitleParserTest {
     // ==================== parseLRC ====================
 
     @Test
-    fun parseLRC_endTimeClampedToNextStart() {
+    fun parseLRC_leavesSubtitleEditDefaultGapBeforeNextStart() {
         val entries = SubtitleParser.parseLRC("[00:01.00]Hello\n[00:03.50]World")
         assertEquals(2, entries.size)
         assertEquals(1000L, entries[0].startTime)
-        assertEquals(3500L, entries[0].endTime)
+        assertEquals(3476L, entries[0].endTime)
         assertFalse(entries[0].endTimeModified)
-        // 最后一行使用默认 6 秒时长
+        // Subtitle Edit 对最后一行按文本长度计算；短文本为 1 秒最短时长加 1.5 秒。
         assertEquals(3500L, entries[1].startTime)
-        assertEquals(9500L, entries[1].endTime)
+        assertEquals(6000L, entries[1].endTime)
     }
 
     @Test
@@ -161,10 +181,32 @@ class SubtitleParserTest {
     }
 
     @Test
-    fun parseLRC_defaultSixSecondsWhenGapIsLarge() {
+    fun parseLRC_capsLargeGapAtSubtitleEditMaximumDuration() {
         val entries = SubtitleParser.parseLRC("[00:01.00]A\n[00:20.00]B")
-        assertEquals(7000L, entries[0].endTime)
+        assertEquals(9000L, entries[0].endTime)
         assertFalse(entries[0].endTimeModified)
+    }
+
+    @Test
+    fun parseLRC_finalCueAddsPaddingAfterOptimalDurationCap() {
+        val longText = "A".repeat(200)
+        val entry = SubtitleParser.parseLRC("[00:01.00]$longText").single()
+        assertEquals(10_500L, entry.endTime)
+    }
+
+    @Test
+    fun parseLRC_ignoresHtmlAndSsaTagsWhenCalculatingFinalDuration() {
+        val entry = SubtitleParser.parseLRC(
+            "[00:01.00]<i>${"A".repeat(16)}</i>{\\an8}"
+        ).single()
+        assertEquals(3_700L, entry.endTime)
+    }
+
+    @Test
+    fun parseLRC_sortsCuesBeforeCalculatingEndTimes() {
+        val entries = SubtitleParser.parseLRC("[00:05.00]Later\n[00:01.00]Earlier")
+        assertEquals(listOf("Earlier", "Later"), entries.map { it.text })
+        assertEquals(4976L, entries[0].endTime)
     }
 
     @Test
@@ -204,6 +246,29 @@ class SubtitleParserTest {
     }
 
     // ==================== parseVTT / toVTT ====================
+
+    @Test
+    fun parseVTT_preservesCueWithoutText() {
+        val entries = SubtitleParser.parseVTT(
+            "WEBVTT\n\nempty-cue\n00:01.000 --> 00:02.000 align:center\n"
+        )
+        assertEquals(1, entries.size)
+        assertEquals("", entries.single().text)
+        assertEquals("empty-cue", entries.single().cueIdentifier)
+        assertEquals("align:center", entries.single().cueSettings)
+    }
+
+    @Test
+    fun parseVTT_loadsHeaderlessCueSelectedByExtension() {
+        val document = SubtitleParser.parseDocument(
+            "00:01.000 --> 00:02.000\n",
+            "headerless.vtt"
+        )
+        assertEquals(SubtitleParser.SubtitleFormat.VTT, document.format)
+        assertEquals(1, document.entries.size)
+        assertEquals("", document.entries.single().text)
+        assertTrue(document.header.startsWith("WEBVTT"))
+    }
 
     @Test
     fun parseVTT_preservesHeaderIdentifierAndSettings() {
@@ -377,6 +442,17 @@ class SubtitleParserTest {
     }
 
     @Test
+    fun toLRC_keepsTerminatorUntilCuesExactlyTouch() {
+        val content = SubtitleParser.toLRC(
+            listOf(
+                SubtitleEntry(startTime = 1000, endTime = 2950, text = "A"),
+                SubtitleEntry(startTime = 3000, endTime = 4000, text = "B")
+            )
+        )
+        assertEquals("[00:01.00]A\n[00:02.95]\n[00:03.00]B\n[00:04.00]\n", content)
+    }
+
+    @Test
     fun parseTXT_skipsBlankLinesAndTrims() {
         val entries = SubtitleParser.parseTXT("Hello\n\n  World  \n")
         assertEquals(2, entries.size)
@@ -417,6 +493,33 @@ class SubtitleParserTest {
     }
 
     @Test
+    fun srt_roundTrip_preservesEmptyTextEntry() {
+        val original = SubtitleEntry(index = 1, startTime = 1000, endTime = 2500, text = "")
+        val reparsed = SubtitleParser.parseSRT(SubtitleParser.toSRT(listOf(original))).single()
+        assertEquals(original.startTime, reparsed.startTime)
+        assertEquals(original.endTime, reparsed.endTime)
+        assertEquals("", reparsed.text)
+    }
+
+    @Test
+    fun vttRoundTrip_preservesEmptyTextEntry() {
+        val original = SubtitleEntry(
+            index = 1,
+            startTime = 1000,
+            endTime = 2500,
+            text = "",
+            cueIdentifier = "empty-cue",
+            cueSettings = "align:center"
+        )
+        val reparsed = SubtitleParser.parseVTT(SubtitleParser.toVTT(listOf(original))).single()
+        assertEquals(original.startTime, reparsed.startTime)
+        assertEquals(original.endTime, reparsed.endTime)
+        assertEquals("", reparsed.text)
+        assertEquals(original.cueIdentifier, reparsed.cueIdentifier)
+        assertEquals(original.cueSettings, reparsed.cueSettings)
+    }
+
+    @Test
     fun lrc_roundTrip_preservesCentisecondAlignedTimes() {
         // LRC 精度是厘秒，用 10ms 对齐的时间验证
         val original = listOf(
@@ -438,7 +541,7 @@ class SubtitleParserTest {
             SubtitleEntry(startTime = 2000, endTime = 3000, text = "B")
         )
         val reparsed = SubtitleParser.parseLRC(SubtitleParser.toLRC(original))
-        assertEquals(2000L, reparsed[0].endTime)
+        assertEquals(1976L, reparsed[0].endTime)
         assertEquals(3000L, reparsed[1].endTime)
     }
 

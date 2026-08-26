@@ -35,8 +35,8 @@ class AiTranslationProtocolTest {
         )
 
         assertEquals(
-            "start\n1\n00:00:01,000 --> 00:00:02,000\n字幕一\nend\n\n" +
-                "start\n2\n00:00:03,000 --> 00:00:04,000\n两行\n字幕\nend",
+            "start\n1\n00:00:01,000 --> 00:00:02,000\n字幕一\n\n" +
+                "2\n00:00:03,000 --> 00:00:04,000\n两行\n字幕\nend",
             content
         )
         assertFalse(content.contains("1.字幕一"))
@@ -61,8 +61,8 @@ class AiTranslationProtocolTest {
         )
 
         assertEquals(
-            "start\n1\n[00:01.00]<b>字幕一</b>\nend\n\n" +
-                "start\n2\n[00:03.25]字幕二\nend",
+            "start\n1\n[00:01.00]<b>字幕一</b>\n\n" +
+                "2\n[00:03.25]字幕二\nend",
             buildSubtitleTranslationContent(subtitles, SubtitleFormat.LRC)
         )
     }
@@ -254,13 +254,12 @@ class AiTranslationProtocolTest {
             301
             ${expected[0].getTimeAxisSRT()}
             译文一
-            end
-            这里是模型补充说明，不应写入字幕。
-            start
+
             302
             ${expected[1].getTimeAxisSRT()}
             译文二
             end
+            这里是模型补充说明，不应写入字幕。
             以上翻译完成。
         """.trimIndent()
 
@@ -346,6 +345,30 @@ class AiTranslationProtocolTest {
                 "302\n${expected[1].getTimeAxisSRT()}\n字幕302\n",
                 expected
             )
+        )
+    }
+
+    @Test
+    fun cancelledMarkedStream_keepsCompletedCuesBeforeOpenEndMarker() {
+        val expected = List(3) { index -> testSubtitle(301 + index, "source") }
+        val content = """
+            start
+            301
+            ${expected[0].getTimeAxisSRT()}
+            字幕301
+
+            302
+            ${expected[1].getTimeAxisSRT()}
+            字幕302
+
+            303
+            ${expected[2].getTimeAxisSRT()}
+            字幕
+        """.trimIndent()
+
+        assertEquals(
+            listOf("字幕301", "字幕302"),
+            parseCompletedTimedTranslationPrefix(content, expected)
         )
     }
 

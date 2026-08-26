@@ -52,16 +52,18 @@ private fun wrapTranslationBlock(content: String): String = buildString {
 internal fun buildTimedSubtitleContent(
     subtitles: List<SubtitleEntry>,
     startPosition: Int = 1
-): String = subtitles.mapIndexed { offset, subtitle ->
-    val sequence = subtitle.index.takeIf { it > 0 } ?: (startPosition + offset)
-    wrapTranslationBlock(buildString {
-        append(sequence)
-        append('\n')
-        append(subtitle.getTimeAxisSRT())
-        append('\n')
-        append(normalizeSubtitleText(subtitle.text))
-    })
-}.joinToString("\n\n")
+): String = wrapTranslationBlock(
+    subtitles.mapIndexed { offset, subtitle ->
+        val sequence = subtitle.index.takeIf { it > 0 } ?: (startPosition + offset)
+        buildString {
+            append(sequence)
+            append('\n')
+            append(subtitle.getTimeAxisSRT())
+            append('\n')
+            append(normalizeSubtitleText(subtitle.text))
+        }
+    }.joinToString("\n\n")
+)
 
 internal fun buildTranslationUserContent(
     subtitles: List<SubtitleEntry>,
@@ -79,36 +81,40 @@ internal fun buildSubtitleTranslationContent(
     format: SubtitleFormat,
     startPosition: Int = 1
 ): String = when (format) {
-    SubtitleFormat.LRC -> subtitles.mapIndexed { offset, subtitle ->
-        val sequence = subtitle.index.takeIf { it > 0 } ?: (startPosition + offset)
-        wrapTranslationBlock(buildString {
-            append(sequence)
-            append('\n')
-            append(TimeUtils.formatLRC(subtitle.startTime))
-            append(normalizeSubtitleText(subtitle.text))
-        })
-    }.joinToString("\n\n")
-
-    SubtitleFormat.VTT -> subtitles.mapIndexed { offset, subtitle ->
-        val sequence = subtitle.index.takeIf { it > 0 } ?: (startPosition + offset)
-        wrapTranslationBlock(buildString {
-            append(sequence)
-            append('\n')
-            if (subtitle.cueIdentifier.isNotBlank()) {
-                append(subtitle.cueIdentifier.trim())
+    SubtitleFormat.LRC -> wrapTranslationBlock(
+        subtitles.mapIndexed { offset, subtitle ->
+            val sequence = subtitle.index.takeIf { it > 0 } ?: (startPosition + offset)
+            buildString {
+                append(sequence)
                 append('\n')
+                append(TimeUtils.formatLRC(subtitle.startTime))
+                append(normalizeSubtitleText(subtitle.text))
             }
-            append(formatVttTimestamp(subtitle.startTime))
-            append(" --> ")
-            append(formatVttTimestamp(subtitle.endTime))
-            if (subtitle.cueSettings.isNotBlank()) {
-                append(' ')
-                append(subtitle.cueSettings.trim())
+        }.joinToString("\n\n")
+    )
+
+    SubtitleFormat.VTT -> wrapTranslationBlock(
+        subtitles.mapIndexed { offset, subtitle ->
+            val sequence = subtitle.index.takeIf { it > 0 } ?: (startPosition + offset)
+            buildString {
+                append(sequence)
+                append('\n')
+                if (subtitle.cueIdentifier.isNotBlank()) {
+                    append(subtitle.cueIdentifier.trim())
+                    append('\n')
+                }
+                append(formatVttTimestamp(subtitle.startTime))
+                append(" --> ")
+                append(formatVttTimestamp(subtitle.endTime))
+                if (subtitle.cueSettings.isNotBlank()) {
+                    append(' ')
+                    append(subtitle.cueSettings.trim())
+                }
+                append('\n')
+                append(normalizeSubtitleText(subtitle.text))
             }
-            append('\n')
-            append(normalizeSubtitleText(subtitle.text))
-        })
-    }.joinToString("\n\n")
+        }.joinToString("\n\n")
+    )
 
     else -> buildTimedSubtitleContent(subtitles, startPosition)
 }
@@ -418,11 +424,11 @@ internal fun parseCompletedTimedTranslationPrefix(
     val expectedKeys = expectedSubtitles.map(SubtitleEntry::translationTimeRange)
     val expectedKeySet = expectedKeys.toSet()
     val extractedBlocks = extractTimedSubtitleBlocks(content)
-    val completedBlocks = (if (markedTranslationContent(content) != null) {
+    val completedBlocks = if (hasCompleteTranslationBlock(content)) {
         extractedBlocks
     } else {
         extractedBlocks.dropLast(1)
-    })
+    }
         .filter { it.timeRange in expectedKeySet }
     val translationsByTime = completedBlocks.groupByTo(
         destination = mutableMapOf(),
@@ -453,11 +459,11 @@ internal fun parseCompletedIndexedTranslationPrefix(
         )
     }
     val extractedBlocks = extractIndexedSubtitleBlocks(content, format)
-    val completedBlocks = (if (markedTranslationContent(content) != null) {
+    val completedBlocks = if (hasCompleteTranslationBlock(content)) {
         extractedBlocks
     } else {
         extractedBlocks.dropLast(1)
-    })
+    }
         .filter { block ->
             val expected = expectedKeys.firstOrNull { it.sequence == block.sequence } ?: return@filter false
             block.startTimeMs == expected.startTimeMs &&
@@ -506,16 +512,20 @@ private fun extractTimedSubtitleBlocks(content: String): List<TimedSubtitleBlock
 
 /**
  * Returns only complete protocol blocks when the response contains the block markers.
- * A null result means the response uses the legacy unmarked format and should use the
- * existing parser. An empty result means markers were started but no complete block arrived.
+ * A null result means the response uses the legacy format or a stream whose final `end`
+ * marker has not arrived yet; those responses use the existing prefix parser.
  */
 private fun markedTranslationContent(content: String): String? {
     val normalized = normalizeSubtitleText(content)
     if (!TRANSLATION_BLOCK_START_LINE.containsMatchIn(normalized)) return null
-    return MARKED_TRANSLATION_BLOCK.findAll(normalized)
+    val completeBlocks = MARKED_TRANSLATION_BLOCK.findAll(normalized)
         .map { it.groupValues[1].trim('\n', '\r') }
-        .joinToString("\n\n")
+        .toList()
+    return completeBlocks.takeIf { it.isNotEmpty() }?.joinToString("\n\n")
 }
+
+private fun hasCompleteTranslationBlock(content: String): Boolean =
+    MARKED_TRANSLATION_BLOCK.containsMatchIn(normalizeSubtitleText(content))
 
 private fun limitToSrtCodeBlock(content: String): String {
     val timeStart = TIMED_SUBTITLE_LINE.find(content)?.range?.first ?: return content

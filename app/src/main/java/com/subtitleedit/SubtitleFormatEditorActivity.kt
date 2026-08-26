@@ -115,7 +115,7 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
                 }
                 val items = entries.mapIndexed { index, entry ->
                     SubtitleFormatPreviewItem(index, entry.text)
-                }
+                }.toMutableList()
                 adapter = SubtitleFormatPreviewAdapter(items) { item, position ->
                     showTextEditDialog(item, position)
                 }
@@ -237,20 +237,40 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
         binding.btnApplyFormat.isEnabled = false
         formattingJob = lifecycleScope.launch {
             try {
-                val changed = withContext(Dispatchers.Default) {
-                    var count = 0
-                    selected.forEach { item ->
-                        val formatted = SubtitleTextFormatter.format(item.text, options)
-                        if (formatted != item.text) {
-                            item.text = formatted
-                            count++
-                        }
+                val formattedTexts = withContext(Dispatchers.Default) {
+                    selected.associate { item ->
+                        item.entryPosition to SubtitleTextFormatter.format(item.text, options)
                     }
-                    count
+                }
+                var changed = 0
+                var removed = 0
+                val iterator = adapter.items.listIterator()
+                while (iterator.hasNext()) {
+                    val item = iterator.next()
+                    val formatted = formattedTexts[item.entryPosition] ?: continue
+                    if (formatted == item.text) continue
+
+                    changed++
+                    if (formatted.isBlank()) {
+                        iterator.remove()
+                        removed++
+                    } else {
+                        item.text = formatted
+                    }
                 }
                 adapter.notifyDataSetChanged()
                 hasChanges = hasChanges || changed > 0
-                OverwritingToast.makeText(this@SubtitleFormatEditorActivity, "已格式化 $changed 条字幕", Toast.LENGTH_SHORT).show()
+                binding.tvFileInfo.text = "$fileName · ${adapter.items.size} 行 · ${format.name}"
+                val message = if (removed > 0) {
+                    "已格式化 $changed 条字幕，删除 $removed 条空字幕"
+                } else {
+                    "已格式化 $changed 条字幕"
+                }
+                OverwritingToast.makeText(
+                    this@SubtitleFormatEditorActivity,
+                    message,
+                    Toast.LENGTH_SHORT
+                ).show()
             } finally {
                 binding.btnApplyFormat.isEnabled = true
             }
@@ -348,8 +368,8 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
     private fun saveToSource() {
         if (!::adapter.isInitialized || entries.isEmpty()) return
         try {
-            val outputEntries = entries.mapIndexed { index, entry ->
-                entry.copy(text = adapter.items[index].text)
+            val outputEntries = adapter.items.mapIndexed { index, item ->
+                entries[item.entryPosition].copy(index = index + 1, text = item.text)
             }
             val content = when (format) {
                 SubtitleParser.SubtitleFormat.SRT -> SubtitleParser.toSRT(outputEntries)
@@ -370,6 +390,7 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
                 it.flush()
             } ?: throw IllegalStateException("无法打开原文件进行写入")
             entries = outputEntries
+            adapter.items.forEachIndexed { index, item -> item.entryPosition = index }
             hasChanges = false
             OverwritingToast.makeText(this, "已保存到 $fileName", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
