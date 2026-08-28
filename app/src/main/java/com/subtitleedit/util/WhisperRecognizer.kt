@@ -601,8 +601,10 @@ class WhisperRecognizer(
                             sampleCount = recognitionWindow.sampleCount
                         )
 
+                        // 段级模型（SenseVoice/Parakeet）没有逐 token 时间戳，临时使用
+                        // padding 后的时间范围；识别完成后再裁回原始 VAD 段。
                         val segmentResultTimeRange = if (usesSegmentLevelResult()) {
-                            SegmentTimeRange(vadSegment.startTime, vadSegment.endTime)
+                            SegmentTimeRange(recognitionStartTimeMs, recognitionEndTimeMs)
                         } else {
                             null
                         }
@@ -611,12 +613,8 @@ class WhisperRecognizer(
                             startTimeMs = recognitionStartTimeMs,
                             segmentResultTimeRange = segmentResultTimeRange
                         )
-                        val segments = if (segmentResultTimeRange == null) {
-                            // 先以 padding 后窗口为原点换算 token 时间，再回收至原始 VAD 时间轴。
-                            constrainToVadRange(recognizedSegments, vadSegment)
-                        } else {
-                            recognizedSegments
-                        }
+                        // 将扩展窗口的识别结果裁回原始 VAD 时间轴，padding 不会出现在输出字幕中。
+                        val segments = constrainToVadRange(recognizedSegments, vadSegment)
                         allSegments.addAll(segments)
 
                         // 实时返回识别结果
@@ -1008,16 +1006,20 @@ class WhisperRecognizer(
                             "${(recognitionWindow.startSample + recognitionWindow.sampleCount) * 1000L / SAMPLE_RATE}ms"
                     )
                     val recognitionStartMs = recognitionWindow.startSample * 1000L / SAMPLE_RATE
+                    val recognitionEndMs =
+                        (recognitionWindow.startSample + recognitionWindow.sampleCount) *
+                            1000L / SAMPLE_RATE
                     val text = if (recognitionWindow.sampleCount > 0) {
                         constrainToTimeRange(
                             recognizedSegments = recognizeSegment(
+                                // 快速转录也直接识别 padding 后的连续时间范围。
                                 reader.readRange(
                                     recognitionWindow.startSample,
                                     recognitionWindow.sampleCount
                                 ),
                                 recognitionStartMs,
                                 segmentResultTimeRange = if (usesSegmentLevelResult()) {
-                                    SegmentTimeRange(startMs, endMs)
+                                    SegmentTimeRange(recognitionStartMs, recognitionEndMs)
                                 } else {
                                     null
                                 }
