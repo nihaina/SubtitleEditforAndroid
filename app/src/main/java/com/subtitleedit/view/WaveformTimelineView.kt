@@ -1458,6 +1458,22 @@ class WaveformTimelineView @JvmOverloads constructor(
         post { invalidate() }
     }
 
+    /** Refresh subtitle data without dropping the block currently selected on the timeline. */
+    fun setSubtitlesPreserveSelection(list: List<SubtitleEntry>) {
+        val previousSelection = selectedIndices
+        val previousLimitedPlayback = limitedPlaybackIndex
+        subtitles = list.toMutableList()
+        selectedIndices = selectedIndices.filter { it in subtitles.indices }.toSet()
+        limitedPlaybackIndex = limitedPlaybackIndex?.takeIf { it in subtitles.indices }
+        if (previousLimitedPlayback != null && limitedPlaybackIndex == null) {
+            onLimitedPlaybackRangeChange?.invoke(null)
+        }
+        if (selectedIndices != previousSelection || limitedPlaybackIndex != previousLimitedPlayback) {
+            onSelectedIndicesChangeListener?.invoke(selectedIndices)
+        }
+        post { invalidate() }
+    }
+
     fun setSubtitlesKeepSelection(list: List<SubtitleEntry>, insertedAt: Int) {
         subtitles = list.toMutableList()
         // 插入位置在选中索引之前或等于时，选中索引 +1

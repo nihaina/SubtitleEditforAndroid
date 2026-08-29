@@ -17,7 +17,7 @@ import kotlin.math.roundToInt
  * - RecyclerView 有公开的 stopScroll()，无需反射
  * - RecyclerView 的 onDraw canvas 是视口坐标系，无需加 scrollY 补偿
  */
-class DraggableRecyclerView @JvmOverloads constructor(
+open class DraggableRecyclerView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0
@@ -179,6 +179,15 @@ class DraggableRecyclerView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+    }
+
+    /** Draw after RecyclerView children so full-width rows cannot cover the thumb. */
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
+        drawThumb(canvas)
+    }
+
+    private fun drawThumb(canvas: Canvas) {
         if (thumbAlpha <= 0) return
 
         val scrollRange  = computeVerticalScrollRange()

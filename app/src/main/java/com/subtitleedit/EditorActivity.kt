@@ -410,6 +410,9 @@ class EditorActivity : AppCompatActivity() {
                 hasUnsavedChanges = true
                 sourceViewHasPendingEdits = true
                 sourceViewEditGeneration++
+                // SourceEditorView keeps one editable block per physical line. The debounced
+                // preview performs the full-text snapshot only when parsing is needed.
+                updateFormatInfo()
                 scheduleSourceViewPreview()
             }
         }
@@ -644,10 +647,7 @@ class EditorActivity : AppCompatActivity() {
         )
     }
 
-    /**
-     * 源码视图也保持 mpv 预览，但不在每次键入时复制完整 Editable。
-     * 防抖后只有最新文本会进入后台转换/写入流程。
-     */
+    /** 源码视图也保持 mpv 预览；防抖后只有最新文本会进入后台解析流程。 */
     private fun scheduleSourceViewPreview() {
         sourceViewPreviewJob?.cancel()
         val editGeneration = sourceViewEditGeneration
@@ -668,11 +668,10 @@ class EditorActivity : AppCompatActivity() {
 
             // 源视图编辑也必须更新波形字幕块。解析失败时保留上一次有效条目，
             // 避免用户输入时间轴中间态时字幕块瞬间全部消失。
-            val canApplyEntries = parsedDocument.entries.isNotEmpty() || sourceSnapshot.isBlank()
-            if (canApplyEntries) {
-                replaceSubtitleEntries(parsedDocument.entries)
-                syncWaveformSubtitles()
-            }
+            val canApplyEntries = parsedDocument.entries.isNotEmpty() ||
+                sourceSnapshot.isBlank() ||
+                !sourceContainsSubtitleMarker(sourceSnapshot)
+            if (canApplyEntries) applySourceViewEntries(parsedDocument.entries)
 
             if (mediaType == EditorMediaType.VIDEO && ::subtitlePreviewController.isInitialized) {
                 subtitlePreviewController.schedule(
@@ -685,12 +684,12 @@ class EditorActivity : AppCompatActivity() {
         }
     }
 
-    /** 将波形拖动后的时间字段回写源视图，避免每次 MOVE 都触发全文 setText。 */
+    /** 将波形拖动后的时间字段回写源视图，避免每次 MOVE 都触发逐行重建。 */
     private fun scheduleSourceViewWaveformSync(updatedSubtitles: List<SubtitleEntry>) {
         sourceViewWaveformSyncJob?.cancel()
         val sourceSyncInFlight = sourceViewHasPendingEdits || sourceViewPreviewJob?.isActive == true
         val sourceContentSnapshot = if (sourceViewHasPendingEdits) {
-            // 先提交编辑器窗口，确保波形时间回写时不会覆盖尚未进入 sourceViewContent 的文本修改。
+            // 先提交当前行块，确保波形时间回写时不会覆盖尚未进入 sourceViewContent 的文本修改。
             snapshotSourceViewContentIfNeeded()
         } else {
             sourceViewContent
@@ -732,6 +731,7 @@ class EditorActivity : AppCompatActivity() {
             sourceViewHasPendingEdits = false
             sourceViewEditGeneration++
             setSourceViewEditorText(updatedSource, preserveScroll = true)
+            updateFormatInfo()
             scheduleSubtitlePreview()
         }
     }
@@ -792,7 +792,7 @@ class EditorActivity : AppCompatActivity() {
             val wasUnsaved = hasUnsavedChanges
             configureSourceViewEditor(sourceViewContent)
             hasUnsavedChanges = wasUnsaved
-            binding.etSourceView.post { binding.etSourceView.scrollTo(0, savedScrollPosition) }
+            binding.etSourceView.post { binding.etSourceView.scrollToDocumentY(savedScrollPosition) }
         } else {
             binding.sourceViewContainer.visibility = View.GONE
             binding.rvSubtitles.visibility = View.VISIBLE
@@ -900,6 +900,11 @@ class EditorActivity : AppCompatActivity() {
         originalFileContent = content
         
         if (currentFormat.isSourceOnly) {
+            // Source-only documents still need a block model for waveform playback and for
+            // keeping source rows aligned with the list view.  The source editor displays
+            // the untouched full text, while these parsed entries provide the corresponding
+            // subtitle blocks.
+            replaceSubtitleEntries(document.entries)
             sourceViewContent = originalFileContent
             enterSourceViewMode()
         } else {
@@ -954,7 +959,7 @@ class EditorActivity : AppCompatActivity() {
                 savedFirstVisibleItemPosition < sourceViewEntryCount
             ) {
                 val estimatedScroll = savedFirstVisibleItemPosition * 80 - savedScrollPosition
-                binding.etSourceView.scrollTo(0, estimatedScroll.coerceAtLeast(0))
+                binding.etSourceView.scrollToDocumentY(estimatedScroll.coerceAtLeast(0))
             }
             onFinished?.invoke()
         }
@@ -962,7 +967,7 @@ class EditorActivity : AppCompatActivity() {
         updateSourceViewMenuTitle()
     }
     
-    /** 退出源码视图。源码 Editable 已由调用方先清空，避免它与列表同时存在。 */
+    /** 退出源码视图。源行 RecyclerView 已由调用方先禁用，避免它与列表同时编辑。 */
     private fun exitSourceViewMode(
         sourceScrollPosition: Int? = null,
         onFinished: (() -> Unit)? = null
@@ -971,7 +976,7 @@ class EditorActivity : AppCompatActivity() {
         if (::searchController.isInitialized) searchController.clearSourceWorkForTransition()
         
         // 保存 ScrollView 的滚动位置
-        savedScrollPosition = sourceScrollPosition ?: binding.etSourceView.scrollY
+        savedScrollPosition = sourceScrollPosition ?: binding.etSourceView.getDocumentScrollOffset()
         
         // 刷新字幕列表
         submitSubtitleList(
@@ -1093,10 +1098,10 @@ class EditorActivity : AppCompatActivity() {
     private fun doExitSourceView() {
         if (sourceViewTransitionJob?.isActive == true) return
         sourceViewWaveformSyncJob?.cancel()
-        val sourceScrollPosition = binding.etSourceView.scrollY
+        val sourceScrollPosition = binding.etSourceView.getDocumentScrollOffset()
         val editedContent = snapshotSourceViewContentIfNeeded()
         val changedFromSavedContent = editedContent != originalFileContent
-        // 先清空 Editable，再在后台构建条目列表，避免大文件切换时两份完整文本并存。
+        // 先禁用源行编辑，再在后台构建字幕条目列表，避免切换期间两套编辑状态并存。
         binding.etSourceView.setDocumentEnabled(false)
         setSourceViewEditorText("")
         showShortToast("正在解析字幕…")
@@ -1152,9 +1157,11 @@ class EditorActivity : AppCompatActivity() {
     /** 搜索替换直接重写完整源码内容。 */
     private fun replaceSourceViewContent(content: String) {
         setSourceViewEditorText(content)
+        sourceViewContent = content
         hasUnsavedChanges = true
         sourceViewHasPendingEdits = true
         sourceViewEditGeneration++
+        updateFormatInfo()
         scheduleSourceViewPreview()
     }
 
@@ -1729,8 +1736,12 @@ class EditorActivity : AppCompatActivity() {
         }
     }
 
-    private fun syncWaveformSubtitles() {
-        waveformController.setSubtitles(subtitleEntries.toList())
+    private fun syncWaveformSubtitles(preserveSelection: Boolean = false) {
+        if (preserveSelection) {
+            waveformController.setSubtitlesPreserveSelection(subtitleEntries.toList())
+        } else {
+            waveformController.setSubtitles(subtitleEntries.toList())
+        }
     }
 
     private fun setWaveformSubtitlesKeepSelection(selectedIndex: Int) {
@@ -2230,6 +2241,69 @@ class EditorActivity : AppCompatActivity() {
         renumberEntries(force = true)
     }
 
+    /**
+     * Apply a parsed source document while preserving the list view's row objects whenever
+     * the number of subtitle blocks is unchanged.  Waveform and list-view consumers can then
+     * keep their existing block references, and only affected rows (plus their neighbours)
+     * are rebound.  A size change still replaces the list in one operation because every row
+     * after the edit has a new index.
+     */
+    private fun applySourceViewEntries(updatedEntries: List<SubtitleEntry>) {
+        if (subtitleEntries.size != updatedEntries.size) {
+            replaceSubtitleEntries(updatedEntries)
+            syncWaveformSubtitles()
+            return
+        }
+
+        val changedPositions = updatedEntries.indices.filter { position ->
+            subtitleEntries[position] != updatedEntries[position]
+        }
+        changedPositions.forEach { position ->
+            val target = subtitleEntries[position]
+            val source = updatedEntries[position]
+            target.index = source.index
+            target.startTime = source.startTime
+            target.endTime = source.endTime
+            target.text = source.text
+            target.endTimeModified = source.endTimeModified
+            target.cueIdentifier = source.cueIdentifier
+            target.cueSettings = source.cueSettings
+        }
+        renumberEntries(force = true)
+
+        if (changedPositions.isEmpty()) {
+            syncWaveformSubtitles(preserveSelection = true)
+        } else if (::subtitleAdapter.isInitialized && subtitleAdapter.itemCount == subtitleEntries.size) {
+            // Reuse the same payload/neighbour refresh path as list-view edits.  The
+            // RecyclerView is hidden in source mode, but retaining its row references keeps
+            // the two editing modes consistent when the user switches back.
+            notifyEntriesChanged(
+                changedPositions,
+                includeNeighbors = true,
+                syncWaveform = false,
+                markChanged = false
+            )
+            syncWaveformSubtitles(preserveSelection = true)
+        } else {
+            syncWaveformSubtitles(preserveSelection = true)
+        }
+    }
+
+    /**
+     * Distinguish an empty-but-valid source document from a temporarily malformed cue.  Once
+     * the last timing marker has actually been removed, the old waveform blocks must be
+     * cleared; while a marker is still present we keep them until parsing succeeds.
+     */
+    private fun sourceContainsSubtitleMarker(content: String): Boolean {
+        return when (currentFormat) {
+            SubtitleParser.SubtitleFormat.SRT,
+            SubtitleParser.SubtitleFormat.VTT -> content.contains("-->")
+            SubtitleParser.SubtitleFormat.LRC -> Regex("\\[-?\\d{1,4}[:.]\\d{1,2}").containsMatchIn(content)
+            SubtitleParser.SubtitleFormat.TXT -> content.isNotBlank()
+            else -> true
+        }
+    }
+
     private fun clearSubtitleEntries() {
         subtitleEntries.clear()
         renumberEntries(force = true)
@@ -2238,7 +2312,13 @@ class EditorActivity : AppCompatActivity() {
     private fun updateFormatInfo() {
         val formatName = getFormatDisplayName(currentFormat)
         val countInfo = if (isSourceViewMode) {
-            val lines = if (sourceViewContent.isEmpty()) 0 else sourceViewContent.count { it == '\n' } + 1
+            val lines = if (::binding.isInitialized) {
+                binding.etSourceView.getDocumentLineCount()
+            } else if (sourceViewContent.isEmpty()) {
+                0
+            } else {
+                sourceViewContent.count { it == '\n' } + 1
+            }
             "行数：$lines"
         } else {
             "条目数：${subtitleEntries.size}"
@@ -2464,8 +2544,8 @@ class EditorActivity : AppCompatActivity() {
     }
     
     override fun onStop() {
-        // 防抖预览尚未来得及执行时，旋转/切后台会销毁 Editable；在这里一次性提交当前
-        // 源码编辑，避免丢失未刷新的内容。
+        // 防抖预览尚未来得及执行时，旋转/切后台可能回收源行 ViewHolder；在这里一次性
+        // 提交当前源文档，避免丢失尚未刷新的内容。
         if (isSourceViewMode && sourceViewHasPendingEdits) {
             snapshotSourceViewContentIfNeeded()
         }
@@ -2477,7 +2557,7 @@ class EditorActivity : AppCompatActivity() {
         if (::subtitleAdapter.isInitialized) {
             stateModel.selectedIndices = subtitleAdapter.getSelectedPositions()
             if (isSourceViewMode) {
-                savedScrollPosition = binding.etSourceView.scrollY
+                savedScrollPosition = binding.etSourceView.getDocumentScrollOffset()
             } else {
                 val layoutManager = binding.rvSubtitles.layoutManager as? LinearLayoutManager
                 val position = layoutManager?.findFirstVisibleItemPosition() ?: -1

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/surface"
+    android:gravity="center_vertical"
+    android:minHeight="28dp"
+    android:orientation="horizontal">
+
+    <TextView
+        android:id="@+id/tvSourceLineNumber"
+        android:layout_width="56dp"
+        android:layout_height="match_parent"
+        android:background="@color/source_gutter_background"
+        android:fontFamily="monospace"
+        android:gravity="end|center_vertical"
+        android:minHeight="28dp"
+        android:paddingStart="4dp"
+        android:paddingEnd="8dp"
+        android:textColor="@color/source_gutter_text"
+        android:textSize="12sp"
+        tools:text="128" />
+
+    <View
+        android:layout_width="1dp"
+        android:layout_height="match_parent"
+        android:background="@color/source_gutter_divider" />
+
+    <com.subtitleedit.view.SourceLineEditText
+        android:id="@+id/etSourceLine"
+        android:layout_width="0dp"
+        android:layout_height="28dp"
+        android:layout_weight="1"
+        android:background="@null"
+        android:fontFamily="monospace"
+        android:gravity="center_vertical|start"
+        android:includeFontPadding="false"
+        android:inputType="textMultiLine|textNoSuggestions"
+        android:maxLines="1"
+        android:paddingStart="12dp"
+        android:paddingTop="0dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="0dp"
+        android:scrollHorizontally="true"
+        android:textColor="@color/on_surface"
+        android:textSize="14sp"
+        tools:text="00:00:01,000 --&gt; 00:00:03,000" />
+
+</LinearLayout>

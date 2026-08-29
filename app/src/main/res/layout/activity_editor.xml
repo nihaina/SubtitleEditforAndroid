@@ -640,7 +640,7 @@
             android:padding="8dp"
             tools:listitem="@layout/item_subtitle" />
 
-        <!-- 源视图完整保存文档，仅为可见行挂载 EditText，避免全文布局压力。 -->
+        <!-- 源视图按物理文本行复用列表式 RecyclerView 块，空行也保留。 -->
         <FrameLayout
             android:id="@+id/sourceViewContainer"
             android:layout_width="match_parent"

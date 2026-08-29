@@ -16,4 +16,8 @@
     <color name="inverse_primary">#1976D2</color>
     <color name="playing_highlight">#3E3A00</color>
     <color name="waveform_toolbar_bg">#1E1E1E</color>
+    <color name="source_gutter_background">#25262B</color>
+    <color name="source_gutter_text">#9B9DA8</color>
+    <color name="source_gutter_divider">#3B3D45</color>
+    <color name="source_current_line">#2B3542</color>
 </resources>

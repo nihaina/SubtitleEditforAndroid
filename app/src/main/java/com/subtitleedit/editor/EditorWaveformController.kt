@@ -254,6 +254,11 @@ internal class EditorWaveformController(
         binding.waveformTimelineView.setSubtitles(subtitles)
     }
 
+    fun setSubtitlesPreserveSelection(subtitles: List<SubtitleEntry>) {
+        if (!hasPlayableMedia) return
+        binding.waveformTimelineView.setSubtitlesPreserveSelection(subtitles)
+    }
+
     fun setSubtitlesKeepSelection(subtitles: List<SubtitleEntry>, selectedIndex: Int) {
         if (!hasPlayableMedia) return
         binding.waveformTimelineView.setSubtitlesKeepSelection(subtitles, selectedIndex)

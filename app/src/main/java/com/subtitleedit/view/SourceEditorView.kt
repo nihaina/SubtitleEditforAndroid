@@ -1,405 +1,539 @@
 package com.subtitleedit.view
 
 import android.content.Context
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Rect
-import android.graphics.RectF
-import android.graphics.Typeface
-import android.text.Editable
-import android.text.InputType
-import android.text.TextWatcher
-import android.text.style.BackgroundColorSpan
 import android.util.AttributeSet
-import android.view.Gravity
-import android.view.View
-import android.widget.EditText
-import android.widget.FrameLayout
+import androidx.recyclerview.widget.LinearLayoutManager
 import com.subtitleedit.R
-import kotlin.math.ceil
-import kotlin.math.max
-import kotlin.math.min
 
 /**
- * 虚拟化源码编辑器。
+ * Source editor backed by the same block/list lifecycle as the subtitle list.
  *
- * 文档字符串和行索引完整保存在内存中，但 EditText 只承载视口附近的窗口。
- * 其余行直接由 Canvas 绘制，避免 Android 为整份字幕建立 DynamicLayout 和巨型
- * View 高度。窗口滚动到边界时，当前窗口先提交回文档，再换绑新的可见窗口。
+ * A subtitle-list item represents one parsed cue; a source-list item represents one physical
+ * source line. Empty lines and the empty line after a trailing line ending are real items.
+ * RecyclerView owns viewport rendering/recycling, while line split/merge operations use the
+ * same item changed/inserted/removed notifications as list-view edits.
  */
 class SourceEditorView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0
-) : DraggableScrollView(context, attrs, defStyleAttr) {
-
-    private companion object {
-        // 参考 Subtitle Edit 的可视行缓存：窗口足够大时，快速拖动不会频繁重绑 EditText。
-        const val MIN_WINDOW_LINES = 512
-        const val MIN_WINDOW_MARGIN_LINES = 128
-    }
+) : DraggableRecyclerView(context, attrs, defStyleAttr) {
 
     data class Highlight(val start: Int, val end: Int, val current: Boolean = false)
 
-    private val documentView = DocumentView(context)
-    private val editor = EditText(context)
-    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    data class DocumentChange(
+        val startLine: Int,
+        val oldLineCount: Int,
+        val newLineCount: Int,
+        val startOffset: Int,
+        val oldEndOffset: Int,
+        val newEndOffset: Int
+    )
+
+    private val lineLayoutManager = LinearLayoutManager(context)
+    private val lines = mutableListOf<SourceLineBlock>()
+    private val offsets = LineOffsets()
     private val highlights = mutableListOf<Highlight>()
-    private var documentText = ""
-    private var lineStarts = intArrayOf(0)
-    private var windowStartLine = 0
-    private var windowEndLine = 0
-    private var cursorDocumentOffset = 0
-    private var bindingWindow = false
-    private var windowRebindPosted = false
-    private var pendingWindowStartLine = -1
-    private var pendingWindowEndLine = -1
     private val documentChangedListeners = mutableListOf<() -> Unit>()
-    private var lineHeight = 0
-    private var baselineOffset = 0f
-    private var horizontalInset = 12f
-    private var verticalInset = 12f
+    private val documentChangeListeners = mutableListOf<(DocumentChange) -> Unit>()
+    private var nextLineId = 1L
+    private var preferredLineEnding = "\n"
+
+    private val lineAdapter = SourceLineAdapter(
+        lines = lines,
+        onTextChanged = ::onLineTextChanged,
+        onSplitLine = ::splitLineAt,
+        onMergePrevious = ::mergeWithPrevious,
+        onMergeNext = ::mergeWithNext,
+        onMoveVertical = ::moveCursorVertically,
+        highlightsForLine = ::highlightsForLine
+    )
 
     init {
-        isFillViewport = true
-        overScrollMode = OVER_SCROLL_ALWAYS
-        setBackgroundColor(Color.TRANSPARENT)
+        setBackgroundColor(context.getColor(R.color.surface))
+        layoutManager = lineLayoutManager
+        adapter = lineAdapter
+        setHasFixedSize(true)
+        setItemViewCacheSize(12)
         clipToPadding = false
-        // 使用 DraggableScrollView 自绘滚动条，避免系统滚动条在大内容上被裁剪或淡出过快。
-        isVerticalScrollBarEnabled = false
-        textPaint.typeface = Typeface.MONOSPACE
-        textPaint.color = context.getColor(R.color.on_surface)
-        textPaint.textSize = resources.getDimension(R.dimen.editor_source_text_size)
-        linePaint.style = Paint.Style.FILL
-        val metrics = textPaint.fontMetrics
-        lineHeight = ceil(metrics.descent - metrics.ascent + resources.displayMetrics.density * 4f).toInt()
-            .coerceAtLeast((resources.displayMetrics.density * 20f).toInt())
-        baselineOffset = -metrics.ascent
-        horizontalInset = resources.displayMetrics.density * 12f
-        verticalInset = resources.displayMetrics.density * 12f
-
-        documentView.setWillNotDraw(false)
-        addView(documentView, LayoutParams(LayoutParams.MATCH_PARENT, 1))
-        editor.apply {
-            background = null
-            gravity = Gravity.TOP or Gravity.START
-            includeFontPadding = false
-            setPadding(horizontalInset.toInt(), 0, horizontalInset.toInt(), 0)
-            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, textPaint.textSize)
-            setLineSpacing(
-                (lineHeight - (textPaint.fontMetrics.descent - textPaint.fontMetrics.ascent)).coerceAtLeast(0f),
-                1f
-            )
-            typeface = Typeface.MONOSPACE
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
-                InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            isSingleLine = false
-            setHorizontallyScrolling(true)
-            isScrollContainer = false
-            isSaveEnabled = false
-            // Window rebinding changes the editor text/selection while the parent is flinging.
-            // Do not let focus handling ask ScrollView to reveal the transient selection.
-            setRevealOnFocusHint(false)
-            setTextColor(textPaint.color)
-            setHintTextColor(textPaint.color)
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
-                override fun afterTextChanged(s: Editable?) {
-                    if (!bindingWindow) commitWindowText(s?.toString().orEmpty())
-                }
-            })
-        }
-        documentView.addView(editor, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, 1))
-        setOnScrollChangeListener { _, _, scrollY, _, _ ->
-            ensureWindowForViewport(scrollY)
-        }
+        setPadding(
+            (resources.displayMetrics.density * 8f).toInt(),
+            (resources.displayMetrics.density * 8f).toInt(),
+            (resources.displayMetrics.density * 8f).toInt(),
+            (resources.displayMetrics.density * 8f).toInt()
+        )
+        replaceLines("")
     }
 
     fun addOnDocumentChangedListener(listener: () -> Unit) {
         documentChangedListeners += listener
     }
 
-    fun setDocumentText(value: String, preserveScroll: Boolean = false) {
-        val previousScroll = if (preserveScroll) scrollY else 0
-        removeCallbacks(windowRebindRunnable)
-        windowRebindPosted = false
-        commitWindowTextIfNeeded()
-        documentText = value
-        rebuildLineIndex()
-        windowStartLine = 0
-        windowEndLine = 0
-        cursorDocumentOffset = 0
-        scrollTo(0, previousScroll.coerceAtLeast(0))
-        ensureWindowForViewport(previousScroll, force = true)
-        if (preserveScroll) {
-            post {
-                scrollTo(0, previousScroll.coerceIn(0, max(0, computeVerticalScrollRange() - height)))
-            }
-        }
-        invalidate()
+    fun addOnDocumentChangeListener(listener: (DocumentChange) -> Unit) {
+        documentChangeListeners += listener
     }
 
-    fun getDocumentText(): String {
-        commitWindowTextIfNeeded()
-        return documentText
+    fun setDocumentText(value: String, preserveScroll: Boolean = false) {
+        val previousScroll = if (preserveScroll) getDocumentScrollOffset() else 0
+        replaceLines(value)
+        lineAdapter.notifyDataSetChanged()
+        if (preserveScroll) post { scrollToDocumentY(previousScroll) }
+    }
+
+    fun getDocumentText(): String = buildString(offsets.documentLength) {
+        lines.forEach { line ->
+            append(line.text)
+            append(line.lineEnding)
+        }
     }
 
     fun replaceDocumentText(value: String) {
+        val oldLineCount = lines.size
+        val oldLength = offsets.documentLength
         setDocumentText(value)
-        documentChangedListeners.forEach { it.invoke() }
+        notifyDocumentChanged(
+            DocumentChange(
+                startLine = 0,
+                oldLineCount = oldLineCount,
+                newLineCount = lines.size,
+                startOffset = 0,
+                oldEndOffset = oldLength,
+                newEndOffset = value.length
+            )
+        )
     }
 
+    fun getDocumentLineCount(): Int = lines.size
+
     fun setDocumentEnabled(enabled: Boolean) {
-        editor.isEnabled = enabled
         isEnabled = enabled
+        lineAdapter.setEditorEnabled(enabled)
     }
 
     fun setSearchHighlights(ranges: List<Highlight>) {
         highlights.clear()
-        highlights.addAll(ranges)
-        applyWindowHighlights()
-        invalidate()
+        highlights += ranges.sortedBy { it.start }
+        lineAdapter.refreshHighlights()
     }
 
     fun clearSearchHighlights() {
+        if (highlights.isEmpty()) return
         highlights.clear()
-        applyWindowHighlights()
-        invalidate()
+        lineAdapter.refreshHighlights()
     }
 
     fun scrollToDocumentOffset(offset: Int) {
-        commitWindowTextIfNeeded()
-        val safeOffset = offset.coerceIn(0, documentText.length)
-        val line = findLineForOffset(safeOffset)
-        val target = (line * lineHeight - height / 3).coerceAtLeast(0)
-        post { scrollTo(0, target) }
+        val line = offsets.findLine(offset.coerceIn(0, offsets.documentLength))
+        lineLayoutManager.scrollToPositionWithOffset(line, height / 3)
     }
 
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        super.onSizeChanged(w, h, oldw, oldh)
-        ensureWindowForViewport(scrollY, force = true)
+    fun getDocumentScrollOffset(): Int = computeVerticalScrollOffset()
+
+    fun scrollToDocumentY(offset: Int) {
+        val rowHeight = (resources.displayMetrics.density * 28f).toInt().coerceAtLeast(1)
+        val position = (offset / rowHeight).coerceIn(0, lines.lastIndex)
+        lineLayoutManager.scrollToPositionWithOffset(position, -(offset % rowHeight))
     }
 
-    override fun requestChildRectangleOnScreen(
-        child: View,
-        rectangle: Rect,
-        immediate: Boolean
-    ): Boolean {
-        // setText()/setSelection() can request the transient window's cursor rectangle. If
-        // ScrollView honors that request during a fling, it jumps back to the rebind target.
-        return if (bindingWindow) false
-        else super.requestChildRectangleOnScreen(child, rectangle, immediate)
-    }
-
-    private val windowRebindRunnable = Runnable {
-        windowRebindPosted = false
-        val start = pendingWindowStartLine
-        val end = pendingWindowEndLine
-        pendingWindowStartLine = -1
-        pendingWindowEndLine = -1
-        if (start >= 0 && end > start && start != windowStartLine) {
-            bindWindow(start, end)
+    private fun replaceLines(value: String) {
+        val parsed = parsePhysicalLines(value)
+        lines.clear()
+        parsed.forEach { parsedLine ->
+            lines += SourceLineBlock(nextLineId++, parsedLine.first, parsedLine.second)
         }
+        preferredLineEnding = parsed.firstOrNull { it.second.isNotEmpty() }?.second ?: "\n"
+        offsets.reset(lines)
     }
 
-    private fun commitWindowTextIfNeeded() {
-        if (windowEndLine > windowStartLine) commitWindowText(editor.text?.toString().orEmpty(), notify = false)
-    }
-
-    private fun commitWindowText(value: String, notify: Boolean = true) {
-        if (bindingWindow || windowEndLine <= windowStartLine) return
-        val start = lineStart(windowStartLine)
-        val end = lineEnd(windowEndLine)
-        val oldCursor = editor.selectionStart.coerceAtLeast(0)
-        cursorDocumentOffset = (start + oldCursor).coerceIn(start, end)
-        val current = documentText.substring(start, end)
-        if (current == value) return
-        documentText = documentText.substring(0, start) + value + documentText.substring(end)
-        rebuildLineIndex()
-        windowEndLine = min(windowStartLine + value.count { it == '\n' } + 1, lineCount())
-        updateDocumentHeight()
-        if (notify) documentChangedListeners.forEach { it.invoke() }
-        documentView.invalidate()
-    }
-
-    private fun ensureWindowForViewport(scrollPosition: Int, force: Boolean = false) {
-        val count = lineCount()
-        if (count == 0) return
-        val firstVisible = (scrollPosition / lineHeight).coerceIn(0, count - 1)
-        val visibleLines = max(1, ceil(height.toFloat() / lineHeight).toInt())
-        val margin = max(MIN_WINDOW_MARGIN_LINES, visibleLines)
-        if (!force && firstVisible >= windowStartLine + margin && firstVisible + visibleLines <= windowEndLine - margin) {
-            return
-        }
-        val windowSize = max(MIN_WINDOW_LINES, visibleLines + margin * 2)
-        val nextStart = (firstVisible - margin).coerceAtLeast(0)
-        val nextEnd = min(count, nextStart + windowSize)
-        if (force) {
-            bindWindow(nextStart, nextEnd)
-            return
-        }
-        // 滚动回调可能一帧内触发多次，只保留最后一个窗口目标，避免连续 setText/layout。
-        pendingWindowStartLine = nextStart
-        pendingWindowEndLine = nextEnd
-        if (!windowRebindPosted) {
-            windowRebindPosted = true
-            postOnAnimation(windowRebindRunnable)
-        }
-    }
-
-    private fun bindWindow(startLine: Int, endLine: Int) {
-        commitWindowTextIfNeeded()
-        windowStartLine = startLine
-        windowEndLine = endLine
-        val start = lineStart(startLine)
-        val end = lineEnd(endLine)
-        val value = documentText.substring(start, end)
-        bindingWindow = true
-        try {
-            editor.setText(value)
-            val relativeCursor = (cursorDocumentOffset - start).coerceIn(0, value.length)
-            editor.setSelection(relativeCursor)
-            applyWindowHighlights()
-        } finally {
-            bindingWindow = false
-        }
-        updateDocumentHeight()
-        documentView.invalidate()
-    }
-
-    private fun applyWindowHighlights() {
-        val editable = editor.text ?: return
-        editable.getSpans(0, editable.length, BackgroundColorSpan::class.java)
-            .forEach { editable.removeSpan(it) }
-        val start = lineStart(windowStartLine)
-        val end = lineEnd(windowEndLine)
-        highlights.forEach { highlight ->
-            val from = (highlight.start - start).coerceAtLeast(0)
-            val to = (highlight.end - start).coerceAtMost(end - start)
-            if (from < to) {
-                val color = if (highlight.current) context.getColor(R.color.secondary)
-                else context.getColor(R.color.inverse_primary)
-                editable.setSpan(
-                    BackgroundColorSpan(color),
-                    from,
-                    to,
-                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+    private fun onLineTextChanged(position: Int, rawValue: String, cursor: Int) {
+        val line = lines.getOrNull(position) ?: return
+        val normalized = normalizeEditorText(rawValue)
+        if ('\n' !in normalized) {
+            if (line.text == normalized) return
+            val startOffset = offsets.start(position)
+            val oldLength = line.text.length
+            line.text = normalized
+            offsets.update(position, normalized.length - oldLength)
+            notifyDocumentChanged(
+                DocumentChange(
+                    startLine = position,
+                    oldLineCount = 1,
+                    newLineCount = 1,
+                    startOffset = startOffset,
+                    oldEndOffset = startOffset + oldLength,
+                    newEndOffset = startOffset + normalized.length
                 )
-            }
+            )
+            return
         }
-    }
 
-    private fun updateDocumentHeight() {
-        val totalHeight = (verticalInset.toInt().toLong() * 2L + lineCount().toLong() * lineHeight)
-            .coerceIn(1L, Int.MAX_VALUE.toLong() - 1L).toInt()
-        val documentParams = documentView.layoutParams
-        if (documentParams.height != totalHeight) {
-            documentParams.height = totalHeight
-            documentView.layoutParams = documentParams
-        }
-        documentView.minimumHeight = totalHeight
-        val editorTop = verticalInset.toInt() + windowStartLine * lineHeight
-        val editorHeight = max(lineHeight, (windowEndLine - windowStartLine) * lineHeight)
-        val params = editor.layoutParams as FrameLayout.LayoutParams
-        if (params.height != editorHeight) {
-            params.height = editorHeight
-            editor.layoutParams = params
-        }
-        // 窗口换绑只移动编辑器，不改变父容器高度，避免 ScrollView 在 fling 中修正 scrollY。
-        editor.translationY = editorTop.toFloat() - editor.top
-    }
-
-    private fun rebuildLineIndex() {
-        val starts = ArrayList<Int>(max(1, documentText.count { it == '\n' } + 1))
-        starts += 0
-        documentText.forEachIndexed { index, c -> if (c == '\n') starts += index + 1 }
-        lineStarts = starts.toIntArray()
-    }
-
-    private fun lineCount(): Int = lineStarts.size
-
-    private fun lineStart(line: Int): Int = lineStarts[line.coerceIn(0, lineStarts.lastIndex)]
-
-    private fun lineEnd(lineExclusive: Int): Int {
-        if (lineExclusive >= lineStarts.size) return documentText.length
-        return lineStarts[lineExclusive]
-    }
-
-    private fun findLineForOffset(offset: Int): Int {
-        var low = 0
-        var high = lineStarts.lastIndex
-        while (low < high) {
-            val mid = (low + high + 1) ushr 1
-            if (lineStarts[mid] <= offset) low = mid else high = mid - 1
-        }
-        return low
-    }
-
-    private inner class DocumentView(context: Context) : FrameLayout(context) {
-        private val backgroundRect = RectF()
-
-        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-            val width = MeasureSpec.getSize(widthMeasureSpec)
-            val desiredHeight = (verticalInset.toInt().toLong() * 2L + lineCount().toLong() * lineHeight)
-                .coerceIn(1L, Int.MAX_VALUE.toLong() - 1L).toInt()
-            setMeasuredDimension(width, max(desiredHeight, MeasureSpec.getSize(heightMeasureSpec)))
-            val childWidth = max(1, width)
-            val childHeight = max(lineHeight, (windowEndLine - windowStartLine) * lineHeight)
-            editor.measure(
-                MeasureSpec.makeMeasureSpec(childWidth, MeasureSpec.EXACTLY),
-                MeasureSpec.makeMeasureSpec(childHeight, MeasureSpec.EXACTLY)
+        val startOffset = offsets.start(position)
+        val oldTextLength = line.text.length
+        val originalEnding = line.lineEnding
+        val oldSerializedLength = line.serializedLength
+        val parts = splitEditorLines(normalized)
+        line.text = parts.first()
+        line.lineEnding = preferredLineEnding
+        val inserted = parts.drop(1).mapIndexed { index, text ->
+            SourceLineBlock(
+                stableId = nextLineId++,
+                text = text,
+                lineEnding = if (index == parts.lastIndex - 1) originalEnding else preferredLineEnding
             )
         }
+        lines.addAll(position + 1, inserted)
+        offsets.update(position, line.serializedLength - oldSerializedLength)
+        offsets.insert(
+            position + 1,
+            inserted.map { it.serializedLength }
+        )
+        lineAdapter.notifyLineSplit(position, inserted.size)
 
-        override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
-            val editorTop = verticalInset.toInt() + windowStartLine * lineHeight
-            editor.layout(0, 0, right - left, editor.measuredHeight)
-            editor.translationY = editorTop.toFloat()
+        val normalizedCursorPrefix = normalizeEditorText(rawValue.take(cursor.coerceIn(0, rawValue.length)))
+        val targetLineOffset = normalizedCursorPrefix.count { it == '\n' }
+        val targetColumn = normalizedCursorPrefix.substringAfterLast('\n').length
+        requestFocus(position + targetLineOffset, targetColumn)
+        notifyDocumentChanged(
+            DocumentChange(
+                startLine = position,
+                oldLineCount = 1,
+                newLineCount = parts.size,
+                startOffset = startOffset,
+                oldEndOffset = startOffset + oldTextLength + originalEnding.length,
+                newEndOffset = startOffset + normalized.length + originalEnding.length
+            )
+        )
+    }
+
+    /** Handle an Enter key even when the single-row EditText rejects a literal newline. */
+    private fun splitLineAt(position: Int, column: Int): Boolean {
+        val line = lines.getOrNull(position) ?: return false
+        val safeColumn = column.coerceIn(0, line.text.length)
+        val startOffset = offsets.start(position)
+        val oldSerializedLength = line.serializedLength
+        val originalEnding = line.lineEnding
+        val before = line.text.substring(0, safeColumn)
+        val after = line.text.substring(safeColumn)
+        line.text = before
+        line.lineEnding = preferredLineEnding
+        val inserted = SourceLineBlock(nextLineId++, after, originalEnding)
+        lines.add(position + 1, inserted)
+        offsets.update(position, line.serializedLength - oldSerializedLength)
+        offsets.insert(position + 1, listOf(inserted.serializedLength))
+        lineAdapter.notifyLineSplit(position, 1)
+        requestFocus(position + 1, 0)
+        notifyDocumentChanged(
+            DocumentChange(
+                startLine = position,
+                oldLineCount = 1,
+                newLineCount = 2,
+                startOffset = startOffset,
+                oldEndOffset = startOffset + oldSerializedLength,
+                newEndOffset = startOffset + line.serializedLength + inserted.serializedLength
+            )
+        )
+        return true
+    }
+
+    private fun mergeWithPrevious(position: Int): Boolean {
+        if (position <= 0 || position !in lines.indices) return false
+        val previousPosition = position - 1
+        val previous = lines[previousPosition]
+        val current = lines[position]
+        val startOffset = offsets.start(previousPosition)
+        val oldEndOffset = offsets.start(position) + current.text.length
+        val cursor = previous.text.length
+        val oldPreviousLength = previous.serializedLength
+        previous.text += current.text
+        previous.lineEnding = current.lineEnding
+        lines.removeAt(position)
+        offsets.update(previousPosition, previous.serializedLength - oldPreviousLength)
+        offsets.remove(position, 1)
+        lineAdapter.notifyLinesMerged(previousPosition, position)
+        requestFocus(previousPosition, cursor)
+        notifyDocumentChanged(
+            DocumentChange(
+                startLine = previousPosition,
+                oldLineCount = 2,
+                newLineCount = 1,
+                startOffset = startOffset,
+                oldEndOffset = oldEndOffset,
+                newEndOffset = startOffset + previous.serializedLength
+            )
+        )
+        return true
+    }
+
+    private fun mergeWithNext(position: Int): Boolean {
+        if (position !in 0 until lines.lastIndex) return false
+        val current = lines[position]
+        val next = lines[position + 1]
+        val startOffset = offsets.start(position)
+        val oldEndOffset = offsets.start(position + 1) + next.text.length
+        val cursor = current.text.length
+        val oldCurrentLength = current.serializedLength
+        current.text += next.text
+        current.lineEnding = next.lineEnding
+        lines.removeAt(position + 1)
+        offsets.update(position, current.serializedLength - oldCurrentLength)
+        offsets.remove(position + 1, 1)
+        lineAdapter.notifyLinesMerged(position, position + 1)
+        requestFocus(position, cursor)
+        notifyDocumentChanged(
+            DocumentChange(
+                startLine = position,
+                oldLineCount = 2,
+                newLineCount = 1,
+                startOffset = startOffset,
+                oldEndOffset = oldEndOffset,
+                newEndOffset = startOffset + current.serializedLength
+            )
+        )
+        return true
+    }
+
+    private fun moveCursorVertically(position: Int, direction: Int, column: Int): Boolean {
+        val target = position + direction
+        if (target !in lines.indices) return false
+        requestFocus(target, column.coerceAtMost(lines[target].text.length))
+        return true
+    }
+
+    private fun requestFocus(position: Int, column: Int) {
+        scrollToPosition(position)
+        post { lineAdapter.requestLineFocus(position, column) }
+    }
+
+    private fun highlightsForLine(position: Int): List<SourceLineHighlight> {
+        val line = lines.getOrNull(position) ?: return emptyList()
+        if (line.text.isEmpty() || highlights.isEmpty()) return emptyList()
+        val lineStart = offsets.start(position)
+        val lineEnd = lineStart + line.text.length
+        var low = 0
+        var high = highlights.size
+        while (low < high) {
+            val middle = (low + high) ushr 1
+            if (highlights[middle].end <= lineStart) low = middle + 1 else high = middle
         }
-
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            val first = (((canvas.clipBounds.top.toFloat() - verticalInset).coerceAtLeast(0f) / lineHeight)
-                .toInt()).coerceIn(0, lineCount() - 1)
-            val last = (((canvas.clipBounds.bottom.toFloat() - verticalInset).coerceAtLeast(0f) / lineHeight)
-                .toInt() + 1).coerceIn(first, lineCount())
-            for (line in first until last) {
-                val start = lineStart(line)
-                val end = if (line + 1 < lineCount()) lineStart(line + 1) else documentText.length
-                val textEnd = if (end > start && documentText[end - 1] == '\n') end - 1 else end
-                drawHighlights(canvas, start, textEnd, line)
-                if (!(line >= windowStartLine && line < windowEndLine)) {
-                    val value = documentText.substring(start, textEnd)
-                    canvas.drawText(value, horizontalInset, verticalInset + line * lineHeight + baselineOffset, textPaint)
-                }
-            }
-        }
-
-        private fun drawHighlights(canvas: Canvas, lineStartOffset: Int, lineEndOffset: Int, line: Int) {
-            highlights.forEach { highlight ->
-                val start = max(lineStartOffset, highlight.start)
-                val end = min(lineEndOffset, highlight.end)
-                if (start >= end) return@forEach
-                val textBefore = documentText.substring(lineStartOffset, start)
-                val textValue = documentText.substring(start, end)
-                val left = horizontalInset + textPaint.measureText(textBefore)
-                val right = left + textPaint.measureText(textValue).coerceAtLeast(textPaint.textSize)
-                backgroundRect.set(
-                    left,
-                    verticalInset + line * lineHeight,
-                    right,
-                    verticalInset + (line + 1) * lineHeight
+        val result = mutableListOf<SourceLineHighlight>()
+        var index = low
+        while (index < highlights.size) {
+            val highlight = highlights[index]
+            if (highlight.start >= lineEnd) break
+            val start = (highlight.start - lineStart).coerceAtLeast(0)
+            val end = (highlight.end - lineStart).coerceAtMost(line.text.length)
+            if (start < end) {
+                result += SourceLineHighlight(
+                    start,
+                    end,
+                    context.getColor(
+                        if (highlight.current) R.color.secondary else R.color.inverse_primary
+                    )
                 )
-                linePaint.color = if (highlight.current) {
-                    context.getColor(R.color.secondary)
-                } else {
-                    context.getColor(R.color.inverse_primary)
-                }
-                canvas.drawRect(backgroundRect, linePaint)
             }
+            index++
+        }
+        return result
+    }
+
+    private fun notifyDocumentChanged(change: DocumentChange) {
+        documentChangedListeners.forEach { it.invoke() }
+        documentChangeListeners.forEach { it.invoke(change) }
+    }
+
+    private fun parsePhysicalLines(value: String): List<Pair<String, String>> {
+        if (value.isEmpty()) return listOf("" to "")
+        val result = mutableListOf<Pair<String, String>>()
+        var lineStart = 0
+        var index = 0
+        while (index < value.length) {
+            val ending = when (value[index]) {
+                '\r' -> if (index + 1 < value.length && value[index + 1] == '\n') "\r\n" else "\r"
+                '\n' -> "\n"
+                '\u2028', '\u2029', '\u0085' -> value[index].toString()
+                else -> null
+            }
+            if (ending == null) {
+                index++
+                continue
+            }
+            result += value.substring(lineStart, index) to ending
+            index += ending.length
+            lineStart = index
+        }
+        result += value.substring(lineStart) to ""
+        return result
+    }
+
+    private fun normalizeEditorText(value: String): String =
+        value.replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .replace('\u2028', '\n')
+            .replace('\u2029', '\n')
+            .replace('\u0085', '\n')
+
+    private fun splitEditorLines(value: String): List<String> {
+        val result = mutableListOf<String>()
+        var start = 0
+        value.forEachIndexed { index, character ->
+            if (character == '\n') {
+                result += value.substring(start, index)
+                start = index + 1
+            }
+        }
+        result += value.substring(start)
+        return result
+    }
+
+    /** Implicit treap of serialized line lengths; structural edits are O(log n). */
+    private class LineOffsets {
+        private class Node(
+            var value: Int,
+            val priority: Int,
+            var left: Node? = null,
+            var right: Node? = null
+        ) {
+            var sum: Int = value
+            var size: Int = 1
+
+            fun update() {
+                sum = (left?.sum ?: 0) + value + (right?.sum ?: 0)
+                size = 1 + (left?.size ?: 0) + (right?.size ?: 0)
+            }
+        }
+
+        private var root: Node? = null
+        private var priorityState = 0x13579BDF
+
+        val documentLength: Int
+            get() = root?.sum ?: 0
+
+        fun reset(lines: List<SourceLineBlock>) {
+            root = null
+            lines.forEach { line ->
+                root = merge(root, Node(line.serializedLength, nextPriority()))
+            }
+        }
+
+        fun update(position: Int, delta: Int) {
+            if (delta == 0) return
+            updateAt(root, position, delta)
+        }
+
+        fun insert(position: Int, values: List<Int>) {
+            if (values.isEmpty()) return
+            val (prefix, suffix) = split(root, position)
+            var inserted: Node? = null
+            values.forEach { inserted = merge(inserted, Node(it, nextPriority())) }
+            root = merge(merge(prefix, inserted), suffix)
+        }
+
+        fun remove(position: Int, count: Int) {
+            if (count <= 0) return
+            val (prefix, tail) = split(root, position)
+            val (_, suffix) = split(tail, count)
+            root = merge(prefix, suffix)
+        }
+
+        fun start(position: Int): Int = prefix(root, position)
+
+        fun findLine(offset: Int): Int {
+            val safeOffset = offset.coerceAtLeast(0)
+            var node = root
+            var before = 0
+            var line = 0
+            while (node != null) {
+                val leftSum = node.left?.sum ?: 0
+                when {
+                    safeOffset < before + leftSum -> node = node.left
+                    safeOffset < before + leftSum + node.value -> {
+                        return line + size(node.left)
+                    }
+                    else -> {
+                        before += leftSum + node.value
+                        line += size(node.left) + 1
+                        node = node.right
+                    }
+                }
+            }
+            return (line - 1).coerceAtLeast(0)
+        }
+
+        private fun updateAt(node: Node?, position: Int, delta: Int) {
+            node ?: return
+            val leftSize = size(node.left)
+            when {
+                position < leftSize -> updateAt(node.left, position, delta)
+                position > leftSize -> updateAt(node.right, position - leftSize - 1, delta)
+                else -> node.value += delta
+            }
+            node.update()
+        }
+
+        private fun prefix(node: Node?, count: Int): Int {
+            if (node == null || count <= 0) return 0
+            val leftSize = size(node.left)
+            return when {
+                count <= leftSize -> prefix(node.left, count)
+                count == leftSize + 1 -> (node.left?.sum ?: 0) + node.value
+                else -> (node.left?.sum ?: 0) + node.value + prefix(node.right, count - leftSize - 1)
+            }
+        }
+
+        private fun split(node: Node?, count: Int): Pair<Node?, Node?> {
+            node ?: return null to null
+            val leftSize = size(node.left)
+            return when {
+                count < leftSize -> {
+                    val (prefix, remaining) = split(node.left, count)
+                    node.left = remaining
+                    node.update()
+                    prefix to node
+                }
+                count > leftSize + 1 -> {
+                    val (remaining, suffix) = split(node.right, count - leftSize - 1)
+                    node.right = remaining
+                    node.update()
+                    node to suffix
+                }
+                count == leftSize -> {
+                    val prefix = node.left
+                    node.left = null
+                    node.update()
+                    prefix to node
+                }
+                else -> {
+                    val suffix = node.right
+                    node.right = null
+                    node.update()
+                    node to suffix
+                }
+            }
+        }
+
+        private fun merge(left: Node?, right: Node?): Node? {
+            left ?: return right
+            right ?: return left
+            return if (left.priority <= right.priority) {
+                left.right = merge(left.right, right)
+                left.update()
+                left
+            } else {
+                right.left = merge(left, right.left)
+                right.update()
+                right
+            }
+        }
+
+        private fun size(node: Node?): Int = node?.size ?: 0
+
+        private fun nextPriority(): Int {
+            var value = priorityState
+            value = value xor (value shl 13)
+            value = value xor (value ushr 17)
+            value = value xor (value shl 5)
+            priorityState = value
+            return value
         }
     }
 }
