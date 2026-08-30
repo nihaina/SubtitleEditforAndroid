@@ -8,6 +8,7 @@ import android.text.TextWatcher
 import android.text.style.BackgroundColorSpan
 import android.util.TypedValue
 import android.view.LayoutInflater
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
@@ -156,7 +157,13 @@ internal class SourceLineAdapter(
             // Keep one physical source line per holder. Enter is handled by SourceLineEditText
             // and converted into an adapter insertion before TextView can wrap the row.
             editor.setSingleLine(false)
-            editor.setHorizontallyScrolling(true)
+            // Long text wraps visually inside the same logical source-line block. Actual
+            // newline insertion is still intercepted by SourceLineEditText and creates a new
+            // adapter item.
+            editor.setHorizontallyScrolling(false)
+            editor.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                updateLineNumberGravity()
+            }
             editor.imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_ENTER_ACTION
             editor.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -212,6 +219,7 @@ internal class SourceLineAdapter(
             binding = true
             try {
                 if (editor.text?.toString() != line.text) editor.setText(line.text)
+                updateLineNumberGravity()
                 applyHighlights(highlights)
             } finally {
                 binding = false
@@ -220,6 +228,16 @@ internal class SourceLineAdapter(
 
         fun bindIndex(position: Int) {
             lineNumber.text = (position + 1).toString()
+        }
+
+        private fun updateLineNumberGravity() {
+            val visualLineCount = editor.layout?.lineCount ?: 1
+            val gravity = if (visualLineCount > 1) {
+                Gravity.TOP or Gravity.END
+            } else {
+                Gravity.CENTER_VERTICAL or Gravity.END
+            }
+            if (lineNumber.gravity != gravity) lineNumber.gravity = gravity
         }
 
         fun bindGutterWidth(widthPx: Int) {
