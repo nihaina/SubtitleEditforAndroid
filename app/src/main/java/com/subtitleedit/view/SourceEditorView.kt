@@ -1,9 +1,13 @@
 package com.subtitleedit.view
 
 import android.content.Context
+import android.graphics.Rect
 import android.util.AttributeSet
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.subtitleedit.R
+import kotlin.math.max
 
 /**
  * Source editor backed by the same block/list lifecycle as the subtitle list.
@@ -38,6 +42,23 @@ class SourceEditorView @JvmOverloads constructor(
     private val documentChangeListeners = mutableListOf<(DocumentChange) -> Unit>()
     private var nextLineId = 1L
     private var preferredLineEnding = "\n"
+    private val basePaddingLeftPx = (resources.displayMetrics.density * 8f).toInt()
+    private val basePaddingTopPx = (resources.displayMetrics.density * 8f).toInt()
+    private val basePaddingRightPx = (resources.displayMetrics.density * 8f).toInt()
+    private val basePaddingBottomPx = (resources.displayMetrics.density * 8f).toInt()
+    private val imeFocusMarginPx = (resources.displayMetrics.density * 8f).toInt()
+    private var imeVisible = false
+    private var imeInsetBottomPx = 0
+    private var imeEnsurePosted = false
+
+    private val imeEnsureRunnable = Runnable {
+        imeEnsurePosted = false
+        updateImeBottomPadding()
+        // Padding changes are applied during the next layout pass. Defer the visibility check
+        // one frame so RecyclerView's new scroll range (including the keyboard tail spacer) is
+        // available before attempting to scroll the focused row.
+        postOnAnimation { ensureFocusedLineVisible() }
+    }
 
     private val lineAdapter = SourceLineAdapter(
         context = context,
@@ -47,7 +68,8 @@ class SourceEditorView @JvmOverloads constructor(
         onMergePrevious = ::mergeWithPrevious,
         onMergeNext = ::mergeWithNext,
         onMoveVertical = ::moveCursorVertically,
-        highlightsForLine = ::highlightsForLine
+        highlightsForLine = ::highlightsForLine,
+        onEditorFocusChanged = ::onEditorFocusChanged
     )
 
     init {
@@ -58,11 +80,23 @@ class SourceEditorView @JvmOverloads constructor(
         setItemViewCacheSize(12)
         clipToPadding = false
         setPadding(
-            (resources.displayMetrics.density * 8f).toInt(),
-            (resources.displayMetrics.density * 8f).toInt(),
-            (resources.displayMetrics.density * 8f).toInt(),
-            (resources.displayMetrics.density * 8f).toInt()
+            basePaddingLeftPx,
+            basePaddingTopPx,
+            basePaddingRightPx,
+            basePaddingBottomPx
         )
+        ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->
+            val imeType = WindowInsetsCompat.Type.ime()
+            val visible = insets.isVisible(imeType)
+            val bottom = insets.getInsets(imeType).bottom
+            if (visible != imeVisible || bottom != imeInsetBottomPx) {
+                imeVisible = visible
+                imeInsetBottomPx = bottom
+                scheduleImeEnsure()
+            }
+            insets
+        }
+        ViewCompat.requestApplyInsets(this)
         replaceLines("")
     }
 
@@ -134,6 +168,79 @@ class SourceEditorView @JvmOverloads constructor(
         val rowHeight = (resources.displayMetrics.density * 28f).toInt().coerceAtLeast(1)
         val position = (offset / rowHeight).coerceIn(0, lines.lastIndex)
         lineLayoutManager.scrollToPositionWithOffset(position, -(offset % rowHeight))
+    }
+
+    override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
+        super.onSizeChanged(width, height, oldWidth, oldHeight)
+        if (imeVisible && height != oldHeight) scheduleImeEnsure()
+    }
+
+    private fun onEditorFocusChanged() {
+        scheduleImeEnsure()
+    }
+
+    private fun scheduleImeEnsure() {
+        if (imeEnsurePosted) return
+        imeEnsurePosted = true
+        post(imeEnsureRunnable)
+    }
+
+    /**
+     * Keep a keyboard-sized, line-number-free tail area while the IME is visible. This lets the
+     * last real source line scroll above the keyboard instead of being permanently trapped at
+     * the bottom edge of the RecyclerView.
+     */
+    private fun updateImeBottomPadding() {
+        // Use the actual window overlap when available, but retain the IME inset as a tail
+        // spacer on adjustResize devices where the RecyclerView itself has already shrunk.
+        val overlap = if (imeVisible) {
+            max(calculateImeOverlap(), imeInsetBottomPx)
+        } else {
+            0
+        }
+        val targetBottom = basePaddingBottomPx + overlap
+        if (paddingBottom != targetBottom) {
+            setPadding(
+                basePaddingLeftPx,
+                basePaddingTopPx,
+                basePaddingRightPx,
+                targetBottom
+            )
+        }
+    }
+
+    private fun calculateImeOverlap(): Int {
+        val visibleFrame = Rect()
+        getWindowVisibleDisplayFrame(visibleFrame)
+        if (visibleFrame.bottom <= 0 || height <= 0) return imeInsetBottomPx
+        val location = IntArray(2)
+        getLocationOnScreen(location)
+        return (location[1] + height - visibleFrame.bottom).coerceAtLeast(0)
+    }
+
+    /** Scroll only when the focused visual line is actually hidden below the IME. */
+    private fun ensureFocusedLineVisible() {
+        if (!imeVisible || height <= 0) return
+        val focusedEditor = findFocus() as? SourceLineEditText ?: return
+        val caretLayout = focusedEditor.layout
+        val caretOffset = focusedEditor.selectionStart.coerceIn(0, focusedEditor.length())
+        val rect = if (caretLayout != null) {
+            val visualLine = caretLayout.getLineForOffset(caretOffset)
+            Rect(
+                0,
+                caretLayout.getLineTop(visualLine),
+                focusedEditor.width,
+                caretLayout.getLineBottom(visualLine)
+            )
+        } else {
+            Rect(0, 0, focusedEditor.width, focusedEditor.height)
+        }
+        offsetDescendantRectToMyCoords(focusedEditor, rect)
+
+        val imeOverlap = calculateImeOverlap()
+        val visibleBottom = height - imeOverlap - imeFocusMarginPx
+        val delta = rect.bottom - visibleBottom
+        if (delta > 0) scrollBy(0, delta)
     }
 
     private fun replaceLines(value: String) {

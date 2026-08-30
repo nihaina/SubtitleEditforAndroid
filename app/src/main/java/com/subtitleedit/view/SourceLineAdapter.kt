@@ -39,7 +39,8 @@ internal class SourceLineAdapter(
     private val onMergePrevious: (Int) -> Boolean,
     private val onMergeNext: (Int) -> Boolean,
     private val onMoveVertical: (Int, Int, Int) -> Boolean,
-    private val highlightsForLine: (Int) -> List<SourceLineHighlight>
+    private val highlightsForLine: (Int) -> List<SourceLineHighlight>,
+    private val onEditorFocusChanged: () -> Unit
 ) : RecyclerView.Adapter<SourceLineAdapter.LineViewHolder>() {
 
     private var editorEnabled = true
@@ -164,6 +165,7 @@ internal class SourceLineAdapter(
             editor.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
                 updateLineNumberGravity()
             }
+            editor.selectionChanged = onEditorFocusChanged
             editor.imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_ENTER_ACTION
             editor.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -204,6 +206,7 @@ internal class SourceLineAdapter(
                         if (focused) R.color.source_current_line else R.color.surface
                     )
                 )
+                if (focused) onEditorFocusChanged()
             }
         }
 

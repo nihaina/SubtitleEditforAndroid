@@ -45,6 +45,12 @@ internal class SourceLineEditText @JvmOverloads constructor(
     var mergeNext: (() -> Boolean)? = null
     var splitLine: ((Int) -> Boolean)? = null
     var moveVertical: ((Int, Int) -> Boolean)? = null
+    var selectionChanged: (() -> Unit)? = null
+
+    override fun onSelectionChanged(selStart: Int, selEnd: Int) {
+        super.onSelectionChanged(selStart, selEnd)
+        selectionChanged?.invoke()
+    }
 
     override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) {
         super.onTextChanged(text, start, before, count)

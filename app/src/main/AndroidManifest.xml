@@ -63,7 +63,8 @@
             android:name=".EditorActivity"
             android:exported="false"
             android:theme="@style/Theme.SubtitleEditforAndroid"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".ArchivePreviewActivity"
