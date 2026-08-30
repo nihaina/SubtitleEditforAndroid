@@ -7,11 +7,15 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.text.style.BackgroundColorSpan
 import android.util.TypedValue
-import android.view.LayoutInflater
+import android.view.ActionMode
 import android.view.Gravity
+import android.view.LayoutInflater
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.subtitleedit.R
@@ -39,8 +43,11 @@ internal class SourceLineAdapter(
     private val onMergePrevious: (Int) -> Boolean,
     private val onMergeNext: (Int) -> Boolean,
     private val onMoveVertical: (Int, Int, Int) -> Boolean,
+    private val onExtendVertical: (Int, Int, Int, Int) -> Boolean,
     private val highlightsForLine: (Int) -> List<SourceLineHighlight>,
-    private val onEditorFocusChanged: () -> Unit
+    private val onEditorFocusChanged: () -> Unit,
+    private val onEditorSelectionChanged: (Int, SourceLineEditText) -> Unit,
+    private val onEditorSelectionActionMode: (Int, SourceLineEditText) -> ActionMode.Callback
 ) : RecyclerView.Adapter<SourceLineAdapter.LineViewHolder>() {
 
     private var editorEnabled = true
@@ -162,10 +169,68 @@ internal class SourceLineAdapter(
             // newline insertion is still intercepted by SourceLineEditText and creates a new
             // adapter item.
             editor.setHorizontallyScrolling(false)
+            // Keep Android's native selection handles backed by the same visible tint as the
+            // document-wide spans. This also guarantees that the initial long-press range is
+            // visible before the RecyclerView highlight payload is applied.
+            editor.highlightColor = ContextCompat.getColor(context, R.color.source_selection)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Native TextView handles are bound to one RecyclerView child and cannot cross
+                // logical source rows. The source view supplies the only visible/touchable pair
+                // of document handles; leave native selection highlighting itself enabled.
+                val hiddenHandle = ContextCompat.getDrawable(
+                    context,
+                    R.drawable.source_transparent_handle
+                )
+                if (hiddenHandle != null) {
+                    editor.setTextSelectHandle(hiddenHandle)
+                    editor.setTextSelectHandleLeft(
+                        ContextCompat.getDrawable(context, R.drawable.source_transparent_handle)
+                            ?: hiddenHandle
+                    )
+                    editor.setTextSelectHandleRight(
+                        ContextCompat.getDrawable(context, R.drawable.source_transparent_handle)
+                            ?: hiddenHandle
+                    )
+                }
+            }
             editor.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
                 updateLineNumberGravity()
             }
-            editor.selectionChanged = onEditorFocusChanged
+            editor.selectionChanged = {
+                // Rebinding a recycled row can move the child EditText's native caret while its
+                // text is being restored. That is an implementation detail of RecyclerView, not
+                // a user edit; forwarding it would overwrite (or clear) the document-wide
+                // selection that is being painted across rows.
+                if (!binding) {
+                    val position = bindingAdapterPosition
+                    if (position == RecyclerView.NO_POSITION) {
+                        onEditorFocusChanged()
+                    } else {
+                        onEditorSelectionChanged(position, editor)
+                    }
+                }
+            }
+            editor.customSelectionActionModeCallback = object : ActionMode.Callback {
+                private var delegate: ActionMode.Callback? = null
+
+                override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
+                    val position = bindingAdapterPosition
+                    if (position == RecyclerView.NO_POSITION) return false
+                    delegate = onEditorSelectionActionMode(position, editor)
+                    return delegate?.onCreateActionMode(mode, menu) == true
+                }
+
+                override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean =
+                    delegate?.onPrepareActionMode(mode, menu) == true
+
+                override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean =
+                    delegate?.onActionItemClicked(mode, item) == true
+
+                override fun onDestroyActionMode(mode: ActionMode) {
+                    delegate?.onDestroyActionMode(mode)
+                    delegate = null
+                }
+            }
             editor.imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_ENTER_ACTION
             editor.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -198,6 +263,11 @@ internal class SourceLineAdapter(
             editor.moveVertical = { direction, column ->
                 val position = bindingAdapterPosition
                 position != RecyclerView.NO_POSITION && onMoveVertical(position, direction, column)
+            }
+            editor.extendVertical = { direction, anchorColumn, focusColumn ->
+                val position = bindingAdapterPosition
+                position != RecyclerView.NO_POSITION &&
+                    onExtendVertical(position, direction, anchorColumn, focusColumn)
             }
             editor.onFocusChangeListener = View.OnFocusChangeListener { _, focused ->
                 itemView.setBackgroundColor(
@@ -272,6 +342,10 @@ internal class SourceLineAdapter(
 
         private fun applyHighlights(highlights: List<SourceLineHighlight>) {
             val editable = editor.text ?: return
+            // Keep a row-local draw copy as well as spans. The direct path is rendered before
+            // glyphs, so a selection remains visible during the same frame that RecyclerView
+            // receives the highlight payload (including a newly long-pressed row).
+            editor.setBackgroundHighlights(highlights)
             editable.getSpans(0, editable.length, BackgroundColorSpan::class.java)
                 .forEach(editable::removeSpan)
             highlights.forEach { highlight ->
@@ -286,6 +360,11 @@ internal class SourceLineAdapter(
                     )
                 }
             }
+            // Span mutations normally invalidate TextView through SpanWatcher, but an
+            // ActionMode selection can arrive while RecyclerView is dispatching a touch event.
+            // Explicitly invalidate here so the selection tint is visible immediately, including
+            // the first long-pressed segment.
+            editor.invalidate()
         }
     }
 

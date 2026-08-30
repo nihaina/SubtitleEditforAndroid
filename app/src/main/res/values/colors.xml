@@ -26,4 +26,5 @@
     <color name="source_gutter_text">#777982</color>
     <color name="source_gutter_divider">#D5D6DB</color>
     <color name="source_current_line">#E5F0FF</color>
+    <color name="source_selection">#90CAF9</color>
 </resources>

@@ -20,4 +20,5 @@
     <color name="source_gutter_text">#9B9DA8</color>
     <color name="source_gutter_divider">#3B3D45</color>
     <color name="source_current_line">#2B3542</color>
+    <color name="source_selection">#1565C0</color>
 </resources>

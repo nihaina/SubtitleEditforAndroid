@@ -151,6 +151,10 @@
     <string name="activity_editor_hint_01">替换为</string>
     <string name="activity_editor_text_01">替换</string>
     <string name="activity_editor_text_02">全部替换</string>
+    <string name="source_selection_select_all">全选</string>
+    <string name="source_selection_cut">剪切</string>
+    <string name="source_selection_copy">复制</string>
+    <string name="source_selection_paste">粘贴</string>
     <string name="activity_editor_text_03" translatable="false">▼</string>
     <string name="activity_editor_contentdescription_02">展开/折叠波形图</string>
     <string name="activity_editor_contentdescription_03">插入字幕（打轴）</string>

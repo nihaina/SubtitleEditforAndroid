@@ -3,11 +3,13 @@ package com.subtitleedit.view
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.text.Layout
 import android.text.Spanned
 import android.text.style.LeadingMarginSpan
 import android.util.AttributeSet
 import android.util.TypedValue
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputConnectionWrapper
@@ -40,12 +42,27 @@ internal class SourceLineEditText @JvmOverloads constructor(
     private val wrapContinuationMarginPx =
         (wrapMarkerPaint.measureText(leftWrapMarker) + resources.displayMetrics.density * 4f)
             .roundToInt()
+    private val backgroundHighlightPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val backgroundHighlightPath = Path()
+    private var backgroundHighlights: List<SourceLineHighlight> = emptyList()
 
     var mergePrevious: (() -> Boolean)? = null
     var mergeNext: (() -> Boolean)? = null
     var splitLine: ((Int) -> Boolean)? = null
     var moveVertical: ((Int, Int) -> Boolean)? = null
+    var extendVertical: ((Int, Int, Int) -> Boolean)? = null
     var selectionChanged: (() -> Unit)? = null
+
+    /**
+     * Keep a view-local copy of the row ranges so selection remains visible even while a
+     * RecyclerView payload is being applied. BackgroundColorSpan is still installed by the
+     * adapter for normal TextView rendering; this path is drawn underneath the text and makes
+     * the document-wide selection deterministic during ActionMode/handle transitions.
+     */
+    fun setBackgroundHighlights(highlights: List<SourceLineHighlight>) {
+        backgroundHighlights = highlights
+        invalidate()
+    }
 
     override fun onSelectionChanged(selStart: Int, selEnd: Int) {
         super.onSelectionChanged(selStart, selEnd)
@@ -58,6 +75,7 @@ internal class SourceLineEditText @JvmOverloads constructor(
     }
 
     override fun onDraw(canvas: Canvas) {
+        drawBackgroundHighlights(canvas)
         super.onDraw(canvas)
 
         // Layout line count includes visual soft wraps. Explicit newlines are never present in
@@ -74,6 +92,32 @@ internal class SourceLineEditText @JvmOverloads constructor(
             if (line > 0) canvas.drawText(leftWrapMarker, leftX, baseline, wrapMarkerPaint)
             if (line < visualLineCount - 1) canvas.drawText(rightWrapMarker, rightX, baseline, wrapMarkerPaint)
         }
+    }
+
+    private fun drawBackgroundHighlights(canvas: Canvas) {
+        val textLayout = layout ?: return
+        if (backgroundHighlights.isEmpty()) return
+        val originX = compoundPaddingLeft - scrollX
+        val availableHeight = height - compoundPaddingTop - compoundPaddingBottom
+        val extraHeight = (availableHeight - textLayout.height).coerceAtLeast(0)
+        val originY = compoundPaddingTop + when (gravity and Gravity.VERTICAL_GRAVITY_MASK) {
+            Gravity.BOTTOM -> extraHeight
+            Gravity.CENTER_VERTICAL -> extraHeight / 2
+            else -> 0
+        } - scrollY
+        backgroundHighlightPaint.style = Paint.Style.FILL
+        canvas.save()
+        canvas.translate(originX.toFloat(), originY.toFloat())
+        backgroundHighlights.forEach { highlight ->
+            val start = highlight.start.coerceIn(0, textLayout.text.length)
+            val end = highlight.end.coerceIn(start, textLayout.text.length)
+            if (start >= end) return@forEach
+            backgroundHighlightPath.reset()
+            textLayout.getSelectionPath(start, end, backgroundHighlightPath)
+            backgroundHighlightPaint.color = highlight.color
+            canvas.drawPath(backgroundHighlightPath, backgroundHighlightPaint)
+        }
+        canvas.restore()
     }
 
     /**
@@ -141,7 +185,7 @@ internal class SourceLineEditText @JvmOverloads constructor(
             }
 
             override fun sendKeyEvent(event: KeyEvent): Boolean {
-                if (event.action == KeyEvent.ACTION_DOWN && handleBoundaryKey(event.keyCode)) {
+                if (event.action == KeyEvent.ACTION_DOWN && handleBoundaryKey(event.keyCode, event)) {
                     return true
                 }
                 return super.sendKeyEvent(event)
@@ -150,13 +194,35 @@ internal class SourceLineEditText @JvmOverloads constructor(
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (handleBoundaryKey(keyCode)) return true
+        if (handleBoundaryKey(keyCode, event)) return true
         return super.onKeyDown(keyCode, event)
     }
 
-    private fun handleBoundaryKey(keyCode: Int): Boolean {
+    private fun handleBoundaryKey(keyCode: Int, event: KeyEvent? = null): Boolean {
         if (keyCode == KeyEvent.KEYCODE_ENTER && selectionStart == selectionEnd) {
             if (splitLine?.invoke(selectionStart.coerceAtLeast(0)) == true) return true
+        }
+        if (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+            val direction = if (keyCode == KeyEvent.KEYCODE_DPAD_UP) -1 else 1
+            val focusOffset = selectionEnd.coerceIn(0, length())
+            val visualLine = layout?.getLineForOffset(focusOffset) ?: 0
+            val lastVisualLine = (layout?.lineCount ?: 1) - 1
+            val atLogicalBoundary = if (direction < 0) {
+                visualLine == 0
+            } else {
+                visualLine >= lastVisualLine
+            }
+            if (!atLogicalBoundary) return false
+            if (event?.isShiftPressed == true) {
+                if (extendVertical?.invoke(
+                        direction,
+                        selectionStart.coerceIn(0, length()),
+                        focusOffset
+                    ) == true
+                ) return true
+            }
+            if (selectionStart != selectionEnd) return false
+            return moveVertical?.invoke(direction, focusOffset) == true
         }
         if (selectionStart != selectionEnd) return false
         return when {
@@ -164,20 +230,6 @@ internal class SourceLineEditText @JvmOverloads constructor(
                 mergePrevious?.invoke() == true
             keyCode == KeyEvent.KEYCODE_FORWARD_DEL && selectionStart == length() ->
                 mergeNext?.invoke() == true
-            keyCode == KeyEvent.KEYCODE_DPAD_UP -> {
-                // Let EditText move within a soft-wrapped visual fragment first. Only the
-                // first visual fragment crosses the logical RecyclerView-row boundary.
-                val visualLine = layout?.getLineForOffset(selectionStart.coerceIn(0, length())) ?: 0
-                if (visualLine > 0) false
-                else moveVertical?.invoke(-1, selectionStart.coerceAtLeast(0)) == true
-            }
-            keyCode == KeyEvent.KEYCODE_DPAD_DOWN -> {
-                val currentOffset = selectionStart.coerceIn(0, length())
-                val visualLine = layout?.getLineForOffset(currentOffset) ?: 0
-                val lastVisualLine = (layout?.lineCount ?: 1) - 1
-                if (visualLine < lastVisualLine) false
-                else moveVertical?.invoke(1, currentOffset) == true
-            }
             else -> false
         }
     }

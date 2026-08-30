@@ -44,6 +44,7 @@
         android:paddingEnd="12dp"
         android:paddingBottom="0dp"
         android:scrollHorizontally="false"
+        android:textSelectHandle="@drawable/source_transparent_handle"
         android:textColor="@color/on_surface"
         android:textSize="14sp"
         tools:text="00:00:01,000 --&gt; 00:00:03,000" />
