@@ -1,8 +1,12 @@
 package com.subtitleedit.view
 
+import android.content.Context
+import android.graphics.Paint
+import android.graphics.Typeface
 import android.text.Editable
 import android.text.TextWatcher
 import android.text.style.BackgroundColorSpan
+import android.util.TypedValue
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -10,6 +14,9 @@ import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.subtitleedit.R
+import kotlin.math.ceil
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 internal class SourceLineBlock(
     val stableId: Long,
@@ -24,6 +31,7 @@ internal data class SourceLineHighlight(val start: Int, val end: Int, val color:
 
 /** RecyclerView adapter whose item lifecycle mirrors the subtitle-list adapter. */
 internal class SourceLineAdapter(
+    private val context: Context,
     private val lines: List<SourceLineBlock>,
     private val onTextChanged: (Int, String, Int) -> Unit,
     private val onSplitLine: (Int, Int) -> Boolean,
@@ -36,6 +44,7 @@ internal class SourceLineAdapter(
     private var editorEnabled = true
     private var pendingFocusPosition = RecyclerView.NO_POSITION
     private var pendingFocusColumn = 0
+    private var gutterWidthPx = computeGutterWidth(1)
 
     init {
         setHasStableIds(true)
@@ -48,10 +57,11 @@ internal class SourceLineAdapter(
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): LineViewHolder {
         return LineViewHolder(
             LayoutInflater.from(parent.context).inflate(R.layout.item_source_line, parent, false)
-        )
+        ).also { it.bindGutterWidth(gutterWidthPx) }
     }
 
     override fun onBindViewHolder(holder: LineViewHolder, position: Int) {
+        holder.bindGutterWidth(gutterWidthPx)
         holder.bind(lines[position], position, editorEnabled, highlightsForLine(position))
         applyPendingFocus(holder, position)
     }
@@ -66,6 +76,7 @@ internal class SourceLineAdapter(
             return
         }
         if (payloads.contains(PAYLOAD_INDEX)) holder.bindIndex(position)
+        if (payloads.contains(PAYLOAD_GUTTER)) holder.bindGutterWidth(gutterWidthPx)
         if (payloads.contains(PAYLOAD_HIGHLIGHT)) {
             holder.bindHighlights(highlightsForLine(position))
         }
@@ -86,6 +97,20 @@ internal class SourceLineAdapter(
         notifyItemRangeChanged(0, itemCount, PAYLOAD_HIGHLIGHT)
     }
 
+    /**
+     * Recalculate the gutter from the largest line number instead of reserving a fixed 56dp.
+     * The width is shared by every row so line content remains vertically aligned while the
+     * document grows from single- to multi-digit line numbers (and shrinks again after merges).
+     */
+    fun setLineCount(lineCount: Int, notify: Boolean = true) {
+        val width = computeGutterWidth(lineCount)
+        if (width == gutterWidthPx) return
+        gutterWidthPx = width
+        if (notify && itemCount > 0) {
+            notifyItemRangeChanged(0, itemCount, PAYLOAD_GUTTER)
+        }
+    }
+
     fun notifyLineSplit(position: Int, insertedCount: Int) {
         notifyItemChanged(position, PAYLOAD_TEXT)
         if (insertedCount > 0) notifyItemRangeInserted(position + 1, insertedCount)
@@ -93,6 +118,10 @@ internal class SourceLineAdapter(
         if (firstShifted < itemCount) {
             notifyItemRangeChanged(firstShifted, itemCount - firstShifted, PAYLOAD_INDEX)
         }
+        // The insertion notification above must be dispatched before changing the width of
+        // the newly-created last row; otherwise RecyclerView would receive a range-change
+        // for a position that did not exist in its previous item count.
+        setLineCount(lines.size)
     }
 
     fun notifyLinesMerged(changedPosition: Int, removedPosition: Int) {
@@ -101,6 +130,7 @@ internal class SourceLineAdapter(
         if (removedPosition < itemCount) {
             notifyItemRangeChanged(removedPosition, itemCount - removedPosition, PAYLOAD_INDEX)
         }
+        setLineCount(lines.size)
     }
 
     fun requestLineFocus(position: Int, column: Int) {
@@ -176,6 +206,7 @@ internal class SourceLineAdapter(
             enabled: Boolean,
             highlights: List<SourceLineHighlight>
         ) {
+            bindGutterWidth(gutterWidthPx)
             bindIndex(position)
             bindEnabled(enabled)
             binding = true
@@ -189,6 +220,15 @@ internal class SourceLineAdapter(
 
         fun bindIndex(position: Int) {
             lineNumber.text = (position + 1).toString()
+        }
+
+        fun bindGutterWidth(widthPx: Int) {
+            if (widthPx <= 0) return
+            val params = lineNumber.layoutParams ?: return
+            if (params.width != widthPx) {
+                params.width = widthPx
+                lineNumber.layoutParams = params
+            }
         }
 
         fun bindEnabled(enabled: Boolean) {
@@ -234,5 +274,27 @@ internal class SourceLineAdapter(
         const val PAYLOAD_HIGHLIGHT = "source_highlight"
         const val PAYLOAD_ENABLED = "source_enabled"
         const val PAYLOAD_FOCUS = "source_focus"
+        const val PAYLOAD_GUTTER = "source_gutter"
+    }
+
+    private fun computeGutterWidth(lineCount: Int): Int {
+        val resources = context.resources
+        val density = resources.displayMetrics.density
+        val digits = lineCount.coerceAtLeast(1).toString().length
+        val numberPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            typeface = Typeface.MONOSPACE
+            textSize = TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_SP,
+                12f,
+                resources.displayMetrics
+            )
+        }
+        val numberWidth = ceil(numberPaint.measureText("8".repeat(digits))).toInt()
+        val horizontalPadding = (12f * density).roundToInt() // XML: 4dp start + 8dp end
+        // Leave a small allowance for TextView/font rounding differences at digit boundaries
+        // (for example, the transition from 9999 to 10000).
+        val measurementAllowance = (2f * density).roundToInt()
+        val minimumWidth = (24f * density).roundToInt()
+        return max(minimumWidth, numberWidth + horizontalPadding + measurementAllowance)
     }
 }

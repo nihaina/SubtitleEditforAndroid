@@ -10,12 +10,14 @@
 
     <TextView
         android:id="@+id/tvSourceLineNumber"
-        android:layout_width="56dp"
+        android:layout_width="wrap_content"
         android:layout_height="match_parent"
         android:background="@color/source_gutter_background"
         android:fontFamily="monospace"
         android:gravity="end|center_vertical"
+        android:maxLines="1"
         android:minHeight="28dp"
+        android:minWidth="24dp"
         android:paddingStart="4dp"
         android:paddingEnd="8dp"
         android:textColor="@color/source_gutter_text"

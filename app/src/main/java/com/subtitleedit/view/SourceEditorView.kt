@@ -40,6 +40,7 @@ class SourceEditorView @JvmOverloads constructor(
     private var preferredLineEnding = "\n"
 
     private val lineAdapter = SourceLineAdapter(
+        context = context,
         lines = lines,
         onTextChanged = ::onLineTextChanged,
         onSplitLine = ::splitLineAt,
@@ -143,6 +144,9 @@ class SourceEditorView @JvmOverloads constructor(
         }
         preferredLineEnding = parsed.firstOrNull { it.second.isNotEmpty() }?.second ?: "\n"
         offsets.reset(lines)
+        // Keep the gutter only as wide as the largest line number currently displayed.
+        // A full data-set refresh below rebinds visible rows with the new width.
+        lineAdapter.setLineCount(lines.size, notify = false)
     }
 
     private fun onLineTextChanged(position: Int, rawValue: String, cursor: Int) {
