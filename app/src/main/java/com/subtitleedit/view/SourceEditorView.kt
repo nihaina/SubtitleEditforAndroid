@@ -73,6 +73,7 @@ class SourceEditorView @JvmOverloads constructor(
     private var imeVisible = false
     private var imeInsetBottomPx = 0
     private var imeEnsurePosted = false
+    private var imeShowRequested = false
     private val selectionEdgeScrollPx = (resources.displayMetrics.density * 24f).toInt()
     private val selectionEdgeZonePx = (resources.displayMetrics.density * 48f).toInt()
     private val selectionTouchSlopPx = ViewConfiguration.get(context).scaledTouchSlop
@@ -95,12 +96,13 @@ class SourceEditorView @JvmOverloads constructor(
     private var selectionGesture: SelectionGesture? = null
     private var selectionTouchMoved = false
     private var selectionActionMode: ActionMode? = null
-    // Keep a generous touch target while drawing a compact MT-style marker inside it.
-    private val selectionHandleSizePx = (resources.displayMetrics.density * 40f).toInt()
-    // The popup remains large enough to grab reliably, but the visible marker matches the
-    // compact system/MT handle instead of filling the whole touch target.
-    private val selectionHandleVisualSizePx = (resources.displayMetrics.density * 32f).toInt()
+    // Material selection-handle assets are 44dp wide but only about 22dp of that bitmap is
+    // opaque. The popup is cropped to that opaque portion so its touch area is the visible
+    // marker, rather than the transparent padding used by TextView's larger native target.
+    private val selectionHandleSizePx = (resources.displayMetrics.density * 22f).toInt()
+    private val selectionHandleVisualSizePx = selectionHandleSizePx
     private val selectionHandleColor = context.getColor(R.color.secondary)
+    private val selectionHandleAlpha = 0.72f
 
     private enum class SelectionHandleSide {
         LEFT,
@@ -156,11 +158,16 @@ class SourceEditorView @JvmOverloads constructor(
         const val MENU_CUT = 0x53450002
         const val MENU_COPY = 0x53450003
         const val MENU_PASTE = 0x53450004
+        const val HANDLE_ACTION_MODE_HIDE_DURATION_MS = 1000L
     }
 
     private val imeEnsureRunnable = Runnable {
         imeEnsurePosted = false
-        if (selectionTouchActive || documentSelection != null) return@Runnable
+        // A normal scroll gesture temporarily marks the touched editor as active. The IME can
+        // still disappear during that gesture, and its bottom padding must be reconciled before
+        // the next scrollbar interaction. A published document selection is the only state that
+        // must defer the focused-editor layout adjustment.
+        if (documentSelection != null) return@Runnable
         updateImeBottomPadding()
         // Padding changes are applied during the next layout pass. Defer the visibility check
         // one frame so RecyclerView's new scroll range (including the keyboard tail spacer) is
@@ -203,6 +210,7 @@ class SourceEditorView @JvmOverloads constructor(
             if (visible != imeVisible || bottom != imeInsetBottomPx) {
                 imeVisible = visible
                 imeInsetBottomPx = bottom
+                if (visible) imeShowRequested = false
                 scheduleImeEnsure()
             }
             insets
@@ -250,6 +258,7 @@ class SourceEditorView @JvmOverloads constructor(
         }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                imeShowRequested = false
                 val handleSide = selectionHandleSideAtRaw(event.rawX, event.rawY)
                 if (handleSide != null && startCustomHandleDrag(handleSide, event.rawX, event.rawY)) {
                     customHandleTouchFromSource = true
@@ -300,8 +309,12 @@ class SourceEditorView @JvmOverloads constructor(
                 selectionTouchActive = false
                 if (documentSelection == null) {
                     restoreImeSuppression()
+                    // Reconcile a keyboard hide that arrived while this gesture was scrolling
+                    // the RecyclerView. Without this, the IME-sized bottom padding survives until
+                    // another inset event and the custom scrollbar track is vertically wrong.
+                    scheduleImeEnsure()
                     if (!moved && !longPressed && gesture?.editor?.hasFocus() == true) {
-                        scheduleImeEnsure()
+                        showImeForFocusedEditor()
                     }
                 }
             }
@@ -310,7 +323,10 @@ class SourceEditorView @JvmOverloads constructor(
                 selectionGesture = null
                 selectionTouchMoved = false
                 selectionTouchActive = false
-                if (documentSelection == null) restoreImeSuppression()
+                if (documentSelection == null) {
+                    restoreImeSuppression()
+                    scheduleImeEnsure()
+                }
             }
         }
         return handled
@@ -410,15 +426,19 @@ class SourceEditorView @JvmOverloads constructor(
     private fun onEditorFocusChanged() {
         if (selectionTouchActive || documentSelection != null) return
         scheduleImeEnsure()
+        showImeForFocusedEditor()
     }
 
-    /** Prevent a focus gained for a possible long-press from opening the IME prematurely. */
+    /** Track a possible long press without suppressing IME for an ordinary tap. */
     private fun beginSelectionTouch(editor: SourceLineEditText) {
         if (imeSuppressedEditor !== editor) {
             imeSuppressedEditor?.showSoftInputOnFocus = true
             imeSuppressedEditor = editor
         }
-        editor.showSoftInputOnFocus = false
+        // A normal tap must be able to focus the row and open the keyboard. If the long-press
+        // timeout is reached, selectionImeSuppressRunnable/suppressImeForSelection() turns this
+        // off before the selection ActionMode remains active.
+        editor.showSoftInputOnFocus = true
         removeCallbacks(selectionImeSuppressRunnable)
         postDelayed(
             selectionImeSuppressRunnable,
@@ -430,6 +450,8 @@ class SourceEditorView @JvmOverloads constructor(
     private fun suppressImeForSelection(editor: SourceLineEditText) {
         removeCallbacks(selectionImeSuppressRunnable)
         beginSelectionTouch(editor)
+        editor.showSoftInputOnFocus = false
+        imeShowRequested = false
         removeCallbacks(selectionImeSuppressRunnable)
         val inputMethod = context.getSystemService(Context.INPUT_METHOD_SERVICE)
             as? InputMethodManager
@@ -440,6 +462,22 @@ class SourceEditorView @JvmOverloads constructor(
         removeCallbacks(selectionImeSuppressRunnable)
         imeSuppressedEditor?.showSoftInputOnFocus = true
         imeSuppressedEditor = null
+    }
+
+    private fun showImeForFocusedEditor() {
+        if (imeVisible || imeShowRequested) return
+        val editor = findFocus() as? SourceLineEditText ?: return
+        if (!editor.showSoftInputOnFocus) return
+        val inputMethod = context.getSystemService(Context.INPUT_METHOD_SERVICE)
+            as? InputMethodManager ?: return
+        imeShowRequested = true
+        editor.post {
+            if (!selectionTouchActive && documentSelection == null && editor.hasFocus()) {
+                inputMethod.showSoftInput(editor, InputMethodManager.SHOW_IMPLICIT)
+            } else {
+                imeShowRequested = false
+            }
+        }
     }
 
     private fun onEditorSelectionChanged(position: Int, editor: SourceLineEditText) {
@@ -614,6 +652,7 @@ class SourceEditorView @JvmOverloads constructor(
         }
         customHandleSide = side
         customHandleAnchor = fixedOffset
+        hideSelectionActionModeForHandleDrag()
         val endpoint = selectionEndpointPoint(movingOffset)
         if (localTouchOffsetX != null && localTouchOffsetY != null) {
             customHandleTouchOffsetX = localTouchOffsetX
@@ -639,6 +678,7 @@ class SourceEditorView @JvmOverloads constructor(
     ) {
         val side = customHandleSide ?: return
         val fixedOffset = customHandleAnchor ?: return
+        hideSelectionActionModeForHandleDrag()
         customHandleLastRawX = rawX
         customHandleLastRawY = rawY
         val targetRawX = rawX - customHandleTouchOffsetX
@@ -646,8 +686,12 @@ class SourceEditorView @JvmOverloads constructor(
         val sourceLocation = IntArray(2)
         getLocationOnScreen(sourceLocation)
         if (scheduleAutoScroll) maybeAutoScrollForSelection(targetRawY - sourceLocation[1])
-        customHandleDragPoint = rawPointToWindow(targetRawX, targetRawY)
-        val target = editorAtRaw(targetRawY) ?: return
+        val rawDragPoint = rawPointToWindow(targetRawX, targetRawY)
+        val target = editorAtRaw(targetRawY)
+        if (target == null) {
+            customHandleDragPoint = rawDragPoint
+            return
+        }
         val movingOffset = absoluteOffset(
             target.first,
             offsetForRawPosition(target.second, targetRawX, targetRawY)
@@ -657,10 +701,9 @@ class SourceEditorView @JvmOverloads constructor(
             SelectionHandleSide.RIGHT -> movingOffset < fixedOffset
         }
         if (crossesOtherHandle) {
-            // Keep the dragged window under the finger, but exchange its logical direction and
-            // endpoint role once it passes the stationary handle. This is the same behavior users
-            // expect from native text selection handles and avoids a disappearing/teleporting
-            // marker when the two endpoints cross.
+            // Exchange the logical direction and endpoint role once the snapped endpoint passes
+            // the stationary handle. This matches native selection behavior and avoids a
+            // disappearing/teleporting marker when the two endpoints cross.
             swapCustomHandleSides()
         }
         val fixedLineOffset = lineAndColumnForAbsoluteOffset(fixedOffset)
@@ -676,11 +719,14 @@ class SourceEditorView @JvmOverloads constructor(
         } else {
             customRightHandleOffset = movingOffset
         }
+        // The finger supplies a candidate coordinate, but the visible handle must stay attached
+        // to the resolved text insertion point. Keep the raw point only while RecyclerView has no
+        // layout for the target row yet (for example during an edge-scroll frame).
+        customHandleDragPoint = selectionEndpointPoint(movingOffset)
+            ?: rawDragPoint
         refreshVisibleSelectionHighlights()
-        // Do not ask the floating ActionMode to relayout on every MOVE. Its platform handle
-        // manager may synchronously reposition/cancel a PopupWindow that currently owns the
-        // pointer stream (the failure was especially visible on the right handle). The custom
-        // popup is already kept under the finger; refresh the toolbar once the drag ends.
+        // Do not ask the floating ActionMode to relayout on every MOVE. The custom popup follows
+        // the snapped text endpoint; refresh the toolbar once the drag ends.
         updateSelectionHandlePopups()
     }
 
@@ -711,6 +757,11 @@ class SourceEditorView @JvmOverloads constructor(
         if (selection != null) syncNativeSelection(selection)
         selectionActionMode?.invalidateContentRect()
         updateSelectionHandlePopups()
+    }
+
+    private fun hideSelectionActionModeForHandleDrag() {
+        val mode = selectionActionMode ?: return
+        mode.hide(HANDLE_ACTION_MODE_HIDE_DURATION_MS)
     }
 
     /** Keep the focused EditText's native caret/range aligned with the document endpoint. */
@@ -769,37 +820,22 @@ class SourceEditorView @JvmOverloads constructor(
         if (customHandleSide != null) return null
         val range = selectedDocumentRange() ?: return null
         if (range.first >= range.second) return null
-        val leftOffset = customLeftHandleOffset ?: range.first
-        val rightOffset = customRightHandleOffset ?: range.second
-        val candidates = arrayOf(
-            SelectionHandleSide.LEFT to leftOffset,
-            SelectionHandleSide.RIGHT to rightOffset
-        )
-        var closest: SelectionHandleSide? = null
-        var closestDistance = Float.MAX_VALUE
-        candidates.forEach { (side, offset) ->
-            val endpoint = selectionEndpointPoint(offset) ?: return@forEach
-            val screenPoint = windowPointToScreen(endpoint)
-            val centerX = screenPoint.x + if (side == SelectionHandleSide.LEFT) {
-                -selectionHandleVisualSizePx * 0.5f
-            } else {
-                selectionHandleVisualSizePx * 0.5f
+        val leftContains = customLeftHandle.containsRaw(rawX, rawY)
+        val rightContains = customRightHandle.containsRaw(rawX, rawY)
+        return when {
+            leftContains && !rightContains -> SelectionHandleSide.LEFT
+            rightContains && !leftContains -> SelectionHandleSide.RIGHT
+            leftContains && rightContains -> {
+                if (customLeftHandle.distanceToCenterRaw(rawX, rawY) <=
+                    customRightHandle.distanceToCenterRaw(rawX, rawY)
+                ) {
+                    SelectionHandleSide.LEFT
+                } else {
+                    SelectionHandleSide.RIGHT
+                }
             }
-            val centerY = screenPoint.y + selectionHandleVisualSizePx * 0.40f
-            val distance = (rawX - centerX) * (rawX - centerX) +
-                (rawY - centerY) * (rawY - centerY)
-            val radius = selectionHandleSizePx * 0.70f
-            val popupContains = if (side == SelectionHandleSide.LEFT) {
-                customLeftHandle.containsRaw(rawX, rawY)
-            } else {
-                customRightHandle.containsRaw(rawX, rawY)
-            }
-            if ((popupContains || distance <= radius * radius) && distance < closestDistance) {
-                closest = side
-                closestDistance = distance
-            }
+            else -> null
         }
-        return closest
     }
 
     private fun lineAndColumnForAbsoluteOffset(offset: Int): Pair<Int, Int> {
@@ -815,9 +851,9 @@ class SourceEditorView @JvmOverloads constructor(
             customRightHandle.dismissSafely()
             return
         }
-        // While a handle is being dragged, keep that popup under the finger. Repositioning the
-        // touched PopupWindow to the newly resolved text endpoint can make Android cancel its
-        // pointer stream when the endpoint crosses into another RecyclerView item.
+        // While a handle is being dragged, the active popup follows the resolved text endpoint.
+        // The touch-to-endpoint offset is retained separately, so the finger can remain over the
+        // marker while the endpoint snaps between characters and rows.
         val dragPoint = customHandleDragPoint
         val leftOffset = customLeftHandleOffset ?: range.first
         val rightOffset = customRightHandleOffset ?: range.second
@@ -836,19 +872,29 @@ class SourceEditorView @JvmOverloads constructor(
         }
         when (customHandleSide) {
             SelectionHandleSide.LEFT -> {
-                // Keep the active popup under the finger and refresh the inactive endpoint as
-                // rows move underneath it. Only the active window owns the pointer stream.
+                // Refresh the inactive endpoint as rows move underneath the active drag.
                 customLeftHandle.positionAt(dragPoint ?: selectionEndpointPoint(leftOffset))
-                customRightHandle.positionAt(selectionEndpointPoint(rightOffset))
+                customRightHandle.positionAt(visibleSelectionEndpointPoint(rightOffset))
             }
             SelectionHandleSide.RIGHT -> {
                 customRightHandle.positionAt(dragPoint ?: selectionEndpointPoint(rightOffset))
-                customLeftHandle.positionAt(selectionEndpointPoint(leftOffset))
+                customLeftHandle.positionAt(visibleSelectionEndpointPoint(leftOffset))
             }
             null -> {
-                customLeftHandle.positionAt(selectionEndpointPoint(leftOffset))
-                customRightHandle.positionAt(selectionEndpointPoint(rightOffset))
+                customLeftHandle.positionAt(visibleSelectionEndpointPoint(leftOffset))
+                customRightHandle.positionAt(visibleSelectionEndpointPoint(rightOffset))
             }
+        }
+    }
+
+    private fun visibleSelectionEndpointPoint(absoluteOffset: Int): Point? {
+        val point = selectionEndpointPoint(absoluteOffset) ?: return null
+        val screenPoint = windowPointToScreen(point)
+        val location = IntArray(2)
+        getLocationOnScreen(location)
+        return point.takeIf {
+            screenPoint.x >= location[0] && screenPoint.x <= location[0] + width &&
+                screenPoint.y >= location[1] && screenPoint.y <= location[1] + height
         }
     }
 
@@ -877,10 +923,10 @@ class SourceEditorView @JvmOverloads constructor(
     private fun selectionEndpointPoint(absoluteOffset: Int): Point? {
         val lineAndColumn = lineAndColumnForAbsoluteOffset(absoluteOffset)
         val holder = findViewHolderForAdapterPosition(lineAndColumn.first)
-        if (holder == null) return offscreenEndpointPoint(lineAndColumn.first)
+        if (holder == null) return null
         val editor = holder.itemView.findViewById<SourceLineEditText>(R.id.etSourceLine)
-            ?: return offscreenEndpointPoint(lineAndColumn.first)
-        val layout = editor.layout ?: return offscreenEndpointPoint(lineAndColumn.first)
+            ?: return null
+        val layout = editor.layout ?: return null
         val column = lineAndColumn.second.coerceIn(0, editor.length())
         val visualLine = layout.getLineForOffset(column)
         val location = IntArray(2)
@@ -909,42 +955,6 @@ class SourceEditorView @JvmOverloads constructor(
         y < selectionEdgeZonePx -> -selectionEdgeScrollPx
         y > height - selectionEdgeZonePx -> selectionEdgeScrollPx
         else -> 0
-    }
-
-    private fun offscreenEndpointPoint(line: Int): Point? {
-        if (!isAttachedToWindow || height <= 0) return null
-        val windowLocation = IntArray(2)
-        getLocationInWindow(windowLocation)
-        var firstVisible = Int.MAX_VALUE
-        var lastVisible = Int.MIN_VALUE
-        var firstTop = 0
-        var lastBottom = 0
-        var visibleHeightTotal = 0
-        var visibleHeightCount = 0
-        for (childIndex in 0 until childCount) {
-            val child = getChildAt(childIndex)
-            val holder = getChildViewHolder(child)
-            val position = holder.bindingAdapterPosition
-            if (position == androidx.recyclerview.widget.RecyclerView.NO_POSITION) continue
-            if (position < firstVisible) firstTop = child.top
-            if (position > lastVisible) lastBottom = child.bottom
-            firstVisible = min(firstVisible, position)
-            lastVisible = max(lastVisible, position)
-            visibleHeightTotal += child.height
-            visibleHeightCount++
-        }
-        if (firstVisible == Int.MAX_VALUE) return null
-        val rowHeight = (visibleHeightTotal / visibleHeightCount.coerceAtLeast(1))
-            .coerceAtLeast((resources.displayMetrics.density * 28f).toInt())
-        val y = when {
-            line < firstVisible -> windowLocation[1] + firstTop -
-                (firstVisible - line) * rowHeight
-            line > lastVisible -> windowLocation[1] + lastBottom +
-                (line - lastVisible) * rowHeight
-            else -> windowLocation[1] + height / 2
-        }
-        val x = windowLocation[0] + paddingLeft
-        return Point(x, y)
     }
 
     private fun selectedDocumentRange(): Pair<Int, Int>? {
@@ -1153,6 +1163,7 @@ class SourceEditorView @JvmOverloads constructor(
             width = selectionHandleSizePx
             height = selectionHandleSizePx
             contentView = handleView
+            handleView.alpha = selectionHandleAlpha
             isFocusable = false
             isTouchable = true
             isOutsideTouchable = false
@@ -1205,7 +1216,13 @@ class SourceEditorView @JvmOverloads constructor(
             // A PopupWindow's content view is not attached until the popup is shown. Checking
             // the popup itself here therefore made every first placement immediately dismiss
             // the handle. The source RecyclerView is the actual owner/attachment anchor.
-            if (point == null || !this@SourceEditorView.isAttachedToWindow) {
+            if (point == null) {
+                // An endpoint can be outside the attached RecyclerView while the document range
+                // remains valid. Hide only this visual handle; never clear documentSelection.
+                dismissSafely()
+                return
+            }
+            if (!this@SourceEditorView.isAttachedToWindow) {
                 return
             }
             try {
@@ -1213,9 +1230,9 @@ class SourceEditorView @JvmOverloads constructor(
                 // application window. selectionEndpointPoint() already returns that same coordinate
                 // space via getLocationInWindow(); subtracting the RecyclerView's location here would
                 // move the popup a second time (often completely off the text).
-                // The endpoint is the upper inside corner of the directional handle, rather than
-                // the center of its touch target. This leaves the left marker extending left and the
-                // right marker extending right, so short selections remain independently tappable.
+                // MT places each visible handle directly below its text endpoint. The left popup
+                // ends at that endpoint and the right popup starts there, so the visible marker
+                // stays on the selection edge while its touch area remains limited to the marker.
                 val x = point.x - hotspotX(side)
                 val y = point.y - hotspotY()
                 if (x == lastWindowX && y == lastWindowY && isShowing) return
@@ -1251,21 +1268,31 @@ class SourceEditorView @JvmOverloads constructor(
                 return false
             }
             val topLeft = windowPointToScreen(Point(lastWindowX, lastWindowY))
-            val slop = selectionTouchSlopPx.toFloat()
-            return rawX >= topLeft.x - slop && rawX <= topLeft.x + width + slop &&
-                rawY >= topLeft.y - slop && rawY <= topLeft.y + height + slop
+            return rawX >= topLeft.x && rawX <= topLeft.x + width &&
+                rawY >= topLeft.y && rawY <= topLeft.y + height
+        }
+
+        fun distanceToCenterRaw(rawX: Float, rawY: Float): Float {
+            if (!isShowing || lastWindowX == Int.MIN_VALUE || lastWindowY == Int.MIN_VALUE) {
+                return Float.MAX_VALUE
+            }
+            val topLeft = windowPointToScreen(Point(lastWindowX, lastWindowY))
+            val centerX = topLeft.x + width * 0.5f
+            val centerY = topLeft.y + height * 0.5f
+            return (rawX - centerX) * (rawX - centerX) +
+                (rawY - centerY) * (rawY - centerY)
         }
     }
 
     private fun hotspotX(side: SelectionHandleSide): Int = when (side) {
-        // Keep the text endpoint at the same local hotspot used by the fallback marker. The
-        // popup remains generous enough to grab without pushing the visible marker away from
-        // the selected text edge.
-        SelectionHandleSide.LEFT -> (selectionHandleSizePx * 0.80f).toInt()
-        SelectionHandleSide.RIGHT -> (selectionHandleSizePx * 0.20f).toInt()
+        // The cropped left popup ends at the text endpoint; the cropped right popup starts at it.
+        SelectionHandleSide.LEFT -> selectionHandleSizePx
+        SelectionHandleSide.RIGHT -> 0
     }
 
-    private fun hotspotY(): Int = (selectionHandleSizePx * 0.20f).toInt()
+    // selectionEndpointPoint() already returns the line bottom, which is the native handle's
+    // popup top. Do not shift it upward: that would detach the stem from the selected text.
+    private fun hotspotY(): Int = 0
 
     private inner class SelectionHandleView(
         context: Context,
@@ -1307,35 +1334,39 @@ class SourceEditorView @JvmOverloads constructor(
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             val visualSize = selectionHandleVisualSizePx.coerceAtMost(width).coerceAtMost(height)
-            val visualTop = (height - visualSize) / 2f
             systemHandleDrawable?.let { drawable ->
                 val intrinsicWidth = drawable.intrinsicWidth.takeIf { it > 0 } ?: width
                 val intrinsicHeight = drawable.intrinsicHeight.takeIf { it > 0 } ?: height
-                val scale = min(
-                    visualSize.toFloat() / intrinsicWidth.coerceAtLeast(1),
-                    visualSize.toFloat() / intrinsicHeight.coerceAtLeast(1)
-                )
+                // Keep the drawable's native aspect ratio. The Android Material assets have
+                // transparent horizontal margins; placing their 3/4 or 1/4 hotspot at the
+                // popup edge crops those margins and leaves only the visible marker touchable.
+                val scale = visualSize.toFloat() / intrinsicHeight.coerceAtLeast(1)
                 val drawWidth = (intrinsicWidth * scale).toInt().coerceAtLeast(1)
                 val drawHeight = (intrinsicHeight * scale).toInt().coerceAtLeast(1)
-                val anchorX = hotspotX(side)
-                val left = if (side == SelectionHandleSide.LEFT) {
-                    anchorX - drawWidth
+                val drawableHotspot = if (side == SelectionHandleSide.LEFT) {
+                    drawWidth * 0.75f
                 } else {
-                    anchorX
+                    drawWidth * 0.25f
                 }
-                val top = (height - drawHeight) / 2
+                val left = if (side == SelectionHandleSide.LEFT) {
+                    width - drawableHotspot
+                } else {
+                    -drawableHotspot
+                }.toInt()
+                val top = 0
                 drawable.setBounds(left, top, left + drawWidth, top + drawHeight)
                 drawable.draw(canvas)
                 return
             }
+            val visualTop = 0f
             val centerX = if (side == SelectionHandleSide.LEFT) {
-                width * 0.80f
+                width * 0.75f
             } else {
-                width * 0.20f
+                width * 0.25f
             }
             val stemWidth = visualSize * 0.09f
-            val stemTop = visualTop + if (side == SelectionHandleSide.LEFT) visualSize * 0.10f else visualSize * 0.28f
-            val stemBottom = visualTop + if (side == SelectionHandleSide.LEFT) visualSize * 0.58f else visualSize * 0.78f
+            val stemTop = visualTop + visualSize * 0.10f
+            val stemBottom = visualTop + visualSize * 0.58f
             canvas.drawRoundRect(
                 centerX - stemWidth,
                 stemTop,
@@ -1345,8 +1376,8 @@ class SourceEditorView @JvmOverloads constructor(
                 stemWidth,
                 paint
             )
-            val circleY = visualTop + if (side == SelectionHandleSide.LEFT) visualSize * 0.68f else visualSize * 0.32f
-            canvas.drawCircle(centerX, circleY, visualSize * 0.22f, paint)
+            val circleY = visualTop + visualSize * 0.68f
+            canvas.drawCircle(width * 0.5f, circleY, visualSize * 0.22f, paint)
         }
 
         override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -1734,6 +1765,15 @@ class SourceEditorView @JvmOverloads constructor(
         private val sourceEditor: SourceLineEditText? = null
     ) : ActionMode.Callback2() {
         override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
+            if (sourceLine != null && sourceEditor != null && documentSelection != null) {
+                // A new long press starts a new selection. End the previous document range and
+                // its toolbar before reading the child's newly selected range; otherwise the old
+                // highlight survives and the two selections appear simultaneously.
+                val previousMode = selectionActionMode
+                selectionActionMode = null
+                if (previousMode != null && previousMode !== mode) previousMode.finish()
+                clearDocumentSelection()
+            }
             // Mark the mode as active before reading the child range. TextView may synchronously
             // emit a collapsed onSelectionChanged callback while the mode is being initialized;
             // that callback must not clear the range we are about to publish.

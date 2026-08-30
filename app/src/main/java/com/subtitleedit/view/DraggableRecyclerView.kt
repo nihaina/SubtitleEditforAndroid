@@ -38,6 +38,20 @@ open class DraggableRecyclerView @JvmOverloads constructor(
     private val touchZonePx      = TOUCH_ZONE_DP       * density
     private val thumbMinHeightPx = THUMB_MIN_HEIGHT_DP * density
 
+    private data class ThumbGeometry(
+        val trackTop: Float,
+        val trackHeight: Float,
+        val thumbHeight: Float,
+        val thumbTop: Float,
+        val scrollRange: Float,
+        val scrollExtent: Float
+    ) {
+        val maxThumbTop: Float
+            get() = (trackHeight - thumbHeight).coerceAtLeast(0f)
+
+        fun hasScrollRange(): Boolean = scrollRange > scrollExtent && maxThumbTop > 0f
+    }
+
     private val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xAAA0A0A0.toInt()
     }
@@ -53,6 +67,8 @@ open class DraggableRecyclerView @JvmOverloads constructor(
 
     private var isDraggingThumb = false
     private var dragOffsetY     = 0f
+    private var dragLastY        = 0f
+    private var dragGeometry: ThumbGeometry? = null
     private var pendingScrollRatio: Float? = null
     private var scrollFramePosted = false
     private var lastThumbAdapterPosition = RecyclerView.NO_POSITION
@@ -102,8 +118,19 @@ open class DraggableRecyclerView @JvmOverloads constructor(
             MotionEvent.ACTION_DOWN -> {
                 if (isInThumbTouchZone(ev.x) && canDragThumb()) {
                     stopScroll()
+                    val geometry = calculateThumbGeometry()
                     isDraggingThumb = true
-                    dragOffsetY = ev.y - paddingTop - computeThumbTop()
+                    dragLastY = ev.y
+                    dragGeometry = geometry
+                    // Insets may have changed after the last draw but before this DOWN event.
+                    // Anchor to the thumb the user actually sees when available; the next MOVE
+                    // will re-anchor if the new layout geometry has become active.
+                    val drawnThumbTop = if (!thumbRect.isEmpty()) {
+                        thumbRect.top
+                    } else {
+                        geometry.trackTop + geometry.thumbTop
+                    }
+                    dragOffsetY = ev.y - drawnThumbTop
                     captureThumbDragAnchor()
                     parent?.requestDisallowInterceptTouchEvent(true)
                     showThumb()
@@ -119,15 +146,24 @@ open class DraggableRecyclerView @JvmOverloads constructor(
                         return true
                     }
 
-                    val thumbHeight    = computeThumbHeight()
-                    val trackHeight    = (height - paddingTop - paddingBottom).toFloat()
-                    val maxThumbTop    = (trackHeight - thumbHeight).coerceAtLeast(0f)
-                    val targetThumbTop = (ev.y - paddingTop - dragOffsetY).coerceIn(0f, maxThumbTop)
-                    val maxScroll      = computeVerticalScrollRange() - computeVerticalScrollExtent()
-                    if (maxThumbTop > 0f && maxScroll > 0) {
-                        val ratio     = targetThumbTop / maxThumbTop
+                    val geometry = calculateThumbGeometry()
+                    val previousGeometry = dragGeometry
+                    if (previousGeometry == null || !sameTrackGeometry(previousGeometry, geometry)) {
+                        // Insets/layout changes (most commonly an IME hide) can alter the
+                        // RecyclerView track between two MOVE events. Re-anchor to the thumb that
+                        // is actually visible at the last finger position before mapping the new
+                        // event, otherwise the drag appears vertically offset.
+                        dragOffsetY = dragLastY - geometry.trackTop - geometry.thumbTop
+                        dragGeometry = geometry
+                    }
+                    val targetThumbTop = (ev.y - geometry.trackTop - dragOffsetY)
+                        .coerceIn(0f, geometry.maxThumbTop)
+                    val maxScroll      = geometry.scrollRange - geometry.scrollExtent
+                    if (geometry.maxThumbTop > 0f && maxScroll > 0f) {
+                        val ratio     = targetThumbTop / geometry.maxThumbTop
                         enqueueThumbScroll(ratio)
                     }
+                    dragLastY = ev.y
                     showThumb()
                     return true
                 }
@@ -188,19 +224,21 @@ open class DraggableRecyclerView @JvmOverloads constructor(
     }
 
     private fun drawThumb(canvas: Canvas) {
-        if (thumbAlpha <= 0) return
+        if (thumbAlpha <= 0) {
+            thumbRect.setEmpty()
+            return
+        }
 
-        val scrollRange  = computeVerticalScrollRange()
-        val scrollExtent = computeVerticalScrollExtent()
-        if (scrollRange <= scrollExtent) return
-
-        val thumbTop    = computeThumbTop()
-        val thumbHeight = computeThumbHeight()
+        val geometry = calculateThumbGeometry()
+        if (!geometry.hasScrollRange()) {
+            thumbRect.setEmpty()
+            return
+        }
         // 贴 View 真正右边缘，忽略 padding，保证滚动条在屏幕最右侧
         val left  = width - thumbMarginPx - thumbWidthPx
         val right = left + thumbWidthPx
-        val top    = paddingTop + thumbTop
-        val bottom = top + thumbHeight
+        val top    = geometry.trackTop + geometry.thumbTop
+        val bottom = top + geometry.thumbHeight
 
         thumbRect.set(left, top, right, bottom)
         canvas.drawRoundRect(thumbRect, thumbRadius, thumbRadius, thumbPaint)
@@ -214,7 +252,7 @@ open class DraggableRecyclerView @JvmOverloads constructor(
         x >= width - touchZonePx
 
     private fun canDragThumb(): Boolean =
-        computeVerticalScrollRange() > computeVerticalScrollExtent()
+        calculateThumbGeometry().hasScrollRange()
 
     private fun enqueueThumbScroll(targetRatio: Float) {
         pendingScrollRatio = targetRatio
@@ -248,6 +286,7 @@ open class DraggableRecyclerView @JvmOverloads constructor(
 
     private fun finishThumbDrag() {
         isDraggingThumb = false
+        dragGeometry = null
         pendingScrollRatio = null
         lastThumbAdapterPosition = RecyclerView.NO_POSITION
         thumbDragPositionCorrection = 0
@@ -279,26 +318,40 @@ open class DraggableRecyclerView @JvmOverloads constructor(
         }
     }
 
-    private fun computeThumbTop(): Float {
-        val scrollRange  = computeVerticalScrollRange().toFloat()
-        val scrollExtent = computeVerticalScrollExtent().toFloat()
-        val scrollOffset = computeVerticalScrollOffset().toFloat()
-        val trackHeight  = (height - paddingTop - paddingBottom).toFloat().coerceAtLeast(0f)
-        val thumbHeight  = computeThumbHeight()
-        val maxThumbTop  = trackHeight - thumbHeight
-        return if (scrollRange > scrollExtent)
-            (scrollOffset / (scrollRange - scrollExtent)) * maxThumbTop
-        else 0f
-    }
-
-    private fun computeThumbHeight(): Float {
-        val scrollRange  = computeVerticalScrollRange().toFloat()
-        val scrollExtent = computeVerticalScrollExtent().toFloat()
-        val trackHeight  = (height - paddingTop - paddingBottom).toFloat().coerceAtLeast(0f)
-        return if (scrollRange > 0)
+    private fun calculateThumbGeometry(): ThumbGeometry {
+        val scrollRange = computeVerticalScrollRange().toFloat().coerceAtLeast(0f)
+        val scrollExtent = computeVerticalScrollExtent().toFloat().coerceAtLeast(0f)
+        val trackTop = paddingTop.toFloat()
+        val trackHeight = (height - paddingTop - paddingBottom).toFloat().coerceAtLeast(0f)
+        val thumbHeight = if (scrollRange > 0f) {
             (scrollExtent / scrollRange * trackHeight)
                 .coerceAtLeast(thumbMinHeightPx.coerceAtMost(trackHeight))
                 .coerceAtMost(trackHeight)
-        else trackHeight
+        } else {
+            trackHeight
+        }
+        val maxThumbTop = (trackHeight - thumbHeight).coerceAtLeast(0f)
+        val maxScroll = (scrollRange - scrollExtent).coerceAtLeast(0f)
+        val thumbTop = if (maxScroll > 0f && maxThumbTop > 0f) {
+            (computeVerticalScrollOffset().toFloat() / maxScroll * maxThumbTop)
+                .coerceIn(0f, maxThumbTop)
+        } else {
+            0f
+        }
+        return ThumbGeometry(
+            trackTop = trackTop,
+            trackHeight = trackHeight,
+            thumbHeight = thumbHeight,
+            thumbTop = thumbTop,
+            scrollRange = scrollRange,
+            scrollExtent = scrollExtent
+        )
     }
+
+    private fun sameTrackGeometry(first: ThumbGeometry, second: ThumbGeometry): Boolean =
+        first.trackTop == second.trackTop &&
+            first.trackHeight == second.trackHeight &&
+            first.thumbHeight == second.thumbHeight &&
+            first.scrollRange == second.scrollRange &&
+            first.scrollExtent == second.scrollExtent
 }
