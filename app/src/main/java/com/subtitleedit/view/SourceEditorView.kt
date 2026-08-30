@@ -13,6 +13,7 @@ import android.graphics.Rect
 import android.graphics.drawable.ColorDrawable
 import android.util.AttributeSet
 import android.os.Build
+import android.os.SystemClock
 import android.view.ActionMode
 import android.view.Gravity
 import android.view.Menu
@@ -121,14 +122,18 @@ class SourceEditorView @JvmOverloads constructor(
     private var customHandleTouchFromSource = false
     private var selectionAutoScrollPosted = false
     private var selectionTouchActive = false
+    // Once a long-press has published a document selection, the child EditText must no longer
+    // receive the remainder of that pointer stream. Otherwise TextView keeps its native handle
+    // drag alive underneath the custom document handles and the first handle drag is ignored.
+    private var nativeSelectionDragBlocked = false
     private var imeSuppressedEditor: SourceLineEditText? = null
     private val selectionImeSuppressRunnable = Runnable {
         if (selectionTouchActive && documentSelection == null) {
             imeSuppressedEditor?.let(::suppressImeForSelection)
         }
     }
-    private val customLeftHandle = SelectionHandlePopup(SelectionHandleSide.LEFT)
-    private val customRightHandle = SelectionHandlePopup(SelectionHandleSide.RIGHT)
+    private var customLeftHandle = SelectionHandlePopup(SelectionHandleSide.LEFT)
+    private var customRightHandle = SelectionHandlePopup(SelectionHandleSide.RIGHT)
 
     private val selectionAutoScrollRunnable = Runnable {
         selectionAutoScrollPosted = false
@@ -219,6 +224,29 @@ class SourceEditorView @JvmOverloads constructor(
                 }
             }
             return true
+        }
+        if (nativeSelectionDragBlocked) {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                // Recover if the platform delivered a fresh gesture without the cancellation or
+                // ACTION_UP that normally closes the long-press stream.
+                nativeSelectionDragBlocked = false
+            } else {
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_MOVE -> {
+                        selectionTouchMoved = true
+                        return true
+                    }
+                    MotionEvent.ACTION_UP,
+                    MotionEvent.ACTION_CANCEL -> {
+                        nativeSelectionDragBlocked = false
+                        selectionGesture = null
+                        selectionTouchMoved = false
+                        selectionTouchActive = false
+                        return true
+                    }
+                }
+                return true
+            }
         }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -624,6 +652,17 @@ class SourceEditorView @JvmOverloads constructor(
             target.first,
             offsetForRawPosition(target.second, targetRawX, targetRawY)
         )
+        val crossesOtherHandle = when (side) {
+            SelectionHandleSide.LEFT -> movingOffset > fixedOffset
+            SelectionHandleSide.RIGHT -> movingOffset < fixedOffset
+        }
+        if (crossesOtherHandle) {
+            // Keep the dragged window under the finger, but exchange its logical direction and
+            // endpoint role once it passes the stationary handle. This is the same behavior users
+            // expect from native text selection handles and avoids a disappearing/teleporting
+            // marker when the two endpoints cross.
+            swapCustomHandleSides()
+        }
         val fixedLineOffset = lineAndColumnForAbsoluteOffset(fixedOffset)
         documentSelection = DocumentSelection(
             anchorLine = fixedLineOffset.first,
@@ -632,7 +671,7 @@ class SourceEditorView @JvmOverloads constructor(
             focusOffset = (movingOffset - offsets.start(target.first))
                 .coerceIn(0, lines[target.first].text.length)
         )
-        if (side == SelectionHandleSide.LEFT) {
+        if (customHandleSide == SelectionHandleSide.LEFT) {
             customLeftHandleOffset = movingOffset
         } else {
             customRightHandleOffset = movingOffset
@@ -771,7 +810,7 @@ class SourceEditorView @JvmOverloads constructor(
 
     private fun updateSelectionHandlePopups() {
         val range = selectedDocumentRange()
-        if (range == null || range.first >= range.second) {
+        if (range == null) {
             customLeftHandle.dismissSafely()
             customRightHandle.dismissSafely()
             return
@@ -782,6 +821,19 @@ class SourceEditorView @JvmOverloads constructor(
         val dragPoint = customHandleDragPoint
         val leftOffset = customLeftHandleOffset ?: range.first
         val rightOffset = customRightHandleOffset ?: range.second
+        if (range.first >= range.second) {
+            if (customHandleSide == null) {
+                customLeftHandle.dismissSafely()
+                customRightHandle.dismissSafely()
+            } else {
+                // Keep the merged handles alive until ACTION_UP so the user can continue dragging
+                // back across the same endpoint instead of losing the active gesture.
+                val point = dragPoint ?: selectionEndpointPoint(leftOffset)
+                customLeftHandle.positionAt(point)
+                customRightHandle.positionAt(point)
+            }
+            return
+        }
         when (customHandleSide) {
             SelectionHandleSide.LEFT -> {
                 // Keep the active popup under the finger and refresh the inactive endpoint as
@@ -917,6 +969,7 @@ class SourceEditorView @JvmOverloads constructor(
         customHandleTouchOffsetX = 0f
         customHandleTouchOffsetY = 0f
         customHandleTouchFromSource = false
+        nativeSelectionDragBlocked = false
         resetHandleEndpointMapping()
         removeCallbacks(selectionAutoScrollRunnable)
         selectionAutoScrollPosted = false
@@ -932,6 +985,34 @@ class SourceEditorView @JvmOverloads constructor(
     private fun resetHandleEndpointMapping() {
         customLeftHandleOffset = null
         customRightHandleOffset = null
+    }
+
+    /** Stop TextView's in-progress long-press/selection gesture at the document boundary. */
+    private fun blockNativeSelectionDrag(editor: SourceLineEditText) {
+        nativeSelectionDragBlocked = true
+        val now = SystemClock.uptimeMillis()
+        val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
+        try {
+            editor.dispatchTouchEvent(cancel)
+        } finally {
+            cancel.recycle()
+        }
+    }
+
+    private fun swapCustomHandleSides() {
+        val popup = customLeftHandle
+        customLeftHandle = customRightHandle
+        customRightHandle = popup
+        customLeftHandle.setSide(SelectionHandleSide.LEFT)
+        customRightHandle.setSide(SelectionHandleSide.RIGHT)
+        val offset = customLeftHandleOffset
+        customLeftHandleOffset = customRightHandleOffset
+        customRightHandleOffset = offset
+        customHandleSide = when (customHandleSide) {
+            SelectionHandleSide.LEFT -> SelectionHandleSide.RIGHT
+            SelectionHandleSide.RIGHT -> SelectionHandleSide.LEFT
+            null -> null
+        }
     }
 
     private fun copyDocumentSelection(): Boolean {
@@ -1062,7 +1143,7 @@ class SourceEditorView @JvmOverloads constructor(
      * over a different RecyclerView item (native handles are bound to one EditText only).
      */
     private inner class SelectionHandlePopup(
-        private val side: SelectionHandleSide
+        private var side: SelectionHandleSide
     ) : PopupWindow(context) {
         private val handleView = SelectionHandleView(context, side)
         private var lastWindowX = Int.MIN_VALUE
@@ -1088,6 +1169,12 @@ class SourceEditorView @JvmOverloads constructor(
             // event to the tiny content view. Handling the gesture at the window boundary keeps
             // the drag alive when the pointer leaves the marker or crosses a RecyclerView row.
             setTouchInterceptor { _, event -> handleTouch(event) }
+        }
+
+        fun setSide(newSide: SelectionHandleSide) {
+            if (side == newSide) return
+            side = newSide
+            handleView.setSide(newSide)
         }
 
         private fun handleTouch(event: MotionEvent): Boolean {
@@ -1182,28 +1269,39 @@ class SourceEditorView @JvmOverloads constructor(
 
     private inner class SelectionHandleView(
         context: Context,
-        private val side: SelectionHandleSide
+        initialSide: SelectionHandleSide
     ) : View(context) {
+        private var side = initialSide
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = selectionHandleColor
             style = Paint.Style.FILL
         }
+        private var systemHandleDrawable: Drawable? = loadSystemHandleDrawable(initialSide)
+
         @SuppressLint("ResourceType")
-        private val systemHandleDrawable: Drawable? = context.obtainStyledAttributes(
-            intArrayOf(
-                if (side == SelectionHandleSide.LEFT) {
-                    android.R.attr.textSelectHandleLeft
-                } else {
-                    android.R.attr.textSelectHandleRight
-                },
-                android.R.attr.textSelectHandle
-            )
-        ).let { attributes ->
-            try {
-                (attributes.getDrawable(0) ?: attributes.getDrawable(1))?.mutate()
-            } finally {
-                attributes.recycle()
+        private fun loadSystemHandleDrawable(side: SelectionHandleSide): Drawable? =
+            context.obtainStyledAttributes(
+                intArrayOf(
+                    if (side == SelectionHandleSide.LEFT) {
+                        android.R.attr.textSelectHandleLeft
+                    } else {
+                        android.R.attr.textSelectHandleRight
+                    },
+                    android.R.attr.textSelectHandle
+                )
+            ).let { attributes ->
+                try {
+                    (attributes.getDrawable(0) ?: attributes.getDrawable(1))?.mutate()
+                } finally {
+                    attributes.recycle()
+                }
             }
+
+        fun setSide(newSide: SelectionHandleSide) {
+            if (side == newSide) return
+            side = newSide
+            systemHandleDrawable = loadSystemHandleDrawable(newSide)
+            invalidate()
         }
 
         override fun onDraw(canvas: Canvas) {
@@ -1655,6 +1753,10 @@ class SourceEditorView @JvmOverloads constructor(
                     focusLine = sourceLine,
                     focusOffset = end
                 )
+                // The long press has done its one allowed job: creating the initial single-row
+                // range. End the child's native drag now; subsequent range changes must come from
+                // one of the custom document handles after the pointer is released.
+                blockNativeSelectionDrag(sourceEditor)
             }
             addSelectionMenu(menu)
             lineAdapter.refreshHighlights()
