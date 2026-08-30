@@ -7,15 +7,11 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.text.style.BackgroundColorSpan
 import android.util.TypedValue
-import android.view.ActionMode
 import android.view.Gravity
 import android.view.LayoutInflater
-import android.view.Menu
-import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
-import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.subtitleedit.R
@@ -46,8 +42,7 @@ internal class SourceLineAdapter(
     private val onExtendVertical: (Int, Int, Int, Int) -> Boolean,
     private val highlightsForLine: (Int) -> List<SourceLineHighlight>,
     private val onEditorFocusChanged: () -> Unit,
-    private val onEditorSelectionChanged: (Int, SourceLineEditText) -> Unit,
-    private val onEditorSelectionActionMode: (Int, SourceLineEditText) -> ActionMode.Callback
+    private val onEditorSelectionChanged: (Int, SourceLineEditText) -> Unit
 ) : RecyclerView.Adapter<SourceLineAdapter.LineViewHolder>() {
 
     private var editorEnabled = true
@@ -188,34 +183,23 @@ internal class SourceLineAdapter(
             // Keep one physical source line per holder. Enter is handled by SourceLineEditText
             // and converted into an adapter insertion before TextView can wrap the row.
             editor.setSingleLine(false)
+            // Selection belongs to SourceEditorView's document model. Keeping TextView
+            // selectable would let its Editor install a second long-press drag/handle stream.
+            editor.setTextIsSelectable(false)
+            // TextView's setter also changes the generic focus/click flags. Restore the flags
+            // required for ordinary cursor placement and IME editing while leaving selection
+            // itself disabled.
+            editor.isFocusable = true
+            editor.isFocusableInTouchMode = true
+            editor.isClickable = true
+            editor.isLongClickable = false
             // Long text wraps visually inside the same logical source-line block. Actual
             // newline insertion is still intercepted by SourceLineEditText and creates a new
             // adapter item.
             editor.setHorizontallyScrolling(false)
-            // Keep Android's native selection handles backed by the same visible tint as the
-            // document-wide spans. This also guarantees that the initial long-press range is
-            // visible before the RecyclerView highlight payload is applied.
+            // The child selection color is retained for caret/keyboard editing; document ranges
+            // are painted by SourceEditorView and never originate from TextView selection.
             editor.highlightColor = ContextCompat.getColor(context, R.color.source_selection)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // Native TextView handles are bound to one RecyclerView child and cannot cross
-                // logical source rows. The source view supplies the only visible/touchable pair
-                // of document handles; leave native selection highlighting itself enabled.
-                val hiddenHandle = ContextCompat.getDrawable(
-                    context,
-                    R.drawable.source_transparent_handle
-                )
-                if (hiddenHandle != null) {
-                    editor.setTextSelectHandle(hiddenHandle)
-                    editor.setTextSelectHandleLeft(
-                        ContextCompat.getDrawable(context, R.drawable.source_transparent_handle)
-                            ?: hiddenHandle
-                    )
-                    editor.setTextSelectHandleRight(
-                        ContextCompat.getDrawable(context, R.drawable.source_transparent_handle)
-                            ?: hiddenHandle
-                    )
-                }
-            }
             editor.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
                 updateLineNumberGravity()
             }
@@ -231,27 +215,6 @@ internal class SourceLineAdapter(
                     } else {
                         onEditorSelectionChanged(position, editor)
                     }
-                }
-            }
-            editor.customSelectionActionModeCallback = object : ActionMode.Callback {
-                private var delegate: ActionMode.Callback? = null
-
-                override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
-                    val position = bindingAdapterPosition
-                    if (position == RecyclerView.NO_POSITION) return false
-                    delegate = onEditorSelectionActionMode(position, editor)
-                    return delegate?.onCreateActionMode(mode, menu) == true
-                }
-
-                override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean =
-                    delegate?.onPrepareActionMode(mode, menu) == true
-
-                override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean =
-                    delegate?.onActionItemClicked(mode, item) == true
-
-                override fun onDestroyActionMode(mode: ActionMode) {
-                    delegate?.onDestroyActionMode(mode)
-                    delegate = null
                 }
             }
             editor.imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_ENTER_ACTION

@@ -44,6 +44,7 @@
         android:paddingEnd="12dp"
         android:paddingBottom="0dp"
         android:scrollHorizontally="false"
+        android:textIsSelectable="false"
         android:textSelectHandle="@drawable/source_transparent_handle"
         android:textSelectHandleLeft="@drawable/source_transparent_handle"
         android:textSelectHandleRight="@drawable/source_transparent_handle"

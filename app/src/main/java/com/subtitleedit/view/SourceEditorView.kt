@@ -89,13 +89,24 @@ class SourceEditorView @JvmOverloads constructor(
         val line: Int,
         val editor: SourceLineEditText,
         val downX: Float,
-        val downY: Float
+        val downY: Float,
+        val downRawX: Float,
+        val downRawY: Float
     )
 
     private var documentSelection: DocumentSelection? = null
     private var selectionGesture: SelectionGesture? = null
+    private var internalSelectionLongPressPosted = false
+    private var internalSelectionDragActive = false
+    private var internalSelectionInitialStart = 0
+    private var internalSelectionInitialEnd = 0
+    private var internalSelectionInitialTouch = 0
+    private var internalSelectionLastRawX = 0f
+    private var internalSelectionLastRawY = 0f
     private var selectionTouchMoved = false
     private var selectionActionMode: ActionMode? = null
+    private var selectionActionModeSuppressedForScroll = false
+    private var selectionActionModeSuppressedForHandleDrag = false
     // Material selection-handle assets are 44dp wide but only about 22dp of that bitmap is
     // opaque. The popup is cropped to that opaque portion so its touch area is the visible
     // marker, rather than the transparent padding used by TextView's larger native target.
@@ -124,32 +135,45 @@ class SourceEditorView @JvmOverloads constructor(
     private var customHandleTouchFromSource = false
     private var selectionAutoScrollPosted = false
     private var selectionTouchActive = false
-    // Once a long-press has published a document selection, the child EditText must no longer
-    // receive the remainder of that pointer stream. Otherwise TextView keeps its native handle
-    // drag alive underneath the custom document handles and the first handle drag is ignored.
-    private var nativeSelectionDragBlocked = false
     private var imeSuppressedEditor: SourceLineEditText? = null
-    private val selectionImeSuppressRunnable = Runnable {
-        if (selectionTouchActive && documentSelection == null) {
-            imeSuppressedEditor?.let(::suppressImeForSelection)
-        }
-    }
     private var customLeftHandle = SelectionHandlePopup(SelectionHandleSide.LEFT)
     private var customRightHandle = SelectionHandlePopup(SelectionHandleSide.RIGHT)
 
+    private val internalSelectionLongPressRunnable = Runnable {
+        internalSelectionLongPressPosted = false
+        val gesture = selectionGesture ?: return@Runnable
+        if (!selectionTouchActive || selectionTouchMoved || customHandleSide != null) return@Runnable
+        beginInternalLongPressSelection(gesture)
+    }
+
     private val selectionAutoScrollRunnable = Runnable {
         selectionAutoScrollPosted = false
-        if (customHandleSide == null) return@Runnable
+        if (customHandleSide == null && !internalSelectionDragActive) return@Runnable
         val location = IntArray(2)
         getLocationOnScreen(location)
-        val targetY = customHandleLastRawY - customHandleTouchOffsetY
+        val targetY = if (customHandleSide != null) {
+            customHandleLastRawY - customHandleTouchOffsetY
+        } else {
+            internalSelectionLastRawY
+        }
         val localY = targetY - location[1]
         val delta = selectionAutoScrollDelta(localY)
         if (delta == 0) return@Runnable
         scrollBy(0, delta)
-        // Resolve the endpoint against the newly visible rows, while keeping the active popup
-        // anchored to the same finger hotspot.
-        updateCustomHandleDrag(customHandleLastRawX, customHandleLastRawY, scheduleAutoScroll = false)
+        // Resolve the endpoint against the newly visible rows after each edge-scroll frame.
+        if (customHandleSide != null) {
+            updateCustomHandleDrag(
+                customHandleLastRawX,
+                customHandleLastRawY,
+                scheduleAutoScroll = false
+            )
+        } else {
+            updateInternalSelectionDrag(
+                internalSelectionLastRawX,
+                internalSelectionLastRawY,
+                scheduleAutoScroll = false
+            )
+        }
         maybeAutoScrollForSelection(localY)
     }
 
@@ -158,7 +182,6 @@ class SourceEditorView @JvmOverloads constructor(
         const val MENU_CUT = 0x53450002
         const val MENU_COPY = 0x53450003
         const val MENU_PASTE = 0x53450004
-        const val HANDLE_ACTION_MODE_HIDE_DURATION_MS = 1000L
     }
 
     private val imeEnsureRunnable = Runnable {
@@ -186,8 +209,7 @@ class SourceEditorView @JvmOverloads constructor(
         onExtendVertical = ::extendCursorVertically,
         highlightsForLine = ::highlightsForLine,
         onEditorFocusChanged = ::onEditorFocusChanged,
-        onEditorSelectionChanged = ::onEditorSelectionChanged,
-        onEditorSelectionActionMode = ::createEditorSelectionActionMode
+        onEditorSelectionChanged = ::onEditorSelectionChanged
     )
 
     init {
@@ -233,32 +255,31 @@ class SourceEditorView @JvmOverloads constructor(
             }
             return true
         }
-        if (nativeSelectionDragBlocked) {
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                // Recover if the platform delivered a fresh gesture without the cancellation or
-                // ACTION_UP that normally closes the long-press stream.
-                nativeSelectionDragBlocked = false
-            } else {
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_MOVE -> {
-                        selectionTouchMoved = true
-                        return true
-                    }
-                    MotionEvent.ACTION_UP,
-                    MotionEvent.ACTION_CANCEL -> {
-                        nativeSelectionDragBlocked = false
-                        selectionGesture = null
-                        selectionTouchMoved = false
-                        selectionTouchActive = false
-                        return true
-                    }
+        if (internalSelectionDragActive) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_MOVE -> {
+                    selectionTouchMoved = true
+                    updateInternalSelectionDrag(event.rawX, event.rawY)
+                    return true
                 }
-                return true
+                MotionEvent.ACTION_UP,
+                MotionEvent.ACTION_CANCEL -> {
+                    finishInternalSelectionDrag()
+                    removeCallbacks(internalSelectionLongPressRunnable)
+                    internalSelectionLongPressPosted = false
+                    selectionGesture = null
+                    selectionTouchMoved = false
+                    selectionTouchActive = false
+                    return true
+                }
+                MotionEvent.ACTION_DOWN -> finishInternalSelectionDrag()
             }
         }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 imeShowRequested = false
+                removeCallbacks(internalSelectionLongPressRunnable)
+                internalSelectionLongPressPosted = false
                 val handleSide = selectionHandleSideAtRaw(event.rawX, event.rawY)
                 if (handleSide != null && startCustomHandleDrag(handleSide, event.rawX, event.rawY)) {
                     customHandleTouchFromSource = true
@@ -274,7 +295,16 @@ class SourceEditorView @JvmOverloads constructor(
                         line = it.first,
                         editor = it.second,
                         downX = event.x,
-                        downY = event.y
+                        downY = event.y,
+                        downRawX = event.rawX,
+                        downRawY = event.rawY
+                    )
+                }
+                if (selectionGesture != null) {
+                    internalSelectionLongPressPosted = true
+                    postDelayed(
+                        internalSelectionLongPressRunnable,
+                        ViewConfiguration.getLongPressTimeout().toLong()
                     )
                 }
             }
@@ -286,6 +316,10 @@ class SourceEditorView @JvmOverloads constructor(
                         abs(event.y - gesture.downY) > selectionTouchSlopPx)
                 ) {
                     selectionTouchMoved = true
+                    if (internalSelectionLongPressPosted) {
+                        removeCallbacks(internalSelectionLongPressRunnable)
+                        internalSelectionLongPressPosted = false
+                    }
                 }
             }
 
@@ -295,12 +329,14 @@ class SourceEditorView @JvmOverloads constructor(
         val handled = super.dispatchTouchEvent(event)
         when (event.actionMasked) {
             MotionEvent.ACTION_UP -> {
+                removeCallbacks(internalSelectionLongPressRunnable)
+                internalSelectionLongPressPosted = false
                 val gesture = selectionGesture
                 val longPressed = gesture != null &&
                     event.eventTime - event.downTime >= ViewConfiguration.getLongPressTimeout()
                 val moved = selectionTouchMoved
-                // A moving gesture is a RecyclerView scroll, not a second text-selection mode.
-                // A stationary tap explicitly clears an existing document selection.
+                // A moving gesture that has not entered the custom long-press path is a
+                // RecyclerView scroll. A stationary tap explicitly clears an existing selection.
                 if (documentSelection != null && !moved && !longPressed) {
                     clearDocumentSelection()
                 }
@@ -320,6 +356,8 @@ class SourceEditorView @JvmOverloads constructor(
             }
 
             MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(internalSelectionLongPressRunnable)
+                internalSelectionLongPressPosted = false
                 selectionGesture = null
                 selectionTouchMoved = false
                 selectionTouchActive = false
@@ -412,12 +450,27 @@ class SourceEditorView @JvmOverloads constructor(
     override fun onScrolled(dx: Int, dy: Int) {
         super.onScrolled(dx, dy)
         updateSelectionHandlePopups()
-        if (documentSelection != null && customHandleSide == null && selectionActionMode == null) {
+        // A normal viewport scroll dismisses the floating selection toolbar and leaves it
+        // dismissed. Handle/selection drags own their toolbar state and restore it on release.
+        if (documentSelection != null && dy != 0 && customHandleSide == null &&
+            !internalSelectionDragActive && !selectionActionModeSuppressedForHandleDrag
+        ) {
+            selectionActionModeSuppressedForScroll = true
+            selectionActionMode?.finish()
+        }
+        if (documentSelection != null && customHandleSide == null &&
+            !internalSelectionDragActive && !selectionActionModeSuppressedForScroll &&
+            !selectionActionModeSuppressedForHandleDrag && selectionActionMode == null
+        ) {
             postOnAnimation { ensureSelectionActionMode() }
         }
     }
 
     override fun onDetachedFromWindow() {
+        removeCallbacks(internalSelectionLongPressRunnable)
+        removeCallbacks(selectionAutoScrollRunnable)
+        internalSelectionLongPressPosted = false
+        internalSelectionDragActive = false
         customLeftHandle.dismissSafely()
         customRightHandle.dismissSafely()
         super.onDetachedFromWindow()
@@ -435,31 +488,22 @@ class SourceEditorView @JvmOverloads constructor(
             imeSuppressedEditor?.showSoftInputOnFocus = true
             imeSuppressedEditor = editor
         }
-        // A normal tap must be able to focus the row and open the keyboard. If the long-press
-        // timeout is reached, selectionImeSuppressRunnable/suppressImeForSelection() turns this
-        // off before the selection ActionMode remains active.
+        // A normal tap must be able to focus the row and open the keyboard. The custom long-press
+        // runnable turns this off only after it has created the document selection.
         editor.showSoftInputOnFocus = true
-        removeCallbacks(selectionImeSuppressRunnable)
-        postDelayed(
-            selectionImeSuppressRunnable,
-            ViewConfiguration.getLongPressTimeout().toLong()
-        )
     }
 
     /** Keep the long-press selection visual-only and close an IME that was already visible. */
     private fun suppressImeForSelection(editor: SourceLineEditText) {
-        removeCallbacks(selectionImeSuppressRunnable)
         beginSelectionTouch(editor)
         editor.showSoftInputOnFocus = false
         imeShowRequested = false
-        removeCallbacks(selectionImeSuppressRunnable)
         val inputMethod = context.getSystemService(Context.INPUT_METHOD_SERVICE)
             as? InputMethodManager
         inputMethod?.hideSoftInputFromWindow(editor.windowToken, 0)
     }
 
     private fun restoreImeSuppression() {
-        removeCallbacks(selectionImeSuppressRunnable)
         imeSuppressedEditor?.showSoftInputOnFocus = true
         imeSuppressedEditor = null
     }
@@ -491,10 +535,10 @@ class SourceEditorView @JvmOverloads constructor(
         val end = editor.selectionEnd.coerceIn(0, editor.length())
         val selection = documentSelection
         if (selection == null) {
-            // The child callback also fires for keyboard/programmatic selection changes and for
-            // a plain text drag. Do not turn those into a document selection. A new document
-            // range is published only by SourceSelectionActionMode (long-press) or by the
-            // custom document handle/vertical-extension paths.
+            // The child callback also fires for keyboard/programmatic selection changes. Do not
+            // turn those into a document selection. A new document
+            // range is published only by the parent-owned long-press/handle paths or by the
+            // vertical-extension keyboard path.
             return
         }
         if (selection.anchorLine != position || selection.focusLine != position) {
@@ -623,6 +667,116 @@ class SourceEditorView @JvmOverloads constructor(
         ).coerceIn(0, editor.length())
     }
 
+    private fun beginInternalLongPressSelection(gesture: SelectionGesture) {
+        val editor = gesture.editor
+        val position = gesture.line.coerceIn(0, lines.lastIndex)
+        val touchOffset = offsetForRawPosition(editor, gesture.downRawX, gesture.downRawY)
+        val word = wordSelectionRange(editor, touchOffset)
+        val initialStart = absoluteOffset(position, word.first)
+        val initialEnd = absoluteOffset(position, word.second)
+        if (initialStart >= initialEnd) return
+
+        // A new long press starts a new document range. It is deliberately independent of
+        // TextView's selection state, so a recycled child cannot leave a second native range
+        // active underneath this one.
+        if (documentSelection != null) clearDocumentSelection()
+        selectionActionModeSuppressedForScroll = false
+        selectionActionModeSuppressedForHandleDrag = false
+        suppressImeForSelection(editor)
+        resetHandleEndpointMapping()
+        documentSelection = DocumentSelection(
+            anchorLine = position,
+            anchorOffset = word.first,
+            focusLine = position,
+            focusOffset = word.second
+        )
+        internalSelectionInitialStart = initialStart
+        internalSelectionInitialEnd = initialEnd
+        internalSelectionInitialTouch = absoluteOffset(position, touchOffset)
+        internalSelectionLastRawX = gesture.downRawX
+        internalSelectionLastRawY = gesture.downRawY
+        internalSelectionDragActive = true
+        parent?.requestDisallowInterceptTouchEvent(true)
+        refreshVisibleSelectionHighlights()
+        // Cancel TextView's already dispatched DOWN stream before it can turn a later MOVE into
+        // a native selection drag. All subsequent movement is consumed by this view.
+        cancelNativeSelectionGesture(editor)
+        // Keep the focused child range aligned for keyboard replacement/deletion. It is only a
+        // caret for cross-row ranges; the document highlight and custom handles remain the source
+        // of truth for the complete selection.
+        syncNativeSelection(documentSelection!!)
+        ensureSelectionActionMode()
+        updateSelectionHandlePopups()
+    }
+
+    private fun updateInternalSelectionDrag(
+        rawX: Float,
+        rawY: Float,
+        scheduleAutoScroll: Boolean = true
+    ) {
+        if (!internalSelectionDragActive || documentSelection == null) return
+        internalSelectionLastRawX = rawX
+        internalSelectionLastRawY = rawY
+        val sourceLocation = IntArray(2)
+        getLocationOnScreen(sourceLocation)
+        val localY = rawY - sourceLocation[1]
+        if (scheduleAutoScroll) maybeAutoScrollForSelection(localY)
+        val target = editorAtRaw(rawY) ?: return
+        val targetOffset = offsetForRawPosition(target.second, rawX, rawY)
+        val movingOffset = absoluteOffset(target.first, targetOffset)
+
+        // Preserve the word selected by the long press until the finger chooses a direction;
+        // moving right keeps the word start fixed, moving left keeps the word end fixed. This
+        // mirrors the native gesture without allowing TextView to own the pointer stream.
+        val anchorOffset = if (movingOffset >= internalSelectionInitialTouch) {
+            internalSelectionInitialStart
+        } else {
+            internalSelectionInitialEnd
+        }
+        val anchorLineOffset = lineAndColumnForAbsoluteOffset(anchorOffset)
+        val focusLineOffset = lineAndColumnForAbsoluteOffset(movingOffset)
+        documentSelection = DocumentSelection(
+            anchorLine = anchorLineOffset.first,
+            anchorOffset = anchorLineOffset.second,
+            focusLine = focusLineOffset.first,
+            focusOffset = focusLineOffset.second
+        )
+        hideSelectionActionModeForHandleDrag()
+        resetHandleEndpointMapping()
+        refreshVisibleSelectionHighlights()
+        updateSelectionHandlePopups()
+    }
+
+    private fun finishInternalSelectionDrag() {
+        if (!internalSelectionDragActive) return
+        internalSelectionDragActive = false
+        removeCallbacks(selectionAutoScrollRunnable)
+        selectionAutoScrollPosted = false
+        parent?.requestDisallowInterceptTouchEvent(false)
+        documentSelection?.let(::syncNativeSelection)
+        selectionActionMode?.invalidateContentRect()
+        updateSelectionHandlePopups()
+        restoreSelectionActionModeAfterDrag()
+    }
+
+    private fun wordSelectionRange(editor: SourceLineEditText, offset: Int): Pair<Int, Int> {
+        val text = editor.text ?: return offset to offset
+        if (text.isEmpty()) return 0 to 0
+        val pivot = offset.coerceIn(0, text.length - 1)
+        val kind = wordCharacterKind(text[pivot])
+        var start = pivot
+        var end = pivot + 1
+        while (start > 0 && wordCharacterKind(text[start - 1]) == kind) start--
+        while (end < text.length && wordCharacterKind(text[end]) == kind) end++
+        return start to end
+    }
+
+    private fun wordCharacterKind(character: Char): Int = when {
+        character.isLetterOrDigit() || character == '_' -> 1
+        character.isWhitespace() -> 2
+        else -> 3
+    }
+
     private fun startCustomHandleDrag(
         side: SelectionHandleSide,
         rawX: Float = Float.NaN,
@@ -632,6 +786,9 @@ class SourceEditorView @JvmOverloads constructor(
     ): Boolean {
         val range = selectedDocumentRange() ?: return false
         if (range.first >= range.second) return false
+        // A handle drag takes over from a toolbar that may have been dismissed by a prior
+        // viewport scroll. Its release path is responsible for showing the toolbar again.
+        selectionActionModeSuppressedForScroll = false
         // Keep the physical marker that received the touch as the moving endpoint. Do not infer
         // start/end from proximity: when the selection is reversed, or when both endpoints are
         // on the same visual row, that heuristic can map the right marker to the left endpoint
@@ -757,11 +914,20 @@ class SourceEditorView @JvmOverloads constructor(
         if (selection != null) syncNativeSelection(selection)
         selectionActionMode?.invalidateContentRect()
         updateSelectionHandlePopups()
+        restoreSelectionActionModeAfterDrag()
     }
 
     private fun hideSelectionActionModeForHandleDrag() {
-        val mode = selectionActionMode ?: return
-        mode.hide(HANDLE_ACTION_MODE_HIDE_DURATION_MS)
+        selectionActionModeSuppressedForHandleDrag = true
+        selectionActionMode?.finish()
+    }
+
+    private fun restoreSelectionActionModeAfterDrag() {
+        if (documentSelection == null) return
+        selectionActionModeSuppressedForScroll = false
+        selectionActionModeSuppressedForHandleDrag = false
+        ensureSelectionActionMode()
+        selectionActionMode?.invalidateContentRect()
     }
 
     /** Keep the focused EditText's native caret/range aligned with the document endpoint. */
@@ -972,6 +1138,11 @@ class SourceEditorView @JvmOverloads constructor(
     private fun clearDocumentSelection() {
         val hadSelection = documentSelection != null
         documentSelection = null
+        selectionActionModeSuppressedForScroll = false
+        selectionActionModeSuppressedForHandleDrag = false
+        removeCallbacks(internalSelectionLongPressRunnable)
+        internalSelectionLongPressPosted = false
+        internalSelectionDragActive = false
         selectionGesture = null
         customHandleSide = null
         customHandleAnchor = null
@@ -979,7 +1150,6 @@ class SourceEditorView @JvmOverloads constructor(
         customHandleTouchOffsetX = 0f
         customHandleTouchOffsetY = 0f
         customHandleTouchFromSource = false
-        nativeSelectionDragBlocked = false
         resetHandleEndpointMapping()
         removeCallbacks(selectionAutoScrollRunnable)
         selectionAutoScrollPosted = false
@@ -997,9 +1167,8 @@ class SourceEditorView @JvmOverloads constructor(
         customRightHandleOffset = null
     }
 
-    /** Stop TextView's in-progress long-press/selection gesture at the document boundary. */
-    private fun blockNativeSelectionDrag(editor: SourceLineEditText) {
-        nativeSelectionDragBlocked = true
+    /** Stop any TextView gesture that was dispatched before the custom long press fired. */
+    private fun cancelNativeSelectionGesture(editor: SourceLineEditText) {
         val now = SystemClock.uptimeMillis()
         val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
         try {
@@ -1114,6 +1283,8 @@ class SourceEditorView @JvmOverloads constructor(
 
     private fun selectAllDocument() {
         if (lines.isEmpty()) return
+        selectionActionModeSuppressedForScroll = false
+        selectionActionModeSuppressedForHandleDrag = false
         resetHandleEndpointMapping()
         documentSelection = DocumentSelection(
             anchorLine = 0,
@@ -1141,11 +1312,6 @@ class SourceEditorView @JvmOverloads constructor(
             color = context.getColor(R.color.source_selection)
         )
     }
-
-    private fun createEditorSelectionActionMode(
-        position: Int,
-        editor: SourceLineEditText
-    ): ActionMode.Callback = SourceSelectionActionMode(position, editor)
 
     /**
      * Selection handles live in their own PopupWindow, just like Android's TextView handles.
@@ -1436,20 +1602,14 @@ class SourceEditorView @JvmOverloads constructor(
 
     /** Return the caret rectangle in the coordinates expected by a floating ActionMode. */
     private fun selectionContentRect(
-        view: View,
-        sourceLine: Int?,
-        sourceEditor: SourceLineEditText?
+        view: View
     ): Rect? {
         val selection = documentSelection ?: return null
         val targetLine = selection.focusLine.coerceIn(0, lines.lastIndex)
-        val editor = if (sourceLine == targetLine && sourceEditor != null) {
-            sourceEditor
-        } else {
-            findViewHolderForAdapterPosition(targetLine)?.itemView
+        val editor = findViewHolderForAdapterPosition(targetLine)?.itemView
             ?.findViewById<SourceLineEditText>(R.id.etSourceLine)
             ?: findFocus() as? SourceLineEditText
             ?: return null
-        }
         val offset = if (targetLine == selection.focusLine) {
             selection.focusOffset.coerceIn(0, editor.length())
         } else {
@@ -1691,11 +1851,15 @@ class SourceEditorView @JvmOverloads constructor(
         if (anchorLine == target && anchorOffset == targetColumn) {
             resetHandleEndpointMapping()
             documentSelection = null
+            selectionActionModeSuppressedForScroll = false
+            selectionActionModeSuppressedForHandleDrag = false
             selectionActionMode?.finish()
             requestFocus(target, targetColumn)
             lineAdapter.refreshHighlights()
             return true
         }
+        selectionActionModeSuppressedForScroll = false
+        selectionActionModeSuppressedForHandleDrag = false
         resetHandleEndpointMapping()
         documentSelection = DocumentSelection(
             anchorLine = anchorLine,
@@ -1718,6 +1882,8 @@ class SourceEditorView @JvmOverloads constructor(
     }
 
     private fun ensureSelectionActionMode() {
+        if (documentSelection == null || selectedDocumentRange()?.let { it.first < it.second } != true) return
+        if (selectionActionModeSuppressedForScroll || selectionActionModeSuppressedForHandleDrag) return
         if (selectionActionMode != null) return
         selectionActionMode = startActionMode(
             SourceSelectionActionMode(),
@@ -1760,58 +1926,21 @@ class SourceEditorView @JvmOverloads constructor(
         return result
     }
 
-    private inner class SourceSelectionActionMode(
-        private val sourceLine: Int? = null,
-        private val sourceEditor: SourceLineEditText? = null
-    ) : ActionMode.Callback2() {
+    private inner class SourceSelectionActionMode : ActionMode.Callback2() {
         override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
-            if (sourceLine != null && sourceEditor != null && documentSelection != null) {
-                // A new long press starts a new selection. End the previous document range and
-                // its toolbar before reading the child's newly selected range; otherwise the old
-                // highlight survives and the two selections appear simultaneously.
-                val previousMode = selectionActionMode
-                selectionActionMode = null
-                if (previousMode != null && previousMode !== mode) previousMode.finish()
-                clearDocumentSelection()
-            }
-            // Mark the mode as active before reading the child range. TextView may synchronously
-            // emit a collapsed onSelectionChanged callback while the mode is being initialized;
-            // that callback must not clear the range we are about to publish.
+            if (selectedDocumentRange()?.let { it.first < it.second } != true) return false
             selectionActionMode = mode
-            if (sourceLine != null && sourceEditor != null && documentSelection == null) {
-                suppressImeForSelection(sourceEditor)
-                val start = sourceEditor.selectionStart.coerceIn(0, sourceEditor.length())
-                val end = sourceEditor.selectionEnd.coerceIn(0, sourceEditor.length())
-                if (start == end) {
-                    selectionActionMode = null
-                    return false
-                }
-                resetHandleEndpointMapping()
-                documentSelection = DocumentSelection(
-                    anchorLine = sourceLine,
-                    anchorOffset = start,
-                    focusLine = sourceLine,
-                    focusOffset = end
-                )
-                // The long press has done its one allowed job: creating the initial single-row
-                // range. End the child's native drag now; subsequent range changes must come from
-                // one of the custom document handles after the pointer is released.
-                blockNativeSelectionDrag(sourceEditor)
-            }
             addSelectionMenu(menu)
             lineAdapter.refreshHighlights()
             postOnAnimation {
                 if (selectionActionMode === mode) lineAdapter.refreshHighlights()
                 if (selectionActionMode === mode) {
-                    // Android creates its own handle popups while the ActionMode is starting.
-                    // Re-show ours after that transaction so the source-view handles remain the
-                    // topmost touch target.
-                    customLeftHandle.dismissSafely()
-                    customRightHandle.dismissSafely()
+                    // Reposition the document handles after the floating toolbar has completed
+                    // its first layout pass. The child TextView has no native selection mode.
                     updateSelectionHandlePopups()
                 }
             }
-            return selectedDocumentRange()?.let { it.first < it.second } == true
+            return true
         }
 
         override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean {
@@ -1821,7 +1950,7 @@ class SourceEditorView @JvmOverloads constructor(
         }
 
         override fun onGetContentRect(mode: ActionMode, view: View, outRect: Rect) {
-            selectionContentRect(view, sourceLine, sourceEditor)?.let(outRect::set)
+            selectionContentRect(view)?.let(outRect::set)
                 ?: outRect.set(0, 0, view.width.coerceAtLeast(1), view.height.coerceAtLeast(1))
         }
 
@@ -1843,11 +1972,9 @@ class SourceEditorView @JvmOverloads constructor(
         override fun onDestroyActionMode(mode: ActionMode) {
             if (selectionActionMode !== mode) return
             selectionActionMode = null
-            // Keep the document range when Android tears down a child TextView's action mode
-            // during RecyclerView recycling/scrolling. A later tap or document edit explicitly
-            // clears it; this prevents select-all highlights from disappearing on scroll.
-            // Keep the cross-row guard as well while the floating handles own that range; a
-            // recycled child must not collapse it through a transient selection callback.
+            // Keep the document range when Android tears down the floating toolbar during
+            // RecyclerView recycling/scrolling. A later tap or document edit explicitly clears
+            // it; this prevents selection highlights from disappearing on scroll.
         }
     }
 

@@ -29,6 +29,13 @@ internal class SourceLineEditText @JvmOverloads constructor(
     defStyleAttr: Int = android.R.attr.editTextStyle
 ) : AppCompatEditText(context, attrs, defStyleAttr) {
 
+    /**
+     * SourceEditorView owns long-press selection. Returning true here prevents TextView's
+     * Editor from starting its native selection ActionMode/handle drag underneath the document
+     * selection implementation.
+     */
+    override fun performLongClick(): Boolean = true
+
     private val wrapMarkerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0x66909090
         textSize = TypedValue.applyDimension(
