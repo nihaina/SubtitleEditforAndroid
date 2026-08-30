@@ -38,7 +38,7 @@ internal data class SourceLineHighlight(val start: Int, val end: Int, val color:
 internal class SourceLineAdapter(
     private val context: Context,
     private val lines: List<SourceLineBlock>,
-    private val onTextChanged: (Int, String, Int) -> Unit,
+    private val onTextChanged: (Int, String, Int, Int, Int, Int) -> Unit,
     private val onSplitLine: (Int, Int) -> Boolean,
     private val onMergePrevious: (Int) -> Boolean,
     private val onMergeNext: (Int) -> Boolean,
@@ -53,6 +53,8 @@ internal class SourceLineAdapter(
     private var editorEnabled = true
     private var pendingFocusPosition = RecyclerView.NO_POSITION
     private var pendingFocusColumn = 0
+    private var pendingSelectionStart: Int? = null
+    private var pendingSelectionEnd: Int? = null
     private var gutterWidthPx = computeGutterWidth(1)
 
     init {
@@ -145,21 +147,42 @@ internal class SourceLineAdapter(
     fun requestLineFocus(position: Int, column: Int) {
         pendingFocusPosition = position
         pendingFocusColumn = column
+        pendingSelectionStart = null
+        pendingSelectionEnd = null
+        if (position in lines.indices) notifyItemChanged(position, PAYLOAD_FOCUS)
+    }
+
+    fun requestLineSelection(position: Int, start: Int, end: Int) {
+        pendingFocusPosition = position
+        pendingFocusColumn = end
+        pendingSelectionStart = start
+        pendingSelectionEnd = end
         if (position in lines.indices) notifyItemChanged(position, PAYLOAD_FOCUS)
     }
 
     private fun applyPendingFocus(holder: LineViewHolder, position: Int) {
         if (position != pendingFocusPosition) return
         val column = pendingFocusColumn
+        val selectionStart = pendingSelectionStart
+        val selectionEnd = pendingSelectionEnd
         pendingFocusPosition = RecyclerView.NO_POSITION
         pendingFocusColumn = 0
-        holder.focus(column)
+        pendingSelectionStart = null
+        pendingSelectionEnd = null
+        if (selectionStart != null && selectionEnd != null) {
+            holder.focusSelection(selectionStart, selectionEnd)
+        } else {
+            holder.focus(column)
+        }
     }
 
     inner class LineViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val lineNumber: TextView = itemView.findViewById(R.id.tvSourceLineNumber)
         private val editor: SourceLineEditText = itemView.findViewById(R.id.etSourceLine)
         private var binding = false
+        private var textChangeStart = 0
+        private var textChangeBefore = 0
+        private var textChangeCount = 0
 
         init {
             // Keep one physical source line per holder. Enter is handled by SourceLineEditText
@@ -234,7 +257,11 @@ internal class SourceLineAdapter(
             editor.imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_ENTER_ACTION
             editor.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    textChangeStart = start
+                    textChangeBefore = before
+                    textChangeCount = count
+                }
 
                 override fun afterTextChanged(s: Editable?) {
                     if (binding) return
@@ -243,7 +270,10 @@ internal class SourceLineAdapter(
                         this@SourceLineAdapter.onTextChanged(
                             position,
                             s?.toString().orEmpty(),
-                            editor.selectionStart.coerceAtLeast(0)
+                            editor.selectionStart.coerceAtLeast(0),
+                            textChangeStart,
+                            textChangeBefore,
+                            textChangeCount
                         )
                     }
                 }
@@ -338,6 +368,14 @@ internal class SourceLineAdapter(
         fun focus(column: Int) {
             editor.requestFocus()
             editor.setSelection(column.coerceIn(0, editor.length()))
+        }
+
+        fun focusSelection(start: Int, end: Int) {
+            editor.requestFocus()
+            editor.setSelection(
+                start.coerceIn(0, editor.length()),
+                end.coerceIn(0, editor.length())
+            )
         }
 
         private fun applyHighlights(highlights: List<SourceLineHighlight>) {
