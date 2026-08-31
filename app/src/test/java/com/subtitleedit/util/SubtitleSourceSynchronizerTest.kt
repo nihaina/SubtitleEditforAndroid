@@ -153,6 +153,42 @@ Second
     }
 
     @Test
+    fun lrcDeletionUsesStableIdentityWhenRemovingMiddleCue() {
+        val source = "[00:01.00]A\n[00:02.00]B\n[00:03.00]C\n"
+        val old = SubtitleParser.parseLRC(source)
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            old,
+            listOf(old[0], old[2].copy())
+        )
+
+        assertTrue(updated.contains("[00:01.00]A"))
+        assertTrue(updated.contains("[00:03.00]C"))
+        assertTrue(!updated.contains("[00:02.00]B"))
+        assertEquals(listOf("A", "C"), SubtitleParser.parseLRC(updated).map { it.text })
+    }
+
+    @Test
+    fun lrcInsertionKeepsExistingCueTextAndAddsOnlyNewCue() {
+        val source = "[00:01.00]A\n[00:03.00]C\n"
+        val old = SubtitleParser.parseLRC(source)
+        val inserted = SubtitleEntry(
+            startTime = 2_000L,
+            endTime = 3_000L,
+            text = "B"
+        )
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            old,
+            listOf(old[0], inserted, old[1].copy())
+        )
+
+        assertEquals(listOf("A", "B", "C"), SubtitleParser.parseLRC(updated).map { it.text })
+    }
+
+    @Test
     fun timeBaseMetadataIsNotAppliedTwice() {
         val vtt = "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000\n\n00:01.000 --> 00:02.000\nOld\n"
         val vttOld = SubtitleParser.parseDocument(vtt, format = SubtitleParser.SubtitleFormat.VTT).entries
@@ -194,5 +230,23 @@ Second
         assertEquals(1, reparsed.size)
         assertEquals("Second", reparsed.single().text)
         assertEquals(3_000L, reparsed.single().startTime)
+    }
+
+    @Test
+    fun structuralEditsFollowStableRowsAndPreserveSurvivingRawCueLayout() {
+        val source = "NOTE header\n\n7\n00:00:01.000   -->   00:00:02.000\nFirst\n\n9\n00:00:03,000-->00:00:04,000\nSecond\n\n"
+        val parsed = SubtitleParser.parseSRT(source)
+        val remaining = parsed[1].copy(index = 1, stableId = parsed[1].stableId + 100_000L)
+
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.SRT,
+            parsed,
+            listOf(remaining)
+        )
+
+        assertTrue(updated.startsWith("NOTE header"))
+        assertTrue(updated.contains("9\n00:00:03,000-->00:00:04,000\nSecond"))
+        assertTrue(!updated.contains("7\n00:00:01.000"))
     }
 }

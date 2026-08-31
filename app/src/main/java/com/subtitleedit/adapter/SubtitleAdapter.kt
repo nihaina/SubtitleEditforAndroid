@@ -141,6 +141,14 @@ class SubtitleAdapter(
         }
     }
 
+    fun setSelectionByStableIds(ids: Set<Long>) {
+        setSelectionByIndices(
+            currentList.mapIndexedNotNull { index, entry ->
+                index.takeIf { entry.stableId in ids }
+            }.toSet()
+        )
+    }
+
     /** Selects or clears the complete list without allocating an index set. */
     fun setAllSelection(selected: Boolean) {
         if (selected) {

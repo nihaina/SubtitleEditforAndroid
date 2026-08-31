@@ -53,6 +53,65 @@ class SubtitleEntryOpsTest {
         assertTrue(SubtitleEntryOps.deepCopy(emptyList()).isEmpty())
     }
 
+    @Test
+    fun retainStableIds_keepsUnchangedRowsWhenSourceAddsCueInTheMiddle() {
+        val first = SubtitleEntry(startTime = 0, endTime = 1000, text = "a")
+        val second = SubtitleEntry(startTime = 1000, endTime = 2000, text = "b")
+        val third = SubtitleEntry(startTime = 2000, endTime = 3000, text = "c")
+        val parsed = listOf(
+            first.copy(),
+            SubtitleEntry(startTime = 1000, endTime = 1500, text = "inserted"),
+            second.copy(),
+            third.copy()
+        )
+
+        val reassociated = SubtitleEntryOps.retainStableIds(listOf(first, second, third), parsed)
+
+        assertEquals(first.stableId, reassociated[0].stableId)
+        assertTrue(reassociated[1].stableId != first.stableId)
+        assertEquals(second.stableId, reassociated[2].stableId)
+        assertEquals(third.stableId, reassociated[3].stableId)
+    }
+
+    @Test
+    fun retainStableIds_keepsNearestRowWhenFollowingRowIsModifiedAfterDeletion() {
+        val first = SubtitleEntry(startTime = 0, endTime = 1000, text = "a")
+        val deleted = SubtitleEntry(startTime = 1000, endTime = 2000, text = "deleted")
+        val changed = SubtitleEntry(startTime = 2000, endTime = 3000, text = "old")
+        val parsed = listOf(first.copy(), changed.copy(text = "new"))
+
+        val reassociated = SubtitleEntryOps.retainStableIds(listOf(first, deleted, changed), parsed)
+
+        assertEquals(first.stableId, reassociated[0].stableId)
+        assertEquals(changed.stableId, reassociated[1].stableId)
+    }
+
+    @Test
+    fun applyEditableHistoryTarget_preservesCurrentFormatFields() {
+        val current = SubtitleEntry(
+            startTime = 1000,
+            endTime = 2000,
+            text = "new",
+            cueIdentifier = "current-id",
+            cueSettings = "line:20%"
+        )
+        val historical = current.copy(
+            startTime = 0,
+            endTime = 1000,
+            text = "old",
+            cueIdentifier = "old-id",
+            cueSettings = "line:80%"
+        )
+
+        val restored = SubtitleEntryOps.applyEditableHistoryTarget(listOf(current), listOf(historical)).single()
+
+        assertEquals(0L, restored.startTime)
+        assertEquals(1000L, restored.endTime)
+        assertEquals("old", restored.text)
+        assertEquals("current-id", restored.cueIdentifier)
+        assertEquals("line:20%", restored.cueSettings)
+    }
+
     // ==================== createInsertedEntry（向后插入） ====================
 
     @Test

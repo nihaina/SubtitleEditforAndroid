@@ -54,8 +54,8 @@
     <string name="menu_open">打开</string>
     <string name="menu_save">保存</string>
     <string name="menu_save_as">另存为</string>
-    <string name="menu_undo">撤销</string>
-    <string name="menu_redo">重做</string>
+    <string name="menu_undo">撤回</string>
+    <string name="menu_redo">恢复</string>
     <string name="menu_source_view">切换视图</string>
     <string name="menu_merge_subtitles">字幕合并</string>
     <string name="merge_subtitles_gap_hint">时间间隔</string>

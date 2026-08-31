@@ -18,6 +18,109 @@ object SubtitleEntryOps {
         return entries.map { it.copy() }
     }
 
+    /**
+     * Reassociate parsed source rows with the in-memory rows they came from. Exact subtitle
+     * content is matched first, so inserting or deleting a cue does not shift every later ID.
+     * Remaining rows represent edits and retain the nearest available identity.
+     */
+    fun retainStableIds(
+        previous: List<SubtitleEntry>,
+        parsed: List<SubtitleEntry>
+    ): List<SubtitleEntry> {
+        if (previous.isEmpty() || parsed.isEmpty()) return parsed.map { it.copy() }
+
+        data class ContentKey(val startTime: Long, val endTime: Long, val text: String)
+
+        val previousByContent = mutableMapOf<ContentKey, ArrayDeque<Int>>()
+        previous.forEachIndexed { index, entry ->
+            val key = ContentKey(entry.startTime, entry.endTime, entry.text)
+            previousByContent.getOrPut(key, ::ArrayDeque).addLast(index)
+        }
+
+        val matchedPrevious = BooleanArray(previous.size)
+        val previousIndexByParsed = IntArray(parsed.size) { -1 }
+        parsed.forEachIndexed { index, entry ->
+            val key = ContentKey(entry.startTime, entry.endTime, entry.text)
+            val previousIndex = previousByContent[key]?.removeFirstOrNull() ?: return@forEachIndexed
+            previousIndexByParsed[index] = previousIndex
+            matchedPrevious[previousIndex] = true
+        }
+
+        val unmatchedPrevious = previous.indices.filterNot { matchedPrevious[it] }.toMutableSet()
+        val unmatchedParsed = parsed.indices.filter { previousIndexByParsed[it] < 0 }
+        if (previous.size == parsed.size) {
+            unmatchedParsed.forEach { parsedIndex ->
+                if (parsedIndex in unmatchedPrevious) {
+                    previousIndexByParsed[parsedIndex] = parsedIndex
+                    unmatchedPrevious.remove(parsedIndex)
+                }
+            }
+        }
+
+        val stillUnmatchedParsed = unmatchedParsed.filter { previousIndexByParsed[it] < 0 }
+        if (stillUnmatchedParsed.size.toLong() * unmatchedPrevious.size <= 40_000L) {
+            data class Candidate(val score: Long, val parsedIndex: Int, val previousIndex: Int)
+
+            val candidates = stillUnmatchedParsed.flatMap { parsedIndex ->
+                unmatchedPrevious.map { previousIndex ->
+                    val old = previous[previousIndex]
+                    val current = parsed[parsedIndex]
+                    val contentPenalty =
+                        (if (old.startTime == current.startTime) 0L else 4L) +
+                            (if (old.endTime == current.endTime) 0L else 4L) +
+                            (if (old.text == current.text) 0L else 2L)
+                    Candidate(
+                        score = contentPenalty * (previous.size + parsed.size + 1L) +
+                            kotlin.math.abs(previousIndex - parsedIndex),
+                        parsedIndex = parsedIndex,
+                        previousIndex = previousIndex
+                    )
+                }
+            }.sortedBy { it.score }
+
+            val unmatchedParsedSet = stillUnmatchedParsed.toMutableSet()
+            candidates.forEach { candidate ->
+                if (candidate.parsedIndex in unmatchedParsedSet &&
+                    candidate.previousIndex in unmatchedPrevious
+                ) {
+                    previousIndexByParsed[candidate.parsedIndex] = candidate.previousIndex
+                    unmatchedParsedSet.remove(candidate.parsedIndex)
+                    unmatchedPrevious.remove(candidate.previousIndex)
+                }
+            }
+        } else {
+            stillUnmatchedParsed.zip(unmatchedPrevious.sorted()).forEach { (parsedIndex, previousIndex) ->
+                previousIndexByParsed[parsedIndex] = previousIndex
+            }
+        }
+
+        return parsed.mapIndexed { index, entry ->
+            val previousIndex = previousIndexByParsed[index]
+            if (previousIndex >= 0) {
+                entry.copy(stableId = previous[previousIndex].stableId)
+            } else {
+                entry.copy()
+            }
+        }
+    }
+
+    /** Applies only undoable list fields to surviving rows; format-only fields remain current. */
+    fun applyEditableHistoryTarget(
+        current: List<SubtitleEntry>,
+        target: List<SubtitleEntry>
+    ): List<SubtitleEntry> {
+        val currentById = current.associateBy { it.stableId }
+        return target.mapIndexed { index, historical ->
+            currentById[historical.stableId]?.copy(
+                index = index + 1,
+                startTime = historical.startTime,
+                endTime = historical.endTime,
+                text = historical.text,
+                endTimeModified = historical.endTimeModified
+            ) ?: historical.copy(index = index + 1)
+        }
+    }
+
     fun createInsertedEntry(
         after: Boolean,
         reference: SubtitleEntry,

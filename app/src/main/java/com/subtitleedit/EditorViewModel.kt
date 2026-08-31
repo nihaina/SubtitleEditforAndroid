@@ -37,6 +37,11 @@ internal class EditorViewModel : ViewModel() {
     var clipboardTexts: List<String> = emptyList()
     var mediaType = EditorMediaType.SUBTITLE_ONLY
     val saveCoordinator = EditorSaveCoordinator()
+    val editHistory = EditorEditHistory()
+    var historyEntriesSnapshot: List<SubtitleEntry> = emptyList()
+    var historySelectionSnapshot: Set<Long> = emptySet()
+    var sourceHistoryTextSnapshot: String = ""
+    var historyBaselineInitialized = false
 
     fun startNewSubtitleDocument() {
         clearSubtitleDocumentReference()

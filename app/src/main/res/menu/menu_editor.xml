@@ -39,6 +39,14 @@
         app:showAsAction="ifRoom">
         <menu>
             <item
+                android:id="@+id/menu_undo"
+                android:title="@string/menu_undo"
+                app:showAsAction="never" />
+            <item
+                android:id="@+id/menu_redo"
+                android:title="@string/menu_redo"
+                app:showAsAction="never" />
+            <item
                 android:id="@+id/menu_search"
                 android:title="@string/menu_search"
                 app:showAsAction="never" />

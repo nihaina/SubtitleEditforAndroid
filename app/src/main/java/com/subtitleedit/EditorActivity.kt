@@ -154,6 +154,21 @@ class EditorActivity : AppCompatActivity() {
     private var clipboardTexts: List<String>
         get() = stateModel.clipboardTexts
         set(value) { stateModel.clipboardTexts = value }
+    private val editHistory: EditorEditHistory
+        get() = stateModel.editHistory
+    private var historyEntriesSnapshot: List<SubtitleEntry>
+        get() = stateModel.historyEntriesSnapshot
+        set(value) { stateModel.historyEntriesSnapshot = value }
+    private var historySelectionSnapshot: Set<Long>
+        get() = stateModel.historySelectionSnapshot
+        set(value) { stateModel.historySelectionSnapshot = value }
+    private var sourceHistoryTextSnapshot: String
+        get() = stateModel.sourceHistoryTextSnapshot
+        set(value) { stateModel.sourceHistoryTextSnapshot = value }
+    private var historyBaselineInitialized: Boolean
+        get() = stateModel.historyBaselineInitialized
+        set(value) { stateModel.historyBaselineInitialized = value }
+    private var suppressHistoryRecording = false
     private val cutPasteController = CutPasteController()
     
     // AI 翻译 / 快速转录 / 快速 TTS
@@ -219,6 +234,8 @@ class EditorActivity : AppCompatActivity() {
         const val EXTRA_SUBTITLE_FILE_PATH = "extra_subtitle_file_path"
         private const val MENU_SELECT_ALL = 0x20001
         private const val MENU_SELECT_RANGE = 0x20002
+        private const val MENU_UNDO = 0x20003
+        private const val MENU_REDO = 0x20004
         private const val BULK_NOTIFY_THRESHOLD = 200
     }
 
@@ -302,7 +319,17 @@ class EditorActivity : AppCompatActivity() {
 
     override fun onPrepareOptionsMenu(menu: Menu): Boolean {
         menu.clear()
-        if (::subtitleAdapter.isInitialized && subtitleAdapter.getSelectedCount() > 0) {
+        val undoOperation = if (isSourceViewMode) {
+            editHistory.peekUndoWithoutSelection()
+        } else {
+            editHistory.peekUndo()
+        }
+        val redoOperation = if (isSourceViewMode) {
+            editHistory.peekRedoWithoutSelection()
+        } else {
+            editHistory.peekRedo()
+        }
+        if (!isSourceViewMode && ::subtitleAdapter.isInitialized && subtitleAdapter.getSelectedCount() > 0) {
             menu.add(Menu.NONE, MENU_SELECT_ALL, 0, "全选")
                 .setIcon(R.drawable.ic_select_all)
                 .setContentDescription("全选")
@@ -313,14 +340,44 @@ class EditorActivity : AppCompatActivity() {
                 .setContentDescription("区间选择")
                 .setTooltipText("区间选择")
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+            menu.add(Menu.NONE, MENU_UNDO, 2, getString(R.string.menu_undo))
+                .setContentDescription(undoOperation?.description ?: getString(R.string.menu_undo))
+                .setTooltipText(undoOperation?.description ?: getString(R.string.menu_undo))
+                .setEnabled(undoOperation != null)
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+            menu.add(Menu.NONE, MENU_REDO, 3, getString(R.string.menu_redo))
+                .setContentDescription(redoOperation?.description ?: getString(R.string.menu_redo))
+                .setTooltipText(redoOperation?.description ?: getString(R.string.menu_redo))
+                .setEnabled(redoOperation != null)
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
         } else {
             menuInflater.inflate(R.menu.menu_editor, menu)
+            menu.findItem(R.id.menu_undo)?.apply {
+                isEnabled = undoOperation != null
+                contentDescription = undoOperation?.description ?: getString(R.string.menu_undo)
+                tooltipText = contentDescription
+            }
+            menu.findItem(R.id.menu_redo)?.apply {
+                isEnabled = redoOperation != null
+                contentDescription = redoOperation?.description ?: getString(R.string.menu_redo)
+                tooltipText = contentDescription
+            }
         }
         return true
     }
     
     private fun handleMenuClick(item: MenuItem): Boolean {
         return when (item.itemId) {
+            R.id.menu_undo,
+            MENU_UNDO -> {
+                undoEdit()
+                true
+            }
+            R.id.menu_redo,
+            MENU_REDO -> {
+                redoEdit()
+                true
+            }
             R.id.menu_new -> {
                 newFile()
                 true
@@ -393,6 +450,7 @@ class EditorActivity : AppCompatActivity() {
             },
             hasPlayableMedia = mediaType.hasPlayableMedia,
             onSelectionChanged = {
+                recordListSelectionChange()
                 updateSelectedCountDisplay()
             }
         )
@@ -408,6 +466,11 @@ class EditorActivity : AppCompatActivity() {
     private fun setupSourceView() {
         binding.etSourceView.addOnDocumentChangedListener {
             if (isSourceViewMode && !suppressSourceViewChanges) {
+                val updatedText = binding.etSourceView.getDocumentText()
+                recordSourceTextChange(sourceHistoryTextSnapshot, updatedText)
+                sourceHistoryTextSnapshot = updatedText
+                sourceViewContent = updatedText
+                originalFileContent = updatedText
                 hasUnsavedChanges = true
                 sourceViewHasPendingEdits = true
                 sourceViewEditGeneration++
@@ -733,8 +796,10 @@ class EditorActivity : AppCompatActivity() {
                 )
             }
             if (!isSourceViewMode || editGeneration != sourceViewEditGeneration) return@launch
+            recordSourceTextChange(sourceContentSnapshot, updatedSource)
             originalFileContent = updatedSource
             sourceViewContent = updatedSource
+            sourceHistoryTextSnapshot = updatedSource
             sourceViewHasPendingEdits = false
             sourceViewEditGeneration++
             setSourceViewEditorText(updatedSource, preserveScroll = true)
@@ -906,16 +971,17 @@ class EditorActivity : AppCompatActivity() {
         // 原始文本同时作为源视图的内存内容；两种视图的编辑都基于并更新这份文本。
         originalFileContent = content
         sourceViewContent = content
+        sourceHistoryTextSnapshot = content
         
         if (currentFormat.isSourceOnly) {
             // Source-only documents still need a block model for waveform playback and for
             // keeping source rows aligned with the list view.  The source editor displays
             // the untouched full text, while these parsed entries provide the corresponding
             // subtitle blocks.
-            replaceSubtitleEntries(document.entries)
+            replaceSubtitleEntries(document.entries, preserveStableIds = false)
             enterSourceViewMode()
         } else {
-            replaceSubtitleEntries(document.entries)
+            replaceSubtitleEntries(document.entries, preserveStableIds = false)
             exitSourceViewMode()
         }
         
@@ -928,6 +994,7 @@ class EditorActivity : AppCompatActivity() {
         // 同步字幕到波形视图（仅音频模式有效）
         syncWaveformSubtitles()
         scheduleSubtitlePreview()
+        initializeEditHistoryBaseline(clearHistory = true)
         stateModel.documentLoaded = true
     }
     
@@ -972,6 +1039,7 @@ class EditorActivity : AppCompatActivity() {
         }
         
         updateSourceViewMenuTitle()
+        invalidateOptionsMenu()
     }
     
     /** 退出源码视图。源行 RecyclerView 已由调用方先禁用，避免它与列表同时编辑。 */
@@ -1014,6 +1082,7 @@ class EditorActivity : AppCompatActivity() {
         }
         
         updateSourceViewMenuTitle()
+        invalidateOptionsMenu()
     }
     
     /**
@@ -1065,6 +1134,7 @@ class EditorActivity : AppCompatActivity() {
 
                 originalFileContent = freshContent
                 sourceViewContent = freshContent
+                sourceHistoryTextSnapshot = freshContent
                 sourceViewHasPendingEdits = false
                 enterSourceViewMode {
                     sourceViewTransitionJob = null
@@ -1099,9 +1169,11 @@ class EditorActivity : AppCompatActivity() {
                 val document = withContext(Dispatchers.Default) {
                     SubtitleParser.parseDocument(editedContent, format = currentFormat)
                 }
-                replaceSubtitleEntries(document.entries)
+                replaceSubtitleEntries(document.entries, preserveStableIds = true)
                 originalFileContent = editedContent
                 sourceViewContent = editedContent
+                sourceHistoryTextSnapshot = editedContent
+                syncEditHistoryBaseline()
                 exitSourceViewMode(sourceScrollPosition) {
                     binding.etSourceView.setDocumentEnabled(true)
                     sourceViewTransitionJob = null
@@ -1136,14 +1208,17 @@ class EditorActivity : AppCompatActivity() {
 
     private fun configureSourceViewEditor(content: String) {
         setSourceViewEditorText(content)
+        sourceHistoryTextSnapshot = content
         binding.etSourceView.setDocumentEnabled(true)
     }
 
     /** 搜索替换直接重写完整源码内容。 */
     private fun replaceSourceViewContent(content: String) {
+        recordSourceTextChange(sourceHistoryTextSnapshot, content)
         setSourceViewEditorText(content)
         originalFileContent = content
         sourceViewContent = content
+        sourceHistoryTextSnapshot = content
         hasUnsavedChanges = true
         sourceViewHasPendingEdits = true
         sourceViewEditGeneration++
@@ -1157,6 +1232,7 @@ class EditorActivity : AppCompatActivity() {
         val snapshot = visibleContent
         originalFileContent = snapshot
         sourceViewContent = snapshot
+        sourceHistoryTextSnapshot = snapshot
         sourceViewHasPendingEdits = false
         return snapshot
     }
@@ -1326,12 +1402,13 @@ class EditorActivity : AppCompatActivity() {
 
         val deletedIndices = cutPasteController.snapshotDeletedIndices()
         val sortedPositions = cutPasteController.consumeDeletedIndicesDesc()
+        val historyBefore = currentHistoryListState()
         sortedPositions.forEach { position ->
             if (position < subtitleEntries.size) {
                 subtitleEntries.removeAt(position)
             }
         }
-        syncAfterDelete(deletedIndices)
+        syncAfterDelete(deletedIndices, historyBefore)
     }
     
     /**
@@ -1380,8 +1457,9 @@ class EditorActivity : AppCompatActivity() {
         
         if (position >= 0 && position < subtitleEntries.size) {
             showDeleteConfirm("确定要删除此字幕吗？") {
+                    val historyBefore = currentHistoryListState()
                     subtitleEntries.removeAt(position)
-                    syncAfterDelete(setOf(position))
+                    syncAfterDelete(setOf(position), historyBefore)
                     com.subtitleedit.util.OverwritingToast.makeText(this, "已删除", Toast.LENGTH_SHORT).show()
             }
         }
@@ -1668,6 +1746,262 @@ class EditorActivity : AppCompatActivity() {
         hasUnsavedChanges = true
     }
 
+    private fun currentHistoryListState(): EditorEditHistory.ListState =
+        EditorEditHistory.ListState(
+            entries = subtitleEntries.map { it.copy() },
+            selectedIds = if (::subtitleAdapter.isInitialized) {
+                val currentIds = subtitleEntries.mapTo(mutableSetOf()) { it.stableId }
+                subtitleAdapter.getSelectedEntries()
+                    .mapTo(mutableSetOf()) { it.first.stableId }
+                    .filterTo(mutableSetOf()) { it in currentIds }
+            } else {
+                emptySet()
+            }
+        )
+
+    private fun initializeEditHistoryBaseline(clearHistory: Boolean) {
+        if (clearHistory) editHistory.clear()
+        val state = currentHistoryListState()
+        historyEntriesSnapshot = state.entries
+        historySelectionSnapshot = state.selectedIds
+        sourceHistoryTextSnapshot = sourceViewContent
+        historyBaselineInitialized = true
+    }
+
+    private fun syncEditHistoryBaseline() {
+        if (!historyBaselineInitialized) {
+            initializeEditHistoryBaseline(clearHistory = false)
+            return
+        }
+        val state = currentHistoryListState()
+        historyEntriesSnapshot = state.entries
+        historySelectionSnapshot = state.selectedIds
+        if (isSourceViewMode) sourceHistoryTextSnapshot = sourceViewContent
+    }
+
+    private fun recordListStateChange(selectedIdsOverride: Set<Long>? = null) {
+        if (suppressHistoryRecording || isSourceViewMode || !historyBaselineInitialized) return
+        val before = EditorEditHistory.ListState(historyEntriesSnapshot, historySelectionSnapshot)
+        val current = currentHistoryListState()
+        val after = if (selectedIdsOverride == null) {
+            current
+        } else {
+            current.copy(selectedIds = selectedIdsOverride)
+        }
+        val difference = EditorEditHistory.difference(before, after)
+        if (!difference.isEmpty) {
+            editHistory.record(
+                EditorEditHistory.Operation.ListChange(
+                    before = before,
+                    after = after,
+                    description = describeListStateChange(difference)
+                )
+            )
+        }
+        // Keep ignored format metadata in the baseline so a later content edit does not absorb it.
+        historyEntriesSnapshot = after.entries
+        historySelectionSnapshot = after.selectedIds
+        if (!difference.isEmpty) invalidateOptionsMenu()
+    }
+
+    private fun recordSourceTextChange(beforeText: String, afterText: String) {
+        if (suppressHistoryRecording || !isSourceViewMode || !historyBaselineInitialized) return
+        if (beforeText == afterText) return
+        editHistory.record(
+            EditorEditHistory.Operation.SourceChange(
+                beforeText = beforeText,
+                afterText = afterText,
+                description = describeSourceTextChange(beforeText, afterText)
+            )
+        )
+        sourceHistoryTextSnapshot = afterText
+        invalidateOptionsMenu()
+    }
+
+    private fun describeListStateChange(difference: EditorEditHistory.ListDifference): String {
+        val descriptions = mutableListOf<String>()
+        difference.deleted.forEach { entry ->
+            descriptions += "删除${entry.stableId}字幕［${formatHistoryTime(entry)}］${entry.text}"
+        }
+        difference.added.forEach { entry ->
+            descriptions += "新增${entry.stableId}字幕［${formatHistoryTime(entry)}］${entry.text}"
+        }
+        difference.modified.forEach { (old, _) ->
+            descriptions += "修改${old.stableId}字幕［${formatHistoryTime(old)}］${old.text}"
+        }
+        difference.selected.forEach { id ->
+            descriptions += "选中${id}字幕"
+        }
+        difference.deselected.forEach { id ->
+            descriptions += "取消选中${id}字幕"
+        }
+        if (difference.orderChanged && difference.deleted.isEmpty() && difference.added.isEmpty()) {
+            descriptions += "调整字幕顺序"
+        }
+        return descriptions.joinToString("\n")
+    }
+
+    private fun describeSourceTextChange(before: String, after: String): String {
+        val beforeLines = before.split('\n')
+        val afterLines = after.split('\n')
+        return (0 until maxOf(beforeLines.size, afterLines.size))
+            .filter { index -> beforeLines.getOrNull(index) != afterLines.getOrNull(index) }
+            .joinToString("\n") { index ->
+                "修改${index + 1}行 修改前${beforeLines.getOrNull(index).orEmpty().removeSuffix("\r")}"
+            }
+    }
+
+    private fun formatHistoryTime(entry: SubtitleEntry): String =
+        "${TimeUtils.formatForInput(entry.startTime)}-${TimeUtils.formatForInput(entry.endTime)}"
+
+    private fun recordListSelectionChange() {
+        if (suppressHistoryRecording || isSourceViewMode) return
+        recordListStateChange()
+    }
+
+    private fun undoEdit() {
+        val skippedSelectionOperations = mutableListOf<EditorEditHistory.Operation>()
+        var operation = editHistory.takeUndo()
+        while (operation != null && isSourceViewMode && with(editHistory) { operation.isSelectionOnly() }) {
+            // Source view has no selection model. Keep skipped list-selection records in the
+            // undo stack; only the actual content operation is consumed and moved to redo.
+            skippedSelectionOperations += operation
+            operation = editHistory.takeUndo()
+        }
+        if (operation == null) {
+            skippedSelectionOperations.asReversed().forEach(editHistory::pushUndo)
+            invalidateOptionsMenu()
+            return
+        }
+        skippedSelectionOperations.asReversed().forEach(editHistory::pushUndo)
+        suppressHistoryRecording = true
+        try {
+            applyHistoryOperation(operation, undo = true)
+            editHistory.pushRedo(operation)
+        } finally {
+            suppressHistoryRecording = false
+        }
+        syncEditHistoryBaseline()
+        hasUnsavedChanges = true
+        invalidateOptionsMenu()
+    }
+
+    private fun redoEdit() {
+        val skippedSelectionOperations = mutableListOf<EditorEditHistory.Operation>()
+        var operation = editHistory.takeRedo()
+        while (operation != null && isSourceViewMode && with(editHistory) { operation.isSelectionOnly() }) {
+            skippedSelectionOperations += operation
+            operation = editHistory.takeRedo()
+        }
+        if (operation == null) {
+            skippedSelectionOperations.asReversed().forEach(editHistory::pushRedo)
+            invalidateOptionsMenu()
+            return
+        }
+        skippedSelectionOperations.asReversed().forEach(editHistory::pushRedo)
+        suppressHistoryRecording = true
+        try {
+            applyHistoryOperation(operation, undo = false)
+            editHistory.pushUndo(operation)
+        } finally {
+            suppressHistoryRecording = false
+        }
+        syncEditHistoryBaseline()
+        hasUnsavedChanges = true
+        invalidateOptionsMenu()
+    }
+
+    private fun applyHistoryOperation(
+        operation: EditorEditHistory.Operation,
+        undo: Boolean
+    ) {
+        when (operation) {
+            is EditorEditHistory.Operation.ListChange -> {
+                val target = if (undo) operation.before else operation.after
+                if (isSourceViewMode) {
+                    applyListHistoryInSourceView(target.entries)
+                } else {
+                    applyListHistoryInListView(target)
+                }
+            }
+            is EditorEditHistory.Operation.SourceChange -> {
+                val targetText = if (undo) operation.beforeText else operation.afterText
+                applySourceHistoryText(targetText)
+            }
+        }
+    }
+
+    private fun applyListHistoryInSourceView(targetEntries: List<SubtitleEntry>) {
+        val source = sourceViewContent
+        val currentEntries = SubtitleParser.parseDocument(source, format = currentFormat).entries
+        val effectiveTargetEntries = SubtitleEntryOps.applyEditableHistoryTarget(
+            current = subtitleEntries,
+            target = targetEntries
+        )
+        val updated = SubtitleSourceSynchronizer.apply(
+            content = source,
+            format = currentFormat,
+            oldEntries = currentEntries,
+            newEntries = effectiveTargetEntries
+        )
+        originalFileContent = updated
+        sourceViewContent = updated
+        sourceHistoryTextSnapshot = updated
+        setSourceViewEditorText(updated, preserveScroll = true)
+        replaceSubtitleEntries(effectiveTargetEntries.map { it.copy() })
+        syncWaveformSubtitles(preserveSelection = true)
+        updateFormatInfo()
+    }
+
+    private fun applyListHistoryInListView(target: EditorEditHistory.ListState) {
+        val source = originalFileContent
+        val currentEntries = SubtitleParser.parseDocument(source, format = currentFormat).entries
+        val effectiveTargetEntries = SubtitleEntryOps.applyEditableHistoryTarget(
+            current = subtitleEntries,
+            target = target.entries
+        )
+        val updatedSource = SubtitleSourceSynchronizer.apply(
+            content = source,
+            format = currentFormat,
+            oldEntries = currentEntries,
+            newEntries = effectiveTargetEntries
+        )
+        originalFileContent = updatedSource
+        sourceViewContent = updatedSource
+        sourceHistoryTextSnapshot = updatedSource
+        replaceSubtitleEntries(effectiveTargetEntries.map { it.copy() })
+        submitSubtitleList(
+            refreshAll = true,
+            syncWaveform = true,
+            markChanged = false
+        ) {
+            subtitleAdapter.setSelectionByStableIds(target.selectedIds)
+            updateSelectedCountDisplay()
+        }
+    }
+
+    private fun applySourceHistoryText(targetText: String) {
+        val selectedIds = currentHistoryListState().selectedIds
+        originalFileContent = targetText
+        sourceViewContent = targetText
+        sourceHistoryTextSnapshot = targetText
+        val parsed = SubtitleParser.parseDocument(targetText, format = currentFormat).entries
+        if (isSourceViewMode) {
+            setSourceViewEditorText(targetText, preserveScroll = true)
+            replaceSubtitleEntries(parsed, preserveStableIds = true)
+            syncWaveformSubtitles(preserveSelection = true)
+            updateFormatInfo()
+        } else {
+            replaceSubtitleEntries(parsed, preserveStableIds = true)
+            submitSubtitleList(
+                refreshAll = true,
+                selectedStableIds = selectedIds,
+                syncWaveform = true,
+                markChanged = false
+            )
+        }
+    }
+
     private fun onEntryUpdated(position: Int, message: String = "已更新") {
         notifyEntriesChanged(listOf(position))
         showShortToast(message)
@@ -1693,7 +2027,10 @@ class EditorActivity : AppCompatActivity() {
                 .forEach { subtitleAdapter.notifyItemChanged(it) }
         }
         if (syncWaveform) syncWaveformSubtitles()
-        if (markChanged) markAsChanged()
+        if (markChanged) {
+            recordListStateChange()
+            markAsChanged()
+        }
         if (::playbackController.isInitialized) playbackController.invalidateHighlightCache()
         if (::searchController.isInitialized) searchController.onDocumentChanged()
         scheduleSubtitlePreview()
@@ -1737,6 +2074,7 @@ class EditorActivity : AppCompatActivity() {
     private fun submitSubtitleList(
         refreshAll: Boolean = false,
         selectedIndices: Set<Int>? = null,
+        selectedStableIds: Set<Long>? = null,
         clearSelection: Boolean = false,
         updateFormat: Boolean = true,
         syncWaveform: Boolean = true,
@@ -1745,11 +2083,23 @@ class EditorActivity : AppCompatActivity() {
         afterSubmit: (() -> Unit)? = null
     ) {
         renumberEntries(force = refreshAll)
+        val currentIds = subtitleEntries.mapTo(mutableSetOf()) { it.stableId }
+        val targetSelectedIds = when {
+            selectedStableIds != null -> selectedStableIds.filterTo(mutableSetOf()) { it in currentIds }
+            selectedIndices != null -> selectedIndices.mapNotNullTo(mutableSetOf()) { index ->
+                subtitleEntries.getOrNull(index)?.stableId
+            }
+            clearSelection -> emptySet()
+            else -> currentHistoryListState().selectedIds
+        }
+        if (markChanged) recordListStateChange(targetSelectedIds)
         subtitleAdapter.submitList(subtitleEntries.toList()) {
             if (clearSelection) {
                 subtitleAdapter.clearSelection()
             }
-            selectedIndices?.let { subtitleAdapter.setSelectionByIndices(it) }
+            // ListAdapter replaces row objects asynchronously. Rebind selection by stable ID
+            // after the new list is installed so selected rows survive source parsing and undo.
+            subtitleAdapter.setSelectionByStableIds(targetSelectedIds)
             if (refreshAll) {
                 subtitleAdapter.refreshAllItems()
             }
@@ -1793,6 +2143,7 @@ class EditorActivity : AppCompatActivity() {
         currentFormatInfo = "格式：SRT | 条目数：${subtitleEntries.size}"
         supportActionBar?.subtitle = currentFormatInfo
         hasUnsavedChanges = false
+        initializeEditHistoryBaseline(clearHistory = true)
         stateModel.documentLoaded = true
         com.subtitleedit.util.OverwritingToast.makeText(this, "已新建文件", Toast.LENGTH_SHORT).show()
     }
@@ -1965,7 +2316,10 @@ class EditorActivity : AppCompatActivity() {
         }
 
         cutPasteController.clear()
+        val historyBefore = currentHistoryListState()
         replaceSubtitleEntries(mergedEntries)
+        historyEntriesSnapshot = historyBefore.entries
+        historySelectionSnapshot = historyBefore.selectedIds
         submitSubtitleList(
             refreshAll = true,
             clearSelection = true,
@@ -2074,12 +2428,13 @@ class EditorActivity : AppCompatActivity() {
         val selectedEntries = requireSelectedEntries("请先选择要删除的字幕") ?: return
         
         showDeleteConfirm("确定要删除选中的字幕吗？") {
+                val historyBefore = currentHistoryListState()
                 val deletedIndices = selectedEntries.map { it.second }.toSet()
                 // 从后往前删除，避免索引变化
                 selectedEntries.sortedByDescending { it.second }.forEach { (_, position) ->
                     subtitleEntries.removeAt(position)
                 }
-                syncAfterDelete(deletedIndices)
+                syncAfterDelete(deletedIndices, historyBefore)
                 com.subtitleedit.util.OverwritingToast.makeText(this, "已删除 ${selectedEntries.size} 条字幕", Toast.LENGTH_SHORT).show()
         }
     }
@@ -2088,23 +2443,17 @@ class EditorActivity : AppCompatActivity() {
      * 删除字幕后同步状态（保持未删除项的选中状态）
      * @param deletedIndices 被删除的索引集合（删除前的索引）
      */
-    private fun syncAfterDelete(deletedIndices: Set<Int>) {
-        // 保存删除前的所有选中索引
-        val allSelectedIndices = subtitleAdapter.getSelectedPositions()
-
-        // 计算删除后应该保持选中的索引（未被删除的选中项）
-        val remainingSelectedIndices = mutableSetOf<Int>()
-        allSelectedIndices.forEach { idx ->
-            if (idx !in deletedIndices) {
-                // 计算有多少个被删除的索引在当前索引之前
-                val offset = deletedIndices.count { it < idx }
-                remainingSelectedIndices.add(idx - offset)
-            }
-        }
-
+    private fun syncAfterDelete(
+        deletedIndices: Set<Int>,
+        historyBefore: EditorEditHistory.ListState
+    ) {
+        historyEntriesSnapshot = historyBefore.entries
+        historySelectionSnapshot = historyBefore.selectedIds
         submitSubtitleList(
             refreshAll = true,
-            selectedIndices = remainingSelectedIndices,
+            selectedStableIds = historySelectionSnapshot.filterTo(mutableSetOf()) { selectedId ->
+                subtitleEntries.any { it.stableId == selectedId }
+            },
             syncWaveform = false,
             markChanged = true
         ) {
@@ -2128,6 +2477,7 @@ class EditorActivity : AppCompatActivity() {
         if (!ensureListMode()) return
         
         subtitleAdapter.clearSelection()
+        recordListStateChange()
         updateSelectedCountDisplay()
     }
 
@@ -2139,6 +2489,7 @@ class EditorActivity : AppCompatActivity() {
         } else {
             subtitleAdapter.setAllSelection(true)
         }
+        recordListStateChange()
         updateSelectedCountDisplay()
     }
 
@@ -2157,6 +2508,7 @@ class EditorActivity : AppCompatActivity() {
         if (range.all { it in selectedPositions }) return
 
         subtitleAdapter.setSelectionByIndices(range)
+        recordListStateChange()
         updateSelectedCountDisplay()
     }
     
@@ -2221,8 +2573,16 @@ class EditorActivity : AppCompatActivity() {
         lastIndexedEntryCount = currentCount
     }
 
-    private fun replaceSubtitleEntries(entries: List<SubtitleEntry>) {
-        subtitleEntries = entries.toMutableList()
+    private fun replaceSubtitleEntries(
+        entries: List<SubtitleEntry>,
+        preserveStableIds: Boolean = false
+    ) {
+        val previous = subtitleEntries
+        subtitleEntries = if (preserveStableIds) {
+            SubtitleEntryOps.retainStableIds(previous, entries).toMutableList()
+        } else {
+            entries.toMutableList()
+        }
         renumberEntries(force = true)
     }
 
@@ -2235,13 +2595,21 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun applySourceViewEntries(updatedEntries: List<SubtitleEntry>) {
         if (subtitleEntries.size != updatedEntries.size) {
-            replaceSubtitleEntries(updatedEntries)
+            replaceSubtitleEntries(updatedEntries, preserveStableIds = true)
             syncWaveformSubtitles()
             return
         }
 
         val changedPositions = updatedEntries.indices.filter { position ->
-            subtitleEntries[position] != updatedEntries[position]
+            val current = subtitleEntries[position]
+            val updated = updatedEntries[position]
+            current.index != updated.index ||
+                current.startTime != updated.startTime ||
+                current.endTime != updated.endTime ||
+                current.text != updated.text ||
+                current.endTimeModified != updated.endTimeModified ||
+                current.cueIdentifier != updated.cueIdentifier ||
+                current.cueSettings != updated.cueSettings
         }
         changedPositions.forEach { position ->
             val target = subtitleEntries[position]
@@ -2481,6 +2849,7 @@ class EditorActivity : AppCompatActivity() {
             writeAction(content)
             originalFileContent = content
             sourceViewContent = content
+            sourceHistoryTextSnapshot = content
             sourceViewHasPendingEdits = false
             hasUnsavedChanges = false
             showShortToast("保存成功")
@@ -2727,6 +3096,7 @@ class EditorActivity : AppCompatActivity() {
         binding.sourceViewContainer.visibility = View.GONE
         binding.rvSubtitles.visibility = View.VISIBLE
         submitSubtitleList(refreshAll = true, syncWaveform = false)
+        initializeEditHistoryBaseline(clearHistory = true)
     }
 
     /**
