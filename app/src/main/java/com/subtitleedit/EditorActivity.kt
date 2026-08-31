@@ -50,6 +50,7 @@ import com.subtitleedit.util.SearchReplaceOps
 import com.subtitleedit.util.SubtitleEntryOps
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
+import com.subtitleedit.util.SubtitleSourceSynchronizer
 import com.subtitleedit.util.TimeUtils
 import java.io.File
 import java.nio.charset.Charset
@@ -105,11 +106,11 @@ class EditorActivity : AppCompatActivity() {
     private var isSourceViewMode: Boolean
         get() = stateModel.isSourceViewMode
         set(value) { stateModel.isSourceViewMode = value }
-    // 源视图原始内容（用于 TXT 文件）- 保存原始文件内容，不做任何修改
+    // 当前内存中的原始文本。视图切换会更新它，但只有显式保存才会写入实际存储。
     private var originalFileContent: String
         get() = stateModel.originalFileContent
         set(value) { stateModel.originalFileContent = value }
-    // 当前显示的内容（可能是原始内容或从字幕列表生成的内容）
+    // 源编辑器当前显示的文本快照
     private var sourceViewContent: String
         get() = stateModel.sourceViewContent
         set(value) { stateModel.sourceViewContent = value }
@@ -724,9 +725,15 @@ class EditorActivity : AppCompatActivity() {
                 entriesSnapshot
             }
             val updatedSource = withContext(Dispatchers.Default) {
-                serializeEntriesForFormat(format, entriesToSerialize)
+                SubtitleSourceSynchronizer.apply(
+                    content = sourceContentSnapshot,
+                    format = format,
+                    oldEntries = SubtitleParser.parseDocument(sourceContentSnapshot, format = format).entries,
+                    newEntries = entriesToSerialize
+                )
             }
             if (!isSourceViewMode || editGeneration != sourceViewEditGeneration) return@launch
+            originalFileContent = updatedSource
             sourceViewContent = updatedSource
             sourceViewHasPendingEdits = false
             sourceViewEditGeneration++
@@ -896,8 +903,9 @@ class EditorActivity : AppCompatActivity() {
         val document = SubtitleParser.parseDocument(content, fileName)
         currentFormat = document.format
         
-        // 始终保存原始文件内容
+        // 原始文本同时作为源视图的内存内容；两种视图的编辑都基于并更新这份文本。
         originalFileContent = content
+        sourceViewContent = content
         
         if (currentFormat.isSourceOnly) {
             // Source-only documents still need a block model for waveform playback and for
@@ -905,7 +913,6 @@ class EditorActivity : AppCompatActivity() {
             // the untouched full text, while these parsed entries provide the corresponding
             // subtitle blocks.
             replaceSubtitleEntries(document.entries)
-            sourceViewContent = originalFileContent
             enterSourceViewMode()
         } else {
             replaceSubtitleEntries(document.entries)
@@ -1026,57 +1033,39 @@ class EditorActivity : AppCompatActivity() {
             // 源视图 → 列表视图：直接切换，解析源视图当前内容
             doExitSourceView()
         } else {
-            // 列表视图 → 源视图：需要重新读取文件
+            // 列表视图 → 源视图：把列表修改定点同步到内存中的原始文本
             doEnterSourceView()
         }
     }
 
-    /**
-     * 列表视图 → 源视图
-     * 重新从磁盘读取文件内容，有未保存更改时提醒先保存
-     */
+    /** 列表视图 → 源视图：只同步内存中的原始文本，不读写实际文件。 */
     private fun doEnterSourceView() {
-        if (hasUnsavedChanges) {
-            AlertDialog.Builder(this)
-                .setTitle("有未保存的更改")
-                .setMessage("切换到源视图将重新读取文件，当前列表中未保存的更改不会体现在源视图中。\n\n建议先保存后再切换。")
-                .setPositiveButton("先保存再切换") { _, _ ->
-                    saveFile(SaveContinuation.ENTER_SOURCE_VIEW)
-                }
-                .setNeutralButton("直接切换（丢弃更改）") { _, _ ->
-                    reloadAndEnterSourceView(forceDiskReload = true)
-                }
-                .setNegativeButton("取消", null)
-                .show()
-        } else {
-            reloadAndEnterSourceView()
-        }
+        enterSourceViewFromMemory()
     }
 
-    /**
-     * 重新从磁盘读取原始文件后进入源视图
-     */
-    private fun reloadAndEnterSourceView(forceDiskReload: Boolean = false) {
+    /** 将列表条目定点写回内存中的原始文本后进入源视图。 */
+    private fun enterSourceViewFromMemory() {
         sourceViewTransitionJob?.cancel()
         sourceViewTransitionJob = lifecycleScope.launch {
             try {
                 sourceViewPreviewJob?.cancelAndJoin()
-                val file = getCurrentSubtitleFile()
-                val freshContent = when {
-                    !forceDiskReload && originalFileContent.isNotEmpty() -> originalFileContent
-                    file != null && file.exists() -> withContext(Dispatchers.IO) {
-                        FileUtils.readFile(file, currentCharset)
-                    }
-                    else -> withContext(Dispatchers.Default) {
-                        serializeEntriesForFormat(currentFormat)
-                    }
+                val sourceBase = originalFileContent
+                val listSnapshot = subtitleEntries.map { it.copy() }
+                val freshContent = withContext(Dispatchers.Default) {
+                    SubtitleSourceSynchronizer.apply(
+                        content = sourceBase,
+                        format = currentFormat,
+                        oldEntries = SubtitleParser.parseDocument(
+                            sourceBase,
+                            format = currentFormat
+                        ).entries,
+                        newEntries = listSnapshot
+                    )
                 }
 
                 originalFileContent = freshContent
                 sourceViewContent = freshContent
-                if (file == null || !file.exists()) {
-                    showShortToast("文件尚未保存，已从当前列表生成源视图内容")
-                }
+                sourceViewHasPendingEdits = false
                 enterSourceViewMode {
                     sourceViewTransitionJob = null
                     // 用完整源码内容重新建立 mpv 字幕轨。
@@ -1087,7 +1076,7 @@ class EditorActivity : AppCompatActivity() {
                 throw e
             } catch (e: Exception) {
                 sourceViewTransitionJob = null
-                showShortToast("读取文件失败：${e.message}")
+                showShortToast("切换到源视图失败：${e.message}")
             }
         }
     }
@@ -1100,7 +1089,6 @@ class EditorActivity : AppCompatActivity() {
         sourceViewWaveformSyncJob?.cancel()
         val sourceScrollPosition = binding.etSourceView.getDocumentScrollOffset()
         val editedContent = snapshotSourceViewContentIfNeeded()
-        val changedFromSavedContent = editedContent != originalFileContent
         // 先禁用源行编辑，再在后台构建字幕条目列表，避免切换期间两套编辑状态并存。
         binding.etSourceView.setDocumentEnabled(false)
         setSourceViewEditorText("")
@@ -1114,9 +1102,6 @@ class EditorActivity : AppCompatActivity() {
                 replaceSubtitleEntries(document.entries)
                 originalFileContent = editedContent
                 sourceViewContent = editedContent
-                if (changedFromSavedContent) {
-                    hasUnsavedChanges = true
-                }
                 exitSourceViewMode(sourceScrollPosition) {
                     binding.etSourceView.setDocumentEnabled(true)
                     sourceViewTransitionJob = null
@@ -1157,6 +1142,7 @@ class EditorActivity : AppCompatActivity() {
     /** 搜索替换直接重写完整源码内容。 */
     private fun replaceSourceViewContent(content: String) {
         setSourceViewEditorText(content)
+        originalFileContent = content
         sourceViewContent = content
         hasUnsavedChanges = true
         sourceViewHasPendingEdits = true
@@ -1169,8 +1155,8 @@ class EditorActivity : AppCompatActivity() {
         if (!isSourceViewMode || !sourceViewHasPendingEdits) return sourceViewContent
         val visibleContent = binding.etSourceView.getDocumentText()
         val snapshot = visibleContent
+        originalFileContent = snapshot
         sourceViewContent = snapshot
-        // originalFileContent 始终保留保存时的基线，用于准确判断“编辑后又恢复原文”的情况。
         sourceViewHasPendingEdits = false
         return snapshot
     }
@@ -1885,7 +1871,6 @@ class EditorActivity : AppCompatActivity() {
         when (continuation) {
             SaveContinuation.NONE -> Unit
             SaveContinuation.FINISH -> finish()
-            SaveContinuation.ENTER_SOURCE_VIEW -> reloadAndEnterSourceView()
         }
     }
     
@@ -2495,7 +2480,8 @@ class EditorActivity : AppCompatActivity() {
             val content = getCurrentEditableContent() ?: return false
             writeAction(content)
             originalFileContent = content
-            if (isSourceViewMode) sourceViewContent = content
+            sourceViewContent = content
+            sourceViewHasPendingEdits = false
             hasUnsavedChanges = false
             showShortToast("保存成功")
             true

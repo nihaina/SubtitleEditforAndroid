@@ -31,13 +31,4 @@ class EditorSaveCoordinatorTest {
 
         assertEquals(SaveContinuation.NONE, coordinator.pending)
     }
-
-    @Test
-    fun newerSaveRequestReplacesPreviousContinuation() {
-        val coordinator = EditorSaveCoordinator()
-        coordinator.begin(SaveContinuation.FINISH)
-        coordinator.begin(SaveContinuation.ENTER_SOURCE_VIEW)
-
-        assertEquals(SaveContinuation.ENTER_SOURCE_VIEW, coordinator.complete(success = true))
-    }
 }

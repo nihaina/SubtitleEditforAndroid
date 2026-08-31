@@ -2,8 +2,7 @@ package com.subtitleedit
 
 internal enum class SaveContinuation {
     NONE,
-    FINISH,
-    ENTER_SOURCE_VIEW
+    FINISH
 }
 
 internal class EditorSaveCoordinator {
