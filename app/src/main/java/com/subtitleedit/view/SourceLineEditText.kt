@@ -13,6 +13,7 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputConnectionWrapper
+import android.text.method.ArrowKeyMovementMethod
 import androidx.appcompat.widget.AppCompatEditText
 import kotlin.math.roundToInt
 
@@ -28,6 +29,24 @@ internal class SourceLineEditText @JvmOverloads constructor(
     attrs: AttributeSet? = null,
     defStyleAttr: Int = android.R.attr.editTextStyle
 ) : AppCompatEditText(context, attrs, defStyleAttr) {
+
+    // Keep normal cursor movement and IME editing, but do not let TextView's Editor create its
+    // selection controller. Editable TextViews otherwise keep the controller even when
+    // textIsSelectable=false; a second tap/long-press can then start the native word drag
+    // independently of SourceEditorView's document-level selection.
+    private val nonSelectingMovementMethod = object : ArrowKeyMovementMethod() {
+        override fun canSelectArbitrarily(): Boolean = false
+    }
+
+    fun suppressNativeTouchSelection() {
+        setTextIsSelectable(false)
+        // setTextIsSelectable(false) normally installs no movement method. Install the
+        // keyboard-capable method after that call (and after XML inflation) so the Editor's
+        // textCanBeSelected() remains false for touch selection while cursor/IME editing still
+        // works.
+        movementMethod = nonSelectingMovementMethod
+        isLongClickable = false
+    }
 
     /**
      * SourceEditorView owns long-press selection. Returning true here prevents TextView's
@@ -60,6 +79,19 @@ internal class SourceLineEditText @JvmOverloads constructor(
     var extendVertical: ((Int, Int, Int) -> Boolean)? = null
     var selectionChanged: (() -> Unit)? = null
 
+    // RecyclerView focus/selection restoration is programmatic. Do not expose those temporary
+    // callbacks as user selection changes; SourceEditorView owns the document-level range.
+    private var suppressSelectionChangedCallback = false
+
+    fun runSilently(block: () -> Unit) {
+        suppressSelectionChangedCallback = true
+        try {
+            block()
+        } finally {
+            suppressSelectionChangedCallback = false
+        }
+    }
+
     /**
      * Keep a view-local copy of the row ranges so selection remains visible even while a
      * RecyclerView payload is being applied. BackgroundColorSpan is still installed by the
@@ -73,7 +105,7 @@ internal class SourceLineEditText @JvmOverloads constructor(
 
     override fun onSelectionChanged(selStart: Int, selEnd: Int) {
         super.onSelectionChanged(selStart, selEnd)
-        selectionChanged?.invoke()
+        if (!suppressSelectionChangedCallback) selectionChanged?.invoke()
     }
 
     override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) {

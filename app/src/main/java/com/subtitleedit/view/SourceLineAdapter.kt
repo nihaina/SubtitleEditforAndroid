@@ -185,7 +185,7 @@ internal class SourceLineAdapter(
             editor.setSingleLine(false)
             // Selection belongs to SourceEditorView's document model. Keeping TextView
             // selectable would let its Editor install a second long-press drag/handle stream.
-            editor.setTextIsSelectable(false)
+            editor.suppressNativeTouchSelection()
             // TextView's setter also changes the generic focus/click flags. Restore the flags
             // required for ordinary cursor placement and IME editing while leaving selection
             // itself disabled.
@@ -329,16 +329,20 @@ internal class SourceLineAdapter(
         }
 
         fun focus(column: Int) {
-            editor.requestFocus()
-            editor.setSelection(column.coerceIn(0, editor.length()))
+            editor.runSilently {
+                editor.requestFocus()
+                editor.setSelection(column.coerceIn(0, editor.length()))
+            }
         }
 
         fun focusSelection(start: Int, end: Int) {
-            editor.requestFocus()
-            editor.setSelection(
-                start.coerceIn(0, editor.length()),
-                end.coerceIn(0, editor.length())
-            )
+            editor.runSilently {
+                editor.requestFocus()
+                editor.setSelection(
+                    start.coerceIn(0, editor.length()),
+                    end.coerceIn(0, editor.length())
+                )
+            }
         }
 
         private fun applyHighlights(highlights: List<SourceLineHighlight>) {

@@ -11,8 +11,10 @@ import android.graphics.Paint
 import android.graphics.Point
 import android.graphics.Rect
 import android.graphics.drawable.ColorDrawable
+import android.icu.text.BreakIterator
 import android.util.AttributeSet
 import android.os.Build
+import android.os.LocaleList
 import android.os.SystemClock
 import android.view.ActionMode
 import android.view.Gravity
@@ -23,6 +25,8 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
+import android.view.textclassifier.TextClassificationManager
+import android.view.textclassifier.TextSelection
 import android.widget.PopupWindow
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -31,6 +35,8 @@ import com.subtitleedit.R
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import java.util.Locale
+import java.util.concurrent.Executors
 
 /**
  * Source editor backed by the same block/list lifecycle as the subtitle list.
@@ -74,6 +80,7 @@ class SourceEditorView @JvmOverloads constructor(
     private var imeInsetBottomPx = 0
     private var imeEnsurePosted = false
     private var imeShowRequested = false
+    private var imeEnsureBlockedByUserScroll = false
     private val selectionEdgeScrollPx = (resources.displayMetrics.density * 24f).toInt()
     private val selectionEdgeZonePx = (resources.displayMetrics.density * 48f).toInt()
     private val selectionTouchSlopPx = ViewConfiguration.get(context).scaledTouchSlop
@@ -104,6 +111,15 @@ class SourceEditorView @JvmOverloads constructor(
     private var internalSelectionLastRawX = 0f
     private var internalSelectionLastRawY = 0f
     private var selectionTouchMoved = false
+    // Once the finger has entered a real drag, the classifier result belongs to the old
+    // long-press seed and must never be allowed to overwrite the actively dragged range. This
+    // flag is separate from selectionTouchMoved because that flag is reset on ACTION_UP.
+    private var internalSelectionSmartSelectionCancelled = false
+    private var internalSelectionInitializing = false
+    private var internalSelectionGeneration = 0L
+    private var viewportTouchMoved = false
+    private var viewportTouchDownX = 0f
+    private var viewportTouchDownY = 0f
     private var selectionActionMode: ActionMode? = null
     private var selectionActionModeSuppressedForScroll = false
     private var selectionActionModeSuppressedForHandleDrag = false
@@ -138,6 +154,13 @@ class SourceEditorView @JvmOverloads constructor(
     private var imeSuppressedEditor: SourceLineEditText? = null
     private var customLeftHandle = SelectionHandlePopup(SelectionHandleSide.LEFT)
     private var customRightHandle = SelectionHandlePopup(SelectionHandleSide.RIGHT)
+
+    // Android's smart-selection classifier is explicitly a worker-thread API. Keep it off the
+    // UI thread just like TextView's SelectionActionModeHelper does, then apply a result only if
+    // the long-press that requested it is still the current document selection.
+    private val wordClassifierExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "SourceEditorWordClassifier").apply { isDaemon = true }
+    }
 
     private val internalSelectionLongPressRunnable = Runnable {
         internalSelectionLongPressPosted = false
@@ -186,16 +209,16 @@ class SourceEditorView @JvmOverloads constructor(
 
     private val imeEnsureRunnable = Runnable {
         imeEnsurePosted = false
-        // A normal scroll gesture temporarily marks the touched editor as active. The IME can
-        // still disappear during that gesture, and its bottom padding must be reconciled before
-        // the next scrollbar interaction. A published document selection is the only state that
-        // must defer the focused-editor layout adjustment.
-        if (documentSelection != null) return@Runnable
         updateImeBottomPadding()
+        // A manual viewport scroll must not be followed by a caret-visibility correction. The
+        // bottom inset is still reconciled above so the custom scrollbar geometry stays current.
+        if (documentSelection != null || imeEnsureBlockedByUserScroll) return@Runnable
         // Padding changes are applied during the next layout pass. Defer the visibility check
         // one frame so RecyclerView's new scroll range (including the keyboard tail spacer) is
         // available before attempting to scroll the focused row.
-        postOnAnimation { ensureFocusedLineVisible() }
+        postOnAnimation {
+            if (!imeEnsureBlockedByUserScroll) ensureFocusedLineVisible()
+        }
     }
 
     private val lineAdapter = SourceLineAdapter(
@@ -230,6 +253,7 @@ class SourceEditorView @JvmOverloads constructor(
             val visible = insets.isVisible(imeType)
             val bottom = insets.getInsets(imeType).bottom
             if (visible != imeVisible || bottom != imeInsetBottomPx) {
+                if (visible && !imeVisible) imeEnsureBlockedByUserScroll = false
                 imeVisible = visible
                 imeInsetBottomPx = bottom
                 if (visible) imeShowRequested = false
@@ -258,8 +282,21 @@ class SourceEditorView @JvmOverloads constructor(
         if (internalSelectionDragActive) {
             when (event.actionMasked) {
                 MotionEvent.ACTION_MOVE -> {
-                    selectionTouchMoved = true
-                    updateInternalSelectionDrag(event.rawX, event.rawY)
+                    // The long-press path receives the same tiny pointer jitter that Android
+                    // reports while a finger is resting on the screen. Treating every MOVE as
+                    // a drag races the smart-word result: the classifier may publish 原作 and
+                    // the next jitter event immediately resolves the endpoint back to 原. Keep
+                    // consuming those events, but do not change the document range until the
+                    // pointer has actually crossed the touch slop from the original press.
+                    val gesture = selectionGesture
+                    val movedBeyondSlop = gesture != null &&
+                        (abs(event.x - gesture.downX) > selectionTouchSlopPx ||
+                            abs(event.y - gesture.downY) > selectionTouchSlopPx)
+                    if (movedBeyondSlop) {
+                        selectionTouchMoved = true
+                        internalSelectionSmartSelectionCancelled = true
+                        updateInternalSelectionDrag(event.rawX, event.rawY)
+                    }
                     return true
                 }
                 MotionEvent.ACTION_UP,
@@ -278,6 +315,17 @@ class SourceEditorView @JvmOverloads constructor(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 imeShowRequested = false
+                // Defer caret visibility correction until this gesture is known to be a tap.
+                // Starting a scroll while the IME is visible must not be interrupted by the
+                // pending one-frame correction posted when the keyboard appeared.
+                imeEnsureBlockedByUserScroll = imeVisible
+                if (imeEnsureBlockedByUserScroll) {
+                    removeCallbacks(imeEnsureRunnable)
+                    imeEnsurePosted = false
+                }
+                viewportTouchMoved = false
+                viewportTouchDownX = event.x
+                viewportTouchDownY = event.y
                 removeCallbacks(internalSelectionLongPressRunnable)
                 internalSelectionLongPressPosted = false
                 val handleSide = selectionHandleSideAtRaw(event.rawX, event.rawY)
@@ -310,12 +358,26 @@ class SourceEditorView @JvmOverloads constructor(
             }
 
             MotionEvent.ACTION_MOVE -> {
+                if (!viewportTouchMoved &&
+                    (abs(event.x - viewportTouchDownX) > selectionTouchSlopPx ||
+                        abs(event.y - viewportTouchDownY) > selectionTouchSlopPx)
+                ) {
+                    viewportTouchMoved = true
+                    if (imeVisible) {
+                        imeEnsureBlockedByUserScroll = true
+                        removeCallbacks(imeEnsureRunnable)
+                        imeEnsurePosted = false
+                    }
+                }
                 val gesture = selectionGesture
                 if (gesture != null &&
                     (abs(event.x - gesture.downX) > selectionTouchSlopPx ||
                         abs(event.y - gesture.downY) > selectionTouchSlopPx)
                 ) {
                     selectionTouchMoved = true
+                    // The long-press runnable will not run after this point. Keep the pending
+                    // classifier request invalid even if its callback arrives after ACTION_UP.
+                    internalSelectionSmartSelectionCancelled = true
                     if (internalSelectionLongPressPosted) {
                         removeCallbacks(internalSelectionLongPressRunnable)
                         internalSelectionLongPressPosted = false
@@ -334,7 +396,7 @@ class SourceEditorView @JvmOverloads constructor(
                 val gesture = selectionGesture
                 val longPressed = gesture != null &&
                     event.eventTime - event.downTime >= ViewConfiguration.getLongPressTimeout()
-                val moved = selectionTouchMoved
+                val moved = selectionTouchMoved || viewportTouchMoved
                 // A moving gesture that has not entered the custom long-press path is a
                 // RecyclerView scroll. A stationary tap explicitly clears an existing selection.
                 if (documentSelection != null && !moved && !longPressed) {
@@ -345,14 +407,19 @@ class SourceEditorView @JvmOverloads constructor(
                 selectionTouchActive = false
                 if (documentSelection == null) {
                     restoreImeSuppression()
-                    // Reconcile a keyboard hide that arrived while this gesture was scrolling
-                    // the RecyclerView. Without this, the IME-sized bottom padding survives until
-                    // another inset event and the custom scrollbar track is vertically wrong.
-                    scheduleImeEnsure()
-                    if (!moved && !longPressed && gesture?.editor?.hasFocus() == true) {
-                        showImeForFocusedEditor()
+                    if (moved) {
+                        // Keep the IME-sized tail in sync after a manual scroll, but do not run
+                        // ensureFocusedLineVisible() and pull the list back to the caret.
+                        updateImeBottomPadding()
+                    } else {
+                        imeEnsureBlockedByUserScroll = false
+                        scheduleImeEnsure()
+                        if (!longPressed && gesture?.editor?.hasFocus() == true) {
+                            showImeForFocusedEditor()
+                        }
                     }
                 }
+                viewportTouchMoved = false
             }
 
             MotionEvent.ACTION_CANCEL -> {
@@ -363,8 +430,14 @@ class SourceEditorView @JvmOverloads constructor(
                 selectionTouchActive = false
                 if (documentSelection == null) {
                     restoreImeSuppression()
-                    scheduleImeEnsure()
+                    if (viewportTouchMoved) {
+                        updateImeBottomPadding()
+                    } else {
+                        imeEnsureBlockedByUserScroll = false
+                        scheduleImeEnsure()
+                    }
                 }
+                viewportTouchMoved = false
             }
         }
         return handled
@@ -526,11 +599,11 @@ class SourceEditorView @JvmOverloads constructor(
 
     private fun onEditorSelectionChanged(position: Int, editor: SourceLineEditText) {
         onEditorFocusChanged()
+        if (internalSelectionInitializing) return
         // A handle drag owns the document endpoints for the duration of the gesture. Ignore the
         // child EditText's transient callbacks while that gesture is active; single-line and
         // multi-line selections otherwise follow the same document-level path.
-        if (customHandleSide != null) return
-        if (selectionTouchActive && selectionTouchMoved && documentSelection != null) return
+        if (customHandleSide != null || internalSelectionDragActive || documentSelection != null) return
         val start = editor.selectionStart.coerceIn(0, editor.length())
         val end = editor.selectionEnd.coerceIn(0, editor.length())
         val selection = documentSelection
@@ -625,7 +698,9 @@ class SourceEditorView @JvmOverloads constructor(
 
     /** Scroll only when the focused visual line is actually hidden below the IME. */
     private fun ensureFocusedLineVisible() {
-        if (!imeVisible || selectionTouchActive || documentSelection != null || height <= 0) return
+        if (!imeVisible || imeEnsureBlockedByUserScroll || selectionTouchActive ||
+            documentSelection != null || height <= 0
+        ) return
         val focusedEditor = findFocus() as? SourceLineEditText ?: return
         val caretLayout = focusedEditor.layout
         val caretOffset = focusedEditor.selectionStart.coerceIn(0, focusedEditor.length())
@@ -670,25 +745,45 @@ class SourceEditorView @JvmOverloads constructor(
     private fun beginInternalLongPressSelection(gesture: SelectionGesture) {
         val editor = gesture.editor
         val position = gesture.line.coerceIn(0, lines.lastIndex)
+        if (editor.length() == 0) return
         val touchOffset = offsetForRawPosition(editor, gesture.downRawX, gesture.downRawY)
-        val word = wordSelectionRange(editor, touchOffset)
+        // Word classification is intentionally performed on the physical row only. Newline
+        // separators are document metadata here, not part of the text under the finger; passing
+        // the entire document to a classifier can return a boundary in an adjacent row and make
+        // the initial long-press range collapse.
+        val localText = editor.text ?: ""
+        val word = runCatching { wordSelectionRange(localText, touchOffset) }
+            .getOrElse { characterClusterRange(localText, touchOffset) }
+            .let { range ->
+                val safeStart = range.first.coerceIn(0, localText.length)
+                val safeEnd = range.second.coerceIn(safeStart, localText.length)
+                if (safeStart < safeEnd) {
+                    safeStart to safeEnd
+                } else {
+                    val fallback = touchOffset.coerceIn(0, (localText.length - 1).coerceAtLeast(0))
+                    fallback to (fallback + 1).coerceAtMost(localText.length)
+                }
+            }
         val initialStart = absoluteOffset(position, word.first)
         val initialEnd = absoluteOffset(position, word.second)
         if (initialStart >= initialEnd) return
+        val startPoint = position to word.first
+        val endPoint = position to word.second
 
         // A new long press starts a new document range. It is deliberately independent of
         // TextView's selection state, so a recycled child cannot leave a second native range
         // active underneath this one.
         if (documentSelection != null) clearDocumentSelection()
+        val selectionGeneration = ++internalSelectionGeneration
         selectionActionModeSuppressedForScroll = false
         selectionActionModeSuppressedForHandleDrag = false
         suppressImeForSelection(editor)
         resetHandleEndpointMapping()
         documentSelection = DocumentSelection(
-            anchorLine = position,
-            anchorOffset = word.first,
-            focusLine = position,
-            focusOffset = word.second
+            anchorLine = startPoint.first,
+            anchorOffset = startPoint.second,
+            focusLine = endPoint.first,
+            focusOffset = endPoint.second
         )
         internalSelectionInitialStart = initialStart
         internalSelectionInitialEnd = initialEnd
@@ -696,17 +791,35 @@ class SourceEditorView @JvmOverloads constructor(
         internalSelectionLastRawX = gesture.downRawX
         internalSelectionLastRawY = gesture.downRawY
         internalSelectionDragActive = true
-        parent?.requestDisallowInterceptTouchEvent(true)
-        refreshVisibleSelectionHighlights()
-        // Cancel TextView's already dispatched DOWN stream before it can turn a later MOVE into
-        // a native selection drag. All subsequent movement is consumed by this view.
-        cancelNativeSelectionGesture(editor)
+        internalSelectionSmartSelectionCancelled = false
+        internalSelectionInitializing = true
+        try {
+            parent?.requestDisallowInterceptTouchEvent(true)
+            refreshVisibleSelectionHighlights()
+            // Cancel TextView's already dispatched DOWN stream before it can turn a later MOVE
+            // into a native selection drag. All subsequent movement is consumed by this view.
+            editor.cancelLongPress()
+            cancelNativeSelectionGesture(editor)
+        } finally {
+            internalSelectionInitializing = false
+        }
         // Keep the focused child range aligned for keyboard replacement/deletion. It is only a
         // caret for cross-row ranges; the document highlight and custom handles remain the source
         // of truth for the complete selection.
         syncNativeSelection(documentSelection!!)
         ensureSelectionActionMode()
         updateSelectionHandlePopups()
+
+        // Native TextView performs smart selection after its initial WordIterator range has been
+        // published. Do the same here. In particular, a CJK touch must not fall back to selecting
+        // every adjacent ideograph when the classifier is unavailable or still starting up.
+        requestSmartWordSelection(
+            text = localText.toString(),
+            initialStart = word.first,
+            initialEnd = word.second,
+            position = position,
+            generation = selectionGeneration
+        )
     }
 
     private fun updateInternalSelectionDrag(
@@ -725,16 +838,43 @@ class SourceEditorView @JvmOverloads constructor(
         val targetOffset = offsetForRawPosition(target.second, rawX, rawY)
         val movingOffset = absoluteOffset(target.first, targetOffset)
 
+        // The long-press selection remains word-based while the finger is held. A MOVE event
+        // can arrive after smart selection has expanded the initial character (and even with a
+        // few pixels of jitter while the finger is stationary). Resolving the raw insertion point
+        // directly in that case would shrink 原作 back to 原, which looks like a second selector
+        // fighting the classifier. Keep the current word intact until the finger leaves it, and
+        // snap subsequent positions to the corresponding word boundary.
+        val movingRight = movingOffset >= internalSelectionInitialTouch
+        val resolvedMovingOffset = if (movingRight) {
+            if (movingOffset <= internalSelectionInitialEnd) {
+                internalSelectionInitialEnd
+            } else {
+                absoluteOffset(
+                    target.first,
+                    wordSelectionRange(target.second.text ?: "", targetOffset).second
+                )
+            }
+        } else {
+            if (movingOffset >= internalSelectionInitialStart) {
+                internalSelectionInitialStart
+            } else {
+                absoluteOffset(
+                    target.first,
+                    wordSelectionRange(target.second.text ?: "", targetOffset).first
+                )
+            }
+        }
+
         // Preserve the word selected by the long press until the finger chooses a direction;
         // moving right keeps the word start fixed, moving left keeps the word end fixed. This
         // mirrors the native gesture without allowing TextView to own the pointer stream.
-        val anchorOffset = if (movingOffset >= internalSelectionInitialTouch) {
+        val anchorOffset = if (movingRight) {
             internalSelectionInitialStart
         } else {
             internalSelectionInitialEnd
         }
         val anchorLineOffset = lineAndColumnForAbsoluteOffset(anchorOffset)
-        val focusLineOffset = lineAndColumnForAbsoluteOffset(movingOffset)
+        val focusLineOffset = lineAndColumnForAbsoluteOffset(resolvedMovingOffset)
         documentSelection = DocumentSelection(
             anchorLine = anchorLineOffset.first,
             anchorOffset = anchorLineOffset.second,
@@ -750,6 +890,11 @@ class SourceEditorView @JvmOverloads constructor(
     private fun finishInternalSelectionDrag() {
         if (!internalSelectionDragActive) return
         internalSelectionDragActive = false
+        // A classifier result is only valid while the long-press gesture is still active. Once
+        // the pointer is released (or a fresh DOWN supersedes this gesture), keep the published
+        // range stable instead of applying a late asynchronous suggestion after the user has
+        // already seen/dragged the handles.
+        internalSelectionSmartSelectionCancelled = true
         removeCallbacks(selectionAutoScrollRunnable)
         selectionAutoScrollPosted = false
         parent?.requestDisallowInterceptTouchEvent(false)
@@ -759,22 +904,249 @@ class SourceEditorView @JvmOverloads constructor(
         restoreSelectionActionModeAfterDrag()
     }
 
-    private fun wordSelectionRange(editor: SourceLineEditText, offset: Int): Pair<Int, Int> {
-        val text = editor.text ?: return offset to offset
+    /**
+     * Return the same initial word range that TextView obtains from its WordIterator. Smart
+     * dictionary expansion is deliberately separate and asynchronous (see below).
+     */
+    private fun wordSelectionRange(text: CharSequence, offset: Int): Pair<Int, Int> {
         if (text.isEmpty()) return 0 to 0
-        val pivot = offset.coerceIn(0, text.length - 1)
-        val kind = wordCharacterKind(text[pivot])
-        var start = pivot
-        var end = pivot + 1
-        while (start > 0 && wordCharacterKind(text[start - 1]) == kind) start--
-        while (end < text.length && wordCharacterKind(text[end]) == kind) end++
-        return start to end
+        var pivot = offset.coerceIn(0, text.length - 1)
+        // Layout hit testing is right-biased at a glyph boundary. Treat punctuation directly
+        // after a word as the word character immediately before it, matching TextView's touch
+        // behavior instead of producing a punctuation-only range.
+        if (pivot > 0 && isPunctuation(text[pivot]) &&
+            isLetterOrDigitAt(text, pivot - 1)
+        ) {
+            pivot--
+        }
+
+        // ICU's word iterator has an intentional boundary bias for CJK text: the first
+        // character of a run and the second character can produce different initial ranges. That
+        // is useful for native cursor movement but is wrong for a touch selection seed. Start
+        // from the actual character under the finger and let TextClassifier expand it only when
+        // the platform dictionary recognizes a real word.
+        if (isCjkCharacter(text[pivot])) return characterClusterRange(text, pivot)
+
+        val locales = resources.configuration.locales
+        val iterator = BreakIterator.getWordInstance(
+            if (locales.isEmpty) Locale.getDefault() else locales[0]
+        )
+        iterator.setText(text.toString())
+        val start = wordBeginning(iterator, text, pivot)
+        val end = wordEnd(iterator, text, pivot)
+        if (start >= 0 && end > start) return start to end
+        return fallbackWordRange(text, pivot)
     }
 
-    private fun wordCharacterKind(character: Char): Int = when {
-        character.isLetterOrDigit() || character == '_' -> 1
-        character.isWhitespace() -> 2
-        else -> 3
+    /** Equivalent to android.text.method.WordIterator#getBeginning(). */
+    private fun wordBeginning(
+        iterator: BreakIterator,
+        text: CharSequence,
+        offset: Int
+    ): Int {
+        if (isLetterOrDigitAt(text, offset)) {
+            if (iterator.isBoundary(offset) && !isLetterOrDigitBefore(text, offset)) {
+                return offset
+            }
+            return iterator.preceding(offset)
+        }
+        if (isLetterOrDigitBefore(text, offset)) return iterator.preceding(offset)
+        return BreakIterator.DONE
+    }
+
+    /** Equivalent to android.text.method.WordIterator#getEnd(). */
+    private fun wordEnd(
+        iterator: BreakIterator,
+        text: CharSequence,
+        offset: Int
+    ): Int {
+        if (isLetterOrDigitBefore(text, offset)) {
+            if (iterator.isBoundary(offset) && !isLetterOrDigitAt(text, offset)) {
+                return offset
+            }
+            return iterator.following(offset)
+        }
+        if (isLetterOrDigitAt(text, offset)) return iterator.following(offset)
+        return BreakIterator.DONE
+    }
+
+    private fun fallbackWordRange(text: CharSequence, pivot: Int): Pair<Int, Int> {
+        // Do not group adjacent CJK ideographs: without a dictionary Android's own WordIterator
+        // selects one character, and grouping the whole run is the source of the long-press
+        // mismatch reported for phrases containing several Chinese words.
+        if (isCjkCharacter(text[pivot])) return characterClusterRange(text, pivot)
+        if (isLetterOrDigitAt(text, pivot)) {
+            var start = pivot
+            var end = pivot + 1
+            while (start > 0 && isLetterOrDigitAt(text, start - 1)) start--
+            while (end < text.length && isLetterOrDigitAt(text, end)) end++
+            return start to end
+        }
+        return characterClusterRange(text, pivot)
+    }
+
+    private fun characterClusterRange(text: CharSequence, initialPivot: Int): Pair<Int, Int> {
+        if (text.isEmpty()) return 0 to 0
+        val pivot = initialPivot.coerceIn(0, text.length - 1)
+        val locales = resources.configuration.locales
+        val iterator = BreakIterator.getCharacterInstance(
+            if (locales.isEmpty) Locale.getDefault() else locales[0]
+        )
+        iterator.setText(text.toString())
+        val start = iterator.preceding((pivot + 1).coerceAtMost(text.length))
+        val end = iterator.following(pivot)
+        val safeStart = if (start == BreakIterator.DONE) 0 else start
+        val safeEnd = if (end == BreakIterator.DONE) text.length else end
+        return if (safeStart < safeEnd) safeStart to safeEnd else {
+            pivot to (pivot + 1).coerceAtMost(text.length)
+        }
+    }
+
+    private fun isLetterOrDigitAt(text: CharSequence, offset: Int): Boolean {
+        if (offset < 0 || offset >= text.length) return false
+        return Character.isLetterOrDigit(Character.codePointAt(text, offset))
+    }
+
+    private fun isLetterOrDigitBefore(text: CharSequence, offset: Int): Boolean {
+        if (offset <= 0 || offset > text.length) return false
+        return Character.isLetterOrDigit(Character.codePointBefore(text, offset))
+    }
+
+    private fun isPunctuation(character: Char): Boolean {
+        return when (Character.getType(character)) {
+            Character.CONNECTOR_PUNCTUATION.toInt(),
+            Character.DASH_PUNCTUATION.toInt(),
+            Character.END_PUNCTUATION.toInt(),
+            Character.FINAL_QUOTE_PUNCTUATION.toInt(),
+            Character.INITIAL_QUOTE_PUNCTUATION.toInt(),
+            Character.OTHER_PUNCTUATION.toInt(),
+            Character.START_PUNCTUATION.toInt() -> true
+            else -> false
+        }
+    }
+
+    private fun isCjkCharacter(character: Char): Boolean {
+        return when (Character.UnicodeScript.of(character.code)) {
+            Character.UnicodeScript.HAN,
+            Character.UnicodeScript.HIRAGANA,
+            Character.UnicodeScript.KATAKANA,
+            Character.UnicodeScript.HANGUL -> true
+            else -> false
+        }
+    }
+
+    private fun requestSmartWordSelection(
+        text: String,
+        initialStart: Int,
+        initialEnd: Int,
+        position: Int,
+        generation: Long
+    ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || initialStart >= initialEnd) return
+        wordClassifierExecutor.execute {
+            val suggested = runCatching {
+                suggestTextClassifierSelection(text, initialStart, initialEnd)
+            }.getOrNull()
+                ?: return@execute
+            if (initialEnd - initialStart == 1 &&
+                isCjkCharacter(text[initialStart]) &&
+                suggested.second - suggested.first > 1 &&
+                !isStableCjkSuggestion(text, suggested)
+            ) return@execute
+            post {
+                if (generation != internalSelectionGeneration ||
+                    customHandleSide != null ||
+                    documentSelection == null ||
+                    internalSelectionSmartSelectionCancelled
+                ) return@post
+                val current = documentSelection ?: return@post
+                val expectedStart = absoluteOffset(position, initialStart)
+                val expectedEnd = absoluteOffset(position, initialEnd)
+                val currentStart = min(
+                    absoluteOffset(current.anchorLine, current.anchorOffset),
+                    absoluteOffset(current.focusLine, current.focusOffset)
+                )
+                val currentEnd = max(
+                    absoluteOffset(current.anchorLine, current.anchorOffset),
+                    absoluteOffset(current.focusLine, current.focusOffset)
+                )
+                if (currentStart != expectedStart || currentEnd != expectedEnd) return@post
+                val suggestedStart = suggested.first.coerceIn(0, text.length)
+                val suggestedEnd = suggested.second.coerceIn(suggestedStart, text.length)
+                if (suggestedStart >= suggestedEnd ||
+                    suggestedStart > initialStart || suggestedEnd < initialEnd ||
+                    lines.getOrNull(position)?.text != text
+                ) return@post
+                if (suggestedStart == initialStart && suggestedEnd == initialEnd) return@post
+                documentSelection = DocumentSelection(
+                    anchorLine = position,
+                    anchorOffset = suggestedStart,
+                    focusLine = position,
+                    focusOffset = suggestedEnd
+                )
+                internalSelectionInitialStart = absoluteOffset(position, suggestedStart)
+                internalSelectionInitialEnd = absoluteOffset(position, suggestedEnd)
+                resetHandleEndpointMapping()
+                syncNativeSelection(documentSelection!!)
+                refreshVisibleSelectionHighlights()
+                selectionActionMode?.invalidateContentRect()
+                updateSelectionHandlePopups()
+            }
+        }
+    }
+
+    /**
+     * A single CJK seed can occasionally be expanded by a classifier only because it is on one
+     * side of an ICU boundary (for example, the second character of an unrelated pair). Accept a
+     * smart range only when every CJK character inside that range independently maps to the same
+     * range. This removes the touch-position-dependent "粘连" selection while retaining genuine
+     * dictionary words such as 原作.
+     */
+    private fun isStableCjkSuggestion(text: String, candidate: Pair<Int, Int>): Boolean {
+        var index = candidate.first
+        var foundCjk = false
+        while (index < candidate.second) {
+            val codePoint = Character.codePointAt(text, index)
+            val next = (index + Character.charCount(codePoint)).coerceAtMost(candidate.second)
+            if (isCjkCharacter(text[index])) {
+                foundCjk = true
+                val suggestion = runCatching {
+                    suggestTextClassifierSelection(text, index, next)
+                }.getOrNull() ?: return false
+                if (suggestion.first != candidate.first || suggestion.second != candidate.second) {
+                    return false
+                }
+            }
+            index = next
+        }
+        return foundCjk
+    }
+
+    /** Ask the platform classifier with the same request shape used by native TextView. */
+    private fun suggestTextClassifierSelection(
+        text: CharSequence,
+        selectionStart: Int,
+        selectionEnd: Int
+    ): Pair<Int, Int>? {
+        val manager = context.getSystemService(TextClassificationManager::class.java)
+            ?: return null
+        val classifier = manager.textClassifier
+        val locales = resources.configuration.locales
+        val defaultLocales = if (locales.isEmpty) LocaleList(Locale.getDefault()) else locales
+        val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val requestBuilder = TextSelection.Request.Builder(text, selectionStart, selectionEnd)
+                .setDefaultLocales(defaultLocales)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                requestBuilder.setIncludeTextClassification(true)
+            }
+            classifier.suggestSelection(requestBuilder.build())
+        } else {
+            @Suppress("DEPRECATION")
+            classifier.suggestSelection(text, selectionStart, selectionEnd, defaultLocales)
+        }
+        val start = selection.selectionStartIndex.coerceIn(0, text.length)
+        val end = selection.selectionEndIndex.coerceIn(start, text.length)
+        return if (start < end) start to end else null
     }
 
     private fun startCustomHandleDrag(
@@ -934,16 +1306,13 @@ class SourceEditorView @JvmOverloads constructor(
     private fun syncNativeSelection(selection: DocumentSelection) {
         val focusLine = selection.focusLine.coerceIn(0, lines.lastIndex)
         val focusColumn = selection.focusOffset.coerceIn(0, lines[focusLine].text.length)
-        val anchorLine = selection.anchorLine.coerceIn(0, lines.lastIndex)
-        val anchorColumn = selection.anchorOffset.coerceIn(0, lines[anchorLine].text.length)
         scrollToPosition(focusLine)
-        if (anchorLine == focusLine) {
-            lineAdapter.requestLineSelection(focusLine, anchorColumn, focusColumn)
-        } else {
-            // A child EditText cannot represent a cross-row range. Put its native caret at the
-            // document focus endpoint; the SourceEditorView highlight remains authoritative.
-            lineAdapter.requestLineFocus(focusLine, focusColumn)
-        }
+        // The document selection is painted by SourceEditorView for both single- and
+        // cross-row ranges. Keeping a native range in the child as well creates a second,
+        // independently-updated selection state; TextView can redraw that state after the smart
+        // classifier finishes and make a correctly matched word appear to revert to one
+        // character. Keep only a collapsed native caret at the document focus endpoint.
+        lineAdapter.requestLineFocus(focusLine, focusColumn)
     }
 
     private fun editorAtRaw(rawY: Float): Pair<Int, SourceLineEditText>? {
@@ -1137,6 +1506,7 @@ class SourceEditorView @JvmOverloads constructor(
 
     private fun clearDocumentSelection() {
         val hadSelection = documentSelection != null
+        internalSelectionGeneration++
         documentSelection = null
         selectionActionModeSuppressedForScroll = false
         selectionActionModeSuppressedForHandleDrag = false
