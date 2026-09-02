@@ -63,7 +63,13 @@ class SourceEditorView @JvmOverloads constructor(
         val newEndOffset: Int
     )
 
-    private val lineLayoutManager = LinearLayoutManager(context)
+    private val lineLayoutManager = LinearLayoutManager(context).apply {
+        // Source rows may wrap to different visual heights. Smooth scrollbar metrics estimate
+        // the document range from the currently visible rows, so that estimate can change while
+        // dragging and make the thumb move backwards after a quick reverse drag. Item-based
+        // metrics remain monotonic as rows are recycled.
+        isSmoothScrollbarEnabled = false
+    }
     private val lines = mutableListOf<SourceLineBlock>()
     private val offsets = LineOffsets()
     private val highlights = mutableListOf<Highlight>()

@@ -118,6 +118,19 @@ open class DraggableRecyclerView @JvmOverloads constructor(
             MotionEvent.ACTION_DOWN -> {
                 if (isInThumbTouchZone(ev.x) && canDragThumb()) {
                     stopScroll()
+                    // Treat every DOWN as a fresh drag transaction. In particular, discard a
+                    // coalesced MOVE target left by an interrupted gesture before the new finger
+                    // position is sampled.
+                    removeCallbacks(applyPendingScrollRunnable)
+                    scrollFramePosted = false
+                    pendingScrollRatio = null
+                    lastThumbAdapterPosition = RecyclerView.NO_POSITION
+                    thumbDragPositionCorrection = 0
+                    // A previous drag may have left LinearLayoutManager with a pending
+                    // scrollToPositionWithOffset request. Reconcile it to the currently visible
+                    // row before taking the new drag anchor, otherwise that old request can be
+                    // consumed after the new finger movement and make the viewport jump back.
+                    cancelPendingLinearLayoutScroll()
                     val geometry = calculateThumbGeometry()
                     isDraggingThumb = true
                     dragLastY = ev.y
@@ -156,11 +169,17 @@ open class DraggableRecyclerView @JvmOverloads constructor(
                         dragOffsetY = dragLastY - geometry.trackTop - geometry.thumbTop
                         dragGeometry = geometry
                     }
-                    val targetThumbTop = (ev.y - geometry.trackTop - dragOffsetY)
-                        .coerceIn(0f, geometry.maxThumbTop)
-                    val maxScroll      = geometry.scrollRange - geometry.scrollExtent
-                    if (geometry.maxThumbTop > 0f && maxScroll > 0f) {
-                        val ratio     = targetThumbTop / geometry.maxThumbTop
+                    // Keep the scroll-range snapshot captured at the start of this track
+                    // geometry. LinearLayoutManager estimates pixel ranges from currently
+                    // visible rows; source rows can wrap to different heights, so those values
+                    // change while scrolling. Recomputing the mapping from every estimate lets a
+                    // quick down/up drag feed an older ratio back into a subsequent slow drag.
+                    val mappingGeometry = dragGeometry ?: geometry
+                    val targetThumbTop = (ev.y - mappingGeometry.trackTop - dragOffsetY)
+                        .coerceIn(0f, mappingGeometry.maxThumbTop)
+                    val maxScroll      = mappingGeometry.scrollRange - mappingGeometry.scrollExtent
+                    if (mappingGeometry.maxThumbTop > 0f && maxScroll > 0f) {
+                        val ratio     = targetThumbTop / mappingGeometry.maxThumbTop
                         enqueueThumbScroll(ratio)
                     }
                     dragLastY = ev.y
@@ -303,6 +322,8 @@ open class DraggableRecyclerView @JvmOverloads constructor(
         val itemCount = adapter?.itemCount ?: return
         if (itemCount <= 0) return
 
+        lastThumbAdapterPosition = RecyclerView.NO_POSITION
+
         val scrollRange = computeVerticalScrollRange()
         val scrollExtent = computeVerticalScrollExtent()
         val currentRatio = if (scrollRange > scrollExtent) {
@@ -314,8 +335,21 @@ open class DraggableRecyclerView @JvmOverloads constructor(
         val firstVisiblePosition = linearLayoutManager.findFirstVisibleItemPosition()
         if (firstVisiblePosition != RecyclerView.NO_POSITION) {
             thumbDragPositionCorrection = firstVisiblePosition - estimatedPosition
-            lastThumbAdapterPosition = firstVisiblePosition
         }
+    }
+
+    /**
+     * Replace any pending position jump with the currently visible row and offset. RecyclerView
+     * applies LinearLayoutManager's pending scroll on a later layout pass; without this reset a
+     * fast reverse drag can leave the old target queued until the next drag starts.
+     */
+    private fun cancelPendingLinearLayoutScroll() {
+        val linearLayoutManager = layoutManager as? LinearLayoutManager ?: return
+        val firstVisiblePosition = linearLayoutManager.findFirstVisibleItemPosition()
+        if (firstVisiblePosition == RecyclerView.NO_POSITION) return
+        val child = linearLayoutManager.findViewByPosition(firstVisiblePosition) ?: return
+        val offset = linearLayoutManager.getDecoratedTop(child) - paddingTop
+        linearLayoutManager.scrollToPositionWithOffset(firstVisiblePosition, offset)
     }
 
     private fun calculateThumbGeometry(): ThumbGeometry {
@@ -350,8 +384,5 @@ open class DraggableRecyclerView @JvmOverloads constructor(
 
     private fun sameTrackGeometry(first: ThumbGeometry, second: ThumbGeometry): Boolean =
         first.trackTop == second.trackTop &&
-            first.trackHeight == second.trackHeight &&
-            first.thumbHeight == second.thumbHeight &&
-            first.scrollRange == second.scrollRange &&
-            first.scrollExtent == second.scrollExtent
+            first.trackHeight == second.trackHeight
 }
