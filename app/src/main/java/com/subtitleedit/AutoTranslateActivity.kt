@@ -58,6 +58,7 @@ class AutoTranslateActivity : AppCompatActivity() {
         val apiKey: String,
         val model: String,
         val targetLanguage: String,
+        val customPrompt: String,
         val baseUrl: String,
         val contextWindowTokens: Int,
         val reasoningLevel: AiProviderConfig.ReasoningLevel
@@ -257,6 +258,7 @@ class AutoTranslateActivity : AppCompatActivity() {
                 apiKey = config.apiKey,
                 model = config.model,
                 targetLanguage = config.targetLanguage,
+                customPrompt = config.customPrompt,
                 baseUrl = config.baseUrl,
                 contextWindowTokens = config.contextWindowTokens,
                 subtitleFormat = document.format,
@@ -364,6 +366,7 @@ class AutoTranslateActivity : AppCompatActivity() {
             apiKey = apiKey,
             model = model,
             targetLanguage = targetLanguage,
+            customPrompt = settingsManager.getAiCustomPrompt(),
             baseUrl = baseUrl,
             contextWindowTokens = settingsManager.getAiContextWindowTokens(provider),
             reasoningLevel = settingsManager.getAiReasoningLevel(provider)

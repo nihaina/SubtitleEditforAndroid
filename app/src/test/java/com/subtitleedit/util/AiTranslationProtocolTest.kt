@@ -54,6 +54,17 @@ class AiTranslationProtocolTest {
     }
 
     @Test
+    fun userContent_appendsCustomPromptAfterDefaultInstruction() {
+        val subtitles = listOf(testSubtitle(1, "hello"))
+
+        assertEquals(
+            "帮我翻译成中文，以原格式输出\n请使用正式语气\n\n" +
+                "start\n1\n00:00:02,000 --> 00:00:03,500\nhello\nend",
+            buildTranslationUserContent(subtitles, "中文", "请使用正式语气")
+        )
+    }
+
+    @Test
     fun lrcInput_addsLocalSequenceWithoutConvertingStyleText() {
         val subtitles = listOf(
             SubtitleEntry(index = 1, startTime = 1_000, endTime = 2_000, text = "<b>字幕一</b>"),

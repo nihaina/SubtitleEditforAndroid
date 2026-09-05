@@ -30,6 +30,7 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_AI_API_KEY = "ai_api_key"
         private const val KEY_AI_MODEL = "ai_model"
         private const val KEY_AI_TARGET_LANGUAGE = "ai_target_language"
+        private const val KEY_AI_CUSTOM_PROMPT = "ai_custom_prompt"
         private const val KEY_AI_CUSTOM_BASE_URL = "ai_custom_base_url"
         private const val KEY_AI_CONTEXT_WINDOW_TOKENS = "ai_context_window_tokens"
         private const val KEY_AI_REASONING_LEVEL = "ai_reasoning_level"
@@ -267,6 +268,16 @@ class SettingsManager private constructor(context: Context) {
      */
     fun setAiTargetLanguage(language: String) {
         prefs.edit().putString(KEY_AI_TARGET_LANGUAGE, language).apply()
+    }
+
+    /** 获取 AI 翻译自定义提示词 */
+    fun getAiCustomPrompt(): String {
+        return prefs.getString(KEY_AI_CUSTOM_PROMPT, "") ?: ""
+    }
+
+    /** 设置 AI 翻译自定义提示词 */
+    fun setAiCustomPrompt(prompt: String) {
+        prefs.edit().putString(KEY_AI_CUSTOM_PROMPT, prompt).apply()
     }
 
     fun getAiContextWindowTokens(provider: String = getAiProvider()): Int {

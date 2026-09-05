@@ -145,6 +145,7 @@ class AiSettingsActivity : AppCompatActivity() {
                 settingsManager.getAiReasoningLevel(provider)
             )
         )
+        binding.etCustomPrompt.setText(settingsManager.getAiCustomPrompt())
         val savedModel = settingsManager.getAiModel(provider)
         if (config.models.isNotEmpty()) {
             binding.tilModel.visibility = View.GONE
@@ -412,6 +413,13 @@ class AiSettingsActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 settingsManager.setAiTargetLanguage(s.toString().trim())
+            }
+        })
+        binding.etCustomPrompt.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                if (!suppressTextSave) settingsManager.setAiCustomPrompt(s.toString())
             }
         })
         binding.etContextWindowTokens.addTextChangedListener(object : TextWatcher {

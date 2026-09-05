@@ -38,8 +38,14 @@ private val MARKED_TRANSLATION_BLOCK = Regex(
     RegexOption.IGNORE_CASE
 )
 
-private fun buildTranslationInstruction(targetLanguage: String): String =
-    "帮我翻译成${targetLanguage}，以原格式输出"
+private fun buildTranslationInstruction(targetLanguage: String, customPrompt: String): String =
+    buildString {
+        append("帮我翻译成${targetLanguage}，以原格式输出")
+        customPrompt.trim().takeIf { it.isNotEmpty() }?.let {
+            append('\n')
+            append(it)
+        }
+    }
 
 private fun wrapTranslationBlock(content: String): String = buildString {
     append(TRANSLATION_BLOCK_START)
@@ -68,10 +74,11 @@ internal fun buildTimedSubtitleContent(
 internal fun buildTranslationUserContent(
     subtitles: List<SubtitleEntry>,
     targetLanguage: String,
+    customPrompt: String = "",
     startPosition: Int = 1,
     format: SubtitleFormat = SubtitleFormat.SRT
 ): String = buildString {
-    append(buildTranslationInstruction(targetLanguage))
+    append(buildTranslationInstruction(targetLanguage, customPrompt))
     append("\n\n")
     append(buildSubtitleTranslationContent(subtitles, format, startPosition))
 }

@@ -59,6 +59,7 @@ internal class EditorTranslationController(
 
         val model = settingsManager.getAiModel()
         val targetLanguage = settingsManager.getAiTargetLanguage()
+        val customPrompt = settingsManager.getAiCustomPrompt()
         if (targetLanguage.isBlank()) {
             showTranslationError("请先设置目标语言")
             return
@@ -84,6 +85,7 @@ internal class EditorTranslationController(
                     apiKey,
                     model,
                     targetLanguage,
+                    customPrompt,
                     baseUrl,
                     contextWindowTokens,
                     reasoningLevel
@@ -108,6 +110,7 @@ internal class EditorTranslationController(
         apiKey: String,
         model: String,
         targetLanguage: String,
+        customPrompt: String,
         baseUrl: String,
         contextWindowTokens: Int,
         reasoningLevel: AiProviderConfig.ReasoningLevel
@@ -120,6 +123,7 @@ internal class EditorTranslationController(
             apiKey = apiKey,
             model = model,
             targetLanguage = targetLanguage,
+            customPrompt = customPrompt,
             baseUrl = baseUrl,
             contextWindowTokens = contextWindowTokens,
             subtitleFormat = subtitleFormatProvider(),

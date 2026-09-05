@@ -23,6 +23,7 @@ class AiTranslationConversation(
     apiKey: String,
     model: String,
     private val targetLanguage: String,
+    private val customPrompt: String = "",
     baseUrl: String,
     contextWindowTokens: Int,
     private val subtitleFormat: SubtitleFormat = SubtitleFormat.SRT,
@@ -82,6 +83,7 @@ class AiTranslationConversation(
                 val userContent = buildTranslationUserContent(
                     subtitles = batch,
                     targetLanguage = targetLanguage,
+                    customPrompt = customPrompt,
                     startPosition = activeBatchStart,
                     format = subtitleFormat
                 )

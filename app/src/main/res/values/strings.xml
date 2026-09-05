@@ -115,6 +115,7 @@
     <string name="activity_ai_settings_text_03">模型</string>
     <string name="activity_ai_settings_fetch_models">从请求地址获取模型列表</string>
     <string name="activity_ai_settings_reasoning_title">思考强度</string>
+    <string name="activity_ai_settings_custom_prompt_hint">自定义提示词（可选）</string>
     <string name="activity_ai_settings_open_chat">打开 AI 对话</string>
     <string name="activity_ai_settings_hint_04">目标语言</string>
     <string name="activity_ai_settings_hint_context_window">上下文上限（Token）</string>
