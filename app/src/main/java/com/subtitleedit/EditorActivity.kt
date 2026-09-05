@@ -128,6 +128,8 @@ class EditorActivity : AppCompatActivity() {
     private var sourceViewPreviewJob: Job? = null
     private var sourceViewWaveformSyncJob: Job? = null
     private var pendingSourceWaveformSync: SourceWaveformSyncRequest? = null
+    private var sourceWaveformHistoryKey: Long? = null
+    private var sourceWaveformHistoryStart: String? = null
     private var sourceViewEntryCount = 0
     private var sourceViewEditGeneration = 0L
 
@@ -135,7 +137,10 @@ class EditorActivity : AppCompatActivity() {
         val sourceContent: String,
         val sourceSyncInFlight: Boolean,
         val editGeneration: Long,
-        val timings: SourceWaveformTimings
+        val timings: SourceWaveformTimings,
+        val waveformDragKey: Long? = null,
+        val recordHistory: Boolean = true,
+        val historyStartContent: String? = null
     )
 
     private data class SourceWaveformTimings(
@@ -566,21 +571,21 @@ class EditorActivity : AppCompatActivity() {
             hasPlayableMedia = mediaType.hasPlayableMedia,
             appCacheDir = cacheDir,
             currentPlaybackPositionMs = { playbackController.currentPositionMs },
-            onSubtitleChanged = { changedIndex, updatedEntry ->
+            onSubtitleChanged = { changedIndex, updatedEntry, dragSessionKey, isFinal ->
                 val currentEntry = subtitleEntries.getOrNull(changedIndex)
                     ?: return@EditorWaveformController
                 currentEntry.startTime = updatedEntry.startTime
                 currentEntry.endTime = updatedEntry.endTime
                 currentEntry.endTimeModified = updatedEntry.endTimeModified
                 if (isSourceViewMode) {
-                    scheduleSourceViewWaveformSync(subtitleEntries)
+                    scheduleSourceViewWaveformSync(subtitleEntries, dragSessionKey, isFinal)
                     markAsChanged()
                 } else {
                     notifyEntriesChanged(
                         positions = listOf(changedIndex),
                         includeNeighbors = true,
                         syncWaveform = false,
-                        markChanged = true
+                        markChanged = isFinal,
                     )
                 }
             },
@@ -787,7 +792,11 @@ class EditorActivity : AppCompatActivity() {
     }
 
     /** 将波形拖动后的时间字段回写源视图，避免每次 MOVE 都触发逐行重建。 */
-    private fun scheduleSourceViewWaveformSync(updatedSubtitles: List<SubtitleEntry>) {
+    private fun scheduleSourceViewWaveformSync(
+        updatedSubtitles: List<SubtitleEntry>,
+        dragSessionKey: Long? = null,
+        recordHistory: Boolean = true
+    ) {
         val sourceSyncInFlight = sourceViewHasPendingEdits || sourceViewPreviewJob?.isActive == true
         val sourceContentSnapshot = if (sourceViewHasPendingEdits) {
             // 先提交当前行块，确保波形时间回写时不会覆盖尚未进入 sourceViewContent 的文本修改。
@@ -796,6 +805,10 @@ class EditorActivity : AppCompatActivity() {
             sourceViewContent
         }
         if (sourceSyncInFlight) sourceViewPreviewJob?.cancel()
+        if (dragSessionKey != null && sourceWaveformHistoryKey != dragSessionKey) {
+            sourceWaveformHistoryKey = dragSessionKey
+            sourceWaveformHistoryStart = sourceContentSnapshot
+        }
         val count = updatedSubtitles.size
         val timings = SourceWaveformTimings(
             indices = IntArray(count),
@@ -813,7 +826,10 @@ class EditorActivity : AppCompatActivity() {
             sourceContent = sourceContentSnapshot,
             sourceSyncInFlight = sourceSyncInFlight,
             editGeneration = sourceViewEditGeneration,
-            timings = timings
+            timings = timings,
+            waveformDragKey = dragSessionKey,
+            recordHistory = recordHistory,
+            historyStartContent = sourceWaveformHistoryStart
         )
         if (sourceViewWaveformSyncJob?.isActive == true) return
 
@@ -862,7 +878,18 @@ class EditorActivity : AppCompatActivity() {
                         continue
                     }
                     val updatedSource = result.updatedSource ?: continue
-                    recordSourceTextChange(request.sourceContent, updatedSource)
+                    if (request.recordHistory) {
+                        recordSourceTextChange(
+                            request.historyStartContent ?: request.sourceContent,
+                            updatedSource,
+                        )
+                        if (request.waveformDragKey != null &&
+                            sourceWaveformHistoryKey == request.waveformDragKey
+                        ) {
+                            sourceWaveformHistoryKey = null
+                            sourceWaveformHistoryStart = null
+                        }
+                    }
                     originalFileContent = updatedSource
                     sourceViewContent = updatedSource
                     sourceHistoryTextSnapshot = updatedSource
@@ -2051,6 +2078,11 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun applyListHistoryInListView(target: EditorEditHistory.ListState) {
+        if (canRestoreListEntriesInPlace(target.entries)) {
+            restoreListEntriesInPlace(target)
+            return
+        }
+
         val source = originalFileContent
         val currentEntries = SubtitleParser.parseDocument(source, format = currentFormat).entries
         val effectiveTargetEntries = SubtitleEntryOps.applyEditableHistoryTarget(
@@ -2075,6 +2107,57 @@ class EditorActivity : AppCompatActivity() {
             subtitleAdapter.setSelectionByStableIds(target.selectedIds)
             updateSelectedCountDisplay()
         }
+    }
+
+    private fun canRestoreListEntriesInPlace(targetEntries: List<SubtitleEntry>): Boolean {
+        if (subtitleEntries.size != targetEntries.size) return false
+        return subtitleEntries.zip(targetEntries).all { (current, target) ->
+            current.stableId == target.stableId &&
+                current.cueIdentifier == target.cueIdentifier &&
+                current.cueSettings == target.cueSettings
+        }
+    }
+
+    private fun restoreListEntriesInPlace(target: EditorEditHistory.ListState) {
+        val source = originalFileContent
+        val currentEntries = subtitleEntries.toList()
+        val changedPositions = currentEntries.indices.filter { position ->
+            val current = currentEntries[position]
+            val historical = target.entries[position]
+            current.startTime != historical.startTime ||
+                current.endTime != historical.endTime ||
+                current.text != historical.text ||
+                current.endTimeModified != historical.endTimeModified
+        }
+        val updatedSource = SubtitleSourceSynchronizer.apply(
+            content = source,
+            format = currentFormat,
+            oldEntries = currentEntries,
+            newEntries = target.entries
+        )
+
+        currentEntries.forEachIndexed { position, current ->
+            val historical = target.entries[position]
+            current.index = historical.index
+            current.startTime = historical.startTime
+            current.endTime = historical.endTime
+            current.text = historical.text
+            current.endTimeModified = historical.endTimeModified
+        }
+        originalFileContent = updatedSource
+        sourceViewContent = updatedSource
+        sourceHistoryTextSnapshot = updatedSource
+        if (changedPositions.isNotEmpty()) {
+            notifyEntriesChanged(
+                positions = changedPositions,
+                syncWaveform = true,
+                markChanged = false
+            )
+        } else {
+            syncWaveformSubtitles()
+        }
+        subtitleAdapter.setSelectionByStableIds(target.selectedIds)
+        updateSelectedCountDisplay()
     }
 
     private fun applySourceHistoryText(targetText: String) {

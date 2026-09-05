@@ -42,7 +42,7 @@ internal class EditorWaveformController(
     private val hasPlayableMedia: Boolean,
     private val appCacheDir: File,
     private val currentPlaybackPositionMs: () -> Long,
-    private val onSubtitleChanged: (Int, SubtitleEntry) -> Unit,
+    private val onSubtitleChanged: (Int, SubtitleEntry, Long, Boolean) -> Unit,
     private val onSelectedIndexChanged: (Int) -> Unit,
     private val onTimestampInserted: (Long, Long) -> Unit,
     private val showMessage: (String) -> Unit

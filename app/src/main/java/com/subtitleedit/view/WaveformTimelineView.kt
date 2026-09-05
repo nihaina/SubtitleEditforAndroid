@@ -121,6 +121,7 @@ class WaveformTimelineView @JvmOverloads constructor(
     private var dragMode = DragMode.NONE
     private var currentSubtitle: SubtitleEntry? = null
     private var currentSubtitleIndex = -1
+    private var currentSubtitleDragKey = 0L
     private var dragStartX = 0f
     private var dragStartStartTime = 0L
     private var dragStartEndTime = 0L
@@ -204,7 +205,7 @@ class WaveformTimelineView @JvmOverloads constructor(
 
     var onSelectedIndicesChangeListener: ((Set<Int>) -> Unit)? = null
     var onTimelineClickListener: ((Float) -> Unit)? = null
-    var onSubtitleChangeListener: ((Int, SubtitleEntry) -> Unit)? = null
+    var onSubtitleChangeListener: ((Int, SubtitleEntry, Long, Boolean) -> Unit)? = null
     var onDraggedViewportPlayheadCorrection: ((positionMs: Long) -> Unit)? = null
     var onLimitedPlaybackRangeChange: ((subtitleIndex: Int?) -> Unit)? = null
     var onLimitedPlaybackStartRequest: ((subtitleIndex: Int) -> Unit)? = null
@@ -1036,6 +1037,7 @@ class WaveformTimelineView @JvmOverloads constructor(
                     if (sub != null && idx >= 0) {
                         currentSubtitle = sub
                         currentSubtitleIndex = idx
+                        currentSubtitleDragKey++
                         if (idx in selectedIndices) {
                             // 已选中：DOWN 时保持 NONE，等 MOVE 时确认真正拖动再设置 dragMode
                             downOnSelectedSubtitle = true
@@ -1156,7 +1158,12 @@ class WaveformTimelineView @JvmOverloads constructor(
                     DragMode.NONE -> {}
                 }
                 if (changed) {
-                    onSubtitleChangeListener?.invoke(currentSubtitleIndex, s.copy())
+                    onSubtitleChangeListener?.invoke(
+                        currentSubtitleIndex,
+                        s.copy(),
+                        currentSubtitleDragKey,
+                        false
+                    )
                 }
                 invalidate()
                 return true
@@ -1165,7 +1172,12 @@ class WaveformTimelineView @JvmOverloads constructor(
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (dragMode != DragMode.NONE && currentSubtitleIndex >= 0) {
                     subtitles.getOrNull(currentSubtitleIndex)?.let { subtitle ->
-                        onSubtitleChangeListener?.invoke(currentSubtitleIndex, subtitle.copy())
+                        onSubtitleChangeListener?.invoke(
+                            currentSubtitleIndex,
+                            subtitle.copy(),
+                            currentSubtitleDragKey,
+                            true
+                        )
                     }
                 }
 
