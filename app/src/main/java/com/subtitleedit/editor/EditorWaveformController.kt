@@ -42,7 +42,7 @@ internal class EditorWaveformController(
     private val hasPlayableMedia: Boolean,
     private val appCacheDir: File,
     private val currentPlaybackPositionMs: () -> Long,
-    private val onSubtitlesChanged: (List<SubtitleEntry>) -> Unit,
+    private val onSubtitleChanged: (Int, SubtitleEntry) -> Unit,
     private val onSelectedIndexChanged: (Int) -> Unit,
     private val onTimestampInserted: (Long, Long) -> Unit,
     private val showMessage: (String) -> Unit
@@ -85,7 +85,7 @@ internal class EditorWaveformController(
         }
 
         binding.mediaPlayerContainer.visibility = View.VISIBLE
-        binding.waveformTimelineView.onSubtitleChangeListener = onSubtitlesChanged
+        binding.waveformTimelineView.onSubtitleChangeListener = onSubtitleChanged
         binding.waveformTimelineView.onSelectedIndicesChangeListener = { indices ->
             indices.firstOrNull()?.let(onSelectedIndexChanged)
         }

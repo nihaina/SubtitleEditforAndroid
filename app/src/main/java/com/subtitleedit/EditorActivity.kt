@@ -28,6 +28,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.SimpleItemAnimator
 import com.subtitleedit.adapter.SubtitleAdapter
 import com.subtitleedit.adapter.TranslationPreviewItem
 import com.subtitleedit.databinding.ActivityEditorBinding
@@ -59,6 +60,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.activity.ComponentActivity
@@ -114,6 +116,9 @@ class EditorActivity : AppCompatActivity() {
     private var sourceViewContent: String
         get() = stateModel.sourceViewContent
         set(value) { stateModel.sourceViewContent = value }
+    private var sourceViewNeedsListSync: Boolean
+        get() = stateModel.sourceViewNeedsListSync
+        set(value) { stateModel.sourceViewNeedsListSync = value }
 
     // 大文件切换时，避免 TextWatcher 在 setText/逐字编辑期间反复复制整份文本。
     private var suppressSourceViewChanges = false
@@ -121,8 +126,30 @@ class EditorActivity : AppCompatActivity() {
     private var sourceViewTransitionJob: Job? = null
     private var sourceViewPreviewJob: Job? = null
     private var sourceViewWaveformSyncJob: Job? = null
+    private var pendingSourceWaveformSync: SourceWaveformSyncRequest? = null
     private var sourceViewEntryCount = 0
     private var sourceViewEditGeneration = 0L
+
+    private data class SourceWaveformSyncRequest(
+        val sourceContent: String,
+        val sourceSyncInFlight: Boolean,
+        val editGeneration: Long,
+        val timings: SourceWaveformTimings
+    )
+
+    private data class SourceWaveformTimings(
+        val indices: IntArray,
+        val startTimes: LongArray,
+        val endTimes: LongArray,
+        val endTimeModified: BooleanArray
+    ) {
+        val size: Int get() = indices.size
+    }
+
+    private data class SourceWaveformSyncResult(
+        val updatedSource: String?,
+        val needsPreview: Boolean = false
+    )
     
     // 切换视图前保存的滚动位置
     private var savedScrollPosition: Int
@@ -458,6 +485,7 @@ class EditorActivity : AppCompatActivity() {
         binding.rvSubtitles.apply {
             layoutManager = LinearLayoutManager(this@EditorActivity)
             adapter = subtitleAdapter
+            (itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false
             // 滑块大跨度定位时复用更多已绑定行，减少文本测量和 ViewHolder 重绑。
             setItemViewCacheSize(12)
         }
@@ -535,15 +563,22 @@ class EditorActivity : AppCompatActivity() {
             hasPlayableMedia = mediaType.hasPlayableMedia,
             appCacheDir = cacheDir,
             currentPlaybackPositionMs = { playbackController.currentPositionMs },
-            onSubtitlesChanged = { updatedSubtitles ->
-                replaceSubtitleEntries(updatedSubtitles)
+            onSubtitleChanged = { changedIndex, updatedEntry ->
+                val currentEntry = subtitleEntries.getOrNull(changedIndex)
+                    ?: return@EditorWaveformController
+                currentEntry.startTime = updatedEntry.startTime
+                currentEntry.endTime = updatedEntry.endTime
+                currentEntry.endTimeModified = updatedEntry.endTimeModified
                 if (isSourceViewMode) {
-                    // 波形拖动期间 WaveformTimelineView 已经持有最新对象；这里只需把
-                    // 时间字段异步序列化回源文档，避免每个 MOVE 事件都重建大文本。
-                    scheduleSourceViewWaveformSync(updatedSubtitles)
+                    scheduleSourceViewWaveformSync(subtitleEntries)
                     markAsChanged()
                 } else {
-                    submitSubtitleList(refreshAll = true, syncWaveform = false, markChanged = true)
+                    notifyEntriesChanged(
+                        positions = listOf(changedIndex),
+                        includeNeighbors = true,
+                        syncWaveform = false,
+                        markChanged = true
+                    )
                 }
             },
             onSelectedIndexChanged = { index ->
@@ -750,7 +785,6 @@ class EditorActivity : AppCompatActivity() {
 
     /** 将波形拖动后的时间字段回写源视图，避免每次 MOVE 都触发逐行重建。 */
     private fun scheduleSourceViewWaveformSync(updatedSubtitles: List<SubtitleEntry>) {
-        sourceViewWaveformSyncJob?.cancel()
         val sourceSyncInFlight = sourceViewHasPendingEdits || sourceViewPreviewJob?.isActive == true
         val sourceContentSnapshot = if (sourceViewHasPendingEdits) {
             // 先提交当前行块，确保波形时间回写时不会覆盖尚未进入 sourceViewContent 的文本修改。
@@ -759,52 +793,87 @@ class EditorActivity : AppCompatActivity() {
             sourceViewContent
         }
         if (sourceSyncInFlight) sourceViewPreviewJob?.cancel()
-        val editGeneration = sourceViewEditGeneration
-        val entriesSnapshot = updatedSubtitles.map { it.copy() }
+        val count = updatedSubtitles.size
+        val timings = SourceWaveformTimings(
+            indices = IntArray(count),
+            startTimes = LongArray(count),
+            endTimes = LongArray(count),
+            endTimeModified = BooleanArray(count)
+        )
+        updatedSubtitles.forEachIndexed { index, entry ->
+            timings.indices[index] = entry.index
+            timings.startTimes[index] = entry.startTime
+            timings.endTimes[index] = entry.endTime
+            timings.endTimeModified[index] = entry.endTimeModified
+        }
+        pendingSourceWaveformSync = SourceWaveformSyncRequest(
+            sourceContent = sourceContentSnapshot,
+            sourceSyncInFlight = sourceSyncInFlight,
+            editGeneration = sourceViewEditGeneration,
+            timings = timings
+        )
+        if (sourceViewWaveformSyncJob?.isActive == true) return
+
         sourceViewWaveformSyncJob = lifecycleScope.launch {
-            kotlinx.coroutines.delay(40L)
-            if (!isSourceViewMode || editGeneration != sourceViewEditGeneration) return@launch
-            val format = currentFormat
-            val entriesToSerialize = if (sourceSyncInFlight) {
-                val sourceEntries = withContext(Dispatchers.Default) {
-                    SubtitleParser.parseDocument(sourceContentSnapshot, format = format).entries
+            val workerJob = coroutineContext[Job]
+            try {
+                while (isActive) {
+                    kotlinx.coroutines.delay(40L)
+                    val request = pendingSourceWaveformSync ?: break
+                    pendingSourceWaveformSync = null
+                    if (!isSourceViewMode || request.editGeneration != sourceViewEditGeneration) continue
+
+                    val format = currentFormat
+                    val result = withContext(Dispatchers.Default) {
+                        val sourceEntries = SubtitleParser.parseDocument(
+                            request.sourceContent,
+                            format = format
+                        ).entries
+                        if (sourceEntries.size != request.timings.size) {
+                            SourceWaveformSyncResult(updatedSource = null, needsPreview = true)
+                        } else {
+                            val entriesToSerialize = sourceEntries.mapIndexed { index, sourceEntry ->
+                                sourceEntry.copy(
+                                    index = request.timings.indices[index],
+                                    startTime = request.timings.startTimes[index],
+                                    endTime = request.timings.endTimes[index],
+                                    endTimeModified = request.timings.endTimeModified[index]
+                                )
+                            }
+                            SourceWaveformSyncResult(
+                                updatedSource = SubtitleSourceSynchronizer.apply(
+                                    content = request.sourceContent,
+                                    format = format,
+                                    oldEntries = sourceEntries,
+                                    newEntries = entriesToSerialize
+                                )
+                            )
+                        }
+                    }
+
+                    if (!isActive) break
+                    if (!isSourceViewMode || request.editGeneration != sourceViewEditGeneration) continue
+                    if (pendingSourceWaveformSync != null) continue
+                    if (result.needsPreview) {
+                        scheduleSourceViewPreview()
+                        continue
+                    }
+                    val updatedSource = result.updatedSource ?: continue
+                    recordSourceTextChange(request.sourceContent, updatedSource)
+                    originalFileContent = updatedSource
+                    sourceViewContent = updatedSource
+                    sourceHistoryTextSnapshot = updatedSource
+                    sourceViewHasPendingEdits = false
+                    sourceViewEditGeneration++
+                    setSourceViewEditorText(updatedSource, preserveScroll = true)
+                    updateFormatInfo()
+                    scheduleSubtitlePreview()
                 }
-                // 源文本在编辑器中可能刚增删了字幕。此时不把旧波形列表强行套回源文档，
-                // 让新的源文本解析完成后再更新波形，避免丢失用户输入。
-                if (sourceEntries.size != entriesSnapshot.size) {
-                    scheduleSourceViewPreview()
-                    return@launch
+            } finally {
+                if (sourceViewWaveformSyncJob === workerJob) {
+                    sourceViewWaveformSyncJob = null
                 }
-                sourceEntries.mapIndexed { index, sourceEntry ->
-                    val waveformEntry = entriesSnapshot[index]
-                    sourceEntry.copy(
-                        index = waveformEntry.index,
-                        startTime = waveformEntry.startTime,
-                        endTime = waveformEntry.endTime,
-                        endTimeModified = waveformEntry.endTimeModified
-                    )
-                }
-            } else {
-                entriesSnapshot
             }
-            val updatedSource = withContext(Dispatchers.Default) {
-                SubtitleSourceSynchronizer.apply(
-                    content = sourceContentSnapshot,
-                    format = format,
-                    oldEntries = SubtitleParser.parseDocument(sourceContentSnapshot, format = format).entries,
-                    newEntries = entriesToSerialize
-                )
-            }
-            if (!isSourceViewMode || editGeneration != sourceViewEditGeneration) return@launch
-            recordSourceTextChange(sourceContentSnapshot, updatedSource)
-            originalFileContent = updatedSource
-            sourceViewContent = updatedSource
-            sourceHistoryTextSnapshot = updatedSource
-            sourceViewHasPendingEdits = false
-            sourceViewEditGeneration++
-            setSourceViewEditorText(updatedSource, preserveScroll = true)
-            updateFormatInfo()
-            scheduleSubtitlePreview()
         }
     }
 
@@ -972,6 +1041,7 @@ class EditorActivity : AppCompatActivity() {
         originalFileContent = content
         sourceViewContent = content
         sourceHistoryTextSnapshot = content
+        sourceViewNeedsListSync = false
         
         if (currentFormat.isSourceOnly) {
             // Source-only documents still need a block model for waveform playback and for
@@ -1007,6 +1077,8 @@ class EditorActivity : AppCompatActivity() {
     private fun enterSourceViewMode(onFinished: (() -> Unit)? = null) {
         isSourceViewMode = true
         sourceViewWaveformSyncJob?.cancel()
+        sourceViewWaveformSyncJob = null
+        pendingSourceWaveformSync = null
         sourceViewHasPendingEdits = false
         sourceViewEditGeneration++
         if (::searchController.isInitialized) searchController.clearSourceWorkForTransition()
@@ -1119,22 +1191,27 @@ class EditorActivity : AppCompatActivity() {
             try {
                 sourceViewPreviewJob?.cancelAndJoin()
                 val sourceBase = originalFileContent
-                val listSnapshot = subtitleEntries.map { it.copy() }
-                val freshContent = withContext(Dispatchers.Default) {
-                    SubtitleSourceSynchronizer.apply(
-                        content = sourceBase,
-                        format = currentFormat,
-                        oldEntries = SubtitleParser.parseDocument(
-                            sourceBase,
-                            format = currentFormat
-                        ).entries,
-                        newEntries = listSnapshot
-                    )
+                val freshContent = if (!sourceViewNeedsListSync) {
+                    sourceBase
+                } else {
+                    val listSnapshot = subtitleEntries.toList()
+                    withContext(Dispatchers.Default) {
+                        SubtitleSourceSynchronizer.apply(
+                            content = sourceBase,
+                            format = currentFormat,
+                            oldEntries = SubtitleParser.parseDocument(
+                                sourceBase,
+                                format = currentFormat
+                            ).entries,
+                            newEntries = listSnapshot
+                        )
+                    }
                 }
 
                 originalFileContent = freshContent
                 sourceViewContent = freshContent
                 sourceHistoryTextSnapshot = freshContent
+                sourceViewNeedsListSync = false
                 sourceViewHasPendingEdits = false
                 enterSourceViewMode {
                     sourceViewTransitionJob = null
@@ -1157,7 +1234,10 @@ class EditorActivity : AppCompatActivity() {
     private fun doExitSourceView() {
         if (sourceViewTransitionJob?.isActive == true) return
         sourceViewWaveformSyncJob?.cancel()
+        sourceViewWaveformSyncJob = null
+        pendingSourceWaveformSync = null
         val sourceScrollPosition = binding.etSourceView.getDocumentScrollOffset()
+        val hadSourceViewEdits = sourceViewHasPendingEdits
         val editedContent = snapshotSourceViewContentIfNeeded()
         // 先禁用源行编辑，再在后台构建字幕条目列表，避免切换期间两套编辑状态并存。
         binding.etSourceView.setDocumentEnabled(false)
@@ -1166,10 +1246,12 @@ class EditorActivity : AppCompatActivity() {
         sourceViewTransitionJob = lifecycleScope.launch {
             try {
                 sourceViewPreviewJob?.cancelAndJoin()
-                val document = withContext(Dispatchers.Default) {
-                    SubtitleParser.parseDocument(editedContent, format = currentFormat)
+                if (hadSourceViewEdits) {
+                    val document = withContext(Dispatchers.Default) {
+                        SubtitleParser.parseDocument(editedContent, format = currentFormat)
+                    }
+                    replaceSubtitleEntries(document.entries, preserveStableIds = true)
                 }
-                replaceSubtitleEntries(document.entries, preserveStableIds = true)
                 originalFileContent = editedContent
                 sourceViewContent = editedContent
                 sourceHistoryTextSnapshot = editedContent
@@ -1219,6 +1301,7 @@ class EditorActivity : AppCompatActivity() {
         originalFileContent = content
         sourceViewContent = content
         sourceHistoryTextSnapshot = content
+        sourceViewNeedsListSync = false
         hasUnsavedChanges = true
         sourceViewHasPendingEdits = true
         sourceViewEditGeneration++
@@ -2028,6 +2111,7 @@ class EditorActivity : AppCompatActivity() {
         }
         if (syncWaveform) syncWaveformSubtitles()
         if (markChanged) {
+            if (!isSourceViewMode) sourceViewNeedsListSync = true
             recordListStateChange()
             markAsChanged()
         }
@@ -2133,6 +2217,7 @@ class EditorActivity : AppCompatActivity() {
         ))
         sourceViewContent = ""
         originalFileContent = ""
+        sourceViewNeedsListSync = false
         currentCharset = StandardCharsets.UTF_8
         currentFormat = SubtitleParser.SubtitleFormat.SRT
         isSourceViewMode = false
@@ -2850,6 +2935,7 @@ class EditorActivity : AppCompatActivity() {
             originalFileContent = content
             sourceViewContent = content
             sourceHistoryTextSnapshot = content
+            sourceViewNeedsListSync = false
             sourceViewHasPendingEdits = false
             hasUnsavedChanges = false
             showShortToast("保存成功")
@@ -2899,6 +2985,14 @@ class EditorActivity : AppCompatActivity() {
     }
     
     override fun onStop() {
+        sourceViewPreviewJob?.cancel()
+        sourceViewPreviewJob = null
+        sourceViewWaveformSyncJob?.cancel()
+        sourceViewWaveformSyncJob = null
+        pendingSourceWaveformSync = null
+        if (::subtitlePreviewController.isInitialized) {
+            subtitlePreviewController.cancelPending()
+        }
         // 防抖预览尚未来得及执行时，旋转/切后台可能回收源行 ViewHolder；在这里一次性
         // 提交当前源文档，避免丢失尚未刷新的内容。
         if (isSourceViewMode && sourceViewHasPendingEdits) {
@@ -2925,10 +3019,21 @@ class EditorActivity : AppCompatActivity() {
         super.onStop()
     }
 
+    override fun onStart() {
+        super.onStart()
+        if (!stateModel.documentLoaded) return
+        if (isSourceViewMode && sourceViewHasPendingEdits) {
+            scheduleSourceViewPreview()
+        } else {
+            scheduleSubtitlePreview()
+        }
+    }
+
     override fun onDestroy() {
         sourceViewTransitionJob?.cancel()
         sourceViewPreviewJob?.cancel()
         sourceViewWaveformSyncJob?.cancel()
+        pendingSourceWaveformSync = null
         ttsController.release()
         if (::subtitlePreviewController.isInitialized) subtitlePreviewController.release()
         audioFilePreparer.release()
@@ -3093,6 +3198,7 @@ class EditorActivity : AppCompatActivity() {
         isSourceViewMode = false
         sourceViewContent = ""
         originalFileContent = ""
+        sourceViewNeedsListSync = false
         binding.sourceViewContainer.visibility = View.GONE
         binding.rvSubtitles.visibility = View.VISIBLE
         submitSubtitleList(refreshAll = true, syncWaveform = false)

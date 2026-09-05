@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -19,26 +20,56 @@ internal class EditorSubtitlePreviewController(
 ) {
     private val sessionDir = File(cacheDir, "mpv-subtitles/${UUID.randomUUID()}")
     private var updateJob: Job? = null
+    private var pendingRequest: PreviewRequest? = null
+    private var requestGeneration = 0L
+
+    private data class PreviewRequest(
+        val format: SubtitleParser.SubtitleFormat,
+        val entries: List<SubtitleEntry>,
+        val sourceViewMode: Boolean,
+        val sourceContent: String
+    )
+
     fun schedule(
         format: SubtitleParser.SubtitleFormat,
         entries: List<SubtitleEntry>,
         sourceViewMode: Boolean,
         sourceContent: String
     ) {
+        val generation = ++requestGeneration
+        pendingRequest = PreviewRequest(format, entries, sourceViewMode, sourceContent)
         updateJob?.cancel()
-        val entrySnapshot = entries.map { it.copy() }
-        val sourceSnapshot = sourceContent
         updateJob = scope.launch {
             delay(300L)
+            val request = pendingRequest ?: return@launch
+            pendingRequest = null
+            val entrySnapshot = request.entries.map { it.copy() }
             val preview = withContext(Dispatchers.IO) {
-                buildPreviewFile(format, entrySnapshot, sourceViewMode, sourceSnapshot)
+                buildPreviewFile(
+                    request.format,
+                    entrySnapshot,
+                    request.sourceViewMode,
+                    request.sourceContent,
+                    generation
+                )
+            }
+            if (!isActive || generation != requestGeneration) {
+                preview?.delete()
+                return@launch
             }
             replaceTrack(preview)
         }
     }
 
-    fun release() {
+    fun cancelPending() {
+        requestGeneration++
         updateJob?.cancel()
+        updateJob = null
+        pendingRequest = null
+    }
+
+    fun release() {
+        cancelPending()
         replaceTrack(null)
         sessionDir.deleteRecursively()
     }
@@ -47,7 +78,8 @@ internal class EditorSubtitlePreviewController(
         format: SubtitleParser.SubtitleFormat,
         entries: List<SubtitleEntry>,
         sourceViewMode: Boolean,
-        sourceContent: String
+        sourceContent: String,
+        generation: Long
     ): File? {
         val rawSourceFormat = format == SubtitleParser.SubtitleFormat.ASS ||
             format == SubtitleParser.SubtitleFormat.SSA ||
@@ -65,8 +97,8 @@ internal class EditorSubtitlePreviewController(
 
         sessionDir.mkdirs()
         val extension = if (rawSourceFormat) format.name.lowercase() else "srt"
-        val destination = File(sessionDir, "live.$extension")
-        val staging = File(sessionDir, "live.$extension.tmp")
+        val destination = File(sessionDir, "live-$generation.$extension")
+        val staging = File(sessionDir, "live-$generation.$extension.tmp")
         staging.writeText(content, StandardCharsets.UTF_8)
         if (destination.exists()) destination.delete()
         if (!staging.renameTo(destination)) {

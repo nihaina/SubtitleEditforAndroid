@@ -204,7 +204,7 @@ class WaveformTimelineView @JvmOverloads constructor(
 
     var onSelectedIndicesChangeListener: ((Set<Int>) -> Unit)? = null
     var onTimelineClickListener: ((Float) -> Unit)? = null
-    var onSubtitleChangeListener: ((List<SubtitleEntry>) -> Unit)? = null
+    var onSubtitleChangeListener: ((Int, SubtitleEntry) -> Unit)? = null
     var onDraggedViewportPlayheadCorrection: ((positionMs: Long) -> Unit)? = null
     var onLimitedPlaybackRangeChange: ((subtitleIndex: Int?) -> Unit)? = null
     var onLimitedPlaybackStartRequest: ((subtitleIndex: Int) -> Unit)? = null
@@ -1155,13 +1155,19 @@ class WaveformTimelineView @JvmOverloads constructor(
                     }
                     DragMode.NONE -> {}
                 }
-                if (changed) onSubtitleChangeListener?.invoke(subtitles.toList())
+                if (changed) {
+                    onSubtitleChangeListener?.invoke(currentSubtitleIndex, s.copy())
+                }
                 invalidate()
                 return true
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (dragMode != DragMode.NONE) onSubtitleChangeListener?.invoke(subtitles.toList())
+                if (dragMode != DragMode.NONE && currentSubtitleIndex >= 0) {
+                    subtitles.getOrNull(currentSubtitleIndex)?.let { subtitle ->
+                        onSubtitleChangeListener?.invoke(currentSubtitleIndex, subtitle.copy())
+                    }
+                }
 
                 downOnSelectedSubtitle = false
                 dragMode = DragMode.NONE

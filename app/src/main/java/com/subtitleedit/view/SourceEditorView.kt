@@ -2017,12 +2017,35 @@ class SourceEditorView @JvmOverloads constructor(
     }
 
     private fun replaceLines(value: String) {
-        val parsed = parsePhysicalLines(value)
         lines.clear()
-        parsed.forEach { parsedLine ->
-            lines += SourceLineBlock(nextLineId++, parsedLine.first, parsedLine.second)
+        if (value.isEmpty()) {
+            lines += SourceLineBlock(nextLineId++, "", "")
+            preferredLineEnding = "\n"
+        } else {
+            var lineStart = 0
+            var index = 0
+            while (index < value.length) {
+                val ending = when (value[index]) {
+                    '\r' -> if (index + 1 < value.length && value[index + 1] == '\n') "\r\n" else "\r"
+                    '\n' -> "\n"
+                    '\u2028', '\u2029', '\u0085' -> value[index].toString()
+                    else -> null
+                }
+                if (ending == null) {
+                    index++
+                    continue
+                }
+                lines += SourceLineBlock(
+                    nextLineId++,
+                    value.substring(lineStart, index),
+                    ending
+                )
+                index += ending.length
+                lineStart = index
+            }
+            lines += SourceLineBlock(nextLineId++, value.substring(lineStart), "")
+            preferredLineEnding = lines.firstOrNull { it.lineEnding.isNotEmpty() }?.lineEnding ?: "\n"
         }
-        preferredLineEnding = parsed.firstOrNull { it.second.isNotEmpty() }?.second ?: "\n"
         offsets.reset(lines)
         // Keep the gutter only as wide as the largest line number currently displayed.
         // A full data-set refresh below rebinds visible rows with the new width.

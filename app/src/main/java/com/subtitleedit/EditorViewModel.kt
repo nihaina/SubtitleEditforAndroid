@@ -24,6 +24,7 @@ internal class EditorViewModel : ViewModel() {
     var isSourceViewMode = false
     var originalFileContent = ""
     var sourceViewContent = ""
+    var sourceViewNeedsListSync = false
     var savedScrollPosition = 0
     var savedFirstVisibleItemPosition = 0
     var selectedIndices: Set<Int> = emptySet()
