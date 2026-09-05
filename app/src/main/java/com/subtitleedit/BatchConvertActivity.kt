@@ -213,7 +213,7 @@ class BatchConvertActivity : AppCompatActivity() {
     /**
      * 执行实际的转换逻辑
      */
-    private fun executeConversionLogic(finalOutputUri: Uri) {
+    private fun executeConversionLogic(finalOutputUri: Uri, overwriteOutput: Boolean = false) {
         // 处理文件
         var successCount = 0
         var failCount = 0
@@ -253,7 +253,14 @@ class BatchConvertActivity : AppCompatActivity() {
                 val nameWithoutExt = originalName.substringBeforeLast(".")
 
                 // 在用户选择的目录中创建文件
-                SubtitleOutputWriter.writeText(this, finalOutputUri, nameWithoutExt, targetExtension, convertedContent)
+                SubtitleOutputWriter.writeText(
+                    this,
+                    finalOutputUri,
+                    nameWithoutExt,
+                    targetExtension,
+                    convertedContent,
+                    overwrite = overwriteOutput
+                )
                 successCount++
                 successFiles.add(convertFile.fileName)
             } catch (e: Exception) {
@@ -323,9 +330,12 @@ class BatchConvertActivity : AppCompatActivity() {
         if (hasConflict) {
             android.app.AlertDialog.Builder(this)
                 .setTitle("文件名冲突")
-                .setMessage("输出目录中已存在同名文件。是否自动重命名（例如添加 (1)）并继续？")
-                .setPositiveButton("继续") { _, _ ->
-                    executeConversionLogic(finalOutputUri)
+                .setMessage("输出目录中已存在同名字幕文件。请选择处理方式。")
+                .setPositiveButton("覆盖") { _, _ ->
+                    executeConversionLogic(finalOutputUri, overwriteOutput = true)
+                }
+                .setNeutralButton("自动重命名") { _, _ ->
+                    executeConversionLogic(finalOutputUri, overwriteOutput = false)
                 }
                 .setNegativeButton("取消", null)
                 .show()

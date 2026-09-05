@@ -203,16 +203,25 @@ class AutoTranslateActivity : AppCompatActivity() {
         if (hasConflict) {
             AlertDialog.Builder(this)
                 .setTitle("文件名冲突")
-                .setMessage("输出目录中已存在同名文件。是否自动重命名（例如添加 (1)）并继续？")
-                .setPositiveButton("继续") { _, _ -> beginQueuedFiles(config, outputUri) }
+                .setMessage("输出目录中已存在同名字幕文件。请选择处理方式。")
+                .setPositiveButton("覆盖") { _, _ ->
+                    beginQueuedFiles(config, outputUri, overwriteOutput = true)
+                }
+                .setNeutralButton("自动重命名") { _, _ ->
+                    beginQueuedFiles(config, outputUri, overwriteOutput = false)
+                }
                 .setNegativeButton("取消", null)
                 .show()
         } else {
-            beginQueuedFiles(config, outputUri)
+            beginQueuedFiles(config, outputUri, overwriteOutput = false)
         }
     }
 
-    private fun beginQueuedFiles(config: TranslationConfig, outputUri: Uri) {
+    private fun beginQueuedFiles(
+        config: TranslationConfig,
+        outputUri: Uri,
+        overwriteOutput: Boolean
+    ) {
         val queuedFiles = files.filter {
             it.status == FileStatus.WAITING || it.status == FileStatus.STOPPED
         }
@@ -220,14 +229,23 @@ class AutoTranslateActivity : AppCompatActivity() {
         queueRunning = true
         updateTranslationControls()
         queuedFiles
-            .forEach { startFile(it, retry = it.status == FileStatus.STOPPED, config, outputUri) }
+            .forEach {
+                startFile(
+                    file = it,
+                    retry = it.status == FileStatus.STOPPED,
+                    config = config,
+                    outputUri = outputUri,
+                    overwriteOutput = overwriteOutput
+                )
+            }
     }
 
     private fun startFile(
         file: AutoTranslateFile,
         retry: Boolean = false,
         config: TranslationConfig? = readTranslationConfig(),
-        outputUri: Uri = outputDirectoryUri ?: Uri.fromFile(getTranslateOutputDirectory())
+        outputUri: Uri = outputDirectoryUri ?: Uri.fromFile(getTranslateOutputDirectory()),
+        overwriteOutput: Boolean = false
     ) {
         if (activeJobs[file.sessionId]?.isActive == true || config == null) return
         queueRunning = true
@@ -236,14 +254,15 @@ class AutoTranslateActivity : AppCompatActivity() {
         file.status = FileStatus.RUNNING
         adapter.notifyItemChanged(files.indexOf(file))
         activeJobs[file.sessionId] = lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            processFile(file, config, outputUri)
+            processFile(file, config, outputUri, overwriteOutput)
         }
     }
 
     private suspend fun processFile(
         file: AutoTranslateFile,
         config: TranslationConfig,
-        outputUri: Uri
+        outputUri: Uri,
+        overwriteOutput: Boolean
     ) {
         try {
             val document = file.document ?: loadDocument(file).also { file.document = it }
@@ -313,7 +332,8 @@ class AutoTranslateActivity : AppCompatActivity() {
                 outputUri,
                 file.fileName.substringBeforeLast("."),
                 outputExtension(file),
-                SubtitleParser.serialize(translatedDocument)
+                SubtitleParser.serialize(translatedDocument),
+                overwrite = overwriteOutput
             )
             file.status = FileStatus.COMPLETED
             file.message = "翻译完成"

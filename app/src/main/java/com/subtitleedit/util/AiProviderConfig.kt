@@ -60,10 +60,10 @@ object AiProviderConfig {
         ),
         Provider(
             id = CUSTOM,
-            displayName = "自定义",
+            displayName = "NEW API",
             baseUrl = "",
             websiteUrl = "https://docs.newapi.pro/",
-            defaultModel = "gpt-4o-mini",
+            defaultModel = "gemini-3.8-flash",
             customEndpoint = true
         )
     )
