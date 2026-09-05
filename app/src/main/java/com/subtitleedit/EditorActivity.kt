@@ -130,9 +130,11 @@ class EditorActivity : AppCompatActivity() {
     private var pendingSourceWaveformSync: SourceWaveformSyncRequest? = null
     private var sourceWaveformHistoryKey: Long? = null
     private var sourceWaveformHistoryStart: String? = null
+    private var sourceWaveformHistoryEntries: List<SubtitleEntry>? = null
     private var sourceViewEntryCount = 0
     private var sourceViewEditGeneration = 0L
     private var sourceViewEntriesGeneration = -1L
+    private var pendingListIndexRefreshStart: Int? = null
 
     private data class SourceWaveformSyncRequest(
         val sourceContent: String,
@@ -141,7 +143,8 @@ class EditorActivity : AppCompatActivity() {
         val timings: SourceWaveformTimings,
         val waveformDragKey: Long? = null,
         val recordHistory: Boolean = true,
-        val historyStartContent: String? = null
+        val historyStartContent: String? = null,
+        val historyStartEntries: List<SubtitleEntry>? = null
     )
 
     private data class SourceWaveformTimings(
@@ -575,13 +578,24 @@ class EditorActivity : AppCompatActivity() {
             onSubtitleChanged = { changedIndex, updatedEntry, dragSessionKey, isFinal ->
                 val currentEntry = subtitleEntries.getOrNull(changedIndex)
                     ?: return@EditorWaveformController
-                currentEntry.startTime = updatedEntry.startTime
-                currentEntry.endTime = updatedEntry.endTime
-                currentEntry.endTimeModified = updatedEntry.endTimeModified
                 if (isSourceViewMode) {
-                    scheduleSourceViewWaveformSync(subtitleEntries, dragSessionKey, isFinal)
+                    val historyEntries = if (sourceWaveformHistoryKey != dragSessionKey) {
+                        subtitleEntries.map { it.copy() }
+                    } else {
+                        null
+                    }
+                    subtitleEntries[changedIndex] = updatedEntry.copy()
+                    scheduleSourceViewWaveformSync(
+                        subtitleEntries,
+                        dragSessionKey,
+                        isFinal,
+                        historyEntries
+                    )
                     markAsChanged()
                 } else {
+                    currentEntry.startTime = updatedEntry.startTime
+                    currentEntry.endTime = updatedEntry.endTime
+                    currentEntry.endTimeModified = updatedEntry.endTimeModified
                     notifyEntriesChanged(
                         positions = listOf(changedIndex),
                         includeNeighbors = true,
@@ -801,7 +815,8 @@ class EditorActivity : AppCompatActivity() {
     private fun scheduleSourceViewWaveformSync(
         updatedSubtitles: List<SubtitleEntry>,
         dragSessionKey: Long? = null,
-        recordHistory: Boolean = true
+        recordHistory: Boolean = true,
+        historyEntries: List<SubtitleEntry>? = null
     ) {
         val sourceSyncInFlight = sourceViewHasPendingEdits || sourceViewPreviewJob?.isActive == true
         val sourceContentSnapshot = if (sourceViewHasPendingEdits) {
@@ -814,6 +829,7 @@ class EditorActivity : AppCompatActivity() {
         if (dragSessionKey != null && sourceWaveformHistoryKey != dragSessionKey) {
             sourceWaveformHistoryKey = dragSessionKey
             sourceWaveformHistoryStart = sourceContentSnapshot
+            sourceWaveformHistoryEntries = historyEntries ?: subtitleEntries.map { it.copy() }
         }
         val count = updatedSubtitles.size
         val timings = SourceWaveformTimings(
@@ -835,7 +851,8 @@ class EditorActivity : AppCompatActivity() {
             timings = timings,
             waveformDragKey = dragSessionKey,
             recordHistory = recordHistory,
-            historyStartContent = sourceWaveformHistoryStart
+            historyStartContent = sourceWaveformHistoryStart,
+            historyStartEntries = sourceWaveformHistoryEntries
         )
         if (sourceViewWaveformSyncJob?.isActive == true) return
 
@@ -888,12 +905,14 @@ class EditorActivity : AppCompatActivity() {
                         recordSourceTextChange(
                             request.historyStartContent ?: request.sourceContent,
                             updatedSource,
+                            request.historyStartEntries
                         )
                         if (request.waveformDragKey != null &&
                             sourceWaveformHistoryKey == request.waveformDragKey
                         ) {
                             sourceWaveformHistoryKey = null
                             sourceWaveformHistoryStart = null
+                            sourceWaveformHistoryEntries = null
                         }
                     }
                     originalFileContent = updatedSource
@@ -1117,6 +1136,9 @@ class EditorActivity : AppCompatActivity() {
         sourceViewWaveformSyncJob?.cancel()
         sourceViewWaveformSyncJob = null
         pendingSourceWaveformSync = null
+        sourceWaveformHistoryKey = null
+        sourceWaveformHistoryStart = null
+        sourceWaveformHistoryEntries = null
         sourceViewHasPendingEdits = false
         sourceViewEditGeneration++
         sourceViewEntriesGeneration = sourceViewEditGeneration
@@ -1288,6 +1310,9 @@ class EditorActivity : AppCompatActivity() {
                 sourceViewWaveformSyncJob?.join()
                 sourceViewWaveformSyncJob = null
                 pendingSourceWaveformSync = null
+                sourceWaveformHistoryKey = null
+                sourceWaveformHistoryStart = null
+                sourceWaveformHistoryEntries = null
                 editedContent = sourceViewContent
                 sourceViewPreviewJob?.cancelAndJoin()
                 if (sourceViewEntriesGeneration != sourceViewEditGeneration) {
@@ -1943,7 +1968,11 @@ class EditorActivity : AppCompatActivity() {
         if (!difference.isEmpty) invalidateOptionsMenu()
     }
 
-    private fun recordSourceTextChange(beforeText: String, afterText: String) {
+    private fun recordSourceTextChange(
+        beforeText: String,
+        afterText: String,
+        beforeEntries: List<SubtitleEntry>? = null
+    ) {
         if (suppressHistoryRecording || !isSourceViewMode || !historyBaselineInitialized) return
         if (beforeText == afterText) return
         editHistory.record(
@@ -1951,7 +1980,7 @@ class EditorActivity : AppCompatActivity() {
                 beforeText = beforeText,
                 afterText = afterText,
                 description = describeSourceTextChange(beforeText, afterText),
-                beforeEntries = subtitleEntries.map { it.copy() }
+                beforeEntries = beforeEntries ?: subtitleEntries.map { it.copy() }
             )
         )
         sourceHistoryTextSnapshot = afterText
@@ -2406,6 +2435,16 @@ class EditorActivity : AppCompatActivity() {
             subtitleAdapter.setSelectionByStableIds(targetSelectedIds)
             if (refreshAll) {
                 subtitleAdapter.refreshAllItems()
+                pendingListIndexRefreshStart = null
+            } else {
+                pendingListIndexRefreshStart?.let { refreshStart ->
+                    pendingListIndexRefreshStart = null
+                    val start = refreshStart.coerceIn(0, subtitleAdapter.itemCount)
+                    val count = subtitleAdapter.itemCount - start
+                    if (count > 0) {
+                        subtitleAdapter.notifyItemRangeChanged(start, count)
+                    }
+                }
             }
             updateSelectedCountDisplay()
             afterSubmit?.invoke()
@@ -2945,6 +2984,10 @@ class EditorActivity : AppCompatActivity() {
             subtitleEntries.subList(prefix, prefix + removedCount).clear()
             subtitleEntries.addAll(prefix, inserted)
             renumberEntries(force = true)
+            pendingListIndexRefreshStart = minOf(
+                pendingListIndexRefreshStart ?: prefix,
+                prefix
+            )
             syncWaveformSubtitleRange(prefix, removedCount, inserted)
             return
         }
