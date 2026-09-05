@@ -254,6 +254,11 @@ internal class EditorWaveformController(
         binding.waveformTimelineView.setSubtitles(subtitles)
     }
 
+    fun updateSubtitleEntries(changes: Map<Int, SubtitleEntry>, totalCount: Int): Boolean {
+        if (!hasPlayableMedia) return true
+        return binding.waveformTimelineView.updateSubtitleEntries(changes, totalCount)
+    }
+
     fun setSubtitlesPreserveSelection(subtitles: List<SubtitleEntry>) {
         if (!hasPlayableMedia) return
         binding.waveformTimelineView.setSubtitlesPreserveSelection(subtitles)
@@ -267,9 +272,19 @@ internal class EditorWaveformController(
     fun getAudioCacheKey(file: File): String? =
         audioCacheKey.takeIf { audioFile?.absolutePath == file.absolutePath }
 
+    fun replaceSubtitleRange(startIndex: Int, removedCount: Int, inserted: List<SubtitleEntry>): Boolean {
+        if (!hasPlayableMedia) return true
+        return binding.waveformTimelineView.replaceSubtitleRange(startIndex, removedCount, inserted)
+    }
+
     fun setSubtitlesAfterDelete(subtitles: List<SubtitleEntry>, deletedIndices: Set<Int>) {
         if (!hasPlayableMedia) return
         binding.waveformTimelineView.setSubtitlesAfterDelete(subtitles, deletedIndices)
+    }
+
+    fun removeSubtitleIndices(deletedIndices: Set<Int>): Boolean {
+        if (!hasPlayableMedia) return true
+        return binding.waveformTimelineView.removeSubtitleIndices(deletedIndices)
     }
 
     fun release() {

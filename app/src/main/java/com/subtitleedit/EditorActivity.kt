@@ -132,6 +132,7 @@ class EditorActivity : AppCompatActivity() {
     private var sourceWaveformHistoryStart: String? = null
     private var sourceViewEntryCount = 0
     private var sourceViewEditGeneration = 0L
+    private var sourceViewEntriesGeneration = -1L
 
     private data class SourceWaveformSyncRequest(
         val sourceContent: String,
@@ -778,7 +779,12 @@ class EditorActivity : AppCompatActivity() {
             val canApplyEntries = parsedDocument.entries.isNotEmpty() ||
                 sourceSnapshot.isBlank() ||
                 !sourceContainsSubtitleMarker(sourceSnapshot)
-            if (canApplyEntries) applySourceViewEntries(parsedDocument.entries)
+            if (canApplyEntries) {
+                applySourceViewEntries(parsedDocument.entries)
+                editHistory.updateLatestSourceAfterEntries(sourceSnapshot, subtitleEntries)
+                sourceViewEntriesGeneration = editGeneration
+                sourceViewHasPendingEdits = false
+            }
 
             if (mediaType == EditorMediaType.VIDEO && ::subtitlePreviewController.isInitialized) {
                 subtitlePreviewController.schedule(
@@ -894,7 +900,9 @@ class EditorActivity : AppCompatActivity() {
                     sourceViewContent = updatedSource
                     sourceHistoryTextSnapshot = updatedSource
                     sourceViewHasPendingEdits = false
+                    editHistory.updateLatestSourceAfterEntries(updatedSource, subtitleEntries)
                     sourceViewEditGeneration++
+                    sourceViewEntriesGeneration = sourceViewEditGeneration
                     setSourceViewEditorText(updatedSource, preserveScroll = true)
                     updateFormatInfo()
                     scheduleSubtitlePreview()
@@ -1111,6 +1119,7 @@ class EditorActivity : AppCompatActivity() {
         pendingSourceWaveformSync = null
         sourceViewHasPendingEdits = false
         sourceViewEditGeneration++
+        sourceViewEntriesGeneration = sourceViewEditGeneration
         if (::searchController.isInitialized) searchController.clearSourceWorkForTransition()
         
         // 保存 RecyclerView 的滚动位置
@@ -1155,33 +1164,31 @@ class EditorActivity : AppCompatActivity() {
         // 保存 ScrollView 的滚动位置
         savedScrollPosition = sourceScrollPosition ?: binding.etSourceView.getDocumentScrollOffset()
         
-        // 刷新字幕列表
         submitSubtitleList(
-            refreshAll = true,
+            refreshAll = false,
             updateFormat = false,
-            // 源视图解析会创建新的 SubtitleEntry 对象；波形必须换绑到这批新对象，
-            // 否则拖拽会继续修改切换前的旧条目，甚至把旧数据写回列表。
-            syncWaveform = true,
-            schedulePreview = false
-        )
-
-        binding.rvSubtitles.animate().cancel()
-        binding.sourceViewContainer.animate().cancel()
-        binding.sourceViewContainer.alpha = 1f
-        binding.sourceViewContainer.visibility = View.GONE
-        binding.rvSubtitles.alpha = 1f
-        binding.rvSubtitles.visibility = View.VISIBLE
-        binding.rvSubtitles.post {
-            val layoutManager = binding.rvSubtitles.layoutManager as LinearLayoutManager
-            if (subtitleEntries.isNotEmpty()) {
-                val estimatedPosition = savedScrollPosition / 80
-                layoutManager.scrollToPositionWithOffset(
-                    estimatedPosition.coerceIn(0, subtitleEntries.lastIndex),
-                    0
-                )
+            syncWaveform = false,
+            schedulePreview = false,
+            afterSubmit = {
+                binding.rvSubtitles.animate().cancel()
+                binding.sourceViewContainer.animate().cancel()
+                binding.sourceViewContainer.alpha = 1f
+                binding.sourceViewContainer.visibility = View.GONE
+                binding.rvSubtitles.alpha = 1f
+                binding.rvSubtitles.visibility = View.VISIBLE
+                binding.rvSubtitles.post {
+                    val layoutManager = binding.rvSubtitles.layoutManager as LinearLayoutManager
+                    if (subtitleEntries.isNotEmpty()) {
+                        val estimatedPosition = savedScrollPosition / 80
+                        layoutManager.scrollToPositionWithOffset(
+                            estimatedPosition.coerceIn(0, subtitleEntries.lastIndex),
+                            0
+                        )
+                    }
+                    onFinished?.invoke()
+                }
             }
-            onFinished?.invoke()
-        }
+        )
         
         updateSourceViewMenuTitle()
         invalidateOptionsMenu()
@@ -1270,24 +1277,27 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun doExitSourceView() {
         if (sourceViewTransitionJob?.isActive == true) return
-        sourceViewWaveformSyncJob?.cancel()
-        sourceViewWaveformSyncJob = null
-        pendingSourceWaveformSync = null
         val sourceScrollPosition = binding.etSourceView.getDocumentScrollOffset()
-        val hadSourceViewEdits = sourceViewHasPendingEdits
-        val editedContent = snapshotSourceViewContentIfNeeded()
+        var editedContent = sourceViewContent
         // 先禁用源行编辑，再在后台构建字幕条目列表，避免切换期间两套编辑状态并存。
         binding.etSourceView.setDocumentEnabled(false)
         setSourceViewEditorText("")
         showShortToast("正在切换到列表视图…")
         sourceViewTransitionJob = lifecycleScope.launch {
             try {
+                sourceViewWaveformSyncJob?.join()
+                sourceViewWaveformSyncJob = null
+                pendingSourceWaveformSync = null
+                editedContent = sourceViewContent
                 sourceViewPreviewJob?.cancelAndJoin()
-                if (hadSourceViewEdits) {
-                    val document = withContext(Dispatchers.Default) {
-                        SubtitleParser.parseDocument(editedContent, format = currentFormat)
+                if (sourceViewEntriesGeneration != sourceViewEditGeneration) {
+                    val appliedLocally = applySourceDeletionLocally(editedContent)
+                    if (!appliedLocally) {
+                        val document = withContext(Dispatchers.Default) {
+                            SubtitleParser.parseDocument(editedContent, format = currentFormat)
+                        }
+                        applySourceViewEntries(document.entries)
                     }
-                    replaceSubtitleEntries(document.entries, preserveStableIds = true)
                 }
                 originalFileContent = editedContent
                 sourceViewContent = editedContent
@@ -1914,6 +1924,11 @@ class EditorActivity : AppCompatActivity() {
         }
         val difference = EditorEditHistory.difference(before, after)
         if (!difference.isEmpty) {
+            if (difference.deleted.isNotEmpty() || difference.added.isNotEmpty() ||
+                difference.modified.isNotEmpty() || difference.orderChanged
+            ) {
+                syncListChangesToMemory(before.entries, after.entries)
+            }
             editHistory.record(
                 EditorEditHistory.Operation.ListChange(
                     before = before,
@@ -1935,11 +1950,27 @@ class EditorActivity : AppCompatActivity() {
             EditorEditHistory.Operation.SourceChange(
                 beforeText = beforeText,
                 afterText = afterText,
-                description = describeSourceTextChange(beforeText, afterText)
+                description = describeSourceTextChange(beforeText, afterText),
+                beforeEntries = subtitleEntries.map { it.copy() }
             )
         )
         sourceHistoryTextSnapshot = afterText
         invalidateOptionsMenu()
+    }
+
+    private fun syncListChangesToMemory(
+        beforeEntries: List<SubtitleEntry>,
+        afterEntries: List<SubtitleEntry>
+    ) {
+        val updatedSource = SubtitleSourceSynchronizer.apply(
+            content = originalFileContent,
+            format = currentFormat,
+            oldEntries = beforeEntries,
+            newEntries = afterEntries
+        )
+        originalFileContent = updatedSource
+        sourceViewContent = updatedSource
+        sourceViewNeedsListSync = false
     }
 
     private fun describeListStateChange(difference: EditorEditHistory.ListDifference): String {
@@ -2050,7 +2081,8 @@ class EditorActivity : AppCompatActivity() {
             }
             is EditorEditHistory.Operation.SourceChange -> {
                 val targetText = if (undo) operation.beforeText else operation.afterText
-                applySourceHistoryText(targetText)
+                val targetEntries = if (undo) operation.beforeEntries else operation.afterEntries
+                applySourceHistoryText(targetText, targetEntries)
             }
         }
     }
@@ -2072,8 +2104,7 @@ class EditorActivity : AppCompatActivity() {
         sourceViewContent = updated
         sourceHistoryTextSnapshot = updated
         setSourceViewEditorText(updated, preserveScroll = true)
-        replaceSubtitleEntries(effectiveTargetEntries.map { it.copy() })
-        syncWaveformSubtitles(preserveSelection = true)
+        applySourceViewEntries(effectiveTargetEntries.map { it.copy() })
         updateFormatInfo()
     }
 
@@ -2083,6 +2114,7 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
+        val previousCount = subtitleEntries.size
         val source = originalFileContent
         val currentEntries = SubtitleParser.parseDocument(source, format = currentFormat).entries
         val effectiveTargetEntries = SubtitleEntryOps.applyEditableHistoryTarget(
@@ -2098,12 +2130,17 @@ class EditorActivity : AppCompatActivity() {
         originalFileContent = updatedSource
         sourceViewContent = updatedSource
         sourceHistoryTextSnapshot = updatedSource
-        replaceSubtitleEntries(effectiveTargetEntries.map { it.copy() })
-        submitSubtitleList(
-            refreshAll = true,
-            syncWaveform = true,
-            markChanged = false
-        ) {
+        applySourceViewEntries(effectiveTargetEntries.map { it.copy() })
+        if (previousCount != subtitleEntries.size || subtitleAdapter.itemCount != subtitleEntries.size) {
+            submitSubtitleList(
+                refreshAll = false,
+                syncWaveform = false,
+                markChanged = false
+            ) {
+                subtitleAdapter.setSelectionByStableIds(target.selectedIds)
+                updateSelectedCountDisplay()
+            }
+        } else {
             subtitleAdapter.setSelectionByStableIds(target.selectedIds)
             updateSelectedCountDisplay()
         }
@@ -2153,32 +2190,99 @@ class EditorActivity : AppCompatActivity() {
                 syncWaveform = true,
                 markChanged = false
             )
-        } else {
-            syncWaveformSubtitles()
         }
         subtitleAdapter.setSelectionByStableIds(target.selectedIds)
         updateSelectedCountDisplay()
     }
 
-    private fun applySourceHistoryText(targetText: String) {
+    private fun applySourceDeletionLocally(content: String): Boolean {
+        val operation = editHistory.peekUndo() as? EditorEditHistory.Operation.SourceChange
+            ?: return false
+        if (operation.afterText != content || operation.beforeEntries.isEmpty()) return false
+        val before = operation.beforeText
+        val prefix = commonTextPrefix(before, content)
+        val suffix = commonTextSuffix(before, content, prefix)
+        if (prefix == before.length && suffix == content.length) return false
+        val deletedText = before.substring(prefix, before.length - suffix)
+        if (deletedText.isBlank()) return false
+        val deletedEntries = SubtitleParser.parseDocument(
+            deletedText,
+            format = currentFormat
+        ).entries
+        if (deletedEntries.isEmpty()) return false
+        val start = findMatchingEntryRange(operation.beforeEntries, deletedEntries)
+            ?: return false
+        val target = operation.beforeEntries.map { it.copy() }.toMutableList()
+        repeat(start.second) { target.removeAt(start.first) }
+        applySourceViewEntries(target)
+        sourceViewEntriesGeneration = sourceViewEditGeneration
+        sourceViewHasPendingEdits = false
+        return true
+    }
+
+    private fun commonTextPrefix(before: String, after: String): Int {
+        var index = 0
+        val limit = minOf(before.length, after.length)
+        while (index < limit && before[index] == after[index]) index++
+        return index
+    }
+
+    private fun commonTextSuffix(before: String, after: String, prefix: Int): Int {
+        var count = 0
+        while (before.length - 1 - count >= prefix &&
+            after.length - 1 - count >= prefix &&
+            before[before.length - 1 - count] == after[after.length - 1 - count]
+        ) count++
+        return count
+    }
+
+    private fun findMatchingEntryRange(
+        entries: List<SubtitleEntry>,
+        deleted: List<SubtitleEntry>
+    ): Pair<Int, Int>? {
+        if (deleted.isEmpty() || deleted.size > entries.size) return null
+        val format = currentFormat
+        for (start in 0..entries.size - deleted.size) {
+            val matches = deleted.indices.all { offset ->
+                val current = entries[start + offset]
+                val removed = deleted[offset]
+                val timingMatches = if (format == SubtitleParser.SubtitleFormat.LRC) {
+                    current.startTime == removed.startTime &&
+                        kotlin.math.abs(current.endTime - removed.endTime) <= 100L
+                } else {
+                    current.startTime == removed.startTime && current.endTime == removed.endTime
+                }
+                timingMatches && current.text == removed.text
+            }
+            if (matches) return start to deleted.size
+        }
+        return null
+    }
+
+    private fun applySourceHistoryText(targetText: String, cachedEntries: List<SubtitleEntry>? = null) {
         val selectedIds = currentHistoryListState().selectedIds
+        val previousCount = subtitleEntries.size
         originalFileContent = targetText
         sourceViewContent = targetText
         sourceHistoryTextSnapshot = targetText
-        val parsed = SubtitleParser.parseDocument(targetText, format = currentFormat).entries
+        val parsed = cachedEntries ?: SubtitleParser.parseDocument(targetText, format = currentFormat).entries
         if (isSourceViewMode) {
             setSourceViewEditorText(targetText, preserveScroll = true)
-            replaceSubtitleEntries(parsed, preserveStableIds = true)
-            syncWaveformSubtitles(preserveSelection = true)
+            applySourceViewEntries(parsed)
             updateFormatInfo()
         } else {
-            replaceSubtitleEntries(parsed, preserveStableIds = true)
-            submitSubtitleList(
-                refreshAll = true,
-                selectedStableIds = selectedIds,
-                syncWaveform = true,
-                markChanged = false
-            )
+            applySourceViewEntries(parsed)
+            if (previousCount != subtitleEntries.size || subtitleAdapter.itemCount != subtitleEntries.size) {
+                submitSubtitleList(
+                    refreshAll = false,
+                    selectedStableIds = selectedIds,
+                    syncWaveform = false,
+                    markChanged = false
+                )
+            } else {
+                subtitleAdapter.setSelectionByStableIds(selectedIds)
+                updateSelectedCountDisplay()
+            }
         }
     }
 
@@ -2206,7 +2310,7 @@ class EditorActivity : AppCompatActivity() {
                 .sorted()
                 .forEach { subtitleAdapter.notifyItemChanged(it) }
         }
-        if (syncWaveform) syncWaveformSubtitles()
+        if (syncWaveform) syncWaveformSubtitles(changedPositions = positionList)
         if (markChanged) {
             if (!isSourceViewMode) sourceViewNeedsListSync = true
             recordListStateChange()
@@ -2240,11 +2344,30 @@ class EditorActivity : AppCompatActivity() {
         }
     }
 
-    private fun syncWaveformSubtitles(preserveSelection: Boolean = false) {
+    private fun syncWaveformSubtitles(
+        preserveSelection: Boolean = false,
+        changedPositions: Iterable<Int>? = null
+    ) {
+        if (changedPositions != null) {
+            val changes = changedPositions.distinct().mapNotNull { index ->
+                subtitleEntries.getOrNull(index)?.let { index to it }
+            }.toMap()
+            if (waveformController.updateSubtitleEntries(changes, subtitleEntries.size)) return
+        }
         if (preserveSelection) {
             waveformController.setSubtitlesPreserveSelection(subtitleEntries.toList())
         } else {
             waveformController.setSubtitles(subtitleEntries.toList())
+        }
+    }
+
+    private fun syncWaveformSubtitleRange(
+        startIndex: Int,
+        removedCount: Int,
+        inserted: List<SubtitleEntry>
+    ) {
+        if (!waveformController.replaceSubtitleRange(startIndex, removedCount, inserted)) {
+            syncWaveformSubtitles()
         }
     }
 
@@ -2632,24 +2755,32 @@ class EditorActivity : AppCompatActivity() {
         historyEntriesSnapshot = historyBefore.entries
         historySelectionSnapshot = historyBefore.selectedIds
         submitSubtitleList(
-            refreshAll = true,
+            refreshAll = false,
             selectedStableIds = historySelectionSnapshot.filterTo(mutableSetOf()) { selectedId ->
                 subtitleEntries.any { it.stableId == selectedId }
             },
             syncWaveform = false,
-            markChanged = true
-        ) {
-            // 刷新被删除行的前一行（消除时间冲突标红）
-            deletedIndices.forEach { deletedIdx ->
-                val offset = deletedIndices.count { it < deletedIdx }
-                val prevIdx = (deletedIdx - offset) - 1
-                if (prevIdx >= 0 && prevIdx < subtitleEntries.size) {
-                    subtitleAdapter.notifyItemChanged(prevIdx)
+            markChanged = true,
+            afterSubmit = {
+                val firstDeleted = deletedIndices.minOrNull()
+                    ?.coerceAtMost(subtitleEntries.size)
+                    ?: subtitleEntries.size
+                val remainingCount = subtitleEntries.size - firstDeleted
+                if (remainingCount > 0) {
+                    subtitleAdapter.notifyItemRangeChanged(firstDeleted, remainingCount)
+                }
+                deletedIndices.forEach { deletedIdx ->
+                    val offset = deletedIndices.count { it < deletedIdx }
+                    val prevIdx = (deletedIdx - offset) - 1
+                    if (prevIdx >= 0 && prevIdx < subtitleEntries.size) {
+                        subtitleAdapter.notifyItemChanged(prevIdx)
+                    }
                 }
             }
+        )
+        if (!waveformController.removeSubtitleIndices(deletedIndices)) {
+            syncWaveformSubtitles(preserveSelection = true)
         }
-        // 同步字幕到波形视图，保持选中状态
-        waveformController.setSubtitlesAfterDelete(subtitleEntries.toList(), deletedIndices)
     }
 
     /**
@@ -2775,10 +2906,46 @@ class EditorActivity : AppCompatActivity() {
      * are rebound.  A size change still replaces the list in one operation because every row
      * after the edit has a new index.
      */
+    private fun commonStablePrefix(previous: List<SubtitleEntry>, updated: List<SubtitleEntry>): Int {
+        var index = 0
+        while (index < previous.size && index < updated.size &&
+            previous[index].stableId == updated[index].stableId
+        ) index++
+        return index
+    }
+
+    private fun commonStableSuffix(
+        previous: List<SubtitleEntry>,
+        updated: List<SubtitleEntry>,
+        prefix: Int
+    ): Int {
+        var count = 0
+        while (previous.size - 1 - count >= prefix &&
+            updated.size - 1 - count >= prefix &&
+            previous[previous.size - 1 - count].stableId ==
+            updated[updated.size - 1 - count].stableId
+        ) count++
+        return count
+    }
+
     private fun applySourceViewEntries(updatedEntries: List<SubtitleEntry>) {
         if (subtitleEntries.size != updatedEntries.size) {
-            replaceSubtitleEntries(updatedEntries, preserveStableIds = true)
-            syncWaveformSubtitles()
+            val previousEntries = subtitleEntries.toList()
+            val associatedEntries = SubtitleEntryOps.retainStableIds(previousEntries, updatedEntries)
+            val prefix = commonStablePrefix(previousEntries, associatedEntries)
+            val suffix = commonStableSuffix(previousEntries, associatedEntries, prefix)
+            val removedCount = previousEntries.size - prefix - suffix
+            val previousById = previousEntries.associateBy { it.stableId }
+            val retainedEntries = associatedEntries.map { parsedEntry ->
+                previousById[parsedEntry.stableId]?.also { updateEntryFields(it, parsedEntry) }
+                    ?: parsedEntry
+            }
+            val inserted = retainedEntries.subList(prefix, retainedEntries.size - suffix)
+            subtitleEntries = previousEntries.toMutableList()
+            subtitleEntries.subList(prefix, prefix + removedCount).clear()
+            subtitleEntries.addAll(prefix, inserted)
+            renumberEntries(force = true)
+            syncWaveformSubtitleRange(prefix, removedCount, inserted)
             return
         }
 
@@ -2796,18 +2963,12 @@ class EditorActivity : AppCompatActivity() {
         changedPositions.forEach { position ->
             val target = subtitleEntries[position]
             val source = updatedEntries[position]
-            target.index = source.index
-            target.startTime = source.startTime
-            target.endTime = source.endTime
-            target.text = source.text
-            target.endTimeModified = source.endTimeModified
-            target.cueIdentifier = source.cueIdentifier
-            target.cueSettings = source.cueSettings
+            updateEntryFields(target, source)
         }
         renumberEntries(force = true)
 
         if (changedPositions.isEmpty()) {
-            syncWaveformSubtitles(preserveSelection = true)
+            syncWaveformSubtitles(preserveSelection = true, changedPositions = changedPositions)
         } else if (::subtitleAdapter.isInitialized && subtitleAdapter.itemCount == subtitleEntries.size) {
             // Reuse the same payload/neighbour refresh path as list-view edits.  The
             // RecyclerView is hidden in source mode, but retaining its row references keeps
@@ -2818,10 +2979,20 @@ class EditorActivity : AppCompatActivity() {
                 syncWaveform = false,
                 markChanged = false
             )
-            syncWaveformSubtitles(preserveSelection = true)
+            syncWaveformSubtitles(preserveSelection = true, changedPositions = changedPositions)
         } else {
-            syncWaveformSubtitles(preserveSelection = true)
+            syncWaveformSubtitles(preserveSelection = true, changedPositions = changedPositions)
         }
+    }
+
+    private fun updateEntryFields(target: SubtitleEntry, source: SubtitleEntry) {
+        target.index = source.index
+        target.startTime = source.startTime
+        target.endTime = source.endTime
+        target.text = source.text
+        target.endTimeModified = source.endTimeModified
+        target.cueIdentifier = source.cueIdentifier
+        target.cueSettings = source.cueSettings
     }
 
     /**
@@ -3352,4 +3523,3 @@ class EditorActivity : AppCompatActivity() {
     }
     
 }
-

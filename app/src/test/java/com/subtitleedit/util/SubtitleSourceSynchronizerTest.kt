@@ -233,6 +233,78 @@ Second
     }
 
     @Test
+    fun restoringDeletedSrtCueRenumbersAllCueBlocks() {
+        val source = "1\n00:00:01,000 --> 00:00:02,000\nFirst\n\n2\n00:00:03,000 --> 00:00:04,000\nSecond\n\n"
+        val original = SubtitleParser.parseSRT(source)
+        val deleted = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.SRT,
+            original,
+            listOf(original[1].copy(index = 1))
+        )
+
+        val restored = SubtitleSourceSynchronizer.apply(
+            deleted,
+            SubtitleParser.SubtitleFormat.SRT,
+            SubtitleParser.parseSRT(deleted),
+            original
+        )
+
+        assertTrue(restored.startsWith("1\n00:00:01,000 --> 00:00:02,000\nFirst"))
+        assertTrue(restored.contains("2\n00:00:03,000 --> 00:00:04,000\nSecond"))
+    }
+
+    @Test
+    fun restoringDeletedLrcCueRestoresItsTerminator() {
+        val source = "[00:01.00]First\n[00:02.00]Removed\n[00:02.50]\n[00:03.00]Second\n"
+        val original = SubtitleParser.parseLRC(source)
+        val deleted = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            original,
+            listOf(original[0], original[2].copy(index = 2))
+        )
+
+        val restored = SubtitleSourceSynchronizer.apply(
+            deleted,
+            SubtitleParser.SubtitleFormat.LRC,
+            SubtitleParser.parseLRC(deleted),
+            original
+        )
+
+        assertEquals(source, restored)
+    }
+
+    @Test
+    fun lrcImplicitEndKeepsMissingTerminatorAtCentisecondPrecision() {
+        val source = "[00:01.00]First\n[00:05.72]Second\n"
+        val oldEntries = SubtitleParser.parseLRC(source)
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            oldEntries,
+            listOf(oldEntries[0].copy(text = "Changed"), oldEntries[1])
+        )
+
+        assertEquals("[00:01.00]Changed\n[00:05.72]Second\n", updated)
+        assertEquals(5_696L, SubtitleParser.parseLRC(updated)[0].endTime)
+    }
+
+    @Test
+    fun lrcTerminatorFormattingRoundsLikeTheParser() {
+        val source = "[00:01.00]First\n[00:05.72]Second\n"
+        val oldEntries = SubtitleParser.parseLRC(source)
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            oldEntries,
+            listOf(oldEntries[0].copy(endTime = 5_696L + 30L), oldEntries[1])
+        )
+
+        assertTrue(updated.contains("[00:05.73]"))
+    }
+
+    @Test
     fun structuralEditsFollowStableRowsAndPreserveSurvivingRawCueLayout() {
         val source = "NOTE header\n\n7\n00:00:01.000   -->   00:00:02.000\nFirst\n\n9\n00:00:03,000-->00:00:04,000\nSecond\n\n"
         val parsed = SubtitleParser.parseSRT(source)
@@ -246,7 +318,7 @@ Second
         )
 
         assertTrue(updated.startsWith("NOTE header"))
-        assertTrue(updated.contains("9\n00:00:03,000-->00:00:04,000\nSecond"))
+        assertTrue(updated.contains("1\n00:00:03,000-->00:00:04,000\nSecond"))
         assertTrue(!updated.contains("7\n00:00:01.000"))
     }
 }

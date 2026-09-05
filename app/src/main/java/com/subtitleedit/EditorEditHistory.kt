@@ -24,7 +24,9 @@ internal class EditorEditHistory {
         data class SourceChange(
             val beforeText: String,
             val afterText: String,
-            override val description: String
+            override val description: String,
+            val beforeEntries: List<SubtitleEntry> = emptyList(),
+            var afterEntries: List<SubtitleEntry>? = null
         ) : Operation()
     }
 
@@ -73,6 +75,13 @@ internal class EditorEditHistory {
 
     fun pushRedo(operation: Operation) {
         redoStack.addLast(operation)
+    }
+
+    fun updateLatestSourceAfterEntries(afterText: String, entries: List<SubtitleEntry>) {
+        val operation = undoStack.lastOrNull() as? Operation.SourceChange ?: return
+        if (operation.afterText == afterText) {
+            operation.afterEntries = entries.map { it.copy() }
+        }
     }
 
     fun clear() {

@@ -211,7 +211,13 @@ object SubtitleSourceSynchronizer {
     ): String {
         if (timeLineOffset !in block.indices) return block.joinToString("") { it.serialized }
         val ending = preferredEnding(block)
-        val prefix = block.take(timeLineOffset).joinToString("") { it.serialized }
+        val prefix = block.take(timeLineOffset).mapIndexed { index, line ->
+            if (index == timeLineOffset - 1 && line.text.trim().toIntOrNull() != null) {
+                line.copy(text = replaceSrtSequenceNumber(line.text, new.index))
+            } else {
+                line
+            }
+        }.joinToString("") { it.serialized }
         val timeline = block[timeLineOffset]
         val trailing = block.drop(timeLineOffset + 1).takeLastWhile { it.text.isBlank() }
         val originalBody = block.drop(timeLineOffset + 1).dropLast(trailing.size)
@@ -331,16 +337,14 @@ object SubtitleSourceSynchronizer {
                     val newEnd = newEntries.getOrNull(endIndex)
                     val oldNext = oldEntries.getOrNull(endIndex + 1)
                     val newNext = newEntries.getOrNull(endIndex + 1)
-                    val timingChanged = oldEnd?.endTime != newEnd?.endTime ||
-                        oldNext?.startTime != newNext?.startTime
+                    val timingChanged = lrcTimingChanged(oldEnd, newEnd, oldNext, newNext)
                     val hasTerminator = cue.terminatorLineIndex != null
                     // LRC without a terminator is parsed as next.start - 24ms. Preserve
                     // that original form when the pair's timing was not edited.
                     val shouldHaveTerminator = when {
                         newEnd == null -> false
                         !timingChanged -> hasTerminator
-                        newNext == null -> true
-                        else -> newEnd.endTime != newNext.startTime
+                        else -> lrcNeedsTerminator(newEnd, newNext)
                     }
                     if (!hasTerminator && shouldHaveTerminator) {
                         append(formatLrcTag(newEnd!!.endTime)).append(line.ending)
@@ -360,9 +364,8 @@ object SubtitleSourceSynchronizer {
                 val oldNext = oldEntries.getOrNull(endIndex + 1)
                 val newNext = newEntries.getOrNull(endIndex + 1)
                 val keptEnd = newEnd ?: return@forEachIndexed
-                val timingChanged = oldEnd?.endTime != newEnd?.endTime ||
-                    oldNext?.startTime != newNext?.startTime
-                val shouldKeep = !timingChanged || newNext == null || keptEnd.endTime != newNext.startTime
+                val timingChanged = lrcTimingChanged(oldEnd, newEnd, oldNext, newNext)
+                val shouldKeep = if (!timingChanged) true else lrcNeedsTerminator(keptEnd, newNext)
                 if (!shouldKeep) return@forEachIndexed
 
                 if (timingChanged && oldEnd != null && oldEnd.endTime != keptEnd.endTime) {
@@ -408,7 +411,7 @@ object SubtitleSourceSynchronizer {
         fun appendAddedBefore(limit: Int) {
             added.filter { it > lastNewIndex && it < limit }.forEach { index ->
                 val entry = newEntries[index]
-                appendLine(formatLrcTag(entry.startTime) + entry.text)
+                appendLrcEntry(entry, newEntries.getOrNull(index + 1), ::appendLine)
                 lastNewIndex = index
             }
         }
@@ -440,12 +443,11 @@ object SubtitleSourceSynchronizer {
             val newEnd = newEntries[lastNewIndexForCue]
             val oldNext = oldEntries.getOrNull(cue.entryStart + oldSlice.size)
             val newNext = newEntries.getOrNull(lastNewIndexForCue + 1)
-            val timingChanged = oldEnd?.endTime != newEnd.endTime || oldNext?.startTime != newNext?.startTime
+            val timingChanged = lrcTimingChanged(oldEnd, newEnd, oldNext, newNext)
             val hasTerminator = cue.terminatorLineIndex != null
             val shouldHaveTerminator = when {
                 !timingChanged -> hasTerminator
-                newNext == null -> true
-                else -> newEnd.endTime != newNext.startTime
+                else -> lrcNeedsTerminator(newEnd, newNext)
             }
             if (shouldHaveTerminator) {
                 val terminator = cue.terminatorLineIndex?.let { lines[it] }
@@ -462,11 +464,7 @@ object SubtitleSourceSynchronizer {
         output.append(lines.drop(cursor).joinToString("") { it.serialized })
         added.filter { it > lastNewIndex }.forEach { index ->
             val entry = newEntries[index]
-            appendLine(formatLrcTag(entry.startTime) + entry.text)
-            val next = newEntries.getOrNull(index + 1)
-            if (next == null || entry.endTime != next.startTime) {
-                appendLine(formatLrcTag(entry.endTime))
-            }
+            appendLrcEntry(entry, newEntries.getOrNull(index + 1), ::appendLine)
         }
         return output.toString()
     }
@@ -515,7 +513,7 @@ object SubtitleSourceSynchronizer {
             entries.forEachIndexed { offset, entry ->
                 append(formatLrcTag(entry.startTime)).append(entry.text).append(ending)
                 val next = entries.getOrNull(offset + 1)
-                if (next == null || entry.endTime != next.startTime) {
+                if (lrcNeedsTerminator(entry, next)) {
                     append(formatLrcTag(entry.endTime)).append(ending)
                 }
             }
@@ -543,6 +541,46 @@ object SubtitleSourceSynchronizer {
             .append(formatTimestamp(entry.endTime, vtt = false)).append(ending)
         if (entry.text.isNotEmpty()) append(normalizeText(entry.text, ending)).append(ending)
         append(ending)
+    }
+
+    private fun replaceSrtSequenceNumber(original: String, index: Int): String {
+        val leading = original.takeWhile { it.isWhitespace() }
+        val trailing = original.takeLastWhile { it.isWhitespace() }
+        return leading + index.coerceAtLeast(1) + trailing
+    }
+
+    private fun appendLrcEntry(
+        entry: SubtitleEntry,
+        next: SubtitleEntry?,
+        appendLine: (String) -> Unit
+    ) {
+        appendLine(formatLrcTag(entry.startTime) + entry.text)
+        if (lrcNeedsTerminator(entry, next)) {
+            appendLine(formatLrcTag(entry.endTime))
+        }
+    }
+
+    private fun lrcTimingChanged(
+        oldEnd: SubtitleEntry?,
+        newEnd: SubtitleEntry?,
+        oldNext: SubtitleEntry?,
+        newNext: SubtitleEntry?
+    ): Boolean =
+        !lrcTimesEquivalent(oldEnd?.endTime, newEnd?.endTime) ||
+            !lrcTimesEquivalent(oldNext?.startTime, newNext?.startTime) ||
+            oldEnd?.endTimeModified != newEnd?.endTimeModified
+
+    private fun lrcNeedsTerminator(entry: SubtitleEntry, next: SubtitleEntry?): Boolean {
+        if (next == null) return true
+        if (lrcTimesEquivalent(entry.endTime, next.startTime)) return false
+        if (entry.endTimeModified) return true
+        if (next.startTime - entry.endTime == LRC_IMPLICIT_END_GAP_MS) return false
+        return true
+    }
+
+    private fun lrcTimesEquivalent(first: Long?, second: Long?): Boolean {
+        if (first == null || second == null) return first == second
+        return formatLrcTag(first) == formatLrcTag(second)
     }
 
     private fun appendVttCue(entry: SubtitleEntry, ending: String): String = buildString {
@@ -624,14 +662,7 @@ object SubtitleSourceSynchronizer {
     }
 
     private fun formatLrcTag(timeMs: Long): String {
-        val safe = timeMs.coerceAtLeast(0L)
-        return String.format(
-            Locale.US,
-            "[%02d:%02d.%02d]",
-            safe / 60_000,
-            safe % 60_000 / 1_000,
-            safe % 1_000 / 10
-        )
+        return TimeUtils.formatLRC(timeMs)
     }
 
     private fun parseArrowTimes(line: String, vtt: Boolean): Pair<Long, Long>? {
@@ -672,4 +703,6 @@ object SubtitleSourceSynchronizer {
             "\\s*(?:-->|->|—>|——>|-+\\s*>)\\s*" +
             "-?\\d{1,3}[:.]\\d{1,2}[:.]\\d{1,2}(?:[,.;:]\\d{1,4})?(?:\\s+.*)?$"
     )
+
+    private const val LRC_IMPLICIT_END_GAP_MS = 24L
 }

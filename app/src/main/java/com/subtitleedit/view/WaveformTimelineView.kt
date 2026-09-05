@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.DashPathEffect
 import android.graphics.Path
@@ -820,10 +821,21 @@ class WaveformTimelineView @JvmOverloads constructor(
         val boxH   = boxBot - boxTop
         val iconY  = boxTop + boxH / 2f + 8f
 
+        val visibleStartIndex = firstVisibleSubtitleIndex()
+        val visibleEndIndex = visibleSubtitleEndExclusive()
+
         // 第一遍：绘制未选中的字幕块
-        for ((index, sub) in subtitles.withIndex()) {
-            if (index in selectedIndices) continue
-            if (sub.endTime < visibleStartMs || sub.startTime > visibleStartMs + visibleDurationMs) continue
+        var index = visibleStartIndex
+        while (index < visibleEndIndex) {
+            val sub = subtitles[index]
+            if (index in selectedIndices) {
+                index++
+                continue
+            }
+            if (sub.endTime < visibleStartMs || sub.startTime > visibleStartMs + visibleDurationMs) {
+                index++
+                continue
+            }
 
             val x1 = timeToX(sub.startTime)
             val x2 = timeToX(sub.endTime)
@@ -836,13 +848,21 @@ class WaveformTimelineView @JvmOverloads constructor(
                     canvas.drawText(clipText(sub.text, availW), x1 + 10f, boxTop + boxH / 2f + 8f, textPaint)
                 }
             }
+            index++
         }
 
         // 第二遍：绘制选中的字幕块（置顶）
-        for (index in selectedIndices) {
-            if (index < 0 || index >= subtitles.size) continue
+        index = visibleStartIndex
+        while (index < visibleEndIndex) {
+            if (index !in selectedIndices) {
+                index++
+                continue
+            }
             val sub = subtitles[index]
-            if (sub.endTime < visibleStartMs || sub.startTime > visibleStartMs + visibleDurationMs) continue
+            if (sub.endTime < visibleStartMs || sub.startTime > visibleStartMs + visibleDurationMs) {
+                index++
+                continue
+            }
 
             val rawStartX = timeToXUnclamped(sub.startTime)
             val x1 = timeToX(sub.startTime)
@@ -875,6 +895,7 @@ class WaveformTimelineView @JvmOverloads constructor(
                     canvas.drawText(clipText(sub.text, availW), textStartX, boxTop + boxH / 2f + 8f, textPaint)
                 }
             }
+            index++
         }
         canvas.restore()
     }
@@ -887,8 +908,15 @@ class WaveformTimelineView @JvmOverloads constructor(
         val lineTop = waveTop          // 波形区顶部
         val lineBot = waveTop + totalH // 字幕区底部
 
-        for ((index, sub) in subtitles.withIndex()) {
-            if (sub.endTime < visibleStartMs || sub.startTime > visibleStartMs + visibleDurationMs) continue
+        val visibleStartIndex = firstVisibleSubtitleIndex()
+        val visibleEndIndex = visibleSubtitleEndExclusive()
+        var index = visibleStartIndex
+        while (index < visibleEndIndex) {
+            val sub = subtitles[index]
+            if (sub.endTime < visibleStartMs || sub.startTime > visibleStartMs + visibleDurationMs) {
+                index++
+                continue
+            }
 
             val edgePaint = if (index in selectedIndices) subtitleEdgeSelectedPaint else subtitleEdgePaint
 
@@ -901,6 +929,7 @@ class WaveformTimelineView @JvmOverloads constructor(
             if (x2 in 0f..width.toFloat()) {
                 canvas.drawLine(x2, lineTop, x2, lineBot, edgePaint)
             }
+            index++
         }
     }
 
@@ -1324,17 +1353,27 @@ class WaveformTimelineView @JvmOverloads constructor(
 
     private fun findSubtitleIndexAtX(x: Float): Int {
         // 选中项绘制在最上层，命中时也应优先。
-        for (index in selectedIndices) {
-            val subtitle = subtitles.getOrNull(index) ?: continue
-            if (x in timeToXUnclamped(subtitle.startTime)..timeToXUnclamped(subtitle.endTime)) {
-                return index
+        var index = visibleSubtitleEndExclusive() - 1
+        val visibleStartIndex = firstVisibleSubtitleIndex()
+        while (index >= visibleStartIndex) {
+            if (index in selectedIndices) {
+                val subtitle = subtitles[index]
+                if (x in timeToXUnclamped(subtitle.startTime)..timeToXUnclamped(subtitle.endTime)) {
+                    return index
+                }
             }
+            index--
         }
 
-        for (index in subtitles.lastIndex downTo 0) {
-            if (index in selectedIndices) continue
+        index = visibleSubtitleEndExclusive() - 1
+        while (index >= visibleStartIndex) {
+            if (index in selectedIndices) {
+                index--
+                continue
+            }
             val subtitle = subtitles[index]
             if (x in timeToX(subtitle.startTime)..timeToX(subtitle.endTime)) return index
+            index--
         }
         return -1
     }
@@ -1474,6 +1513,134 @@ class WaveformTimelineView @JvmOverloads constructor(
             onLimitedPlaybackRangeChange?.invoke(null)
         }
         post { invalidate() }
+    }
+
+    /** Replace one contiguous subtitle range without copying the entire document. */
+    fun replaceSubtitleRange(startIndex: Int, removedCount: Int, inserted: List<SubtitleEntry>): Boolean {
+        if (startIndex !in 0..subtitles.size || removedCount < 0 ||
+            startIndex + removedCount > subtitles.size
+        ) return false
+        val delta = inserted.size - removedCount
+        var dirtyLeft = Float.POSITIVE_INFINITY
+        var dirtyRight = Float.NEGATIVE_INFINITY
+        for (index in startIndex until startIndex + removedCount) {
+            val subtitle = subtitles[index]
+            dirtyLeft = min(dirtyLeft, timeToX(subtitle.startTime))
+            dirtyRight = max(dirtyRight, timeToX(subtitle.endTime))
+        }
+        inserted.forEach { subtitle ->
+            dirtyLeft = min(dirtyLeft, timeToX(subtitle.startTime))
+            dirtyRight = max(dirtyRight, timeToX(subtitle.endTime))
+        }
+        selectedIndices = selectedIndices.mapNotNull { index ->
+            when {
+                index < startIndex -> index
+                index >= startIndex + removedCount -> index + delta
+                else -> null
+            }
+        }.filter { it in 0 until (subtitles.size + delta) }.toSet()
+        limitedPlaybackIndex = limitedPlaybackIndex?.let { index ->
+            when {
+                index < startIndex -> index
+                index >= startIndex + removedCount -> index + delta
+                else -> null
+            }
+        }
+        subtitles.subList(startIndex, startIndex + removedCount).clear()
+        subtitles.addAll(startIndex, inserted)
+        onSelectedIndicesChangeListener?.invoke(selectedIndices)
+        invalidateSubtitleRegion(dirtyLeft, dirtyRight)
+        return true
+    }
+
+    /** Update only changed subtitle blocks while keeping the timeline list allocation intact. */
+    fun updateSubtitleEntries(changes: Map<Int, SubtitleEntry>, totalCount: Int): Boolean {
+        if (subtitles.size != totalCount) return false
+        if (changes.keys.any { it !in subtitles.indices }) return false
+        var dirtyLeft = Float.POSITIVE_INFINITY
+        var dirtyRight = Float.NEGATIVE_INFINITY
+        changes.forEach { (index, entry) ->
+            val previous = subtitles[index]
+            dirtyLeft = min(dirtyLeft, min(timeToX(previous.startTime), timeToX(entry.startTime)))
+            dirtyRight = max(dirtyRight, max(timeToX(previous.endTime), timeToX(entry.endTime)))
+            subtitles[index] = entry
+        }
+        if (changes.isNotEmpty()) invalidateSubtitleRegion(dirtyLeft, dirtyRight)
+        return true
+    }
+
+    fun removeSubtitleIndices(deletedIndices: Set<Int>): Boolean {
+        if (deletedIndices.isEmpty()) return true
+        if (deletedIndices.any { it !in subtitles.indices }) return false
+
+        val sortedDeleted = deletedIndices.sorted()
+        var dirtyLeft = Float.POSITIVE_INFINITY
+        var dirtyRight = Float.NEGATIVE_INFINITY
+        sortedDeleted.forEach { index ->
+            val subtitle = subtitles[index]
+            dirtyLeft = min(dirtyLeft, timeToX(subtitle.startTime))
+            dirtyRight = max(dirtyRight, timeToX(subtitle.endTime))
+        }
+        selectedIndices = selectedIndices.mapNotNull { index ->
+            if (index in deletedIndices) null else index - sortedDeleted.count { it < index }
+        }.toSet()
+        limitedPlaybackIndex = limitedPlaybackIndex?.let { index ->
+            if (index in deletedIndices) {
+                onLimitedPlaybackRangeChange?.invoke(null)
+                null
+            } else {
+                index - sortedDeleted.count { it < index }
+            }
+        }
+
+        var rangeEnd = sortedDeleted.last()
+        var rangeStart = rangeEnd
+        for (position in sortedDeleted.dropLast(1).asReversed()) {
+            if (position + 1 == rangeStart) {
+                rangeStart = position
+            } else {
+                subtitles.subList(rangeStart, rangeEnd + 1).clear()
+                rangeStart = position
+                rangeEnd = position
+            }
+        }
+        subtitles.subList(rangeStart, rangeEnd + 1).clear()
+        onSelectedIndicesChangeListener?.invoke(selectedIndices)
+        invalidateSubtitleRegion(dirtyLeft, dirtyRight)
+        return true
+    }
+
+    private fun firstVisibleSubtitleIndex(): Int {
+        var low = 0
+        var high = subtitles.size
+        while (low < high) {
+            val middle = (low + high) ushr 1
+            if (subtitles[middle].startTime < visibleStartMs) low = middle + 1 else high = middle
+        }
+        return (low - 1).coerceAtLeast(0)
+    }
+
+    private fun visibleSubtitleEndExclusive(): Int {
+        val visibleEndMs = visibleStartMs + visibleDurationMs
+        var low = 0
+        var high = subtitles.size
+        while (low < high) {
+            val middle = (low + high) ushr 1
+            if (subtitles[middle].startTime <= visibleEndMs) low = middle + 1 else high = middle
+        }
+        return low
+    }
+
+    private fun invalidateSubtitleRegion(left: Float, right: Float) {
+        if (left == Float.POSITIVE_INFINITY || right == Float.NEGATIVE_INFINITY) return
+        val padding = 8f
+        val dirty = Rect(
+            (left - padding).toInt().coerceAtLeast(0),
+            0,
+            (right + padding).toInt().coerceAtMost(width),
+            height
+        )
+        if (dirty.left < dirty.right) invalidate(dirty) else invalidate()
     }
 
     /** Refresh subtitle data without dropping the block currently selected on the timeline. */
