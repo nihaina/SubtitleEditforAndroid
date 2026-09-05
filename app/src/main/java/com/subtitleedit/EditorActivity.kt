@@ -124,6 +124,7 @@ class EditorActivity : AppCompatActivity() {
     private var suppressSourceViewChanges = false
     private var sourceViewHasPendingEdits = false
     private var sourceViewTransitionJob: Job? = null
+    private var isSourceViewTransitioning = false
     private var sourceViewPreviewJob: Job? = null
     private var sourceViewWaveformSyncJob: Job? = null
     private var pendingSourceWaveformSync: SourceWaveformSyncRequest? = null
@@ -389,6 +390,8 @@ class EditorActivity : AppCompatActivity() {
                 contentDescription = redoOperation?.description ?: getString(R.string.menu_redo)
                 tooltipText = contentDescription
             }
+            menu.findItem(R.id.menu_source_view)?.isEnabled =
+                !isSourceViewTransitioning && sourceViewTransitionJob?.isActive != true
         }
         return true
     }
@@ -1161,7 +1164,7 @@ class EditorActivity : AppCompatActivity() {
      * 切换源视图模式
      */
     private fun toggleSourceView() {
-        if (sourceViewTransitionJob?.isActive == true) {
+        if (isSourceViewTransitioning || sourceViewTransitionJob?.isActive == true) {
             showShortToast("正在切换视图，请稍候")
             return
         }
@@ -1170,6 +1173,8 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
+        isSourceViewTransitioning = true
+        invalidateOptionsMenu()
         if (isSourceViewMode) {
             // 源视图 → 列表视图：直接切换，解析源视图当前内容
             doExitSourceView()
@@ -1187,6 +1192,7 @@ class EditorActivity : AppCompatActivity() {
     /** 将列表条目定点写回内存中的原始文本后进入源视图。 */
     private fun enterSourceViewFromMemory() {
         sourceViewTransitionJob?.cancel()
+        showShortToast("正在切换到源视图…")
         sourceViewTransitionJob = lifecycleScope.launch {
             try {
                 sourceViewPreviewJob?.cancelAndJoin()
@@ -1215,6 +1221,8 @@ class EditorActivity : AppCompatActivity() {
                 sourceViewHasPendingEdits = false
                 enterSourceViewMode {
                     sourceViewTransitionJob = null
+                    isSourceViewTransitioning = false
+                    invalidateOptionsMenu()
                     // 用完整源码内容重新建立 mpv 字幕轨。
                     scheduleSubtitlePreview()
                     showShortToast("已切换到源视图")
@@ -1223,6 +1231,8 @@ class EditorActivity : AppCompatActivity() {
                 throw e
             } catch (e: Exception) {
                 sourceViewTransitionJob = null
+                isSourceViewTransitioning = false
+                invalidateOptionsMenu()
                 showShortToast("切换到源视图失败：${e.message}")
             }
         }
@@ -1242,7 +1252,7 @@ class EditorActivity : AppCompatActivity() {
         // 先禁用源行编辑，再在后台构建字幕条目列表，避免切换期间两套编辑状态并存。
         binding.etSourceView.setDocumentEnabled(false)
         setSourceViewEditorText("")
-        showShortToast("正在解析字幕…")
+        showShortToast("正在切换到列表视图…")
         sourceViewTransitionJob = lifecycleScope.launch {
             try {
                 sourceViewPreviewJob?.cancelAndJoin()
@@ -1259,6 +1269,8 @@ class EditorActivity : AppCompatActivity() {
                 exitSourceViewMode(sourceScrollPosition) {
                     binding.etSourceView.setDocumentEnabled(true)
                     sourceViewTransitionJob = null
+                    isSourceViewTransitioning = false
+                    invalidateOptionsMenu()
                     updateFormatInfo()
                     // 等源码 Editable、解析临时对象和列表提交完成一个帧周期后，
                     // 再重建 mpv 字幕轨，避免切换瞬间额外复制所有条目。
@@ -1274,6 +1286,8 @@ class EditorActivity : AppCompatActivity() {
                 configureSourceViewEditor(editedContent)
                 binding.etSourceView.setDocumentEnabled(true)
                 sourceViewTransitionJob = null
+                isSourceViewTransitioning = false
+                invalidateOptionsMenu()
                 showShortToast("解析失败：${e.message}")
             }
         }
