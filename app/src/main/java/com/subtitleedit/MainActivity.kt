@@ -44,6 +44,7 @@ import com.subtitleedit.databinding.DialogArchiveProgressBinding
 import com.subtitleedit.databinding.DialogArchivePasswordBinding
 import com.subtitleedit.databinding.DialogArchiveConflictBinding
 import com.subtitleedit.databinding.DialogCreateArchiveBinding
+import com.subtitleedit.databinding.DialogSubtitleConvertBinding
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.util.ArchiveManager
 import com.subtitleedit.util.ArchivePreviewCache
@@ -58,6 +59,7 @@ import com.subtitleedit.model.FileSortField
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.UpdateChecker
+import com.subtitleedit.util.SubtitleParser
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -1505,10 +1507,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun showMoreActions() {
         PopupMenu(this, binding.btnMoreSelected).apply {
+            val selected = selectedFiles()
+            val canConvert = selected.isNotEmpty() && selected.all {
+                it.isFile && FileUtils.isSubtitleFile(it)
+            }
+            val convertItem = if (canConvert) {
+                menu.add(getString(R.string.convert_format))
+            } else {
+                null
+            }
             val compressItem = if (!isFileSearchQueryActive()) menu.add("压缩") else null
             val propertiesItem = menu.add("详情")
             setOnMenuItemClickListener { item ->
                 when {
+                    item === convertItem -> showSubtitleFormatConvertDialog()
                     item === compressItem -> showCreateArchiveDialog()
                     item === propertiesItem -> showSelectedProperties()
                 }
@@ -1517,6 +1529,220 @@ class MainActivity : AppCompatActivity() {
             show()
         }
     }
+
+    private fun showSubtitleFormatConvertDialog() {
+        val sources = selectedFiles().filter { it.isFile && FileUtils.isSubtitleFile(it) }
+        if (sources.isEmpty() || sources.size != selectedPaths.size) return
+
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    sources.map { source ->
+                        val content = FileUtils.readFile(source)
+                        SubtitleConversionSource(
+                            file = source,
+                            content = content,
+                            format = SubtitleParser.detectFormat(content, source.name)
+                        )
+                    }
+                }
+            }
+            result.onFailure { error ->
+                showShortToast(getString(R.string.dialog_subtitle_convert_failed, error.message ?: "未知错误"))
+            }.onSuccess { conversionSources ->
+                val targetFormats = listOf(
+                    SubtitleParser.SubtitleFormat.SRT,
+                    SubtitleParser.SubtitleFormat.LRC,
+                    SubtitleParser.SubtitleFormat.VTT,
+                    SubtitleParser.SubtitleFormat.TXT
+                )
+                val unsupportedSource = conversionSources.firstOrNull { it.format !in targetFormats }
+                if (unsupportedSource != null) {
+                    showShortToast(
+                        getString(
+                            R.string.dialog_subtitle_convert_unsupported_file,
+                            unsupportedSource.file.name
+                        )
+                    )
+                    return@onSuccess
+                }
+
+                val dialogBinding = DialogSubtitleConvertBinding.inflate(layoutInflater)
+                if (conversionSources.size == 1) {
+                    dialogBinding.tvSourceFile.text = getString(
+                        R.string.dialog_subtitle_convert_source_file,
+                        conversionSources.first().file.name
+                    )
+                    dialogBinding.tvSourceFormat.text = getString(
+                        R.string.dialog_subtitle_convert_source_format,
+                        subtitleFormatDisplayName(conversionSources.first().format)
+                    )
+                } else {
+                    dialogBinding.tvSourceFile.text = getString(
+                        R.string.dialog_subtitle_convert_source_files,
+                        conversionSources.size
+                    )
+                    dialogBinding.tvSourceFormat.text = getString(
+                        R.string.dialog_subtitle_convert_source_formats,
+                        conversionSources
+                            .groupingBy { it.format }
+                            .eachCount()
+                            .entries
+                            .joinToString("、") { (format, count) ->
+                                "${subtitleFormatDisplayName(format)} × $count"
+                            }
+                    )
+                }
+                dialogBinding.spinnerTargetFormat.adapter = ArrayAdapter(
+                    this@MainActivity,
+                    android.R.layout.simple_spinner_item,
+                    targetFormats.map(::subtitleFormatDisplayName)
+                ).apply {
+                    setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+                }
+                val sourceFormats = conversionSources.map { it.format }.toSet()
+                val defaultTargetIndex = targetFormats.indexOfFirst { it !in sourceFormats }
+                    .takeIf { it >= 0 } ?: 0
+                dialogBinding.spinnerTargetFormat.setSelection(defaultTargetIndex)
+
+                val dialog = AlertDialog.Builder(this@MainActivity)
+                    .setTitle(R.string.dialog_subtitle_convert_title)
+                    .setView(dialogBinding.root)
+                    .setPositiveButton(R.string.start_convert, null)
+                    .setNegativeButton(R.string.cancel, null)
+                    .create()
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val targetFormat = targetFormats[dialogBinding.spinnerTargetFormat.selectedItemPosition]
+                        val filesToConvert = conversionSources.filter { it.format != targetFormat }
+                        if (filesToConvert.isEmpty()) {
+                            showShortToast(getString(R.string.dialog_subtitle_convert_same_format))
+                            return@setOnClickListener
+                        }
+
+                        val keepOriginal = dialogBinding.cbKeepOriginal.isChecked
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+                        lifecycleScope.launch {
+                            val conversionResult = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    val successFiles = mutableListOf<String>()
+                                    val skippedFiles = conversionSources
+                                        .filter { it.format == targetFormat }
+                                        .map { it.file.name }
+                                    val failedFiles = mutableListOf<String>()
+                                    filesToConvert.forEach { conversionSource ->
+                                        runCatching {
+                                            val targetFile = File(
+                                                conversionSource.file.parentFile,
+                                                "${conversionSource.file.nameWithoutExtension}.${subtitleFormatExtension(targetFormat)}"
+                                            )
+                                            if (targetFile.exists()) {
+                                                error(
+                                                    getString(
+                                                        R.string.dialog_subtitle_convert_target_exists,
+                                                        targetFile.name
+                                                    )
+                                                )
+                                            }
+                                            val convertedContent = SubtitleParser.convertFormat(
+                                                conversionSource.content,
+                                                conversionSource.format,
+                                                targetFormat
+                                            )
+                                            FileUtils.writeFile(targetFile, convertedContent)
+                                            if (!keepOriginal && !conversionSource.file.delete()) {
+                                                targetFile.delete()
+                                                error("无法删除原文件")
+                                            }
+                                            successFiles += targetFile.name
+                                        }.onFailure {
+                                            failedFiles += "${conversionSource.file.name}: ${it.message ?: "未知错误"}"
+                                        }
+                                    }
+                                    SubtitleConversionResult(successFiles, skippedFiles, failedFiles)
+                                }
+                            }
+                            dialog.dismiss()
+                            conversionResult.onSuccess { batchResult ->
+                                exitSelectionMode()
+                                currentDirectory?.let(::loadDirectory)
+                                val message = buildString {
+                                    append(
+                                        getString(
+                                            R.string.dialog_subtitle_convert_batch_success,
+                                            batchResult.successFiles.size
+                                        )
+                                    )
+                                    if (batchResult.skippedFiles.isNotEmpty()) {
+                                        append(
+                                            getString(
+                                                R.string.dialog_subtitle_convert_batch_skipped,
+                                                batchResult.skippedFiles.size
+                                            )
+                                        )
+                                    }
+                                    if (batchResult.failedFiles.isNotEmpty()) {
+                                        append(
+                                            getString(
+                                                R.string.dialog_subtitle_convert_batch_failed,
+                                                batchResult.failedFiles.size
+                                            )
+                                        )
+                                    }
+                                }
+                                if (batchResult.failedFiles.isEmpty()) {
+                                    showShortToast(message)
+                                } else {
+                                    AlertDialog.Builder(this@MainActivity)
+                                        .setTitle(R.string.dialog_subtitle_convert_title)
+                                        .setMessage(
+                                            message + "\n\n" + batchResult.failedFiles.joinToString("\n")
+                                        )
+                                        .setPositiveButton(R.string.confirm, null)
+                                        .show()
+                                }
+                            }.onFailure { error ->
+                                showShortToast(
+                                    getString(
+                                        R.string.dialog_subtitle_convert_failed,
+                                        error.message ?: "未知错误"
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+                dialog.show()
+            }
+        }
+    }
+
+    private data class SubtitleConversionSource(
+        val file: File,
+        val content: String,
+        val format: SubtitleParser.SubtitleFormat
+    )
+
+    private data class SubtitleConversionResult(
+        val successFiles: List<String>,
+        val skippedFiles: List<String>,
+        val failedFiles: List<String>
+    )
+
+    private fun subtitleFormatDisplayName(format: SubtitleParser.SubtitleFormat): String =
+        when (format) {
+            SubtitleParser.SubtitleFormat.VTT -> "WebVTT"
+            else -> format.name
+        }
+
+    private fun subtitleFormatExtension(format: SubtitleParser.SubtitleFormat): String =
+        when (format) {
+            SubtitleParser.SubtitleFormat.SRT -> "srt"
+            SubtitleParser.SubtitleFormat.LRC -> "lrc"
+            SubtitleParser.SubtitleFormat.VTT -> "vtt"
+            SubtitleParser.SubtitleFormat.TXT -> "txt"
+            else -> error("不支持的字幕格式")
+        }
 
     private fun showCreateArchiveDialog() {
         val sources = selectedFiles()
