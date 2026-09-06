@@ -58,8 +58,8 @@ import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.util.SubtitleFormatConverter
 import com.subtitleedit.util.UpdateChecker
-import com.subtitleedit.util.SubtitleParser
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -1538,11 +1538,9 @@ class MainActivity : AppCompatActivity() {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     sources.map { source ->
-                        val content = FileUtils.readFile(source)
                         SubtitleConversionSource(
                             file = source,
-                            content = content,
-                            format = SubtitleParser.detectFormat(content, source.name)
+                            source = SubtitleFormatConverter.readFile(this@MainActivity, source)
                         )
                     }
                 }
@@ -1550,13 +1548,10 @@ class MainActivity : AppCompatActivity() {
             result.onFailure { error ->
                 showShortToast(getString(R.string.dialog_subtitle_convert_failed, error.message ?: "未知错误"))
             }.onSuccess { conversionSources ->
-                val targetFormats = listOf(
-                    SubtitleParser.SubtitleFormat.SRT,
-                    SubtitleParser.SubtitleFormat.LRC,
-                    SubtitleParser.SubtitleFormat.VTT,
-                    SubtitleParser.SubtitleFormat.TXT
-                )
-                val unsupportedSource = conversionSources.firstOrNull { it.format !in targetFormats }
+                val targetFormats = SubtitleFormatConverter.supportedTargetFormats
+                val unsupportedSource = conversionSources.firstOrNull {
+                    it.source.format !in SubtitleFormatConverter.supportedSourceFormats
+                }
                 if (unsupportedSource != null) {
                     showShortToast(
                         getString(
@@ -1575,7 +1570,7 @@ class MainActivity : AppCompatActivity() {
                     )
                     dialogBinding.tvSourceFormat.text = getString(
                         R.string.dialog_subtitle_convert_source_format,
-                        subtitleFormatDisplayName(conversionSources.first().format)
+                        SubtitleFormatConverter.displayName(conversionSources.first().source.format)
                     )
                 } else {
                     dialogBinding.tvSourceFile.text = getString(
@@ -1585,22 +1580,22 @@ class MainActivity : AppCompatActivity() {
                     dialogBinding.tvSourceFormat.text = getString(
                         R.string.dialog_subtitle_convert_source_formats,
                         conversionSources
-                            .groupingBy { it.format }
+                            .groupingBy { it.source.format }
                             .eachCount()
                             .entries
                             .joinToString("、") { (format, count) ->
-                                "${subtitleFormatDisplayName(format)} × $count"
+                                "${SubtitleFormatConverter.displayName(format)} × $count"
                             }
                     )
                 }
                 dialogBinding.spinnerTargetFormat.adapter = ArrayAdapter(
                     this@MainActivity,
                     android.R.layout.simple_spinner_item,
-                    targetFormats.map(::subtitleFormatDisplayName)
+                    targetFormats.map(SubtitleFormatConverter::displayName)
                 ).apply {
                     setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
                 }
-                val sourceFormats = conversionSources.map { it.format }.toSet()
+                val sourceFormats = conversionSources.map { it.source.format }.toSet()
                 val defaultTargetIndex = targetFormats.indexOfFirst { it !in sourceFormats }
                     .takeIf { it >= 0 } ?: 0
                 dialogBinding.spinnerTargetFormat.setSelection(defaultTargetIndex)
@@ -1614,7 +1609,7 @@ class MainActivity : AppCompatActivity() {
                 dialog.setOnShowListener {
                     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                         val targetFormat = targetFormats[dialogBinding.spinnerTargetFormat.selectedItemPosition]
-                        val filesToConvert = conversionSources.filter { it.format != targetFormat }
+                        val filesToConvert = conversionSources.filter { it.source.format != targetFormat }
                         if (filesToConvert.isEmpty()) {
                             showShortToast(getString(R.string.dialog_subtitle_convert_same_format))
                             return@setOnClickListener
@@ -1627,14 +1622,14 @@ class MainActivity : AppCompatActivity() {
                                 runCatching {
                                     val successFiles = mutableListOf<String>()
                                     val skippedFiles = conversionSources
-                                        .filter { it.format == targetFormat }
+                                        .filter { it.source.format == targetFormat }
                                         .map { it.file.name }
                                     val failedFiles = mutableListOf<String>()
                                     filesToConvert.forEach { conversionSource ->
                                         runCatching {
                                             val targetFile = File(
                                                 conversionSource.file.parentFile,
-                                                "${conversionSource.file.nameWithoutExtension}.${subtitleFormatExtension(targetFormat)}"
+                                                "${conversionSource.file.nameWithoutExtension}.${SubtitleFormatConverter.extension(targetFormat)}"
                                             )
                                             if (targetFile.exists()) {
                                                 error(
@@ -1644,9 +1639,8 @@ class MainActivity : AppCompatActivity() {
                                                     )
                                                 )
                                             }
-                                            val convertedContent = SubtitleParser.convertFormat(
-                                                conversionSource.content,
-                                                conversionSource.format,
+                                            val convertedContent = SubtitleFormatConverter.convert(
+                                                conversionSource.source,
                                                 targetFormat
                                             )
                                             FileUtils.writeFile(targetFile, convertedContent)
@@ -1719,8 +1713,7 @@ class MainActivity : AppCompatActivity() {
 
     private data class SubtitleConversionSource(
         val file: File,
-        val content: String,
-        val format: SubtitleParser.SubtitleFormat
+        val source: SubtitleFormatConverter.Source
     )
 
     private data class SubtitleConversionResult(
@@ -1728,21 +1721,6 @@ class MainActivity : AppCompatActivity() {
         val skippedFiles: List<String>,
         val failedFiles: List<String>
     )
-
-    private fun subtitleFormatDisplayName(format: SubtitleParser.SubtitleFormat): String =
-        when (format) {
-            SubtitleParser.SubtitleFormat.VTT -> "WebVTT"
-            else -> format.name
-        }
-
-    private fun subtitleFormatExtension(format: SubtitleParser.SubtitleFormat): String =
-        when (format) {
-            SubtitleParser.SubtitleFormat.SRT -> "srt"
-            SubtitleParser.SubtitleFormat.LRC -> "lrc"
-            SubtitleParser.SubtitleFormat.VTT -> "vtt"
-            SubtitleParser.SubtitleFormat.TXT -> "txt"
-            else -> error("不支持的字幕格式")
-        }
 
     private fun showCreateArchiveDialog() {
         val sources = selectedFiles()

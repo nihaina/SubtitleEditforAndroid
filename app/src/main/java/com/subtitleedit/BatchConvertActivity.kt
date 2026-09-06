@@ -17,9 +17,9 @@ import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleOutputWriter
+import com.subtitleedit.util.SubtitleFormatConverter
 import com.subtitleedit.util.SubtitleParser
 import java.io.File
-import java.nio.charset.StandardCharsets
 
 /**
  * 批量转换界面
@@ -99,19 +99,20 @@ class BatchConvertActivity : AppCompatActivity() {
     
     private fun setupFormatSpinners() {
         // 目标格式
-        val formats = arrayOf("SRT", "LRC", "WebVTT")
-        val targetAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, formats)
+        val formats = SubtitleFormatConverter.supportedTargetFormats
+        val targetAdapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_item,
+            formats.map(SubtitleFormatConverter::displayName)
+        )
         targetAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         binding.spinnerTargetFormat.adapter = targetAdapter
         
         // 监听目标格式选择变化
         binding.spinnerTargetFormat.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
-                targetFormat = when (position) {
-                    0 -> SubtitleParser.SubtitleFormat.SRT
-                    1 -> SubtitleParser.SubtitleFormat.LRC
-                    2 -> SubtitleParser.SubtitleFormat.VTT
-                    else -> SubtitleParser.SubtitleFormat.LRC
+                targetFormat = formats.getOrElse(position) {
+                    SubtitleParser.SubtitleFormat.LRC
                 }
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
@@ -224,29 +225,19 @@ class BatchConvertActivity : AppCompatActivity() {
         
         convertFiles.forEach { convertFile ->
             try {
-                // 使用 URI 读取文件内容
-                val content = FileUtils.readUri(this, convertFile.uri, StandardCharsets.UTF_8)
-                
-                // 自动检测源格式
-                val detectedFormat = SubtitleParser.detectFormat(content)
+                val source = SubtitleFormatConverter.readUri(this, convertFile.uri, convertFile.fileName)
                 
                 // 如果检测到的格式与目标格式相同，跳过转换（直接计入成功）
-                if (detectedFormat == targetFormat) {
+                if (source.format == targetFormat) {
                     skippedCount++
                     skippedFiles.add(convertFile.fileName)
                     return@forEach
                 }
                 
-                // 转换格式
-                val convertedContent = SubtitleParser.convertFormat(content, detectedFormat, targetFormat)
+                val convertedContent = SubtitleFormatConverter.convert(source, targetFormat)
                 
                 // 确定输出文件名
-                val targetExtension = when (targetFormat) {
-                    SubtitleParser.SubtitleFormat.SRT -> "srt"
-                    SubtitleParser.SubtitleFormat.LRC -> "lrc"
-                    SubtitleParser.SubtitleFormat.VTT -> "vtt"
-                    else -> "txt"
-                }
+                val targetExtension = SubtitleFormatConverter.extension(targetFormat)
                 
                 // 从 URI 获取文件名，去掉原扩展名
                 val originalName = convertFile.fileName
@@ -317,12 +308,7 @@ class BatchConvertActivity : AppCompatActivity() {
         
         // 检查是否有潜在冲突
         val hasConflict = convertFiles.any { convertFile ->
-            val targetExtension = when (targetFormat) {
-                SubtitleParser.SubtitleFormat.SRT -> "srt"
-                SubtitleParser.SubtitleFormat.LRC -> "lrc"
-                SubtitleParser.SubtitleFormat.VTT -> "vtt"
-                else -> "txt"
-            }
+            val targetExtension = SubtitleFormatConverter.extension(targetFormat)
             val nameWithoutExt = convertFile.fileName.substringBeforeLast(".")
             SubtitleOutputWriter.exists(this, finalOutputUri, nameWithoutExt, targetExtension)
         }
