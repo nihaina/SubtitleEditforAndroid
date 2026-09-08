@@ -2298,6 +2298,7 @@ class EditorActivity : AppCompatActivity() {
         syncWaveform: Boolean = true,
         markChanged: Boolean = true
     ) {
+        stateModel.refreshDocument()
         val positionList = positions.toList()
         if (positionList.size > BULK_NOTIFY_THRESHOLD) {
             // Bulk translation/replace operations must not enqueue one RecyclerView update per row.
@@ -2388,6 +2389,7 @@ class EditorActivity : AppCompatActivity() {
         afterSubmit: (() -> Unit)? = null
     ) {
         renumberEntries(force = refreshAll)
+        stateModel.refreshDocument()
         val currentIds = subtitleEntries.mapTo(mutableSetOf()) { it.stableId }
         val targetSelectedIds = when {
             selectedStableIds != null -> selectedStableIds.filterTo(mutableSetOf()) { it in currentIds }

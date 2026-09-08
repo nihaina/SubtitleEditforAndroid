@@ -20,6 +20,8 @@ internal class EditorViewModel : ViewModel() {
 
     private val _uiState = MutableStateFlow(EditorUiState())
     val uiState: StateFlow<EditorUiState> = _uiState.asStateFlow()
+    private val _document = MutableStateFlow(documentState.subtitleDocument)
+    val document: StateFlow<SubtitleDocument> = _document.asStateFlow()
     private val _effects = MutableSharedFlow<EditorEffect>(extraBufferCapacity = 8)
     val effects: SharedFlow<EditorEffect> = _effects.asSharedFlow()
 
@@ -49,7 +51,10 @@ internal class EditorViewModel : ViewModel() {
         set(value) { documentState.documentTitle = value }
     var subtitleEntries: MutableList<SubtitleEntry>
         get() = documentState.subtitleEntries
-        set(value) { documentState.subtitleEntries = value }
+        set(value) {
+            documentState.subtitleEntries = value
+            publishDocument()
+        }
     var lastIndexedEntryCount: Int
         get() = documentState.lastIndexedEntryCount
         set(value) { documentState.lastIndexedEntryCount = value }
@@ -58,13 +63,22 @@ internal class EditorViewModel : ViewModel() {
         set(value) { documentState.currentCharset = value }
     var currentFormat: SubtitleParser.SubtitleFormat
         get() = documentState.currentFormat
-        set(value) { documentState.currentFormat = value }
+        set(value) {
+            documentState.currentFormat = value
+            publishDocument()
+        }
     var documentHeader: String
         get() = documentState.documentHeader
-        set(value) { documentState.documentHeader = value }
+        set(value) {
+            documentState.documentHeader = value
+            publishDocument()
+        }
     var documentFooter: String
         get() = documentState.documentFooter
-        set(value) { documentState.documentFooter = value }
+        set(value) {
+            documentState.documentFooter = value
+            publishDocument()
+        }
     val subtitleDocument: SubtitleDocument
         get() = documentState.subtitleDocument
     var originalFileContent: String
@@ -158,7 +172,10 @@ internal class EditorViewModel : ViewModel() {
     fun saveUriSubtitleDocument(uri: String, subtitleTitle: String) =
         documentState.saveUriSubtitleDocument(uri, subtitleTitle)
 
-    fun replaceDocument(document: SubtitleDocument) = documentState.replaceDocument(document)
+    fun replaceDocument(document: SubtitleDocument) {
+        documentState.replaceDocument(document)
+        publishDocument()
+    }
 
     fun loadSubtitleContent(content: String, fileName: String? = null): SubtitleDocument {
         val document = SubtitleParser.parseDocument(content, fileName)
@@ -168,6 +185,7 @@ internal class EditorViewModel : ViewModel() {
         documentState.sourceViewNeedsListSync = false
         documentState.hasUnsavedChanges = false
         documentState.sourceHistoryTextSnapshot = content
+        publishDocument()
         onEvent(EditorEvent.SetDocumentLoaded(true))
         return document
     }
@@ -182,7 +200,13 @@ internal class EditorViewModel : ViewModel() {
     }
 
     fun execute(command: EditorCommand): EditorCommandResult {
-        return command.execute(documentState)
+        val result = command.execute(documentState)
+        if (result.changedPositions.isNotEmpty() || result.structureChanged) publishDocument()
+        return result
+    }
+
+    fun refreshDocument() {
+        publishDocument()
     }
 
     fun undo(
@@ -209,6 +233,7 @@ internal class EditorViewModel : ViewModel() {
                 documentState.originalFileContent = event.value
                 documentState.sourceViewNeedsListSync = true
                 documentState.hasUnsavedChanges = true
+                publishDocument()
             }
             is EditorEvent.SetSavedScrollPosition ->
                 updateUiState { copy(savedScrollPosition = event.value) }
@@ -236,5 +261,9 @@ internal class EditorViewModel : ViewModel() {
 
     private inline fun updateUiState(transform: EditorUiState.() -> EditorUiState) {
         _uiState.value = transform(_uiState.value)
+    }
+
+    private fun publishDocument() {
+        _document.value = documentState.subtitleDocument
     }
 }

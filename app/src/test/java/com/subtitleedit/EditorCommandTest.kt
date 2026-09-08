@@ -34,6 +34,7 @@ class EditorCommandTest {
         assertEquals(setOf(0), textResult.changedPositions)
         assertEquals(setOf(0), timeResult.changedPositions)
         assertEquals("新文本", viewModel.subtitleDocument.entries.single().text)
+        assertEquals("新文本", viewModel.document.value.entries.single().text)
         assertEquals(900L, viewModel.subtitleDocument.entries.single().endTime)
         assertTrue(viewModel.subtitleDocument.entries.single().endTimeModified)
     }
