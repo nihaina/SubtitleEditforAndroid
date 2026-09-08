@@ -194,6 +194,9 @@ class EditorActivity : AppCompatActivity() {
         set(value) { stateModel.clipboardTexts = value }
     private val editHistory: EditorEditHistory
         get() = stateModel.editHistory
+    private val editHistoryController: EditorHistoryController by lazy {
+        EditorHistoryController(editHistory)
+    }
     private var historyEntriesSnapshot: List<SubtitleEntry>
         get() = stateModel.historyEntriesSnapshot
         set(value) { stateModel.historyEntriesSnapshot = value }
@@ -2073,26 +2076,15 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun undoEdit() {
-        val skippedSelectionOperations = mutableListOf<EditorEditHistory.Operation>()
-        var operation = editHistory.takeUndo()
-        while (operation != null && isSourceViewMode && with(editHistory) { operation.isSelectionOnly() }) {
-            // Source view has no selection model. Keep skipped list-selection records in the
-            // undo stack; only the actual content operation is consumed and moved to redo.
-            skippedSelectionOperations += operation
-            operation = editHistory.takeUndo()
-        }
-        if (operation == null) {
-            skippedSelectionOperations.asReversed().forEach(editHistory::pushUndo)
-            invalidateOptionsMenu()
-            return
-        }
-        skippedSelectionOperations.asReversed().forEach(editHistory::pushUndo)
         suppressHistoryRecording = true
-        try {
-            applyHistoryOperation(operation, undo = true)
-            editHistory.pushRedo(operation)
+        val applied = try {
+            editHistoryController.undo(isSourceViewMode, ::applyHistoryOperation)
         } finally {
             suppressHistoryRecording = false
+        }
+        if (!applied) {
+            invalidateOptionsMenu()
+            return
         }
         syncEditHistoryBaseline()
         hasUnsavedChanges = true
@@ -2100,24 +2092,15 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun redoEdit() {
-        val skippedSelectionOperations = mutableListOf<EditorEditHistory.Operation>()
-        var operation = editHistory.takeRedo()
-        while (operation != null && isSourceViewMode && with(editHistory) { operation.isSelectionOnly() }) {
-            skippedSelectionOperations += operation
-            operation = editHistory.takeRedo()
-        }
-        if (operation == null) {
-            skippedSelectionOperations.asReversed().forEach(editHistory::pushRedo)
-            invalidateOptionsMenu()
-            return
-        }
-        skippedSelectionOperations.asReversed().forEach(editHistory::pushRedo)
         suppressHistoryRecording = true
-        try {
-            applyHistoryOperation(operation, undo = false)
-            editHistory.pushUndo(operation)
+        val applied = try {
+            editHistoryController.redo(isSourceViewMode, ::applyHistoryOperation)
         } finally {
             suppressHistoryRecording = false
+        }
+        if (!applied) {
+            invalidateOptionsMenu()
+            return
         }
         syncEditHistoryBaseline()
         hasUnsavedChanges = true

@@ -105,6 +105,43 @@ class EditorEditHistoryTest {
     }
 
     @Test
+    fun historyControllerMovesOnlyContentOperationsInSourceView() {
+        val history = EditorEditHistory()
+        val controller = EditorHistoryController(history)
+        val entry = SubtitleEntry(text = "same")
+        val selection = EditorEditHistory.Operation.ListChange(
+            before = EditorEditHistory.ListState(listOf(entry), emptySet()),
+            after = EditorEditHistory.ListState(listOf(entry.copy()), setOf(entry.stableId)),
+            description = "select"
+        )
+        val source = sourceChange("a", "b")
+        history.record(selection)
+        history.record(source)
+        val applied = mutableListOf<EditorEditHistory.Operation>()
+
+        assertTrue(controller.undo(true) { operation, _ -> applied += operation })
+        assertEquals(listOf(source), applied)
+        assertSame(source, history.peekRedo())
+        assertSame(selection, history.peekUndo())
+    }
+
+    @Test
+    fun historyControllerRestoresSkippedOperationsWhenNothingCanBeApplied() {
+        val history = EditorEditHistory()
+        val controller = EditorHistoryController(history)
+        val entry = SubtitleEntry(text = "same")
+        val selection = EditorEditHistory.Operation.ListChange(
+            before = EditorEditHistory.ListState(listOf(entry), emptySet()),
+            after = EditorEditHistory.ListState(listOf(entry.copy()), setOf(entry.stableId)),
+            description = "select"
+        )
+        history.record(selection)
+
+        assertFalse(controller.undo(true) { _, _ -> error("不应应用选择操作") })
+        assertSame(selection, history.peekUndo())
+    }
+
+    @Test
     fun differenceTreatsRowReorderingAsAContentStateChange() {
         val first = SubtitleEntry(text = "first")
         val second = SubtitleEntry(text = "second")
