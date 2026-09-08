@@ -148,6 +148,7 @@ internal class EditorViewModel : ViewModel() {
         set(value) { onEvent(EditorEvent.SetAudioOnlyFromVideo(value)) }
     val saveCoordinator = EditorSaveCoordinator()
     val editHistory = EditorEditHistory()
+    private val editHistoryController = EditorHistoryController(editHistory)
 
     fun startNewSubtitleDocument() = documentState.startNewSubtitleDocument()
 
@@ -159,9 +160,40 @@ internal class EditorViewModel : ViewModel() {
 
     fun replaceDocument(document: SubtitleDocument) = documentState.replaceDocument(document)
 
+    fun loadSubtitleContent(content: String, fileName: String? = null): SubtitleDocument {
+        val document = SubtitleParser.parseDocument(content, fileName)
+        documentState.replaceDocument(document)
+        documentState.originalFileContent = content
+        documentState.sourceViewContent = content
+        documentState.sourceViewNeedsListSync = false
+        documentState.hasUnsavedChanges = false
+        documentState.sourceHistoryTextSnapshot = content
+        onEvent(EditorEvent.SetDocumentLoaded(true))
+        return document
+    }
+
+    fun buildSaveContent(
+        sourceContent: String? = null,
+        requireNonEmptyList: Boolean = false
+    ): String? {
+        if (uiState.value.isSourceViewMode) return sourceContent ?: documentState.sourceViewContent
+        if (requireNonEmptyList && documentState.subtitleEntries.isEmpty()) return null
+        return SubtitleParser.serialize(documentState.subtitleDocument)
+    }
+
     fun execute(command: EditorCommand): EditorCommandResult {
         return command.execute(documentState)
     }
+
+    fun undo(
+        isSourceViewMode: Boolean,
+        apply: (EditorEditHistory.Operation, Boolean) -> Unit
+    ): Boolean = editHistoryController.undo(isSourceViewMode, apply)
+
+    fun redo(
+        isSourceViewMode: Boolean,
+        apply: (EditorEditHistory.Operation, Boolean) -> Unit
+    ): Boolean = editHistoryController.redo(isSourceViewMode, apply)
 
     fun onEvent(event: EditorEvent) {
         when (event) {

@@ -52,6 +52,35 @@ internal sealed interface EditorCommand {
         }
     }
 
+    data class UpdateTexts(
+        val updates: List<Pair<Int, String>>
+    ) : EditorCommand {
+        override fun execute(state: EditorDocumentState): EditorCommandResult {
+            val validUpdates = linkedMapOf<Int, String>()
+            updates.forEach { (position, text) ->
+                if (position in state.subtitleEntries.indices) validUpdates[position] = text
+            }
+            if (validUpdates.isEmpty()) return EditorCommandResult()
+
+            val removedPositions = validUpdates
+                .filterValues { it.isBlank() }
+                .keys
+                .sortedDescending()
+            validUpdates
+                .filterValues { it.isNotBlank() }
+                .forEach { (position, text) -> state.subtitleEntries[position].text = text }
+            removedPositions.forEach { state.subtitleEntries.removeAt(it) }
+            if (removedPositions.isNotEmpty()) {
+                state.subtitleEntries.forEachIndexed { index, entry -> entry.index = index + 1 }
+            }
+            return EditorCommandResult(
+                changedPositions = validUpdates.keys,
+                structureChanged = removedPositions.isNotEmpty(),
+                removedCount = removedPositions.size
+            )
+        }
+    }
+
     data class Delete(
         val positions: Set<Int>
     ) : EditorCommand {
@@ -83,5 +112,6 @@ internal sealed interface EditorCommand {
 
 internal data class EditorCommandResult(
     val changedPositions: Set<Int> = emptySet(),
-    val structureChanged: Boolean = false
+    val structureChanged: Boolean = false,
+    val removedCount: Int = 0
 )

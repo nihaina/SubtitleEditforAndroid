@@ -1,11 +1,26 @@
 package com.subtitleedit
 
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.util.SubtitleParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EditorCommandTest {
+    @Test
+    fun loadingAndSavingUsesTheSharedSubtitleDocument() {
+        val viewModel = EditorViewModel()
+        val source = "1\n00:00:01,000 --> 00:00:02,000\n你好\n"
+
+        val document = viewModel.loadSubtitleContent(source, "sample.srt")
+        val saved = viewModel.buildSaveContent(requireNonEmptyList = true)
+
+        assertEquals(SubtitleParser.SubtitleFormat.SRT, document.format)
+        assertEquals("你好", viewModel.subtitleDocument.entries.single().text)
+        assertTrue(saved?.contains("00:00:01,000 --> 00:00:02,000") == true)
+        assertTrue(saved?.contains("你好") == true)
+    }
+
     @Test
     fun textAndTimeCommandsUpdateTheSharedDocument() {
         val viewModel = EditorViewModel()
@@ -39,5 +54,23 @@ class EditorCommandTest {
         assertTrue(insertResult.structureChanged)
         assertEquals(listOf("插入", "第二"), viewModel.subtitleDocument.entries.map { it.text })
         assertEquals(second.stableId, viewModel.subtitleDocument.entries[1].stableId)
+    }
+
+    @Test
+    fun bulkTextCommandRemovesBlankRowsAndUpdatesIndices() {
+        val viewModel = EditorViewModel()
+        viewModel.subtitleEntries = mutableListOf(
+            SubtitleEntry(index = 1, text = "第一"),
+            SubtitleEntry(index = 2, text = "第二"),
+            SubtitleEntry(index = 3, text = "第三")
+        )
+
+        val result = viewModel.execute(
+            EditorCommand.UpdateTexts(listOf(1 to "", 2 to "更新"))
+        )
+
+        assertEquals(1, result.removedCount)
+        assertEquals(listOf("第一", "更新"), viewModel.subtitleDocument.entries.map { it.text })
+        assertEquals(listOf(1, 2), viewModel.subtitleDocument.entries.map { it.index })
     }
 }

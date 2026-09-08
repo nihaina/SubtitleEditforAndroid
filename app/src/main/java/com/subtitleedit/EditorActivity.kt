@@ -43,7 +43,6 @@ import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.CutPasteController
 import com.subtitleedit.util.SubtitlePasteOps
 import com.subtitleedit.util.SettingsManager
-import com.subtitleedit.util.SearchReplaceOps
 import com.subtitleedit.util.SubtitleEntryOps
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
@@ -193,9 +192,6 @@ class EditorActivity : AppCompatActivity() {
         set(value) { stateModel.clipboardTexts = value }
     private val editHistory: EditorEditHistory
         get() = stateModel.editHistory
-    private val editHistoryController: EditorHistoryController by lazy {
-        EditorHistoryController(editHistory)
-    }
     private var historyEntriesSnapshot: List<SubtitleEntry>
         get() = stateModel.historyEntriesSnapshot
         set(value) { stateModel.historyEntriesSnapshot = value }
@@ -582,7 +578,9 @@ class EditorActivity : AppCompatActivity() {
                 replaceSourceViewContent(content)
             },
             applyEntryUpdates = { updates ->
-                val result = SearchReplaceOps.applyEntryUpdates(subtitleEntries, updates)
+                val result = stateModel.execute(
+                    EditorCommand.UpdateTexts(updates.map { it.index to it.newText })
+                )
                 if (result.removedCount > 0) {
                     submitSubtitleList(refreshAll = true, markChanged = true)
                 } else {
@@ -1047,15 +1045,8 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun parseContent(content: String, fileName: String? = null) {
-        val document = SubtitleParser.parseDocument(content, fileName)
-        stateModel.replaceDocument(document)
+        val document = stateModel.loadSubtitleContent(content, fileName)
         currentFormat = document.format
-        
-        // 原始文本同时作为源视图的内存内容；两种视图的编辑都基于并更新这份文本。
-        originalFileContent = content
-        sourceViewContent = content
-        sourceHistoryTextSnapshot = content
-        sourceViewNeedsListSync = false
         
         if (currentFormat.isSourceOnly) {
             // Source-only documents still need a block model for waveform playback and for
@@ -1079,7 +1070,6 @@ class EditorActivity : AppCompatActivity() {
         syncWaveformSubtitles()
         scheduleSubtitlePreview()
         initializeEditHistoryBaseline(clearHistory = true)
-        stateModel.documentLoaded = true
     }
     
     /**
@@ -2004,7 +1994,7 @@ class EditorActivity : AppCompatActivity() {
     private fun undoEdit() {
         suppressHistoryRecording = true
         val applied = try {
-            editHistoryController.undo(isSourceViewMode, ::applyHistoryOperation)
+            stateModel.undo(isSourceViewMode, ::applyHistoryOperation)
         } finally {
             suppressHistoryRecording = false
         }
@@ -2020,7 +2010,7 @@ class EditorActivity : AppCompatActivity() {
     private fun redoEdit() {
         suppressHistoryRecording = true
         val applied = try {
-            editHistoryController.redo(isSourceViewMode, ::applyHistoryOperation)
+            stateModel.redo(isSourceViewMode, ::applyHistoryOperation)
         } finally {
             suppressHistoryRecording = false
         }
@@ -2876,7 +2866,7 @@ class EditorActivity : AppCompatActivity() {
     /** 把预览对话框中勾选应用的文本写回字幕列表。 */
     private fun applyPreviewTexts(appliedItems: List<TranslationPreviewItem>, actionName: String) {
         appliedItems.forEach { item ->
-            subtitleEntries.getOrNull(item.entryPosition)?.text = item.translatedText
+            stateModel.execute(EditorCommand.UpdateText(item.entryPosition, item.translatedText))
         }
         if (appliedItems.isNotEmpty()) {
             notifyEntriesChanged(appliedItems.map { it.entryPosition }, includeNeighbors = false)
@@ -3097,12 +3087,13 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun getCurrentEditableContent(requireNonEmptyList: Boolean = false): String? {
-        if (isSourceViewMode) return snapshotSourceViewContentIfNeeded()
-        if (requireNonEmptyList && subtitleEntries.isEmpty()) {
+        val sourceContent = if (isSourceViewMode) snapshotSourceViewContentIfNeeded() else null
+        val content = stateModel.buildSaveContent(sourceContent, requireNonEmptyList)
+        if (content == null) {
             showShortToast("没有内容可保存")
             return null
         }
-        return serializeEntriesForFormat(currentFormat)
+        return content
     }
 
     private fun ensureListMode(): Boolean {
@@ -3516,7 +3507,7 @@ class EditorActivity : AppCompatActivity() {
         if (!ensureMediaMode()) return
         
         val newStartTime = playbackController.currentPositionMs
-        entry.startTime = newStartTime
+        stateModel.execute(EditorCommand.UpdateTime(position, startTime = newStartTime))
         
         notifyEntriesChanged(listOf(position))
         
