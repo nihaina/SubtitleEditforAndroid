@@ -1564,7 +1564,7 @@ class EditorActivity : AppCompatActivity() {
         val historyBefore = currentHistoryListState()
         sortedPositions.forEach { position ->
             if (position < subtitleEntries.size) {
-                subtitleEntries.removeAt(position)
+                EditorDocumentOperations.removeAt(subtitleEntries, position)
             }
         }
         syncAfterDelete(deletedIndices, historyBefore)
@@ -1588,7 +1588,7 @@ class EditorActivity : AppCompatActivity() {
             }
 
             if (subtitleEntries.isEmpty()) {
-                subtitleEntries.add(targetSnapshot)
+                EditorDocumentOperations.addAt(subtitleEntries, 0, targetSnapshot)
                 targetPosition = 0
             }
             targetPosition = targetPosition.coerceIn(0, subtitleEntries.lastIndex)
@@ -1617,7 +1617,7 @@ class EditorActivity : AppCompatActivity() {
         if (position >= 0 && position < subtitleEntries.size) {
             showDeleteConfirm("确定要删除此字幕吗？") {
                     val historyBefore = currentHistoryListState()
-                    subtitleEntries.removeAt(position)
+                    EditorDocumentOperations.removeAt(subtitleEntries, position)
                     syncAfterDelete(setOf(position), historyBefore)
                     com.subtitleedit.util.OverwritingToast.makeText(this, "已删除", Toast.LENGTH_SHORT).show()
             }
@@ -1655,7 +1655,7 @@ class EditorActivity : AppCompatActivity() {
         insertedEntries.forEachIndexed { index, entry ->
             entry.index = insertPosition + index + 1
         }
-        subtitleEntries.addAll(insertPosition, insertedEntries)
+        EditorDocumentOperations.addAllAt(subtitleEntries, insertPosition, insertedEntries)
         submitSubtitleList(
             refreshAll = true,
             syncWaveform = false,
@@ -1686,7 +1686,7 @@ class EditorActivity : AppCompatActivity() {
         val insertPos = subtitleEntries.indexOfFirst { it.startTime > realStart }
             .let { if (it == -1) subtitleEntries.size else it }
 
-        subtitleEntries.add(insertPos, newEntry)
+        EditorDocumentOperations.addAt(subtitleEntries, insertPos, newEntry)
         submitSubtitleList(
             refreshAll = true,
             syncWaveform = false,
@@ -2468,7 +2468,7 @@ class EditorActivity : AppCompatActivity() {
         stateModel.startNewSubtitleDocument()
         clearSubtitleEntries()
         // 添加默认字幕行：3秒时长，文本"请输入文本"
-        subtitleEntries.add(SubtitleEntry(
+        EditorDocumentOperations.addAt(subtitleEntries, subtitleEntries.size, SubtitleEntry(
             index = 1,
             startTime = 0L,
             endTime = 3000L,
@@ -2776,7 +2776,7 @@ class EditorActivity : AppCompatActivity() {
                 val deletedIndices = selectedEntries.map { it.second }.toSet()
                 // 从后往前删除，避免索引变化
                 selectedEntries.sortedByDescending { it.second }.forEach { (_, position) ->
-                    subtitleEntries.removeAt(position)
+                    EditorDocumentOperations.removeAt(subtitleEntries, position)
                 }
                 syncAfterDelete(deletedIndices, historyBefore)
                 com.subtitleedit.util.OverwritingToast.makeText(this, "已删除 ${selectedEntries.size} 条字幕", Toast.LENGTH_SHORT).show()
@@ -2919,9 +2919,7 @@ class EditorActivity : AppCompatActivity() {
     private fun renumberEntries(force: Boolean = false) {
         val currentCount = subtitleEntries.size
         if (!force && currentCount == lastIndexedEntryCount) return
-        subtitleEntries.forEachIndexed { index, entry ->
-            entry.index = index + 1
-        }
+        EditorDocumentOperations.renumber(subtitleEntries)
         lastIndexedEntryCount = currentCount
     }
 
@@ -2976,13 +2974,15 @@ class EditorActivity : AppCompatActivity() {
             val removedCount = previousEntries.size - prefix - suffix
             val previousById = previousEntries.associateBy { it.stableId }
             val retainedEntries = associatedEntries.map { parsedEntry ->
-                previousById[parsedEntry.stableId]?.also { updateEntryFields(it, parsedEntry) }
+                previousById[parsedEntry.stableId]?.also {
+                    EditorDocumentOperations.updateFields(it, parsedEntry)
+                }
                     ?: parsedEntry
             }
             val inserted = retainedEntries.subList(prefix, retainedEntries.size - suffix)
-            subtitleEntries = previousEntries.toMutableList()
+            subtitleEntries = EditorDocumentOperations.replaceEntries(previousEntries)
             subtitleEntries.subList(prefix, prefix + removedCount).clear()
-            subtitleEntries.addAll(prefix, inserted)
+            EditorDocumentOperations.addAllAt(subtitleEntries, prefix, inserted)
             renumberEntries(force = true)
             pendingListIndexRefreshStart = minOf(
                 pendingListIndexRefreshStart ?: prefix,
@@ -3006,7 +3006,7 @@ class EditorActivity : AppCompatActivity() {
         changedPositions.forEach { position ->
             val target = subtitleEntries[position]
             val source = updatedEntries[position]
-            updateEntryFields(target, source)
+            EditorDocumentOperations.updateFields(target, source)
         }
         renumberEntries(force = true)
 
@@ -3028,16 +3028,6 @@ class EditorActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateEntryFields(target: SubtitleEntry, source: SubtitleEntry) {
-        target.index = source.index
-        target.startTime = source.startTime
-        target.endTime = source.endTime
-        target.text = source.text
-        target.endTimeModified = source.endTimeModified
-        target.cueIdentifier = source.cueIdentifier
-        target.cueSettings = source.cueSettings
-    }
-
     /**
      * Distinguish an empty-but-valid source document from a temporarily malformed cue.  Once
      * the last timing marker has actually been removed, the old waveform blocks must be
@@ -3054,7 +3044,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun clearSubtitleEntries() {
-        subtitleEntries.clear()
+        EditorDocumentOperations.clear(subtitleEntries)
         renumberEntries(force = true)
     }
     
