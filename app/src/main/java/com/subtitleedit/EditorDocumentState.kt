@@ -3,6 +3,7 @@ package com.subtitleedit
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
+import com.subtitleedit.util.subtitle.SubtitleDocument
 import java.io.File
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
@@ -25,6 +26,8 @@ internal class EditorDocumentState {
     var lastIndexedEntryCount = -1
     var currentCharset: Charset = StandardCharsets.UTF_8
     var currentFormat: SubtitleParser.SubtitleFormat = SubtitleParser.SubtitleFormat.UNKNOWN
+    var documentHeader = ""
+    var documentFooter = ""
     var originalFileContent = ""
     var sourceViewContent = ""
     var sourceViewNeedsListSync = false
@@ -37,6 +40,21 @@ internal class EditorDocumentState {
     var historySelectionSnapshot: Set<Long> = emptySet()
     var sourceHistoryTextSnapshot = ""
     var historyBaselineInitialized = false
+
+    val subtitleDocument: SubtitleDocument
+        get() = SubtitleDocument(
+            format = currentFormat,
+            entries = subtitleEntries.map { it.copy() },
+            header = documentHeader,
+            footer = documentFooter
+        )
+
+    fun replaceDocument(document: SubtitleDocument) {
+        currentFormat = document.format
+        documentHeader = document.header
+        documentFooter = document.footer
+        subtitleEntries = document.entries.map { it.copy() }.toMutableList()
+    }
 
     fun startNewSubtitleDocument() {
         clearSubtitleDocumentReference()

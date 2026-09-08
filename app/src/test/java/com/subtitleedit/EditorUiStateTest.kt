@@ -4,6 +4,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 
 class EditorUiStateTest {
     @Test
@@ -46,5 +51,20 @@ class EditorUiStateTest {
         assertEquals(EditorUiState(), viewModel.uiState.value)
         assertFalse(viewModel.isSourceViewMode)
         assertEquals(1.0f, viewModel.playbackSpeed)
+    }
+
+    @Test
+    fun menuRefreshEventEmitsAnEffect() = runBlocking {
+        val viewModel = EditorViewModel()
+        val received = CompletableDeferred<EditorEffect>()
+        val collector = launch {
+            viewModel.effects.collect { received.complete(it) }
+        }
+        yield()
+
+        viewModel.onEvent(EditorEvent.RequestOptionsMenuRefresh)
+
+        assertEquals(EditorEffect.InvalidateOptionsMenu, received.await())
+        collector.cancel()
     }
 }

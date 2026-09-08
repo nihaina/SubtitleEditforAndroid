@@ -348,16 +348,26 @@ class EditorActivity : AppCompatActivity() {
 
     private fun observeUiState() {
         lifecycleScope.launch {
-            repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
-                stateModel.uiState.collect { state ->
-                    val previous = lastRenderedUiState
-                    lastRenderedUiState = state
-                    if (previous == null ||
-                        previous.isSourceViewMode != state.isSourceViewMode ||
-                        previous.selectedIndices != state.selectedIndices ||
-                        previous.documentLoaded != state.documentLoaded
-                    ) {
-                        invalidateOptionsMenu()
+                repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                launch {
+                    stateModel.uiState.collect { state ->
+                        val previous = lastRenderedUiState
+                        lastRenderedUiState = state
+                        if (previous == null ||
+                            previous.isSourceViewMode != state.isSourceViewMode ||
+                            previous.selectedIndices != state.selectedIndices ||
+                            previous.documentLoaded != state.documentLoaded
+                        ) {
+                            stateModel.onEvent(EditorEvent.RequestOptionsMenuRefresh)
+                        }
+                    }
+                }
+                launch {
+                    stateModel.effects.collect { effect ->
+                        when (effect) {
+                            EditorEffect.InvalidateOptionsMenu -> invalidateOptionsMenu()
+                            is EditorEffect.ShowMessage -> showShortToast(effect.message)
+                        }
                     }
                 }
             }
@@ -549,9 +559,7 @@ class EditorActivity : AppCompatActivity() {
                 val updatedText = binding.etSourceView.getDocumentText()
                 recordSourceTextChange(sourceHistoryTextSnapshot, updatedText)
                 sourceHistoryTextSnapshot = updatedText
-                sourceViewContent = updatedText
-                originalFileContent = updatedText
-                hasUnsavedChanges = true
+                stateModel.setSourceDocumentContent(updatedText)
                 sourceViewHasPendingEdits = true
                 sourceViewEditGeneration++
                 // SourceEditorView keeps one editable block per physical line. The debounced
@@ -1040,6 +1048,7 @@ class EditorActivity : AppCompatActivity() {
     
     private fun parseContent(content: String, fileName: String? = null) {
         val document = SubtitleParser.parseDocument(content, fileName)
+        stateModel.replaceDocument(document)
         currentFormat = document.format
         
         // 原始文本同时作为源视图的内存内容；两种视图的编辑都基于并更新这份文本。
@@ -1556,9 +1565,9 @@ class EditorActivity : AppCompatActivity() {
         if (!ensureListMode()) return
         
         if (position >= 0 && position < subtitleEntries.size) {
-            showDeleteConfirm("确定要删除此字幕吗？") {
+                showDeleteConfirm("确定要删除此字幕吗？") {
                     val historyBefore = currentHistoryListState()
-                    EditorDocumentOperations.removeAt(subtitleEntries, position)
+                    stateModel.execute(EditorCommand.Delete(setOf(position)))
                     syncAfterDelete(setOf(position), historyBefore)
                     com.subtitleedit.util.OverwritingToast.makeText(this, "已删除", Toast.LENGTH_SHORT).show()
             }
@@ -1596,7 +1605,8 @@ class EditorActivity : AppCompatActivity() {
         insertedEntries.forEachIndexed { index, entry ->
             entry.index = insertPosition + index + 1
         }
-        EditorDocumentOperations.addAllAt(subtitleEntries, insertPosition, insertedEntries)
+        stateModel.execute(EditorCommand.Insert(insertPosition, insertedEntries))
+        renumberEntries(force = true)
         submitSubtitleList(
             refreshAll = true,
             syncWaveform = false,
@@ -1627,7 +1637,8 @@ class EditorActivity : AppCompatActivity() {
         val insertPos = subtitleEntries.indexOfFirst { it.startTime > realStart }
             .let { if (it == -1) subtitleEntries.size else it }
 
-        EditorDocumentOperations.addAt(subtitleEntries, insertPos, newEntry)
+        stateModel.execute(EditorCommand.Insert(insertPos, listOf(newEntry)))
+        renumberEntries(force = true)
         submitSubtitleList(
             refreshAll = true,
             syncWaveform = false,
@@ -1655,12 +1666,7 @@ class EditorActivity : AppCompatActivity() {
         
         val selectedEntries = requireSelectedEntries("没有选中的字幕") ?: return
         
-        // 保存选中的条目对象（用于同步选中状态）
-        val selectedEntryObjects = selectedEntries.map { it.first }.toSet()
-        
-        // 应用时间偏移
-        EditorDocumentOperations.applyOffsetAll(selectedEntryObjects, offsetMs)
-        
+        stateModel.execute(EditorCommand.ApplyOffset(selectedEntries.map { it.second }.toSet(), offsetMs))
         notifyEntriesChanged(selectedEntries.map { it.second })
         showShortToast("已对选中项应用 ${offsetMs}ms 偏移")
     }
@@ -1681,15 +1687,12 @@ class EditorActivity : AppCompatActivity() {
             .setPositiveButton("确定") { _, _ ->
                 val newTime = TimeUtils.parseFromInput(editText.text.toString())
                 if (newTime != null) {
-                    if (isStartTime) {
-                        entry.startTime = newTime
+                    val result = if (isStartTime) {
+                        stateModel.execute(EditorCommand.UpdateTime(position, startTime = newTime))
                     } else {
-                        entry.endTime = newTime
-                        // 用户修改了结束时间，设置标记
-                        entry.endTimeModified = true
+                        stateModel.execute(EditorCommand.UpdateTime(position, endTime = newTime))
                     }
-                    
-                    onEntryUpdated(position)
+                    if (result.changedPositions.isNotEmpty()) onEntryUpdated(position)
                 } else {
                     showShortToast("时间格式无效")
                 }
@@ -1710,8 +1713,10 @@ class EditorActivity : AppCompatActivity() {
             .setTitle("编辑字幕文本")
             .setView(editText)
             .setPositiveButton("确定") { _, _ ->
-                entry.text = editText.text.toString()
-                onEntryUpdated(position)
+                val result = stateModel.execute(
+                    EditorCommand.UpdateText(position, editText.text.toString())
+                )
+                if (result.changedPositions.isNotEmpty()) onEntryUpdated(position)
             }
             .setNegativeButton("取消", null)
             .show()
@@ -2722,20 +2727,20 @@ class EditorActivity : AppCompatActivity() {
             // 有长按位置，对长按的那一行应用偏移（无论是否有选中状态）
             longClickPos >= 0 && longClickPos < subtitleEntries.size -> {
                 val entry = subtitleEntries[longClickPos]
-                EditorDocumentOperations.applyOffset(entry, offsetMs)
+                stateModel.execute(EditorCommand.ApplyOffset(setOf(longClickPos), offsetMs))
                 
                 notifyEntriesChanged(listOf(longClickPos))
             }
             // 没有长按位置但有选中的字幕，对选中的字幕应用偏移
             subtitleAdapter.getSelectedCount() > 0 -> {
                 val selectedEntries = subtitleAdapter.getSelectedEntries()
-                EditorDocumentOperations.applyOffsetAll(selectedEntries.map { it.first }, offsetMs)
+                stateModel.execute(EditorCommand.ApplyOffset(selectedEntries.map { it.second }.toSet(), offsetMs))
                 
                 notifyEntriesChanged(selectedEntries.map { it.second })
             }
             // 都没有，对所有字幕应用偏移
             else -> {
-                EditorDocumentOperations.applyOffsetAll(subtitleEntries, offsetMs)
+                stateModel.execute(EditorCommand.ApplyOffset(subtitleEntries.indices.toSet(), offsetMs))
                 
                 submitSubtitleList(refreshAll = true, markChanged = true)
             }
@@ -2751,11 +2756,7 @@ class EditorActivity : AppCompatActivity() {
         showDeleteConfirm("确定要删除选中的字幕吗？") {
                 val historyBefore = currentHistoryListState()
                 val deletedIndices = selectedEntries.map { it.second }.toSet()
-                // 从后往前删除，避免索引变化
-                EditorDocumentOperations.removeAtDescending(
-                    subtitleEntries,
-                    selectedEntries.map { it.second }
-                )
+                stateModel.execute(EditorCommand.Delete(deletedIndices))
                 syncAfterDelete(deletedIndices, historyBefore)
                 com.subtitleedit.util.OverwritingToast.makeText(this, "已删除 ${selectedEntries.size} 条字幕", Toast.LENGTH_SHORT).show()
         }
@@ -3081,31 +3082,18 @@ class EditorActivity : AppCompatActivity() {
         format: SubtitleParser.SubtitleFormat,
         entries: List<SubtitleEntry>
     ): String {
-        return when (format) {
-            SubtitleParser.SubtitleFormat.SRT -> SubtitleParser.toSRT(entries)
-            SubtitleParser.SubtitleFormat.LRC -> SubtitleParser.toLRC(
-                entries,
-                SubtitleParser.parseDocument(
-                    originalFileContent,
-                    format = SubtitleParser.SubtitleFormat.LRC
-                ).header
+        if (format == SubtitleParser.SubtitleFormat.ASS ||
+            format == SubtitleParser.SubtitleFormat.SSA
+        ) return sourceViewContent
+
+        return SubtitleParser.serialize(
+            stateModel.subtitleDocument.copy(
+                format = format,
+                entries = entries.map { it.copy() },
+                header = stateModel.documentHeader,
+                footer = stateModel.documentFooter
             )
-            SubtitleParser.SubtitleFormat.TXT -> SubtitleParser.toTXT(entries)
-            SubtitleParser.SubtitleFormat.ASS,
-            SubtitleParser.SubtitleFormat.SSA -> sourceViewContent
-            SubtitleParser.SubtitleFormat.VTT -> {
-                val originalDocument = SubtitleParser.parseDocument(
-                    originalFileContent,
-                    format = SubtitleParser.SubtitleFormat.VTT
-                )
-                SubtitleParser.toVTT(
-                    entries,
-                    originalDocument.header.ifBlank { "WEBVTT" },
-                    originalDocument.footer
-                )
-            }
-            else -> SubtitleParser.toSRT(entries)
-        }
+        )
     }
 
     private fun getCurrentEditableContent(requireNonEmptyList: Boolean = false): String? {
