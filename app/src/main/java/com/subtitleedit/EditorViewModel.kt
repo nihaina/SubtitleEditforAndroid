@@ -93,12 +93,27 @@ internal class EditorViewModel : ViewModel() {
     var isSourceViewMode: Boolean
         get() = uiState.value.isSourceViewMode
         set(value) { updateUiState { copy(isSourceViewMode = value) } }
+    var isSourceViewTransitioning: Boolean
+        get() = uiState.value.isSourceViewTransitioning
+        set(value) { updateUiState { copy(isSourceViewTransitioning = value) } }
+    var sourceViewEntryCount: Int
+        get() = uiState.value.sourceViewEntryCount
+        set(value) { updateUiState { copy(sourceViewEntryCount = value) } }
     var savedScrollPosition: Int
         get() = uiState.value.savedScrollPosition
         set(value) { updateUiState { copy(savedScrollPosition = value) } }
     var savedFirstVisibleItemPosition: Int
         get() = uiState.value.savedFirstVisibleItemPosition
         set(value) { updateUiState { copy(savedFirstVisibleItemPosition = value) } }
+    var isVideoFullscreen: Boolean
+        get() = uiState.value.isVideoFullscreen
+        set(value) { updateUiState { copy(isVideoFullscreen = value) } }
+    var previousRequestedOrientation: Int
+        get() = uiState.value.previousRequestedOrientation
+        set(value) { updateUiState { copy(previousRequestedOrientation = value) } }
+    var videoViewportInlineIndex: Int
+        get() = uiState.value.videoViewportInlineIndex
+        set(value) { updateUiState { copy(videoViewportInlineIndex = value) } }
     var selectedIndices: Set<Int>
         get() = uiState.value.selectedIndices
         set(value) { updateUiState { copy(selectedIndices = value) } }

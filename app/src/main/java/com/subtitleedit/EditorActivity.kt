@@ -125,14 +125,18 @@ class EditorActivity : AppCompatActivity() {
     private var suppressSourceViewChanges = false
     private var sourceViewHasPendingEdits = false
     private var sourceViewTransitionJob: Job? = null
-    private var isSourceViewTransitioning = false
+    private var isSourceViewTransitioning: Boolean
+        get() = stateModel.isSourceViewTransitioning
+        set(value) { stateModel.isSourceViewTransitioning = value }
     private var sourceViewPreviewJob: Job? = null
     private var sourceViewWaveformSyncJob: Job? = null
     private var pendingSourceWaveformSync: SourceWaveformSyncRequest? = null
     private var sourceWaveformHistoryKey: Long? = null
     private var sourceWaveformHistoryStart: String? = null
     private var sourceWaveformHistoryEntries: List<SubtitleEntry>? = null
-    private var sourceViewEntryCount = 0
+    private var sourceViewEntryCount: Int
+        get() = stateModel.sourceViewEntryCount
+        set(value) { stateModel.sourceViewEntryCount = value }
     private var sourceViewEditGeneration = 0L
     private var sourceViewEntriesGeneration = -1L
     private var pendingListIndexRefreshStart: Int? = null
@@ -231,9 +235,15 @@ class EditorActivity : AppCompatActivity() {
     private lateinit var subtitlePreviewController: EditorSubtitlePreviewController
     private var waveformMediaFile: File? = null
     private var waveformAudioStreamIndex: Int? = null
-    private var isVideoFullscreen = false
-    private var previousRequestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-    private var videoViewportInlineIndex = 0
+    private var isVideoFullscreen: Boolean
+        get() = stateModel.isVideoFullscreen
+        set(value) { stateModel.isVideoFullscreen = value }
+    private var previousRequestedOrientation: Int
+        get() = stateModel.previousRequestedOrientation
+        set(value) { stateModel.previousRequestedOrientation = value }
+    private var videoViewportInlineIndex: Int
+        get() = stateModel.videoViewportInlineIndex
+        set(value) { stateModel.videoViewportInlineIndex = value }
     private var lastRenderedUiState: EditorUiState? = null
 
     // 文件选择器
