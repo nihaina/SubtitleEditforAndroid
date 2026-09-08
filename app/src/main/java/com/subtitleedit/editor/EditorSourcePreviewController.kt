@@ -19,6 +19,7 @@ internal class EditorSourcePreviewController(
     private val currentFormat: () -> SubtitleParser.SubtitleFormat,
     private val snapshotContent: () -> String,
     private val onParsed: (Long, String, SubtitleDocument) -> Unit,
+    private val debounceMillis: Long = 350L,
     private val parseDocument: suspend (String, SubtitleParser.SubtitleFormat) -> SubtitleDocument =
         { content, format ->
             withContext(Dispatchers.Default) {
@@ -35,7 +36,7 @@ internal class EditorSourcePreviewController(
         previewJob?.cancel()
         val scheduledGeneration = editGeneration()
         previewJob = scope.launch {
-            delay(350L)
+            delay(debounceMillis)
             if (
                 !isSourceViewMode() ||
                 suppressSourceViewChanges() ||
@@ -55,7 +56,7 @@ internal class EditorSourcePreviewController(
     fun scheduleListPreview(onReady: () -> Unit) {
         previewJob?.cancel()
         previewJob = scope.launch {
-            delay(350L)
+            delay(debounceMillis)
             if (!coroutineContext.isActive || isSourceViewMode()) return@launch
             onReady()
         }
