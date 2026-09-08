@@ -9,6 +9,17 @@ internal object EditorDocumentOperations {
         return entries.removeAt(position)
     }
 
+    fun removeAtDescending(
+        entries: MutableList<SubtitleEntry>,
+        positions: Iterable<Int>
+    ): List<SubtitleEntry> {
+        return positions
+            .distinct()
+            .sortedDescending()
+            .filter { it in entries.indices }
+            .map { removeAt(entries, it) }
+    }
+
     fun addAt(
         entries: MutableList<SubtitleEntry>,
         position: Int,
@@ -42,6 +53,19 @@ internal object EditorDocumentOperations {
         target.endTimeModified = source.endTimeModified
         target.cueIdentifier = source.cueIdentifier
         target.cueSettings = source.cueSettings
+    }
+
+    fun updateText(entry: SubtitleEntry, text: String) {
+        entry.text = text
+    }
+
+    fun applyOffset(entry: SubtitleEntry, offsetMs: Long) {
+        entry.startTime = (entry.startTime + offsetMs).coerceAtLeast(0)
+        entry.endTime = (entry.endTime + offsetMs).coerceAtLeast(entry.startTime + 1)
+    }
+
+    fun applyOffsetAll(entries: Iterable<SubtitleEntry>, offsetMs: Long) {
+        entries.forEach { applyOffset(it, offsetMs) }
     }
 
     fun renumber(entries: List<SubtitleEntry>) {

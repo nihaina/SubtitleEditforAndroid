@@ -18,7 +18,9 @@ internal class EditorEditHistory {
         data class ListChange(
             val before: ListState,
             val after: ListState,
-            override val description: String
+            override val description: String,
+            val beforeSourceText: String? = null,
+            val afterSourceText: String? = null
         ) : Operation()
 
         data class SourceChange(
@@ -26,7 +28,9 @@ internal class EditorEditHistory {
             val afterText: String,
             override val description: String,
             val beforeEntries: List<SubtitleEntry> = emptyList(),
-            var afterEntries: List<SubtitleEntry>? = null
+            val beforeEntriesText: String? = null,
+            var afterEntries: List<SubtitleEntry>? = null,
+            var afterEntriesText: String? = null
         ) : Operation()
     }
 
@@ -81,6 +85,7 @@ internal class EditorEditHistory {
         val operation = undoStack.lastOrNull() as? Operation.SourceChange ?: return
         if (operation.afterText == afterText) {
             operation.afterEntries = entries.map { it.copy() }
+            operation.afterEntriesText = afterText
         }
     }
 

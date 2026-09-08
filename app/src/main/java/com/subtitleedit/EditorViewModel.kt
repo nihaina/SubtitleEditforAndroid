@@ -6,13 +6,23 @@ import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
 import java.io.File
 import java.nio.charset.Charset
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 internal class EditorViewModel : ViewModel() {
     /** Document-owned state. Compatibility properties below keep the current UI unchanged. */
     val documentState = EditorDocumentState()
 
-    var initialized = false
-    var documentLoaded = false
+    private val _uiState = MutableStateFlow(EditorUiState())
+    val uiState: StateFlow<EditorUiState> = _uiState.asStateFlow()
+
+    var initialized: Boolean
+        get() = uiState.value.initialized
+        set(value) { updateUiState { copy(initialized = value) } }
+    var documentLoaded: Boolean
+        get() = uiState.value.documentLoaded
+        set(value) { updateUiState { copy(documentLoaded = value) } }
     var filePath: String
         get() = documentState.filePath
         set(value) { documentState.filePath = value }
@@ -80,14 +90,30 @@ internal class EditorViewModel : ViewModel() {
         get() = documentState.historyBaselineInitialized
         set(value) { documentState.historyBaselineInitialized = value }
 
-    var isSourceViewMode = false
-    var savedScrollPosition = 0
-    var savedFirstVisibleItemPosition = 0
-    var selectedIndices: Set<Int> = emptySet()
-    var playbackPositionMs = 0L
-    var playbackSpeed = 1.0f
-    var selectedAudioStreamIndex: Int? = null
-    var isAudioOnlyFromVideo = false
+    var isSourceViewMode: Boolean
+        get() = uiState.value.isSourceViewMode
+        set(value) { updateUiState { copy(isSourceViewMode = value) } }
+    var savedScrollPosition: Int
+        get() = uiState.value.savedScrollPosition
+        set(value) { updateUiState { copy(savedScrollPosition = value) } }
+    var savedFirstVisibleItemPosition: Int
+        get() = uiState.value.savedFirstVisibleItemPosition
+        set(value) { updateUiState { copy(savedFirstVisibleItemPosition = value) } }
+    var selectedIndices: Set<Int>
+        get() = uiState.value.selectedIndices
+        set(value) { updateUiState { copy(selectedIndices = value) } }
+    var playbackPositionMs: Long
+        get() = uiState.value.playbackPositionMs
+        set(value) { updateUiState { copy(playbackPositionMs = value) } }
+    var playbackSpeed: Float
+        get() = uiState.value.playbackSpeed
+        set(value) { updateUiState { copy(playbackSpeed = value) } }
+    var selectedAudioStreamIndex: Int?
+        get() = uiState.value.selectedAudioStreamIndex
+        set(value) { updateUiState { copy(selectedAudioStreamIndex = value) } }
+    var isAudioOnlyFromVideo: Boolean
+        get() = uiState.value.isAudioOnlyFromVideo
+        set(value) { updateUiState { copy(isAudioOnlyFromVideo = value) } }
     val saveCoordinator = EditorSaveCoordinator()
     val editHistory = EditorEditHistory()
 
@@ -98,4 +124,8 @@ internal class EditorViewModel : ViewModel() {
 
     fun saveUriSubtitleDocument(uri: String, subtitleTitle: String) =
         documentState.saveUriSubtitleDocument(uri, subtitleTitle)
+
+    private inline fun updateUiState(transform: EditorUiState.() -> EditorUiState) {
+        _uiState.value = transform(_uiState.value)
+    }
 }

@@ -67,4 +67,29 @@ class EditorDocumentOperationsTest {
         assertEquals(2, second.index)
         assertEquals(stableIds, listOf(first.stableId, second.stableId))
     }
+
+    @Test
+    fun removeAtDescendingRemovesOriginalPositionsWithoutIndexShift() {
+        val entries = mutableListOf(
+            SubtitleEntry(text = "0"),
+            SubtitleEntry(text = "1"),
+            SubtitleEntry(text = "2"),
+            SubtitleEntry(text = "3")
+        )
+
+        val removed = EditorDocumentOperations.removeAtDescending(entries, listOf(1, 3))
+
+        assertEquals(listOf("3", "1"), removed.map { it.text })
+        assertEquals(listOf("0", "2"), entries.map { it.text })
+    }
+
+    @Test
+    fun applyOffsetUsesTheExistingTimingConstraints() {
+        val entry = SubtitleEntry(startTime = 1000L, endTime = 2000L)
+
+        EditorDocumentOperations.applyOffset(entry, -1500L)
+
+        assertEquals(0L, entry.startTime)
+        assertEquals(500L, entry.endTime)
+    }
 }

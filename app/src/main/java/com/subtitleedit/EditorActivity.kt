@@ -65,6 +65,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 
 /**
  * 字幕编辑界面
@@ -230,6 +231,7 @@ class EditorActivity : AppCompatActivity() {
     private var isVideoFullscreen = false
     private var previousRequestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     private var videoViewportInlineIndex = 0
+    private var lastRenderedUiState: EditorUiState? = null
 
     // 文件选择器
     private val openFileLauncher = registerForActivityResult(
@@ -318,6 +320,7 @@ class EditorActivity : AppCompatActivity() {
         setupMediaActions()
         setupVideoPanel()
         setupBackPressedHandler()
+        observeUiState()
         
         if (stateModel.documentLoaded) {
             restoreDocumentState()
@@ -329,6 +332,24 @@ class EditorActivity : AppCompatActivity() {
                 loadMediaFile(subtitleFilePath)
             } else {
                 loadFile()
+            }
+        }
+    }
+
+    private fun observeUiState() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                stateModel.uiState.collect { state ->
+                    val previous = lastRenderedUiState
+                    lastRenderedUiState = state
+                    if (previous == null ||
+                        previous.isSourceViewMode != state.isSourceViewMode ||
+                        previous.selectedIndices != state.selectedIndices ||
+                        previous.documentLoaded != state.documentLoaded
+                    ) {
+                        invalidateOptionsMenu()
+                    }
+                }
             }
         }
     }
@@ -1562,11 +1583,7 @@ class EditorActivity : AppCompatActivity() {
         val deletedIndices = cutPasteController.snapshotDeletedIndices()
         val sortedPositions = cutPasteController.consumeDeletedIndicesDesc()
         val historyBefore = currentHistoryListState()
-        sortedPositions.forEach { position ->
-            if (position < subtitleEntries.size) {
-                EditorDocumentOperations.removeAt(subtitleEntries, position)
-            }
-        }
+        EditorDocumentOperations.removeAtDescending(subtitleEntries, sortedPositions)
         syncAfterDelete(deletedIndices, historyBefore)
     }
     
@@ -1718,7 +1735,7 @@ class EditorActivity : AppCompatActivity() {
         val selectedEntryObjects = selectedEntries.map { it.first }.toSet()
         
         // 应用时间偏移
-        SubtitleEntryOps.applyOffsetAll(selectedEntryObjects, offsetMs)
+        EditorDocumentOperations.applyOffsetAll(selectedEntryObjects, offsetMs)
         
         notifyEntriesChanged(selectedEntries.map { it.second })
         showShortToast("已对选中项应用 ${offsetMs}ms 偏移")
@@ -1949,16 +1966,21 @@ class EditorActivity : AppCompatActivity() {
         }
         val difference = EditorEditHistory.difference(before, after)
         if (!difference.isEmpty) {
-            if (difference.deleted.isNotEmpty() || difference.added.isNotEmpty() ||
-                difference.modified.isNotEmpty() || difference.orderChanged
-            ) {
+            val hasStructuralChange = difference.deleted.isNotEmpty() ||
+                difference.added.isNotEmpty() || difference.orderChanged
+            val hasContentChange = hasStructuralChange || difference.modified.isNotEmpty()
+            val beforeSourceText = originalFileContent
+            if (hasContentChange) {
                 syncListChangesToMemory(before.entries, after.entries)
             }
+            val afterSourceText = originalFileContent
             editHistory.record(
                 EditorEditHistory.Operation.ListChange(
                     before = before,
                     after = after,
-                    description = describeListStateChange(difference)
+                    description = describeListStateChange(difference),
+                    beforeSourceText = beforeSourceText.takeIf { hasContentChange },
+                    afterSourceText = afterSourceText.takeIf { hasContentChange }
                 )
             )
         }
@@ -1975,12 +1997,19 @@ class EditorActivity : AppCompatActivity() {
     ) {
         if (suppressHistoryRecording || !isSourceViewMode || !historyBaselineInitialized) return
         if (beforeText == afterText) return
+        val cachedBeforeEntries = beforeEntries ?: subtitleEntries
+            .takeIf {
+                sourceViewEntriesGeneration == sourceViewEditGeneration &&
+                    sourceHistoryTextSnapshot == beforeText
+            }
+            ?.map { it.copy() }
         editHistory.record(
             EditorEditHistory.Operation.SourceChange(
                 beforeText = beforeText,
                 afterText = afterText,
                 description = describeSourceTextChange(beforeText, afterText),
-                beforeEntries = beforeEntries ?: subtitleEntries.map { it.copy() }
+                beforeEntries = cachedBeforeEntries ?: emptyList(),
+                beforeEntriesText = beforeText.takeIf { cachedBeforeEntries != null }
             )
         )
         sourceHistoryTextSnapshot = afterText
@@ -2102,33 +2131,52 @@ class EditorActivity : AppCompatActivity() {
         when (operation) {
             is EditorEditHistory.Operation.ListChange -> {
                 val target = if (undo) operation.before else operation.after
-                if (isSourceViewMode) {
-                    applyListHistoryInSourceView(target.entries)
+                val targetSourceText = if (undo) {
+                    operation.beforeSourceText
                 } else {
-                    applyListHistoryInListView(target)
+                    operation.afterSourceText
+                }
+                if (isSourceViewMode) {
+                    applyListHistoryInSourceView(target.entries, targetSourceText)
+                } else {
+                    applyListHistoryInListView(target, targetSourceText)
                 }
             }
             is EditorEditHistory.Operation.SourceChange -> {
                 val targetText = if (undo) operation.beforeText else operation.afterText
-                val targetEntries = if (undo) operation.beforeEntries else operation.afterEntries
+                val targetEntries = if (undo) {
+                    operation.beforeEntries.takeIf { operation.beforeEntriesText == operation.beforeText }
+                } else {
+                    operation.afterEntries?.takeIf { operation.afterEntriesText == operation.afterText }
+                }
                 applySourceHistoryText(targetText, targetEntries)
             }
         }
     }
 
-    private fun applyListHistoryInSourceView(targetEntries: List<SubtitleEntry>) {
-        val source = sourceViewContent
-        val currentEntries = SubtitleParser.parseDocument(source, format = currentFormat).entries
-        val effectiveTargetEntries = SubtitleEntryOps.applyEditableHistoryTarget(
-            current = subtitleEntries,
-            target = targetEntries
-        )
-        val updated = SubtitleSourceSynchronizer.apply(
-            content = source,
-            format = currentFormat,
-            oldEntries = currentEntries,
-            newEntries = effectiveTargetEntries
-        )
+    private fun applyListHistoryInSourceView(
+        targetEntries: List<SubtitleEntry>,
+        targetSourceText: String?
+    ) {
+        val effectiveTargetEntries: List<SubtitleEntry>
+        val updated: String
+        if (targetSourceText != null) {
+            effectiveTargetEntries = targetEntries
+            updated = targetSourceText
+        } else {
+            val source = sourceViewContent
+            val currentEntries = SubtitleParser.parseDocument(source, format = currentFormat).entries
+            effectiveTargetEntries = SubtitleEntryOps.applyEditableHistoryTarget(
+                current = subtitleEntries,
+                target = targetEntries
+            )
+            updated = SubtitleSourceSynchronizer.apply(
+                content = source,
+                format = currentFormat,
+                oldEntries = currentEntries,
+                newEntries = effectiveTargetEntries
+            )
+        }
         originalFileContent = updated
         sourceViewContent = updated
         sourceHistoryTextSnapshot = updated
@@ -2137,25 +2185,35 @@ class EditorActivity : AppCompatActivity() {
         updateFormatInfo()
     }
 
-    private fun applyListHistoryInListView(target: EditorEditHistory.ListState) {
-        if (canRestoreListEntriesInPlace(target.entries)) {
+    private fun applyListHistoryInListView(
+        target: EditorEditHistory.ListState,
+        targetSourceText: String?
+    ) {
+        if (targetSourceText == null && canRestoreListEntriesInPlace(target.entries)) {
             restoreListEntriesInPlace(target)
             return
         }
 
         val previousCount = subtitleEntries.size
-        val source = originalFileContent
-        val currentEntries = SubtitleParser.parseDocument(source, format = currentFormat).entries
-        val effectiveTargetEntries = SubtitleEntryOps.applyEditableHistoryTarget(
-            current = subtitleEntries,
-            target = target.entries
-        )
-        val updatedSource = SubtitleSourceSynchronizer.apply(
-            content = source,
-            format = currentFormat,
-            oldEntries = currentEntries,
-            newEntries = effectiveTargetEntries
-        )
+        val effectiveTargetEntries: List<SubtitleEntry>
+        val updatedSource: String
+        if (targetSourceText != null) {
+            effectiveTargetEntries = target.entries
+            updatedSource = targetSourceText
+        } else {
+            val source = originalFileContent
+            val currentEntries = SubtitleParser.parseDocument(source, format = currentFormat).entries
+            effectiveTargetEntries = SubtitleEntryOps.applyEditableHistoryTarget(
+                current = subtitleEntries,
+                target = target.entries
+            )
+            updatedSource = SubtitleSourceSynchronizer.apply(
+                content = source,
+                format = currentFormat,
+                oldEntries = currentEntries,
+                newEntries = effectiveTargetEntries
+            )
+        }
         originalFileContent = updatedSource
         sourceViewContent = updatedSource
         sourceHistoryTextSnapshot = updatedSource
@@ -2227,7 +2285,9 @@ class EditorActivity : AppCompatActivity() {
     private fun applySourceDeletionLocally(content: String): Boolean {
         val operation = editHistory.peekUndo() as? EditorEditHistory.Operation.SourceChange
             ?: return false
-        if (operation.afterText != content || operation.beforeEntries.isEmpty()) return false
+        if (operation.afterText != content ||
+            operation.beforeEntriesText != operation.beforeText
+        ) return false
         val before = operation.beforeText
         val prefix = commonTextPrefix(before, content)
         val suffix = commonTextSuffix(before, content, prefix)
@@ -2294,12 +2354,25 @@ class EditorActivity : AppCompatActivity() {
         originalFileContent = targetText
         sourceViewContent = targetText
         sourceHistoryTextSnapshot = targetText
-        val parsed = cachedEntries ?: SubtitleParser.parseDocument(targetText, format = currentFormat).entries
         if (isSourceViewMode) {
+            sourceViewPreviewJob?.cancel()
+            sourceViewEditGeneration++
+            sourceViewHasPendingEdits = false
             setSourceViewEditorText(targetText, preserveScroll = true)
-            applySourceViewEntries(parsed)
+            if (cachedEntries != null) {
+                applySourceViewEntries(cachedEntries)
+                sourceViewEntriesGeneration = sourceViewEditGeneration
+            } else {
+                // The source text is already restored. Parse asynchronously so redo does not
+                // block the editor while rebuilding entries for a large document.
+                scheduleSourceViewPreview()
+            }
             updateFormatInfo()
-        } else {
+            return
+        }
+
+        val parsed = cachedEntries ?: SubtitleParser.parseDocument(targetText, format = currentFormat).entries
+        if (!isSourceViewMode) {
             applySourceViewEntries(parsed)
             if (previousCount != subtitleEntries.size || subtitleAdapter.itemCount != subtitleEntries.size) {
                 submitSubtitleList(
@@ -2745,20 +2818,20 @@ class EditorActivity : AppCompatActivity() {
             // 有长按位置，对长按的那一行应用偏移（无论是否有选中状态）
             longClickPos >= 0 && longClickPos < subtitleEntries.size -> {
                 val entry = subtitleEntries[longClickPos]
-                SubtitleEntryOps.applyOffset(entry, offsetMs)
+                EditorDocumentOperations.applyOffset(entry, offsetMs)
                 
                 notifyEntriesChanged(listOf(longClickPos))
             }
             // 没有长按位置但有选中的字幕，对选中的字幕应用偏移
             subtitleAdapter.getSelectedCount() > 0 -> {
                 val selectedEntries = subtitleAdapter.getSelectedEntries()
-                SubtitleEntryOps.applyOffsetAll(selectedEntries.map { it.first }, offsetMs)
+                EditorDocumentOperations.applyOffsetAll(selectedEntries.map { it.first }, offsetMs)
                 
                 notifyEntriesChanged(selectedEntries.map { it.second })
             }
             // 都没有，对所有字幕应用偏移
             else -> {
-                SubtitleEntryOps.applyOffsetAll(subtitleEntries, offsetMs)
+                EditorDocumentOperations.applyOffsetAll(subtitleEntries, offsetMs)
                 
                 submitSubtitleList(refreshAll = true, markChanged = true)
             }
@@ -2775,9 +2848,10 @@ class EditorActivity : AppCompatActivity() {
                 val historyBefore = currentHistoryListState()
                 val deletedIndices = selectedEntries.map { it.second }.toSet()
                 // 从后往前删除，避免索引变化
-                selectedEntries.sortedByDescending { it.second }.forEach { (_, position) ->
-                    EditorDocumentOperations.removeAt(subtitleEntries, position)
-                }
+                EditorDocumentOperations.removeAtDescending(
+                    subtitleEntries,
+                    selectedEntries.map { it.second }
+                )
                 syncAfterDelete(deletedIndices, historyBefore)
                 com.subtitleedit.util.OverwritingToast.makeText(this, "已删除 ${selectedEntries.size} 条字幕", Toast.LENGTH_SHORT).show()
         }
@@ -2968,7 +3042,12 @@ class EditorActivity : AppCompatActivity() {
     private fun applySourceViewEntries(updatedEntries: List<SubtitleEntry>) {
         if (subtitleEntries.size != updatedEntries.size) {
             val previousEntries = subtitleEntries.toList()
-            val associatedEntries = SubtitleEntryOps.retainStableIds(previousEntries, updatedEntries)
+            val previousIds = previousEntries.mapTo(mutableSetOf()) { it.stableId }
+            val associatedEntries = if (updatedEntries.any { it.stableId in previousIds }) {
+                updatedEntries.map { it.copy() }
+            } else {
+                SubtitleEntryOps.retainStableIds(previousEntries, updatedEntries)
+            }
             val prefix = commonStablePrefix(previousEntries, associatedEntries)
             val suffix = commonStableSuffix(previousEntries, associatedEntries, prefix)
             val removedCount = previousEntries.size - prefix - suffix

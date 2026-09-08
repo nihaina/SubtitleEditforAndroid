@@ -1,5 +1,6 @@
 package com.subtitleedit.util
 
+import com.subtitleedit.EditorDocumentOperations
 import com.subtitleedit.model.SubtitleEntry
 
 object SubtitleEntryOps {
@@ -173,12 +174,11 @@ object SubtitleEntryOps {
     }
 
     fun applyOffset(entry: SubtitleEntry, offsetMs: Long) {
-        entry.startTime = (entry.startTime + offsetMs).coerceAtLeast(0)
-        entry.endTime = (entry.endTime + offsetMs).coerceAtLeast(entry.startTime + 1)
+        EditorDocumentOperations.applyOffset(entry, offsetMs)
     }
 
     fun applyOffsetAll(entries: Iterable<SubtitleEntry>, offsetMs: Long) {
-        entries.forEach { applyOffset(it, offsetMs) }
+        EditorDocumentOperations.applyOffsetAll(entries, offsetMs)
     }
 
     fun clampMoveToNeighbors(

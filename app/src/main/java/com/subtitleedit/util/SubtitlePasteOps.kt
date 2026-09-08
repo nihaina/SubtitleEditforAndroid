@@ -1,5 +1,6 @@
 package com.subtitleedit.util
 
+import com.subtitleedit.EditorDocumentOperations
 import com.subtitleedit.model.SubtitleEntry
 
 object SubtitlePasteOps {
@@ -21,7 +22,7 @@ object SubtitlePasteOps {
             return PasteAtPositionResult(structureChanged = false, affectedPositions = emptySet())
         }
 
-        entries[position].text = clipboardTexts.first()
+        EditorDocumentOperations.updateText(entries[position], clipboardTexts.first())
         if (clipboardTexts.size == 1) {
             return PasteAtPositionResult(
                 structureChanged = false,
@@ -37,7 +38,7 @@ object SubtitlePasteOps {
             next = entries.getOrNull(position + 1),
             texts = clipboardTexts.drop(1)
         )
-        entries.addAll(position + 1, insertedEntries)
+        EditorDocumentOperations.addAllAt(entries, position + 1, insertedEntries)
         val affected = (position until (position + clipboardTexts.size)).toSet()
         return PasteAtPositionResult(structureChanged = true, affectedPositions = affected)
     }
@@ -53,7 +54,7 @@ object SubtitlePasteOps {
         }
 
         validPositions.forEachIndexed { index, position ->
-            entries[position].text = clipboardTexts[index]
+            EditorDocumentOperations.updateText(entries[position], clipboardTexts[index])
         }
 
         val affectedPositions = validPositions.toMutableSet()
@@ -68,7 +69,7 @@ object SubtitlePasteOps {
                 texts = extraTexts
             )
             val insertionPosition = lastTargetPosition + 1
-            entries.addAll(insertionPosition, insertedEntries)
+            EditorDocumentOperations.addAllAt(entries, insertionPosition, insertedEntries)
             affectedPositions.addAll(
                 insertionPosition until (insertionPosition + insertedEntries.size)
             )
