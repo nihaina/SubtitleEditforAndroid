@@ -69,6 +69,10 @@ internal class ModelDownloadWorker(
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
+            currentCoroutineContext().ensureActive()
+            if (ModelDownloadRetryPolicy.shouldRetry(error, runAttemptCount)) {
+                return@withContext Result.retry()
+            }
             Result.failure(workDataOf(
                 KEY_ERROR to (error.message ?: "模型任务失败").take(500),
                 KEY_MESSAGE to lastProgress.message,

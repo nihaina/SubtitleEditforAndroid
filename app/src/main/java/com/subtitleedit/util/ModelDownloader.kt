@@ -15,6 +15,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import java.io.BufferedOutputStream
+import java.io.EOFException
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -487,7 +488,7 @@ object ModelDownloader {
             val call = client.newCall(request)
             executeDownload(call) { response ->
                     if (!response.isSuccessful) {
-                        throw IOException("模型下载失败：HTTP ${response.code}")
+                        throw ModelDownloadHttpException(response.code)
                     }
                     val body = response.body ?: throw IOException("模型下载响应为空")
                     val total = body.contentLength()
@@ -511,7 +512,7 @@ object ModelDownloader {
                         }
                     }
                     if (downloaded <= 0L || total > 0L && downloaded != total) {
-                        throw IOException("模型文件下载不完整")
+                        throw EOFException("模型文件下载不完整")
                     }
             }
 

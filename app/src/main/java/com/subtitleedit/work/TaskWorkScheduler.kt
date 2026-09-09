@@ -1,8 +1,11 @@
 package com.subtitleedit.work
 
 import android.content.Context
+import androidx.work.BackoffPolicy
+import androidx.work.Constraints
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
@@ -11,6 +14,7 @@ import com.subtitleedit.task.TaskState
 import com.subtitleedit.task.TaskStatus
 import com.subtitleedit.task.TaskStateStore
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -33,6 +37,16 @@ internal class TaskWorkScheduler(
                     Data.Builder()
                         .putString(ModelDownloadWorker.KEY_MODEL_KIND, ModelDownloadWorker.KIND_DEMIX_GENERAL)
                         .build()
+                )
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build()
+                )
+                .setBackoffCriteria(
+                    BackoffPolicy.EXPONENTIAL,
+                    10L,
+                    TimeUnit.SECONDS
                 )
                 .addTag(ModelDownloadWorker.TAG_MODEL_DOWNLOAD)
                 .build()
@@ -78,7 +92,15 @@ internal class TaskWorkScheduler(
                 WorkInfo.State.FAILED -> TaskStatus.FAILED
                 WorkInfo.State.CANCELLED -> TaskStatus.CANCELLED
             },
-            progress = TaskProgress(
+            progress = if (state == WorkInfo.State.ENQUEUED || state == WorkInfo.State.BLOCKED) {
+                TaskProgress(
+                    message = if (runAttemptCount > 0) {
+                        "等待网络连接或自动重试（已尝试 $runAttemptCount 次）"
+                    } else {
+                        "等待网络连接或任务调度"
+                    }
+                )
+            } else TaskProgress(
                 message = data.getString(ModelDownloadWorker.KEY_MESSAGE).orEmpty(),
                 current = data.getLong(ModelDownloadWorker.KEY_CURRENT, 0L),
                 total = data.getLong(ModelDownloadWorker.KEY_TOTAL, -1L)

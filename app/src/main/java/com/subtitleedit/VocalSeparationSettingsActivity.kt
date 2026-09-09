@@ -42,6 +42,11 @@ class VocalSeparationSettingsActivity : AppCompatActivity() {
     private var modelDownloadWorkId: UUID? = null
     private var modelDownloadDialog: ModelDownloadProgressDialog? = null
     private var pendingGeneralModelDownload = false
+    private var pendingNotificationPermission = false
+
+    private val notificationPermissionPreferences by lazy {
+        getSharedPreferences("task_notifications", MODE_PRIVATE)
+    }
 
     private val vocalsModelPicker = modelPicker(VocalSeparationEngine.Stem.VOCALS)
     private val drumsModelPicker = modelPicker(VocalSeparationEngine.Stem.DRUMS)
@@ -59,6 +64,23 @@ class VocalSeparationSettingsActivity : AppCompatActivity() {
         ActivityResultContracts.RequestPermission()
     ) { continuePendingGeneralModelDownload() }
 
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        notificationPermissionPreferences.edit().putBoolean("requested", true).apply()
+        if (pendingNotificationPermission) {
+            pendingNotificationPermission = false
+            if (!granted) {
+                OverwritingToast.makeText(
+                    this,
+                    "未开启通知，下载仍会继续，可在此页面查看进度",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            startGeneralModelDownload()
+        }
+    }
+
     private fun modelPicker(stem: VocalSeparationEngine.Stem) = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let { handleSelectedModel(stem, it) } }
@@ -70,11 +92,16 @@ class VocalSeparationSettingsActivity : AppCompatActivity() {
         settings = SettingsManager.getInstance(this)
         modelDownloadWorkId = savedInstanceState?.getString("model_download_work_id")
             ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        pendingGeneralModelDownload = savedInstanceState?.getBoolean("pending_model_download") ?: false
+        pendingNotificationPermission =
+            savedInstanceState?.getBoolean("pending_notification_permission") ?: false
 
         setupToolbar()
         setupListeners()
         loadSettings()
-        restoreActiveGeneralModelDownload()
+        if (!pendingGeneralModelDownload && !pendingNotificationPermission) {
+            restoreActiveGeneralModelDownload()
+        }
     }
 
     private fun setupToolbar() {
@@ -135,8 +162,18 @@ class VocalSeparationSettingsActivity : AppCompatActivity() {
     }
 
     private fun startGeneralModelDownload() {
-        if (!ensureModelStorageAccess()) return
         if (modelDownloadJob?.isActive == true) return
+        if (pendingNotificationPermission) return
+        if (!ensureModelStorageAccess()) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED &&
+            !notificationPermissionPreferences.getBoolean("requested", false)
+        ) {
+            pendingNotificationPermission = true
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
         observeGeneralModelDownload(enqueue = true)
     }
 
@@ -234,6 +271,8 @@ class VocalSeparationSettingsActivity : AppCompatActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         modelDownloadWorkId?.let { outState.putString("model_download_work_id", it.toString()) }
+        outState.putBoolean("pending_model_download", pendingGeneralModelDownload)
+        outState.putBoolean("pending_notification_permission", pendingNotificationPermission)
         super.onSaveInstanceState(outState)
     }
 
