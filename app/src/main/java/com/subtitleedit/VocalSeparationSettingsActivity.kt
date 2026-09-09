@@ -20,6 +20,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.subtitleedit.databinding.ActivityVocalSeparationSettingsBinding
 import com.subtitleedit.demix.VocalSeparationEngine
+import com.subtitleedit.repository.DefaultModelRepository
+import com.subtitleedit.repository.ModelRepository
 import com.subtitleedit.util.ModelDownloadProgressDialog
 import com.subtitleedit.util.ModelDownloader
 import com.subtitleedit.util.OverwritingToast
@@ -32,6 +34,7 @@ import java.io.File
 class VocalSeparationSettingsActivity : AppCompatActivity() {
     private lateinit var binding: ActivityVocalSeparationSettingsBinding
     private lateinit var settings: SettingsManager
+    private val modelRepository: ModelRepository = DefaultModelRepository()
     private var loading = false
     private var accessWarningShown = false
     private var modelType = SettingsManager.DEMIX_MODEL_GENERAL
@@ -146,7 +149,7 @@ class VocalSeparationSettingsActivity : AppCompatActivity() {
 
         modelDownloadJob = lifecycleScope.launch {
             try {
-                val modelFile = ModelDownloader.downloadDemixGeneralModel { progress ->
+                val modelFile = modelRepository.downloadDemixGeneralModel { progress ->
                     runOnUiThread { modelDownloadDialog?.update(progress) }
                 }
                 settings.setDemixModelUri("general", Uri.fromFile(modelFile).toString())

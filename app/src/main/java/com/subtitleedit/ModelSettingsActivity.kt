@@ -18,6 +18,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.subtitleedit.databinding.ActivityModelSettingsBinding
+import com.subtitleedit.repository.DefaultModelRepository
+import com.subtitleedit.repository.ModelRepository
 import com.subtitleedit.util.ModelDownloadProgressDialog
 import com.subtitleedit.util.ModelDownloader
 import com.subtitleedit.util.OverwritingToast
@@ -40,6 +42,7 @@ class ModelSettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityModelSettingsBinding
     private lateinit var settingsManager: SettingsManager
+    private val modelRepository: ModelRepository = DefaultModelRepository()
 
     private var encoderPath: String = ""
     private var decoderPath: String = ""
@@ -184,9 +187,9 @@ class ModelSettingsActivity : AppCompatActivity() {
         when (modelType) {
             SettingsManager.ASR_MODEL_SENSEVOICE -> showSenseVoiceDownloadOptions()
             SettingsManager.ASR_MODEL_PARAKEET_TDT ->
-                confirmParakeetDownload(ModelDownloader.PARAKEET_TDT_MODEL)
+                confirmParakeetDownload(modelRepository.parakeetTdtModel)
             SettingsManager.ASR_MODEL_PARAKEET_CTC_JA ->
-                confirmParakeetDownload(ModelDownloader.PARAKEET_CTC_JA_MODEL)
+                confirmParakeetDownload(modelRepository.parakeetCtcJaModel)
             else -> showWhisperDownloadModelPicker()
         }
     }
@@ -194,7 +197,7 @@ class ModelSettingsActivity : AppCompatActivity() {
     private fun showSenseVoiceDownloadOptions() {
         if (settingsManager.getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU) {
             if (!ensureQnnRuntimeAvailable()) return
-            val options = ModelDownloader.SENSEVOICE_NPU_MODELS
+            val options = modelRepository.senseVoiceNpuModels
             val labels = options.map { "${it.displayName}（${it.sizeLabel}）" }.toTypedArray()
             AlertDialog.Builder(this)
                 .setTitle("选择 SenseVoice NPU 模型")
@@ -202,7 +205,7 @@ class ModelSettingsActivity : AppCompatActivity() {
                 .setNegativeButton("取消", null)
                 .show()
         } else {
-            confirmSenseVoiceDownload(ModelDownloader.SENSEVOICE_CPU_MODEL)
+            confirmSenseVoiceDownload(modelRepository.senseVoiceCpuModel)
         }
     }
 
@@ -245,7 +248,7 @@ class ModelSettingsActivity : AppCompatActivity() {
     }
 
     private fun showWhisperDownloadModelPicker() {
-        val options = ModelDownloader.WHISPER_MODELS
+        val options = modelRepository.whisperModels
         val labels = options.map { "${it.displayName}（${it.sizeLabel}）" }.toTypedArray()
         AlertDialog.Builder(this)
             .setTitle("选择 Whisper 模型")
@@ -324,7 +327,7 @@ class ModelSettingsActivity : AppCompatActivity() {
                         reusedGeneratedModel = true
                         installed.contextBinary to installed.tokens
                     } else {
-                        val files = ModelDownloader.downloadSenseVoice(option) { progress ->
+                        val files = modelRepository.downloadSenseVoice(option) { progress ->
                             runOnUiThread { modelDownloadDialog?.update(progress) }
                         }
                         downloadedFiles = files
@@ -342,7 +345,7 @@ class ModelSettingsActivity : AppCompatActivity() {
                         imported.contextBinary to imported.tokens
                     }
                 } else {
-                    val files = ModelDownloader.downloadSenseVoice(option) { progress ->
+                    val files = modelRepository.downloadSenseVoice(option) { progress ->
                         runOnUiThread { modelDownloadDialog?.update(progress) }
                     }
                     downloadedFiles = files
@@ -418,7 +421,7 @@ class ModelSettingsActivity : AppCompatActivity() {
 
         modelDownloadJob = lifecycleScope.launch {
             try {
-                val files = ModelDownloader.downloadWhisper(option) { progress ->
+                val files = modelRepository.downloadWhisper(option) { progress ->
                     runOnUiThread { modelDownloadDialog?.update(progress) }
                 }
                 modelType = SettingsManager.ASR_MODEL_WHISPER
@@ -464,7 +467,7 @@ class ModelSettingsActivity : AppCompatActivity() {
 
         modelDownloadJob = lifecycleScope.launch {
             try {
-                val files = ModelDownloader.downloadParakeet(option) { progress ->
+                val files = modelRepository.downloadParakeet(option) { progress ->
                     runOnUiThread { modelDownloadDialog?.update(progress) }
                 }
                 modelType = option.modelType
@@ -787,7 +790,7 @@ class ModelSettingsActivity : AppCompatActivity() {
         if (modelUri.scheme != "file") return
         val source = modelUri.path?.let(::File) ?: return
         if (!source.name.equals("libmodel.so", ignoreCase = true)) return
-        val modelsRoot = runCatching { ModelDownloader.modelsDirectory().canonicalFile }.getOrNull()
+        val modelsRoot = runCatching { modelRepository.modelsDirectory().canonicalFile }.getOrNull()
             ?: return
         val candidate = runCatching { source.canonicalFile }.getOrNull() ?: return
         if (SenseVoiceNpuModelPathPolicy.isInside(modelsRoot, candidate)) candidate.delete()

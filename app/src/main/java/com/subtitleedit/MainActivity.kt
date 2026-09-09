@@ -46,6 +46,8 @@ import com.subtitleedit.databinding.DialogArchiveConflictBinding
 import com.subtitleedit.databinding.DialogCreateArchiveBinding
 import com.subtitleedit.databinding.DialogSubtitleConvertBinding
 import com.subtitleedit.editor.EditorMediaType
+import com.subtitleedit.repository.ArchiveRepository
+import com.subtitleedit.repository.DefaultArchiveRepository
 import com.subtitleedit.util.ArchiveManager
 import com.subtitleedit.util.ArchivePreviewCache
 import com.subtitleedit.util.ArchivePasswordVault
@@ -84,6 +86,8 @@ import java.nio.file.Files
  * 主界面 - 文件浏览器
  */
 class MainActivity : AppCompatActivity() {
+
+    private val archiveRepository: ArchiveRepository = DefaultArchiveRepository()
 
     private companion object {
         const val MENU_SELECT_ALL = 0x10001
@@ -953,7 +957,7 @@ class MainActivity : AppCompatActivity() {
             FileUtils.isSubtitleFile(file) ||
             FileUtils.isAudioFile(file) ||
             file.extension.lowercase() in VIDEO_EXTENSIONS ||
-            ArchiveManager.isRecognizedArchive(file)
+            archiveRepository.isRecognizedArchive(file)
     }
 
     private fun startDirectoryObserver(directory: File) {
@@ -1032,8 +1036,8 @@ class MainActivity : AppCompatActivity() {
         if (file.isDirectory) {
             // 进入子目录
             navigateIntoDirectory(file)
-        } else if (ArchiveManager.isRecognizedArchive(file)) {
-            if (ArchiveManager.isSupportedArchive(file)) {
+        } else if (archiveRepository.isRecognizedArchive(file)) {
+            if (archiveRepository.isSupportedArchive(file)) {
                 showArchiveActions(file)
             } else {
                 showShortToast("当前库暂不支持 ${file.extension.uppercase()} 格式")
@@ -1753,18 +1757,18 @@ class MainActivity : AppCompatActivity() {
             splitOptions.map { it.label }
         ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
 
-        var methods = ArchiveManager.compressionMethods(formats.first())
-        var encryptionMethods = ArchiveManager.encryptionMethods(formats.first())
+        var methods = archiveRepository.compressionMethods(formats.first())
+        var encryptionMethods = archiveRepository.encryptionMethods(formats.first())
         fun refreshFormatControls(position: Int) {
             val format = formats[position.coerceIn(formats.indices)]
-            methods = ArchiveManager.compressionMethods(format)
+            methods = archiveRepository.compressionMethods(format)
             dialogBinding.spinnerCompressionMethod.adapter = ArrayAdapter(
                 this,
                 android.R.layout.simple_spinner_item,
                 methods.map { it.displayName }
             ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
             dialogBinding.spinnerCompressionMethod.setSelection(0, false)
-            encryptionMethods = ArchiveManager.encryptionMethods(format)
+            encryptionMethods = archiveRepository.encryptionMethods(format)
             dialogBinding.spinnerEncryptionMethod.adapter = ArrayAdapter(
                 this,
                 android.R.layout.simple_spinner_item,
@@ -1814,7 +1818,7 @@ class MainActivity : AppCompatActivity() {
                 val format = formats[dialogBinding.spinnerArchiveFormat.selectedItemPosition]
                 val method = methods[dialogBinding.spinnerCompressionMethod.selectedItemPosition]
                 val splitSizeBytes = splitOptions[dialogBinding.spinnerSplitSize.selectedItemPosition].bytes
-                val extension = ArchiveManager.outputExtension(format, method)
+                val extension = archiveRepository.outputExtension(format, method)
                 val rawName = dialogBinding.etArchiveName.text?.toString()?.trim().orEmpty()
                 val baseName = stripArchiveExtension(rawName)
                 when {
@@ -1876,7 +1880,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val deleteFailures = withContext(Dispatchers.IO) {
                     val workerContext = coroutineContext
-                    ArchiveManager.createArchive(
+                    archiveRepository.createArchive(
                         sources = sources,
                         destination = output,
                         format = format,
@@ -1983,10 +1987,10 @@ class MainActivity : AppCompatActivity() {
                     runCatching {
                         when (action) {
                             ArchiveAction.PREVIEW -> {
-                                val entries = ArchiveManager.listEntries(archive, passwordChars)
+                                val entries = archiveRepository.listEntries(archive, passwordChars)
                                 ArchivePreviewCache.write(this@MainActivity, entries)
                             }
-                            ArchiveAction.TEST -> ArchiveManager.testArchive(archive, passwordChars)
+                            ArchiveAction.TEST -> archiveRepository.testArchive(archive, passwordChars)
                             ArchiveAction.EXTRACT_CURRENT -> error("不应直接执行解压操作")
                         }
                     }
@@ -2053,7 +2057,7 @@ class MainActivity : AppCompatActivity() {
         onCompleted: () -> Unit,
         onCancelled: () -> Unit = {}
     ) {
-        if (ArchiveManager.requiresStreamingConflictResolution(archive)) {
+        if (archiveRepository.requiresStreamingConflictResolution(archive)) {
             executeArchiveExtraction(
                 archive = archive,
                 destination = destination,
@@ -2075,7 +2079,7 @@ class MainActivity : AppCompatActivity() {
             val result = try {
                 withContext(Dispatchers.IO) {
                     runCatching {
-                        ArchiveManager.findDestinationConflicts(
+                        archiveRepository.findDestinationConflicts(
                             archive = archive,
                             destination = destination,
                             password = passwordChars,
@@ -2214,7 +2218,7 @@ class MainActivity : AppCompatActivity() {
                     withContext(Dispatchers.IO) {
                         val workerContext = currentCoroutineContext()
                         runCatching {
-                            ArchiveManager.extractArchive(
+                            archiveRepository.extractArchive(
                                 archive = archive,
                                 destination = destination,
                                 password = passwordChars,

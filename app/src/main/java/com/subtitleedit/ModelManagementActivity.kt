@@ -23,7 +23,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.card.MaterialCardView
 import com.subtitleedit.databinding.ActivityModelManagementBinding
-import com.subtitleedit.util.ModelDownloader
+import com.subtitleedit.repository.DefaultModelRepository
+import com.subtitleedit.repository.ModelRepository
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SenseVoiceNpuModelImporter
 import com.subtitleedit.util.SettingsManager
@@ -36,6 +37,7 @@ import java.util.Locale
 class ModelManagementActivity : AppCompatActivity() {
     private lateinit var binding: ActivityModelManagementBinding
     private lateinit var settingsManager: SettingsManager
+    private val modelRepository: ModelRepository = DefaultModelRepository()
     private var requestedStorageAccess = false
 
     private data class ModelItem(
@@ -64,7 +66,7 @@ class ModelManagementActivity : AppCompatActivity() {
         supportActionBar?.title = "模型管理"
         binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
         binding.tvModelsDirectory.text =
-            "下载模型目录：${ModelDownloader.modelsDirectory().absolutePath}\n" +
+            "下载模型目录：${modelRepository.modelsDirectory().absolutePath}\n" +
                 "NPU BIN 模型保存在应用内部目录"
 
         if (hasStorageAccess()) loadModels() else requestStorageAccess()
@@ -125,7 +127,7 @@ class ModelManagementActivity : AppCompatActivity() {
 
     private fun scanModels(): List<ModelItem> {
         val items = mutableListOf<ModelItem>()
-        val root = ModelDownloader.modelsDirectory()
+        val root = modelRepository.modelsDirectory()
         if (root.isDirectory) {
             root.listFiles().orEmpty()
                 .filterNot { it.name.startsWith(".") || it.name.contains(".part.") || it.name.endsWith(".backup") }
@@ -136,7 +138,7 @@ class ModelManagementActivity : AppCompatActivity() {
                         }
                         file.isDirectory && file.name.startsWith("sherpa-onnx-qnn-") &&
                             file.name.contains("sense-voice") -> {
-                            val option = ModelDownloader.SENSEVOICE_NPU_MODELS
+                            val option = modelRepository.senseVoiceNpuModels
                                 .firstOrNull { it.directoryName == file.name }
                             items += ModelItem(
                                 "SenseVoice 模型",
@@ -154,23 +156,23 @@ class ModelManagementActivity : AppCompatActivity() {
                                 calculateSize(file)
                             )
                         }
-                        file.isDirectory && file.name == ModelDownloader.PARAKEET_TDT_MODEL.directoryName -> {
+                        file.isDirectory && file.name == modelRepository.parakeetTdtModel.directoryName -> {
                             items += ModelItem(
                                 "Parakeet 模型",
-                                ModelDownloader.PARAKEET_TDT_MODEL.displayName,
+                                modelRepository.parakeetTdtModel.displayName,
                                 file,
                                 calculateSize(file)
                             )
                         }
-                        file.isDirectory && file.name == ModelDownloader.PARAKEET_CTC_JA_MODEL.directoryName -> {
+                        file.isDirectory && file.name == modelRepository.parakeetCtcJaModel.directoryName -> {
                             items += ModelItem(
                                 "Parakeet 模型",
-                                ModelDownloader.PARAKEET_CTC_JA_MODEL.displayName,
+                                modelRepository.parakeetCtcJaModel.displayName,
                                 file,
                                 calculateSize(file)
                             )
                         }
-                        file.isDirectory && file.name == ModelDownloader.SEPARATION_DIRECTORY_NAME -> {
+                        file.isDirectory && file.name == modelRepository.separationDirectoryName -> {
                             file.listFiles().orEmpty().filterNot { it.name.startsWith(".") }.forEach { model ->
                                 items += ModelItem("人声分离模型", model.name, model, calculateSize(model))
                             }
