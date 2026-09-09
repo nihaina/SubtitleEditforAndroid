@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
+import com.subtitleedit.util.SubtitleSourceSynchronizer
 import com.subtitleedit.util.subtitle.SubtitleDocument
 import java.io.File
 import java.nio.charset.Charset
@@ -161,8 +162,88 @@ internal class EditorViewModel : ViewModel() {
         get() = uiState.value.isAudioOnlyFromVideo
         set(value) { onEvent(EditorEvent.SetAudioOnlyFromVideo(value)) }
     val saveCoordinator = EditorSaveCoordinator()
-    val editHistory = EditorEditHistory()
+    private val editHistory = EditorEditHistory()
     private val editHistoryController = EditorHistoryController(editHistory)
+
+    fun peekUndo(): EditorEditHistory.Operation? = editHistory.peekUndo()
+
+    fun peekRedo(): EditorEditHistory.Operation? = editHistory.peekRedo()
+
+    fun peekUndoWithoutSelection(): EditorEditHistory.Operation? =
+        editHistory.peekUndoWithoutSelection()
+
+    fun peekRedoWithoutSelection(): EditorEditHistory.Operation? =
+        editHistory.peekRedoWithoutSelection()
+
+    fun clearHistory() {
+        editHistory.clear()
+    }
+
+    fun updateLatestSourceHistory(afterText: String, entries: List<SubtitleEntry>) {
+        editHistory.updateLatestSourceAfterEntries(afterText, entries)
+    }
+
+    fun setHistoryBaseline(state: EditorEditHistory.ListState, sourceText: String, clear: Boolean) {
+        if (clear) editHistory.clear()
+        documentState.historyEntriesSnapshot = state.entries
+        documentState.historySelectionSnapshot = state.selectedIds
+        documentState.sourceHistoryTextSnapshot = sourceText
+        documentState.historyBaselineInitialized = true
+    }
+
+    fun syncHistoryBaseline(state: EditorEditHistory.ListState, sourceText: String?, sourceMode: Boolean) {
+        if (!documentState.historyBaselineInitialized) {
+            setHistoryBaseline(state, sourceText.orEmpty(), clear = false)
+            return
+        }
+        documentState.historyEntriesSnapshot = state.entries
+        documentState.historySelectionSnapshot = state.selectedIds
+        if (sourceMode && sourceText != null) documentState.sourceHistoryTextSnapshot = sourceText
+    }
+
+    fun recordListHistory(
+        before: EditorEditHistory.ListState,
+        after: EditorEditHistory.ListState,
+        description: String,
+        beforeSourceText: String?,
+        afterSourceText: String?
+    ): Boolean {
+        val difference = EditorEditHistory.difference(before, after)
+        if (difference.isEmpty) return false
+        editHistory.record(
+            EditorEditHistory.Operation.ListChange(
+                before = before,
+                after = after,
+                description = description,
+                beforeSourceText = beforeSourceText,
+                afterSourceText = afterSourceText
+            )
+        )
+        documentState.historyEntriesSnapshot = after.entries
+        documentState.historySelectionSnapshot = after.selectedIds
+        return true
+    }
+
+    fun recordSourceHistory(
+        beforeText: String,
+        afterText: String,
+        description: String,
+        beforeEntries: List<SubtitleEntry>,
+        beforeEntriesText: String?
+    ): Boolean {
+        if (beforeText == afterText) return false
+        editHistory.record(
+            EditorEditHistory.Operation.SourceChange(
+                beforeText = beforeText,
+                afterText = afterText,
+                description = description,
+                beforeEntries = beforeEntries,
+                beforeEntriesText = beforeEntriesText
+            )
+        )
+        documentState.sourceHistoryTextSnapshot = afterText
+        return true
+    }
 
     fun startNewSubtitleDocument() = documentState.startNewSubtitleDocument()
 
@@ -206,6 +287,22 @@ internal class EditorViewModel : ViewModel() {
     }
 
     fun refreshDocument() {
+        publishDocument()
+    }
+
+    fun syncListChangesToSource(
+        beforeEntries: List<SubtitleEntry>,
+        afterEntries: List<SubtitleEntry>
+    ) {
+        val updatedSource = SubtitleSourceSynchronizer.apply(
+            content = documentState.originalFileContent,
+            format = documentState.currentFormat,
+            oldEntries = beforeEntries,
+            newEntries = afterEntries
+        )
+        documentState.originalFileContent = updatedSource
+        documentState.sourceViewContent = updatedSource
+        documentState.sourceViewNeedsListSync = false
         publishDocument()
     }
 

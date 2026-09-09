@@ -190,8 +190,6 @@ class EditorActivity : AppCompatActivity() {
     private var clipboardTexts: List<String>
         get() = stateModel.clipboardTexts
         set(value) { stateModel.clipboardTexts = value }
-    private val editHistory: EditorEditHistory
-        get() = stateModel.editHistory
     private var historyEntriesSnapshot: List<SubtitleEntry>
         get() = stateModel.historyEntriesSnapshot
         set(value) { stateModel.historyEntriesSnapshot = value }
@@ -394,14 +392,14 @@ class EditorActivity : AppCompatActivity() {
     override fun onPrepareOptionsMenu(menu: Menu): Boolean {
         menu.clear()
         val undoOperation = if (isSourceViewMode) {
-            editHistory.peekUndoWithoutSelection()
+            stateModel.peekUndoWithoutSelection()
         } else {
-            editHistory.peekUndo()
+            stateModel.peekUndo()
         }
         val redoOperation = if (isSourceViewMode) {
-            editHistory.peekRedoWithoutSelection()
+            stateModel.peekRedoWithoutSelection()
         } else {
-            editHistory.peekRedo()
+            stateModel.peekRedo()
         }
         if (!isSourceViewMode && ::subtitleAdapter.isInitialized && subtitleAdapter.getSelectedCount() > 0) {
             menu.add(Menu.NONE, MENU_SELECT_ALL, 0, "全选")
@@ -750,7 +748,7 @@ class EditorActivity : AppCompatActivity() {
             !sourceContainsSubtitleMarker(sourceSnapshot)
         if (canApplyEntries) {
             applySourceViewEntries(parsedDocument.entries)
-            editHistory.updateLatestSourceAfterEntries(sourceSnapshot, subtitleEntries)
+            stateModel.updateLatestSourceHistory(sourceSnapshot, subtitleEntries)
             sourceViewEntriesGeneration = editGeneration
             sourceViewHasPendingEdits = false
         }
@@ -873,7 +871,7 @@ class EditorActivity : AppCompatActivity() {
                     sourceViewContent = updatedSource
                     sourceHistoryTextSnapshot = updatedSource
                     sourceViewHasPendingEdits = false
-                    editHistory.updateLatestSourceAfterEntries(updatedSource, subtitleEntries)
+                    stateModel.updateLatestSourceHistory(updatedSource, subtitleEntries)
                     sourceViewEditGeneration++
                     sourceViewEntriesGeneration = sourceViewEditGeneration
                     setSourceViewEditorText(updatedSource, preserveScroll = true)
@@ -1855,23 +1853,13 @@ class EditorActivity : AppCompatActivity() {
         )
 
     private fun initializeEditHistoryBaseline(clearHistory: Boolean) {
-        if (clearHistory) editHistory.clear()
         val state = currentHistoryListState()
-        historyEntriesSnapshot = state.entries
-        historySelectionSnapshot = state.selectedIds
-        sourceHistoryTextSnapshot = sourceViewContent
-        historyBaselineInitialized = true
+        stateModel.setHistoryBaseline(state, sourceViewContent, clearHistory)
     }
 
     private fun syncEditHistoryBaseline() {
-        if (!historyBaselineInitialized) {
-            initializeEditHistoryBaseline(clearHistory = false)
-            return
-        }
         val state = currentHistoryListState()
-        historyEntriesSnapshot = state.entries
-        historySelectionSnapshot = state.selectedIds
-        if (isSourceViewMode) sourceHistoryTextSnapshot = sourceViewContent
+        stateModel.syncHistoryBaseline(state, sourceViewContent, isSourceViewMode)
     }
 
     private fun recordListStateChange(selectedIdsOverride: Set<Long>? = null) {
@@ -1890,17 +1878,15 @@ class EditorActivity : AppCompatActivity() {
             val hasContentChange = hasStructuralChange || difference.modified.isNotEmpty()
             val beforeSourceText = originalFileContent
             if (hasContentChange) {
-                syncListChangesToMemory(before.entries, after.entries)
+                stateModel.syncListChangesToSource(before.entries, after.entries)
             }
             val afterSourceText = originalFileContent
-            editHistory.record(
-                EditorEditHistory.Operation.ListChange(
-                    before = before,
-                    after = after,
-                    description = describeListStateChange(difference),
-                    beforeSourceText = beforeSourceText.takeIf { hasContentChange },
-                    afterSourceText = afterSourceText.takeIf { hasContentChange }
-                )
+            stateModel.recordListHistory(
+                before = before,
+                after = after,
+                description = describeListStateChange(difference),
+                beforeSourceText = beforeSourceText.takeIf { hasContentChange },
+                afterSourceText = afterSourceText.takeIf { hasContentChange }
             )
         }
         // Keep ignored format metadata in the baseline so a later content edit does not absorb it.
@@ -1922,32 +1908,14 @@ class EditorActivity : AppCompatActivity() {
                     sourceHistoryTextSnapshot == beforeText
             }
             ?.map { it.copy() }
-        editHistory.record(
-            EditorEditHistory.Operation.SourceChange(
-                beforeText = beforeText,
-                afterText = afterText,
-                description = describeSourceTextChange(beforeText, afterText),
-                beforeEntries = cachedBeforeEntries ?: emptyList(),
-                beforeEntriesText = beforeText.takeIf { cachedBeforeEntries != null }
-            )
+        stateModel.recordSourceHistory(
+            beforeText = beforeText,
+            afterText = afterText,
+            description = describeSourceTextChange(beforeText, afterText),
+            beforeEntries = cachedBeforeEntries ?: emptyList(),
+            beforeEntriesText = beforeText.takeIf { cachedBeforeEntries != null }
         )
-        sourceHistoryTextSnapshot = afterText
         invalidateOptionsMenu()
-    }
-
-    private fun syncListChangesToMemory(
-        beforeEntries: List<SubtitleEntry>,
-        afterEntries: List<SubtitleEntry>
-    ) {
-        val updatedSource = SubtitleSourceSynchronizer.apply(
-            content = originalFileContent,
-            format = currentFormat,
-            oldEntries = beforeEntries,
-            newEntries = afterEntries
-        )
-        originalFileContent = updatedSource
-        sourceViewContent = updatedSource
-        sourceViewNeedsListSync = false
     }
 
     private fun describeListStateChange(difference: EditorEditHistory.ListDifference): String {
@@ -2182,7 +2150,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun applySourceDeletionLocally(content: String): Boolean {
-        val operation = editHistory.peekUndo() as? EditorEditHistory.Operation.SourceChange
+        val operation = stateModel.peekUndo() as? EditorEditHistory.Operation.SourceChange
             ?: return false
         if (operation.afterText != content ||
             operation.beforeEntriesText != operation.beforeText
