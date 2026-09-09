@@ -1962,7 +1962,7 @@ class EditorActivity : AppCompatActivity() {
     private fun undoEdit() {
         suppressHistoryRecording = true
         val applied = try {
-            stateModel.undo(isSourceViewMode, ::applyHistoryOperation)
+            stateModel.undoCommand(isSourceViewMode, ::applyHistoryOperation)
         } finally {
             suppressHistoryRecording = false
         }
@@ -1978,7 +1978,7 @@ class EditorActivity : AppCompatActivity() {
     private fun redoEdit() {
         suppressHistoryRecording = true
         val applied = try {
-            stateModel.redo(isSourceViewMode, ::applyHistoryOperation)
+            stateModel.redoCommand(isSourceViewMode, ::applyHistoryOperation)
         } finally {
             suppressHistoryRecording = false
         }
@@ -1992,9 +1992,10 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun applyHistoryOperation(
-        operation: EditorEditHistory.Operation,
+        command: EditorHistoryCommand,
         undo: Boolean
     ) {
+        val operation = command as? EditorEditHistory.Operation ?: return
         when (operation) {
             is EditorEditHistory.Operation.ListChange -> {
                 val target = if (undo) operation.before else operation.after

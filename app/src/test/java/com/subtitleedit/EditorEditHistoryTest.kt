@@ -154,6 +154,46 @@ class EditorEditHistoryTest {
         assertFalse(difference.isEmpty)
     }
 
+    @Test
+    fun historyOperationExecutesAgainstDocumentState() {
+        val history = EditorEditHistory()
+        val beforeEntry = SubtitleEntry(startTime = 0L, endTime = 1000L, text = "旧")
+        val afterEntry = beforeEntry.copy(text = "新")
+        val operation = EditorEditHistory.Operation.ListChange(
+            before = EditorEditHistory.ListState(listOf(beforeEntry), emptySet()),
+            after = EditorEditHistory.ListState(listOf(afterEntry), emptySet()),
+            description = "修改"
+        )
+        val state = EditorDocumentState().apply {
+            subtitleEntries = mutableListOf(beforeEntry.copy())
+            originalFileContent = "1\n00:00:00,000 --> 00:00:01,000\n旧\n"
+            currentFormat = com.subtitleedit.util.SubtitleParser.SubtitleFormat.SRT
+        }
+
+        val result = operation.execute(state, undo = false)
+
+        assertEquals("新", state.subtitleEntries.single().text)
+        assertEquals("新", result.entries.single().text)
+        assertTrue(result.sourceText?.contains("新") == true)
+    }
+
+    @Test
+    fun viewModelExecutesHistoryCommandAndPublishesDocument() {
+        val viewModel = EditorViewModel()
+        val before = SubtitleEntry(text = "前")
+        val after = before.copy(text = "后")
+        val command = EditorEditHistory.Operation.ListChange(
+            before = EditorEditHistory.ListState(listOf(before), emptySet()),
+            after = EditorEditHistory.ListState(listOf(after), emptySet()),
+            description = "修改"
+        )
+        viewModel.subtitleEntries = mutableListOf(before.copy())
+
+        viewModel.executeHistoryCommand(command, undo = false)
+
+        assertEquals("后", viewModel.document.value.entries.single().text)
+    }
+
     private fun sourceChange(before: String, after: String) =
         EditorEditHistory.Operation.SourceChange(before, after, "source")
 

@@ -286,6 +286,15 @@ internal class EditorViewModel : ViewModel() {
         return result
     }
 
+    fun executeHistoryCommand(
+        command: EditorHistoryCommand,
+        undo: Boolean
+    ): EditorHistoryCommandResult {
+        val result = command.execute(documentState, undo)
+        publishDocument()
+        return result
+    }
+
     fun refreshDocument() {
         publishDocument()
     }
@@ -315,6 +324,16 @@ internal class EditorViewModel : ViewModel() {
         isSourceViewMode: Boolean,
         apply: (EditorEditHistory.Operation, Boolean) -> Unit
     ): Boolean = editHistoryController.redo(isSourceViewMode, apply)
+
+    fun undoCommand(
+        isSourceViewMode: Boolean,
+        apply: (EditorHistoryCommand, Boolean) -> Unit
+    ): Boolean = editHistoryController.undoCommand(isSourceViewMode, apply)
+
+    fun redoCommand(
+        isSourceViewMode: Boolean,
+        apply: (EditorHistoryCommand, Boolean) -> Unit
+    ): Boolean = editHistoryController.redoCommand(isSourceViewMode, apply)
 
     fun onEvent(event: EditorEvent) {
         when (event) {

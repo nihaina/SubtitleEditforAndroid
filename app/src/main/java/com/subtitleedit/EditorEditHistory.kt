@@ -1,6 +1,7 @@
 package com.subtitleedit
 
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.util.SubtitleSourceSynchronizer
 
 /**
  * In-memory undo/redo stacks shared by the list and source editors.
@@ -12,8 +13,7 @@ internal class EditorEditHistory {
         val selectedIds: Set<Long>
     )
 
-    sealed class Operation {
-        abstract val description: String
+    sealed class Operation : EditorHistoryCommand {
 
         data class ListChange(
             val before: ListState,
@@ -32,6 +32,57 @@ internal class EditorEditHistory {
             var afterEntries: List<SubtitleEntry>? = null,
             var afterEntriesText: String? = null
         ) : Operation()
+
+        override fun isSelectionOnly(): Boolean = when (this) {
+            is ListChange -> haveSameEditableEntries(before.entries, after.entries)
+            is SourceChange -> false
+        }
+
+        override fun execute(
+            state: EditorDocumentState,
+            undo: Boolean
+        ): EditorHistoryCommandResult {
+            return when (this) {
+                is ListChange -> {
+                    val target = if (undo) before else after
+                    val targetSource = if (undo) beforeSourceText else afterSourceText
+                    val entries = target.entries.map { it.copy() }
+                    val source = targetSource ?: SubtitleSourceSynchronizer.apply(
+                        content = state.originalFileContent,
+                        format = state.currentFormat,
+                        oldEntries = state.subtitleEntries,
+                        newEntries = entries
+                    )
+                    state.subtitleEntries = entries.map { it.copy() }.toMutableList()
+                    state.originalFileContent = source
+                    state.sourceViewContent = source
+                    state.sourceHistoryTextSnapshot = source
+                    state.sourceViewNeedsListSync = false
+                    EditorHistoryCommandResult(entries, source, target.selectedIds)
+                }
+                is SourceChange -> {
+                    val targetText = if (undo) beforeText else afterText
+                    val cachedEntries = if (undo) {
+                        beforeEntries.takeIf { beforeEntriesText == beforeText }
+                    } else {
+                        afterEntries?.takeIf { afterEntriesText == afterText }
+                    }
+                    val entries = cachedEntries ?: state.subtitleEntries
+                    state.originalFileContent = targetText
+                    state.sourceViewContent = targetText
+                    state.sourceHistoryTextSnapshot = targetText
+                    state.sourceViewNeedsListSync = true
+                    if (cachedEntries != null) {
+                        state.subtitleEntries = entries.map { it.copy() }.toMutableList()
+                    }
+                    EditorHistoryCommandResult(
+                        entries = entries.map { it.copy() },
+                        sourceText = targetText,
+                        selectedIds = emptySet()
+                    )
+                }
+            }
+        }
     }
 
     data class ListDifference(
@@ -98,9 +149,6 @@ internal class EditorEditHistory {
         is Operation.ListChange -> difference(before, after).isEmpty
         is Operation.SourceChange -> beforeText == afterText
     }
-
-    fun Operation.isSelectionOnly(): Boolean =
-        this is Operation.ListChange && haveSameEditableEntries(before.entries, after.entries)
 
     companion object {
         fun difference(before: ListState, after: ListState): ListDifference {

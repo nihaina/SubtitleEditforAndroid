@@ -6,6 +6,13 @@ internal class EditorHistoryController(
     fun undo(
         isSourceViewMode: Boolean,
         apply: (EditorEditHistory.Operation, Boolean) -> Unit
+    ): Boolean = undoCommand(isSourceViewMode) { command, reversed ->
+        apply(command as EditorEditHistory.Operation, reversed)
+    }
+
+    fun undoCommand(
+        isSourceViewMode: Boolean,
+        apply: (EditorHistoryCommand, Boolean) -> Unit
     ): Boolean = move(
         isSourceViewMode = isSourceViewMode,
         take = history::takeUndo,
@@ -17,6 +24,13 @@ internal class EditorHistoryController(
     fun redo(
         isSourceViewMode: Boolean,
         apply: (EditorEditHistory.Operation, Boolean) -> Unit
+    ): Boolean = redoCommand(isSourceViewMode) { command, reversed ->
+        apply(command as EditorEditHistory.Operation, reversed)
+    }
+
+    fun redoCommand(
+        isSourceViewMode: Boolean,
+        apply: (EditorHistoryCommand, Boolean) -> Unit
     ): Boolean = move(
         isSourceViewMode = isSourceViewMode,
         take = history::takeRedo,
@@ -30,7 +44,7 @@ internal class EditorHistoryController(
         take: () -> EditorEditHistory.Operation?,
         restore: (EditorEditHistory.Operation) -> Unit,
         destination: (EditorEditHistory.Operation) -> Unit,
-        apply: (EditorEditHistory.Operation) -> Unit
+        apply: (EditorHistoryCommand) -> Unit
     ): Boolean {
         val skippedSelectionOperations = mutableListOf<EditorEditHistory.Operation>()
         var operation = take()
