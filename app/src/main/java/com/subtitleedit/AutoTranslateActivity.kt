@@ -19,6 +19,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.subtitleedit.databinding.ActivityAutoTranslateBinding
+import com.subtitleedit.repository.AiTranslationService
+import com.subtitleedit.repository.DefaultAiTranslationService
 import com.subtitleedit.util.AiProviderConfig
 import com.subtitleedit.util.AiTranslationConversation
 import com.subtitleedit.util.DirectoryDisplayPath
@@ -47,6 +49,7 @@ class AutoTranslateActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityAutoTranslateBinding
     private lateinit var settingsManager: SettingsManager
+    private val aiTranslationService: AiTranslationService = DefaultAiTranslationService()
     private lateinit var adapter: AutoTranslateAdapter
     private val files = mutableListOf<AutoTranslateFile>()
     private val activeJobs = mutableMapOf<String, Job>()
@@ -271,7 +274,7 @@ class AutoTranslateActivity : AppCompatActivity() {
             postFileUpdate(file) { }
             if (entries.isEmpty()) throw IllegalArgumentException("未检测到可翻译的字幕行")
 
-            val translator = AiTranslationConversation(
+            val translator = aiTranslationService.createConversation(
                 context = this,
                 provider = config.provider,
                 apiKey = config.apiKey,

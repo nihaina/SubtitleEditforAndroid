@@ -19,6 +19,8 @@ import androidx.lifecycle.lifecycleScope
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.subtitleedit.databinding.ActivitySpeechToSubtitleBinding
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.repository.DefaultSpeechRecognitionService
+import com.subtitleedit.repository.SpeechRecognitionService
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleParser
@@ -41,6 +43,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySpeechToSubtitleBinding
     private lateinit var settingsManager: SettingsManager
+    private val speechRecognitionService: SpeechRecognitionService = DefaultSpeechRecognitionService()
 
     private val selectedMediaFiles = mutableListOf<SelectedMediaFile>()
     private var encoderPath: String = ""
@@ -625,7 +628,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                             "(${senseVoiceLanguageCode(selectedLanguage)})"
                     )
                 }
-                val recognizer = WhisperRecognizer(
+                val recognizer = speechRecognitionService.createRecognizer(
                     encoderPath = encoderPath,
                     decoderPath = decoderPath,
                     joinerPath = joinerPath,
@@ -724,7 +727,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         appendRuntimeLog("实验打轴完成：生成 ${ranges.size} 个时间范围，已丢弃打轴模型文本")
 
         appendRuntimeLog("识别：初始化 ${currentAsrModelDisplayName()}，按实验时间轴生成字幕文本")
-        val textRecognizer = WhisperRecognizer(
+        val textRecognizer = speechRecognitionService.createRecognizer(
             encoderPath = encoderPath,
             decoderPath = decoderPath,
             joinerPath = joinerPath,

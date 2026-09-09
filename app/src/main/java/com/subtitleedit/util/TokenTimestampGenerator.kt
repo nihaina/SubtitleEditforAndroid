@@ -2,6 +2,8 @@ package com.subtitleedit.util
 
 import android.content.Context
 import android.net.Uri
+import com.subtitleedit.repository.DefaultSpeechRecognitionService
+import com.subtitleedit.repository.SpeechRecognitionService
 import java.io.File
 
 class TokenTimestampGenerator(context: Context) {
@@ -14,6 +16,7 @@ class TokenTimestampGenerator(context: Context) {
 
     private val appContext = context.applicationContext
     private val settingsManager = SettingsManager.getInstance(appContext)
+    private val speechRecognitionService: SpeechRecognitionService = DefaultSpeechRecognitionService()
 
     fun generateSegments(
         pcmFile: File,
@@ -28,7 +31,7 @@ class TokenTimestampGenerator(context: Context) {
             )
         }
 
-        val recognizer = WhisperRecognizer(
+        val recognizer = speechRecognitionService.createRecognizer(
             encoderPath = modelConfig.encoderPath,
             decoderPath = modelConfig.decoderPath,
             joinerPath = modelConfig.joinerPath,

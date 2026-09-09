@@ -25,6 +25,8 @@ import com.subtitleedit.chat.ChatBackendConfig
 import com.subtitleedit.chat.ChatLaunchConfiguration
 import com.subtitleedit.chat.ChatReasoningLevel
 import com.subtitleedit.databinding.ActivityAiSettingsBinding
+import com.subtitleedit.repository.AiTranslationService
+import com.subtitleedit.repository.DefaultAiTranslationService
 import com.subtitleedit.util.AiKeyAccessSession
 import com.subtitleedit.util.AiProviderConfig
 import com.subtitleedit.util.AiModelClient
@@ -35,6 +37,7 @@ class AiSettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityAiSettingsBinding
     private lateinit var settingsManager: SettingsManager
+    private val aiTranslationService: AiTranslationService = DefaultAiTranslationService()
     private var selectedProvider: String = AiProviderConfig.SILICONFLOW
     private var suppressTextSave = false
     private var isApiKeyVisible = false
@@ -215,7 +218,7 @@ class AiSettingsActivity : AppCompatActivity() {
             binding.btnFetchModels.isEnabled = false
             lifecycleScope.launch {
                 try {
-                    val models = AiModelClient.fetchModels(baseUrl, apiKey)
+                    val models = aiTranslationService.fetchModels(baseUrl, apiKey)
                     if (models.isEmpty()) {
                         showToast("模型列表为空")
                     } else {

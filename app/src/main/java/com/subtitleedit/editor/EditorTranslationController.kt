@@ -5,6 +5,8 @@ import android.app.AlertDialog
 import android.widget.Toast
 import com.subtitleedit.adapter.TranslationPreviewItem
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.repository.AiTranslationService
+import com.subtitleedit.repository.DefaultAiTranslationService
 import com.subtitleedit.util.AiProviderConfig
 import com.subtitleedit.util.AiTranslationConversation
 import com.subtitleedit.util.OverwritingToast
@@ -25,6 +27,7 @@ internal class EditorTranslationController(
     private val applyTexts: (List<TranslationPreviewItem>) -> Unit,
     private val saveDraft: (List<TranslationPreviewItem>) -> Unit,
     private val showMessage: (String) -> Unit,
+    private val aiTranslationService: AiTranslationService = DefaultAiTranslationService(),
     private val subtitleFormatProvider: () -> SubtitleParser.SubtitleFormat = {
         SubtitleParser.SubtitleFormat.SRT
     }
@@ -117,7 +120,7 @@ internal class EditorTranslationController(
     ) {
         // One editor action owns one history record; all subtitle batches and retries share it.
         val historySessionId = UUID.randomUUID().toString()
-        val translator = AiTranslationConversation(
+        val translator = aiTranslationService.createConversation(
             context = activity,
             provider = provider,
             apiKey = apiKey,

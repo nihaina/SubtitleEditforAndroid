@@ -11,6 +11,8 @@ import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegSession
 import com.subtitleedit.adapter.TranslationPreviewItem
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.repository.DefaultSpeechRecognitionService
+import com.subtitleedit.repository.SpeechRecognitionService
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.WhisperRecognizer
 import java.io.File
@@ -35,7 +37,8 @@ internal class EditorTranscribeController(
     private val cacheDir: File,
     private val previewDialog: EditorTextPreviewDialog,
     private val applyTexts: (List<TranslationPreviewItem>) -> Unit,
-    private val showMessage: (String) -> Unit
+    private val showMessage: (String) -> Unit,
+    private val speechRecognitionService: SpeechRecognitionService = DefaultSpeechRecognitionService()
 ) {
     private var transcribeJob: Job? = null
     private var transcribeCancelled = false
@@ -198,7 +201,7 @@ internal class EditorTranscribeController(
                 } ?: throw IllegalStateException("音频转换失败")
                 if (transcribeCancelled) return@launch
 
-                val recognizer = WhisperRecognizer(
+                val recognizer = speechRecognitionService.createRecognizer(
                     encoderPath = encoderPath,
                     decoderPath = decoderPath,
                     joinerPath = joinerPath,
