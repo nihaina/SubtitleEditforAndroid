@@ -194,6 +194,35 @@ class EditorEditHistoryTest {
         assertEquals("后", viewModel.document.value.entries.single().text)
     }
 
+    @Test
+    fun sourceHistoryWithCachedEntriesKeepsDocumentSynchronized() {
+        val beforeEntry = SubtitleEntry(startTime = 0L, endTime = 1000L, text = "旧")
+        val afterEntry = beforeEntry.copy(text = "新")
+        val state = EditorDocumentState().apply {
+            subtitleEntries = mutableListOf(afterEntry.copy())
+            originalFileContent = "新"
+            sourceViewContent = "新"
+            sourceViewNeedsListSync = true
+            currentFormat = com.subtitleedit.util.SubtitleParser.SubtitleFormat.TXT
+        }
+        val operation = EditorEditHistory.Operation.SourceChange(
+            beforeText = "旧",
+            afterText = "新",
+            description = "修改",
+            beforeEntries = listOf(beforeEntry),
+            beforeEntriesText = "旧",
+            afterEntries = listOf(afterEntry),
+            afterEntriesText = "新"
+        )
+
+        val result = operation.execute(state, undo = true)
+
+        assertEquals("旧", state.sourceViewContent)
+        assertEquals("旧", state.subtitleEntries.single().text)
+        assertFalse(state.sourceViewNeedsListSync)
+        assertTrue(result.entriesResolved)
+    }
+
     private fun sourceChange(before: String, after: String) =
         EditorEditHistory.Operation.SourceChange(before, after, "source")
 

@@ -47,18 +47,49 @@ internal class EditorEditHistory {
                     val target = if (undo) before else after
                     val targetSource = if (undo) beforeSourceText else afterSourceText
                     val entries = target.entries.map { it.copy() }
-                    val source = targetSource ?: SubtitleSourceSynchronizer.apply(
-                        content = state.originalFileContent,
-                        format = state.currentFormat,
-                        oldEntries = state.subtitleEntries,
-                        newEntries = entries
-                    )
-                    state.subtitleEntries = entries.map { it.copy() }.toMutableList()
+                    val previousEntries = state.subtitleEntries.toList()
+                    val contentChanged = !haveSameEditableEntries(previousEntries, entries)
+                    val source = targetSource ?: if (contentChanged) {
+                        SubtitleSourceSynchronizer.apply(
+                            content = state.originalFileContent,
+                            format = state.currentFormat,
+                            oldEntries = previousEntries,
+                            newEntries = entries
+                        )
+                    } else {
+                        state.originalFileContent
+                    }
+                    val changedPositions = entries.indices.filter { position ->
+                        val current = previousEntries.getOrNull(position)
+                        val targetEntry = entries[position]
+                        current == null || current != targetEntry
+                    }.toSet()
+                    val structureChanged = previousEntries.size != entries.size ||
+                        previousEntries.map { it.stableId } != entries.map { it.stableId }
+                    if (!structureChanged && previousEntries.size == entries.size &&
+                        previousEntries.zip(entries).all { (current, targetEntry) ->
+                            current.stableId == targetEntry.stableId &&
+                                current.cueIdentifier == targetEntry.cueIdentifier &&
+                                current.cueSettings == targetEntry.cueSettings
+                        }
+                    ) {
+                        previousEntries.forEachIndexed { position, current ->
+                            EditorDocumentOperations.updateFields(current, entries[position])
+                        }
+                    } else {
+                        state.subtitleEntries = entries.map { it.copy() }.toMutableList()
+                    }
                     state.originalFileContent = source
                     state.sourceViewContent = source
                     state.sourceHistoryTextSnapshot = source
                     state.sourceViewNeedsListSync = false
-                    EditorHistoryCommandResult(entries, source, target.selectedIds)
+                    EditorHistoryCommandResult(
+                        entries = state.subtitleEntries.map { it.copy() },
+                        sourceText = source,
+                        selectedIds = target.selectedIds,
+                        changedPositions = changedPositions,
+                        structureChanged = structureChanged
+                    )
                 }
                 is SourceChange -> {
                     val targetText = if (undo) beforeText else afterText
@@ -67,18 +98,39 @@ internal class EditorEditHistory {
                     } else {
                         afterEntries?.takeIf { afterEntriesText == afterText }
                     }
-                    val entries = cachedEntries ?: state.subtitleEntries
+                    val entries = cachedEntries ?: state.subtitleEntries.toList()
+                    val previousEntries = state.subtitleEntries.toList()
+                    val changedPositions = if (cachedEntries == null) {
+                        emptySet()
+                    } else {
+                        entries.indices.filter { position ->
+                            previousEntries.getOrNull(position) != entries[position]
+                        }.toSet()
+                    }
+                    val structureChanged = cachedEntries != null && (
+                        previousEntries.size != entries.size ||
+                            previousEntries.map { it.stableId } != entries.map { it.stableId }
+                        )
                     state.originalFileContent = targetText
                     state.sourceViewContent = targetText
                     state.sourceHistoryTextSnapshot = targetText
-                    state.sourceViewNeedsListSync = true
+                    state.sourceViewNeedsListSync = cachedEntries == null
                     if (cachedEntries != null) {
-                        state.subtitleEntries = entries.map { it.copy() }.toMutableList()
+                        if (!structureChanged && previousEntries.size == entries.size) {
+                            previousEntries.forEachIndexed { position, current ->
+                                EditorDocumentOperations.updateFields(current, entries[position])
+                            }
+                        } else {
+                            state.subtitleEntries = entries.map { it.copy() }.toMutableList()
+                        }
                     }
                     EditorHistoryCommandResult(
                         entries = entries.map { it.copy() },
                         sourceText = targetText,
-                        selectedIds = emptySet()
+                        selectedIds = emptySet(),
+                        changedPositions = changedPositions,
+                        structureChanged = structureChanged,
+                        entriesResolved = cachedEntries != null
                     )
                 }
             }

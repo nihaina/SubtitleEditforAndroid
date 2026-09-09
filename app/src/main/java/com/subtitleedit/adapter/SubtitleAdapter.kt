@@ -474,8 +474,7 @@ class SubtitleAdapter(
 
     private class SubtitleDiffCallback : DiffUtil.ItemCallback<SubtitleEntry>() {
         override fun areItemsTheSame(oldItem: SubtitleEntry, newItem: SubtitleEntry): Boolean {
-            // 使用对象的 identity 而不是 index，因为 index 会在插入/删除时变化
-            return oldItem === newItem
+            return oldItem.stableId == newItem.stableId
         }
 
         override fun areContentsTheSame(oldItem: SubtitleEntry, newItem: SubtitleEntry): Boolean {

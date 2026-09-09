@@ -13,5 +13,8 @@ internal interface EditorHistoryCommand {
 internal data class EditorHistoryCommandResult(
     val entries: List<SubtitleEntry>,
     val sourceText: String?,
-    val selectedIds: Set<Long>
+    val selectedIds: Set<Long>,
+    val changedPositions: Set<Int> = emptySet(),
+    val structureChanged: Boolean = false,
+    val entriesResolved: Boolean = true
 )

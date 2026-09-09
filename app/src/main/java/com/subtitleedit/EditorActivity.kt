@@ -1995,159 +1995,49 @@ class EditorActivity : AppCompatActivity() {
         command: EditorHistoryCommand,
         undo: Boolean
     ) {
-        val operation = command as? EditorEditHistory.Operation ?: return
-        when (operation) {
-            is EditorEditHistory.Operation.ListChange -> {
-                val target = if (undo) operation.before else operation.after
-                val targetSourceText = if (undo) {
-                    operation.beforeSourceText
-                } else {
-                    operation.afterSourceText
-                }
-                if (isSourceViewMode) {
-                    applyListHistoryInSourceView(target.entries, targetSourceText)
-                } else {
-                    applyListHistoryInListView(target, targetSourceText)
-                }
-            }
-            is EditorEditHistory.Operation.SourceChange -> {
-                val targetText = if (undo) operation.beforeText else operation.afterText
-                val targetEntries = if (undo) {
-                    operation.beforeEntries.takeIf { operation.beforeEntriesText == operation.beforeText }
-                } else {
-                    operation.afterEntries?.takeIf { operation.afterEntriesText == operation.afterText }
-                }
-                applySourceHistoryText(targetText, targetEntries)
-            }
-        }
+        val result = stateModel.executeHistoryCommand(command, undo)
+        renderHistoryCommandResult(result)
     }
 
-    private fun applyListHistoryInSourceView(
-        targetEntries: List<SubtitleEntry>,
-        targetSourceText: String?
-    ) {
-        val effectiveTargetEntries: List<SubtitleEntry>
-        val updated: String
-        if (targetSourceText != null) {
-            effectiveTargetEntries = targetEntries
-            updated = targetSourceText
-        } else {
-            val source = sourceViewContent
-            val currentEntries = SubtitleParser.parseDocument(source, format = currentFormat).entries
-            effectiveTargetEntries = SubtitleEntryOps.applyEditableHistoryTarget(
-                current = subtitleEntries,
-                target = targetEntries
-            )
-            updated = SubtitleSourceSynchronizer.apply(
-                content = source,
-                format = currentFormat,
-                oldEntries = currentEntries,
-                newEntries = effectiveTargetEntries
-            )
-        }
-        originalFileContent = updated
-        sourceViewContent = updated
-        sourceHistoryTextSnapshot = updated
-        setSourceViewEditorText(updated, preserveScroll = true)
-        applySourceViewEntries(effectiveTargetEntries.map { it.copy() })
-        updateFormatInfo()
-    }
-
-    private fun applyListHistoryInListView(
-        target: EditorEditHistory.ListState,
-        targetSourceText: String?
-    ) {
-        if (targetSourceText == null && canRestoreListEntriesInPlace(target.entries)) {
-            restoreListEntriesInPlace(target)
+    private fun renderHistoryCommandResult(result: EditorHistoryCommandResult) {
+        val selectedIds = result.selectedIds.takeIf { it.isNotEmpty() }
+            ?: currentHistoryListState().selectedIds
+        if (isSourceViewMode) {
+            sourcePreviewController.cancel()
+            sourceViewEditGeneration++
+            sourceViewHasPendingEdits = false
+            result.sourceText?.let { setSourceViewEditorText(it, preserveScroll = true) }
+            if (result.entriesResolved) {
+                sourceViewEntriesGeneration = sourceViewEditGeneration
+                syncWaveformSubtitles(
+                    preserveSelection = true,
+                    changedPositions = result.changedPositions
+                )
+            } else {
+                scheduleSourceViewPreview()
+            }
+            updateFormatInfo()
             return
         }
 
-        val previousCount = subtitleEntries.size
-        val effectiveTargetEntries: List<SubtitleEntry>
-        val updatedSource: String
-        if (targetSourceText != null) {
-            effectiveTargetEntries = target.entries
-            updatedSource = targetSourceText
-        } else {
-            val source = originalFileContent
-            val currentEntries = SubtitleParser.parseDocument(source, format = currentFormat).entries
-            effectiveTargetEntries = SubtitleEntryOps.applyEditableHistoryTarget(
-                current = subtitleEntries,
-                target = target.entries
-            )
-            updatedSource = SubtitleSourceSynchronizer.apply(
-                content = source,
-                format = currentFormat,
-                oldEntries = currentEntries,
-                newEntries = effectiveTargetEntries
-            )
-        }
-        originalFileContent = updatedSource
-        sourceViewContent = updatedSource
-        sourceHistoryTextSnapshot = updatedSource
-        applySourceViewEntries(effectiveTargetEntries.map { it.copy() })
-        if (previousCount != subtitleEntries.size || subtitleAdapter.itemCount != subtitleEntries.size) {
+        if (result.structureChanged || subtitleAdapter.itemCount != subtitleEntries.size) {
             submitSubtitleList(
                 refreshAll = false,
-                syncWaveform = false,
-                markChanged = false
-            ) {
-                subtitleAdapter.setSelectionByStableIds(target.selectedIds)
-                updateSelectedCountDisplay()
-            }
-        } else {
-            subtitleAdapter.setSelectionByStableIds(target.selectedIds)
-            updateSelectedCountDisplay()
-        }
-    }
-
-    private fun canRestoreListEntriesInPlace(targetEntries: List<SubtitleEntry>): Boolean {
-        if (subtitleEntries.size != targetEntries.size) return false
-        return subtitleEntries.zip(targetEntries).all { (current, target) ->
-            current.stableId == target.stableId &&
-                current.cueIdentifier == target.cueIdentifier &&
-                current.cueSettings == target.cueSettings
-        }
-    }
-
-    private fun restoreListEntriesInPlace(target: EditorEditHistory.ListState) {
-        val source = originalFileContent
-        val currentEntries = subtitleEntries.toList()
-        val changedPositions = currentEntries.indices.filter { position ->
-            val current = currentEntries[position]
-            val historical = target.entries[position]
-            current.startTime != historical.startTime ||
-                current.endTime != historical.endTime ||
-                current.text != historical.text ||
-                current.endTimeModified != historical.endTimeModified
-        }
-        val updatedSource = SubtitleSourceSynchronizer.apply(
-            content = source,
-            format = currentFormat,
-            oldEntries = currentEntries,
-            newEntries = target.entries
-        )
-
-        currentEntries.forEachIndexed { position, current ->
-            val historical = target.entries[position]
-            current.index = historical.index
-            current.startTime = historical.startTime
-            current.endTime = historical.endTime
-            current.text = historical.text
-            current.endTimeModified = historical.endTimeModified
-        }
-        originalFileContent = updatedSource
-        sourceViewContent = updatedSource
-        sourceHistoryTextSnapshot = updatedSource
-        if (changedPositions.isNotEmpty()) {
-            notifyEntriesChanged(
-                positions = changedPositions,
+                selectedStableIds = selectedIds,
                 syncWaveform = true,
                 markChanged = false
             )
+        } else {
+            if (result.changedPositions.isNotEmpty()) {
+                notifyEntriesChanged(
+                    positions = result.changedPositions,
+                    syncWaveform = true,
+                    markChanged = false
+                )
+            }
+            subtitleAdapter.setSelectionByStableIds(selectedIds)
+            updateSelectedCountDisplay()
         }
-        subtitleAdapter.setSelectionByStableIds(target.selectedIds)
-        updateSelectedCountDisplay()
     }
 
     private fun applySourceDeletionLocally(content: String): Boolean {
@@ -2214,46 +2104,6 @@ class EditorActivity : AppCompatActivity() {
             if (matches) return start to deleted.size
         }
         return null
-    }
-
-    private fun applySourceHistoryText(targetText: String, cachedEntries: List<SubtitleEntry>? = null) {
-        val selectedIds = currentHistoryListState().selectedIds
-        val previousCount = subtitleEntries.size
-        originalFileContent = targetText
-        sourceViewContent = targetText
-        sourceHistoryTextSnapshot = targetText
-        if (isSourceViewMode) {
-            sourcePreviewController.cancel()
-            sourceViewEditGeneration++
-            sourceViewHasPendingEdits = false
-            setSourceViewEditorText(targetText, preserveScroll = true)
-            if (cachedEntries != null) {
-                applySourceViewEntries(cachedEntries)
-                sourceViewEntriesGeneration = sourceViewEditGeneration
-            } else {
-                // The source text is already restored. Parse asynchronously so redo does not
-                // block the editor while rebuilding entries for a large document.
-                scheduleSourceViewPreview()
-            }
-            updateFormatInfo()
-            return
-        }
-
-        val parsed = cachedEntries ?: SubtitleParser.parseDocument(targetText, format = currentFormat).entries
-        if (!isSourceViewMode) {
-            applySourceViewEntries(parsed)
-            if (previousCount != subtitleEntries.size || subtitleAdapter.itemCount != subtitleEntries.size) {
-                submitSubtitleList(
-                    refreshAll = false,
-                    selectedStableIds = selectedIds,
-                    syncWaveform = false,
-                    markChanged = false
-                )
-            } else {
-                subtitleAdapter.setSelectionByStableIds(selectedIds)
-                updateSelectedCountDisplay()
-            }
-        }
     }
 
     private fun onEntryUpdated(position: Int, message: String = "已更新") {
