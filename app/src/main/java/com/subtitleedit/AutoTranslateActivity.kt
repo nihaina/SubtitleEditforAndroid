@@ -22,7 +22,6 @@ import com.subtitleedit.databinding.ActivityAutoTranslateBinding
 import com.subtitleedit.repository.AiTranslationService
 import com.subtitleedit.repository.DefaultAiTranslationService
 import com.subtitleedit.util.AiProviderConfig
-import com.subtitleedit.util.AiTranslationConversation
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.OverwritingToast
@@ -49,7 +48,8 @@ class AutoTranslateActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityAutoTranslateBinding
     private lateinit var settingsManager: SettingsManager
-    private val aiTranslationService: AiTranslationService = DefaultAiTranslationService()
+    private val aiTranslationService: AiTranslationService
+        get() = (application as SubtitleEditApplication).dependencies.aiTranslationService
     private lateinit var adapter: AutoTranslateAdapter
     private val files = mutableListOf<AutoTranslateFile>()
     private val activeJobs = mutableMapOf<String, Job>()

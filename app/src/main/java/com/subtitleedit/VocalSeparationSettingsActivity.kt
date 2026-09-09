@@ -20,25 +20,26 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.subtitleedit.databinding.ActivityVocalSeparationSettingsBinding
 import com.subtitleedit.demix.VocalSeparationEngine
-import com.subtitleedit.repository.DefaultModelRepository
-import com.subtitleedit.repository.ModelRepository
 import com.subtitleedit.util.ModelDownloadProgressDialog
 import com.subtitleedit.util.ModelDownloader
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.task.TaskStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.UUID
 
 class VocalSeparationSettingsActivity : AppCompatActivity() {
     private lateinit var binding: ActivityVocalSeparationSettingsBinding
     private lateinit var settings: SettingsManager
-    private val modelRepository: ModelRepository = DefaultModelRepository()
     private var loading = false
     private var accessWarningShown = false
     private var modelType = SettingsManager.DEMIX_MODEL_GENERAL
     private var modelDownloadJob: Job? = null
+    private var modelDownloadWorkId: UUID? = null
     private var modelDownloadDialog: ModelDownloadProgressDialog? = null
     private var pendingGeneralModelDownload = false
 
@@ -67,10 +68,13 @@ class VocalSeparationSettingsActivity : AppCompatActivity() {
         binding = ActivityVocalSeparationSettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
         settings = SettingsManager.getInstance(this)
+        modelDownloadWorkId = savedInstanceState?.getString("model_download_work_id")
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
 
         setupToolbar()
         setupListeners()
         loadSettings()
+        restoreActiveGeneralModelDownload()
     }
 
     private fun setupToolbar() {
@@ -132,55 +136,105 @@ class VocalSeparationSettingsActivity : AppCompatActivity() {
 
     private fun startGeneralModelDownload() {
         if (!ensureModelStorageAccess()) return
-        if (modelDownloadJob?.isActive == true) {
-            OverwritingToast.makeText(this, "模型正在下载", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (modelDownloadJob?.isActive == true) return
+        observeGeneralModelDownload(enqueue = true)
+    }
 
-        val progressDialog = ModelDownloadProgressDialog(
-            this,
-            "下载人声分离模型"
-        ) { modelDownloadJob?.cancel() }
-        modelDownloadDialog = progressDialog
-        progressDialog.show()
-        binding.btnDownloadGeneralModel.isEnabled = false
-        binding.btnResetGeneralModel.isEnabled = false
-        binding.btnSwitchDemixModel.isEnabled = false
+    private fun restoreActiveGeneralModelDownload() {
+        observeGeneralModelDownload(enqueue = false)
+    }
 
+    private fun observeGeneralModelDownload(enqueue: Boolean) {
+        if (modelDownloadJob?.isActive == true) return
+        setModelDownloadActionsEnabled(false)
         modelDownloadJob = lifecycleScope.launch {
+            var progressDialog: ModelDownloadProgressDialog? = null
             try {
-                val modelFile = modelRepository.downloadDemixGeneralModel { progress ->
-                    runOnUiThread { modelDownloadDialog?.update(progress) }
+                val scheduler = (application as SubtitleEditApplication).dependencies.taskWorkScheduler
+                val workId = if (enqueue) {
+                    scheduler.enqueueGeneralModelDownload()
+                } else {
+                    scheduler.findActiveModelDownload(modelDownloadWorkId) ?: return@launch
                 }
-                settings.setDemixModelUri("general", Uri.fromFile(modelFile).toString())
-                settings.setDemixModelType(SettingsManager.DEMIX_MODEL_GENERAL)
-                modelType = SettingsManager.DEMIX_MODEL_GENERAL
-                updateGeneralModelUi()
-                updateDemixModelUi()
-                progressDialog.dismiss()
-                OverwritingToast.makeText(
+                modelDownloadWorkId = workId
+                progressDialog = ModelDownloadProgressDialog(
                     this@VocalSeparationSettingsActivity,
-                    "人声分离模型已下载并自动选择\n${modelFile.parentFile?.absolutePath}",
-                    Toast.LENGTH_LONG
-                ).show()
-            } catch (e: CancellationException) {
-                progressDialog.dismiss()
-                throw e
-            } catch (e: Exception) {
-                progressDialog.dismiss()
-                OverwritingToast.makeText(
-                    this@VocalSeparationSettingsActivity,
-                    "人声分离模型下载失败：${e.message}",
-                    Toast.LENGTH_LONG
-                ).show()
+                    "下载人声分离模型"
+                ) {
+                    lifecycleScope.launch {
+                        try {
+                            scheduler.cancel(workId)
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (error: Exception) {
+                            showError("取消下载失败：" + error.message)
+                        }
+                    }
+                }
+                modelDownloadDialog = progressDialog
+                progressDialog.show()
+                scheduler.observeTask(workId).takeWhile { taskState ->
+                    if (taskState == null) {
+                        modelDownloadWorkId = null
+                        throw IllegalStateException("下载任务不存在")
+                    }
+                    taskState.progress.message.takeIf(String::isNotBlank)?.let { message ->
+                        modelDownloadDialog?.update(
+                            ModelDownloader.Progress(
+                                message,
+                                taskState.progress.current,
+                                taskState.progress.total
+                            )
+                        )
+                    }
+                    when (taskState.status) {
+                        TaskStatus.SUCCEEDED -> {
+                            modelDownloadWorkId = null
+                            modelType = settings.getDemixModelType()
+                            updateGeneralModelUi()
+                            updateDemixModelUi()
+                            OverwritingToast.makeText(
+                                this@VocalSeparationSettingsActivity,
+                                "人声分离模型已下载并自动选择",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            false
+                        }
+                        TaskStatus.FAILED -> {
+                            modelDownloadWorkId = null
+                            showError("人声分离模型下载失败：" + (taskState.errorMessage ?: "模型任务失败"))
+                            false
+                        }
+                        TaskStatus.CANCELLED -> {
+                            modelDownloadWorkId = null
+                            false
+                        }
+                        else -> true
+                    }
+                }.collect { }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                showError("模型任务失败：" + error.message)
             } finally {
-                binding.btnDownloadGeneralModel.isEnabled = true
-                binding.btnResetGeneralModel.isEnabled = true
-                binding.btnSwitchDemixModel.isEnabled = true
+                progressDialog?.dismiss()
+                setModelDownloadActionsEnabled(true)
                 if (modelDownloadDialog === progressDialog) modelDownloadDialog = null
                 modelDownloadJob = null
             }
         }
+    }
+
+    private fun setModelDownloadActionsEnabled(enabled: Boolean) {
+        binding.btnDownloadGeneralModel.isEnabled = enabled
+        binding.btnResetGeneralModel.isEnabled = enabled
+        binding.btnSwitchDemixModel.isEnabled = enabled
+        binding.btnSelectGeneralModel.isEnabled = enabled
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        modelDownloadWorkId?.let { outState.putString("model_download_work_id", it.toString()) }
+        super.onSaveInstanceState(outState)
     }
 
     private fun ensureModelStorageAccess(): Boolean {

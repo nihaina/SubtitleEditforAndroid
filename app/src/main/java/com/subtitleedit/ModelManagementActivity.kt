@@ -23,7 +23,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.card.MaterialCardView
 import com.subtitleedit.databinding.ActivityModelManagementBinding
-import com.subtitleedit.repository.DefaultModelRepository
 import com.subtitleedit.repository.ModelRepository
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SenseVoiceNpuModelImporter
@@ -37,7 +36,8 @@ import java.util.Locale
 class ModelManagementActivity : AppCompatActivity() {
     private lateinit var binding: ActivityModelManagementBinding
     private lateinit var settingsManager: SettingsManager
-    private val modelRepository: ModelRepository = DefaultModelRepository()
+    private val modelRepository: ModelRepository
+        get() = (application as SubtitleEditApplication).dependencies.modelRepository
     private var requestedStorageAccess = false
 
     private data class ModelItem(

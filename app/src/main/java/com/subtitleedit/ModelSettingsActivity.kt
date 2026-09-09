@@ -18,7 +18,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.subtitleedit.databinding.ActivityModelSettingsBinding
-import com.subtitleedit.repository.DefaultModelRepository
 import com.subtitleedit.repository.ModelRepository
 import com.subtitleedit.util.ModelDownloadProgressDialog
 import com.subtitleedit.util.ModelDownloader
@@ -42,7 +41,8 @@ class ModelSettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityModelSettingsBinding
     private lateinit var settingsManager: SettingsManager
-    private val modelRepository: ModelRepository = DefaultModelRepository()
+    private val modelRepository: ModelRepository
+        get() = (application as SubtitleEditApplication).dependencies.modelRepository
 
     private var encoderPath: String = ""
     private var decoderPath: String = ""

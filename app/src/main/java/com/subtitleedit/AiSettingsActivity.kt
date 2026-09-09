@@ -29,7 +29,6 @@ import com.subtitleedit.repository.AiTranslationService
 import com.subtitleedit.repository.DefaultAiTranslationService
 import com.subtitleedit.util.AiKeyAccessSession
 import com.subtitleedit.util.AiProviderConfig
-import com.subtitleedit.util.AiModelClient
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SettingsManager
 
@@ -37,7 +36,8 @@ class AiSettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityAiSettingsBinding
     private lateinit var settingsManager: SettingsManager
-    private val aiTranslationService: AiTranslationService = DefaultAiTranslationService()
+    private val aiTranslationService: AiTranslationService
+        get() = (application as SubtitleEditApplication).dependencies.aiTranslationService
     private var selectedProvider: String = AiProviderConfig.SILICONFLOW
     private var suppressTextSave = false
     private var isApiKeyVisible = false

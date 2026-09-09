@@ -43,7 +43,8 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySpeechToSubtitleBinding
     private lateinit var settingsManager: SettingsManager
-    private val speechRecognitionService: SpeechRecognitionService = DefaultSpeechRecognitionService()
+    private val speechRecognitionService: SpeechRecognitionService
+        get() = (application as SubtitleEditApplication).dependencies.speechRecognitionService
 
     private val selectedMediaFiles = mutableListOf<SelectedMediaFile>()
     private var encoderPath: String = ""

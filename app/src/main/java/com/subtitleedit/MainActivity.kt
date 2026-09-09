@@ -47,7 +47,6 @@ import com.subtitleedit.databinding.DialogCreateArchiveBinding
 import com.subtitleedit.databinding.DialogSubtitleConvertBinding
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.repository.ArchiveRepository
-import com.subtitleedit.repository.DefaultArchiveRepository
 import com.subtitleedit.util.ArchiveManager
 import com.subtitleedit.util.ArchivePreviewCache
 import com.subtitleedit.util.ArchivePasswordVault
@@ -87,7 +86,8 @@ import java.nio.file.Files
  */
 class MainActivity : AppCompatActivity() {
 
-    private val archiveRepository: ArchiveRepository = DefaultArchiveRepository()
+    private val archiveRepository: ArchiveRepository
+        get() = (application as SubtitleEditApplication).dependencies.archiveRepository
 
     private companion object {
         const val MENU_SELECT_ALL = 0x10001

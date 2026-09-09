@@ -1,6 +1,7 @@
 package com.subtitleedit
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
@@ -395,5 +396,17 @@ internal class EditorViewModel(
 
     private fun publishDocument() {
         _document.value = documentState.subtitleDocument
+    }
+}
+
+internal class EditorViewModelFactory(
+    private val subtitleRepository: SubtitleRepository
+) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(EditorViewModel::class.java)) {
+            return EditorViewModel(subtitleRepository) as T
+        }
+        throw IllegalArgumentException("未知的 ViewModel：${modelClass.name}")
     }
 }

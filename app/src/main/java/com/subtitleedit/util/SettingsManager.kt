@@ -939,6 +939,15 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putString(demixModelKey(stem), uri).apply()
     }
 
+    fun selectDownloadedDemixModel(uri: String) {
+        check(
+            prefs.edit()
+                .putString(demixModelKey("general"), uri)
+                .putString(KEY_DEMIX_MODEL_TYPE, DEMIX_MODEL_GENERAL)
+                .commit()
+        ) { "模型选择保存失败" }
+    }
+
     fun getDemixModelType(): String = prefs.getString(KEY_DEMIX_MODEL_TYPE, DEMIX_MODEL_GENERAL)
         ?.takeIf { it == DEMIX_MODEL_GENERAL || it == DEMIX_MODEL_FT }
         ?: DEMIX_MODEL_GENERAL

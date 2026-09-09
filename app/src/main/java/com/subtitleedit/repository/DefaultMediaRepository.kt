@@ -1,10 +1,8 @@
 package com.subtitleedit.repository
 
-import android.media.MediaExtractor
-import android.media.MediaFormat
 import android.util.Log
-import com.arthenica.ffmpegkit.FFmpegKit
-import com.arthenica.ffmpegkit.FFprobeKit
+import com.subtitleedit.nativebridge.DefaultNativeMediaEngine
+import com.subtitleedit.nativebridge.NativeMediaEngine
 import com.subtitleedit.util.FileHashUtils
 import java.io.File
 import kotlinx.coroutines.CancellationException
@@ -12,7 +10,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 internal class DefaultMediaRepository(
-    private val cacheDir: File
+    private val cacheDir: File,
+    private val nativeMediaEngine: NativeMediaEngine = DefaultNativeMediaEngine()
 ) : MediaRepository {
     private var temporaryPlaybackFile: File? = null
 
@@ -20,15 +19,8 @@ internal class DefaultMediaRepository(
         audioFile: File,
         inspectVideoAudioTrack: Boolean
     ): PreparedAudioFile = withContext(Dispatchers.IO) {
-        val mediaInformation = FFprobeKit.getMediaInformation(audioFile.absolutePath)
-            .getMediaInformation()
-        val audioStreamIndex = if (inspectVideoAudioTrack) {
-            selectDefaultAudioStreamIndex(mediaInformation)
-                ?: if (hasAudioTrack(audioFile)) null
-                else throw IllegalStateException("视频没有可用音轨")
-        } else {
-            null
-        }
+        val mediaInformation = nativeMediaEngine.probe(audioFile, inspectVideoAudioTrack)
+        val audioStreamIndex = mediaInformation.defaultAudioStreamIndex
 
         if (inspectVideoAudioTrack) {
             return@withContext PreparedAudioFile(
@@ -38,7 +30,7 @@ internal class DefaultMediaRepository(
             )
         }
 
-        val startTime = mediaInformation?.getStartTime()?.toDoubleOrNull() ?: 0.0
+        val startTime = mediaInformation.startTimeSeconds
         if (startTime <= 0.001) {
             return@withContext PreparedAudioFile(audioFile, wasFixed = false)
         }
@@ -54,9 +46,9 @@ internal class DefaultMediaRepository(
         }
 
         try {
-            val command = "-y -i \"${audioFile.absolutePath}\" " +
-                "-c:a pcm_s16le -ar 44100 -ac 2 \"${wavFile.absolutePath}\""
-            executeWavConversion(command, wavFile)
+            if (!nativeMediaEngine.convertToWav(audioFile, wavFile)) {
+                throw IllegalStateException("Native WAV 转换失败")
+            }
             replaceTemporaryPlaybackFile(wavFile)
             Log.d(TAG, "WAV 转换成功：${wavFile.absolutePath}")
             PreparedAudioFile(wavFile, wasFixed = true)
@@ -83,52 +75,9 @@ internal class DefaultMediaRepository(
         temporaryPlaybackFile = null
     }
 
-    private fun selectDefaultAudioStreamIndex(
-        mediaInformation: com.arthenica.ffmpegkit.MediaInformation?
-    ): Int? {
-        val audioStreams = mediaInformation?.getStreams()
-            ?.filter { stream ->
-                stream.getType().equals("audio", ignoreCase = true) ||
-                    stream.getAllProperties()
-                        ?.optString("codec_type")
-                        .equals("audio", ignoreCase = true)
-            }
-            .orEmpty()
-        val selectedStream = audioStreams.firstOrNull { stream ->
-            stream.getAllProperties()
-                ?.optJSONObject("disposition")
-                ?.optInt("default", 0) == 1
-        } ?: audioStreams.firstOrNull()
-        return selectedStream?.getIndex()?.toInt()
-    }
-
-    private fun hasAudioTrack(mediaFile: File): Boolean {
-        val extractor = MediaExtractor()
-        return try {
-            extractor.setDataSource(mediaFile.absolutePath)
-            (0 until extractor.trackCount).any { index ->
-                extractor.getTrackFormat(index)
-                    .getString(MediaFormat.KEY_MIME)
-                    ?.startsWith("audio/") == true
-            }
-        } catch (error: Exception) {
-            Log.w(TAG, "无法通过 MediaExtractor 检测视频音轨", error)
-            false
-        } finally {
-            extractor.release()
-        }
-    }
-
     private fun createTemporaryWav(prefix: String): File {
         cacheDir.mkdirs()
         return File.createTempFile(prefix, ".wav", cacheDir)
-    }
-
-    private fun executeWavConversion(command: String, outputFile: File) {
-        val ffmpegSession = FFmpegKit.execute(command)
-        if (ffmpegSession.getReturnCode()?.isValueSuccess() != true || outputFile.length() <= 44L) {
-            throw IllegalStateException("FFmpeg 返回 ${ffmpegSession.getReturnCode()}")
-        }
     }
 
     private fun replaceTemporaryPlaybackFile(file: File) {

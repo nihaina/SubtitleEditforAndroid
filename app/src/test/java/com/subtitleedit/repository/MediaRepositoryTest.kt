@@ -3,10 +3,14 @@ package com.subtitleedit.repository
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.RandomAccessFile
+import com.subtitleedit.nativebridge.MediaProbeResult
+import com.subtitleedit.nativebridge.NativeMediaEngine
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -77,5 +81,40 @@ class MediaRepositoryTest {
 
         assertEquals("original", source.readText())
         assertEquals("other session", unrelated.readText())
+    }
+
+    @Test
+    fun audioPreparationUsesInjectedNativeEngineForVideoProbe() = runBlocking {
+        val source = temporaryFolder.newFile("offset.mp3")
+        val engine = RecordingNativeMediaEngine()
+        val repository = DefaultMediaRepository(
+            cacheDir = temporaryFolder.newFolder("cache"),
+            nativeMediaEngine = engine
+        )
+
+        val prepared = repository.prepareAudio(source, inspectVideoAudioTrack = true)
+
+        assertTrue(engine.probed)
+        assertFalse(engine.converted)
+        assertFalse(prepared.wasFixed)
+        assertEquals(2, prepared.audioStreamIndex)
+        assertEquals(source, prepared.playbackFile)
+        repository.release()
+    }
+
+    private class RecordingNativeMediaEngine : NativeMediaEngine {
+        var probed = false
+        var converted = false
+
+        override fun probe(file: File, inspectVideoAudioTrack: Boolean): MediaProbeResult {
+            probed = true
+            return MediaProbeResult(startTimeSeconds = 1.0, defaultAudioStreamIndex = 2)
+        }
+
+        override fun convertToWav(inputFile: File, outputFile: File): Boolean {
+            converted = true
+            outputFile.writeBytes(ByteArray(45))
+            return true
+        }
     }
 }

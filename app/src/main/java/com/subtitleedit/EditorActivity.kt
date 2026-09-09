@@ -16,6 +16,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -26,7 +28,6 @@ import androidx.recyclerview.widget.SimpleItemAnimator
 import com.subtitleedit.adapter.SubtitleAdapter
 import com.subtitleedit.adapter.TranslationPreviewItem
 import com.subtitleedit.databinding.ActivityEditorBinding
-import com.subtitleedit.repository.DefaultMediaRepository
 import com.subtitleedit.repository.MediaRepository
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.editor.EditorPlaybackController
@@ -73,7 +74,11 @@ class EditorActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityEditorBinding
     private lateinit var subtitleAdapter: SubtitleAdapter
-    private val stateModel: EditorViewModel by viewModels()
+    private val stateModel: EditorViewModel by viewModels {
+        EditorViewModelFactory(
+            (application as SubtitleEditApplication).dependencies.subtitleRepository
+        )
+    }
 
     private var filePath: String
         get() = stateModel.filePath
@@ -287,7 +292,7 @@ class EditorActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityEditorBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        mediaRepository = DefaultMediaRepository(cacheDir)
+        mediaRepository = (application as SubtitleEditApplication).dependencies.mediaRepository(cacheDir)
         
         if (!stateModel.initialized) {
             filePath = intent.getStringExtra(EXTRA_FILE_PATH) ?: ""
@@ -897,6 +902,7 @@ class EditorActivity : AppCompatActivity() {
             applyTexts = { appliedItems -> applyPreviewTexts(appliedItems, "翻译") },
             saveDraft = ::saveTranslationDraft,
             showMessage = ::showShortToast,
+            aiTranslationService = (application as SubtitleEditApplication).dependencies.aiTranslationService,
             subtitleFormatProvider = { currentFormat }
         )
         transcribeController = EditorTranscribeController(
@@ -905,7 +911,8 @@ class EditorActivity : AppCompatActivity() {
             cacheDir = cacheDir,
             previewDialog = previewDialog,
             applyTexts = { appliedItems -> applyPreviewTexts(appliedItems, "转录") },
-            showMessage = ::showShortToast
+            showMessage = ::showShortToast,
+            speechRecognitionService = (application as SubtitleEditApplication).dependencies.speechRecognitionService
         )
         ttsController = EditorTtsController(
             activity = this,
