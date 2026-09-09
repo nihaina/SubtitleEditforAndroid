@@ -13,7 +13,7 @@ import com.arthenica.ffmpegkit.FFmpegSession
 import com.subtitleedit.audio.FfmpegWaveformChunkLoader
 import com.subtitleedit.databinding.ActivityEditorBinding
 import com.subtitleedit.model.SubtitleEntry
-import com.subtitleedit.util.FileHashUtils
+import com.subtitleedit.repository.MediaRepository
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.view.WaveformTimelineView
 import java.io.File
@@ -41,6 +41,7 @@ internal class EditorWaveformController(
     private val scope: CoroutineScope,
     private val hasPlayableMedia: Boolean,
     private val appCacheDir: File,
+    private val mediaRepository: MediaRepository,
     private val currentPlaybackPositionMs: () -> Long,
     private val onSubtitleChanged: (Int, SubtitleEntry, Long, Boolean) -> Unit,
     private val onSelectedIndexChanged: (Int) -> Unit,
@@ -201,7 +202,7 @@ internal class EditorWaveformController(
         updateGenerateButton()
 
         cacheIndexJob = scope.launch(Dispatchers.IO) {
-            val cacheKey = runCatching { FileHashUtils.md5(audioFile) }
+            val cacheKey = runCatching { mediaRepository.getCacheKey(audioFile) }
             withContext(Dispatchers.Main) {
                 if (cacheIndexRequest != cacheIndexGeneration) return@withContext
 

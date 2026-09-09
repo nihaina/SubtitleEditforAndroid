@@ -5,6 +5,8 @@ import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.subtitle.SubtitleDocument
+import com.subtitleedit.repository.DefaultSubtitleRepository
+import com.subtitleedit.repository.SubtitleRepository
 import com.subtitleedit.usecase.ApplySubtitleEditUseCase
 import com.subtitleedit.usecase.LoadSubtitleDocumentUseCase
 import com.subtitleedit.usecase.SaveSubtitleDocumentUseCase
@@ -18,7 +20,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
-internal class EditorViewModel : ViewModel() {
+internal class EditorViewModel(
+    val subtitleRepository: SubtitleRepository = DefaultSubtitleRepository()
+) : ViewModel() {
     /** Document-owned state. Compatibility properties below keep the current UI unchanged. */
     val documentState = EditorDocumentState()
 
@@ -167,8 +171,8 @@ internal class EditorViewModel : ViewModel() {
     val saveCoordinator = EditorSaveCoordinator()
     private val editHistory = EditorEditHistory()
     private val editHistoryController = EditorHistoryController(editHistory)
-    private val loadSubtitleDocument = LoadSubtitleDocumentUseCase()
-    private val saveSubtitleDocument = SaveSubtitleDocumentUseCase()
+    private val loadSubtitleDocument = LoadSubtitleDocumentUseCase(subtitleRepository)
+    private val saveSubtitleDocument = SaveSubtitleDocumentUseCase(subtitleRepository)
     private val applySubtitleEdit = ApplySubtitleEditUseCase()
     private val syncSourceDocument = SyncSourceDocumentUseCase()
 

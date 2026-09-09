@@ -1,9 +1,12 @@
 package com.subtitleedit.usecase
 
-import com.subtitleedit.util.SubtitleParser
+import com.subtitleedit.repository.DefaultSubtitleRepository
+import com.subtitleedit.repository.SubtitleRepository
 import com.subtitleedit.util.subtitle.SubtitleDocument
 
-internal class LoadSubtitleDocumentUseCase {
+internal class LoadSubtitleDocumentUseCase(
+    private val repository: SubtitleRepository = DefaultSubtitleRepository()
+) {
     operator fun invoke(content: String, fileName: String? = null): SubtitleDocument =
-        SubtitleParser.parseDocument(content, fileName)
+        repository.load(content, fileName)
 }

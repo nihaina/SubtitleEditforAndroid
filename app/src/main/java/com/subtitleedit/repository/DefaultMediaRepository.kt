@@ -1,29 +1,24 @@
-package com.subtitleedit.editor
+package com.subtitleedit.repository
 
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.util.Log
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFprobeKit
+import com.subtitleedit.util.FileHashUtils
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-internal data class PreparedAudioFile(
-    val playbackFile: File,
-    val wasFixed: Boolean,
-    val audioStreamIndex: Int? = null
-)
-
-internal class EditorAudioFilePreparer(
+internal class DefaultMediaRepository(
     private val cacheDir: File
-) {
+) : MediaRepository {
     private var temporaryPlaybackFile: File? = null
 
-    suspend fun prepare(
+    override suspend fun prepareAudio(
         audioFile: File,
-        inspectVideoAudioTrack: Boolean = false
+        inspectVideoAudioTrack: Boolean
     ): PreparedAudioFile = withContext(Dispatchers.IO) {
         val mediaInformation = FFprobeKit.getMediaInformation(audioFile.absolutePath)
             .getMediaInformation()
@@ -75,7 +70,11 @@ internal class EditorAudioFilePreparer(
         }
     }
 
-    fun release() {
+    override suspend fun getCacheKey(file: File): String = withContext(Dispatchers.IO) {
+        FileHashUtils.md5(file)
+    }
+
+    override fun release() {
         temporaryPlaybackFile?.let { file ->
             if (file.exists() && !file.delete()) {
                 Log.w(TAG, "无法删除临时播放 WAV：${file.absolutePath}")
@@ -142,6 +141,6 @@ internal class EditorAudioFilePreparer(
     }
 
     private companion object {
-        const val TAG = "EditorActivity"
+        const val TAG = "DefaultMediaRepository"
     }
 }

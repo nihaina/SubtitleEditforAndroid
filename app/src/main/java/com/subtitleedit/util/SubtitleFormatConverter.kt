@@ -2,11 +2,13 @@ package com.subtitleedit.util
 
 import android.content.Context
 import android.net.Uri
+import com.subtitleedit.repository.DefaultSubtitleRepository
 import com.subtitleedit.usecase.ConvertSubtitleFormatUseCase
 import java.io.File
 
 /** 字幕格式转换工具页和文件管理页共用的转换入口。 */
 object SubtitleFormatConverter {
+    private val subtitleRepository = DefaultSubtitleRepository()
     private val convertSubtitleFormat = ConvertSubtitleFormatUseCase()
     val supportedTargetFormats = listOf(
         SubtitleParser.SubtitleFormat.SRT,
@@ -22,7 +24,7 @@ object SubtitleFormatConverter {
     )
 
     fun readFile(context: Context, file: File): Source {
-        val content = FileUtils.readFile(
+        val content = subtitleRepository.readFile(
             file,
             charset = SettingsManager.getInstance(context).getDefaultEncoding()
         )
@@ -30,7 +32,7 @@ object SubtitleFormatConverter {
     }
 
     fun readUri(context: Context, uri: Uri, fileName: String): Source {
-        val content = FileUtils.readUri(
+        val content = subtitleRepository.readUri(
             context,
             uri,
             charset = SettingsManager.getInstance(context).getDefaultEncoding()

@@ -26,7 +26,8 @@ import androidx.recyclerview.widget.SimpleItemAnimator
 import com.subtitleedit.adapter.SubtitleAdapter
 import com.subtitleedit.adapter.TranslationPreviewItem
 import com.subtitleedit.databinding.ActivityEditorBinding
-import com.subtitleedit.editor.EditorAudioFilePreparer
+import com.subtitleedit.repository.DefaultMediaRepository
+import com.subtitleedit.repository.MediaRepository
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.editor.EditorPlaybackController
 import com.subtitleedit.editor.EditorSearchController
@@ -219,7 +220,7 @@ class EditorActivity : AppCompatActivity() {
     private var isAudioOnlyFromVideo: Boolean
         get() = stateModel.isAudioOnlyFromVideo
         set(value) { stateModel.isAudioOnlyFromVideo = value }
-    private lateinit var audioFilePreparer: EditorAudioFilePreparer
+    private lateinit var mediaRepository: MediaRepository
     private lateinit var playbackController: EditorPlaybackController
     private lateinit var videoFullscreenController: EditorVideoFullscreenController
     private lateinit var waveformController: EditorWaveformController
@@ -286,7 +287,7 @@ class EditorActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityEditorBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        audioFilePreparer = EditorAudioFilePreparer(cacheDir)
+        mediaRepository = DefaultMediaRepository(cacheDir)
         
         if (!stateModel.initialized) {
             filePath = intent.getStringExtra(EXTRA_FILE_PATH) ?: ""
@@ -618,6 +619,7 @@ class EditorActivity : AppCompatActivity() {
             scope = lifecycleScope,
             hasPlayableMedia = mediaType.hasPlayableMedia,
             appCacheDir = cacheDir,
+            mediaRepository = mediaRepository,
             currentPlaybackPositionMs = { playbackController.currentPositionMs },
             onSubtitleChanged = { changedIndex, updatedEntry, dragSessionKey, isFinal ->
                 val currentEntry = subtitleEntries.getOrNull(changedIndex)
@@ -992,7 +994,7 @@ class EditorActivity : AppCompatActivity() {
 
     private fun openFileFromUri(uri: Uri) {
         try {
-            val content = FileUtils.readUri(this, uri)
+            val content = stateModel.subtitleRepository.readUri(this, uri)
             // 获取文件名并更新显示
             val fileName = getFileNameFromUri(uri)
             stateModel.openUriSubtitleDocument(uri.toString(), fileName)
@@ -2316,7 +2318,7 @@ class EditorActivity : AppCompatActivity() {
         }
 
         val completed = stateModel.saveCoordinator.complete(saveWithContent { content ->
-            FileUtils.writeFile(targetFile, content, currentCharset)
+            stateModel.subtitleRepository.writeFile(targetFile, content, currentCharset)
         })
         executeSaveContinuation(completed)
     }
@@ -2333,9 +2335,7 @@ class EditorActivity : AppCompatActivity() {
     
     private fun saveFileToUri(uri: Uri): Boolean {
         val saved = saveWithContent { content ->
-            EditorDocumentWriter.write(content, currentCharset) {
-                contentResolver.openOutputStream(uri)
-            }
+            stateModel.subtitleRepository.writeUri(this, uri, content, currentCharset)
         }
         if (saved) {
             val fileName = getFileNameFromUri(uri)
@@ -3000,7 +3000,7 @@ class EditorActivity : AppCompatActivity() {
 
     private fun readFileOrNull(file: File, failurePrefix: String): String? {
         return try {
-            FileUtils.readFile(file, currentCharset)
+            stateModel.subtitleRepository.readFile(file, currentCharset)
         } catch (e: Exception) {
             showShortToast("$failurePrefix：${e.message}")
             null
@@ -3119,7 +3119,7 @@ class EditorActivity : AppCompatActivity() {
         pendingSourceWaveformSync = null
         ttsController.release()
         if (::subtitlePreviewController.isInitialized) subtitlePreviewController.release()
-        audioFilePreparer.release()
+        mediaRepository.release()
         playbackController.release()
         waveformController.release()
         translationController.release()
@@ -3211,7 +3211,7 @@ class EditorActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             val preparedAudio = try {
-                audioFilePreparer.prepare(
+                mediaRepository.prepareAudio(
                     originalFile,
                     inspectVideoAudioTrack = isAudioOnlyFromVideo
                 )
@@ -3298,7 +3298,7 @@ class EditorActivity : AppCompatActivity() {
         currentCharset = settingsManager.getDefaultEncoding()
         
         try {
-            val content = FileUtils.readFile(subtitleFile, currentCharset)
+            val content = stateModel.subtitleRepository.readFile(subtitleFile, currentCharset)
             parseContent(content, subtitleFile.name)
             hasUnsavedChanges = false
             isNewFile = false
