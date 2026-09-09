@@ -17,6 +17,7 @@ import com.subtitleedit.util.SearchReplaceEngine
 import com.subtitleedit.util.SearchReplaceOps
 import com.subtitleedit.util.SearchTextMatcher
 import com.subtitleedit.util.TimeUtils
+import com.subtitleedit.usecase.SearchReplaceSubtitleUseCase
 
 /** Coordinates the editor search bar without owning the editor document. */
 class EditorSearchController(
@@ -27,11 +28,12 @@ class EditorSearchController(
     private val ignoreSourceChanges: () -> Boolean,
     private val entries: () -> List<SubtitleEntry>,
     private val replaceSourceContent: (String) -> Unit,
-    private val applyEntryUpdates: (List<SearchReplaceOps.TextUpdate>) -> Int,
+    private val applyEntryUpdates: (List<com.subtitleedit.util.SearchReplaceOps.TextUpdate>) -> Int,
     private val confirmReplaceAll: (matchCount: Int, onConfirm: () -> Unit) -> Unit,
     private val showMessage: (String) -> Unit
 ) {
     private val engine = SearchReplaceEngine()
+    private val searchReplaceSubtitle = SearchReplaceSubtitleUseCase()
     private var listResultEntries: List<SubtitleEntry> = emptyList()
     private var matchCase = false
     private var wholeWord = false
@@ -179,7 +181,7 @@ class EditorSearchController(
             return
         }
 
-        val newContent = SearchReplaceOps.replaceInContentAt(
+        val newContent = searchReplaceSubtitle.replaceInContentAt(
             content = content,
             start = position,
             queryLength = query.length,
@@ -205,7 +207,7 @@ class EditorSearchController(
             return
         }
 
-        val newText = SearchReplaceOps.replaceFirstTextIfChanged(
+        val newText = searchReplaceSubtitle.replaceFirstText(
             originalText = entry.text,
             query = engine.query,
             replacement = binding.etReplace.text?.toString().orEmpty(),
@@ -246,7 +248,7 @@ class EditorSearchController(
     }
 
     private fun replaceAllInSourceView(query: String) {
-        val result = SearchReplaceOps.replaceAllInContent(
+        val result = searchReplaceSubtitle.replaceAllInContent(
             content = binding.etSourceView.getDocumentText(),
             query = query,
             replacement = binding.etReplace.text?.toString().orEmpty(),
@@ -272,15 +274,15 @@ class EditorSearchController(
 
     private fun replaceAllInListView(query: String) {
         val texts = entries().map { it.text }
-        val updates = SearchReplaceOps.collectTextUpdates(
-            texts = texts,
+        val updates = searchReplaceSubtitle.collectEntryUpdates(
+            entries = entries(),
             query = query,
             replacement = binding.etReplace.text?.toString().orEmpty(),
             matchCase = matchCase,
             wholeWord = wholeWord
         )
         val matchCount = texts.sumOf {
-            SearchReplaceOps.countMatches(it, query, matchCase, wholeWord)
+            searchReplaceSubtitle.countMatches(it, query, matchCase, wholeWord)
         }
         if (updates.isEmpty() || matchCount == 0) {
             showMessage("没有找到可替换的内容")

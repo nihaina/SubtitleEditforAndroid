@@ -4,8 +4,11 @@ import androidx.lifecycle.ViewModel
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
-import com.subtitleedit.util.SubtitleSourceSynchronizer
 import com.subtitleedit.util.subtitle.SubtitleDocument
+import com.subtitleedit.usecase.ApplySubtitleEditUseCase
+import com.subtitleedit.usecase.LoadSubtitleDocumentUseCase
+import com.subtitleedit.usecase.SaveSubtitleDocumentUseCase
+import com.subtitleedit.usecase.SyncSourceDocumentUseCase
 import java.io.File
 import java.nio.charset.Charset
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -164,6 +167,10 @@ internal class EditorViewModel : ViewModel() {
     val saveCoordinator = EditorSaveCoordinator()
     private val editHistory = EditorEditHistory()
     private val editHistoryController = EditorHistoryController(editHistory)
+    private val loadSubtitleDocument = LoadSubtitleDocumentUseCase()
+    private val saveSubtitleDocument = SaveSubtitleDocumentUseCase()
+    private val applySubtitleEdit = ApplySubtitleEditUseCase()
+    private val syncSourceDocument = SyncSourceDocumentUseCase()
 
     fun peekUndo(): EditorEditHistory.Operation? = editHistory.peekUndo()
 
@@ -259,7 +266,7 @@ internal class EditorViewModel : ViewModel() {
     }
 
     fun loadSubtitleContent(content: String, fileName: String? = null): SubtitleDocument {
-        val document = SubtitleParser.parseDocument(content, fileName)
+        val document = loadSubtitleDocument(content, fileName)
         documentState.replaceDocument(document)
         documentState.originalFileContent = content
         documentState.sourceViewContent = content
@@ -275,13 +282,16 @@ internal class EditorViewModel : ViewModel() {
         sourceContent: String? = null,
         requireNonEmptyList: Boolean = false
     ): String? {
-        if (uiState.value.isSourceViewMode) return sourceContent ?: documentState.sourceViewContent
-        if (requireNonEmptyList && documentState.subtitleEntries.isEmpty()) return null
-        return SubtitleParser.serialize(documentState.subtitleDocument)
+        return saveSubtitleDocument(
+            document = documentState.subtitleDocument,
+            sourceContent = sourceContent ?: documentState.sourceViewContent,
+            sourceViewMode = uiState.value.isSourceViewMode,
+            requireNonEmptyList = requireNonEmptyList
+        )
     }
 
     fun execute(command: EditorCommand): EditorCommandResult {
-        val result = command.execute(documentState)
+        val result = applySubtitleEdit(documentState, command)
         if (result.changedPositions.isNotEmpty() || result.structureChanged) publishDocument()
         return result
     }
@@ -303,7 +313,7 @@ internal class EditorViewModel : ViewModel() {
         beforeEntries: List<SubtitleEntry>,
         afterEntries: List<SubtitleEntry>
     ) {
-        val updatedSource = SubtitleSourceSynchronizer.apply(
+        val updatedSource = syncSourceDocument(
             content = documentState.originalFileContent,
             format = documentState.currentFormat,
             oldEntries = beforeEntries,

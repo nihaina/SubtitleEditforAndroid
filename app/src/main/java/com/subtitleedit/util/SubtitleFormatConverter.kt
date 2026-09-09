@@ -2,10 +2,12 @@ package com.subtitleedit.util
 
 import android.content.Context
 import android.net.Uri
+import com.subtitleedit.usecase.ConvertSubtitleFormatUseCase
 import java.io.File
 
 /** 字幕格式转换工具页和文件管理页共用的转换入口。 */
 object SubtitleFormatConverter {
+    private val convertSubtitleFormat = ConvertSubtitleFormatUseCase()
     val supportedTargetFormats = listOf(
         SubtitleParser.SubtitleFormat.SRT,
         SubtitleParser.SubtitleFormat.LRC,
@@ -37,7 +39,7 @@ object SubtitleFormatConverter {
     }
 
     fun convert(source: Source, targetFormat: SubtitleParser.SubtitleFormat): String =
-        SubtitleParser.convertFormat(source.content, source.format, targetFormat)
+        convertSubtitleFormat(source.content, source.format, targetFormat)
 
     fun extension(format: SubtitleParser.SubtitleFormat): String =
         when (format) {
