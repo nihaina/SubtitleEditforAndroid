@@ -61,6 +61,7 @@ import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.FileTransferManager
 import com.subtitleedit.util.FileBrowserNavigation
 import com.subtitleedit.util.ArchiveNamePolicy
+import com.subtitleedit.util.ArchiveErrorPolicy
 import com.subtitleedit.util.FilePropertiesInfo
 import com.subtitleedit.util.MediaFilePropertiesReader
 import com.subtitleedit.util.SettingsManager
@@ -70,7 +71,6 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import com.subtitleedit.util.ArchivePasswordRequiredException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
@@ -1871,7 +1871,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }.onFailure { error ->
-                if (needsArchivePassword(archive, error, password != null)) {
+                if (ArchiveErrorPolicy.needsPassword(archive, error, password != null)) {
                     showArchivePasswordDialog(
                         archive = archive,
                         onPassword = { enteredPassword ->
@@ -1974,7 +1974,7 @@ class MainActivity : AppCompatActivity() {
                     )
                 }
             }.onFailure { error ->
-                if (needsArchivePassword(archive, error, password != null)) {
+                if (ArchiveErrorPolicy.needsPassword(archive, error, password != null)) {
                     showArchivePasswordDialog(
                         archive = archive,
                         onPassword = { enteredPassword ->
@@ -2095,11 +2095,11 @@ class MainActivity : AppCompatActivity() {
                     showExtractionCompleted(extracted)
                     onCompleted()
                 }.onFailure { error ->
-                    if (isArchiveOperationCancelled(error)) {
+                    if (ArchiveErrorPolicy.isCancelled(error)) {
                         onCancelled()
-                    } else if (isDestinationConflict(error)) {
+                    } else if (ArchiveErrorPolicy.isDestinationConflict(error)) {
                         prepareArchiveExtraction(archive, destination, password, onCompleted, onCancelled)
-                    } else if (needsArchivePassword(archive, error, password != null)) {
+                    } else if (ArchiveErrorPolicy.needsPassword(archive, error, password != null)) {
                         showArchivePasswordDialog(
                             archive = archive,
                             onPassword = { enteredPassword ->
@@ -2236,14 +2236,6 @@ class MainActivity : AppCompatActivity() {
         }
         showShortToast(message)
     }
-
-    private fun isDestinationConflict(error: Throwable): Boolean =
-        generateSequence(error) { it.cause }
-            .any { it is ArchiveManager.DestinationConflictException }
-
-    private fun isArchiveOperationCancelled(error: Throwable): Boolean =
-        generateSequence(error) { it.cause }
-            .any { it is CancellationException }
 
     private fun showArchivePasswordDialog(
         archive: File,
@@ -2389,24 +2381,6 @@ class MainActivity : AppCompatActivity() {
                     progress.binding.tvProgressPercent.visibility = View.GONE
                 }
             }
-        }
-    }
-
-    private fun needsArchivePassword(
-        archive: File,
-        error: Throwable,
-        passwordAttempted: Boolean
-    ): Boolean {
-        if (error.message?.contains("无法清理") == true ||
-            error.message?.contains("未能恢复") == true) return false
-        val causes = generateSequence(error as Throwable?) { it.cause }
-        return causes.any { cause ->
-                cause is ArchivePasswordRequiredException ||
-                cause.message?.contains("password", ignoreCase = true) == true ||
-                cause.message?.contains("passphrase", ignoreCase = true) == true ||
-                cause.message?.contains("decrypt", ignoreCase = true) == true ||
-                (passwordAttempted && archive.extension.equals("7z", ignoreCase = true) &&
-                    cause.message?.contains("checksum verification failed", ignoreCase = true) == true)
         }
     }
 
