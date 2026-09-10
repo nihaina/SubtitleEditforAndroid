@@ -9,6 +9,10 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.UUID
 
 // 延迟初始化，避免循环依赖
 private var settingsManagerInstance: SettingsManager? = null
@@ -123,8 +127,32 @@ object FileUtils {
      * 写入文件
      */
     fun writeFile(file: File, content: String, charset: Charset = StandardCharsets.UTF_8) {
-        FileOutputStream(file).use { fos ->
-            fos.write(content.toByteArray(charset))
+        val parent = file.parentFile
+        if (parent != null && !parent.exists() && !parent.mkdirs() && !parent.isDirectory) {
+            throw IOException("无法创建文件目录")
+        }
+        val temporary = File(
+            parent ?: throw IOException("文件目录无效"),
+            ".${file.name}.${UUID.randomUUID()}.tmp"
+        )
+        try {
+            FileOutputStream(temporary).use { fos ->
+                fos.write(content.toByteArray(charset))
+                fos.flush()
+                fos.fd.sync()
+            }
+            try {
+                Files.move(
+                    temporary.toPath(),
+                    file.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE
+                )
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+        } finally {
+            temporary.delete()
         }
     }
     
