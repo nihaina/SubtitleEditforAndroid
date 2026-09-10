@@ -60,6 +60,7 @@ import com.subtitleedit.model.FileSortField
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.FileTransferManager
 import com.subtitleedit.util.FileBrowserNavigation
+import com.subtitleedit.util.ArchiveNamePolicy
 import com.subtitleedit.util.FilePropertiesInfo
 import com.subtitleedit.util.MediaFilePropertiesReader
 import com.subtitleedit.util.SettingsManager
@@ -1597,7 +1598,7 @@ class MainActivity : AppCompatActivity() {
             SplitOption("100 MB", 100L * 1024 * 1024),
             SplitOption("500 MB", 500L * 1024 * 1024)
         )
-        dialogBinding.etArchiveName.setText(defaultArchiveName(sources))
+        dialogBinding.etArchiveName.setText(ArchiveNamePolicy.defaultName(sources))
         dialogBinding.etArchiveName.setSelection(dialogBinding.etArchiveName.text?.length ?: 0)
         dialogBinding.spinnerArchiveFormat.adapter = ArrayAdapter(
             this,
@@ -1673,9 +1674,9 @@ class MainActivity : AppCompatActivity() {
                 val splitSizeBytes = splitOptions[dialogBinding.spinnerSplitSize.selectedItemPosition].bytes
                 val extension = archiveRepository.outputExtension(format, method)
                 val rawName = dialogBinding.etArchiveName.text?.toString()?.trim().orEmpty()
-                val baseName = stripArchiveExtension(rawName)
+                val baseName = ArchiveNamePolicy.stripExtension(rawName)
                 when {
-                    !isValidFileName(baseName) -> {
+                    !ArchiveNamePolicy.isValidName(baseName) -> {
                         dialogBinding.etArchiveName.error = "请输入有效名称"
                     }
                     File(outputDirectory, "$baseName.$extension").exists() -> {
@@ -2416,25 +2417,6 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("确定", null)
             .show()
     }
-
-    private fun defaultArchiveName(sources: List<File>): String =
-        if (sources.size == 1) {
-            sources.first().let { source ->
-                if (source.isDirectory) source.name else source.nameWithoutExtension.ifBlank { source.name }
-            }
-        } else {
-            "archive-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())}"
-        }
-
-    private fun stripArchiveExtension(name: String): String =
-        listOf(".tar.bz2", ".tar.gz", ".tar.xz", ".zip", ".7z", ".tar")
-            .firstOrNull { name.endsWith(it, ignoreCase = true) }
-            ?.let { name.dropLast(it.length) }
-            ?: name
-
-    private fun isValidFileName(name: String): Boolean =
-        name.isNotBlank() && name != "." && name != ".." &&
-            !name.contains('/') && !name.contains('\\') && !name.contains('\u0000')
 
     private fun showSelectedProperties() {
         val files = selectedFiles()
