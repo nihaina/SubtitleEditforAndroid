@@ -87,6 +87,12 @@ class SubtitleAdapter(
         private const val SELECTION_REFRESH_THRESHOLD = 200
     }
 
+    private fun notifyAllItemsChanged(payload: Any? = null) {
+        if (itemCount == 0) return
+        if (payload == null) notifyItemRangeChanged(0, itemCount)
+        else notifyItemRangeChanged(0, itemCount, payload)
+    }
+
     fun isSelected(position: Int): Boolean {
         val entry = getItem(position)
         return selectedEntries.contains(entry)
@@ -112,7 +118,7 @@ class SubtitleAdapter(
         selectedEntries.clear()
         if (selectedCount == 0) return
         if (selectedCount > SELECTION_REFRESH_THRESHOLD) {
-            notifyDataSetChanged()
+            notifyAllItemsChanged(PAYLOAD_SELECTION)
         } else {
             positionsToNotify.forEach { position ->
                 notifyItemChanged(position, PAYLOAD_SELECTION)
@@ -130,7 +136,7 @@ class SubtitleAdapter(
         }
         val changedCount = oldPositions.size + indices.size
         if (changedCount > SELECTION_REFRESH_THRESHOLD) {
-            notifyDataSetChanged()
+            notifyAllItemsChanged(PAYLOAD_SELECTION)
         } else {
             // 刷新旧的和新的选中位置
             (oldPositions.asSequence() + indices.asSequence()).forEach { position ->
@@ -156,7 +162,7 @@ class SubtitleAdapter(
         } else {
             selectedEntries.clear()
         }
-        notifyDataSetChanged()
+        notifyAllItemsChanged(PAYLOAD_SELECTION)
     }
 
     fun getSelectedCount(): Int {
@@ -187,7 +193,7 @@ class SubtitleAdapter(
             }
         }
         
-        notifyDataSetChanged()
+        notifyAllItemsChanged(PAYLOAD_SELECTION)
     }
     
     /**
@@ -209,14 +215,14 @@ class SubtitleAdapter(
             }
         }
         
-        notifyDataSetChanged()
+        notifyAllItemsChanged(PAYLOAD_SELECTION)
     }
 
     /**
      * 强制刷新所有可见项（用于行数序列号实时更新）
      */
     fun refreshAllItems() {
-        notifyDataSetChanged()
+        notifyAllItemsChanged()
     }
     
     // 搜索高亮相关
@@ -241,7 +247,7 @@ class SubtitleAdapter(
         searchQuery = query
         searchMatchCase = matchCase
         searchWholeWord = wholeWord
-        notifyDataSetChanged()
+        notifyAllItemsChanged()
     }
     
     /**
@@ -252,7 +258,7 @@ class SubtitleAdapter(
         searchQuery = ""
         searchMatchCase = false
         searchWholeWord = false
-        notifyDataSetChanged()
+        notifyAllItemsChanged()
     }
     
     /**

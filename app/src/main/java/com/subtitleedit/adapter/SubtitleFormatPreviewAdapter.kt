@@ -28,14 +28,14 @@ class SubtitleFormatPreviewAdapter(
 
     fun selectAll(selected: Boolean) {
         items.forEach { it.selected = selected }
-        notifyDataSetChanged()
+        if (items.isNotEmpty()) notifyItemRangeChanged(0, items.size)
     }
 
     fun selectRange(startInclusive: Int, endInclusive: Int) {
         items.forEachIndexed { index, item ->
             item.selected = index in startInclusive..endInclusive
         }
-        notifyDataSetChanged()
+        if (items.isNotEmpty()) notifyItemRangeChanged(0, items.size)
     }
 
     fun areAllSelected(): Boolean = items.isNotEmpty() && items.all { it.selected }

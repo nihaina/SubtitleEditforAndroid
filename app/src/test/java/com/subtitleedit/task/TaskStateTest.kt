@@ -50,4 +50,15 @@ class TaskStateTest {
         assertEquals(TaskStatus.SUCCEEDED, store.states.value.getValue("task-3").status)
         assertEquals("完成", store.states.value.getValue("task-3").progress.message)
     }
+
+    @Test
+    fun cancellingStateCannotBeRegressedByLateQueuedProgress() {
+        val store = TaskStateStore()
+        val reporter = TaskReporter(store, "task-4", "demo")
+        store.update("task-4", TaskStatus.CANCELLING, TaskProgress("正在取消"))
+
+        reporter.running(TaskProgress("迟到的进度"))
+
+        assertEquals(TaskStatus.CANCELLING, store.states.value.getValue("task-4").status)
+    }
 }

@@ -140,6 +140,7 @@ class MainActivity : AppCompatActivity() {
     private var observedDirectoryPath: String? = null
     private var directoryWatchingEnabled = false
     private var directorySearchJob: Job? = null
+    private var directoryLoadJob: Job? = null
     private var fileCopyJob: Job? = null
     private var directorySearchGeneration = 0L
     private var activeFileSearchView: SearchView? = null
@@ -755,18 +756,20 @@ class MainActivity : AppCompatActivity() {
         
         currentDirectory = directory
         updatePathDisplay()
-        
-        val files = mutableListOf<File>()
-        
-        files.addAll(
-            directory.listFiles { file ->
-                (showHiddenFiles || !file.name.startsWith(".")) &&
-                    (file.isDirectory || shouldDisplayFile(file, showAllFileTypes))
-            }?.toList().orEmpty()
-        )
-        directoryFiles.clear()
-        directoryFiles.addAll(files.distinctBy { it.absolutePath })
-        displayDirectoryFiles(restoreScrollPosition = restoreScrollPosition)
+        directoryLoadJob?.cancel()
+        val requestedPath = directory.absolutePath
+        directoryLoadJob = lifecycleScope.launch {
+            val files = withContext(Dispatchers.IO) {
+                directory.listFiles { file ->
+                    (showHiddenFiles || !file.name.startsWith(".")) &&
+                        (file.isDirectory || shouldDisplayFile(file, showAllFileTypes))
+                }?.toList().orEmpty().distinctBy { it.absolutePath }
+            }
+            if (currentDirectory?.absolutePath != requestedPath) return@launch
+            directoryFiles.clear()
+            directoryFiles.addAll(files)
+            displayDirectoryFiles(restoreScrollPosition = restoreScrollPosition)
+        }
         startDirectoryObserver(directory)
         return true
     }
@@ -901,7 +904,6 @@ class MainActivity : AppCompatActivity() {
             null
         }
         fileAdapter.submitList(adapterItems) {
-            fileAdapter.notifyDataSetChanged()
             if (restoreScrollPosition && directoryPath != null) {
                 binding.rvFileList.post {
                     if (currentDirectory?.let(::directoryPath) != directoryPath) return@post

@@ -257,8 +257,7 @@ class EditorActivity : AppCompatActivity() {
         if (uri == null) {
             stateModel.saveCoordinator.cancel()
         } else {
-            val continuation = stateModel.saveCoordinator.complete(saveFileToUri(uri))
-            executeSaveContinuation(continuation)
+            saveFileToUriAsync(uri)
         }
     }
     
@@ -992,26 +991,39 @@ class EditorActivity : AppCompatActivity() {
         // 使用用户设置的默认编码
         val settingsManager = SettingsManager.getInstance(this)
         currentCharset = settingsManager.getDefaultEncoding()
+        val charset = currentCharset
 
-        val content = readFileOrNull(file, "读取文件失败") ?: return
-        parseContent(content, file.name)
-        hasUnsavedChanges = false
-        isNewFile = false
+        lifecycleScope.launch {
+            val content = runCatching {
+                withContext(Dispatchers.IO) {
+                    stateModel.subtitleRepository.readFile(file, charset)
+                }
+            }.getOrElse {
+                showShortToast("读取文件失败：${it.message}")
+                return@launch
+            }
+            parseContent(content, file.name)
+            hasUnsavedChanges = false
+            isNewFile = false
+        }
     }
 
     private fun openFileFromUri(uri: Uri) {
-        try {
-            val content = stateModel.subtitleRepository.readUri(this, uri)
-            // 获取文件名并更新显示
-            val fileName = getFileNameFromUri(uri)
-            stateModel.openUriSubtitleDocument(uri.toString(), fileName)
-            setDocumentTitle(stateModel.documentTitle)
-            takePersistableWritePermission(uri)
-            parseContent(content, fileName)
-            hasUnsavedChanges = false
-            com.subtitleedit.util.OverwritingToast.makeText(this, "文件已打开：$fileName", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            com.subtitleedit.util.OverwritingToast.makeText(this, "打开文件失败：${e.message}", Toast.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            try {
+                val (content, fileName) = withContext(Dispatchers.IO) {
+                    val loadedContent = stateModel.subtitleRepository.readUri(this@EditorActivity, uri)
+                    loadedContent to getFileNameFromUri(uri)
+                }
+                stateModel.openUriSubtitleDocument(uri.toString(), fileName)
+                setDocumentTitle(stateModel.documentTitle)
+                takePersistableWritePermission(uri)
+                parseContent(content, fileName)
+                hasUnsavedChanges = false
+                com.subtitleedit.util.OverwritingToast.makeText(this@EditorActivity, "文件已打开：$fileName", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                com.subtitleedit.util.OverwritingToast.makeText(this@EditorActivity, "打开文件失败：${e.message}", Toast.LENGTH_SHORT).show()
+            }
         }
     }
     
@@ -1045,10 +1057,20 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
-        val content = readFileOrNull(targetFile, "切换编码失败") ?: return
-        parseContent(content, targetFile.name)
-        hasUnsavedChanges = false
-        showShortToast("已切换编码为：${FileUtils.SUPPORTED_ENCODINGS.find { it.charset == currentCharset }?.displayName}")
+        val charset = currentCharset
+        lifecycleScope.launch {
+            val content = runCatching {
+                withContext(Dispatchers.IO) {
+                    stateModel.subtitleRepository.readFile(targetFile, charset)
+                }
+            }.getOrElse {
+                showShortToast("切换编码失败：${it.message}")
+                return@launch
+            }
+            parseContent(content, targetFile.name)
+            hasUnsavedChanges = false
+            showShortToast("已切换编码为：${FileUtils.SUPPORTED_ENCODINGS.find { it.charset == currentCharset }?.displayName}")
+        }
     }
     
     private fun parseContent(content: String, fileName: String? = null) {
@@ -2308,8 +2330,7 @@ class EditorActivity : AppCompatActivity() {
     private fun saveFile(continuation: SaveContinuation = SaveContinuation.NONE) {
         stateModel.saveCoordinator.begin(continuation)
         stateModel.documentUri?.let { uriString ->
-            val completed = stateModel.saveCoordinator.complete(saveFileToUri(Uri.parse(uriString)))
-            executeSaveContinuation(completed)
+            saveFileToUriAsync(Uri.parse(uriString))
             return
         }
 
@@ -2324,10 +2345,31 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
-        val completed = stateModel.saveCoordinator.complete(saveWithContent { content ->
-            stateModel.subtitleRepository.writeFile(targetFile, content, currentCharset)
-        })
-        executeSaveContinuation(completed)
+        val content = getCurrentEditableContent()
+        if (content == null) {
+            executeSaveContinuation(stateModel.saveCoordinator.complete(false))
+            return
+        }
+        val charset = currentCharset
+        lifecycleScope.launch {
+            val saved = runCatching {
+                withContext(Dispatchers.IO) {
+                    stateModel.subtitleRepository.writeFile(targetFile, content, charset)
+                }
+            }.onFailure {
+                showShortToast("保存失败：${it.message}")
+            }.isSuccess
+            if (saved) {
+                originalFileContent = content
+                sourceViewContent = content
+                sourceHistoryTextSnapshot = content
+                sourceViewNeedsListSync = false
+                sourceViewHasPendingEdits = false
+                hasUnsavedChanges = false
+                showShortToast("保存成功")
+            }
+            executeSaveContinuation(stateModel.saveCoordinator.complete(saved))
+        }
     }
     
     private fun saveFileAs() {
@@ -2340,17 +2382,38 @@ class EditorActivity : AppCompatActivity() {
         saveFileLauncher.launch("subtitle.$formatExtension")
     }
     
-    private fun saveFileToUri(uri: Uri): Boolean {
-        val saved = saveWithContent { content ->
-            stateModel.subtitleRepository.writeUri(this, uri, content, currentCharset)
+    private fun saveFileToUriAsync(uri: Uri) {
+        val content = getCurrentEditableContent()
+        if (content == null) {
+            executeSaveContinuation(stateModel.saveCoordinator.complete(false))
+            return
         }
-        if (saved) {
-            val fileName = getFileNameFromUri(uri)
-            stateModel.saveUriSubtitleDocument(uri.toString(), fileName)
-            takePersistableWritePermission(uri)
-            setDocumentTitle(stateModel.documentTitle)
+        val charset = currentCharset
+        lifecycleScope.launch {
+            val saved = runCatching {
+                withContext(Dispatchers.IO) {
+                    stateModel.subtitleRepository.writeUri(this@EditorActivity, uri, content, charset)
+                }
+            }.onFailure {
+                showShortToast("保存失败：${it.message}")
+            }.isSuccess
+            if (saved) {
+                originalFileContent = content
+                sourceViewContent = content
+                sourceHistoryTextSnapshot = content
+                sourceViewNeedsListSync = false
+                sourceViewHasPendingEdits = false
+                hasUnsavedChanges = false
+                val fileName = withContext(Dispatchers.IO) {
+                    getFileNameFromUri(uri)
+                }
+                stateModel.saveUriSubtitleDocument(uri.toString(), fileName)
+                takePersistableWritePermission(uri)
+                setDocumentTitle(stateModel.documentTitle)
+                showShortToast("保存成功")
+            }
+            executeSaveContinuation(stateModel.saveCoordinator.complete(saved))
         }
-        return saved
     }
 
     private fun takePersistableWritePermission(uri: Uri) {
@@ -3005,36 +3068,9 @@ class EditorActivity : AppCompatActivity() {
         return if (mediaType.hasPlayableMedia) subtitleFile else currentFile
     }
 
-    private fun readFileOrNull(file: File, failurePrefix: String): String? {
-        return try {
-            stateModel.subtitleRepository.readFile(file, currentCharset)
-        } catch (e: Exception) {
-            showShortToast("$failurePrefix：${e.message}")
-            null
-        }
-    }
-
     private fun finishWithToast(message: String) {
         showShortToast(message)
         finish()
-    }
-
-    private inline fun saveWithContent(writeAction: (String) -> Unit): Boolean {
-        return try {
-            val content = getCurrentEditableContent() ?: return false
-            writeAction(content)
-            originalFileContent = content
-            sourceViewContent = content
-            sourceHistoryTextSnapshot = content
-            sourceViewNeedsListSync = false
-            sourceViewHasPendingEdits = false
-            hasUnsavedChanges = false
-            showShortToast("保存成功")
-            true
-        } catch (e: Exception) {
-            showShortToast("保存失败：${e.message}")
-            false
-        }
     }
 
     private fun showShortToast(message: String) {
@@ -3303,14 +3339,24 @@ class EditorActivity : AppCompatActivity() {
     private fun loadSubtitleFile(subtitleFile: File) {
         val settingsManager = SettingsManager.getInstance(this)
         currentCharset = settingsManager.getDefaultEncoding()
-        
-        try {
-            val content = stateModel.subtitleRepository.readFile(subtitleFile, currentCharset)
+        val charset = currentCharset
+
+        lifecycleScope.launch {
+            val content = runCatching {
+                withContext(Dispatchers.IO) {
+                    stateModel.subtitleRepository.readFile(subtitleFile, charset)
+                }
+            }.getOrElse {
+                com.subtitleedit.util.OverwritingToast.makeText(
+                    this@EditorActivity,
+                    "读取字幕文件失败：${it.message}",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@launch
+            }
             parseContent(content, subtitleFile.name)
             hasUnsavedChanges = false
             isNewFile = false
-        } catch (e: Exception) {
-            com.subtitleedit.util.OverwritingToast.makeText(this, "读取字幕文件失败：${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
     

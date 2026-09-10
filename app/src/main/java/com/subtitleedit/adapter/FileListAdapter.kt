@@ -67,13 +67,24 @@ class FileListAdapter(
         val newPath = root?.absolutePath
         if (previousPath == newPath) return
         relativePathRoot = root
-        notifyDataSetChanged()
+        if (itemCount > 0) notifyItemRangeChanged(0, itemCount)
     }
 
     fun updateSelection(selectionMode: Boolean, selectedPaths: Set<String>) {
+        val modeChanged = this.selectionMode != selectionMode
+        val previousPaths = this.selectedPaths
         this.selectionMode = selectionMode
         this.selectedPaths = selectedPaths
-        notifyDataSetChanged()
+        if (itemCount == 0) return
+        if (modeChanged) {
+            notifyItemRangeChanged(0, itemCount)
+            return
+        }
+        currentList.forEachIndexed { position, file ->
+            if ((file.absolutePath in previousPaths) != (file.absolutePath in selectedPaths)) {
+                notifyItemChanged(position)
+            }
+        }
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FileViewHolder {
