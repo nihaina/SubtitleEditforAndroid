@@ -31,7 +31,7 @@ class VocalSeparationEngine(
     private val graphOptimizationEnabled: Boolean = false,
     private val cpuArenaEnabled: Boolean = false,
     private val log: (String) -> Unit = {}
-) {
+) : VocalSeparationRunner {
     enum class Stem(val fileSuffix: String, val displayName: String, val modelIndex: Int) {
         VOCALS("vocals", "Vocals", 3),
         DRUMS("drums", "Drums", 0),
@@ -46,7 +46,7 @@ class VocalSeparationEngine(
         val elapsedMs: Long
     )
 
-    fun separate(
+    override fun separate(
         pcmFile: File,
         outputDir: File,
         outputBaseName: String,

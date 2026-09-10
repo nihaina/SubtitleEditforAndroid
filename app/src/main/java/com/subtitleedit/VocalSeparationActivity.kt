@@ -341,15 +341,16 @@ class VocalSeparationActivity : AppCompatActivity() {
             appendRuntimeLog("$prefix 使用$modelLabel：${getFileName(modelUri)}")
             val result = withContext(Dispatchers.IO) {
                 withDirectModelPath(modelUri) { directPath, size ->
-                    val engine = VocalSeparationEngine(
-                        directPath,
-                        getFileName(modelUri),
-                        size,
-                        graphOptimizationEnabled = settings.isDemixOrtGraphOptimizationEnabled(),
-                        cpuArenaEnabled = settings.isDemixOrtCpuArenaEnabled(),
-                        log = { message -> appendRuntimeLog("$prefix $modelLabel: $message") }
-                    )
-                    engine.separate(
+                    val runner = (application as SubtitleEditApplication).dependencies
+                        .vocalSeparationRunner(
+                            modelPath = directPath,
+                            modelDisplayName = getFileName(modelUri),
+                            modelSize = size,
+                            graphOptimizationEnabled = settings.isDemixOrtGraphOptimizationEnabled(),
+                            cpuArenaEnabled = settings.isDemixOrtCpuArenaEnabled(),
+                            log = { message -> appendRuntimeLog("$prefix $modelLabel: $message") }
+                        )
+                    runner.separate(
                         pcm,
                         tempOutput,
                         selected.fileName.substringBeforeLast("."),

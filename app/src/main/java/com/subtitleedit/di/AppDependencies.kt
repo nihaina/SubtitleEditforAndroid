@@ -4,6 +4,8 @@ import android.app.Application
 import android.net.Uri
 import com.subtitleedit.nativebridge.DefaultNativeMediaEngine
 import com.subtitleedit.nativebridge.NativeMediaEngine
+import com.subtitleedit.demix.VocalSeparationEngine
+import com.subtitleedit.demix.VocalSeparationRunner
 import com.subtitleedit.repository.AiTranslationService
 import com.subtitleedit.repository.ArchiveRepository
 import com.subtitleedit.repository.DefaultAiTranslationService
@@ -26,6 +28,22 @@ internal class AppDependencies(application: Application) {
     private val appContext = application.applicationContext
 
     val nativeMediaEngine: NativeMediaEngine by lazy { DefaultNativeMediaEngine() }
+
+    fun vocalSeparationRunner(
+        modelPath: String,
+        modelDisplayName: String,
+        modelSize: Long?,
+        graphOptimizationEnabled: Boolean,
+        cpuArenaEnabled: Boolean,
+        log: (String) -> Unit
+    ): VocalSeparationRunner = VocalSeparationEngine(
+        modelPath = modelPath,
+        modelDisplayName = modelDisplayName,
+        modelSize = modelSize,
+        graphOptimizationEnabled = graphOptimizationEnabled,
+        cpuArenaEnabled = cpuArenaEnabled,
+        log = log
+    )
 
     val subtitleRepository: SubtitleRepository by lazy { DefaultSubtitleRepository() }
     val modelRepository: ModelRepository by lazy { DefaultModelRepository() }
