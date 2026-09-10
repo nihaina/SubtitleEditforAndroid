@@ -30,6 +30,7 @@ import com.subtitleedit.adapter.TranslationPreviewItem
 import com.subtitleedit.databinding.ActivityEditorBinding
 import com.subtitleedit.repository.MediaRepository
 import com.subtitleedit.editor.EditorMediaType
+import com.subtitleedit.editor.EditorHistoryDescriptionFormatter
 import com.subtitleedit.editor.EditorPlaybackController
 import com.subtitleedit.editor.EditorSearchController
 import com.subtitleedit.editor.EditorSourcePreviewController
@@ -1915,7 +1916,7 @@ class EditorActivity : AppCompatActivity() {
             stateModel.recordListHistory(
                 before = before,
                 after = after,
-                description = describeListStateChange(difference),
+                description = EditorHistoryDescriptionFormatter.describeListStateChange(difference),
                 beforeSourceText = beforeSourceText.takeIf { hasContentChange },
                 afterSourceText = afterSourceText.takeIf { hasContentChange }
             )
@@ -1942,48 +1943,12 @@ class EditorActivity : AppCompatActivity() {
         stateModel.recordSourceHistory(
             beforeText = beforeText,
             afterText = afterText,
-            description = describeSourceTextChange(beforeText, afterText),
+            description = EditorHistoryDescriptionFormatter.describeSourceTextChange(beforeText, afterText),
             beforeEntries = cachedBeforeEntries ?: emptyList(),
             beforeEntriesText = beforeText.takeIf { cachedBeforeEntries != null }
         )
         invalidateOptionsMenu()
     }
-
-    private fun describeListStateChange(difference: EditorEditHistory.ListDifference): String {
-        val descriptions = mutableListOf<String>()
-        difference.deleted.forEach { entry ->
-            descriptions += "删除${entry.stableId}字幕［${formatHistoryTime(entry)}］${entry.text}"
-        }
-        difference.added.forEach { entry ->
-            descriptions += "新增${entry.stableId}字幕［${formatHistoryTime(entry)}］${entry.text}"
-        }
-        difference.modified.forEach { (old, _) ->
-            descriptions += "修改${old.stableId}字幕［${formatHistoryTime(old)}］${old.text}"
-        }
-        difference.selected.forEach { id ->
-            descriptions += "选中${id}字幕"
-        }
-        difference.deselected.forEach { id ->
-            descriptions += "取消选中${id}字幕"
-        }
-        if (difference.orderChanged && difference.deleted.isEmpty() && difference.added.isEmpty()) {
-            descriptions += "调整字幕顺序"
-        }
-        return descriptions.joinToString("\n")
-    }
-
-    private fun describeSourceTextChange(before: String, after: String): String {
-        val beforeLines = before.split('\n')
-        val afterLines = after.split('\n')
-        return (0 until maxOf(beforeLines.size, afterLines.size))
-            .filter { index -> beforeLines.getOrNull(index) != afterLines.getOrNull(index) }
-            .joinToString("\n") { index ->
-                "修改${index + 1}行 修改前${beforeLines.getOrNull(index).orEmpty().removeSuffix("\r")}"
-            }
-    }
-
-    private fun formatHistoryTime(entry: SubtitleEntry): String =
-        "${TimeUtils.formatForInput(entry.startTime)}-${TimeUtils.formatForInput(entry.endTime)}"
 
     private fun recordListSelectionChange() {
         if (suppressHistoryRecording || isSourceViewMode) return
