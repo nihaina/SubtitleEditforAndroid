@@ -22,6 +22,7 @@ import com.subtitleedit.databinding.ActivityMediaConvertBinding
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.task.LongTaskController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -117,6 +118,12 @@ class MediaConvertActivity : AppCompatActivity() {
     private var probeJob: Job? = null
     private var currentSession: FFmpegSession? = null
     private var isConverting = false
+    private val taskController by lazy {
+        LongTaskController(
+            (application as SubtitleEditApplication).dependencies.taskStateStore,
+            "media-convert"
+        )
+    }
 
     private val pickFileLauncher = registerForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
@@ -144,7 +151,7 @@ class MediaConvertActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         probeJob?.cancel()
-        conversionJob?.cancel()
+        taskController.cancel()
         currentSession?.cancel()
         super.onDestroy()
     }
@@ -414,12 +421,13 @@ class MediaConvertActivity : AppCompatActivity() {
     }
 
     private fun beginConversion(overwriteOutput: Boolean) {
-        if (isConverting) return
+        if (isConverting || taskController.isRunning) return
         isConverting = true
         outputUris.clear()
         binding.tvLog.text = ""
         setConvertingState(true)
-        conversionJob = lifecycleScope.launch {
+        conversionJob = taskController.launch(lifecycleScope) { task ->
+            task.onCancel { currentSession?.cancel() }
             val format = selectedFormat ?: return@launch
             val reservedNames = mutableSetOf<String>()
             val failures = mutableListOf<String>()
@@ -446,6 +454,7 @@ class MediaConvertActivity : AppCompatActivity() {
             } catch (_: CancellationException) {
                 appendLog("\n⚠️ 已取消转换\n")
             } finally {
+                currentSession = null
                 isConverting = false
                 setConvertingState(false)
             }
@@ -760,11 +769,9 @@ class MediaConvertActivity : AppCompatActivity() {
 
     private fun cancelConversion() {
         if (!isConverting) return
-        isConverting = false
+        taskController.cancel()
         currentSession?.cancel()
-        conversionJob?.cancel()
         appendLog("\n⚠️ 正在取消...\n")
-        setConvertingState(false)
     }
 
     private fun shareOutputs() {
