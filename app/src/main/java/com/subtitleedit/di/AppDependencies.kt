@@ -3,6 +3,7 @@ package com.subtitleedit.di
 import android.app.Application
 import android.net.Uri
 import com.subtitleedit.nativebridge.DefaultNativeMediaEngine
+import com.subtitleedit.nativebridge.NativeMediaEngine
 import com.subtitleedit.repository.AiTranslationService
 import com.subtitleedit.repository.ArchiveRepository
 import com.subtitleedit.repository.DefaultAiTranslationService
@@ -24,6 +25,8 @@ import java.io.File
 internal class AppDependencies(application: Application) {
     private val appContext = application.applicationContext
 
+    val nativeMediaEngine: NativeMediaEngine by lazy { DefaultNativeMediaEngine() }
+
     val subtitleRepository: SubtitleRepository by lazy { DefaultSubtitleRepository() }
     val modelRepository: ModelRepository by lazy { DefaultModelRepository() }
     val archiveRepository: ArchiveRepository by lazy { DefaultArchiveRepository() }
@@ -44,6 +47,6 @@ internal class AppDependencies(application: Application) {
 
     fun mediaRepository(cacheDir: File): MediaRepository = DefaultMediaRepository(
         cacheDir = cacheDir,
-        nativeMediaEngine = DefaultNativeMediaEngine()
+        nativeMediaEngine = nativeMediaEngine
     )
 }

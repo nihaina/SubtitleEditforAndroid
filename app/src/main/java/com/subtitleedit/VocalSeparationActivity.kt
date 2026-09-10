@@ -12,7 +12,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.arthenica.ffmpegkit.FFmpegKit
 import com.subtitleedit.databinding.ActivityVocalSeparationBinding
 import com.subtitleedit.demix.DemixOutputWriter
 import com.subtitleedit.demix.VocalSeparationEngine
@@ -36,6 +35,8 @@ class VocalSeparationActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityVocalSeparationBinding
     private lateinit var settings: SettingsManager
+    private val nativeMediaEngine: com.subtitleedit.nativebridge.NativeMediaEngine
+        get() = (application as SubtitleEditApplication).dependencies.nativeMediaEngine
     private val selectedFiles = mutableListOf<SelectedMediaFile>()
     private var outputDirUri: Uri? = null
     private var separationJob: Job? = null
@@ -381,9 +382,7 @@ class VocalSeparationActivity : AppCompatActivity() {
     private fun convertToPcm(input: File, cache: File): File? {
         val output = File(cache, "${input.nameWithoutExtension}_44k_stereo.f32le")
         if (output.exists()) output.delete()
-        val command = "-y -i \"${input.absolutePath}\" -vn -ar 44100 -ac 2 -f f32le -c:a pcm_f32le \"${output.absolutePath}\""
-        val session = FFmpegKit.execute(command)
-        return if (session.getReturnCode()?.isValueSuccess() == true && output.isFile && output.length() > 0) output else null
+        return if (nativeMediaEngine.convertToPcm(input, output)) output else null
     }
 
     private fun copyUriToCache(uri: Uri, name: String, cache: File): File? = runCatching {
@@ -475,7 +474,7 @@ class VocalSeparationActivity : AppCompatActivity() {
     private fun cancelSeparation() {
         if (!isRunning) return
         isCancelled = true
-        FFmpegKit.cancel()
+        nativeMediaEngine.cancel()
         separationJob?.cancel()
         appendRuntimeLog("收到取消请求，正在停止当前处理")
     }
@@ -523,7 +522,7 @@ class VocalSeparationActivity : AppCompatActivity() {
     override fun onDestroy() {
         if (isRunning) {
             isCancelled = true
-            FFmpegKit.cancel()
+            nativeMediaEngine.cancel()
         }
         separationJob?.cancel()
         super.onDestroy()

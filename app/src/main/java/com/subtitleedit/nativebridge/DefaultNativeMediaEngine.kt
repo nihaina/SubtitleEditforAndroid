@@ -31,6 +31,18 @@ internal class DefaultNativeMediaEngine : NativeMediaEngine {
         return session.getReturnCode()?.isValueSuccess() == true && outputFile.length() > 44L
     }
 
+    override fun convertToPcm(inputFile: File, outputFile: File): Boolean {
+        val command = "-y -i \"${inputFile.absolutePath}\" -vn -ar 44100 -ac 2 " +
+            "-f f32le -c:a pcm_f32le \"${outputFile.absolutePath}\""
+        val session = FFmpegKit.execute(command)
+        return session.getReturnCode()?.isValueSuccess() == true && outputFile.isFile &&
+            outputFile.length() > 0L
+    }
+
+    override fun cancel() {
+        FFmpegKit.cancel()
+    }
+
     private fun selectDefaultAudioStreamIndex(
         mediaInformation: com.arthenica.ffmpegkit.MediaInformation?
     ): Int? {

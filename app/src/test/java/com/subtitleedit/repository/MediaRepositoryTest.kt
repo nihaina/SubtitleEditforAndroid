@@ -116,5 +116,7 @@ class MediaRepositoryTest {
             outputFile.writeBytes(ByteArray(45))
             return true
         }
+
+        override fun convertToPcm(inputFile: File, outputFile: File): Boolean = false
     }
 }

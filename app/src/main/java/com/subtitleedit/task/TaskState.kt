@@ -36,8 +36,13 @@ internal class TaskStateStore {
         TaskState(id = id, type = type, status = TaskStatus.QUEUED)
     )
 
+    @Synchronized
     fun updateState(state: TaskState): TaskState {
-        _states.update { it + (state.id to state) }
+        val previous = _states.value[state.id]
+        if (previous != null && previous.status.isTerminal() && !state.status.isTerminal()) {
+            return previous
+        }
+        _states.value = _states.value + (state.id to state)
         return state
     }
 
@@ -59,5 +64,10 @@ internal class TaskStateStore {
 
     fun remove(id: String) {
         _states.update { it - id }
+    }
+
+    private fun TaskStatus.isTerminal(): Boolean = when (this) {
+        TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.CANCELLED -> true
+        TaskStatus.QUEUED, TaskStatus.RUNNING -> false
     }
 }

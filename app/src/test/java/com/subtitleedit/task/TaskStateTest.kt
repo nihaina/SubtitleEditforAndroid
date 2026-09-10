@@ -35,4 +35,19 @@ class TaskStateTest {
         assertEquals("failed", state.errorMessage)
         assertEquals(3L, state.progress.current)
     }
+
+    @Test
+    fun terminalStateCannotBeRegressedByLateProgress() {
+        val store = TaskStateStore()
+        val reporter = TaskReporter(store, "task-3", "demo")
+        reporter.succeeded(TaskProgress("完成", 10L, 10L))
+
+        val published = store.updateState(
+            TaskState("task-3", "demo", TaskStatus.RUNNING, TaskProgress("迟到的进度"))
+        )
+
+        assertEquals(TaskStatus.SUCCEEDED, published.status)
+        assertEquals(TaskStatus.SUCCEEDED, store.states.value.getValue("task-3").status)
+        assertEquals("完成", store.states.value.getValue("task-3").progress.message)
+    }
 }

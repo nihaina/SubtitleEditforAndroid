@@ -11,4 +11,8 @@ internal interface NativeMediaEngine {
     fun probe(file: File, inspectVideoAudioTrack: Boolean): MediaProbeResult
 
     fun convertToWav(inputFile: File, outputFile: File): Boolean
+
+    fun convertToPcm(inputFile: File, outputFile: File): Boolean
+
+    fun cancel() {}
 }
