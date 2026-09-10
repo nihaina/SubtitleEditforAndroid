@@ -59,6 +59,7 @@ import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.FileTransferManager
+import com.subtitleedit.util.FileBrowserNavigation
 import com.subtitleedit.util.FilePropertiesInfo
 import com.subtitleedit.util.MediaFilePropertiesReader
 import com.subtitleedit.util.SettingsManager
@@ -1050,7 +1051,7 @@ class MainActivity : AppCompatActivity() {
         saveCurrentDirectoryScrollPosition()
         val wasSearching = isFileSearchQueryActive()
         val historyEntries = if (wasSearching) {
-            navigationHistoryForSearchResult(previousDirectory, directory)
+            FileBrowserNavigation.historyForSearchResult(previousDirectory, directory)
         } else {
             listOf(previousDirectory)
         }
@@ -1062,22 +1063,6 @@ class MainActivity : AppCompatActivity() {
             directoryHistory.addAll(historyEntries)
             if (wasSearching) invalidateOptionsMenu()
         }
-    }
-
-    private fun navigationHistoryForSearchResult(root: File, target: File): List<File> {
-        val rootPath = runCatching { root.canonicalPath }.getOrElse { root.absolutePath }
-        val reversedHistory = mutableListOf<File>()
-        var directory = target.parentFile
-
-        while (directory != null) {
-            reversedHistory.add(directory)
-            val directoryPath = runCatching { directory.canonicalPath }
-                .getOrElse { directory.absolutePath }
-            if (directoryPath == rootPath) return reversedHistory.asReversed()
-            directory = directory.parentFile
-        }
-
-        return listOf(root)
     }
 
     private fun isFileSearchQueryActive(): Boolean =
