@@ -32,6 +32,7 @@ import com.subtitleedit.repository.MediaRepository
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.editor.EditorHistoryDescriptionFormatter
 import com.subtitleedit.editor.EditorSourceDiffUtils
+import com.subtitleedit.util.SubtitleFormatPolicy
 import com.subtitleedit.editor.EditorPlaybackController
 import com.subtitleedit.editor.EditorSearchController
 import com.subtitleedit.editor.EditorSourcePreviewController
@@ -925,7 +926,7 @@ class EditorActivity : AppCompatActivity() {
     private fun updateSelectedCountDisplay() {
         val count = subtitleAdapter.getSelectedCount()
         if (count > 0) {
-            val formatName = getFormatDisplayName(currentFormat)
+            val formatName = SubtitleFormatPolicy.displayName(currentFormat)
             supportActionBar?.subtitle = "$formatName | ${subtitleEntries.size} 条 | 选中：$count"
         } else {
             supportActionBar?.subtitle = currentFormatInfo
@@ -1203,7 +1204,7 @@ class EditorActivity : AppCompatActivity() {
             return
         }
         if (currentFormat.isSourceOnly) {
-            showShortToast("${getFormatDisplayName(currentFormat)} 文件使用源码视图编辑")
+            showShortToast("${SubtitleFormatPolicy.displayName(currentFormat)} 文件使用源码视图编辑")
             return
         }
 
@@ -2830,13 +2831,7 @@ class EditorActivity : AppCompatActivity() {
      * cleared; while a marker is still present we keep them until parsing succeeds.
      */
     private fun sourceContainsSubtitleMarker(content: String): Boolean {
-        return when (currentFormat) {
-            SubtitleParser.SubtitleFormat.SRT,
-            SubtitleParser.SubtitleFormat.VTT -> content.contains("-->")
-            SubtitleParser.SubtitleFormat.LRC -> Regex("\\[-?\\d{1,4}[:.]\\d{1,2}").containsMatchIn(content)
-            SubtitleParser.SubtitleFormat.TXT -> content.isNotBlank()
-            else -> true
-        }
+        return SubtitleFormatPolicy.containsSubtitleMarker(content, currentFormat)
     }
 
     private fun clearSubtitleEntries() {
@@ -2845,7 +2840,7 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun updateFormatInfo() {
-        val formatName = getFormatDisplayName(currentFormat)
+        val formatName = SubtitleFormatPolicy.displayName(currentFormat)
         val countInfo = if (isSourceViewMode) {
             val lines = if (::binding.isInitialized) {
                 binding.etSourceView.getDocumentLineCount()
@@ -2862,29 +2857,8 @@ class EditorActivity : AppCompatActivity() {
         supportActionBar?.subtitle = currentFormatInfo
     }
 
-    private fun getFormatDisplayName(format: SubtitleParser.SubtitleFormat): String {
-        return when (format) {
-            SubtitleParser.SubtitleFormat.SRT -> "SRT"
-            SubtitleParser.SubtitleFormat.LRC -> "LRC"
-            SubtitleParser.SubtitleFormat.TXT -> "TXT"
-            SubtitleParser.SubtitleFormat.ASS -> "ASS"
-            SubtitleParser.SubtitleFormat.SSA -> "SSA"
-            SubtitleParser.SubtitleFormat.VTT -> "WebVTT"
-            else -> "未知"
-        }
-    }
-
-    private fun getFormatExtension(format: SubtitleParser.SubtitleFormat): String {
-        return when (format) {
-            SubtitleParser.SubtitleFormat.SRT -> "srt"
-            SubtitleParser.SubtitleFormat.LRC -> "lrc"
-            SubtitleParser.SubtitleFormat.TXT -> "txt"
-            SubtitleParser.SubtitleFormat.ASS -> "ass"
-            SubtitleParser.SubtitleFormat.SSA -> "ssa"
-            SubtitleParser.SubtitleFormat.VTT -> "vtt"
-            else -> "srt"
-        }
-    }
+    private fun getFormatExtension(format: SubtitleParser.SubtitleFormat): String =
+        SubtitleFormatPolicy.extension(format)
 
     private fun serializeEntriesForFormat(format: SubtitleParser.SubtitleFormat): String {
         return serializeEntriesForFormat(format, subtitleEntries)
