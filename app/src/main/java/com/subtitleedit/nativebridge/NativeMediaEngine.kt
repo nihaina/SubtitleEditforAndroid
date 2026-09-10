@@ -9,10 +9,18 @@ internal data class MediaProbeResult(
 
 internal interface NativeMediaEngine {
     fun probe(file: File, inspectVideoAudioTrack: Boolean): MediaProbeResult
+    fun openOperation(): NativeMediaOperation
+}
 
-    fun convertToWav(inputFile: File, outputFile: File): Boolean
+internal interface NativeMediaOperation {
+    suspend fun convertToWav(inputFile: File, outputFile: File): Boolean
 
-    fun convertToPcm(inputFile: File, outputFile: File): Boolean
+    suspend fun convertToPcm(inputFile: File, outputFile: File, format: PcmFormat): Boolean
 
-    fun cancel() {}
+    fun cancel()
+}
+
+internal enum class PcmFormat {
+    SPEECH_WAV_16K_MONO,
+    DEMIX_FLOAT_44K_STEREO
 }

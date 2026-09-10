@@ -45,20 +45,25 @@ internal class DefaultMediaRepository(
             return@withContext PreparedAudioFile(audioFile, wasFixed = false)
         }
 
+        val operation = nativeMediaEngine.openOperation()
         try {
-            if (!nativeMediaEngine.convertToWav(audioFile, wavFile)) {
+            if (!operation.convertToWav(audioFile, wavFile)) {
                 throw IllegalStateException("Native WAV 转换失败")
             }
             replaceTemporaryPlaybackFile(wavFile)
             Log.d(TAG, "WAV 转换成功：${wavFile.absolutePath}")
             PreparedAudioFile(wavFile, wasFixed = true)
         } catch (e: CancellationException) {
+            operation.cancel()
             wavFile.delete()
             throw e
         } catch (e: Exception) {
+            operation.cancel()
             wavFile.delete()
             Log.e(TAG, "WAV 转换异常，使用原文件", e)
             PreparedAudioFile(audioFile, wasFixed = false)
+        } finally {
+            operation.cancel()
         }
     }
 

@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.update
 internal enum class TaskStatus {
     QUEUED,
     RUNNING,
+    CANCELLING,
     SUCCEEDED,
     FAILED,
     CANCELLED
@@ -42,6 +43,10 @@ internal class TaskStateStore {
         if (previous != null && previous.status.isTerminal() && !state.status.isTerminal()) {
             return previous
         }
+        if (previous?.status == TaskStatus.CANCELLING &&
+            (state.status == TaskStatus.QUEUED || state.status == TaskStatus.RUNNING)) {
+            return previous
+        }
         _states.value = _states.value + (state.id to state)
         return state
     }
@@ -68,6 +73,6 @@ internal class TaskStateStore {
 
     private fun TaskStatus.isTerminal(): Boolean = when (this) {
         TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.CANCELLED -> true
-        TaskStatus.QUEUED, TaskStatus.RUNNING -> false
+        TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.CANCELLING -> false
     }
 }

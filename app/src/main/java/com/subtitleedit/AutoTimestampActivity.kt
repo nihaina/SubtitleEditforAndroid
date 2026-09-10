@@ -13,8 +13,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.arthenica.ffmpegkit.FFmpegKit
 import com.subtitleedit.databinding.ActivityAutoTimestampBinding
+import com.subtitleedit.nativebridge.NativeMediaOperation
+import com.subtitleedit.nativebridge.PcmFormat
+import com.subtitleedit.task.LongTaskController
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
@@ -45,8 +47,17 @@ class AutoTimestampActivity : AppCompatActivity() {
     private var outputDirUri: Uri? = null
     private var generationJob: Job? = null
     private var isGenerating = false
-    private var isCancelled = false
+    private val taskController by lazy {
+        LongTaskController(
+            (application as SubtitleEditApplication).dependencies.taskStateStore,
+            "auto-timestamp"
+        )
+    }
+    private val isCancelled: Boolean get() = taskController.isCancellationRequested
     private lateinit var settingsManager: SettingsManager
+    private val nativeMediaEngine
+        get() = (application as SubtitleEditApplication).dependencies.nativeMediaEngine
+    private var mediaOperation: NativeMediaOperation? = null
     private val operationLog = StringBuilder()
 
     private val formatOptions = arrayOf("SRT", "LRC")
@@ -369,6 +380,7 @@ class AutoTimestampActivity : AppCompatActivity() {
     }
 
     private fun generateTimestamps(overwriteOutput: Boolean) {
+        if (taskController.isRunning) return
         val outputDir = outputDirUri ?: run {
             com.subtitleedit.util.OverwritingToast.makeText(this, "请选择输出目录", Toast.LENGTH_SHORT).show()
             return
@@ -396,9 +408,11 @@ class AutoTimestampActivity : AppCompatActivity() {
         }
         appendVadConfig(refinementSubtitle != null)
         isGenerating = true
-        isCancelled = false
+        mediaOperation?.cancel()
+        mediaOperation = nativeMediaEngine.openOperation()
 
-        generationJob = lifecycleScope.launch {
+        generationJob = taskController.launch(lifecycleScope) { task ->
+            task.onCancel { mediaOperation?.cancel() }
             try {
                 var successCount = 0
                 val failedFiles = mutableListOf<String>()
@@ -437,11 +451,14 @@ class AutoTimestampActivity : AppCompatActivity() {
                 }
 
             } catch (e: Exception) {
+                if (!isCancelled) task.recordFailure(e)
                 binding.tvStatus.text = if (isGenerating) "处理失败" else "已取消"
                 if (isGenerating) {
                     com.subtitleedit.util.OverwritingToast.makeText(this@AutoTimestampActivity, "处理失败：${e.message}", Toast.LENGTH_LONG).show()
                 }
             } finally {
+                mediaOperation?.cancel()
+                mediaOperation = null
                 binding.progressBar.visibility = android.view.View.GONE
                 binding.btnCancel.visibility = android.view.View.GONE
                 isGenerating = false
@@ -463,13 +480,9 @@ class AutoTimestampActivity : AppCompatActivity() {
 
     private fun cancelGeneration(showToast: Boolean = true) {
         if (!isGenerating) return
-        isCancelled = true
-        generationJob?.cancel()
-        isGenerating = false
-        binding.progressBar.visibility = android.view.View.GONE
-        binding.btnCancel.visibility = android.view.View.GONE
-        updateGenerateButtonState()
-        binding.tvStatus.text = "已取消"
+        taskController.cancel()
+        mediaOperation?.cancel()
+        binding.tvStatus.text = "正在取消..."
         if (showToast) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "已取消", Toast.LENGTH_SHORT).show()
         }
@@ -810,18 +823,15 @@ class AutoTimestampActivity : AppCompatActivity() {
     /**
      * 转换为 16kHz PCM WAV
      */
-    private fun convertToPcm(inputFile: File, taskCacheDir: File): File? {
+    private suspend fun convertToPcm(inputFile: File, taskCacheDir: File): File? {
         return try {
             val outputFile = File(taskCacheDir, "${inputFile.nameWithoutExtension}_16k.wav")
             if (outputFile.exists()) outputFile.delete()
 
-            val cmd = "-y -i \"${inputFile.absolutePath}\" -ar 16000 -ac 1 -c:a pcm_s16le \"${outputFile.absolutePath}\""
-            val session = FFmpegKit.execute(cmd)
-
-            if (session.getReturnCode()?.isValueSuccess() == true && outputFile.exists()) {
+            if (mediaOperation?.convertToPcm(inputFile, outputFile, PcmFormat.SPEECH_WAV_16K_MONO) == true && outputFile.exists()) {
                 outputFile
             } else {
-                Log.e("AutoTimestamp", "FFmpeg 转换失败: ${session.getOutput()}")
+                Log.e("AutoTimestamp", "FFmpeg 转换失败")
                 null
             }
         } catch (e: Exception) {
@@ -982,7 +992,8 @@ class AutoTimestampActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        isCancelled = true
+        taskController.cancel()
+        mediaOperation?.cancel()
         generationJob?.cancel()
         super.onDestroy()
     }

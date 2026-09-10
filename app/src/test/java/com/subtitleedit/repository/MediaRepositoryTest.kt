@@ -5,6 +5,8 @@ import java.io.FileNotFoundException
 import java.io.RandomAccessFile
 import com.subtitleedit.nativebridge.MediaProbeResult
 import com.subtitleedit.nativebridge.NativeMediaEngine
+import com.subtitleedit.nativebridge.NativeMediaOperation
+import com.subtitleedit.nativebridge.PcmFormat
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -111,12 +113,16 @@ class MediaRepositoryTest {
             return MediaProbeResult(startTimeSeconds = 1.0, defaultAudioStreamIndex = 2)
         }
 
-        override fun convertToWav(inputFile: File, outputFile: File): Boolean {
-            converted = true
-            outputFile.writeBytes(ByteArray(45))
-            return true
-        }
+        override fun openOperation(): NativeMediaOperation = object : NativeMediaOperation {
+            override suspend fun convertToWav(inputFile: File, outputFile: File): Boolean {
+                converted = true
+                outputFile.writeBytes(ByteArray(45))
+                return true
+            }
 
-        override fun convertToPcm(inputFile: File, outputFile: File): Boolean = false
+            override suspend fun convertToPcm(inputFile: File, outputFile: File, format: PcmFormat): Boolean = false
+
+            override fun cancel() = Unit
+        }
     }
 }

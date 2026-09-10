@@ -19,6 +19,9 @@ import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.RuntimeLogManager
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.nativebridge.NativeMediaOperation
+import com.subtitleedit.nativebridge.PcmFormat
+import com.subtitleedit.task.LongTaskController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -37,11 +40,18 @@ class VocalSeparationActivity : AppCompatActivity() {
     private lateinit var settings: SettingsManager
     private val nativeMediaEngine: com.subtitleedit.nativebridge.NativeMediaEngine
         get() = (application as SubtitleEditApplication).dependencies.nativeMediaEngine
+    private var mediaOperation: NativeMediaOperation? = null
     private val selectedFiles = mutableListOf<SelectedMediaFile>()
     private var outputDirUri: Uri? = null
     private var separationJob: Job? = null
     private var isRunning = false
-    private var isCancelled = false
+    private val taskController by lazy {
+        LongTaskController(
+            (application as SubtitleEditApplication).dependencies.taskStateStore,
+            "vocal-separation"
+        )
+    }
+    private val isCancelled: Boolean get() = taskController.isCancellationRequested
     private var accessWarningShown = false
     private val runtimeText = StringBuilder()
 
@@ -236,7 +246,9 @@ class VocalSeparationActivity : AppCompatActivity() {
         overwrite: Boolean
     ) {
         if (isRunning) return
-        isCancelled = false
+        if (taskController.isRunning) return
+        mediaOperation?.cancel()
+        mediaOperation = nativeMediaEngine.openOperation()
         isRunning = true
         runtimeText.clear()
         binding.tvRealtimeResult.text = ""
@@ -244,7 +256,8 @@ class VocalSeparationActivity : AppCompatActivity() {
         binding.layoutProgress.visibility = View.VISIBLE
         binding.btnCancel.visibility = View.VISIBLE
 
-        separationJob = lifecycleScope.launch {
+        separationJob = taskController.launch(lifecycleScope) { task ->
+            task.onCancel { mediaOperation?.cancel() }
             var success = 0
             try {
                 appendRuntimeLog("开始人声分离")
@@ -290,6 +303,8 @@ class VocalSeparationActivity : AppCompatActivity() {
                     showError(e.message ?: "人声分离失败")
                 }
             } finally {
+                mediaOperation?.cancel()
+                mediaOperation = null
                 isRunning = false
                 binding.layoutProgress.visibility = View.GONE
                 binding.btnCancel.visibility = View.GONE
@@ -380,10 +395,10 @@ class VocalSeparationActivity : AppCompatActivity() {
         }
     }
 
-    private fun convertToPcm(input: File, cache: File): File? {
+    private suspend fun convertToPcm(input: File, cache: File): File? {
         val output = File(cache, "${input.nameWithoutExtension}_44k_stereo.f32le")
         if (output.exists()) output.delete()
-        return if (nativeMediaEngine.convertToPcm(input, output)) output else null
+        return if (mediaOperation?.convertToPcm(input, output, PcmFormat.DEMIX_FLOAT_44K_STEREO) == true) output else null
     }
 
     private fun copyUriToCache(uri: Uri, name: String, cache: File): File? = runCatching {
@@ -474,8 +489,8 @@ class VocalSeparationActivity : AppCompatActivity() {
 
     private fun cancelSeparation() {
         if (!isRunning) return
-        isCancelled = true
-        nativeMediaEngine.cancel()
+        taskController.cancel()
+        mediaOperation?.cancel()
         separationJob?.cancel()
         appendRuntimeLog("收到取消请求，正在停止当前处理")
     }
@@ -522,9 +537,11 @@ class VocalSeparationActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         if (isRunning) {
-            isCancelled = true
-            nativeMediaEngine.cancel()
+            taskController.cancel()
+            mediaOperation?.cancel()
         }
+        taskController.cancel()
+        mediaOperation?.cancel()
         separationJob?.cancel()
         super.onDestroy()
     }

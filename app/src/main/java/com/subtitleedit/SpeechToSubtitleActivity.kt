@@ -16,8 +16,10 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
-import com.arthenica.ffmpegkit.FFmpegKit
 import com.subtitleedit.databinding.ActivitySpeechToSubtitleBinding
+import com.subtitleedit.nativebridge.NativeMediaOperation
+import com.subtitleedit.nativebridge.PcmFormat
+import com.subtitleedit.task.LongTaskController
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.repository.DefaultSpeechRecognitionService
 import com.subtitleedit.repository.SpeechRecognitionService
@@ -45,6 +47,8 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     private lateinit var settingsManager: SettingsManager
     private val speechRecognitionService: SpeechRecognitionService
         get() = (application as SubtitleEditApplication).dependencies.speechRecognitionService
+    private val nativeMediaEngine
+        get() = (application as SubtitleEditApplication).dependencies.nativeMediaEngine
 
     private val selectedMediaFiles = mutableListOf<SelectedMediaFile>()
     private var encoderPath: String = ""
@@ -56,11 +60,18 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     private var outputDirUri: Uri? = null
     private var conversionJob: Job? = null
     private var isConverting = false
-    private var isCancelled = false
+    private val taskController by lazy {
+        LongTaskController(
+            (application as SubtitleEditApplication).dependencies.taskStateStore,
+            "speech-to-subtitle"
+        )
+    }
+    private val isCancelled: Boolean get() = taskController.isCancellationRequested
     private var pendingSubtitleContent: String = ""
     private val realtimeResults = StringBuilder()
     private var logRenderScheduled = false
     private var lastProgressLog = ""
+    private var mediaOperation: NativeMediaOperation? = null
 
     private companion object {
         const val OUTPUT_DIRECTORY_KEY = "speech_to_subtitle"
@@ -394,10 +405,12 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     }
 
     private fun startConversion(overwriteOutput: Boolean) {
-        isCancelled = false
+        mediaOperation?.cancel()
+        mediaOperation = nativeMediaEngine.openOperation()
         realtimeResults.clear()
         lastProgressLog = ""
-        conversionJob = lifecycleScope.launch {
+        conversionJob = taskController.launch(lifecycleScope) { task ->
+            task.onCancel { mediaOperation?.cancel() }
             try {
                 isConverting = true
                 showProgress("正在准备...", 0)
@@ -446,9 +459,12 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
 
             } catch (e: Exception) {
                 if (!isCancelled) {
+                    task.recordFailure(e)
                     showError(e.message ?: "未知错误")
                 }
             } finally {
+                mediaOperation?.cancel()
+                mediaOperation = null
                 isConverting = false
                 hideProgress()
                 updateStartButtonState()
@@ -471,11 +487,8 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
 
     private fun cancelConversion() {
         if (!isConverting) return
-        isCancelled = true
-        conversionJob?.cancel()
-        isConverting = false
-        hideProgress()
-        updateStartButtonState()
+        taskController.cancel()
+        mediaOperation?.cancel()
         com.subtitleedit.util.OverwritingToast.makeText(this, "已取消", Toast.LENGTH_SHORT).show()
     }
 
@@ -500,15 +513,12 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     /**
      * 转换为 16kHz PCM WAV
      */
-    private fun convertToPcm(inputFile: File, taskCacheDir: File): File? {
+    private suspend fun convertToPcm(inputFile: File, taskCacheDir: File): File? {
         return try {
             val outputFile = File(taskCacheDir, "${inputFile.nameWithoutExtension}_16k.wav")
             if (outputFile.exists()) outputFile.delete()
 
-            val cmd = "-y -i \"${inputFile.absolutePath}\" -ar 16000 -ac 1 -c:a pcm_s16le \"${outputFile.absolutePath}\""
-            val session = FFmpegKit.execute(cmd)
-
-            if (session.getReturnCode()?.isValueSuccess() == true && outputFile.exists()) {
+            if (mediaOperation?.convertToPcm(inputFile, outputFile, PcmFormat.SPEECH_WAV_16K_MONO) == true && outputFile.exists()) {
                 outputFile
             } else {
                 null
@@ -1025,6 +1035,8 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        taskController.cancel()
+        mediaOperation?.cancel()
         super.onDestroy()
         conversionJob?.cancel()
     }

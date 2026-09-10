@@ -24,23 +24,43 @@ internal class DefaultNativeMediaEngine : NativeMediaEngine {
         )
     }
 
-    override fun convertToWav(inputFile: File, outputFile: File): Boolean {
-        val command = "-y -i \"${inputFile.absolutePath}\" " +
-            "-c:a pcm_s16le -ar 44100 -ac 2 \"${outputFile.absolutePath}\""
-        val session = FFmpegKit.execute(command)
-        return session.getReturnCode()?.isValueSuccess() == true && outputFile.length() > 44L
-    }
+    override fun openOperation(): NativeMediaOperation = Operation()
 
-    override fun convertToPcm(inputFile: File, outputFile: File): Boolean {
-        val command = "-y -i \"${inputFile.absolutePath}\" -vn -ar 44100 -ac 2 " +
-            "-f f32le -c:a pcm_f32le \"${outputFile.absolutePath}\""
-        val session = FFmpegKit.execute(command)
-        return session.getReturnCode()?.isValueSuccess() == true && outputFile.isFile &&
-            outputFile.length() > 0L
-    }
+    private class Operation : NativeMediaOperation {
+        private val commandOperation = NativeCommandOperation { arguments, complete ->
+            val session = FFmpegKit.executeWithArgumentsAsync(arguments) { completed ->
+                complete(completed.getReturnCode()?.isValueSuccess() == true)
+            }
+            NativeCommandSession { session.cancel() }
+        }
 
-    override fun cancel() {
-        FFmpegKit.cancel()
+        override suspend fun convertToWav(inputFile: File, outputFile: File): Boolean {
+            return commandOperation.execute(arrayOf(
+                "-y", "-i", inputFile.absolutePath, "-c:a", "pcm_s16le",
+                "-ar", "44100", "-ac", "2", outputFile.absolutePath
+            )) && outputFile.length() > 44L
+        }
+
+        override suspend fun convertToPcm(
+            inputFile: File,
+            outputFile: File,
+            format: PcmFormat
+        ): Boolean {
+            val options = when (format) {
+                PcmFormat.SPEECH_WAV_16K_MONO -> arrayOf(
+                    "-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", "-f", "wav"
+                )
+                PcmFormat.DEMIX_FLOAT_44K_STEREO -> arrayOf(
+                    "-vn", "-ar", "44100", "-ac", "2", "-f", "f32le", "-c:a", "pcm_f32le"
+                )
+            }
+            return commandOperation.execute(
+                arrayOf("-y", "-i", inputFile.absolutePath) + options + outputFile.absolutePath
+            ) && outputFile.isFile && outputFile.length() >
+                if (format == PcmFormat.SPEECH_WAV_16K_MONO) 44L else 0L
+        }
+
+        override fun cancel() = commandOperation.cancel()
     }
 
     private fun selectDefaultAudioStreamIndex(
