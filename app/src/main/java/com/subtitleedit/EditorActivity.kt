@@ -31,6 +31,7 @@ import com.subtitleedit.databinding.ActivityEditorBinding
 import com.subtitleedit.repository.MediaRepository
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.editor.EditorHistoryDescriptionFormatter
+import com.subtitleedit.editor.EditorSourceDiffUtils
 import com.subtitleedit.editor.EditorPlaybackController
 import com.subtitleedit.editor.EditorSearchController
 import com.subtitleedit.editor.EditorSourcePreviewController
@@ -2043,8 +2044,8 @@ class EditorActivity : AppCompatActivity() {
             operation.beforeEntriesText != operation.beforeText
         ) return false
         val before = operation.beforeText
-        val prefix = commonTextPrefix(before, content)
-        val suffix = commonTextSuffix(before, content, prefix)
+        val prefix = EditorSourceDiffUtils.commonTextPrefix(before, content)
+        val suffix = EditorSourceDiffUtils.commonTextSuffix(before, content, prefix)
         if (prefix == before.length && suffix == content.length) return false
         val deletedText = before.substring(prefix, before.length - suffix)
         if (deletedText.isBlank()) return false
@@ -2053,7 +2054,11 @@ class EditorActivity : AppCompatActivity() {
             format = currentFormat
         ).entries
         if (deletedEntries.isEmpty()) return false
-        val start = findMatchingEntryRange(operation.beforeEntries, deletedEntries)
+        val start = EditorSourceDiffUtils.findMatchingEntryRange(
+            operation.beforeEntries,
+            deletedEntries,
+            currentFormat
+        )
             ?: return false
         val target = operation.beforeEntries.map { it.copy() }.toMutableList()
         repeat(start.second) { target.removeAt(start.first) }
@@ -2061,45 +2066,6 @@ class EditorActivity : AppCompatActivity() {
         sourceViewEntriesGeneration = sourceViewEditGeneration
         sourceViewHasPendingEdits = false
         return true
-    }
-
-    private fun commonTextPrefix(before: String, after: String): Int {
-        var index = 0
-        val limit = minOf(before.length, after.length)
-        while (index < limit && before[index] == after[index]) index++
-        return index
-    }
-
-    private fun commonTextSuffix(before: String, after: String, prefix: Int): Int {
-        var count = 0
-        while (before.length - 1 - count >= prefix &&
-            after.length - 1 - count >= prefix &&
-            before[before.length - 1 - count] == after[after.length - 1 - count]
-        ) count++
-        return count
-    }
-
-    private fun findMatchingEntryRange(
-        entries: List<SubtitleEntry>,
-        deleted: List<SubtitleEntry>
-    ): Pair<Int, Int>? {
-        if (deleted.isEmpty() || deleted.size > entries.size) return null
-        val format = currentFormat
-        for (start in 0..entries.size - deleted.size) {
-            val matches = deleted.indices.all { offset ->
-                val current = entries[start + offset]
-                val removed = deleted[offset]
-                val timingMatches = if (format == SubtitleParser.SubtitleFormat.LRC) {
-                    current.startTime == removed.startTime &&
-                        kotlin.math.abs(current.endTime - removed.endTime) <= 100L
-                } else {
-                    current.startTime == removed.startTime && current.endTime == removed.endTime
-                }
-                timingMatches && current.text == removed.text
-            }
-            if (matches) return start to deleted.size
-        }
-        return null
     }
 
     private fun onEntryUpdated(position: Int, message: String = "已更新") {
