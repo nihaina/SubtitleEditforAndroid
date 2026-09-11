@@ -30,8 +30,6 @@ import com.subtitleedit.adapter.TranslationPreviewItem
 import com.subtitleedit.databinding.ActivityEditorBinding
 import com.subtitleedit.repository.MediaRepository
 import com.subtitleedit.editor.EditorMediaType
-import com.subtitleedit.editor.EditorHistoryDescriptionFormatter
-import com.subtitleedit.editor.EditorSourceDiffUtils
 import com.subtitleedit.util.SubtitleFormatPolicy
 import com.subtitleedit.util.WebVttCuePolicy
 import com.subtitleedit.util.SubtitleStableRange
@@ -43,6 +41,12 @@ import com.subtitleedit.editor.EditorSourcePreviewController
 import com.subtitleedit.editor.EditorSourceLineEditController
 import com.subtitleedit.editor.EditorSourceWaveformSyncController
 import com.subtitleedit.editor.EditorSubtitleDialogController
+import com.subtitleedit.editor.EditorConfirmationDialogController
+import com.subtitleedit.editor.EditorHistoryCoordinator
+import com.subtitleedit.editor.EditorFileSessionController
+import com.subtitleedit.editor.EditorListOperationsController
+import com.subtitleedit.editor.EditorSourceViewState
+import com.subtitleedit.editor.EditorSourceViewCoordinator
 import com.subtitleedit.editor.EditorSubtitlePreviewController
 import com.subtitleedit.editor.EditorTextPreviewDialog
 import com.subtitleedit.editor.EditorTranscribeController
@@ -133,7 +137,10 @@ class EditorActivity : AppCompatActivity() {
 
     // 大文件切换时，避免 TextWatcher 在 setText/逐字编辑期间反复复制整份文本。
     private var suppressSourceViewChanges = false
-    private var sourceViewHasPendingEdits = false
+    private val sourceViewState = EditorSourceViewState()
+    private var sourceViewHasPendingEdits: Boolean
+        get() = sourceViewState.pendingEdits
+        set(value) { sourceViewState.pendingEdits = value }
     private var sourceViewTransitionJob: Job? = null
     private var sourceListParseJob: Job? = null
     private var isSourceViewTransitioning: Boolean
@@ -141,11 +148,20 @@ class EditorActivity : AppCompatActivity() {
         set(value) { stateModel.isSourceViewTransitioning = value }
     private lateinit var sourceWaveformSyncController: EditorSourceWaveformSyncController
     private lateinit var subtitleDialogController: EditorSubtitleDialogController
+    private lateinit var confirmationDialogController: EditorConfirmationDialogController
+    private lateinit var historyCoordinator: EditorHistoryCoordinator
+    private lateinit var sourceViewCoordinator: EditorSourceViewCoordinator
+    private lateinit var fileSessionController: EditorFileSessionController
+    private val listOperationsController = EditorListOperationsController()
     private var sourceViewEntryCount: Int
         get() = stateModel.sourceViewEntryCount
         set(value) { stateModel.sourceViewEntryCount = value }
-    private var sourceViewEditGeneration = 0L
-    private var sourceViewEntriesGeneration = -1L
+    private var sourceViewEditGeneration: Long
+        get() = sourceViewState.editGeneration
+        set(value) { sourceViewState.editGeneration = value }
+    private var sourceViewEntriesGeneration: Long
+        get() = sourceViewState.entriesGeneration
+        set(value) { sourceViewState.entriesGeneration = value }
     private var pendingListIndexRefreshStart: Int? = null
     private lateinit var sourceLineEditController: EditorSourceLineEditController
 
@@ -304,7 +320,18 @@ class EditorActivity : AppCompatActivity() {
         setupToolbar()
         setupRecyclerView()
         setupSourceView()
+        fileSessionController = EditorFileSessionController(this, stateModel.subtitleRepository)
+        setupHistoryCoordinator()
+        sourceViewCoordinator = EditorSourceViewCoordinator(
+            format = { currentFormat },
+            peekUndo = { stateModel.peekUndo() },
+            updateLatestHistory = { content, entries -> stateModel.updateLatestSourceHistory(content, entries) },
+            applyEntries = { entries -> applySourceViewEntries(entries) },
+            setEntriesGeneration = { sourceViewEntriesGeneration = sourceViewEditGeneration },
+            clearPendingEdits = { sourceViewHasPendingEdits = false }
+        )
         setupSubtitleDialogController()
+        confirmationDialogController = EditorConfirmationDialogController(this) { hasUnsavedChanges }
         setupSearchController()
         setupPlaybackController()
         setupWaveformController()
@@ -591,6 +618,24 @@ class EditorActivity : AppCompatActivity() {
             },
             onUpdated = ::onEntryUpdated,
             showMessage = ::showShortToast
+        )
+    }
+
+    private fun setupHistoryCoordinator() {
+        historyCoordinator = EditorHistoryCoordinator(
+            stateModel = stateModel,
+            entries = { subtitleEntries },
+            selectedIds = {
+                if (::subtitleAdapter.isInitialized) {
+                    subtitleAdapter.getSelectedEntries().mapTo(mutableSetOf()) { it.first.stableId }
+                } else emptySet()
+            },
+            sourceMode = { isSourceViewMode },
+            sourceText = { sourceViewContent },
+            sourceEntriesReady = { sourceViewEntriesGeneration == sourceViewEditGeneration },
+            currentOriginalText = { originalFileContent },
+            applyOperation = ::applyHistoryOperation,
+            invalidateMenu = ::invalidateOptionsMenu
         )
     }
 
@@ -958,7 +1003,7 @@ class EditorActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val content = runCatching {
                 withContext(Dispatchers.IO) {
-                    stateModel.subtitleRepository.readFile(file, charset)
+                    fileSessionController.readFile(file, charset)
                 }
             }.getOrElse {
                 showShortToast("读取文件失败：${it.message}")
@@ -974,8 +1019,8 @@ class EditorActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 val (content, fileName) = withContext(Dispatchers.IO) {
-                    val loadedContent = stateModel.subtitleRepository.readUri(this@EditorActivity, uri)
-                    loadedContent to getFileNameFromUri(uri)
+                    val loadedContent = fileSessionController.readUri(uri)
+                    loadedContent to fileSessionController.fileName(uri)
                 }
                 stateModel.openUriSubtitleDocument(uri.toString(), fileName)
                 setDocumentTitle(stateModel.documentTitle)
@@ -992,25 +1037,7 @@ class EditorActivity : AppCompatActivity() {
     /**
      * 从 URI 获取文件名
      */
-    private fun getFileNameFromUri(uri: Uri): String {
-        var fileName = "未命名"
-        // 尝试从 display name 获取
-        val cursor = contentResolver.query(uri, null, null, null, null)
-        cursor?.use {
-            val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-            if (it.moveToFirst() && nameIndex >= 0) {
-                fileName = it.getString(nameIndex)
-            }
-        }
-        // 如果获取失败，尝试从 path 获取
-        if (fileName == "未命名") {
-            val path = uri.path
-            if (!path.isNullOrEmpty()) {
-                fileName = path.substringAfterLast('/')
-            }
-        }
-        return fileName
-    }
+    private fun getFileNameFromUri(uri: Uri): String = fileSessionController.fileName(uri)
     
     private fun reloadFile() {
         val targetFile = if (mediaType.hasPlayableMedia) subtitleFile else currentFile
@@ -1023,7 +1050,7 @@ class EditorActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val content = runCatching {
                 withContext(Dispatchers.IO) {
-                    stateModel.subtitleRepository.readFile(targetFile, charset)
+                    fileSessionController.readFile(targetFile, charset)
                 }
             }.getOrElse {
                 showShortToast("切换编码失败：${it.message}")
@@ -1246,7 +1273,7 @@ class EditorActivity : AppCompatActivity() {
                 editedContent = sourceViewContent
                 sourcePreviewController.cancel()
                 if (sourceViewEntriesGeneration != sourceViewEditGeneration) {
-                    val appliedLocally = applySourceDeletionLocally(editedContent)
+                    val appliedLocally = sourceViewCoordinator.applyDeletionLocally(editedContent)
                     if (!appliedLocally) {
                         // Keep the current rows for the transition and parse the large source
                         // document after the list is visible. This removes the full-file parse
@@ -1508,7 +1535,7 @@ class EditorActivity : AppCompatActivity() {
         
         val selectedEntries = requireSelectedEntries("请先选择要剪切的字幕") ?: return
         
-        clipboardTexts = selectedEntries.map { it.first.text }
+        clipboardTexts = listOperationsController.copy(subtitleEntries, selectedEntries.map { it.second })
         cutPasteController.markMultiCut(selectedEntries.map { it.second })
         com.subtitleedit.util.OverwritingToast.makeText(this, "已剪切 ${clipboardTexts.size} 项", Toast.LENGTH_SHORT).show()
     }
@@ -1520,9 +1547,8 @@ class EditorActivity : AppCompatActivity() {
         if (!cutPasteController.hasPendingCut()) return
 
         val deletedIndices = cutPasteController.snapshotDeletedIndices()
-        val sortedPositions = cutPasteController.consumeDeletedIndicesDesc()
         val historyBefore = currentHistoryListState()
-        EditorDocumentOperations.removeAtDescending(subtitleEntries, sortedPositions)
+        listOperationsController.removePendingCut(subtitleEntries, cutPasteController)
         syncAfterDelete(deletedIndices, historyBefore)
     }
     
@@ -1549,11 +1575,7 @@ class EditorActivity : AppCompatActivity() {
             }
             targetPosition = targetPosition.coerceIn(0, subtitleEntries.lastIndex)
 
-            val pasteResult = SubtitlePasteOps.pasteAtPosition(
-                entries = subtitleEntries,
-                position = targetPosition,
-                clipboardTexts = clipboardTexts
-            )
+            val pasteResult = listOperationsController.pasteAt(subtitleEntries, targetPosition, clipboardTexts)
             if (pasteResult.structureChanged) {
                 submitSubtitleList(refreshAll = true, markChanged = true)
                 com.subtitleedit.util.OverwritingToast.makeText(this, "已粘贴 ${clipboardTexts.size} 项", Toast.LENGTH_SHORT).show()
@@ -1601,16 +1623,11 @@ class EditorActivity : AppCompatActivity() {
         }
         insertPosition = insertPosition.coerceIn(0, subtitleEntries.size)
 
-        val insertedEntries = SubtitleEntryOps.createInsertedEntries(
-            after = after,
-            reference = refEntry,
-            previous = subtitleEntries.getOrNull(insertPosition - 1),
-            next = subtitleEntries.getOrNull(insertPosition),
-            texts = if (pasteAfterInsert) clipboardTexts else listOf("新字幕")
+        val insertedEntries = listOperationsController.createInserted(
+            after, refEntry, subtitleEntries.getOrNull(insertPosition - 1),
+            subtitleEntries.getOrNull(insertPosition),
+            if (pasteAfterInsert) clipboardTexts else listOf("新字幕"), insertPosition
         )
-        insertedEntries.forEachIndexed { index, entry ->
-            entry.index = insertPosition + index + 1
-        }
         stateModel.execute(EditorCommand.Insert(insertPosition, insertedEntries))
         renumberEntries(force = true)
         submitSubtitleList(
@@ -1696,7 +1713,7 @@ class EditorActivity : AppCompatActivity() {
         
         val selectedEntries = requireSelectedEntries("请先选择要复制的字幕") ?: return
         
-        clipboardTexts = selectedEntries.map { it.first.text }
+        clipboardTexts = listOperationsController.copy(subtitleEntries, selectedEntries.map { it.second })
         cutPasteController.clear()
         com.subtitleedit.util.OverwritingToast.makeText(this, "已复制 ${clipboardTexts.size} 项", Toast.LENGTH_SHORT).show()
     }
@@ -1768,46 +1785,16 @@ class EditorActivity : AppCompatActivity() {
         )
 
     private fun initializeEditHistoryBaseline(clearHistory: Boolean) {
-        val state = currentHistoryListState()
-        stateModel.setHistoryBaseline(state, sourceViewContent, clearHistory)
+        historyCoordinator.initialize(clearHistory)
     }
 
     private fun syncEditHistoryBaseline() {
-        val state = currentHistoryListState()
-        stateModel.syncHistoryBaseline(state, sourceViewContent, isSourceViewMode)
+        historyCoordinator.sync()
     }
 
     private fun recordListStateChange(selectedIdsOverride: Set<Long>? = null) {
-        if (suppressHistoryRecording || isSourceViewMode || !historyBaselineInitialized) return
-        val before = EditorEditHistory.ListState(historyEntriesSnapshot, historySelectionSnapshot)
-        val current = currentHistoryListState()
-        val after = if (selectedIdsOverride == null) {
-            current
-        } else {
-            current.copy(selectedIds = selectedIdsOverride)
-        }
-        val difference = EditorEditHistory.difference(before, after)
-        if (!difference.isEmpty) {
-            val hasStructuralChange = difference.deleted.isNotEmpty() ||
-                difference.added.isNotEmpty() || difference.orderChanged
-            val hasContentChange = hasStructuralChange || difference.modified.isNotEmpty()
-            val beforeSourceText = originalFileContent
-            if (hasContentChange) {
-                stateModel.syncListChangesToSource(before.entries, after.entries)
-            }
-            val afterSourceText = originalFileContent
-            stateModel.recordListHistory(
-                before = before,
-                after = after,
-                description = EditorHistoryDescriptionFormatter.describeListStateChange(difference),
-                beforeSourceText = beforeSourceText.takeIf { hasContentChange },
-                afterSourceText = afterSourceText.takeIf { hasContentChange }
-            )
-        }
-        // Keep ignored format metadata in the baseline so a later content edit does not absorb it.
-        historyEntriesSnapshot = after.entries
-        historySelectionSnapshot = after.selectedIds
-        if (!difference.isEmpty) invalidateOptionsMenu()
+        if (suppressHistoryRecording) return
+        historyCoordinator.recordList(selectedIdsOverride)
     }
 
     private fun recordSourceTextChange(
@@ -1815,26 +1802,8 @@ class EditorActivity : AppCompatActivity() {
         afterText: String,
         beforeEntries: List<SubtitleEntry>? = null
     ) {
-        if (suppressHistoryRecording || !isSourceViewMode || !historyBaselineInitialized) return
-        if (beforeText == afterText) return
-        // Only attach entries when they describe this exact source snapshot. During rapid
-        // typing/deletion the debounced parser may still represent an older generation; reusing
-        // that stale list makes one undo jump across several source edits.
-        val cachedBeforeEntries = beforeEntries?.map { it.copy() }
-            ?: subtitleEntries
-                .takeIf {
-                    sourceViewEntriesGeneration == sourceViewEditGeneration &&
-                        sourceHistoryTextSnapshot == beforeText
-                }
-                ?.map { it.copy() }
-        stateModel.recordSourceHistory(
-            beforeText = beforeText,
-            afterText = afterText,
-            description = EditorHistoryDescriptionFormatter.describeSourceTextChange(beforeText, afterText),
-            beforeEntries = cachedBeforeEntries ?: emptyList(),
-            beforeEntriesText = beforeText.takeIf { cachedBeforeEntries != null }
-        )
-        invalidateOptionsMenu()
+        if (suppressHistoryRecording) return
+        historyCoordinator.recordSource(beforeText, afterText, beforeEntries)
     }
 
     private fun recordListSelectionChange() {
@@ -1844,11 +1813,7 @@ class EditorActivity : AppCompatActivity() {
 
     private fun undoEdit() {
         suppressHistoryRecording = true
-        val applied = try {
-            stateModel.undoCommand(isSourceViewMode, ::applyHistoryOperation)
-        } finally {
-            suppressHistoryRecording = false
-        }
+        val applied = try { historyCoordinator.undo() } finally { suppressHistoryRecording = false }
         if (!applied) {
             invalidateOptionsMenu()
             return
@@ -1860,11 +1825,7 @@ class EditorActivity : AppCompatActivity() {
 
     private fun redoEdit() {
         suppressHistoryRecording = true
-        val applied = try {
-            stateModel.redoCommand(isSourceViewMode, ::applyHistoryOperation)
-        } finally {
-            suppressHistoryRecording = false
-        }
+        val applied = try { historyCoordinator.redo() } finally { suppressHistoryRecording = false }
         if (!applied) {
             invalidateOptionsMenu()
             return
@@ -2074,41 +2035,6 @@ class EditorActivity : AppCompatActivity() {
             subtitleAdapter.setSelectionByStableIds(selectedIds)
             updateSelectedCountDisplay()
         }
-    }
-
-    private fun applySourceDeletionLocally(content: String): Boolean {
-        val operation = stateModel.peekUndo() as? EditorEditHistory.Operation.SourceChange
-            ?: return false
-        if (operation.afterText != content ||
-            operation.beforeEntriesText != operation.beforeText
-        ) return false
-        val before = operation.beforeText
-        val prefix = EditorSourceDiffUtils.commonTextPrefix(before, content)
-        val suffix = EditorSourceDiffUtils.commonTextSuffix(before, content, prefix)
-        if (prefix == before.length && suffix == content.length) return false
-        val deletedText = before.substring(prefix, before.length - suffix)
-        if (deletedText.isBlank()) return false
-        val deletedEntries = SubtitleParser.parseDocument(
-            deletedText,
-            format = currentFormat
-        ).entries
-        if (deletedEntries.isEmpty()) return false
-        val start = EditorSourceDiffUtils.findMatchingEntryRange(
-            operation.beforeEntries,
-            deletedEntries,
-            currentFormat
-        )
-            ?: return false
-        val target = operation.beforeEntries.map { it.copy() }.toMutableList()
-        repeat(start.second) { target.removeAt(start.first) }
-        applySourceViewEntries(target)
-        // The deletion was resolved from the in-memory "before" snapshot. Cache the
-        // resulting entries on the same history operation so redo can restore them without
-        // parsing the whole source document again.
-        stateModel.updateLatestSourceHistory(content, target)
-        sourceViewEntriesGeneration = sourceViewEditGeneration
-        sourceViewHasPendingEdits = false
-        return true
     }
 
     private fun onEntryUpdated(position: Int, message: String = "已更新") {
@@ -2946,12 +2872,7 @@ class EditorActivity : AppCompatActivity() {
         negativeText: String = "取消",
         onConfirm: () -> Unit
     ) {
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setMessage(message)
-            .setPositiveButton(positiveText) { _, _ -> onConfirm() }
-            .setNegativeButton(negativeText, null)
-            .show()
+        confirmationDialogController.show(title, message, positiveText, negativeText, onConfirm)
     }
 
     private fun showUnsavedChangesConfirm(message: String, onConfirm: () -> Unit) {
@@ -2966,27 +2887,15 @@ class EditorActivity : AppCompatActivity() {
         message: String,
         action: () -> Unit
     ) {
-        if (!hasUnsavedChanges) {
-            action()
-            return
-        }
-        showUnsavedChangesConfirm(message, action)
+        confirmationDialogController.runAfterUnsavedChangesConfirmed(message, action)
     }
 
     private fun showReplaceAllConfirm(count: Int, onConfirm: () -> Unit) {
-        showConfirmDialog(
-            title = "确认替换",
-            message = "确定要全部替换吗？共找到 $count 处匹配项。",
-            onConfirm = onConfirm
-        )
+        confirmationDialogController.showReplaceAll(count, onConfirm)
     }
 
     private fun showDeleteConfirm(message: String, onConfirm: () -> Unit) {
-        showConfirmDialog(
-            title = "删除",
-            message = message,
-            onConfirm = onConfirm
-        )
+        confirmationDialogController.showDelete(message, onConfirm)
     }
 
     private fun getCurrentSubtitleFile(): File? {
