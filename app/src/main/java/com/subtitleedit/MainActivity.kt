@@ -1,7 +1,6 @@
 package com.subtitleedit
 
 import android.Manifest
-import android.content.res.ColorStateList
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaExtractor
@@ -32,7 +31,6 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.appcompat.widget.SearchView
-import androidx.appcompat.widget.AppCompatRadioButton
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.Lifecycle
@@ -118,6 +116,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var fileAdapter: FileListAdapter
     private lateinit var filePropertiesDialogController: FilePropertiesDialogController
     private lateinit var mediaOpenController: MediaOpenController
+    private lateinit var fileBrowserDialogController: FileBrowserDialogController
     private val stateModel: MainViewModel by viewModels()
 
     private var currentDirectory: File?
@@ -166,11 +165,6 @@ class MainActivity : AppCompatActivity() {
     )
 
 
-    private data class SortOptionRow(
-        val container: LinearLayout,
-        val radioButton: AppCompatRadioButton
-    )
-
     // 权限请求
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -210,6 +204,26 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
         filePropertiesDialogController = FilePropertiesDialogController(this, ::showShortToast)
         mediaOpenController = MediaOpenController(this, ::openMediaWithSubtitle)
+        fileBrowserDialogController = FileBrowserDialogController(
+            activity = this,
+            dp = ::dp,
+            currentDirectory = { currentDirectory },
+            onCreated = { currentDirectory?.let(::loadDirectory) },
+            onSortChanged = { field, direction ->
+                field?.let {
+                    sortField = it
+                    SettingsManager.getInstance(this).setFileSortField(it)
+                }
+                direction?.let {
+                    sortDirection = it
+                    SettingsManager.getInstance(this).setFileSortDirection(it)
+                }
+                displayDirectoryFiles()
+            },
+            onOpenSettings = {
+                startActivity(Intent(this, FileManagementSettingsActivity::class.java))
+            }
+        )
         showAllFileTypes = settingsManager.isShowAllFileTypesEnabled()
         showHiddenFiles = settingsManager.isShowHiddenFilesEnabled()
         if (stateModel.sortField == null) sortField = settingsManager.getFileSortField()
@@ -469,209 +483,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun showCreateMenu() {
         val anchor = binding.toolbar.findViewById<View>(MENU_CREATE) ?: binding.toolbar
-        PopupMenu(this, anchor).apply {
-            menu.add("新建文件夹")
-            menu.add("新建文件")
-            setOnMenuItemClickListener { item ->
-                if (item.title == "新建文件") showCreateFileDialog() else showCreateFolderDialog()
-                true
-            }
-            show()
-        }
-    }
-
-    private fun showCreateFolderDialog() {
-        val input = EditText(this).apply {
-            hint = "文件夹名称"
-            setSingleLine(true)
-            setPadding(dp(24), dp(8), dp(24), dp(8))
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("新建文件夹")
-            .setView(input)
-            .setNegativeButton(R.string.cancel, null)
-            .setPositiveButton(R.string.confirm, null)
-            .create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val entered = input.text.toString()
-                val validation = FileBrowserOrder.validateName(entered)
-                if (validation != null) {
-                    input.error = validation
-                    return@setOnClickListener
-                }
-                val name = entered.trim()
-                val directory = currentDirectory ?: return@setOnClickListener
-                val target = File(directory, name)
-                if (target.exists()) {
-                    input.error = "同名项目已存在"
-                    return@setOnClickListener
-                }
-                val created = runCatching {
-                    target.mkdir()
-                }.getOrDefault(false)
-                if (!created) {
-                    input.error = "创建失败，请检查目录写入权限"
-                    return@setOnClickListener
-                }
-                dialog.dismiss()
-                loadDirectory(directory)
-            }
-        }
-        dialog.show()
-    }
-
-    private fun showCreateFileDialog() {
-        val nameInput = EditText(this).apply {
-            hint = "文件名"
-            setSingleLine(true)
-        }
-        val extensionInput = EditText(this).apply {
-            hint = "扩展名"
-            setText("txt")
-            setSingleLine(true)
-        }
-        val inputs = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), 0, dp(24), 0)
-            addView(nameInput, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(56)))
-            addView(extensionInput, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(56)))
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("新建文件")
-            .setView(inputs)
-            .setNegativeButton(R.string.cancel, null)
-            .setPositiveButton(R.string.confirm, null)
-            .create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                nameInput.error = null
-                extensionInput.error = null
-                FileBrowserOrder.validateName(nameInput.text.toString())?.let { error ->
-                    nameInput.error = error
-                    return@setOnClickListener
-                }
-                FileBrowserOrder.validateExtension(extensionInput.text.toString())?.let { error ->
-                    extensionInput.error = error
-                    return@setOnClickListener
-                }
-                val name = FileBrowserOrder.composeFileName(
-                    nameInput.text.toString(),
-                    extensionInput.text.toString()
-                )
-                val directory = currentDirectory ?: return@setOnClickListener
-                val target = File(directory, name)
-                if (target.exists()) {
-                    nameInput.error = "同名项目已存在"
-                    return@setOnClickListener
-                }
-                val created = runCatching { target.createNewFile() }.getOrDefault(false)
-                if (!created) {
-                    nameInput.error = "创建失败，请检查目录写入权限"
-                    return@setOnClickListener
-                }
-                dialog.dismiss()
-                loadDirectory(directory)
-            }
-        }
-        dialog.show()
-        nameInput.requestFocus()
+        fileBrowserDialogController.showCreateMenu(anchor)
     }
 
     private fun showDirectoryMoreMenu() {
         val anchor = binding.toolbar.findViewById<View>(MENU_MORE) ?: binding.toolbar
-        PopupMenu(this, anchor).apply {
-            menu.add("排序")
-            menu.add("设置")
-            setOnMenuItemClickListener { item ->
-                if (item.title == "排序") showSortDialog()
-                else startActivity(Intent(this@MainActivity, FileManagementSettingsActivity::class.java))
-                true
-            }
-            show()
-        }
+        fileBrowserDialogController.showMoreMenu(anchor, ::showSortDialog)
     }
 
     private fun showSortDialog() {
-        val fields = listOf(
-            "名称" to FileSortField.NAME,
-            "类型" to FileSortField.TYPE,
-            "大小" to FileSortField.SIZE,
-            "日期" to FileSortField.DATE
-        )
-        val directions = listOf("升序" to FileSortDirection.ASCENDING, "降序" to FileSortDirection.DESCENDING)
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-        }
-        val fieldRows = mutableListOf<Pair<SortOptionRow, FileSortField>>()
-        val directionRows = mutableListOf<Pair<SortOptionRow, FileSortDirection>>()
-        lateinit var refreshSelection: () -> Unit
-        fields.forEach { (label, value) ->
-            val row = sortRow(label, false) {
-                sortField = value
-                SettingsManager.getInstance(this).setFileSortField(value)
-                displayDirectoryFiles()
-                refreshSelection()
-            }
-            fieldRows.add(row to value)
-            container.addView(row.container)
-        }
-        directions.forEach { (label, value) ->
-            val row = sortRow(label, false) {
-                sortDirection = value
-                SettingsManager.getInstance(this).setFileSortDirection(value)
-                displayDirectoryFiles()
-                refreshSelection()
-            }
-            directionRows.add(row to value)
-            container.addView(row.container)
-        }
-        refreshSelection = {
-            fieldRows.forEach { (row, value) -> setSortRowSelected(row, sortField == value) }
-            directionRows.forEach { (row, value) -> setSortRowSelected(row, sortDirection == value) }
-        }
-        refreshSelection()
-        AlertDialog.Builder(this).setTitle("排序").setView(container)
-            .setNegativeButton(R.string.cancel, null).show()
-    }
-
-    private fun sortRow(label: String, selected: Boolean, onClick: () -> Unit): SortOptionRow {
-        val radio = AppCompatRadioButton(this).apply {
-            isClickable = false
-            isFocusable = false
-            buttonTintList = ColorStateList(
-                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                intArrayOf(
-                    ContextCompat.getColor(this@MainActivity, R.color.primary),
-                    ContextCompat.getColor(this@MainActivity, R.color.on_surface_variant)
-                )
-            )
-            layoutParams = LinearLayout.LayoutParams(dp(40), LinearLayout.LayoutParams.MATCH_PARENT)
-        }
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(dp(16), 0, dp(8), 0)
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48))
-            addView(TextView(this@MainActivity).apply {
-                text = label
-                textSize = 16f
-                gravity = android.view.Gravity.CENTER_VERTICAL
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
-            })
-            addView(radio)
-            setOnClickListener { onClick() }
-        }
-        return SortOptionRow(row, radio).also { setSortRowSelected(it, selected) }
-    }
-
-    private fun setSortRowSelected(row: SortOptionRow, selected: Boolean) {
-        row.container.setBackgroundColor(
-            if (selected) ContextCompat.getColor(this, R.color.primary_container)
-            else android.graphics.Color.TRANSPARENT
-        )
-        row.radioButton.isChecked = selected
+        fileBrowserDialogController.showSortDialog({ sortField }, { sortDirection })
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
