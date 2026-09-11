@@ -36,6 +36,7 @@ class FileListAdapter(
 ) : ListAdapter<File, FileListAdapter.FileViewHolder>(FileDiffCallback()) {
 
     private companion object {
+        private val SELECTION_PAYLOAD = Any()
         val AUDIO_EXTENSIONS = FileUtils.AUDIO_EXTENSIONS + setOf("opus", "ac3", "amr")
         val VIDEO_EXTENSIONS = setOf(
             "mp4", "mkv", "avi", "mov", "webm", "flv", "wmv", "m4v",
@@ -72,19 +73,27 @@ class FileListAdapter(
 
     fun updateSelection(selectionMode: Boolean, selectedPaths: Set<String>) {
         val modeChanged = this.selectionMode != selectionMode
-        val previousPaths = this.selectedPaths
+        // MainViewModel exposes a mutable linked set. Keep a value snapshot here;
+        // otherwise a later add/remove mutates the "previous" set as well and no
+        // row receives a selection payload after the first click.
+        val previousPaths = this.selectedPaths.toSet()
         this.selectionMode = selectionMode
-        this.selectedPaths = selectedPaths
+        this.selectedPaths = selectedPaths.toSet()
         if (itemCount == 0) return
         if (modeChanged) {
-            notifyItemRangeChanged(0, itemCount)
+            notifyItemRangeChanged(0, itemCount, SELECTION_PAYLOAD)
             return
         }
         currentList.forEachIndexed { position, file ->
             if ((file.absolutePath in previousPaths) != (file.absolutePath in selectedPaths)) {
-                notifyItemChanged(position)
+                notifyItemChanged(position, SELECTION_PAYLOAD)
             }
         }
+    }
+
+    /** Rebind every visible/current row after an AsyncListDiffer submission. */
+    fun refreshSelectionVisuals() {
+        if (itemCount > 0) notifyItemRangeChanged(0, itemCount, SELECTION_PAYLOAD)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FileViewHolder {
@@ -95,6 +104,25 @@ class FileListAdapter(
 
     override fun onBindViewHolder(holder: FileViewHolder, position: Int) {
         holder.bind(getItem(position))
+    }
+
+    override fun onBindViewHolder(holder: FileViewHolder, position: Int, payloads: MutableList<Any>) {
+        if (payloads.any { it === SELECTION_PAYLOAD }) {
+            holder.bindSelectionVisual(getItem(position))
+        } else {
+            holder.bind(getItem(position))
+        }
+    }
+
+    override fun onViewAttachedToWindow(holder: FileViewHolder) {
+        super.onViewAttachedToWindow(holder)
+        // A holder can survive a directory transition while AsyncListDiffer is
+        // applying the new list. Reapply only the selection visuals at attach time
+        // so a row never keeps the previous directory's alpha/stroke state.
+        val position = holder.bindingAdapterPosition
+        if (position != RecyclerView.NO_POSITION) {
+            holder.bindSelectionVisual(getItem(position))
+        }
     }
 
     inner class FileViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
@@ -115,6 +143,13 @@ class FileListAdapter(
             ivFileIcon.scaleType = ImageView.ScaleType.FIT_CENTER
             ivFileIcon.setPadding(iconPadding, iconPadding, iconPadding, iconPadding)
             ivFileIcon.clearColorFilter()
+            // Every holder can be reused for a different kind of item. Reset view state
+            // before applying the directory/file-specific values below.
+            fileDetailsRow.visibility = View.VISIBLE
+            tvFileSize.visibility = View.VISIBLE
+            tvMediaDuration.visibility = View.GONE
+            tvFileExtension.visibility = View.VISIBLE
+            tvFileModifiedTime.visibility = View.VISIBLE
 
             // 设置图标
             if (file.isDirectory) {
@@ -188,18 +223,7 @@ class FileListAdapter(
                     )
                 )
             }
-            val isSelected = file.absolutePath in selectedPaths
-            card.strokeWidth = if (isSelected) 2 else 0
-            card.strokeColor = if (isSelected) {
-                androidx.core.content.ContextCompat.getColor(itemView.context, R.color.primary)
-            } else {
-                android.graphics.Color.TRANSPARENT
-            }
-            itemView.alpha = when {
-                isRestricted -> 0.55f
-                selectionMode && !isSelected && file.name != ".." -> 0.72f
-                else -> 1f
-            }
+            bindSelectionVisual(file)
 
             // 点击事件
             itemView.setOnClickListener {
@@ -208,6 +232,24 @@ class FileListAdapter(
             itemView.setOnLongClickListener {
                 if (isRestricted) onItemClick(file) else onItemLongClick(file)
                 true
+            }
+        }
+
+        fun bindSelectionVisual(file: File) {
+            val isRestricted = isItemRestricted(file)
+            val isSelected = file.absolutePath in selectedPaths
+            card.strokeWidth = if (isSelected) 2 else 0
+            card.strokeColor = if (isSelected) {
+                androidx.core.content.ContextCompat.getColor(itemView.context, R.color.primary)
+            } else {
+                android.graphics.Color.TRANSPARENT
+            }
+            itemView.alpha = when {
+                // Selection mode is a visual state of the current directory. Apply it to
+                // every unselected item, including the synthetic parent-directory row.
+                selectionMode && !isSelected -> 0.72f
+                isRestricted -> 0.55f
+                else -> 1f
             }
         }
 

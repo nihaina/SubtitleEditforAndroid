@@ -38,6 +38,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.Lifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.SimpleItemAnimator
 import com.subtitleedit.adapter.FileListAdapter
 import com.subtitleedit.databinding.ActivityMainBinding
 import com.subtitleedit.databinding.DialogArchiveProgressBinding
@@ -327,6 +328,12 @@ class MainActivity : AppCompatActivity() {
         binding.rvFileList.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = fileAdapter
+            // Selection updates are represented by item alpha/stroke. The default
+            // change animation restores alpha to 1f at animation end, which makes
+            // only currently visible rows become bright again after navigation or
+            // a directory refresh. Disable change animations so bound selection
+            // visuals remain authoritative.
+            (itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false
         }
     }
     
@@ -898,6 +905,14 @@ class MainActivity : AppCompatActivity() {
             null
         }
         fileAdapter.submitList(adapterItems) {
+            // AsyncListDiffer may finish after the selection update below. Reapply the
+            // latest selection state once the new list is installed so visible holders
+            // cannot retain the pre-refresh alpha/stroke values.
+            fileAdapter.updateSelection(
+                selectedPaths.isNotEmpty() && pendingFileOperation == null,
+                selectedPaths.toSet()
+            )
+            fileAdapter.refreshSelectionVisuals()
             if (restoreScrollPosition && directoryPath != null) {
                 binding.rvFileList.post {
                     if (currentDirectory?.let(::directoryPath) != directoryPath) return@post
@@ -993,6 +1008,9 @@ class MainActivity : AppCompatActivity() {
     private fun onFileClicked(file: File) {
         // 处理父目录导航
         if (file.name == "..") {
+            // 普通文件选择期间暂时锁定顶部父目录项，避免点击文件夹选择后
+            // 意外离开当前目录。复制/移动等目标目录选择仍允许返回上级。
+            if (selectedPaths.isNotEmpty() && pendingFileOperation == null) return
             if (pendingFileOperation != null) navigateDestinationUp() else goUpLevel()
             return
         }
@@ -1012,11 +1030,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (selectedPaths.isNotEmpty()) {
-            if (file.isDirectory) {
-                navigateIntoDirectory(file)
-            } else {
-                toggleSelection(file)
-            }
+            // 选中状态下点击文件或文件夹都只切换选中状态；目录导航通过
+            // 退出选择模式后进行，避免选择文件夹时触发列表刷新和跳转。
+            toggleSelection(file)
             return
         }
         

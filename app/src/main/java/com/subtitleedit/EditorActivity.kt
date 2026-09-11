@@ -30,6 +30,7 @@ import com.subtitleedit.adapter.TranslationPreviewItem
 import com.subtitleedit.databinding.ActivityEditorBinding
 import com.subtitleedit.repository.MediaRepository
 import com.subtitleedit.editor.EditorMediaType
+import com.subtitleedit.editor.EditorMediaDocumentController
 import com.subtitleedit.util.SubtitleFormatPolicy
 import com.subtitleedit.util.WebVttCuePolicy
 import com.subtitleedit.util.SubtitleStableRange
@@ -47,6 +48,8 @@ import com.subtitleedit.editor.EditorFileSessionController
 import com.subtitleedit.editor.EditorListOperationsController
 import com.subtitleedit.editor.EditorSourceViewState
 import com.subtitleedit.editor.EditorSourceViewCoordinator
+import com.subtitleedit.editor.EditorSaveSessionController
+import com.subtitleedit.editor.EditorListPresentationController
 import com.subtitleedit.editor.EditorSubtitlePreviewController
 import com.subtitleedit.editor.EditorTextPreviewDialog
 import com.subtitleedit.editor.EditorTranscribeController
@@ -152,7 +155,10 @@ class EditorActivity : AppCompatActivity() {
     private lateinit var historyCoordinator: EditorHistoryCoordinator
     private lateinit var sourceViewCoordinator: EditorSourceViewCoordinator
     private lateinit var fileSessionController: EditorFileSessionController
+    private lateinit var saveSessionController: EditorSaveSessionController
+    private val mediaDocumentController = EditorMediaDocumentController()
     private val listOperationsController = EditorListOperationsController()
+    private lateinit var listPresentationController: EditorListPresentationController
     private var sourceViewEntryCount: Int
         get() = stateModel.sourceViewEntryCount
         set(value) { stateModel.sourceViewEntryCount = value }
@@ -319,8 +325,19 @@ class EditorActivity : AppCompatActivity() {
         
         setupToolbar()
         setupRecyclerView()
+        listPresentationController = EditorListPresentationController(
+            adapter = { subtitleAdapter },
+            entries = { subtitleEntries },
+            selectedIds = {
+                if (::subtitleAdapter.isInitialized) {
+                    subtitleAdapter.getSelectedEntries().mapTo(mutableSetOf()) { it.first.stableId }
+                } else emptySet()
+            },
+            updateSelectedCount = ::updateSelectedCountDisplay
+        )
         setupSourceView()
         fileSessionController = EditorFileSessionController(this, stateModel.subtitleRepository)
+        saveSessionController = EditorSaveSessionController(this, stateModel.subtitleRepository)
         setupHistoryCoordinator()
         sourceViewCoordinator = EditorSourceViewCoordinator(
             format = { currentFormat },
@@ -2050,18 +2067,7 @@ class EditorActivity : AppCompatActivity() {
     ) {
         stateModel.refreshDocument()
         val positionList = positions.toList()
-        if (positionList.size > BULK_NOTIFY_THRESHOLD) {
-            // Bulk translation/replace operations must not enqueue one RecyclerView update per row.
-            subtitleAdapter.refreshAllItems()
-        } else if (includeNeighbors) {
-            notifyPositionsWithNeighbors(positionList)
-        } else {
-            positionList
-                .filter { it in subtitleEntries.indices }
-                .distinct()
-                .sorted()
-                .forEach { subtitleAdapter.notifyItemChanged(it) }
-        }
+        listPresentationController.notifyPositions(positionList, includeNeighbors)
         if (syncWaveform) syncWaveformSubtitles(changedPositions = positionList)
         if (markChanged) {
             if (!isSourceViewMode) sourceViewNeedsListSync = true
@@ -2071,29 +2077,6 @@ class EditorActivity : AppCompatActivity() {
         if (::playbackController.isInitialized) playbackController.invalidateHighlightCache()
         if (::searchController.isInitialized) searchController.onDocumentChanged()
         scheduleSubtitlePreview()
-    }
-
-    private fun notifyPositionsWithNeighbors(positions: List<Int>) {
-        if (positions.isEmpty()) return
-        val allAffected = mutableSetOf<Int>()
-        positions.forEach { pos ->
-            if (pos in subtitleEntries.indices) {
-                allAffected.add(pos)
-            }
-            val prev = pos - 1
-            if (prev in subtitleEntries.indices) {
-                allAffected.add(prev)
-            }
-            val next = pos + 1
-            if (next in subtitleEntries.indices) {
-                allAffected.add(next)
-            }
-        }
-        if (allAffected.size > BULK_NOTIFY_THRESHOLD) {
-            subtitleAdapter.refreshAllItems()
-        } else {
-            allAffected.sorted().forEach { subtitleAdapter.notifyItemChanged(it) }
-        }
     }
 
     private fun syncWaveformSubtitles(
@@ -2140,23 +2123,14 @@ class EditorActivity : AppCompatActivity() {
     ) {
         renumberEntries(force = refreshAll)
         stateModel.refreshDocument()
-        val currentIds = subtitleEntries.mapTo(mutableSetOf()) { it.stableId }
-        val targetSelectedIds = when {
-            selectedStableIds != null -> selectedStableIds.filterTo(mutableSetOf()) { it in currentIds }
-            selectedIndices != null -> selectedIndices.mapNotNullTo(mutableSetOf()) { index ->
-                subtitleEntries.getOrNull(index)?.stableId
-            }
-            clearSelection -> emptySet()
-            else -> currentHistoryListState().selectedIds
-        }
+        val targetSelectedIds = listPresentationController.targetSelection(
+            selectedIndices, selectedStableIds, clearSelection
+        )
         if (markChanged) recordListStateChange(targetSelectedIds)
         subtitleAdapter.submitList(subtitleEntries.toList()) {
-            if (clearSelection) {
-                subtitleAdapter.clearSelection()
-            }
             // ListAdapter replaces row objects asynchronously. Rebind selection by stable ID
             // after the new list is installed so selected rows survive source parsing and undo.
-            subtitleAdapter.setSelectionByStableIds(targetSelectedIds)
+            listPresentationController.bindSelection(targetSelectedIds, clearSelection)
             if (refreshAll) {
                 subtitleAdapter.refreshAllItems()
                 pendingListIndexRefreshStart = null
@@ -2170,7 +2144,6 @@ class EditorActivity : AppCompatActivity() {
                     }
                 }
             }
-            updateSelectedCountDisplay()
             afterSubmit?.invoke()
         }
         if (updateFormat) updateFormatInfo()
@@ -2252,13 +2225,9 @@ class EditorActivity : AppCompatActivity() {
         }
         val charset = currentCharset
         lifecycleScope.launch {
-            val saved = runCatching {
-                withContext(Dispatchers.IO) {
-                    stateModel.subtitleRepository.writeFile(targetFile, content, charset)
-                }
-            }.onFailure {
-                showShortToast("保存失败：${it.message}")
-            }.isSuccess
+            val result = saveSessionController.saveFile(targetFile, content, charset)
+            val saved = result.success
+            if (!saved) showShortToast("保存失败：${result.error?.message}")
             if (saved) {
                 originalFileContent = content
                 sourceViewContent = content
@@ -2290,13 +2259,9 @@ class EditorActivity : AppCompatActivity() {
         }
         val charset = currentCharset
         lifecycleScope.launch {
-            val saved = runCatching {
-                withContext(Dispatchers.IO) {
-                    stateModel.subtitleRepository.writeUri(this@EditorActivity, uri, content, charset)
-                }
-            }.onFailure {
-                showShortToast("保存失败：${it.message}")
-            }.isSuccess
+            val result = saveSessionController.saveUri(uri, content, charset)
+            val saved = result.success
+            if (!saved) showShortToast("保存失败：${result.error?.message}")
             if (saved) {
                 originalFileContent = content
                 sourceViewContent = content
@@ -3140,16 +3105,14 @@ class EditorActivity : AppCompatActivity() {
     ) {
         if (restoreDocument) {
             syncWaveformSubtitles()
-        } else if (subtitleFilePath != null) {
-            val subtitleFile = File(subtitleFilePath)
-            if (subtitleFile.exists()) {
-                loadSubtitleFile(subtitleFile)
-            } else {
+            return
+        }
+        when (val preparation = mediaDocumentController.subtitlePreparation(subtitleFilePath, false)) {
+            is EditorMediaDocumentController.Preparation.Companion -> loadSubtitleFile(preparation.file)
+            EditorMediaDocumentController.Preparation.Empty -> {
                 prepareEmptyMediaDocument()
-                showShortToast("未找到同名字幕文件")
+                if (!subtitleFilePath.isNullOrBlank()) showShortToast("未找到同名字幕文件")
             }
-        } else {
-            prepareEmptyMediaDocument()
         }
     }
 
