@@ -152,6 +152,7 @@ class EditorActivity : AppCompatActivity() {
 
     private data class SourceWaveformSyncRequest(
         val sourceContent: String,
+        val sourceEntries: List<SubtitleEntry>,
         val sourceSyncInFlight: Boolean,
         val editGeneration: Long,
         val timings: SourceWaveformTimings,
@@ -650,6 +651,10 @@ class EditorActivity : AppCompatActivity() {
                         null
                     }
                     subtitleEntries[changedIndex] = updatedEntry.copy()
+                    waveformController.updateSubtitleEntries(
+                        mapOf(changedIndex to subtitleEntries[changedIndex].copy()),
+                        subtitleEntries.size
+                    )
                     scheduleSourceViewWaveformSync(
                         subtitleEntries,
                         dragSessionKey,
@@ -890,6 +895,7 @@ class EditorActivity : AppCompatActivity() {
         }
         pendingSourceWaveformSync = SourceWaveformSyncRequest(
             sourceContent = sourceContentSnapshot,
+            sourceEntries = (sourceWaveformHistoryEntries ?: subtitleEntries).map { it.copy() },
             sourceSyncInFlight = sourceSyncInFlight,
             editGeneration = sourceViewEditGeneration,
             timings = timings,
@@ -911,10 +917,7 @@ class EditorActivity : AppCompatActivity() {
 
                     val format = currentFormat
                     val result = withContext(Dispatchers.Default) {
-                        val sourceEntries = SubtitleParser.parseDocument(
-                            request.sourceContent,
-                            format = format
-                        ).entries
+                        val sourceEntries = request.sourceEntries
                         if (sourceEntries.size != request.timings.size) {
                             SourceWaveformSyncResult(updatedSource = null, needsPreview = true)
                         } else {
@@ -945,19 +948,18 @@ class EditorActivity : AppCompatActivity() {
                         continue
                     }
                     val updatedSource = result.updatedSource ?: continue
-                    if (request.recordHistory) {
-                        recordSourceTextChange(
-                            request.historyStartContent ?: request.sourceContent,
-                            updatedSource,
-                            request.historyStartEntries
-                        )
-                        if (request.waveformDragKey != null &&
-                            sourceWaveformHistoryKey == request.waveformDragKey
-                        ) {
-                            sourceWaveformHistoryKey = null
-                            sourceWaveformHistoryStart = null
-                            sourceWaveformHistoryEntries = null
-                        }
+                    if (!request.recordHistory) continue
+                    recordSourceTextChange(
+                        request.historyStartContent ?: request.sourceContent,
+                        updatedSource,
+                        request.historyStartEntries
+                    )
+                    if (request.waveformDragKey != null &&
+                        sourceWaveformHistoryKey == request.waveformDragKey
+                    ) {
+                        sourceWaveformHistoryKey = null
+                        sourceWaveformHistoryStart = null
+                        sourceWaveformHistoryEntries = null
                     }
                     originalFileContent = updatedSource
                     sourceViewContent = updatedSource
