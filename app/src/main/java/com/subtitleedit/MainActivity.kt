@@ -1,7 +1,6 @@
 package com.subtitleedit
 
 import android.Manifest
-import android.content.ClipData
 import android.content.res.ColorStateList
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -71,12 +70,9 @@ import com.subtitleedit.util.MainNavigationPolicy
 import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.ArchiveProgressPolicy
 import com.subtitleedit.util.FileSelectionPolicy
-import com.subtitleedit.util.DirectorySizeReader
 import com.subtitleedit.util.FileOperationUiPolicy
 import com.subtitleedit.util.ArchiveActionUiPolicy
 import com.subtitleedit.util.ArchiveActionUiPolicy.ArchiveAction
-import com.subtitleedit.util.FilePropertiesInfo
-import com.subtitleedit.util.MediaFilePropertiesReader
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleFormatConverter
 import com.subtitleedit.util.UpdateChecker
@@ -120,6 +116,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var fileAdapter: FileListAdapter
+    private lateinit var filePropertiesDialogController: FilePropertiesDialogController
+    private lateinit var mediaOpenController: MediaOpenController
     private val stateModel: MainViewModel by viewModels()
 
     private var currentDirectory: File?
@@ -210,6 +208,8 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        filePropertiesDialogController = FilePropertiesDialogController(this, ::showShortToast)
+        mediaOpenController = MediaOpenController(this, ::openMediaWithSubtitle)
         showAllFileTypes = settingsManager.isShowAllFileTypesEnabled()
         showHiddenFiles = settingsManager.isShowHiddenFilesEnabled()
         if (stateModel.sortField == null) sortField = settingsManager.getFileSortField()
@@ -2374,94 +2374,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSelectedProperties() {
-        val files = selectedFiles()
-        if (files.isEmpty()) return
-        if (files.size == 1) {
-            showFilePropertiesDialog(files.first())
-        } else {
-            showMultipleFilePropertiesDialog(files)
-        }
-    }
-
-    private fun directorySize(directory: File): Long = DirectorySizeReader.size(directory)
-
-    private fun fileProperties(file: File): FilePropertiesInfo =
-        MediaFilePropertiesReader.read(file)
-
-    private fun showFilePropertiesDialog(file: File) {
-        val content = layoutInflater.inflate(R.layout.dialog_file_properties, null)
-        content.findViewById<TextView>(R.id.tvPropertyName).text = file.name
-        content.findViewById<TextView>(R.id.tvPropertyType).text =
-            if (file.isDirectory) "文件夹" else file.extension.uppercase().ifBlank { "未知" } + " 文件"
-        content.findViewById<TextView>(R.id.tvPropertySize).text = getString(R.string.loading)
-        content.findViewById<TextView>(R.id.tvPropertyModifiedTime).text =
-            SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(file.lastModified()))
-        content.findViewById<TextView>(R.id.tvPropertyPath).apply {
-            text = file.absolutePath
-            contentDescription = "点击复制路径：${file.absolutePath}"
-            setOnClickListener {
-                val clipboard = getSystemService(android.content.ClipboardManager::class.java)
-                clipboard.setPrimaryClip(ClipData.newPlainText("文件路径", file.absolutePath))
-                showShortToast("路径已复制")
-            }
-        }
-
-        val dialog = AlertDialog.Builder(this)
-            .setView(content)
-            .setPositiveButton("确定", null)
-            .show()
-
-        val loadJob = lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { fileProperties(file) } }
-            if (!dialog.isShowing) return@launch
-            content.findViewById<View>(R.id.propertyLoadingIndicator).visibility = View.GONE
-            result.onSuccess { properties ->
-                content.findViewById<TextView>(R.id.tvPropertyType).text = properties.type
-                content.findViewById<TextView>(R.id.tvPropertySize).text = properties.size
-                content.findViewById<TextView>(R.id.tvPropertyModifiedTime).text = properties.modifiedTime
-                content.findViewById<TextView>(R.id.tvMediaInfoTitle).apply {
-                    text = properties.mediaInfoTitle
-                    visibility = if (properties.mediaInfoTitle == null) View.GONE else View.VISIBLE
-                }
-                content.findViewById<LinearLayout>(R.id.mediaPropertiesContainer).apply {
-                    removeAllViews()
-                    properties.mediaDetails.forEach { detail ->
-                        val row = layoutInflater.inflate(R.layout.item_file_property, this, false)
-                        row.findViewById<TextView>(R.id.tvPropertyLabel).text = detail.label
-                        row.findViewById<TextView>(R.id.tvPropertyValue).text = detail.value
-                        addView(row)
-                    }
-                    visibility = if (properties.mediaDetails.isEmpty()) View.GONE else View.VISIBLE
-                }
-            }.onFailure {
-                content.findViewById<TextView>(R.id.tvPropertySize).text = getString(R.string.read_failed)
-            }
-        }
-        dialog.setOnDismissListener { loadJob.cancel() }
-    }
-
-    private fun showMultipleFilePropertiesDialog(files: List<File>) {
-        val content = layoutInflater.inflate(R.layout.dialog_multiple_file_properties, null)
-        content.findViewById<TextView>(R.id.tvSelectedItemCount).text = "${files.size} 项"
-        val totalSizeView = content.findViewById<TextView>(R.id.tvSelectedTotalSize).apply {
-            text = getString(R.string.loading)
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setView(content)
-            .setPositiveButton("确定", null)
-            .show()
-
-        val loadJob = lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching { files.sumOf { if (it.isDirectory) directorySize(it) else it.length() } }
-            }
-            if (!dialog.isShowing) return@launch
-            totalSizeView.text = result.fold(
-                onSuccess = FileUtils::formatFileSize,
-                onFailure = { getString(R.string.read_failed) }
-            )
-        }
-        dialog.setOnDismissListener { loadJob.cancel() }
+        filePropertiesDialogController.show(selectedFiles())
     }
 
     private fun showShortToast(message: String) {
@@ -2472,28 +2385,7 @@ class MainActivity : AppCompatActivity() {
         mediaFile: File,
         mediaType: EditorMediaType,
         audioOnlyFromVideo: Boolean = false
-    ) {
-        val possibleSubtitleFiles = FileUtils.getPossibleSubtitleFiles(mediaFile)
-
-        when {
-            possibleSubtitleFiles.size > 1 -> {
-                showSubtitleFilePicker(
-                    mediaFile,
-                    mediaType,
-                    possibleSubtitleFiles,
-                    audioOnlyFromVideo
-                )
-            }
-            else -> {
-                openMediaWithSubtitle(
-                    mediaFile,
-                    mediaType,
-                    possibleSubtitleFiles.firstOrNull(),
-                    audioOnlyFromVideo
-                )
-            }
-        }
-    }
+    ) = mediaOpenController.open(mediaFile, mediaType, audioOnlyFromVideo)
 
     private fun updateCompressionProgress(
         progress: ArchiveProgressUi,
@@ -2553,69 +2445,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showVideoOpenModePicker(videoFile: File) {
-        val options = arrayOf("加载视频", "仅加载音频")
-        AlertDialog.Builder(this)
-            .setTitle("打开视频文件")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> openMediaFileForEdit(videoFile, EditorMediaType.VIDEO)
-                    else -> openMediaFileForEdit(
-                        videoFile,
-                        EditorMediaType.AUDIO,
-                        audioOnlyFromVideo = true
-                    )
-                }
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
+    private fun showVideoOpenModePicker(videoFile: File) =
+        mediaOpenController.showVideoModePicker(videoFile)
 
     /**
      * 当存在多个同名字幕文件时，弹出选择对话框
      */
-    private fun showSubtitleFilePicker(
-        mediaFile: File,
-        mediaType: EditorMediaType,
-        subtitleFiles: List<File>,
-        audioOnlyFromVideo: Boolean
-    ) {
-        val fileNames = subtitleFiles.map { file ->
-            file.name + "  (" + FileUtils.formatFileSize(file.length()) + ")"
-        }.toTypedArray()
-
-        // 用自定义标题同时显示标题和提示信息（setItems 与 setView/setMessage 互斥）
-        val customTitle = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(8, 8, 8, 0)
-            addView(android.widget.TextView(context).apply {
-                text = "选择字幕文件"
-                textSize = 19f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                setPadding(4, 0, 4, 6)
-            })
-            addView(android.widget.TextView(context).apply {
-                val typeLabel = if (mediaType == EditorMediaType.VIDEO) "视频" else "音频"
-                text = "$typeLabel「${mediaFile.name}」同目录下存在多个字幕文件，请选择要打开的文件："
-                textSize = 14f
-                setPadding(4, 0, 4, 0)
-            })
-        }
-
-        AlertDialog.Builder(this)
-            .setCustomTitle(customTitle)
-            .setItems(fileNames) { _, which ->
-                openMediaWithSubtitle(
-                    mediaFile,
-                    mediaType,
-                    subtitleFiles[which],
-                    audioOnlyFromVideo
-                )
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
     private fun openMediaWithSubtitle(
         mediaFile: File,
         mediaType: EditorMediaType,
