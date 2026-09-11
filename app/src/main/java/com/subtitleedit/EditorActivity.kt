@@ -36,6 +36,7 @@ import com.subtitleedit.util.SubtitleFormatPolicy
 import com.subtitleedit.util.WebVttCuePolicy
 import com.subtitleedit.util.SubtitleStableRange
 import com.subtitleedit.util.SubtitleSerialization
+import com.subtitleedit.util.SelectionRangePolicy
 import com.subtitleedit.editor.EditorPlaybackController
 import com.subtitleedit.editor.EditorSearchController
 import com.subtitleedit.editor.EditorSourcePreviewController
@@ -2632,12 +2633,11 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
-        val start = selectedPositions.first()
-        val end = selectedPositions.last()
-        val range = (start..end).toSet()
-        if (range.all { it in selectedPositions }) return
+        val range = SelectionRangePolicy.contiguousRange(selectedPositions) ?: return
+        val rangeSet = range.toSet()
+        if (rangeSet.all { it in selectedPositions }) return
 
-        subtitleAdapter.setSelectionByIndices(range)
+        subtitleAdapter.setSelectionByIndices(rangeSet)
         recordListStateChange()
         updateSelectedCountDisplay()
     }

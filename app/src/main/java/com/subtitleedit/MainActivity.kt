@@ -65,6 +65,7 @@ import com.subtitleedit.util.ArchiveErrorPolicy
 import com.subtitleedit.util.FileBrowserPolicy
 import com.subtitleedit.util.AndroidDirectoryPolicy
 import com.subtitleedit.util.FilePathPolicy
+import com.subtitleedit.util.SelectionRangePolicy
 import com.subtitleedit.util.FilePropertiesInfo
 import com.subtitleedit.util.MediaFilePropertiesReader
 import com.subtitleedit.util.SettingsManager
@@ -1115,9 +1116,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val start = selectedIndices.minOrNull() ?: return
-        val end = selectedIndices.maxOrNull() ?: return
-        selectedPaths.addAll(visibleFiles.subList(start, end + 1).map { it.absolutePath })
+        val range = SelectionRangePolicy.contiguousRange(selectedIndices) ?: return
+        selectedPaths.addAll(visibleFiles.subList(range.first, range.last + 1).map { it.absolutePath })
         updateSelectionUi()
     }
 
