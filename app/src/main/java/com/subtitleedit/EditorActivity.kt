@@ -41,6 +41,7 @@ import com.subtitleedit.editor.EditorPlaybackController
 import com.subtitleedit.editor.EditorSearchController
 import com.subtitleedit.editor.EditorSourcePreviewController
 import com.subtitleedit.editor.EditorSourceLineEditController
+import com.subtitleedit.editor.EditorSourceWaveformSyncController
 import com.subtitleedit.editor.EditorSubtitlePreviewController
 import com.subtitleedit.editor.EditorTextPreviewDialog
 import com.subtitleedit.editor.EditorTranscribeController
@@ -137,11 +138,7 @@ class EditorActivity : AppCompatActivity() {
     private var isSourceViewTransitioning: Boolean
         get() = stateModel.isSourceViewTransitioning
         set(value) { stateModel.isSourceViewTransitioning = value }
-    private var sourceViewWaveformSyncJob: Job? = null
-    private var pendingSourceWaveformSync: SourceWaveformSyncRequest? = null
-    private var sourceWaveformHistoryKey: Long? = null
-    private var sourceWaveformHistoryStart: String? = null
-    private var sourceWaveformHistoryEntries: List<SubtitleEntry>? = null
+    private lateinit var sourceWaveformSyncController: EditorSourceWaveformSyncController
     private var sourceViewEntryCount: Int
         get() = stateModel.sourceViewEntryCount
         set(value) { stateModel.sourceViewEntryCount = value }
@@ -150,32 +147,6 @@ class EditorActivity : AppCompatActivity() {
     private var pendingListIndexRefreshStart: Int? = null
     private lateinit var sourceLineEditController: EditorSourceLineEditController
 
-    private data class SourceWaveformSyncRequest(
-        val sourceContent: String,
-        val sourceEntries: List<SubtitleEntry>,
-        val sourceSyncInFlight: Boolean,
-        val editGeneration: Long,
-        val timings: SourceWaveformTimings,
-        val waveformDragKey: Long? = null,
-        val recordHistory: Boolean = true,
-        val historyStartContent: String? = null,
-        val historyStartEntries: List<SubtitleEntry>? = null
-    )
-
-    private data class SourceWaveformTimings(
-        val indices: IntArray,
-        val startTimes: LongArray,
-        val endTimes: LongArray,
-        val endTimeModified: BooleanArray
-    ) {
-        val size: Int get() = indices.size
-    }
-
-    private data class SourceWaveformSyncResult(
-        val updatedSource: String?,
-        val needsPreview: Boolean = false
-    )
-    
     // 切换视图前保存的滚动位置
     private var savedScrollPosition: Int
         get() = stateModel.savedScrollPosition
@@ -639,6 +610,21 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun setupWaveformController() {
+        sourceWaveformSyncController = EditorSourceWaveformSyncController(
+            scope = lifecycleScope,
+            isSourceViewMode = { isSourceViewMode },
+            hasPendingSourceEdits = { sourceViewHasPendingEdits },
+            isPreviewActive = { sourcePreviewController.isActive },
+            editGeneration = { sourceViewEditGeneration },
+            currentFormat = { currentFormat },
+            sourceContent = { sourceViewContent },
+            snapshotSourceContent = ::snapshotSourceViewContentIfNeeded,
+            currentEntries = { subtitleEntries },
+            cancelPreview = { sourcePreviewController.cancel() },
+            schedulePreview = ::scheduleSourceViewPreview,
+            recordHistory = ::recordSourceTextChange,
+            onSourceUpdated = ::applySourceWaveformUpdatedSource
+        )
         waveformController = EditorWaveformController(
             context = this,
             binding = binding,
@@ -651,22 +637,20 @@ class EditorActivity : AppCompatActivity() {
                 val currentEntry = subtitleEntries.getOrNull(changedIndex)
                     ?: return@EditorWaveformController
                 if (isSourceViewMode) {
-                    val historyEntries = if (sourceWaveformHistoryKey != dragSessionKey) {
-                        subtitleEntries.map { it.copy() }
-                    } else {
-                        null
+                    val updatedEntries = subtitleEntries.toMutableList().apply {
+                        set(changedIndex, updatedEntry.copy())
                     }
-                    subtitleEntries[changedIndex] = updatedEntry.copy()
                     waveformController.updateSubtitleEntries(
-                        mapOf(changedIndex to subtitleEntries[changedIndex].copy()),
+                        mapOf(changedIndex to updatedEntry.copy()),
                         subtitleEntries.size
                     )
-                    scheduleSourceViewWaveformSync(
-                        subtitleEntries,
+                    sourceWaveformSyncController.schedule(
+                        updatedEntries,
                         dragSessionKey,
                         isFinal,
-                        historyEntries
+                        null
                     )
+                    subtitleEntries[changedIndex] = updatedEntry.copy()
                     markAsChanged()
                 } else {
                     currentEntry.startTime = updatedEntry.startTime
@@ -826,125 +810,18 @@ class EditorActivity : AppCompatActivity() {
     }
 
     /** 将波形拖动后的时间字段回写源视图，避免每次 MOVE 都触发逐行重建。 */
-    private fun scheduleSourceViewWaveformSync(
-        updatedSubtitles: List<SubtitleEntry>,
-        dragSessionKey: Long? = null,
-        recordHistory: Boolean = true,
-        historyEntries: List<SubtitleEntry>? = null
-    ) {
-        val sourceSyncInFlight = sourceViewHasPendingEdits || sourcePreviewController.isActive
-        val sourceContentSnapshot = if (sourceViewHasPendingEdits) {
-            // 先提交当前行块，确保波形时间回写时不会覆盖尚未进入 sourceViewContent 的文本修改。
-            snapshotSourceViewContentIfNeeded()
-        } else {
-            sourceViewContent
-        }
-        if (sourceSyncInFlight) sourcePreviewController.cancel()
-        if (dragSessionKey != null && sourceWaveformHistoryKey != dragSessionKey) {
-            sourceWaveformHistoryKey = dragSessionKey
-            sourceWaveformHistoryStart = sourceContentSnapshot
-            sourceWaveformHistoryEntries = historyEntries ?: subtitleEntries.map { it.copy() }
-        }
-        val count = updatedSubtitles.size
-        val timings = SourceWaveformTimings(
-            indices = IntArray(count),
-            startTimes = LongArray(count),
-            endTimes = LongArray(count),
-            endTimeModified = BooleanArray(count)
-        )
-        updatedSubtitles.forEachIndexed { index, entry ->
-            timings.indices[index] = entry.index
-            timings.startTimes[index] = entry.startTime
-            timings.endTimes[index] = entry.endTime
-            timings.endTimeModified[index] = entry.endTimeModified
-        }
-        pendingSourceWaveformSync = SourceWaveformSyncRequest(
-            sourceContent = sourceContentSnapshot,
-            sourceEntries = (sourceWaveformHistoryEntries ?: subtitleEntries).map { it.copy() },
-            sourceSyncInFlight = sourceSyncInFlight,
-            editGeneration = sourceViewEditGeneration,
-            timings = timings,
-            waveformDragKey = dragSessionKey,
-            recordHistory = recordHistory,
-            historyStartContent = sourceWaveformHistoryStart,
-            historyStartEntries = sourceWaveformHistoryEntries
-        )
-        if (sourceViewWaveformSyncJob?.isActive == true) return
-
-        sourceViewWaveformSyncJob = lifecycleScope.launch {
-            val workerJob = coroutineContext[Job]
-            try {
-                while (isActive) {
-                    kotlinx.coroutines.delay(40L)
-                    val request = pendingSourceWaveformSync ?: break
-                    pendingSourceWaveformSync = null
-                    if (!isSourceViewMode || request.editGeneration != sourceViewEditGeneration) continue
-
-                    val format = currentFormat
-                    val result = withContext(Dispatchers.Default) {
-                        val sourceEntries = request.sourceEntries
-                        if (sourceEntries.size != request.timings.size) {
-                            SourceWaveformSyncResult(updatedSource = null, needsPreview = true)
-                        } else {
-                            val entriesToSerialize = sourceEntries.mapIndexed { index, sourceEntry ->
-                                sourceEntry.copy(
-                                    index = request.timings.indices[index],
-                                    startTime = request.timings.startTimes[index],
-                                    endTime = request.timings.endTimes[index],
-                                    endTimeModified = request.timings.endTimeModified[index]
-                                )
-                            }
-                            SourceWaveformSyncResult(
-                                updatedSource = SubtitleSourceSynchronizer.apply(
-                                    content = request.sourceContent,
-                                    format = format,
-                                    oldEntries = sourceEntries,
-                                    newEntries = entriesToSerialize
-                                )
-                            )
-                        }
-                    }
-
-                    if (!isActive) break
-                    if (!isSourceViewMode || request.editGeneration != sourceViewEditGeneration) continue
-                    if (pendingSourceWaveformSync != null) continue
-                    if (result.needsPreview) {
-                        scheduleSourceViewPreview()
-                        continue
-                    }
-                    val updatedSource = result.updatedSource ?: continue
-                    if (!request.recordHistory) continue
-                    recordSourceTextChange(
-                        request.historyStartContent ?: request.sourceContent,
-                        updatedSource,
-                        request.historyStartEntries
-                    )
-                    if (request.waveformDragKey != null &&
-                        sourceWaveformHistoryKey == request.waveformDragKey
-                    ) {
-                        sourceWaveformHistoryKey = null
-                        sourceWaveformHistoryStart = null
-                        sourceWaveformHistoryEntries = null
-                    }
-                    originalFileContent = updatedSource
-                    sourceViewContent = updatedSource
-                    sourceHistoryTextSnapshot = updatedSource
-                    sourceViewHasPendingEdits = false
-                    stateModel.updateLatestSourceHistory(updatedSource, subtitleEntries)
-                    sourceViewEditGeneration++
-                    sourceViewEntriesGeneration = sourceViewEditGeneration
-                    setSourceViewEditorText(updatedSource, preserveScroll = true)
-                    updateFormatInfo()
-                    scheduleSubtitlePreview()
-                }
-            } finally {
-                if (sourceViewWaveformSyncJob === workerJob) {
-                    sourceViewWaveformSyncJob = null
-                }
-            }
-        }
+    private fun applySourceWaveformUpdatedSource(updatedSource: String) {
+        originalFileContent = updatedSource
+        sourceViewContent = updatedSource
+        sourceHistoryTextSnapshot = updatedSource
+        sourceViewHasPendingEdits = false
+        stateModel.updateLatestSourceHistory(updatedSource, subtitleEntries)
+        sourceViewEditGeneration++
+        sourceViewEntriesGeneration = sourceViewEditGeneration
+        setSourceViewEditorText(updatedSource, preserveScroll = true)
+        updateFormatInfo()
+        scheduleSubtitlePreview()
     }
-
     private fun setupAiControllers() {
         val previewDialog = EditorTextPreviewDialog(this)
         translationController = EditorTranslationController(
@@ -1164,12 +1041,7 @@ class EditorActivity : AppCompatActivity() {
         isSourceViewMode = true
         sourceListParseJob?.cancel()
         sourceListParseJob = null
-        sourceViewWaveformSyncJob?.cancel()
-        sourceViewWaveformSyncJob = null
-        pendingSourceWaveformSync = null
-        sourceWaveformHistoryKey = null
-        sourceWaveformHistoryStart = null
-        sourceWaveformHistoryEntries = null
+        sourceWaveformSyncController.cancel()
         sourceViewHasPendingEdits = false
         sourceViewEditGeneration++
         sourceViewEntriesGeneration = sourceViewEditGeneration
@@ -1338,12 +1210,7 @@ class EditorActivity : AppCompatActivity() {
         sourceViewTransitionJob = lifecycleScope.launch {
             var needsBackgroundParse = false
             try {
-                sourceViewWaveformSyncJob?.join()
-                sourceViewWaveformSyncJob = null
-                pendingSourceWaveformSync = null
-                sourceWaveformHistoryKey = null
-                sourceWaveformHistoryStart = null
-                sourceWaveformHistoryEntries = null
+                sourceWaveformSyncController.cancelAndJoin()
                 editedContent = sourceViewContent
                 sourcePreviewController.cancel()
                 if (sourceViewEntriesGeneration != sourceViewEditGeneration) {
@@ -3227,9 +3094,7 @@ class EditorActivity : AppCompatActivity() {
         sourcePreviewController.cancel()
         sourceListParseJob?.cancel()
         sourceListParseJob = null
-        sourceViewWaveformSyncJob?.cancel()
-        sourceViewWaveformSyncJob = null
-        pendingSourceWaveformSync = null
+        sourceWaveformSyncController.cancel()
         if (::subtitlePreviewController.isInitialized) {
             subtitlePreviewController.cancelPending()
         }
@@ -3272,8 +3137,7 @@ class EditorActivity : AppCompatActivity() {
     override fun onDestroy() {
         sourceViewTransitionJob?.cancel()
         sourcePreviewController.cancel()
-        sourceViewWaveformSyncJob?.cancel()
-        pendingSourceWaveformSync = null
+        sourceWaveformSyncController.cancel()
         ttsController.release()
         if (::subtitlePreviewController.isInitialized) subtitlePreviewController.release()
         mediaRepository.release()
