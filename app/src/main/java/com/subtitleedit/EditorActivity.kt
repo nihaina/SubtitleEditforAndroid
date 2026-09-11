@@ -40,6 +40,7 @@ import com.subtitleedit.util.SelectionRangePolicy
 import com.subtitleedit.editor.EditorPlaybackController
 import com.subtitleedit.editor.EditorSearchController
 import com.subtitleedit.editor.EditorSourcePreviewController
+import com.subtitleedit.editor.EditorSourceLineEditController
 import com.subtitleedit.editor.EditorSubtitlePreviewController
 import com.subtitleedit.editor.EditorTextPreviewDialog
 import com.subtitleedit.editor.EditorTranscribeController
@@ -146,9 +147,8 @@ class EditorActivity : AppCompatActivity() {
         set(value) { stateModel.sourceViewEntryCount = value }
     private var sourceViewEditGeneration = 0L
     private var sourceViewEntriesGeneration = -1L
-    private var sourceCueIndexByLine: IntArray? = null
     private var pendingListIndexRefreshStart: Int? = null
-    private val sourceLrcTimeTagPattern = Regex("\\[-?\\d{1,4}[:.]\\d{1,2}(?:[.:]\\d{1,3})?]")
+    private lateinit var sourceLineEditController: EditorSourceLineEditController
 
     private data class SourceWaveformSyncRequest(
         val sourceContent: String,
@@ -554,6 +554,12 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun setupSourceView() {
+        sourceLineEditController = EditorSourceLineEditController(
+            lineCount = binding.etSourceView::getDocumentLineCount,
+            lineText = binding.etSourceView::getDocumentLineText,
+            currentFormat = { currentFormat },
+            entries = { subtitleEntries }
+        )
         sourcePreviewController = EditorSourcePreviewController(
             scope = lifecycleScope,
             isSourceViewMode = { isSourceViewMode },
@@ -579,7 +585,7 @@ class EditorActivity : AppCompatActivity() {
         }
         binding.etSourceView.addOnDocumentChangeListener { change ->
             if (isSourceViewMode && !suppressSourceViewChanges) {
-                if (change.oldLineCount != change.newLineCount) sourceCueIndexByLine = null
+                if (change.oldLineCount != change.newLineCount) sourceLineEditController.invalidateLineIndex()
                 applySimpleSourceLineChange(change.startLine, change.oldLineCount, change.newLineCount)
             }
         }
@@ -768,32 +774,11 @@ class EditorActivity : AppCompatActivity() {
      * changed source block immediately and therefore do not make view switches or history wait.
      */
     private fun applySimpleSourceLineChange(startLine: Int, oldLineCount: Int, newLineCount: Int) {
-        if (oldLineCount != newLineCount || subtitleEntries.isEmpty()) return
-        val lineCount = binding.etSourceView.getDocumentLineCount()
-        if (startLine !in 0 until lineCount) return
-
-        var blockStart = startLine
-        while (blockStart > 0 && binding.etSourceView.getDocumentLineText(blockStart - 1).isNotBlank()) {
-            blockStart--
-        }
-        var blockEnd = startLine
-        while (blockEnd + 1 < lineCount &&
-            binding.etSourceView.getDocumentLineText(blockEnd + 1).isNotBlank()
-        ) {
-            blockEnd++
-        }
-        val block = buildString {
-            for (line in blockStart..blockEnd) {
-                if (line > blockStart) append('\n')
-                append(binding.etSourceView.getDocumentLineText(line))
-            }
-        }
-        val parsed = SubtitleParser.parseDocument(block, format = currentFormat).entries
-        if (parsed.size != 1) return
-
-        val entryIndex = sourceCueIndexBeforeLine(blockStart)
+        if (subtitleEntries.isEmpty()) return
+        val update = sourceLineEditController.resolve(startLine, oldLineCount, newLineCount) ?: return
+        val entryIndex = update.entryIndex
         val current = subtitleEntries.getOrNull(entryIndex) ?: return
-        val updated = parsed.single()
+        val updated = update.entry
         current.startTime = updated.startTime
         current.endTime = updated.endTime
         current.text = updated.text
@@ -811,26 +796,6 @@ class EditorActivity : AppCompatActivity() {
         syncWaveformSubtitles(changedPositions = listOf(entryIndex))
         if (::playbackController.isInitialized) playbackController.invalidateHighlightCache()
         if (::searchController.isInitialized) searchController.onDocumentChanged()
-    }
-
-    private fun sourceCueIndexBeforeLine(lineIndex: Int): Int {
-        val lineCount = binding.etSourceView.getDocumentLineCount()
-        val map = sourceCueIndexByLine ?: IntArray(lineCount).also { result ->
-            var count = 0
-            for (line in 0 until lineCount) {
-                result[line] = count
-                val text = binding.etSourceView.getDocumentLineText(line)
-                count += when (currentFormat) {
-                    SubtitleParser.SubtitleFormat.SRT,
-                    SubtitleParser.SubtitleFormat.VTT -> if (text.contains("-->")) 1 else 0
-                    SubtitleParser.SubtitleFormat.LRC ->
-                        sourceLrcTimeTagPattern.findAll(text).count()
-                    SubtitleParser.SubtitleFormat.TXT -> if (text.isNotBlank()) 1 else 0
-                    else -> 0
-                }
-            }
-        }.also { sourceCueIndexByLine = it }
-        return map.getOrElse(lineIndex) { subtitleEntries.size }
     }
 
     private fun applySourcePreview(
@@ -1451,7 +1416,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun setSourceViewEditorText(content: String, preserveScroll: Boolean = false) {
-        sourceCueIndexByLine = null
+        if (::sourceLineEditController.isInitialized) sourceLineEditController.invalidateLineIndex()
         suppressSourceViewChanges = true
         try {
             binding.etSourceView.setDocumentText(content, preserveScroll)
