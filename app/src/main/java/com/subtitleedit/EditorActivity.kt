@@ -64,7 +64,6 @@ import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -133,6 +132,7 @@ class EditorActivity : AppCompatActivity() {
     private var suppressSourceViewChanges = false
     private var sourceViewHasPendingEdits = false
     private var sourceViewTransitionJob: Job? = null
+    private var sourceListParseJob: Job? = null
     private var isSourceViewTransitioning: Boolean
         get() = stateModel.isSourceViewTransitioning
         set(value) { stateModel.isSourceViewTransitioning = value }
@@ -146,7 +146,9 @@ class EditorActivity : AppCompatActivity() {
         set(value) { stateModel.sourceViewEntryCount = value }
     private var sourceViewEditGeneration = 0L
     private var sourceViewEntriesGeneration = -1L
+    private var sourceCueIndexByLine: IntArray? = null
     private var pendingListIndexRefreshStart: Int? = null
+    private val sourceLrcTimeTagPattern = Regex("\\[-?\\d{1,4}[:.]\\d{1,2}(?:[.:]\\d{1,3})?]")
 
     private data class SourceWaveformSyncRequest(
         val sourceContent: String,
@@ -574,6 +576,12 @@ class EditorActivity : AppCompatActivity() {
                 scheduleSourceViewPreview()
             }
         }
+        binding.etSourceView.addOnDocumentChangeListener { change ->
+            if (isSourceViewMode && !suppressSourceViewChanges) {
+                if (change.oldLineCount != change.newLineCount) sourceCueIndexByLine = null
+                applySimpleSourceLineChange(change.startLine, change.oldLineCount, change.newLineCount)
+            }
+        }
     }
     
     private fun setupSearchController() {
@@ -747,6 +755,77 @@ class EditorActivity : AppCompatActivity() {
     /** 源码视图也保持 mpv 预览；防抖后只有最新文本会进入后台解析流程。 */
     private fun scheduleSourceViewPreview() {
         sourcePreviewController.schedule()
+    }
+
+    /**
+     * Keep the parsed row model in sync for a text-only edit inside one cue. The full parser is
+     * still used for structural edits, but ordinary character edits can be applied from the
+     * changed source block immediately and therefore do not make view switches or history wait.
+     */
+    private fun applySimpleSourceLineChange(startLine: Int, oldLineCount: Int, newLineCount: Int) {
+        if (oldLineCount != newLineCount || subtitleEntries.isEmpty()) return
+        val lineCount = binding.etSourceView.getDocumentLineCount()
+        if (startLine !in 0 until lineCount) return
+
+        var blockStart = startLine
+        while (blockStart > 0 && binding.etSourceView.getDocumentLineText(blockStart - 1).isNotBlank()) {
+            blockStart--
+        }
+        var blockEnd = startLine
+        while (blockEnd + 1 < lineCount &&
+            binding.etSourceView.getDocumentLineText(blockEnd + 1).isNotBlank()
+        ) {
+            blockEnd++
+        }
+        val block = buildString {
+            for (line in blockStart..blockEnd) {
+                if (line > blockStart) append('\n')
+                append(binding.etSourceView.getDocumentLineText(line))
+            }
+        }
+        val parsed = SubtitleParser.parseDocument(block, format = currentFormat).entries
+        if (parsed.size != 1) return
+
+        val entryIndex = sourceCueIndexBeforeLine(blockStart)
+        val current = subtitleEntries.getOrNull(entryIndex) ?: return
+        val updated = parsed.single()
+        current.startTime = updated.startTime
+        current.endTime = updated.endTime
+        current.text = updated.text
+        current.endTimeModified = updated.endTimeModified
+        current.cueIdentifier = updated.cueIdentifier
+        current.cueSettings = updated.cueSettings
+        sourceViewEntriesGeneration = sourceViewEditGeneration
+        sourceViewHasPendingEdits = false
+        stateModel.updateSourceHistory(sourceViewContent, subtitleEntries)
+        if (::subtitleAdapter.isInitialized && entryIndex in 0 until subtitleAdapter.itemCount) {
+            subtitleAdapter.notifyItemChanged(entryIndex)
+        }
+        // Keep only the dependent waveform row in sync. Publishing the complete document here
+        // would copy/broadcast every subtitle for each source-editor keystroke on large files.
+        syncWaveformSubtitles(changedPositions = listOf(entryIndex))
+        if (::playbackController.isInitialized) playbackController.invalidateHighlightCache()
+        if (::searchController.isInitialized) searchController.onDocumentChanged()
+    }
+
+    private fun sourceCueIndexBeforeLine(lineIndex: Int): Int {
+        val lineCount = binding.etSourceView.getDocumentLineCount()
+        val map = sourceCueIndexByLine ?: IntArray(lineCount).also { result ->
+            var count = 0
+            for (line in 0 until lineCount) {
+                result[line] = count
+                val text = binding.etSourceView.getDocumentLineText(line)
+                count += when (currentFormat) {
+                    SubtitleParser.SubtitleFormat.SRT,
+                    SubtitleParser.SubtitleFormat.VTT -> if (text.contains("-->")) 1 else 0
+                    SubtitleParser.SubtitleFormat.LRC ->
+                        sourceLrcTimeTagPattern.findAll(text).count()
+                    SubtitleParser.SubtitleFormat.TXT -> if (text.isNotBlank()) 1 else 0
+                    else -> 0
+                }
+            }
+        }.also { sourceCueIndexByLine = it }
+        return map.getOrElse(lineIndex) { subtitleEntries.size }
     }
 
     private fun applySourcePreview(
@@ -1116,6 +1195,8 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun enterSourceViewMode(onFinished: (() -> Unit)? = null) {
         isSourceViewMode = true
+        sourceListParseJob?.cancel()
+        sourceListParseJob = null
         sourceViewWaveformSyncJob?.cancel()
         sourceViewWaveformSyncJob = null
         pendingSourceWaveformSync = null
@@ -1234,7 +1315,7 @@ class EditorActivity : AppCompatActivity() {
         showShortToast("正在切换到源视图…")
         sourceViewTransitionJob = lifecycleScope.launch {
             try {
-                sourcePreviewController.cancelAndJoin()
+                sourcePreviewController.cancel()
                 val sourceBase = originalFileContent
                 val freshContent = if (!sourceViewNeedsListSync) {
                     sourceBase
@@ -1288,6 +1369,7 @@ class EditorActivity : AppCompatActivity() {
         binding.etSourceView.setDocumentEnabled(false)
         showShortToast("正在切换到列表视图…")
         sourceViewTransitionJob = lifecycleScope.launch {
+            var needsBackgroundParse = false
             try {
                 sourceViewWaveformSyncJob?.join()
                 sourceViewWaveformSyncJob = null
@@ -1295,21 +1377,21 @@ class EditorActivity : AppCompatActivity() {
                 sourceWaveformHistoryKey = null
                 sourceWaveformHistoryStart = null
                 sourceWaveformHistoryEntries = null
-                sourcePreviewController.flushLatest()
-                // flushLatest snapshots the live editor content when there are pending edits.
                 editedContent = sourceViewContent
+                sourcePreviewController.cancel()
                 if (sourceViewEntriesGeneration != sourceViewEditGeneration) {
                     val appliedLocally = applySourceDeletionLocally(editedContent)
                     if (!appliedLocally) {
-                        val document = withContext(Dispatchers.Default) {
-                            SubtitleParser.parseDocument(editedContent, format = currentFormat)
-                        }
-                        applySourceViewEntries(document.entries)
+                        // Keep the current rows for the transition and parse the large source
+                        // document after the list is visible. This removes the full-file parse
+                        // from the user-facing switch path.
+                        needsBackgroundParse = true
                     }
                 }
                 originalFileContent = editedContent
                 sourceViewContent = editedContent
                 sourceHistoryTextSnapshot = editedContent
+                sourceViewNeedsListSync = false
                 syncEditHistoryBaseline()
                 exitSourceViewMode(sourceScrollPosition) {
                     binding.etSourceView.setDocumentEnabled(true)
@@ -1319,7 +1401,11 @@ class EditorActivity : AppCompatActivity() {
                     updateFormatInfo()
                     // 等源码 Editable、解析临时对象和列表提交完成一个帧周期后，
                     // 再重建 mpv 字幕轨，避免切换瞬间额外复制所有条目。
-                    sourcePreviewController.scheduleListPreview(::scheduleSubtitlePreview)
+                    if (needsBackgroundParse) {
+                        scheduleListSourceParse(editedContent, sourceViewEditGeneration)
+                    } else {
+                        sourcePreviewController.scheduleListPreview(::scheduleSubtitlePreview)
+                    }
                     showShortToast("已切换到列表视图")
                 }
             } catch (e: CancellationException) {
@@ -1335,7 +1421,35 @@ class EditorActivity : AppCompatActivity() {
         }
     }
 
+    /** Parse a source snapshot off the UI thread and publish it once the list view is active. */
+    private fun scheduleListSourceParse(content: String, generation: Long) {
+        sourceListParseJob?.cancel()
+        sourceListParseJob = lifecycleScope.launch {
+            try {
+                val document = withContext(Dispatchers.Default) {
+                    SubtitleParser.parseDocument(content, format = currentFormat)
+                }
+                if (!isActive || isSourceViewMode || sourceViewContent != content ||
+                    generation != sourceViewEditGeneration
+                ) return@launch
+                applySourceViewEntries(document.entries)
+                sourceViewEntriesGeneration = generation
+                sourceViewNeedsListSync = false
+                stateModel.updateSourceHistory(content, subtitleEntries)
+                syncEditHistoryBaseline()
+                submitSubtitleList(
+                    refreshAll = false,
+                    syncWaveform = false,
+                    markChanged = false
+                )
+            } finally {
+                if (sourceListParseJob === coroutineContext[Job]) sourceListParseJob = null
+            }
+        }
+    }
+
     private fun setSourceViewEditorText(content: String, preserveScroll: Boolean = false) {
+        sourceCueIndexByLine = null
         suppressSourceViewChanges = true
         try {
             binding.etSourceView.setDocumentText(content, preserveScroll)
@@ -1923,12 +2037,16 @@ class EditorActivity : AppCompatActivity() {
     ) {
         if (suppressHistoryRecording || !isSourceViewMode || !historyBaselineInitialized) return
         if (beforeText == afterText) return
-        val cachedBeforeEntries = beforeEntries ?: subtitleEntries
-            .takeIf {
-                sourceViewEntriesGeneration == sourceViewEditGeneration &&
-                    sourceHistoryTextSnapshot == beforeText
-            }
-            ?.map { it.copy() }
+        // Only attach entries when they describe this exact source snapshot. During rapid
+        // typing/deletion the debounced parser may still represent an older generation; reusing
+        // that stale list makes one undo jump across several source edits.
+        val cachedBeforeEntries = beforeEntries?.map { it.copy() }
+            ?: subtitleEntries
+                .takeIf {
+                    sourceViewEntriesGeneration == sourceViewEditGeneration &&
+                        sourceHistoryTextSnapshot == beforeText
+                }
+                ?.map { it.copy() }
         stateModel.recordSourceHistory(
             beforeText = beforeText,
             afterText = afterText,
@@ -1980,25 +2098,178 @@ class EditorActivity : AppCompatActivity() {
         command: EditorHistoryCommand,
         undo: Boolean
     ) {
-        val result = stateModel.executeHistoryCommand(command, undo)
-        renderHistoryCommandResult(result)
+        val operation = command as? EditorEditHistory.Operation ?: return
+        when (operation) {
+            is EditorEditHistory.Operation.ListChange -> {
+                val target = if (undo) operation.before else operation.after
+                val targetSourceText = if (undo) {
+                    operation.beforeSourceText
+                } else {
+                    operation.afterSourceText
+                }
+                if (isSourceViewMode) {
+                    applyListHistoryInSourceView(target.entries, targetSourceText)
+                } else {
+                    applyListHistoryInListView(target, targetSourceText)
+                }
+            }
+            is EditorEditHistory.Operation.SourceChange -> {
+                val targetText = if (undo) operation.beforeText else operation.afterText
+                val targetEntries = if (undo) {
+                    operation.beforeEntries.takeIf { operation.beforeEntriesText == operation.beforeText }
+                } else {
+                    operation.afterEntries?.takeIf { operation.afterEntriesText == operation.afterText }
+                }
+                applySourceHistoryText(targetText, targetEntries)
+            }
+        }
     }
 
-    private fun renderHistoryCommandResult(result: EditorHistoryCommandResult) {
-        // An empty set is a meaningful history result: it clears the current selection.
-        // Falling back to the live selection here made the first selection impossible to undo.
-        val selectedIds = result.selectedIds
+    private fun applyListHistoryInSourceView(
+        targetEntries: List<SubtitleEntry>,
+        targetSourceText: String?
+    ) {
+        val effectiveTargetEntries: List<SubtitleEntry>
+        val updated: String
+        if (targetSourceText != null) {
+            effectiveTargetEntries = targetEntries
+            updated = targetSourceText
+        } else {
+            val source = sourceViewContent
+            val currentEntries = SubtitleParser.parseDocument(source, format = currentFormat).entries
+            effectiveTargetEntries = SubtitleEntryOps.applyEditableHistoryTarget(
+                current = subtitleEntries,
+                target = targetEntries
+            )
+            updated = SubtitleSourceSynchronizer.apply(
+                content = source,
+                format = currentFormat,
+                oldEntries = currentEntries,
+                newEntries = effectiveTargetEntries
+            )
+        }
+        originalFileContent = updated
+        sourceViewContent = updated
+        sourceHistoryTextSnapshot = updated
+        setSourceViewEditorText(updated, preserveScroll = true)
+        applySourceViewEntries(effectiveTargetEntries.map { it.copy() })
+        updateFormatInfo()
+    }
+
+    private fun applyListHistoryInListView(
+        target: EditorEditHistory.ListState,
+        targetSourceText: String?
+    ) {
+        if (targetSourceText == null && canRestoreListEntriesInPlace(target.entries)) {
+            restoreListEntriesInPlace(target)
+            return
+        }
+
+        val previousCount = subtitleEntries.size
+        val effectiveTargetEntries: List<SubtitleEntry>
+        val updatedSource: String
+        if (targetSourceText != null) {
+            effectiveTargetEntries = target.entries
+            updatedSource = targetSourceText
+        } else {
+            val source = originalFileContent
+            val currentEntries = SubtitleParser.parseDocument(source, format = currentFormat).entries
+            effectiveTargetEntries = SubtitleEntryOps.applyEditableHistoryTarget(
+                current = subtitleEntries,
+                target = target.entries
+            )
+            updatedSource = SubtitleSourceSynchronizer.apply(
+                content = source,
+                format = currentFormat,
+                oldEntries = currentEntries,
+                newEntries = effectiveTargetEntries
+            )
+        }
+        originalFileContent = updatedSource
+        sourceViewContent = updatedSource
+        sourceHistoryTextSnapshot = updatedSource
+        applySourceViewEntries(effectiveTargetEntries.map { it.copy() })
+        if (previousCount != subtitleEntries.size || subtitleAdapter.itemCount != subtitleEntries.size) {
+            submitSubtitleList(
+                refreshAll = false,
+                syncWaveform = false,
+                markChanged = false
+            ) {
+                subtitleAdapter.setSelectionByStableIds(target.selectedIds)
+                updateSelectedCountDisplay()
+            }
+        } else {
+            subtitleAdapter.setSelectionByStableIds(target.selectedIds)
+            updateSelectedCountDisplay()
+        }
+    }
+
+    private fun canRestoreListEntriesInPlace(targetEntries: List<SubtitleEntry>): Boolean {
+        if (subtitleEntries.size != targetEntries.size) return false
+        return subtitleEntries.zip(targetEntries).all { (current, target) ->
+            current.stableId == target.stableId &&
+                current.cueIdentifier == target.cueIdentifier &&
+                current.cueSettings == target.cueSettings
+        }
+    }
+
+    private fun restoreListEntriesInPlace(target: EditorEditHistory.ListState) {
+        val source = originalFileContent
+        val currentEntries = subtitleEntries.toList()
+        val changedPositions = currentEntries.indices.filter { position ->
+            val current = currentEntries[position]
+            val historical = target.entries[position]
+            current.startTime != historical.startTime ||
+                current.endTime != historical.endTime ||
+                current.text != historical.text ||
+                current.endTimeModified != historical.endTimeModified
+        }
+        val updatedSource = SubtitleSourceSynchronizer.apply(
+            content = source,
+            format = currentFormat,
+            oldEntries = currentEntries,
+            newEntries = target.entries
+        )
+
+        currentEntries.forEachIndexed { position, current ->
+            val historical = target.entries[position]
+            current.index = historical.index
+            current.startTime = historical.startTime
+            current.endTime = historical.endTime
+            current.text = historical.text
+            current.endTimeModified = historical.endTimeModified
+        }
+        originalFileContent = updatedSource
+        sourceViewContent = updatedSource
+        sourceHistoryTextSnapshot = updatedSource
+        if (changedPositions.isNotEmpty()) {
+            notifyEntriesChanged(
+                positions = changedPositions,
+                syncWaveform = true,
+                markChanged = false
+            )
+        }
+        subtitleAdapter.setSelectionByStableIds(target.selectedIds)
+        updateSelectedCountDisplay()
+    }
+
+    private fun applySourceHistoryText(
+        targetText: String,
+        cachedEntries: List<SubtitleEntry>? = null
+    ) {
+        val selectedIds = currentHistoryListState().selectedIds
+        val previousCount = subtitleEntries.size
+        originalFileContent = targetText
+        sourceViewContent = targetText
+        sourceHistoryTextSnapshot = targetText
         if (isSourceViewMode) {
             sourcePreviewController.cancel()
             sourceViewEditGeneration++
             sourceViewHasPendingEdits = false
-            result.sourceText?.let { setSourceViewEditorText(it, preserveScroll = true) }
-            if (result.entriesResolved) {
+            setSourceViewEditorText(targetText, preserveScroll = true)
+            if (cachedEntries != null) {
+                applySourceViewEntries(cachedEntries)
                 sourceViewEntriesGeneration = sourceViewEditGeneration
-                syncWaveformSubtitles(
-                    preserveSelection = true,
-                    changedPositions = result.changedPositions
-                )
             } else {
                 scheduleSourceViewPreview()
             }
@@ -2006,21 +2277,20 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
-        if (result.structureChanged || subtitleAdapter.itemCount != subtitleEntries.size) {
+        if (cachedEntries == null) {
+            sourceViewNeedsListSync = false
+            scheduleListSourceParse(targetText, sourceViewEditGeneration)
+            return
+        }
+        applySourceViewEntries(cachedEntries)
+        if (previousCount != subtitleEntries.size || subtitleAdapter.itemCount != subtitleEntries.size) {
             submitSubtitleList(
                 refreshAll = false,
                 selectedStableIds = selectedIds,
-                syncWaveform = true,
+                syncWaveform = false,
                 markChanged = false
             )
         } else {
-            if (result.changedPositions.isNotEmpty()) {
-                notifyEntriesChanged(
-                    positions = result.changedPositions,
-                    syncWaveform = true,
-                    markChanged = false
-                )
-            }
             subtitleAdapter.setSelectionByStableIds(selectedIds)
             updateSelectedCountDisplay()
         }
@@ -2052,6 +2322,10 @@ class EditorActivity : AppCompatActivity() {
         val target = operation.beforeEntries.map { it.copy() }.toMutableList()
         repeat(start.second) { target.removeAt(start.first) }
         applySourceViewEntries(target)
+        // The deletion was resolved from the in-memory "before" snapshot. Cache the
+        // resulting entries on the same history operation so redo can restore them without
+        // parsing the whole source document again.
+        stateModel.updateLatestSourceHistory(content, target)
         sourceViewEntriesGeneration = sourceViewEditGeneration
         sourceViewHasPendingEdits = false
         return true
@@ -2984,6 +3258,8 @@ class EditorActivity : AppCompatActivity() {
     
     override fun onStop() {
         sourcePreviewController.cancel()
+        sourceListParseJob?.cancel()
+        sourceListParseJob = null
         sourceViewWaveformSyncJob?.cancel()
         sourceViewWaveformSyncJob = null
         pendingSourceWaveformSync = null

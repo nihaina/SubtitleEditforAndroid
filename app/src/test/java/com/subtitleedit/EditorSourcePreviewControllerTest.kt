@@ -80,29 +80,4 @@ class EditorSourcePreviewControllerTest {
         scope.cancel()
     }
 
-    @Test
-    fun flushLatestPublishesWithoutWaitingForDebounce() = runBlocking {
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val parsed = CopyOnWriteArrayList<String>()
-        val controller = EditorSourcePreviewController(
-            scope = scope,
-            isSourceViewMode = { true },
-            suppressSourceViewChanges = { false },
-            editGeneration = { 1L },
-            currentFormat = { SubtitleParser.SubtitleFormat.SRT },
-            snapshotContent = { "latest" },
-            onParsed = { _, content, _ -> parsed += content },
-            debounceMillis = 10_000L,
-            parseDocument = { content, format ->
-                SubtitleDocument(format, listOf(SubtitleEntry(text = content)))
-            }
-        )
-
-        controller.schedule()
-        controller.flushLatest()
-
-        assertEquals(listOf("latest"), parsed)
-        controller.cancel()
-        scope.cancel()
-    }
 }

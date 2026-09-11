@@ -192,6 +192,18 @@ internal class EditorEditHistory {
         }
     }
 
+    fun updateSourceAfterEntries(afterText: String, entries: List<SubtitleEntry>) {
+        val copied = entries.map { it.copy() }
+        listOf(undoStack.lastOrNull(), redoStack.lastOrNull())
+            .filterIsInstance<Operation.SourceChange>()
+            .forEach { operation ->
+                if (operation.afterText == afterText) {
+                    operation.afterEntries = copied.map { it.copy() }
+                    operation.afterEntriesText = afterText
+                }
+            }
+    }
+
     fun clear() {
         undoStack.clear()
         redoStack.clear()

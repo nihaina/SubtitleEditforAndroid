@@ -223,6 +223,43 @@ class EditorEditHistoryTest {
         assertTrue(result.entriesResolved)
     }
 
+    @Test
+    fun latestSourceHistoryCachesEntriesForRedo() {
+        val history = EditorEditHistory()
+        val before = SubtitleEntry(startTime = 0L, endTime = 1000L, text = "旧")
+        val after = SubtitleEntry(startTime = 0L, endTime = 1000L, text = "新")
+        val operation = EditorEditHistory.Operation.SourceChange(
+            beforeText = "旧",
+            afterText = "新",
+            description = "修改",
+            beforeEntries = listOf(before),
+            beforeEntriesText = "旧"
+        )
+        history.record(operation)
+
+        history.updateLatestSourceAfterEntries("新", listOf(after))
+
+        assertEquals(listOf(after), operation.afterEntries)
+        assertEquals("新", operation.afterEntriesText)
+    }
+
+    @Test
+    fun sourceHistoryCacheUpdatesOperationOnRedoStack() {
+        val history = EditorEditHistory()
+        val before = SubtitleEntry(text = "旧")
+        val after = SubtitleEntry(text = "新")
+        val operation = EditorEditHistory.Operation.SourceChange(
+            beforeText = "旧", afterText = "新", description = "修改",
+            beforeEntries = listOf(before), beforeEntriesText = "旧"
+        )
+        history.record(operation)
+        history.pushRedo(history.takeUndo()!!)
+
+        history.updateSourceAfterEntries("新", listOf(after))
+
+        assertEquals(listOf(after), operation.afterEntries)
+    }
+
     private fun sourceChange(before: String, after: String) =
         EditorEditHistory.Operation.SourceChange(before, after, "source")
 

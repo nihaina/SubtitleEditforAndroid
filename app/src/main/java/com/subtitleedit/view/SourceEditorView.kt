@@ -490,6 +490,8 @@ class SourceEditorView @JvmOverloads constructor(
 
     fun getDocumentLineCount(): Int = lines.size
 
+    fun getDocumentLineText(index: Int): String = lines.getOrNull(index)?.text.orEmpty()
+
     fun setDocumentEnabled(enabled: Boolean) {
         isEnabled = enabled
         lineAdapter.setEditorEnabled(enabled)

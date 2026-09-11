@@ -100,7 +100,13 @@ internal class EditorViewModel(
         get() = documentState.sourceViewNeedsListSync
         set(value) { documentState.sourceViewNeedsListSync = value }
     fun setSourceDocumentContent(content: String) {
-        onEvent(EditorEvent.SetSourceDocumentContent(content))
+        // SourceEditorView already owns the visible document and emits a debounced preview.
+        // Avoid publishing the entire document on every keystroke; history keeps the full
+        // before snapshot and the preview publishes only when parsing completes.
+        documentState.sourceViewContent = content
+        documentState.originalFileContent = content
+        documentState.sourceViewNeedsListSync = true
+        documentState.hasUnsavedChanges = true
     }
     var hasUnsavedChanges: Boolean
         get() = documentState.hasUnsavedChanges
@@ -193,6 +199,10 @@ internal class EditorViewModel(
 
     fun updateLatestSourceHistory(afterText: String, entries: List<SubtitleEntry>) {
         editHistory.updateLatestSourceAfterEntries(afterText, entries)
+    }
+
+    fun updateSourceHistory(afterText: String, entries: List<SubtitleEntry>) {
+        editHistory.updateSourceAfterEntries(afterText, entries)
     }
 
     fun setHistoryBaseline(state: EditorEditHistory.ListState, sourceText: String, clear: Boolean) {
