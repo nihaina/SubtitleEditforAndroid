@@ -42,6 +42,7 @@ import com.subtitleedit.editor.EditorSearchController
 import com.subtitleedit.editor.EditorSourcePreviewController
 import com.subtitleedit.editor.EditorSourceLineEditController
 import com.subtitleedit.editor.EditorSourceWaveformSyncController
+import com.subtitleedit.editor.EditorSubtitleDialogController
 import com.subtitleedit.editor.EditorSubtitlePreviewController
 import com.subtitleedit.editor.EditorTextPreviewDialog
 import com.subtitleedit.editor.EditorTranscribeController
@@ -139,6 +140,7 @@ class EditorActivity : AppCompatActivity() {
         get() = stateModel.isSourceViewTransitioning
         set(value) { stateModel.isSourceViewTransitioning = value }
     private lateinit var sourceWaveformSyncController: EditorSourceWaveformSyncController
+    private lateinit var subtitleDialogController: EditorSubtitleDialogController
     private var sourceViewEntryCount: Int
         get() = stateModel.sourceViewEntryCount
         set(value) { stateModel.sourceViewEntryCount = value }
@@ -302,6 +304,7 @@ class EditorActivity : AppCompatActivity() {
         setupToolbar()
         setupRecyclerView()
         setupSourceView()
+        setupSubtitleDialogController()
         setupSearchController()
         setupPlaybackController()
         setupWaveformController()
@@ -562,6 +565,35 @@ class EditorActivity : AppCompatActivity() {
         }
     }
     
+    private fun setupSubtitleDialogController() {
+        subtitleDialogController = EditorSubtitleDialogController(
+            context = this,
+            ensureListMode = ::ensureListMode,
+            currentFormat = { currentFormat },
+            entryAt = { position -> subtitleEntries.getOrNull(position) },
+            updateTime = { position, start, value ->
+                val result = if (start) {
+                    stateModel.execute(EditorCommand.UpdateTime(position, startTime = value))
+                } else {
+                    stateModel.execute(EditorCommand.UpdateTime(position, endTime = value))
+                }
+                result.changedPositions.isNotEmpty()
+            },
+            updateText = { position, value ->
+                stateModel.execute(EditorCommand.UpdateText(position, value))
+                    .changedPositions.isNotEmpty()
+            },
+            updateCue = { position, identifier, settings ->
+                subtitleEntries.getOrNull(position)?.apply {
+                    cueIdentifier = identifier
+                    cueSettings = settings
+                }
+            },
+            onUpdated = ::onEntryUpdated,
+            showMessage = ::showShortToast
+        )
+    }
+
     private fun setupSearchController() {
         searchController = EditorSearchController(
             context = this,
@@ -1646,102 +1678,16 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun showTimeEditDialog(entry: SubtitleEntry, position: Int, isStartTime: Boolean) {
-        if (!ensureListMode()) return
-        
-        val currentTime = if (isStartTime) entry.startTime else entry.endTime
-        val editText = EditText(this).apply {
-            setText(TimeUtils.formatForInput(currentTime))
-            inputType = EditorInfo.TYPE_CLASS_TEXT
-            hint = "格式：00:00:01.500"
-        }
-        
-        AlertDialog.Builder(this)
-            .setTitle(if (isStartTime) "编辑开始时间" else "编辑结束时间")
-            .setView(editText)
-            .setPositiveButton("确定") { _, _ ->
-                val newTime = TimeUtils.parseFromInput(editText.text.toString())
-                if (newTime != null) {
-                    val result = if (isStartTime) {
-                        stateModel.execute(EditorCommand.UpdateTime(position, startTime = newTime))
-                    } else {
-                        stateModel.execute(EditorCommand.UpdateTime(position, endTime = newTime))
-                    }
-                    if (result.changedPositions.isNotEmpty()) onEntryUpdated(position)
-                } else {
-                    showShortToast("时间格式无效")
-                }
-            }
-            .setNegativeButton("取消", null)
-            .show()
+        subtitleDialogController.showTime(position, isStartTime)
     }
-    
+
     private fun showTextEditDialog(entry: SubtitleEntry, position: Int) {
-        if (!ensureListMode()) return
-        
-        val editText = EditText(this).apply {
-            setText(entry.text)
-            setLines(3)
-        }
-        
-        AlertDialog.Builder(this)
-            .setTitle("编辑字幕文本")
-            .setView(editText)
-            .setPositiveButton("确定") { _, _ ->
-                val result = stateModel.execute(
-                    EditorCommand.UpdateText(position, editText.text.toString())
-                )
-                if (result.changedPositions.isNotEmpty()) onEntryUpdated(position)
-            }
-            .setNegativeButton("取消", null)
-            .show()
+        subtitleDialogController.showText(position)
     }
 
-    /** Subtitle Edit 将 cue identifier/settings 作为 WebVTT 的格式字段单独编辑。 */
     private fun showWebVttCueDialog(position: Int) {
-        if (!ensureListMode() || currentFormat != SubtitleParser.SubtitleFormat.VTT) return
-        val entry = subtitleEntries.getOrNull(position) ?: return
-        val layout = createDialogInputContainer()
-        val identifierInput = EditText(this).apply {
-            hint = "Cue identifier（可选）"
-            setText(entry.cueIdentifier)
-            isSingleLine = true
-        }
-        val settingsInput = EditText(this).apply {
-            hint = "例如：line:90% position:50% align:start"
-            setText(entry.cueSettings)
-            isSingleLine = true
-        }
-        layout.addView(TextView(this).apply { text = "Cue identifier" })
-        layout.addView(identifierInput)
-        layout.addView(TextView(this).apply {
-            text = "Cue settings（line / position / size / align / vertical / region）"
-        })
-        layout.addView(settingsInput)
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("WebVTT Cue 属性")
-            .setView(layout)
-            .setPositiveButton("确定", null)
-            .setNegativeButton("取消", null)
-            .create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val identifier = identifierInput.text.toString().trim()
-                val settings = settingsInput.text.toString().trim()
-                val error = WebVttCuePolicy.validate(identifier, settings)
-                if (error != null) {
-                    showShortToast(error)
-                    return@setOnClickListener
-                }
-                entry.cueIdentifier = identifier
-                entry.cueSettings = settings
-                onEntryUpdated(position, "WebVTT Cue 属性已更新")
-                dialog.dismiss()
-            }
-        }
-        dialog.show()
+        subtitleDialogController.showWebVttCue(position)
     }
-
     /**
      * 复制选中的字幕（支持多行）
      */
