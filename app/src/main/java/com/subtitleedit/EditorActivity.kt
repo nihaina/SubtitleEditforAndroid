@@ -33,6 +33,9 @@ import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.editor.EditorHistoryDescriptionFormatter
 import com.subtitleedit.editor.EditorSourceDiffUtils
 import com.subtitleedit.util.SubtitleFormatPolicy
+import com.subtitleedit.util.WebVttCuePolicy
+import com.subtitleedit.util.SubtitleStableRange
+import com.subtitleedit.util.SubtitleSerialization
 import com.subtitleedit.editor.EditorPlaybackController
 import com.subtitleedit.editor.EditorSearchController
 import com.subtitleedit.editor.EditorSourcePreviewController
@@ -1776,7 +1779,7 @@ class EditorActivity : AppCompatActivity() {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val identifier = identifierInput.text.toString().trim()
                 val settings = settingsInput.text.toString().trim()
-                val error = validateWebVttCueProperties(identifier, settings)
+                val error = WebVttCuePolicy.validate(identifier, settings)
                 if (error != null) {
                     showShortToast(error)
                     return@setOnClickListener
@@ -1790,23 +1793,6 @@ class EditorActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun validateWebVttCueProperties(identifier: String, settings: String): String? {
-        if (identifier.contains('\n') || identifier.contains("-->")) {
-            return "Cue identifier 不能包含换行或 -->"
-        }
-        if (settings.contains('\n') || settings.contains("-->")) {
-            return "Cue settings 不能包含换行或 -->"
-        }
-        val allowedKeys = setOf("vertical", "line", "position", "size", "align", "region")
-        val invalid = settings.split(Regex("\\s+"))
-            .filter { it.isNotBlank() }
-            .firstOrNull { token ->
-                val separator = token.indexOf(':')
-                separator <= 0 || token.substring(0, separator).lowercase() !in allowedKeys
-            }
-        return invalid?.let { "无法识别的 Cue setting：$it" }
-    }
-    
     /**
      * 复制选中的字幕（支持多行）
      */
@@ -2735,28 +2721,6 @@ class EditorActivity : AppCompatActivity() {
      * are rebound.  A size change still replaces the list in one operation because every row
      * after the edit has a new index.
      */
-    private fun commonStablePrefix(previous: List<SubtitleEntry>, updated: List<SubtitleEntry>): Int {
-        var index = 0
-        while (index < previous.size && index < updated.size &&
-            previous[index].stableId == updated[index].stableId
-        ) index++
-        return index
-    }
-
-    private fun commonStableSuffix(
-        previous: List<SubtitleEntry>,
-        updated: List<SubtitleEntry>,
-        prefix: Int
-    ): Int {
-        var count = 0
-        while (previous.size - 1 - count >= prefix &&
-            updated.size - 1 - count >= prefix &&
-            previous[previous.size - 1 - count].stableId ==
-            updated[updated.size - 1 - count].stableId
-        ) count++
-        return count
-    }
-
     private fun applySourceViewEntries(updatedEntries: List<SubtitleEntry>) {
         if (subtitleEntries.size != updatedEntries.size) {
             val previousEntries = subtitleEntries.toList()
@@ -2766,8 +2730,8 @@ class EditorActivity : AppCompatActivity() {
             } else {
                 SubtitleEntryOps.retainStableIds(previousEntries, updatedEntries)
             }
-            val prefix = commonStablePrefix(previousEntries, associatedEntries)
-            val suffix = commonStableSuffix(previousEntries, associatedEntries, prefix)
+            val prefix = SubtitleStableRange.commonPrefix(previousEntries, associatedEntries)
+            val suffix = SubtitleStableRange.commonSuffix(previousEntries, associatedEntries, prefix)
             val removedCount = previousEntries.size - prefix - suffix
             val previousById = previousEntries.associateBy { it.stableId }
             val retainedEntries = associatedEntries.map { parsedEntry ->
@@ -2872,13 +2836,14 @@ class EditorActivity : AppCompatActivity() {
             format == SubtitleParser.SubtitleFormat.SSA
         ) return sourceViewContent
 
-        return SubtitleParser.serialize(
+        return SubtitleSerialization.serialize(
             stateModel.subtitleDocument.copy(
-                format = format,
-                entries = entries.map { it.copy() },
                 header = stateModel.documentHeader,
                 footer = stateModel.documentFooter
-            )
+            ),
+            format,
+            entries,
+            sourceViewContent
         )
     }
 

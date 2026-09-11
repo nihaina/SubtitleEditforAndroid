@@ -62,6 +62,9 @@ import com.subtitleedit.util.FileTransferManager
 import com.subtitleedit.util.FileBrowserNavigation
 import com.subtitleedit.util.ArchiveNamePolicy
 import com.subtitleedit.util.ArchiveErrorPolicy
+import com.subtitleedit.util.FileBrowserPolicy
+import com.subtitleedit.util.AndroidDirectoryPolicy
+import com.subtitleedit.util.FilePathPolicy
 import com.subtitleedit.util.FilePropertiesInfo
 import com.subtitleedit.util.MediaFilePropertiesReader
 import com.subtitleedit.util.SettingsManager
@@ -753,7 +756,12 @@ class MainActivity : AppCompatActivity() {
             val files = withContext(Dispatchers.IO) {
                 directory.listFiles { file ->
                     (showHiddenFiles || !file.name.startsWith(".")) &&
-                        (file.isDirectory || shouldDisplayFile(file, showAllFileTypes))
+                        (file.isDirectory || FileBrowserPolicy.shouldDisplayFile(
+                            file,
+                            showAllFileTypes,
+                            VIDEO_EXTENSIONS,
+                            archiveRepository::isRecognizedArchive
+                        ))
                 }?.toList().orEmpty().distinctBy { it.absolutePath }
             }
             if (currentDirectory?.absolutePath != requestedPath) return@launch
@@ -911,7 +919,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun directoryPath(directory: File): String =
-        runCatching { directory.canonicalPath }.getOrElse { directory.absolutePath }
+        FilePathPolicy.canonicalOrAbsolute(directory)
 
     private fun saveCurrentDirectoryScrollPosition() {
         val directory = currentDirectory ?: return
@@ -942,15 +950,6 @@ class MainActivity : AppCompatActivity() {
             position.coerceIn(0, fileAdapter.itemCount - 1),
             savedPosition?.offset ?: 0
         )
-    }
-
-    private fun shouldDisplayFile(file: File, includeAllFileTypes: Boolean): Boolean {
-        if (!file.isFile) return false
-        return includeAllFileTypes ||
-            FileUtils.isSubtitleFile(file) ||
-            FileUtils.isAudioFile(file) ||
-            file.extension.lowercase() in VIDEO_EXTENSIONS ||
-            archiveRepository.isRecognizedArchive(file)
     }
 
     private fun startDirectoryObserver(directory: File) {
@@ -1079,19 +1078,8 @@ class MainActivity : AppCompatActivity() {
         if (refreshDirectory) displayDirectoryFiles()
     }
 
-    private fun isRestrictedAndroidDirectory(file: File): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
-            !file.isDirectory ||
-            !file.name.equals("Android", ignoreCase = true)
-        ) {
-            return false
-        }
-
-        val storageRoot = Environment.getExternalStorageDirectory()
-        val parentPath = runCatching { file.parentFile?.canonicalPath }.getOrNull()
-        val storageRootPath = runCatching { storageRoot.canonicalPath }.getOrNull()
-        return parentPath != null && parentPath == storageRootPath
-    }
+    private fun isRestrictedAndroidDirectory(file: File): Boolean =
+        AndroidDirectoryPolicy.isRestricted(file)
 
     private fun enterSelectionMode(file: File) {
         if (file.name == ".." || pendingFileOperation != null) return
