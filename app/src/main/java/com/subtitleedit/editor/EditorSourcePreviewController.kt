@@ -72,4 +72,17 @@ internal class EditorSourcePreviewController(
         job.cancelAndJoin()
         if (previewJob === job) previewJob = null
     }
+
+    /** Immediately parses the latest source snapshot before leaving source view. */
+    suspend fun flushLatest() {
+        previewJob?.cancelAndJoin()
+        previewJob = null
+        if (!isSourceViewMode() || suppressSourceViewChanges()) return
+        val generation = editGeneration()
+        val sourceSnapshot = snapshotContent()
+        val parsedDocument = parseDocument(sourceSnapshot, currentFormat())
+        if (isSourceViewMode() && generation == editGeneration()) {
+            onParsed(generation, sourceSnapshot, parsedDocument)
+        }
+    }
 }

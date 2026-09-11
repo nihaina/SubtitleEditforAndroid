@@ -1286,7 +1286,6 @@ class EditorActivity : AppCompatActivity() {
         var editedContent = sourceViewContent
         // 先禁用源行编辑，再在后台构建字幕条目列表，避免切换期间两套编辑状态并存。
         binding.etSourceView.setDocumentEnabled(false)
-        setSourceViewEditorText("")
         showShortToast("正在切换到列表视图…")
         sourceViewTransitionJob = lifecycleScope.launch {
             try {
@@ -1296,8 +1295,9 @@ class EditorActivity : AppCompatActivity() {
                 sourceWaveformHistoryKey = null
                 sourceWaveformHistoryStart = null
                 sourceWaveformHistoryEntries = null
+                sourcePreviewController.flushLatest()
+                // flushLatest snapshots the live editor content when there are pending edits.
                 editedContent = sourceViewContent
-                sourcePreviewController.cancelAndJoin()
                 if (sourceViewEntriesGeneration != sourceViewEditGeneration) {
                     val appliedLocally = applySourceDeletionLocally(editedContent)
                     if (!appliedLocally) {
@@ -1985,8 +1985,9 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun renderHistoryCommandResult(result: EditorHistoryCommandResult) {
-        val selectedIds = result.selectedIds.takeIf { it.isNotEmpty() }
-            ?: currentHistoryListState().selectedIds
+        // An empty set is a meaningful history result: it clears the current selection.
+        // Falling back to the live selection here made the first selection impossible to undo.
+        val selectedIds = result.selectedIds
         if (isSourceViewMode) {
             sourcePreviewController.cancel()
             sourceViewEditGeneration++

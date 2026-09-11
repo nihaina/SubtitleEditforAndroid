@@ -66,6 +66,14 @@ import com.subtitleedit.util.FileBrowserPolicy
 import com.subtitleedit.util.AndroidDirectoryPolicy
 import com.subtitleedit.util.FilePathPolicy
 import com.subtitleedit.util.SelectionRangePolicy
+import com.subtitleedit.util.MainNavigationPolicy
+import com.subtitleedit.util.FileTypePolicy
+import com.subtitleedit.util.ArchiveProgressPolicy
+import com.subtitleedit.util.FileSelectionPolicy
+import com.subtitleedit.util.DirectorySizeReader
+import com.subtitleedit.util.FileOperationUiPolicy
+import com.subtitleedit.util.ArchiveActionUiPolicy
+import com.subtitleedit.util.ArchiveActionUiPolicy.ArchiveAction
 import com.subtitleedit.util.FilePropertiesInfo
 import com.subtitleedit.util.MediaFilePropertiesReader
 import com.subtitleedit.util.SettingsManager
@@ -107,10 +115,6 @@ class MainActivity : AppCompatActivity() {
         val DIRECTORY_CHANGE_EVENTS = FileObserver.CREATE or FileObserver.DELETE or
             FileObserver.MOVED_FROM or FileObserver.MOVED_TO or FileObserver.CLOSE_WRITE or
             FileObserver.ATTRIB or FileObserver.DELETE_SELF or FileObserver.MOVE_SELF
-        val VIDEO_EXTENSIONS = setOf(
-            "mp4", "mkv", "avi", "mov", "webm", "flv", "wmv", "m4v",
-            "ts", "3gp", "mpg", "mpeg", "mts", "m2ts"
-        )
     }
 
     private lateinit var binding: ActivityMainBinding
@@ -154,8 +158,6 @@ class MainActivity : AppCompatActivity() {
         val directory = currentDirectory ?: return@Runnable
         if (directory.exists() && directory.canRead()) loadDirectory(directory)
     }
-
-    private enum class ArchiveAction { PREVIEW, EXTRACT_CURRENT, TEST }
 
     private data class SplitOption(val label: String, val bytes: Long?)
 
@@ -376,20 +378,12 @@ class MainActivity : AppCompatActivity() {
             supportFragmentManager.beginTransaction()
                 .replace(R.id.fragmentContainer, fragment, itemId.toString())
                 .commit()
-            supportActionBar?.title = topLevelTitle(itemId)
+            supportActionBar?.title = getString(MainNavigationPolicy.titleRes(itemId))
         }
         binding.bottomNavigation.visibility = View.VISIBLE
         binding.bottomDivider.visibility = View.VISIBLE
         invalidateOptionsMenu()
     }
-
-    private fun topLevelTitle(itemId: Int): String =
-        when (itemId) {
-                R.id.nav_favorites -> getString(R.string.nav_favorites)
-                R.id.nav_drafts -> getString(R.string.drafts)
-                R.id.nav_tools -> getString(R.string.menu_main_title_01)
-                else -> getString(R.string.menu_main_title_02)
-        }
 
     fun updateTopLevelToolbar(title: String, showBack: Boolean = false, onBack: (() -> Unit)? = null) {
         binding.toolbar.title = title
@@ -760,7 +754,7 @@ class MainActivity : AppCompatActivity() {
                         (file.isDirectory || FileBrowserPolicy.shouldDisplayFile(
                             file,
                             showAllFileTypes,
-                            VIDEO_EXTENSIONS,
+                            FileTypePolicy.videoExtensions,
                             archiveRepository::isRecognizedArchive
                         ))
                 }?.toList().orEmpty().distinctBy { it.absolutePath }
@@ -1040,7 +1034,7 @@ class MainActivity : AppCompatActivity() {
             openFileForEdit(file)
         } else if (FileUtils.isAudioFile(file)) {
             openMediaFileForEdit(file, EditorMediaType.AUDIO)
-        } else if (file.extension.lowercase() in VIDEO_EXTENSIONS) {
+        } else if (FileTypePolicy.isVideo(file)) {
             showVideoOpenModePicker(file)
         } else {
             com.subtitleedit.util.OverwritingToast.makeText(this, "不支持的文件格式", Toast.LENGTH_SHORT).show()
@@ -1121,7 +1115,7 @@ class MainActivity : AppCompatActivity() {
         updateSelectionUi()
     }
 
-    private fun selectedFiles(): List<File> = selectedPaths.map(::File).filter { it.exists() }
+    private fun selectedFiles(): List<File> = FileSelectionPolicy.existingFiles(selectedPaths)
 
     private fun updateSelectionUi(invalidateMenu: Boolean = true) {
         val operation = pendingFileOperation
@@ -1131,12 +1125,6 @@ class MainActivity : AppCompatActivity() {
         binding.bottomNavigation.visibility = if (showTopLevelNavigation) View.VISIBLE else View.GONE
         binding.bottomDivider.visibility = if (showTopLevelNavigation) View.VISIBLE else View.GONE
 
-        val selectionTitle = when (operation) {
-            FileOperation.COPY -> "选择复制目标（已选 ${selectedPaths.size} 项）"
-            FileOperation.MOVE -> "选择移动目标（已选 ${selectedPaths.size} 项）"
-            FileOperation.EXTRACT -> "选择解压目录"
-            null -> "已选择 ${selectedPaths.size} 项"
-        }
         val choosingDestination = operation != null
         binding.selectionActionItems.visibility = if (choosingDestination) View.GONE else View.VISIBLE
         binding.destinationActionItems.visibility = if (choosingDestination) View.VISIBLE else View.GONE
@@ -1147,13 +1135,9 @@ class MainActivity : AppCompatActivity() {
             binding.btnDeleteSelected,
             binding.btnMoreSelected
         ).forEach { it.isEnabled = !choosingDestination }
-        binding.btnConfirmDestination.text = when (operation) {
-            FileOperation.MOVE -> "移动到此处"
-            FileOperation.EXTRACT -> "解压到此处"
-            else -> "复制到此处"
-        }
+        binding.btnConfirmDestination.text = FileOperationUiPolicy.destinationButtonLabel(operation)
         supportActionBar?.title = if (isSelectionUiActive) {
-            selectionTitle
+            FileOperationUiPolicy.selectionTitle(operation, selectedPaths.size)
         } else {
             getString(R.string.nav_directory)
         }
@@ -1787,7 +1771,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showArchiveActions(archive: File) {
-        val actions = arrayOf("解压预览", "解压到当前文件夹", "解压到指定目录", "解压测试")
+        val actions = ArchiveActionUiPolicy.actionLabels
         AlertDialog.Builder(this)
             .setTitle(archive.name)
             .setItems(actions) { _, which ->
@@ -1816,11 +1800,7 @@ class MainActivity : AppCompatActivity() {
             )
             return
         }
-        val title = when (action) {
-            ArchiveAction.PREVIEW -> "正在读取压缩包"
-            ArchiveAction.TEST -> "正在测试压缩包"
-            ArchiveAction.EXTRACT_CURRENT -> error("不应直接执行解压操作")
-        }
+        val title = ArchiveActionUiPolicy.progressTitle(action)
         val progress = showBlockingProgress(title, archive.name)
         lifecycleScope.launch {
             val passwordChars = password?.toCharArray()
@@ -2340,10 +2320,7 @@ class MainActivity : AppCompatActivity() {
     ) {
         runOnUiThread {
             if (!progress.dialog.isShowing) return@runOnUiThread
-            progress.binding.tvProgressMessage.text = when (phase) {
-                ArchiveManager.ProgressPhase.SCANNING -> "正在检查压缩包..."
-                ArchiveManager.ProgressPhase.EXTRACTING -> "正在解压..."
-            }
+            progress.binding.tvProgressMessage.text = ArchiveProgressPolicy.phaseLabel(phase)
             if (total > 0L) {
                 val ratio = completed.coerceIn(0L, total).toDouble() / total.toDouble()
                 val percent = (ratio * 100.0).toInt().coerceIn(0, 100)
@@ -2390,8 +2367,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun directorySize(directory: File): Long =
-        directory.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    private fun directorySize(directory: File): Long = DirectorySizeReader.size(directory)
 
     private fun fileProperties(file: File): FilePropertiesInfo =
         MediaFilePropertiesReader.read(file)
