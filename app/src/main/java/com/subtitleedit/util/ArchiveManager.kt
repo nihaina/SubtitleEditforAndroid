@@ -324,16 +324,20 @@ object ArchiveManager {
                 checkCancelled = checkCancelled
             )
         }
-        val entries = OfficialSevenZipArchive.list(archive, password)
+        val listedEntries = OfficialSevenZipArchive.list(archive, password)
         checkCancelled()
-        entries.firstOrNull { it.isSymbolicLink }?.let { throw IOException("压缩包包含不支持的符号链接：${it.name}") }
+        listedEntries.firstOrNull { it.isSymbolicLink }?.let { throw IOException("压缩包包含不支持的符号链接：${it.name}") }
         val validationCounter = Counter(limits)
-        entries.forEach { entry ->
+        listedEntries.forEach { entry ->
             checkCancelled()
             validationCounter.addEntry()
             if (!entry.isDirectory) validationCounter.addBytes(entry.size.coerceAtLeast(0L))
             validateEntryName(entry.name)
         }
+        // 7-Zip extracts duplicate normalized paths with -aoa (the last item wins).
+        // Mirror that behavior while moving staged files; otherwise the second copy
+        // points at a source file that was already moved and extraction fails.
+        val entries = collapseDuplicateEntries(listedEntries)
         if (!conflictsPrechecked && conflictPolicy == ConflictPolicy.FAIL) {
             findDestinationConflicts(archive, destination, password, limits, onProgress)
                 .firstOrNull { conflict -> conflict.entryName !in conflictPolicies }
@@ -367,6 +371,16 @@ object ArchiveManager {
                 validateEntryName(entry.name)
                 val source = File(staging, entry.name.replace('/', File.separatorChar))
                 if (Files.isSymbolicLink(source.toPath())) throw IOException("压缩包包含不支持的符号链接：${entry.name}")
+                // Malformed archives can contain both a file and children below the
+                // same path.  7-Zip resolves that collision while creating staging
+                // output, so one of the listed entries may no longer match the
+                // materialized type. Ignore that metadata-only entry instead of
+                // failing the whole extraction.
+                if (entry.isDirectory && !source.isDirectory || !entry.isDirectory && !source.isFile) {
+                    counter.addSkippedEntry()
+                    onProgress?.invoke(ProgressPhase.EXTRACTING, counter.bytes, totalBytes)
+                    return@forEach
+                }
                 val target = resolver.resolve(entry.name, entry.isDirectory, entry.size, entry.modifiedTimeMillis)
                 if (target == null) {
                     counter.addSkippedEntry()
@@ -408,7 +422,7 @@ object ArchiveManager {
         ) { "目标目录不存在或不可用" }
         onProgress?.invoke(ProgressPhase.SCANNING, 0L, 0L)
         val scanner = DestinationConflictScanner(destination)
-        val entries = OfficialSevenZipArchive.list(archive, password)
+        val entries = collapseDuplicateEntries(OfficialSevenZipArchive.list(archive, password))
         val counter = Counter(limits)
         entries.forEach { entry ->
             counter.addEntry()
@@ -417,7 +431,9 @@ object ArchiveManager {
             scanner.inspect(entry.name, entry.isDirectory, entry.size, entry.modifiedTimeMillis)
             onProgress?.invoke(ProgressPhase.SCANNING, counter.entries.toLong(), entries.size.toLong())
         }
-        return scanner.conflicts
+        // Internal archive path collisions are resolved by 7-Zip while materializing
+        // the staging tree. They must not be presented as destination overwrite prompts.
+        return scanner.conflicts.filterNot { it.archiveInternal }
     }
 
     private fun extractSequentialTarArchive(
@@ -653,6 +669,15 @@ object ArchiveManager {
                 conflictsByName[name] = conflict
             }
         }
+    }
+
+    private fun collapseDuplicateEntries(
+        entries: List<OfficialSevenZipArchive.Entry>
+    ): List<OfficialSevenZipArchive.Entry> {
+        val seen = HashSet<String>(entries.size)
+        return entries.asReversed()
+            .filter { seen.add(validateEntryName(it.name)) }
+            .asReversed()
     }
 
     /**

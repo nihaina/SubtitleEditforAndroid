@@ -39,18 +39,12 @@ import androidx.recyclerview.widget.SimpleItemAnimator
 import com.subtitleedit.adapter.FileListAdapter
 import com.subtitleedit.databinding.ActivityMainBinding
 import com.subtitleedit.databinding.DialogArchiveProgressBinding
-import com.subtitleedit.databinding.DialogArchivePasswordBinding
-import com.subtitleedit.databinding.DialogArchiveConflictBinding
 import com.subtitleedit.databinding.DialogCreateArchiveBinding
 import com.subtitleedit.databinding.DialogSubtitleConvertBinding
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.repository.ArchiveRepository
 import com.subtitleedit.util.ArchiveManager
 import com.subtitleedit.util.ArchivePreviewCache
-import com.subtitleedit.util.ArchivePasswordVault
-import com.subtitleedit.model.ArchiveConflictDialogFormatter
-import com.subtitleedit.model.ArchiveConflictDialogModel
-import com.subtitleedit.model.ArchiveConflictFileMetadata
 import com.subtitleedit.model.FileBrowserOrder
 import com.subtitleedit.model.FileBrowserSearch
 import com.subtitleedit.model.FileSortDirection
@@ -117,6 +111,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var filePropertiesDialogController: FilePropertiesDialogController
     private lateinit var mediaOpenController: MediaOpenController
     private lateinit var fileBrowserDialogController: FileBrowserDialogController
+    private lateinit var archivePasswordDialogController: ArchivePasswordDialogController
+    private lateinit var archiveConflictDialogController: ArchiveConflictDialogController
     private val stateModel: MainViewModel by viewModels()
 
     private var currentDirectory: File?
@@ -224,6 +220,8 @@ class MainActivity : AppCompatActivity() {
                 startActivity(Intent(this, FileManagementSettingsActivity::class.java))
             }
         )
+        archivePasswordDialogController = ArchivePasswordDialogController(this, ::showShortToast)
+        archiveConflictDialogController = ArchiveConflictDialogController(this)
         showAllFileTypes = settingsManager.isShowAllFileTypesEnabled()
         showHiddenFiles = settingsManager.isShowHiddenFilesEnabled()
         if (stateModel.sortField == null) sortField = settingsManager.getFileSortField()
@@ -1467,7 +1465,7 @@ class MainActivity : AppCompatActivity() {
             }
         refreshFormatControls(0)
         dialogBinding.btnPasswordBook.setOnClickListener {
-            showPasswordBook(dialogBinding.etArchivePassword)
+            archivePasswordDialogController.showPasswordBook(dialogBinding.etArchivePassword)
         }
 
         val dialog = AlertDialog.Builder(this)
@@ -1981,57 +1979,7 @@ class MainActivity : AppCompatActivity() {
         conflict: ArchiveManager.DestinationConflict,
         onPolicySelected: (ArchiveManager.ConflictPolicy, Boolean) -> Unit,
         onCancelled: () -> Unit = {}
-    ) {
-        val model = ArchiveConflictDialogModel(
-            entryName = conflict.entryName,
-            source = ArchiveConflictFileMetadata(
-                sizeBytes = conflict.sourceSize.takeIf { it >= 0L },
-                modifiedAtMillis = conflict.sourceModifiedTimeMillis.takeIf { it > 0L }
-            ),
-            existing = ArchiveConflictFileMetadata(
-                sizeBytes = conflict.existingSize.takeIf { it >= 0L },
-                modifiedAtMillis = conflict.existingModifiedTimeMillis.takeIf { it > 0L }
-            )
-        )
-        val dialogBinding = DialogArchiveConflictBinding.inflate(layoutInflater)
-        dialogBinding.tvConflictTitle.text = "覆盖文件？"
-        dialogBinding.tvConflictFileName.text = if (conflict.archiveInternal) {
-            "压缩包内重复条目：${model.entryName}"
-        } else {
-            "（${model.entryName}）已存在"
-        }
-        dialogBinding.tvConflictSourceSize.text =
-            "大小：${ArchiveConflictDialogFormatter.size(model.source.sizeBytes)}"
-        dialogBinding.tvConflictSourceModified.text =
-            "最后修改：${ArchiveConflictDialogFormatter.modifiedTime(model.source.modifiedAtMillis)}"
-        dialogBinding.tvConflictReplacementSize.text =
-            "大小：${ArchiveConflictDialogFormatter.size(model.existing.sizeBytes)}"
-        dialogBinding.tvConflictReplacementModified.text =
-            "最后修改：${ArchiveConflictDialogFormatter.modifiedTime(model.existing.modifiedAtMillis)}"
-        val dialog = AlertDialog.Builder(this)
-            .setView(dialogBinding.root)
-            .setCancelable(false)
-            .create()
-        fun choose(policy: ArchiveManager.ConflictPolicy) {
-            val applyToAll = dialogBinding.cbApplyToAll.isChecked
-            dialog.dismiss()
-            onPolicySelected(policy, applyToAll)
-        }
-        dialogBinding.btnConflictCancel.setOnClickListener {
-            dialog.dismiss()
-            onCancelled()
-        }
-        dialogBinding.btnConflictRename.setOnClickListener {
-            choose(ArchiveManager.ConflictPolicy.RENAME)
-        }
-        dialogBinding.btnConflictSkip.setOnClickListener {
-            choose(ArchiveManager.ConflictPolicy.SKIP)
-        }
-        dialogBinding.btnConflictReplace.setOnClickListener {
-            choose(ArchiveManager.ConflictPolicy.OVERWRITE)
-        }
-        dialog.show()
-    }
+    ) = archiveConflictDialogController.show(conflict, onPolicySelected, onCancelled)
 
     private fun showExtractionCompleted(result: ArchiveManager.ExtractResult) {
         val message = if (result.skippedCount > 0) {
@@ -2046,79 +1994,7 @@ class MainActivity : AppCompatActivity() {
         archive: File,
         onPassword: (String) -> Unit,
         onCancelled: () -> Unit = {}
-    ) {
-        val passwordBinding = DialogArchivePasswordBinding.inflate(layoutInflater)
-        passwordBinding.btnPasswordBook.setOnClickListener {
-            showPasswordBook(passwordBinding.etArchivePassword)
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("输入压缩包密码")
-            .setMessage(archive.name)
-            .setView(passwordBinding.root)
-            .setPositiveButton("确定", null)
-            .setNegativeButton("取消", null)
-            .create()
-        dialog.setOnCancelListener { onCancelled() }
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
-                dialog.dismiss()
-                onCancelled()
-            }
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val password = passwordBinding.etArchivePassword.text?.toString().orEmpty()
-                if (password.isEmpty()) {
-                    passwordBinding.etArchivePassword.error = "请输入密码"
-                } else {
-                    dialog.dismiss()
-                    onPassword(password)
-                }
-            }
-        }
-        dialog.show()
-    }
-
-    private fun showPasswordBook(target: android.widget.EditText) {
-        val vault = ArchivePasswordVault(this)
-        val passwords = runCatching(vault::getPasswords).getOrElse {
-            showShortToast("无法读取密码本")
-            return
-        }
-        val labels = passwords.mapIndexed { index, password ->
-            "密码 ${index + 1}（${"•".repeat(password.length.coerceIn(1, 8))}）"
-        }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("密码本")
-            .apply {
-                if (labels.isEmpty()) {
-                    setMessage("密码本为空，可保存当前输入的密码。")
-                } else {
-                    setItems(labels) { _, which ->
-                        target.setText(passwords[which])
-                        target.setSelection(target.text?.length ?: 0)
-                    }
-                }
-            }
-            .setPositiveButton("保存当前密码") { _, _ ->
-                val password = target.text?.toString().orEmpty()
-                if (password.isEmpty()) {
-                    showShortToast("请先输入密码")
-                } else {
-                    runCatching { vault.savePassword(password) }
-                        .onSuccess { showShortToast("密码已保存") }
-                        .onFailure { showShortToast("密码保存失败") }
-                }
-            }
-            .apply {
-                if (passwords.isNotEmpty()) {
-                    setNeutralButton("清空密码本") { _, _ ->
-                        runCatching(vault::clear)
-                        showShortToast("密码本已清空")
-                    }
-                }
-            }
-            .setNegativeButton("关闭", null)
-            .show()
-    }
+    ) = archivePasswordDialogController.showPasswordDialog(archive, onPassword, onCancelled)
 
     private fun showBlockingProgress(title: String, message: String): AlertDialog =
         AlertDialog.Builder(this)
