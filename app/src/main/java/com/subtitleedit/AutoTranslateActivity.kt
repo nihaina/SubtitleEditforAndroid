@@ -87,7 +87,7 @@ class AutoTranslateActivity : AppCompatActivity() {
     }
 
     private val filePickerLauncher = registerForActivityResult(
-        ActivityResultContracts.GetMultipleContents()
+        ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         uris.forEach { uri ->
             if (files.any { it.uri == uri }) return@forEach
@@ -123,7 +123,9 @@ class AutoTranslateActivity : AppCompatActivity() {
         settingsManager = SettingsManager.getInstance(this)
         setupToolbar()
         setupList()
-        binding.btnAddFiles.setOnClickListener { filePickerLauncher.launch("*/*") }
+        binding.btnAddFiles.setOnClickListener {
+            filePickerLauncher.launch(arrayOf("text/*", "application/*"))
+        }
         binding.btnSelectOutputDir.setOnClickListener {
             directoryPickerLauncher.launch(outputDirectoryUri)
         }

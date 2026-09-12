@@ -42,9 +42,7 @@ class SubtitleFormatSelectActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
         binding.btnSelectFile.setOnClickListener {
-            // 不同文件管理器给 LRC 返回的 MIME 类型并不一致，使用 */* 保证文件可见，
-            // 选择后仍由扩展名校验严格限制为 SRT/LRC/TXT。
-            filePicker.launch(arrayOf("*/*"))
+            filePicker.launch(arrayOf("text/*", "application/*"))
         }
         binding.btnConfirm.setOnClickListener {
             val uri = selectedUri ?: return@setOnClickListener

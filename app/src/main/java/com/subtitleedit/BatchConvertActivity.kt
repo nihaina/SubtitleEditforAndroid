@@ -41,7 +41,7 @@ class BatchConvertActivity : AppCompatActivity() {
 
     // 文件选择器
     private val filePickerLauncher = registerForActivityResult(
-        ActivityResultContracts.GetMultipleContents()
+        ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         uris.forEach { uri ->
             val fileName = getFileNameFromUri(uri) ?: "未知文件"
@@ -155,7 +155,7 @@ class BatchConvertActivity : AppCompatActivity() {
     }
     
     private fun openFilePicker() {
-        filePickerLauncher.launch("*/*")
+        filePickerLauncher.launch(arrayOf("text/*", "application/*"))
     }
     
     private fun openDirectoryPicker() {
