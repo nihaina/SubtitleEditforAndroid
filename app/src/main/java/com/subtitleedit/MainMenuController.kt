@@ -2,7 +2,6 @@ package com.subtitleedit
 
 import android.view.Menu
 import android.view.MenuItem
-import com.subtitleedit.util.MainNavigationPolicy
 
 /** Builds and routes the file-browser menu without owning file operations. */
 internal class MainMenuController(

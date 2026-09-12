@@ -5,7 +5,6 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
-import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
@@ -16,11 +15,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.core.view.ViewCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.SimpleItemAnimator
@@ -31,7 +27,6 @@ import com.subtitleedit.repository.MediaRepository
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.editor.EditorMediaDocumentController
 import com.subtitleedit.util.SubtitleFormatPolicy
-import com.subtitleedit.util.WebVttCuePolicy
 import com.subtitleedit.util.SubtitleStableRange
 import com.subtitleedit.util.SubtitleSerialization
 import com.subtitleedit.util.SelectionRangePolicy
