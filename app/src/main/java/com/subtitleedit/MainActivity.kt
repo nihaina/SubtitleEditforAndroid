@@ -52,9 +52,9 @@ import com.subtitleedit.util.FileBrowserPolicy
 import com.subtitleedit.util.AndroidDirectoryPolicy
 import com.subtitleedit.util.FilePathPolicy
 import com.subtitleedit.util.SelectionRangePolicy
-import com.subtitleedit.util.MainNavigationPolicy
 import com.subtitleedit.util.MainBackNavigationPolicy
 import com.subtitleedit.util.MainLifecycleCoordinator
+import com.subtitleedit.util.MainNavigationPolicy
 import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.FileSelectionPolicy
 import com.subtitleedit.util.FileOperationUiPolicy
@@ -90,9 +90,6 @@ class MainActivity : AppCompatActivity() {
         get() = (application as SubtitleEditApplication).dependencies.archiveRepository
 
     private companion object {
-        const val MENU_SELECT_ALL = 0x10001
-        const val MENU_SELECT_RANGE = 0x10002
-        const val MENU_SEARCH = 0x10003
         const val MENU_CREATE = 0x10004
         const val MENU_MORE = 0x10005
         const val CONFLICT_WAIT_INTERVAL_MS = 250L
@@ -101,6 +98,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var fileAdapter: FileListAdapter
     private lateinit var filePropertiesDialogController: FilePropertiesDialogController
+    private lateinit var mainMenuController: MainMenuController
     private lateinit var mediaOpenController: MediaOpenController
     private lateinit var fileBrowserDialogController: FileBrowserDialogController
     private lateinit var archivePasswordDialogController: ArchivePasswordDialogController
@@ -179,6 +177,13 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         filePropertiesDialogController = FilePropertiesDialogController(this, ::showShortToast)
+        mainMenuController = MainMenuController(
+            configureSearch = ::configureSearchItem,
+            selectAll = ::selectAllVisibleFiles,
+            selectRange = ::selectRangeBetweenSelectedFiles,
+            showCreate = ::showCreateMenu,
+            showMore = ::showDirectoryMoreMenu
+        )
         mediaOpenController = MediaOpenController(this, ::openMediaWithSubtitle)
         fileBrowserDialogController = FileBrowserDialogController(
             activity = this,
@@ -309,55 +314,16 @@ class MainActivity : AppCompatActivity() {
     override fun onCreateOptionsMenu(menu: Menu): Boolean = true
 
     override fun onPrepareOptionsMenu(menu: Menu): Boolean {
-        menu.clear()
-        if (stateModel.selectedTopLevelItem != R.id.nav_directory) return true
-        if (selectedPaths.isNotEmpty() || pendingFileOperation != null) {
-            if (pendingFileOperation == null) {
-                menu.add(Menu.NONE, MENU_SELECT_ALL, 0, "全选")
-                    .setIcon(R.drawable.ic_select_all)
-                    .setContentDescription("全选")
-                    .setTooltipText("全选")
-                    .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-                menu.add(Menu.NONE, MENU_SELECT_RANGE, 1, "局部全选")
-                    .setIcon(R.drawable.ic_select_range)
-                    .setContentDescription("局部全选")
-                    .setTooltipText("局部全选")
-                    .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-            }
-        } else {
-            val searchItem = menu.add(Menu.NONE, MENU_SEARCH, 0, R.string.menu_search)
-                .setIcon(R.drawable.ic_search)
-            searchItem.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS or MenuItem.SHOW_AS_ACTION_COLLAPSE_ACTION_VIEW)
-            configureSearchItem(searchItem)
-            menu.add(Menu.NONE, MENU_CREATE, 1, R.string.menu_new)
-                .setIcon(R.drawable.ic_add)
-                .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-            menu.add(Menu.NONE, MENU_MORE, 2, R.string.activity_main_text_01)
-                .setIcon(R.drawable.ic_more_vertical)
-                .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-        }
-        return true
+        return mainMenuController.prepare(
+            menu = menu,
+            isDirectorySelected = stateModel.selectedTopLevelItem == R.id.nav_directory,
+            hasSelection = selectedPaths.isNotEmpty(),
+            hasPendingOperation = pendingFileOperation != null
+        )
     }
 
-    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
-        MENU_SELECT_ALL -> {
-            selectAllVisibleFiles()
-            true
-        }
-        MENU_SELECT_RANGE -> {
-            selectRangeBetweenSelectedFiles()
-            true
-        }
-        MENU_CREATE -> {
-            showCreateMenu()
-            true
-        }
-        MENU_MORE -> {
-            showDirectoryMoreMenu()
-            true
-        }
-        else -> super.onOptionsItemSelected(item)
-    }
+    override fun onOptionsItemSelected(item: MenuItem): Boolean =
+        mainMenuController.handle(item).takeIf { it } ?: super.onOptionsItemSelected(item)
     
     private fun setupRecyclerView() {
         fileAdapter = FileListAdapter(
