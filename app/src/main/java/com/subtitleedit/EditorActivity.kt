@@ -2158,10 +2158,23 @@ class EditorActivity : AppCompatActivity() {
             .setSingleChoiceItems(encodings.toTypedArray(), currentIndex) { dialog, which ->
                 val newCharset = FileUtils.SUPPORTED_ENCODINGS[which].charset
                 if (newCharset != stateModel.currentCharset) {
-                    stateModel.currentCharset = newCharset
-                    reloadFile()
+                    dialog.dismiss()
+                    AlertDialog.Builder(this)
+                        .setTitle("切换编码")
+                        .setMessage("请选择使用指定编码重新加载文件，或以该编码保存当前内容。")
+                        .setPositiveButton("重载") { _, _ ->
+                            stateModel.currentCharset = newCharset
+                            reloadFile()
+                        }
+                        .setNegativeButton("保存") { _, _ ->
+                            stateModel.currentCharset = newCharset
+                            saveFile()
+                        }
+                        .setNeutralButton("取消", null)
+                        .show()
+                } else {
+                    dialog.dismiss()
                 }
-                dialog.dismiss()
             }
             .setNegativeButton("取消", null)
             .show()
