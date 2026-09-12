@@ -38,7 +38,6 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.SimpleItemAnimator
 import com.subtitleedit.adapter.FileListAdapter
 import com.subtitleedit.databinding.ActivityMainBinding
-import com.subtitleedit.databinding.DialogArchiveProgressBinding
 import com.subtitleedit.databinding.DialogCreateArchiveBinding
 import com.subtitleedit.databinding.DialogSubtitleConvertBinding
 import com.subtitleedit.editor.EditorMediaType
@@ -60,7 +59,6 @@ import com.subtitleedit.util.FilePathPolicy
 import com.subtitleedit.util.SelectionRangePolicy
 import com.subtitleedit.util.MainNavigationPolicy
 import com.subtitleedit.util.FileTypePolicy
-import com.subtitleedit.util.ArchiveProgressPolicy
 import com.subtitleedit.util.FileSelectionPolicy
 import com.subtitleedit.util.FileOperationUiPolicy
 import com.subtitleedit.util.ArchiveActionUiPolicy
@@ -113,6 +111,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var fileBrowserDialogController: FileBrowserDialogController
     private lateinit var archivePasswordDialogController: ArchivePasswordDialogController
     private lateinit var archiveConflictDialogController: ArchiveConflictDialogController
+    private lateinit var archiveProgressDialogController: ArchiveProgressDialogController
+    private lateinit var archiveActionDialogController: ArchiveActionDialogController
     private val stateModel: MainViewModel by viewModels()
 
     private var currentDirectory: File?
@@ -154,12 +154,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private data class SplitOption(val label: String, val bytes: Long?)
-
-    private data class ArchiveProgressUi(
-        val dialog: AlertDialog,
-        val binding: DialogArchiveProgressBinding
-    )
-
 
     // 权限请求
     private val permissionLauncher = registerForActivityResult(
@@ -222,6 +216,8 @@ class MainActivity : AppCompatActivity() {
         )
         archivePasswordDialogController = ArchivePasswordDialogController(this, ::showShortToast)
         archiveConflictDialogController = ArchiveConflictDialogController(this)
+        archiveProgressDialogController = ArchiveProgressDialogController(this)
+        archiveActionDialogController = ArchiveActionDialogController(this)
         showAllFileTypes = settingsManager.isShowAllFileTypesEnabled()
         showHiddenFiles = settingsManager.isShowHiddenFilesEnabled()
         if (stateModel.sortField == null) sortField = settingsManager.getFileSortField()
@@ -1605,21 +1601,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showArchiveActions(archive: File) {
-        val actions = ArchiveActionUiPolicy.actionLabels
-        AlertDialog.Builder(this)
-            .setTitle(archive.name)
-            .setItems(actions) { _, which ->
-                when (which) {
-                    0 -> runArchiveAction(archive, ArchiveAction.PREVIEW)
-                    1 -> runArchiveAction(archive, ArchiveAction.EXTRACT_CURRENT)
-                    2 -> startExtractDestinationSelection(archive)
-                    3 -> runArchiveAction(archive, ArchiveAction.TEST)
-                }
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
+    private fun showArchiveActions(archive: File) = archiveActionDialogController.showActions(
+        archive = archive,
+        onAction = { action -> runArchiveAction(archive, action) },
+        onExtractToDestination = { startExtractDestinationSelection(archive) }
+    )
 
     private fun runArchiveAction(
         archive: File,
@@ -1997,78 +1983,24 @@ class MainActivity : AppCompatActivity() {
     ) = archivePasswordDialogController.showPasswordDialog(archive, onPassword, onCancelled)
 
     private fun showBlockingProgress(title: String, message: String): AlertDialog =
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setMessage(message)
-            .setCancelable(false)
-            .create()
-            .also(AlertDialog::show)
+        archiveActionDialogController.showBlockingProgress(title, message)
 
     private fun showArchiveProgress(
         title: String,
         message: String,
         showCancel: Boolean = false
-    ): ArchiveProgressUi {
-        val progressBinding = DialogArchiveProgressBinding.inflate(layoutInflater)
-        progressBinding.tvProgressMessage.text = message
-        progressBinding.tvProgressLeading.visibility = View.GONE
-        progressBinding.tvProgressProcessed.visibility = View.GONE
-        progressBinding.progressBar.isIndeterminate = true
-        progressBinding.tvProgressPercent.visibility = View.GONE
-        val builder = AlertDialog.Builder(this)
-            .setTitle(title)
-            .setView(progressBinding.root)
-            .setCancelable(false)
-        if (showCancel) builder.setNegativeButton("取消", null)
-        val dialog = builder.create()
-            .also(AlertDialog::show)
-        return ArchiveProgressUi(dialog, progressBinding)
-    }
+    ): ArchiveProgressDialogController.ProgressUi =
+        archiveProgressDialogController.show(title, message, showCancel)
 
     private fun updateArchiveProgress(
-        progress: ArchiveProgressUi,
+        progress: ArchiveProgressDialogController.ProgressUi,
         phase: ArchiveManager.ProgressPhase,
         completed: Long,
         total: Long
-    ) {
-        runOnUiThread {
-            if (!progress.dialog.isShowing) return@runOnUiThread
-            progress.binding.tvProgressMessage.text = ArchiveProgressPolicy.phaseLabel(phase)
-            if (total > 0L) {
-                val ratio = completed.coerceIn(0L, total).toDouble() / total.toDouble()
-                val percent = (ratio * 100.0).toInt().coerceIn(0, 100)
-                progress.binding.progressBar.isIndeterminate = false
-                progress.binding.progressBar.max = 1000
-                progress.binding.progressBar.progress = (ratio * 1000.0).toInt().coerceIn(0, 1000)
-                progress.binding.tvProgressPercent.text = if (phase == ArchiveManager.ProgressPhase.SCANNING) {
-                    "$percent% · 已检查 $completed / $total 项"
-                } else {
-                    "$percent% · 已处理 ${FileUtils.formatFileSize(completed)} / ${FileUtils.formatFileSize(total)}"
-                }
-                progress.binding.tvProgressPercent.visibility = View.VISIBLE
-            } else {
-                progress.binding.progressBar.isIndeterminate = true
-                if (phase == ArchiveManager.ProgressPhase.EXTRACTING) {
-                    progress.binding.tvProgressPercent.text = if (completed > 0L) {
-                        "已处理 ${FileUtils.formatFileSize(completed)}"
-                    } else {
-                        "正在读取..."
-                    }
-                    progress.binding.tvProgressPercent.visibility = View.VISIBLE
-                } else {
-                    progress.binding.tvProgressPercent.visibility = View.GONE
-                }
-            }
-        }
-    }
+    ) = archiveProgressDialogController.updateArchive(progress, phase, completed, total)
 
-    private fun showOperationError(title: String, error: Throwable) {
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setMessage(error.message ?: "未知错误")
-            .setPositiveButton("确定", null)
-            .show()
-    }
+    private fun showOperationError(title: String, error: Throwable) =
+        archiveProgressDialogController.showError(title, error)
 
     private fun showSelectedProperties() {
         filePropertiesDialogController.show(selectedFiles())
@@ -2085,62 +2017,16 @@ class MainActivity : AppCompatActivity() {
     ) = mediaOpenController.open(mediaFile, mediaType, audioOnlyFromVideo)
 
     private fun updateCompressionProgress(
-        progress: ArchiveProgressUi,
+        progress: ArchiveProgressDialogController.ProgressUi,
         compressionProgress: ArchiveManager.CompressionProgress
-    ) {
-        runOnUiThread {
-            if (!progress.dialog.isShowing) return@runOnUiThread
-            progress.binding.tvProgressLeading.text =
-                "已生成 ${FileUtils.formatFileSize(compressionProgress.generatedBytes)}"
-            progress.binding.tvProgressLeading.visibility = View.VISIBLE
-            if (compressionProgress.sourceBytes > 0L) {
-                progress.binding.tvProgressProcessed.text =
-                    "已处理 ${FileUtils.formatFileSize(compressionProgress.processedBytes)} / " +
-                        FileUtils.formatFileSize(compressionProgress.sourceBytes)
-                progress.binding.tvProgressProcessed.visibility = View.VISIBLE
-            } else {
-                progress.binding.tvProgressProcessed.visibility = View.GONE
-            }
-            progress.binding.tvProgressMessage.text = compressionProgress.currentFileName?.let {
-                it
-            } ?: progress.binding.tvProgressMessage.text
-            val percent = compressionProgress.percent
-            if (percent != null) {
-                progress.binding.progressBar.isIndeterminate = false
-                progress.binding.progressBar.max = 100
-                progress.binding.progressBar.progress = percent
-                progress.binding.tvProgressPercent.text = "$percent%"
-                progress.binding.tvProgressPercent.visibility = View.VISIBLE
-            } else {
-                progress.binding.progressBar.isIndeterminate = true
-                progress.binding.tvProgressPercent.visibility = View.GONE
-            }
-        }
-    }
+    ) = archiveProgressDialogController.updateCompression(progress, compressionProgress)
 
     private fun updateFileCopyProgress(
-        progress: ArchiveProgressUi,
+        progress: ArchiveProgressDialogController.ProgressUi,
         message: String,
         completed: Long,
         total: Long
-    ) {
-        runOnUiThread {
-            if (!progress.dialog.isShowing) return@runOnUiThread
-            progress.binding.tvProgressMessage.text = message
-            if (total > 0L) {
-                val ratio = completed.coerceIn(0L, total).toDouble() / total.toDouble()
-                progress.binding.progressBar.isIndeterminate = false
-                progress.binding.progressBar.max = 1000
-                progress.binding.progressBar.progress = (ratio * 1000.0).toInt().coerceIn(0, 1000)
-                progress.binding.tvProgressPercent.text =
-                    "${FileUtils.formatFileSize(completed)} / ${FileUtils.formatFileSize(total)}"
-                progress.binding.tvProgressPercent.visibility = View.VISIBLE
-            } else {
-                progress.binding.progressBar.isIndeterminate = true
-                progress.binding.tvProgressPercent.visibility = View.GONE
-            }
-        }
-    }
+    ) = archiveProgressDialogController.updateFileCopy(progress, message, completed, total)
 
     private fun showVideoOpenModePicker(videoFile: File) =
         mediaOpenController.showVideoModePicker(videoFile)
