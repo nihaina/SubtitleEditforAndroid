@@ -152,6 +152,7 @@ internal class EditorEditHistory {
 
     private val undoStack = ArrayDeque<Operation>()
     private val redoStack = ArrayDeque<Operation>()
+    private var lastSourceChangeAtMs: Long? = null
 
     val canUndo: Boolean get() = undoStack.isNotEmpty()
     val canRedo: Boolean get() = redoStack.isNotEmpty()
@@ -166,21 +167,54 @@ internal class EditorEditHistory {
 
     fun peekRedoWithoutSelection(): Operation? = redoStack.lastOrNull { !it.isSelectionOnly() }
 
-    fun record(operation: Operation) {
+    fun record(operation: Operation, timestampMs: Long = System.currentTimeMillis()) {
         if (operation.isNoOp()) return
-        undoStack.addLast(operation)
+        val previous = undoStack.lastOrNull() as? Operation.SourceChange
+        val merged = operation as? Operation.SourceChange
+        if (merged != null && previous != null &&
+            lastSourceChangeAtMs?.let { timestampMs - it in 0..SOURCE_DELETE_MERGE_WINDOW_MS } == true &&
+            previous.afterText == merged.beforeText &&
+            isPureDeletion(previous.beforeText, previous.afterText) &&
+            isPureDeletion(merged.beforeText, merged.afterText)
+        ) {
+            undoStack.removeLast()
+            undoStack.addLast(
+                Operation.SourceChange(
+                    beforeText = previous.beforeText,
+                    afterText = merged.afterText,
+                    description = listOf(previous.description, merged.description)
+                        .filter { it.isNotBlank() }
+                        .joinToString("\n"),
+                    beforeEntries = previous.beforeEntries,
+                    beforeEntriesText = previous.beforeEntriesText,
+                    afterEntries = merged.afterEntries,
+                    afterEntriesText = merged.afterEntriesText
+                )
+            )
+        } else {
+            undoStack.addLast(operation)
+        }
         redoStack.clear()
+        lastSourceChangeAtMs = if (operation is Operation.SourceChange) timestampMs else null
     }
 
-    fun takeUndo(): Operation? = undoStack.removeLastOrNull()
+    fun takeUndo(): Operation? {
+        lastSourceChangeAtMs = null
+        return undoStack.removeLastOrNull()
+    }
 
-    fun takeRedo(): Operation? = redoStack.removeLastOrNull()
+    fun takeRedo(): Operation? {
+        lastSourceChangeAtMs = null
+        return redoStack.removeLastOrNull()
+    }
 
     fun pushUndo(operation: Operation) {
+        lastSourceChangeAtMs = null
         undoStack.addLast(operation)
     }
 
     fun pushRedo(operation: Operation) {
+        lastSourceChangeAtMs = null
         redoStack.addLast(operation)
     }
 
@@ -207,6 +241,18 @@ internal class EditorEditHistory {
     fun clear() {
         undoStack.clear()
         redoStack.clear()
+        lastSourceChangeAtMs = null
+    }
+
+    private fun isPureDeletion(before: String, after: String): Boolean {
+        if (after.length >= before.length) return false
+        var prefix = 0
+        while (prefix < after.length && before[prefix] == after[prefix]) prefix++
+        var suffix = 0
+        while (suffix < after.length - prefix &&
+            before[before.length - 1 - suffix] == after[after.length - 1 - suffix]
+        ) suffix++
+        return prefix + suffix == after.length
     }
 
     private fun Operation.isNoOp(): Boolean = when (this) {
@@ -215,6 +261,8 @@ internal class EditorEditHistory {
     }
 
     companion object {
+        private const val SOURCE_DELETE_MERGE_WINDOW_MS = 400L
+
         fun difference(before: ListState, after: ListState): ListDifference {
             val beforeById = before.entries.associateBy { it.stableId }
             val afterById = after.entries.associateBy { it.stableId }

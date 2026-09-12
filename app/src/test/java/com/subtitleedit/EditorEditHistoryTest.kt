@@ -51,6 +51,18 @@ class EditorEditHistoryTest {
     }
 
     @Test
+    fun consecutiveSourceDeletionsWithin400MsShareOneUndoOperation() {
+        val history = EditorEditHistory()
+        history.record(sourceChange("abcdef", "abcde"), timestampMs = 1_000L)
+        history.record(sourceChange("abcde", "abcd"), timestampMs = 1_400L)
+
+        val operation = history.takeUndo() as EditorEditHistory.Operation.SourceChange
+        assertEquals("abcdef", operation.beforeText)
+        assertEquals("abcd", operation.afterText)
+        assertFalse(history.canUndo)
+    }
+
+    @Test
     fun subtitleCopiesKeepStableId() {
         val entry = SubtitleEntry(text = "A")
 
