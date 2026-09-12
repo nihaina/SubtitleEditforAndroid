@@ -81,6 +81,9 @@ class AutoTranslateActivity : AppCompatActivity() {
         var message = ""
         var document: SubtitleDocument? = null
         val translatedTexts = mutableListOf<String>()
+        // Keep the output policy with the file so a retry uses the same choice made
+        // in the conflict dialog instead of falling back to the startFile default.
+        var overwriteOutput = false
     }
 
     private val filePickerLauncher = registerForActivityResult(
@@ -233,6 +236,7 @@ class AutoTranslateActivity : AppCompatActivity() {
         updateTranslationControls()
         queuedFiles
             .forEach {
+                it.overwriteOutput = overwriteOutput
                 startFile(
                     file = it,
                     retry = it.status == FileStatus.STOPPED,
@@ -248,7 +252,7 @@ class AutoTranslateActivity : AppCompatActivity() {
         retry: Boolean = false,
         config: TranslationConfig? = readTranslationConfig(),
         outputUri: Uri = outputDirectoryUri ?: Uri.fromFile(getTranslateOutputDirectory()),
-        overwriteOutput: Boolean = false
+        overwriteOutput: Boolean = file.overwriteOutput
     ) {
         if (activeJobs[file.sessionId]?.isActive == true || config == null) return
         queueRunning = true
