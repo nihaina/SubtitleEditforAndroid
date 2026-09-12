@@ -10,10 +10,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
-import android.os.FileObserver
-import android.os.Handler
-import android.os.Looper
-import android.os.SystemClock
 import android.provider.Settings
 import android.view.Menu
 import android.view.MenuItem
@@ -45,7 +41,6 @@ import com.subtitleedit.repository.ArchiveRepository
 import com.subtitleedit.util.ArchiveManager
 import com.subtitleedit.util.ArchivePreviewCache
 import com.subtitleedit.model.FileBrowserOrder
-import com.subtitleedit.model.FileBrowserSearch
 import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
 import com.subtitleedit.util.FileUtils
@@ -63,6 +58,8 @@ import com.subtitleedit.util.FileSelectionPolicy
 import com.subtitleedit.util.FileOperationUiPolicy
 import com.subtitleedit.util.ArchiveActionUiPolicy
 import com.subtitleedit.util.ArchiveActionUiPolicy.ArchiveAction
+import com.subtitleedit.util.DirectoryWatcher
+import com.subtitleedit.util.DirectorySearchController
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleFormatConverter
 import com.subtitleedit.util.UpdateChecker
@@ -71,10 +68,10 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
@@ -97,11 +94,6 @@ class MainActivity : AppCompatActivity() {
         const val MENU_CREATE = 0x10004
         const val MENU_MORE = 0x10005
         const val CONFLICT_WAIT_INTERVAL_MS = 250L
-        const val DIRECTORY_REFRESH_DELAY_MS = 250L
-        const val SEARCH_PROGRESS_INTERVAL_MS = 150L
-        val DIRECTORY_CHANGE_EVENTS = FileObserver.CREATE or FileObserver.DELETE or
-            FileObserver.MOVED_FROM or FileObserver.MOVED_TO or FileObserver.CLOSE_WRITE or
-            FileObserver.ATTRIB or FileObserver.DELETE_SELF or FileObserver.MOVE_SELF
     }
 
     private lateinit var binding: ActivityMainBinding
@@ -139,20 +131,11 @@ class MainActivity : AppCompatActivity() {
     private var sortDirection: FileSortDirection
         get() = stateModel.sortDirection ?: FileSortDirection.ASCENDING
         set(value) { stateModel.sortDirection = value }
-    private val directoryRefreshHandler = Handler(Looper.getMainLooper())
-    private var directoryObserver: FileObserver? = null
-    private var observedDirectoryPath: String? = null
-    private var directoryWatchingEnabled = false
-    private var directorySearchJob: Job? = null
+    private val directoryWatcher = DirectoryWatcher(::refreshWatchedDirectory)
+    private lateinit var directorySearchController: DirectorySearchController
     private var directoryLoadJob: Job? = null
     private var fileCopyJob: Job? = null
-    private var directorySearchGeneration = 0L
     private var activeFileSearchView: SearchView? = null
-    private val directoryRefreshRunnable = Runnable {
-        val directory = currentDirectory ?: return@Runnable
-        if (directory.exists() && directory.canRead()) loadDirectory(directory)
-    }
-
     private data class SplitOption(val label: String, val bytes: Long?)
 
     // 权限请求
@@ -218,6 +201,17 @@ class MainActivity : AppCompatActivity() {
         archiveConflictDialogController = ArchiveConflictDialogController(this)
         archiveProgressDialogController = ArchiveProgressDialogController(this)
         archiveActionDialogController = ArchiveActionDialogController(this)
+        directorySearchController = DirectorySearchController(
+            scope = lifecycleScope,
+            canEnterDirectory = { file -> !isRestrictedAndroidDirectory(file) },
+            onPartialResult = { files ->
+                showDirectoryFiles(files, showParent = false, relativePathRoot = currentDirectory, searching = true)
+            },
+            onCompleted = { files ->
+                showDirectoryFiles(files, showParent = false, relativePathRoot = currentDirectory, searching = false)
+            },
+            onFinished = { binding.searchProgress.visibility = View.INVISIBLE }
+        )
         showAllFileTypes = settingsManager.isShowAllFileTypesEnabled()
         showHiddenFiles = settingsManager.isShowHiddenFilesEnabled()
         if (stateModel.sortField == null) sortField = settingsManager.getFileSortField()
@@ -232,7 +226,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        directoryWatchingEnabled = true
+        directoryWatcher.setEnabled(true)
         val newShowAllFileTypes = SettingsManager.getInstance(this).isShowAllFileTypesEnabled()
         val newShowHiddenFiles = SettingsManager.getInstance(this).isShowHiddenFilesEnabled()
         showAllFileTypes = newShowAllFileTypes
@@ -256,8 +250,7 @@ class MainActivity : AppCompatActivity() {
         if (stateModel.selectedTopLevelItem == R.id.nav_directory) {
             saveCurrentDirectoryScrollPosition()
         }
-        directoryWatchingEnabled = false
-        stopDirectoryObserver()
+        directoryWatcher.setEnabled(false)
         super.onPause()
     }
 
@@ -382,8 +375,8 @@ class MainActivity : AppCompatActivity() {
             supportActionBar?.title = getString(R.string.nav_directory)
             currentDirectory?.let { loadDirectory(it, restoreScrollPosition = true) }
         } else {
-            directorySearchJob?.cancel()
-            stopDirectoryObserver()
+            directorySearchController.cancel()
+            directoryWatcher.stop()
             val fragment = when (itemId) {
                 R.id.nav_favorites -> FavoritesFragment()
                 R.id.nav_drafts -> DraftsFragment()
@@ -586,14 +579,12 @@ class MainActivity : AppCompatActivity() {
             directoryFiles.addAll(files)
             displayDirectoryFiles(restoreScrollPosition = restoreScrollPosition)
         }
-        startDirectoryObserver(directory)
+        directoryWatcher.watch(directory)
         return true
     }
 
     private fun displayDirectoryFiles(restoreScrollPosition: Boolean = false) {
-        directorySearchJob?.cancel()
-        directorySearchJob = null
-        val searchGeneration = ++directorySearchGeneration
+        directorySearchController.cancel()
         binding.searchProgress.visibility = View.INVISIBLE
 
         val directory = currentDirectory ?: return
@@ -627,73 +618,17 @@ class MainActivity : AppCompatActivity() {
             restoreScrollPosition = restoreScrollPosition
         )
 
-        val rootPath = directory.absolutePath
-        val includeHidden = showHiddenFiles
-        val searchSortField = sortField
-        val searchSortDirection = sortDirection
-        directorySearchJob = lifecycleScope.launch {
-            try {
-                val displayed = withContext(Dispatchers.IO) {
-                    val searchContext = coroutineContext
-                    var lastPublishedAt = 0L
-                    var lastPublishedCount = -1
-                    val matches = FileBrowserSearch.search(
-                        root = directory,
-                        query = query,
-                        includeHidden = includeHidden,
-                        includeFile = { true },
-                        canEnterDirectory = { !isRestrictedAndroidDirectory(it) },
-                        onEntryVisited = { searchContext.ensureActive() },
-                        onDirectoryScanned = { partialMatches ->
-                            searchContext.ensureActive()
-                            val now = SystemClock.elapsedRealtime()
-                            if (partialMatches.size != lastPublishedCount &&
-                                now - lastPublishedAt >= SEARCH_PROGRESS_INTERVAL_MS
-                            ) {
-                                lastPublishedAt = now
-                                lastPublishedCount = partialMatches.size
-                                val partialDisplayed = FileBrowserOrder.sort(
-                                    partialMatches.toList(),
-                                    searchSortField,
-                                    searchSortDirection
-                                )
-                                directoryRefreshHandler.post {
-                                    if (directorySearchGeneration == searchGeneration &&
-                                        directorySearchJob?.isActive == true &&
-                                        currentDirectory?.absolutePath == rootPath &&
-                                        stateModel.searchQuery.trim() == query
-                                    ) {
-                                        showDirectoryFiles(
-                                            partialDisplayed,
-                                            showParent = false,
-                                            relativePathRoot = directory,
-                                            searching = true
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    )
-                    FileBrowserOrder.sort(matches, searchSortField, searchSortDirection)
-                }
-                if (directorySearchGeneration != searchGeneration ||
-                    currentDirectory?.absolutePath != rootPath ||
-                    stateModel.searchQuery.trim() != query
-                ) {
-                    return@launch
-                }
-                showDirectoryFiles(
-                    displayed,
-                    showParent = false,
-                    relativePathRoot = directory,
-                    searching = false
-                )
-            } finally {
-                if (directorySearchGeneration == searchGeneration) {
-                    binding.searchProgress.visibility = View.INVISIBLE
-                }
+        directorySearchController.search(
+            root = directory,
+            query = query,
+            includeHidden = showHiddenFiles,
+            sortField = sortField,
+            sortDirection = sortDirection,
+            isCurrent = {
+                currentDirectory?.absolutePath == directory.absolutePath &&
+                    stateModel.searchQuery.trim() == query
             }
-        }
+        )
     }
 
     private fun showDirectoryFiles(
@@ -777,41 +712,9 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun startDirectoryObserver(directory: File) {
-        if (!directoryWatchingEnabled) return
-        val path = runCatching { directory.canonicalPath }.getOrElse { directory.absolutePath }
-        if (path == observedDirectoryPath && directoryObserver != null) return
-        stopDirectoryObserver()
-
-        directoryObserver = createDirectoryObserver(directory).also { observer ->
-            observedDirectoryPath = path
-            observer.startWatching()
-        }
-    }
-
-    @Suppress("DEPRECATION")
-    private fun createDirectoryObserver(directory: File): FileObserver =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            object : FileObserver(directory, DIRECTORY_CHANGE_EVENTS) {
-                override fun onEvent(event: Int, path: String?) = scheduleDirectoryRefresh(event)
-            }
-        } else {
-            object : FileObserver(directory.absolutePath, DIRECTORY_CHANGE_EVENTS) {
-                override fun onEvent(event: Int, path: String?) = scheduleDirectoryRefresh(event)
-            }
-        }
-
-    private fun scheduleDirectoryRefresh(event: Int) {
-        if (!directoryWatchingEnabled || event and DIRECTORY_CHANGE_EVENTS == 0) return
-        directoryRefreshHandler.removeCallbacks(directoryRefreshRunnable)
-        directoryRefreshHandler.postDelayed(directoryRefreshRunnable, DIRECTORY_REFRESH_DELAY_MS)
-    }
-
-    private fun stopDirectoryObserver() {
-        directoryRefreshHandler.removeCallbacks(directoryRefreshRunnable)
-        directoryObserver?.stopWatching()
-        directoryObserver = null
-        observedDirectoryPath = null
+    private fun refreshWatchedDirectory() {
+        val directory = currentDirectory ?: return
+        if (directory.exists() && directory.canRead()) loadDirectory(directory)
     }
     
     private fun updatePathDisplay() {
@@ -897,9 +800,7 @@ class MainActivity : AppCompatActivity() {
     private fun clearFileSearch(refreshDirectory: Boolean) {
         stateModel.isFileSearchActive = false
         stateModel.searchQuery = ""
-        directorySearchJob?.cancel()
-        directorySearchJob = null
-        directorySearchGeneration++
+        directorySearchController.cancel()
         binding.searchProgress.visibility = View.INVISIBLE
         if (refreshDirectory) displayDirectoryFiles()
     }
