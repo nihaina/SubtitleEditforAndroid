@@ -8,34 +8,25 @@
     android:paddingEnd="24dp"
     android:paddingBottom="20dp">
 
-    <LinearLayout
+    <TextView
+        android:id="@+id/tvProgressMessage"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:ellipsize="middle"
+        android:gravity="start"
+        android:maxLines="2"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="14sp" />
 
-        <TextView
-            android:id="@+id/tvProgressMessage"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:ellipsize="middle"
-            android:gravity="start"
-            android:maxLines="2"
-            android:textColor="?android:attr/textColorSecondary"
-            android:textSize="14sp" />
-
-        <TextView
-            android:id="@+id/tvProgressPercent"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="16dp"
-            android:gravity="end"
-            android:maxLines="1"
-            android:textColor="?android:attr/textColorSecondary"
-            android:textSize="18sp" />
-
-    </LinearLayout>
+    <TextView
+        android:id="@+id/tvProgressPercent"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:gravity="start"
+        android:maxLines="2"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="14sp" />
 
     <ProgressBar
         android:id="@+id/progressBar"
@@ -48,30 +39,24 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:orientation="vertical">
 
         <TextView
             android:id="@+id/tvProgressLeading"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:gravity="start"
-            android:maxLines="1"
+            android:maxLines="2"
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="14sp" />
 
-        <Space
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
-
         <TextView
             android:id="@+id/tvProgressProcessed"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
-            android:gravity="end"
-            android:maxLines="1"
+            android:layout_marginTop="4dp"
+            android:gravity="start"
+            android:maxLines="2"
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="14sp" />
 
