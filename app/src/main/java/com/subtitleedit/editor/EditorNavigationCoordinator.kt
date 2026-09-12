@@ -28,11 +28,15 @@ internal class EditorNavigationCoordinator(
     }
 
     fun onBackPressed() {
-        when {
-            isVideoFullscreen() -> exitVideoFullscreen()
-            subtitleAdapter.getSelectedCount() > 0 -> cancelSelection()
-            hasUnsavedChanges() -> showUnsavedChangesDialog()
-            else -> finishWithoutSaving()
+        when (EditorNavigationPolicy.decide(
+            isVideoFullscreen = isVideoFullscreen(),
+            selectedCount = subtitleAdapter.getSelectedCount(),
+            hasUnsavedChanges = hasUnsavedChanges()
+        )) {
+            EditorNavigationPolicy.Decision.EXIT_FULLSCREEN -> exitVideoFullscreen()
+            EditorNavigationPolicy.Decision.CANCEL_SELECTION -> cancelSelection()
+            EditorNavigationPolicy.Decision.CONFIRM_UNSAVED -> showUnsavedChangesDialog()
+            EditorNavigationPolicy.Decision.FINISH -> finishWithoutSaving()
         }
     }
 

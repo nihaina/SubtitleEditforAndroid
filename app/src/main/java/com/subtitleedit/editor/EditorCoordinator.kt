@@ -9,8 +9,7 @@ import com.subtitleedit.EditorEditHistory
  *
  * Menu routing, back navigation and lifecycle/resource coordination are exposed through
  * this facade so the Activity does not need to know which editor subsystem owns them.
- * The Activity keeps only the Android host callbacks; editor actions enter through
- * this composition boundary.
+ * Activity level editor actions enter through this composition boundary.
  */
 internal class EditorCoordinator(
     private val menu: EditorMenuController,
