@@ -7,15 +7,20 @@ import com.subtitleedit.EditorEditHistory
 /**
  * Single composition boundary for the editor screen.
  *
- * Menu routing and lifecycle/resource coordination are deliberately exposed through
+ * Menu routing, back navigation and lifecycle/resource coordination are exposed through
  * this facade so the Activity does not need to know which editor subsystem owns them.
- * Document, source-view and media callbacks can be moved behind the same boundary
- * without changing the Activity's lifecycle contract.
+ * The Activity keeps only the Android host callbacks; editor actions enter through
+ * this composition boundary.
  */
 internal class EditorCoordinator(
     private val menu: EditorMenuController,
-    private val lifecycle: EditorLifecycleCoordinator
+    private val lifecycle: EditorLifecycleCoordinator,
+    private val navigation: EditorNavigationCoordinator
 ) {
+    fun bindNavigation() = navigation.bind()
+
+    fun onNavigateUp() = navigation.onNavigateUp()
+
     fun prepareMenu(
         menuView: Menu,
         sourceMode: Boolean,

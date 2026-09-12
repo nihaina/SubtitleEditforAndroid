@@ -18,7 +18,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
@@ -60,6 +59,7 @@ import com.subtitleedit.editor.EditorWaveformController
 import com.subtitleedit.editor.EditorMenuController
 import com.subtitleedit.editor.EditorLifecycleCoordinator
 import com.subtitleedit.editor.EditorCoordinator
+import com.subtitleedit.editor.EditorNavigationCoordinator
 import com.subtitleedit.util.DraftManager
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.CutPasteController
@@ -225,10 +225,8 @@ class EditorActivity : AppCompatActivity() {
     private lateinit var ttsController: EditorTtsController
 
     private lateinit var searchController: EditorSearchController
-    private lateinit var menuController: EditorMenuController
     private lateinit var editorCoordinator: EditorCoordinator
     private lateinit var sourcePreviewController: EditorSourcePreviewController
-    private lateinit var lifecycleCoordinator: EditorLifecycleCoordinator
     
     private var mediaType: EditorMediaType
         get() = stateModel.mediaType
@@ -298,7 +296,6 @@ class EditorActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityEditorBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        menuController = EditorMenuController(this, ::handleEditorMenuAction)
         mediaRepository = (application as SubtitleEditApplication).dependencies.mediaRepository(cacheDir)
         
         if (!stateModel.initialized) {
@@ -359,8 +356,7 @@ class EditorActivity : AppCompatActivity() {
         setupAiControllers()
         setupMediaActions()
         setupVideoPanel()
-        setupBackPressedHandler()
-        lifecycleCoordinator = EditorLifecycleCoordinator(
+        val lifecycleCoordinator = EditorLifecycleCoordinator(
             binding = binding,
             subtitleAdapter = subtitleAdapter,
             sourcePreview = sourcePreviewController,
@@ -394,7 +390,22 @@ class EditorActivity : AppCompatActivity() {
                 savedScrollPosition = offset
             }
         )
-        editorCoordinator = EditorCoordinator(menuController, lifecycleCoordinator)
+        val navigationCoordinator = EditorNavigationCoordinator(
+            activity = this,
+            subtitleAdapter = subtitleAdapter,
+            isVideoFullscreen = { isVideoFullscreen },
+            exitVideoFullscreen = ::exitVideoFullscreen,
+            cancelSelection = ::cancelSelection,
+            hasUnsavedChanges = { hasUnsavedChanges },
+            saveAndFinish = { saveFile(SaveContinuation.FINISH) },
+            finishWithoutSaving = ::finish
+        )
+        editorCoordinator = EditorCoordinator(
+            menu = EditorMenuController(this, ::handleEditorMenuAction),
+            lifecycle = lifecycleCoordinator,
+            navigation = navigationCoordinator
+        )
+        editorCoordinator.bindNavigation()
         observeUiState()
         
         if (stateModel.documentLoaded) {
@@ -446,11 +457,7 @@ class EditorActivity : AppCompatActivity() {
         supportActionBar?.title = "未命名"
         
         binding.toolbar.setNavigationOnClickListener {
-            if (subtitleAdapter.getSelectedCount() > 0) {
-                cancelSelection()
-            } else {
-                handleBackPressed()
-            }
+            editorCoordinator.onNavigateUp()
         }
         
         binding.toolbar.setOnMenuItemClickListener { menuItem ->
@@ -2827,40 +2834,6 @@ class EditorActivity : AppCompatActivity() {
 
     private fun showShortToast(message: String) {
         com.subtitleedit.util.OverwritingToast.makeText(this, message, Toast.LENGTH_SHORT).show()
-    }
-    
-    private fun setupBackPressedHandler() {
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                handleBackPressed()
-            }
-        })
-    }
-
-    private fun handleBackPressed() {
-        if (isVideoFullscreen) {
-            exitVideoFullscreen()
-            return
-        }
-        if (::subtitleAdapter.isInitialized && subtitleAdapter.getSelectedCount() > 0) {
-            cancelSelection()
-            return
-        }
-        if (hasUnsavedChanges) {
-            AlertDialog.Builder(this)
-                .setTitle("提示")
-                .setMessage("是否保存更改？")
-                .setPositiveButton("保存") { _, _ ->
-                    saveFile(SaveContinuation.FINISH)
-                }
-                .setNegativeButton("不保存") { _, _ ->
-                    finish()
-                }
-                .setNeutralButton("取消", null)
-                .show()
-        } else {
-            finish()
-        }
     }
     
     override fun onStop() {
