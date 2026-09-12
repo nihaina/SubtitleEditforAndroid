@@ -57,6 +57,9 @@ import com.subtitleedit.editor.EditorTranslationController
 import com.subtitleedit.editor.EditorTtsController
 import com.subtitleedit.editor.EditorVideoFullscreenController
 import com.subtitleedit.editor.EditorWaveformController
+import com.subtitleedit.editor.EditorMenuController
+import com.subtitleedit.editor.EditorLifecycleCoordinator
+import com.subtitleedit.editor.EditorCoordinator
 import com.subtitleedit.util.DraftManager
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.CutPasteController
@@ -222,7 +225,10 @@ class EditorActivity : AppCompatActivity() {
     private lateinit var ttsController: EditorTtsController
 
     private lateinit var searchController: EditorSearchController
+    private lateinit var menuController: EditorMenuController
+    private lateinit var editorCoordinator: EditorCoordinator
     private lateinit var sourcePreviewController: EditorSourcePreviewController
+    private lateinit var lifecycleCoordinator: EditorLifecycleCoordinator
     
     private var mediaType: EditorMediaType
         get() = stateModel.mediaType
@@ -285,10 +291,6 @@ class EditorActivity : AppCompatActivity() {
         const val EXTRA_MEDIA_TYPE = "extra_media_type"
         const val EXTRA_AUDIO_ONLY_FROM_VIDEO = "extra_audio_only_from_video"
         const val EXTRA_SUBTITLE_FILE_PATH = "extra_subtitle_file_path"
-        private const val MENU_SELECT_ALL = 0x20001
-        private const val MENU_SELECT_RANGE = 0x20002
-        private const val MENU_UNDO = 0x20003
-        private const val MENU_REDO = 0x20004
         private const val BULK_NOTIFY_THRESHOLD = 200
     }
 
@@ -296,6 +298,7 @@ class EditorActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityEditorBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        menuController = EditorMenuController(this, ::handleEditorMenuAction)
         mediaRepository = (application as SubtitleEditApplication).dependencies.mediaRepository(cacheDir)
         
         if (!stateModel.initialized) {
@@ -357,6 +360,41 @@ class EditorActivity : AppCompatActivity() {
         setupMediaActions()
         setupVideoPanel()
         setupBackPressedHandler()
+        lifecycleCoordinator = EditorLifecycleCoordinator(
+            binding = binding,
+            subtitleAdapter = subtitleAdapter,
+            sourcePreview = sourcePreviewController,
+            sourceWaveformSync = sourceWaveformSyncController,
+            subtitlePreview = if (::subtitlePreviewController.isInitialized) subtitlePreviewController else null,
+            playback = playbackController,
+            waveform = waveformController,
+            tts = ttsController,
+            translation = translationController,
+            transcribe = transcribeController,
+            videoFullscreen = if (::videoFullscreenController.isInitialized) videoFullscreenController else null,
+            mediaRelease = { mediaRepository.release() },
+            isDocumentLoaded = { stateModel.documentLoaded },
+            isSourceMode = { isSourceViewMode },
+            hasPendingSourceEdits = { sourceViewHasPendingEdits },
+            snapshotSource = { snapshotSourceViewContentIfNeeded() },
+            scheduleSourcePreview = { scheduleSourceViewPreview() },
+            scheduleSubtitlePreview = { scheduleSubtitlePreview() },
+            cancelSourceParse = {
+                sourceListParseJob?.cancel()
+                sourceListParseJob = null
+            },
+            savePlaybackState = { position, speed ->
+                stateModel.playbackPositionMs = position
+                stateModel.playbackSpeed = speed
+            },
+            saveSelectedIndices = { indices -> stateModel.selectedIndices = indices },
+            saveSourceScroll = { offset -> savedScrollPosition = offset },
+            saveListScroll = { position, offset ->
+                savedFirstVisibleItemPosition = position
+                savedScrollPosition = offset
+            }
+        )
+        editorCoordinator = EditorCoordinator(menuController, lifecycleCoordinator)
         observeUiState()
         
         if (stateModel.documentLoaded) {
@@ -422,121 +460,36 @@ class EditorActivity : AppCompatActivity() {
     
     override fun onCreateOptionsMenu(menu: Menu): Boolean = true
 
-    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
-        menu.clear()
-        val undoOperation = if (isSourceViewMode) {
-            stateModel.peekUndoWithoutSelection()
-        } else {
-            stateModel.peekUndo()
-        }
-        val redoOperation = if (isSourceViewMode) {
-            stateModel.peekRedoWithoutSelection()
-        } else {
-            stateModel.peekRedo()
-        }
-        if (!isSourceViewMode && ::subtitleAdapter.isInitialized && subtitleAdapter.getSelectedCount() > 0) {
-            menu.add(Menu.NONE, MENU_SELECT_ALL, 0, "全选")
-                .setIcon(R.drawable.ic_select_all)
-                .setContentDescription("全选")
-                .setTooltipText("全选")
-                .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-            menu.add(Menu.NONE, MENU_SELECT_RANGE, 1, "区间选择")
-                .setIcon(R.drawable.ic_select_range)
-                .setContentDescription("区间选择")
-                .setTooltipText("区间选择")
-                .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-            menu.add(Menu.NONE, MENU_UNDO, 2, getString(R.string.menu_undo))
-                .setContentDescription(undoOperation?.description ?: getString(R.string.menu_undo))
-                .setTooltipText(undoOperation?.description ?: getString(R.string.menu_undo))
-                .setEnabled(undoOperation != null)
-                .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
-            menu.add(Menu.NONE, MENU_REDO, 3, getString(R.string.menu_redo))
-                .setContentDescription(redoOperation?.description ?: getString(R.string.menu_redo))
-                .setTooltipText(redoOperation?.description ?: getString(R.string.menu_redo))
-                .setEnabled(redoOperation != null)
-                .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
-        } else {
-            menuInflater.inflate(R.menu.menu_editor, menu)
-            menu.findItem(R.id.menu_undo)?.apply {
-                isEnabled = undoOperation != null
-                contentDescription = undoOperation?.description ?: getString(R.string.menu_undo)
-                tooltipText = contentDescription
-            }
-            menu.findItem(R.id.menu_redo)?.apply {
-                isEnabled = redoOperation != null
-                contentDescription = redoOperation?.description ?: getString(R.string.menu_redo)
-                tooltipText = contentDescription
-            }
-            menu.findItem(R.id.menu_source_view)?.isEnabled =
-                !isSourceViewTransitioning && sourceViewTransitionJob?.isActive != true
-        }
-        return true
-    }
-    
-    private fun handleMenuClick(item: MenuItem): Boolean {
-        return when (item.itemId) {
-            R.id.menu_undo,
-            MENU_UNDO -> {
-                undoEdit()
-                true
-            }
-            R.id.menu_redo,
-            MENU_REDO -> {
-                redoEdit()
-                true
-            }
-            R.id.menu_new -> {
-                newFile()
-                true
-            }
-            R.id.menu_open -> {
-                openFile()
-                true
-            }
-            R.id.menu_save -> {
-                saveFile()
-                true
-            }
-            R.id.menu_save_as -> {
-                saveFileAs()
-                true
-            }
-            R.id.menu_encoding -> {
-                showEncodingDialog()
-                true
-            }
-            R.id.menu_source_view -> {
-                toggleSourceView()
-                true
-            }
-            R.id.menu_merge_subtitles -> {
-                showMergeSubtitlesDialog()
-                true
-            }
-            R.id.menu_search -> {
-                searchController.show()
-                true
-            }
-            MENU_SELECT_ALL -> {
-                selectAllSubtitles()
-                true
-            }
-            MENU_SELECT_RANGE -> {
-                selectRangeBetweenSelectedSubtitles()
-                true
-            }
-            R.id.menu_save_draft -> {
-                saveDraft()
-                true
-            }
-            R.id.menu_drafts -> {
-                openDrafts()
-                true
-            }
-            else -> false
+    override fun onPrepareOptionsMenu(menu: Menu): Boolean = editorCoordinator.prepareMenu(
+        menuView = menu,
+        sourceMode = isSourceViewMode,
+        selectedCount = if (::subtitleAdapter.isInitialized) subtitleAdapter.getSelectedCount() else 0,
+        undo = if (isSourceViewMode) stateModel.peekUndoWithoutSelection() else stateModel.peekUndo(),
+        redo = if (isSourceViewMode) stateModel.peekRedoWithoutSelection() else stateModel.peekRedo(),
+        sourceTransitioning = isSourceViewTransitioning || sourceViewTransitionJob?.isActive == true
+    )
+
+    private fun handleMenuClick(item: MenuItem): Boolean = editorCoordinator.handleMenu(item)
+
+    private fun handleEditorMenuAction(action: EditorMenuController.Action) {
+        when (action) {
+            EditorMenuController.Action.UNDO -> undoEdit()
+            EditorMenuController.Action.REDO -> redoEdit()
+            EditorMenuController.Action.NEW -> newFile()
+            EditorMenuController.Action.OPEN -> openFile()
+            EditorMenuController.Action.SAVE -> saveFile()
+            EditorMenuController.Action.SAVE_AS -> saveFileAs()
+            EditorMenuController.Action.ENCODING -> showEncodingDialog()
+            EditorMenuController.Action.SOURCE_VIEW -> toggleSourceView()
+            EditorMenuController.Action.MERGE -> showMergeSubtitlesDialog()
+            EditorMenuController.Action.SEARCH -> searchController.show()
+            EditorMenuController.Action.SELECT_ALL -> selectAllSubtitles()
+            EditorMenuController.Action.SELECT_RANGE -> selectRangeBetweenSelectedSubtitles()
+            EditorMenuController.Action.SAVE_DRAFT -> saveDraft()
+            EditorMenuController.Action.DRAFTS -> openDrafts()
         }
     }
-    
+
     private fun setupRecyclerView() {
         subtitleAdapter = SubtitleAdapter(
             onItemClick = { _, _ -> },
@@ -2911,77 +2864,31 @@ class EditorActivity : AppCompatActivity() {
     }
     
     override fun onStop() {
-        sourcePreviewController.cancel()
-        sourceListParseJob?.cancel()
-        sourceListParseJob = null
-        sourceWaveformSyncController.cancel()
-        if (::subtitlePreviewController.isInitialized) {
-            subtitlePreviewController.cancelPending()
-        }
-        // 防抖预览尚未来得及执行时，旋转/切后台可能回收源行 ViewHolder；在这里一次性
-        // 提交当前源文档，避免丢失尚未刷新的内容。
-        if (isSourceViewMode && sourceViewHasPendingEdits) {
-            snapshotSourceViewContentIfNeeded()
-        }
-        if (::playbackController.isInitialized) {
-            stateModel.playbackPositionMs = playbackController.currentPositionMs
-            stateModel.playbackSpeed = playbackController.playbackSpeed
-            playbackController.pauseForLifecycle()
-        }
-        if (::subtitleAdapter.isInitialized) {
-            stateModel.selectedIndices = subtitleAdapter.getSelectedPositions()
-            if (isSourceViewMode) {
-                savedScrollPosition = binding.etSourceView.getDocumentScrollOffset()
-            } else {
-                val layoutManager = binding.rvSubtitles.layoutManager as? LinearLayoutManager
-                val position = layoutManager?.findFirstVisibleItemPosition() ?: -1
-                if (position >= 0) {
-                    savedFirstVisibleItemPosition = position
-                    savedScrollPosition = layoutManager?.findViewByPosition(position)?.top ?: 0
-                }
-            }
-        }
+        editorCoordinator.onStop()
         super.onStop()
     }
 
     override fun onStart() {
         super.onStart()
-        if (!stateModel.documentLoaded) return
-        if (isSourceViewMode && sourceViewHasPendingEdits) {
-            scheduleSourceViewPreview()
-        } else {
-            scheduleSubtitlePreview()
-        }
+        editorCoordinator.onStart()
     }
 
     override fun onDestroy() {
         sourceViewTransitionJob?.cancel()
-        sourcePreviewController.cancel()
-        sourceWaveformSyncController.cancel()
-        ttsController.release()
-        if (::subtitlePreviewController.isInitialized) subtitlePreviewController.release()
-        mediaRepository.release()
-        playbackController.release()
-        waveformController.release()
-        translationController.release()
-        transcribeController.release()
+        editorCoordinator.onDestroy()
         super.onDestroy()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (::videoFullscreenController.isInitialized) {
-            videoFullscreenController.onWindowFocusChanged(hasFocus)
-        }
+        editorCoordinator.onWindowFocusChanged(hasFocus)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        if (::videoFullscreenController.isInitialized) {
-            videoFullscreenController.onConfigurationChanged()
-        }
+        editorCoordinator.onConfigurationChanged()
     }
-    
+
     // ==================== 媒体播放器相关方法 ====================
     
     private fun setupMediaActions() {
