@@ -49,7 +49,6 @@ import com.subtitleedit.util.FilePathPolicy
 import com.subtitleedit.util.SelectionRangePolicy
 import com.subtitleedit.util.MainBackNavigationPolicy
 import com.subtitleedit.util.MainLifecycleCoordinator
-import com.subtitleedit.util.MainNavigationPolicy
 import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.FileSelectionPolicy
 import com.subtitleedit.util.FileOperationUiPolicy
@@ -89,6 +88,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var fileAdapter: FileListAdapter
     private lateinit var filePropertiesDialogController: FilePropertiesDialogController
     private lateinit var mainMenuController: MainMenuController
+    private lateinit var topLevelNavigationCoordinator: MainTopLevelNavigationCoordinator
     private lateinit var mediaOpenController: MediaOpenController
     private lateinit var fileBrowserDialogController: FileBrowserDialogController
     private lateinit var archivePasswordDialogController: ArchivePasswordDialogController
@@ -173,6 +173,26 @@ class MainActivity : AppCompatActivity() {
             selectRange = ::selectRangeBetweenSelectedFiles,
             showCreate = ::showCreateMenu,
             showMore = ::showDirectoryMoreMenu
+        )
+        topLevelNavigationCoordinator = MainTopLevelNavigationCoordinator(
+            activity = this,
+            binding = binding,
+            selectedItem = { stateModel.selectedTopLevelItem },
+            setSelectedItem = { stateModel.selectedTopLevelItem = it },
+            saveDirectoryScroll = ::saveCurrentDirectoryScrollPosition,
+            currentDirectory = { currentDirectory },
+            loadDirectory = { directory, restore -> loadDirectory(directory, restore) },
+            cancelDirectorySearch = { directorySearchController.cancel() },
+            stopDirectoryWatcher = { directoryWatcher.stop() },
+            invalidateMenu = ::invalidateOptionsMenu,
+            clearDirectorySelection = {
+                directoryHistory.clear()
+                selectedPaths.clear()
+                pendingFileOperation = null
+                pendingArchiveFile = null
+                stateModel.searchQuery = ""
+                stateModel.isFileSearchActive = false
+            }
         )
         mediaOpenController = MediaOpenController(this, ::openMediaWithSubtitle)
         fileBrowserDialogController = FileBrowserDialogController(
@@ -347,63 +367,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupBottomNavigation() {
-        binding.bottomNavigation.selectedItemId = stateModel.selectedTopLevelItem
-        binding.bottomNavigation.setOnItemSelectedListener { item ->
-            showTopLevelPage(item.itemId)
-            true
-        }
-        showTopLevelPage(stateModel.selectedTopLevelItem)
+        topLevelNavigationCoordinator.bind(topLevelNavigationCoordinator::showPage)
     }
 
     private fun showTopLevelPage(itemId: Int) {
-        val wasDirectorySelected = stateModel.selectedTopLevelItem == R.id.nav_directory
-        if (wasDirectorySelected && itemId != R.id.nav_directory) {
-            saveCurrentDirectoryScrollPosition()
-        }
-        stateModel.selectedTopLevelItem = itemId
-        val directorySelected = itemId == R.id.nav_directory
-        binding.directoryContent.visibility = if (directorySelected) View.VISIBLE else View.GONE
-        binding.fragmentContainer.visibility = if (directorySelected) View.GONE else View.VISIBLE
-        binding.toolbar.navigationIcon = null
-        binding.toolbar.setNavigationOnClickListener(null)
-
-        if (directorySelected) {
-            supportActionBar?.title = getString(R.string.nav_directory)
-            currentDirectory?.let { loadDirectory(it, restoreScrollPosition = true) }
-        } else {
-            directorySearchController.cancel()
-            directoryWatcher.stop()
-            val fragment = when (itemId) {
-                R.id.nav_favorites -> FavoritesFragment()
-                R.id.nav_drafts -> DraftsFragment()
-                R.id.nav_tools -> ToolsFragment()
-                else -> SettingsFragment()
-            }
-            supportFragmentManager.beginTransaction()
-                .replace(R.id.fragmentContainer, fragment, itemId.toString())
-                .commit()
-            supportActionBar?.title = getString(MainNavigationPolicy.titleRes(itemId))
-        }
-        binding.bottomNavigation.visibility = View.VISIBLE
-        binding.bottomDivider.visibility = View.VISIBLE
-        invalidateOptionsMenu()
+        topLevelNavigationCoordinator.showPage(itemId)
     }
 
     fun updateTopLevelToolbar(title: String, showBack: Boolean = false, onBack: (() -> Unit)? = null) {
-        binding.toolbar.title = title
-        binding.toolbar.navigationIcon = if (showBack) ContextCompat.getDrawable(this, R.drawable.ic_back) else null
-        binding.toolbar.setNavigationOnClickListener(if (showBack) View.OnClickListener { onBack?.invoke() } else null)
+        topLevelNavigationCoordinator.updateToolbar(title, showBack, onBack)
     }
 
     fun openDirectoryFromFavorites(directory: File) {
-        if (!loadDirectory(directory, restoreScrollPosition = true)) return
-        directoryHistory.clear()
-        selectedPaths.clear()
-        pendingFileOperation = null
-        pendingArchiveFile = null
-        stateModel.searchQuery = ""
-        stateModel.isFileSearchActive = false
-        binding.bottomNavigation.selectedItemId = R.id.nav_directory
+        topLevelNavigationCoordinator.openDirectoryFromFavorites(directory)
     }
 
     private fun configureSearchItem(item: MenuItem) {
