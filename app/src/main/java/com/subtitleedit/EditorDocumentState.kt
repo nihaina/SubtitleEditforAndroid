@@ -40,6 +40,8 @@ internal class EditorDocumentState {
     var historySelectionSnapshot: Set<Long> = emptySet()
     var sourceHistoryTextSnapshot = ""
     var historyBaselineInitialized = false
+    var sourceViewEditGeneration = 0L
+    var sourceViewEntriesGeneration = 0L
 
     val subtitleDocument: SubtitleDocument
         get() = SubtitleDocument(

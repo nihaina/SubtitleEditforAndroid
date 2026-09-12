@@ -1,5 +1,6 @@
 package com.subtitleedit.editor
 
+import com.subtitleedit.EditorDocumentState
 import com.subtitleedit.EditorEditHistory
 import com.subtitleedit.EditorEditHistory.Operation
 import com.subtitleedit.EditorViewModel
@@ -8,25 +9,23 @@ import com.subtitleedit.model.SubtitleEntry
 /** Coordinates history snapshots and stack movement without owning any Android UI. */
 internal class EditorHistoryCoordinator(
     private val stateModel: EditorViewModel,
-    private val entries: () -> List<SubtitleEntry>,
+    private val documentState: EditorDocumentState,
     private val selectedIds: () -> Set<Long>,
     private val sourceMode: () -> Boolean,
-    private val sourceText: () -> String,
     private val sourceEntriesReady: () -> Boolean,
-    private val currentOriginalText: () -> String,
     private val applyOperation: (Operation, Boolean) -> Unit,
     private val invalidateMenu: () -> Unit
 ) {
-    fun currentState() = EditorEditHistory.ListState(entries().map { it.copy() }, selectedIds())
+    fun currentState() = EditorEditHistory.ListState(documentState.subtitleEntries.map { it.copy() }, selectedIds())
 
     fun initialize(clear: Boolean) {
         val state = currentState()
-        stateModel.setHistoryBaseline(state, sourceText(), clear)
+        stateModel.setHistoryBaseline(state, documentState.sourceViewContent, clear)
     }
 
     fun sync() {
         val state = currentState()
-        stateModel.syncHistoryBaseline(state, sourceText(), sourceMode())
+        stateModel.syncHistoryBaseline(state, documentState.sourceViewContent, sourceMode())
     }
 
     fun recordList(selectedOverride: Set<Long>? = null) {
@@ -41,13 +40,13 @@ internal class EditorHistoryCoordinator(
         if (!difference.isEmpty) {
             val contentChanged = difference.deleted.isNotEmpty() || difference.added.isNotEmpty() ||
                 difference.orderChanged || difference.modified.isNotEmpty()
-            val beforeSource = currentOriginalText()
+            val beforeSource = documentState.originalFileContent
             if (contentChanged) stateModel.syncListChangesToSource(before.entries, after.entries)
             stateModel.recordListHistory(
                 before, after,
                 EditorHistoryDescriptionFormatter.describeListStateChange(difference),
                 beforeSource.takeIf { contentChanged },
-                currentOriginalText().takeIf { contentChanged }
+                documentState.originalFileContent.takeIf { contentChanged }
             )
             invalidateMenu()
         }
@@ -56,7 +55,7 @@ internal class EditorHistoryCoordinator(
     fun recordSource(before: String, after: String, beforeEntries: List<SubtitleEntry>? = null) {
         if (!sourceMode() || !stateModel.historyBaselineInitialized || before == after) return
         val cached = beforeEntries?.map { it.copy() }
-            ?: entries().takeIf {
+            ?: documentState.subtitleEntries.takeIf {
                 sourceEntriesReady() && stateModel.sourceHistoryTextSnapshot == before
             }?.map { it.copy() }
         stateModel.recordSourceHistory(

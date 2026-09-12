@@ -15,6 +15,8 @@ internal data class DirectoryScrollPosition(
 
 internal class MainViewModel : ViewModel() {
     val documentState = MainDocumentState()
+
+    /** Compatibility accessors for existing tests and integrations; new code uses documentState. */
     var currentDirectory: File?
         get() = documentState.currentDirectory
         set(value) { documentState.currentDirectory = value }

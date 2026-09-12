@@ -3,6 +3,7 @@ package com.subtitleedit.editor
 import android.app.AlertDialog
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import com.subtitleedit.EditorDocumentState
 import com.subtitleedit.adapter.SubtitleAdapter
 
 /** Owns editor back navigation across fullscreen, selection and unsaved-document states. */
@@ -12,7 +13,7 @@ internal class EditorNavigationCoordinator(
     private val isVideoFullscreen: () -> Boolean,
     private val exitVideoFullscreen: () -> Unit,
     private val cancelSelection: () -> Unit,
-    private val hasUnsavedChanges: () -> Boolean,
+    private val documentState: EditorDocumentState,
     private val saveAndFinish: () -> Unit,
     private val finishWithoutSaving: () -> Unit
 ) {
@@ -31,7 +32,7 @@ internal class EditorNavigationCoordinator(
         when (EditorNavigationPolicy.decide(
             isVideoFullscreen = isVideoFullscreen(),
             selectedCount = subtitleAdapter.getSelectedCount(),
-            hasUnsavedChanges = hasUnsavedChanges()
+            hasUnsavedChanges = documentState.hasUnsavedChanges
         )) {
             EditorNavigationPolicy.Decision.EXIT_FULLSCREEN -> exitVideoFullscreen()
             EditorNavigationPolicy.Decision.CANCEL_SELECTION -> cancelSelection()

@@ -99,27 +99,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var archiveActionDialogController: ArchiveActionDialogController
     private val stateModel: MainViewModel by viewModels()
 
-    private var currentDirectory: File?
-        get() = stateModel.currentDirectory
-        set(value) { stateModel.currentDirectory = value }
-    private val directoryHistory get() = stateModel.directoryHistory
     private val visibleFiles = mutableListOf<File>()
     private val directoryFiles = mutableListOf<File>()
-    private val selectedPaths get() = stateModel.selectedPaths
-    private var pendingFileOperation: FileOperation?
-        get() = stateModel.pendingFileOperation
-        set(value) { stateModel.pendingFileOperation = value }
-    private var pendingArchiveFile: File?
-        get() = stateModel.pendingArchiveFile
-        set(value) { stateModel.pendingArchiveFile = value }
     private var showAllFileTypes = false
     private var showHiddenFiles = false
-    private var sortField: FileSortField
-        get() = stateModel.sortField ?: FileSortField.NAME
-        set(value) { stateModel.sortField = value }
-    private var sortDirection: FileSortDirection
-        get() = stateModel.sortDirection ?: FileSortDirection.ASCENDING
-        set(value) { stateModel.sortDirection = value }
     private val directoryWatcher = DirectoryWatcher(::refreshWatchedDirectory)
     private lateinit var directorySearchController: DirectorySearchController
     private lateinit var backNavigationCallback: OnBackPressedCallback
@@ -184,27 +167,27 @@ class MainActivity : AppCompatActivity() {
             stopDirectoryWatcher = { directoryWatcher.stop() },
             invalidateMenu = ::invalidateOptionsMenu,
             clearDirectorySelection = {
-                directoryHistory.clear()
-                selectedPaths.clear()
-                pendingFileOperation = null
-                pendingArchiveFile = null
-                stateModel.searchQuery = ""
-                stateModel.isFileSearchActive = false
+                stateModel.documentState.directoryHistory.clear()
+                stateModel.documentState.selectedPaths.clear()
+                stateModel.documentState.pendingFileOperation = null
+                stateModel.documentState.pendingArchiveFile = null
+                stateModel.documentState.searchQuery = ""
+                stateModel.documentState.isFileSearchActive = false
             }
         )
         mediaOpenController = MediaOpenController(this, ::openMediaWithSubtitle)
         fileBrowserDialogController = FileBrowserDialogController(
             activity = this,
             dp = ::dp,
-            currentDirectory = { currentDirectory },
-            onCreated = { currentDirectory?.let(::loadDirectory) },
+            currentDirectory = { stateModel.documentState.currentDirectory },
+            onCreated = { stateModel.documentState.currentDirectory?.let(::loadDirectory) },
             onSortChanged = { field, direction ->
                 field?.let {
-                    sortField = it
+                    stateModel.documentState.sortField = it
                     SettingsManager.getInstance(this).setFileSortField(it)
                 }
                 direction?.let {
-                    sortDirection = it
+                    stateModel.documentState.sortDirection = it
                     SettingsManager.getInstance(this).setFileSortDirection(it)
                 }
                 displayDirectoryFiles()
@@ -244,17 +227,21 @@ class MainActivity : AppCompatActivity() {
             scope = lifecycleScope,
             canEnterDirectory = { file -> !isRestrictedAndroidDirectory(file) },
             onPartialResult = { files ->
-                showDirectoryFiles(files, showParent = false, relativePathRoot = currentDirectory, searching = true)
+                showDirectoryFiles(files, showParent = false, relativePathRoot = stateModel.documentState.currentDirectory, searching = true)
             },
             onCompleted = { files ->
-                showDirectoryFiles(files, showParent = false, relativePathRoot = currentDirectory, searching = false)
+                showDirectoryFiles(files, showParent = false, relativePathRoot = stateModel.documentState.currentDirectory, searching = false)
             },
             onFinished = { binding.searchProgress.visibility = View.INVISIBLE }
         )
         showAllFileTypes = settingsManager.isShowAllFileTypesEnabled()
         showHiddenFiles = settingsManager.isShowHiddenFilesEnabled()
-        if (stateModel.sortField == null) sortField = settingsManager.getFileSortField()
-        if (stateModel.sortDirection == null) sortDirection = settingsManager.getFileSortDirection()
+        if (stateModel.documentState.sortField == null) {
+            stateModel.documentState.sortField = settingsManager.getFileSortField()
+        }
+        if (stateModel.documentState.sortDirection == null) {
+            stateModel.documentState.sortDirection = settingsManager.getFileSortDirection()
+        }
         
         setupToolbar()
         setupRecyclerView()
@@ -266,8 +253,8 @@ class MainActivity : AppCompatActivity() {
             lifecycleOwner = this,
             scope = lifecycleScope,
             directoryWatcher = directoryWatcher,
-            shouldShowDirectory = { stateModel.selectedTopLevelItem == R.id.nav_directory },
-            refreshDirectory = { currentDirectory?.let(::loadDirectory) },
+            shouldShowDirectory = { stateModel.documentState.selectedTopLevelItem == R.id.nav_directory },
+            refreshDirectory = { stateModel.documentState.currentDirectory?.let(::loadDirectory) },
             saveDirectoryScroll = ::saveCurrentDirectoryScrollPosition,
             readFileFilters = {
                 SettingsManager.getInstance(this).isShowAllFileTypesEnabled() to
@@ -324,9 +311,9 @@ class MainActivity : AppCompatActivity() {
     override fun onPrepareOptionsMenu(menu: Menu): Boolean {
         return mainMenuController.prepare(
             menu = menu,
-            isDirectorySelected = stateModel.selectedTopLevelItem == R.id.nav_directory,
-            hasSelection = selectedPaths.isNotEmpty(),
-            hasPendingOperation = pendingFileOperation != null
+            isDirectorySelected = stateModel.documentState.selectedTopLevelItem == R.id.nav_directory,
+            hasSelection = stateModel.documentState.selectedPaths.isNotEmpty(),
+            hasPendingOperation = stateModel.documentState.pendingFileOperation != null
         )
     }
 
@@ -387,17 +374,17 @@ class MainActivity : AppCompatActivity() {
         searchView.apply {
             queryHint = getString(R.string.file_search_hint)
             maxWidth = Int.MAX_VALUE
-            setQuery(stateModel.searchQuery, false)
+            setQuery(stateModel.documentState.searchQuery, false)
             setOnQueryTextListener(object : SearchView.OnQueryTextListener {
                 override fun onQueryTextSubmit(query: String?): Boolean = true
                 override fun onQueryTextChange(newText: String?): Boolean {
                     if (activeFileSearchView !== searchView || suppressSearchCallbacks) return true
                     val updatedQuery = newText.orEmpty()
-                    val selectionUiActive = selectedPaths.isNotEmpty() || pendingFileOperation != null
+                    val selectionUiActive = stateModel.documentState.selectedPaths.isNotEmpty() || stateModel.documentState.pendingFileOperation != null
                     if (selectionUiActive) return true
-                    if (updatedQuery == stateModel.searchQuery) return true
-                    stateModel.isFileSearchActive = true
-                    stateModel.searchQuery = updatedQuery
+                    if (updatedQuery == stateModel.documentState.searchQuery) return true
+                    stateModel.documentState.isFileSearchActive = true
+                    stateModel.documentState.searchQuery = updatedQuery
                     displayDirectoryFiles()
                     return true
                 }
@@ -407,26 +394,26 @@ class MainActivity : AppCompatActivity() {
         item.setOnActionExpandListener(object : MenuItem.OnActionExpandListener {
             override fun onMenuItemActionExpand(item: MenuItem): Boolean {
                 if (activeFileSearchView !== searchView) return true
-                stateModel.isFileSearchActive = true
+                stateModel.documentState.isFileSearchActive = true
                 return true
             }
 
             override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
                 if (activeFileSearchView !== searchView || suppressSearchCallbacks) return true
-                val enteringSelectionMode = selectedPaths.isNotEmpty() || pendingFileOperation != null
+                val enteringSelectionMode = stateModel.documentState.selectedPaths.isNotEmpty() || stateModel.documentState.pendingFileOperation != null
                 if (!enteringSelectionMode) {
                     clearFileSearch(refreshDirectory = true)
                 }
                 return true
             }
         })
-        if (stateModel.isFileSearchActive && stateModel.searchQuery.isNotEmpty()) {
+        if (stateModel.documentState.isFileSearchActive && stateModel.documentState.searchQuery.isNotEmpty()) {
             item.expandActionView()
-            searchView.setQuery(stateModel.searchQuery, false)
+            searchView.setQuery(stateModel.documentState.searchQuery, false)
             searchView.post {
                 if (activeFileSearchView !== searchView) return@post
-                val retainedQuery = stateModel.searchQuery
-                if (stateModel.isFileSearchActive && retainedQuery.isNotEmpty() &&
+                val retainedQuery = stateModel.documentState.searchQuery
+                if (stateModel.documentState.isFileSearchActive && retainedQuery.isNotEmpty() &&
                     searchView.query.toString() != retainedQuery
                 ) {
                     searchView.setQuery(retainedQuery, false)
@@ -449,7 +436,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSortDialog() {
-        fileBrowserDialogController.showSortDialog({ sortField }, { sortDirection })
+        fileBrowserDialogController.showSortDialog(
+            { stateModel.documentState.sortField ?: FileSortField.NAME },
+            { stateModel.documentState.sortDirection ?: FileSortDirection.ASCENDING }
+        )
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
@@ -511,14 +501,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadInitialDirectory() {
-        val restored = currentDirectory?.takeIf { it.exists() && it.canRead() }
+        val restored = stateModel.documentState.currentDirectory?.takeIf { it.exists() && it.canRead() }
         if (loadDirectory(restored ?: getDefaultDirectory(), restoreScrollPosition = restored != null)) return
         if (restored == null) return
 
-        directoryHistory.clear()
-        selectedPaths.clear()
-        pendingFileOperation = null
-        pendingArchiveFile = null
+        stateModel.documentState.directoryHistory.clear()
+        stateModel.documentState.selectedPaths.clear()
+        stateModel.documentState.pendingFileOperation = null
+        stateModel.documentState.pendingArchiveFile = null
         loadDirectory(getDefaultDirectory())
     }
     
@@ -528,7 +518,7 @@ class MainActivity : AppCompatActivity() {
             return false
         }
         
-        currentDirectory = directory
+        stateModel.documentState.currentDirectory = directory
         updatePathDisplay()
         directoryLoadJob?.cancel()
         val requestedPath = directory.absolutePath
@@ -544,7 +534,7 @@ class MainActivity : AppCompatActivity() {
                         ))
                 }?.toList().orEmpty().distinctBy { it.absolutePath }
             }
-            if (currentDirectory?.absolutePath != requestedPath) return@launch
+            if (stateModel.documentState.currentDirectory?.absolutePath != requestedPath) return@launch
             directoryFiles.clear()
             directoryFiles.addAll(files)
             displayDirectoryFiles(restoreScrollPosition = restoreScrollPosition)
@@ -557,16 +547,16 @@ class MainActivity : AppCompatActivity() {
         directorySearchController.cancel()
         binding.searchProgress.visibility = View.INVISIBLE
 
-        val directory = currentDirectory ?: return
-        val query = if (stateModel.isFileSearchActive) {
-            stateModel.searchQuery.trim()
+        val directory = stateModel.documentState.currentDirectory ?: return
+        val query = if (stateModel.documentState.isFileSearchActive) {
+            stateModel.documentState.searchQuery.trim()
         } else {
             ""
         }
         val directMatches = FileBrowserOrder.sort(
             FileBrowserOrder.filter(directoryFiles, query),
-            sortField,
-            sortDirection
+            stateModel.documentState.sortField ?: FileSortField.NAME,
+            stateModel.documentState.sortDirection ?: FileSortDirection.ASCENDING
         )
         if (query.isEmpty()) {
             showDirectoryFiles(
@@ -592,11 +582,11 @@ class MainActivity : AppCompatActivity() {
             root = directory,
             query = query,
             includeHidden = showHiddenFiles,
-            sortField = sortField,
-            sortDirection = sortDirection,
+            sortField = stateModel.documentState.sortField ?: FileSortField.NAME,
+            sortDirection = stateModel.documentState.sortDirection ?: FileSortDirection.ASCENDING,
             isCurrent = {
-                currentDirectory?.absolutePath == directory.absolutePath &&
-                    stateModel.searchQuery.trim() == query
+                stateModel.documentState.currentDirectory?.absolutePath == directory.absolutePath &&
+                    stateModel.documentState.searchQuery.trim() == query
             }
         )
     }
@@ -612,15 +602,15 @@ class MainActivity : AppCompatActivity() {
         visibleFiles.addAll(displayed)
 
         val adapterItems = mutableListOf<File>()
-        val directory = currentDirectory
+        val directory = stateModel.documentState.currentDirectory
         if (showParent && directory?.parentFile?.canRead() == true) {
             adapterItems.add(File(directory.absolutePath + "/.."))
         }
         adapterItems.addAll(displayed)
         fileAdapter.setRelativePathRoot(relativePathRoot)
-        val directoryPath = currentDirectory?.let(::directoryPath)
+        val directoryPath = stateModel.documentState.currentDirectory?.let(::directoryPath)
         val savedScrollPosition = if (restoreScrollPosition && directoryPath != null) {
-            stateModel.directoryScrollPositions[directoryPath]
+            stateModel.documentState.directoryScrollPositions[directoryPath]
         } else {
             null
         }
@@ -629,13 +619,13 @@ class MainActivity : AppCompatActivity() {
             // latest selection state once the new list is installed so visible holders
             // cannot retain the pre-refresh alpha/stroke values.
             fileAdapter.updateSelection(
-                selectedPaths.isNotEmpty() && pendingFileOperation == null,
-                selectedPaths.toSet()
+                stateModel.documentState.selectedPaths.isNotEmpty() && stateModel.documentState.pendingFileOperation == null,
+                stateModel.documentState.selectedPaths.toSet()
             )
             fileAdapter.refreshSelectionVisuals()
             if (restoreScrollPosition && directoryPath != null) {
                 binding.rvFileList.post {
-                    if (currentDirectory?.let(::directoryPath) != directoryPath) return@post
+                    if (stateModel.documentState.currentDirectory?.let(::directoryPath) != directoryPath) return@post
                     restoreDirectoryScrollPosition(savedScrollPosition)
                 }
             }
@@ -652,7 +642,7 @@ class MainActivity : AppCompatActivity() {
         FilePathPolicy.canonicalOrAbsolute(directory)
 
     private fun saveCurrentDirectoryScrollPosition() {
-        val directory = currentDirectory ?: return
+        val directory = stateModel.documentState.currentDirectory ?: return
         val layoutManager = binding.rvFileList.layoutManager as? LinearLayoutManager ?: return
         val firstVisibleIndex = layoutManager.findFirstVisibleItemPosition()
         if (firstVisibleIndex < 0) return
@@ -662,7 +652,7 @@ class MainActivity : AppCompatActivity() {
             layoutManager.getDecoratedTop(it) - binding.rvFileList.paddingTop
         } ?: 0
         val firstVisiblePath = fileAdapter.currentList.getOrNull(firstVisibleIndex)?.absolutePath
-        stateModel.directoryScrollPositions[directoryPath(directory)] = DirectoryScrollPosition(
+        stateModel.documentState.directoryScrollPositions[directoryPath(directory)] = DirectoryScrollPosition(
             firstVisiblePath = firstVisiblePath,
             firstVisibleIndex = firstVisibleIndex,
             offset = offset
@@ -683,12 +673,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshWatchedDirectory() {
-        val directory = currentDirectory ?: return
+        val directory = stateModel.documentState.currentDirectory ?: return
         if (directory.exists() && directory.canRead()) loadDirectory(directory)
     }
     
     private fun updatePathDisplay() {
-        currentDirectory?.let {
+        stateModel.documentState.currentDirectory?.let {
             binding.tvCurrentPath.text = it.absolutePath
         }
     }
@@ -698,8 +688,8 @@ class MainActivity : AppCompatActivity() {
         if (file.name == "..") {
             // 普通文件选择期间暂时锁定顶部父目录项，避免点击文件夹选择后
             // 意外离开当前目录。复制/移动等目标目录选择仍允许返回上级。
-            if (selectedPaths.isNotEmpty() && pendingFileOperation == null) return
-            if (pendingFileOperation != null) navigateDestinationUp() else goUpLevel()
+            if (stateModel.documentState.selectedPaths.isNotEmpty() && stateModel.documentState.pendingFileOperation == null) return
+            if (stateModel.documentState.pendingFileOperation != null) navigateDestinationUp() else goUpLevel()
             return
         }
 
@@ -708,7 +698,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        if (pendingFileOperation != null) {
+        if (stateModel.documentState.pendingFileOperation != null) {
             if (file.isDirectory) {
                 navigateDestinationInto(file)
             } else {
@@ -717,7 +707,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        if (selectedPaths.isNotEmpty()) {
+        if (stateModel.documentState.selectedPaths.isNotEmpty()) {
             // 选中状态下点击文件或文件夹都只切换选中状态；目录导航通过
             // 退出选择模式后进行，避免选择文件夹时触发列表刷新和跳转。
             toggleSelection(file)
@@ -746,7 +736,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun navigateIntoDirectory(directory: File) {
-        val previousDirectory = currentDirectory ?: return
+        val previousDirectory = stateModel.documentState.currentDirectory ?: return
         saveCurrentDirectoryScrollPosition()
         val wasSearching = isFileSearchQueryActive()
         val historyEntries = if (wasSearching) {
@@ -759,17 +749,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (loadDirectory(directory, restoreScrollPosition = true)) {
-            directoryHistory.addAll(historyEntries)
+            stateModel.documentState.directoryHistory.addAll(historyEntries)
             if (wasSearching) invalidateOptionsMenu()
         }
     }
 
     private fun isFileSearchQueryActive(): Boolean =
-        stateModel.isFileSearchActive && stateModel.searchQuery.isNotBlank()
+        stateModel.documentState.isFileSearchActive && stateModel.documentState.searchQuery.isNotBlank()
 
     private fun clearFileSearch(refreshDirectory: Boolean) {
-        stateModel.isFileSearchActive = false
-        stateModel.searchQuery = ""
+        stateModel.documentState.isFileSearchActive = false
+        stateModel.documentState.searchQuery = ""
         directorySearchController.cancel()
         binding.searchProgress.visibility = View.INVISIBLE
         if (refreshDirectory) displayDirectoryFiles()
@@ -779,33 +769,33 @@ class MainActivity : AppCompatActivity() {
         AndroidDirectoryPolicy.isRestricted(file)
 
     private fun enterSelectionMode(file: File) {
-        if (file.name == ".." || pendingFileOperation != null) return
-        if (file.absolutePath in selectedPaths) {
+        if (file.name == ".." || stateModel.documentState.pendingFileOperation != null) return
+        if (file.absolutePath in stateModel.documentState.selectedPaths) {
             toggleSelection(file)
             return
         }
-        pendingFileOperation = null
-        selectedPaths.add(file.absolutePath)
+        stateModel.documentState.pendingFileOperation = null
+        stateModel.documentState.selectedPaths.add(file.absolutePath)
         updateSelectionUi()
     }
 
     private fun toggleSelection(file: File) {
-        if (!selectedPaths.add(file.absolutePath)) selectedPaths.remove(file.absolutePath)
-        if (selectedPaths.isEmpty()) exitSelectionMode() else updateSelectionUi()
+        if (!stateModel.documentState.selectedPaths.add(file.absolutePath)) stateModel.documentState.selectedPaths.remove(file.absolutePath)
+        if (stateModel.documentState.selectedPaths.isEmpty()) exitSelectionMode() else updateSelectionUi()
     }
 
     private fun selectAllVisibleFiles() {
-        if (visibleFiles.isNotEmpty() && visibleFiles.all { it.absolutePath in selectedPaths }) {
+        if (visibleFiles.isNotEmpty() && visibleFiles.all { it.absolutePath in stateModel.documentState.selectedPaths }) {
             exitSelectionMode()
             return
         }
-        selectedPaths.addAll(visibleFiles.map { it.absolutePath })
+        stateModel.documentState.selectedPaths.addAll(visibleFiles.map { it.absolutePath })
         updateSelectionUi()
     }
 
     private fun selectRangeBetweenSelectedFiles() {
         val selectedIndices = visibleFiles.mapIndexedNotNull { index, file ->
-            index.takeIf { file.absolutePath in selectedPaths }
+            index.takeIf { file.absolutePath in stateModel.documentState.selectedPaths }
         }
         if (selectedIndices.size < 2) {
             showShortToast("请先在当前目录选择两个文件")
@@ -813,15 +803,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         val range = SelectionRangePolicy.contiguousRange(selectedIndices) ?: return
-        selectedPaths.addAll(visibleFiles.subList(range.first, range.last + 1).map { it.absolutePath })
+        stateModel.documentState.selectedPaths.addAll(visibleFiles.subList(range.first, range.last + 1).map { it.absolutePath })
         updateSelectionUi()
     }
 
-    private fun selectedFiles(): List<File> = FileSelectionPolicy.existingFiles(selectedPaths)
+    private fun selectedFiles(): List<File> = FileSelectionPolicy.existingFiles(stateModel.documentState.selectedPaths)
 
     private fun updateSelectionUi(invalidateMenu: Boolean = true) {
-        val operation = pendingFileOperation
-        val isSelectionUiActive = selectedPaths.isNotEmpty() || operation != null
+        val operation = stateModel.documentState.pendingFileOperation
+        val isSelectionUiActive = stateModel.documentState.selectedPaths.isNotEmpty() || operation != null
         binding.selectionBottomActions.visibility = if (isSelectionUiActive) View.VISIBLE else View.GONE
         val showTopLevelNavigation = !isSelectionUiActive
         binding.bottomNavigation.visibility = if (showTopLevelNavigation) View.VISIBLE else View.GONE
@@ -839,7 +829,7 @@ class MainActivity : AppCompatActivity() {
         ).forEach { it.isEnabled = !choosingDestination }
         binding.btnConfirmDestination.text = FileOperationUiPolicy.destinationButtonLabel(operation)
         supportActionBar?.title = if (isSelectionUiActive) {
-            FileOperationUiPolicy.selectionTitle(operation, selectedPaths.size)
+            FileOperationUiPolicy.selectionTitle(operation, stateModel.documentState.selectedPaths.size)
         } else {
             getString(R.string.nav_directory)
         }
@@ -858,13 +848,13 @@ class MainActivity : AppCompatActivity() {
             if (isSelectionUiActive) activeFileSearchView = null
             invalidateOptionsMenu()
         }
-        fileAdapter.updateSelection(selectedPaths.isNotEmpty() && operation == null, selectedPaths)
+        fileAdapter.updateSelection(stateModel.documentState.selectedPaths.isNotEmpty() && operation == null, stateModel.documentState.selectedPaths)
     }
 
     private fun exitSelectionMode() {
-        selectedPaths.clear()
-        pendingFileOperation = null
-        pendingArchiveFile = null
+        stateModel.documentState.selectedPaths.clear()
+        stateModel.documentState.pendingFileOperation = null
+        stateModel.documentState.pendingArchiveFile = null
         updateSelectionUi()
     }
 
@@ -873,15 +863,15 @@ class MainActivity : AppCompatActivity() {
             exitSelectionMode()
             return
         }
-        pendingFileOperation = operation
+        stateModel.documentState.pendingFileOperation = operation
         updateSelectionUi()
     }
 
     private fun completeDestinationOperation() {
-        val operation = pendingFileOperation ?: return
-        val destination = currentDirectory ?: return
+        val operation = stateModel.documentState.pendingFileOperation ?: return
+        val destination = stateModel.documentState.currentDirectory ?: return
         if (operation == FileOperation.EXTRACT) {
-            val archive = pendingArchiveFile ?: run {
+            val archive = stateModel.documentState.pendingArchiveFile ?: run {
                 cancelDestinationSelection()
                 return
             }
@@ -958,8 +948,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun cancelDestinationSelection() {
-        pendingFileOperation = null
-        pendingArchiveFile = null
+        stateModel.documentState.pendingFileOperation = null
+        stateModel.documentState.pendingArchiveFile = null
         updateSelectionUi()
     }
 
@@ -1003,7 +993,7 @@ class MainActivity : AppCompatActivity() {
                             showShortToast("目标名称已存在")
                         } else if (file.renameTo(target)) {
                             exitSelectionMode()
-                            currentDirectory?.let(::loadDirectory)
+                            stateModel.documentState.currentDirectory?.let(::loadDirectory)
                             showShortToast("已重命名")
                         } else {
                             showShortToast("重命名失败")
@@ -1026,7 +1016,7 @@ class MainActivity : AppCompatActivity() {
                     val deleted = withContext(Dispatchers.IO) { files.all { it.deleteRecursively() } }
                     if (deleted) {
                         exitSelectionMode()
-                        currentDirectory?.let(::loadDirectory)
+                        stateModel.documentState.currentDirectory?.let(::loadDirectory)
                         showShortToast("已删除")
                     } else {
                         showShortToast("删除失败")
@@ -1064,7 +1054,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showSubtitleFormatConvertDialog() {
         val sources = selectedFiles().filter { it.isFile && FileUtils.isSubtitleFile(it) }
-        if (sources.isEmpty() || sources.size != selectedPaths.size) return
+        if (sources.isEmpty() || sources.size != stateModel.documentState.selectedPaths.size) return
 
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
@@ -1191,7 +1181,7 @@ class MainActivity : AppCompatActivity() {
                             dialog.dismiss()
                             conversionResult.onSuccess { batchResult ->
                                 exitSelectionMode()
-                                currentDirectory?.let(::loadDirectory)
+                                stateModel.documentState.currentDirectory?.let(::loadDirectory)
                                 val message = buildString {
                                     append(
                                         getString(
@@ -1256,7 +1246,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showCreateArchiveDialog() {
         val sources = selectedFiles()
-        val outputDirectory = currentDirectory ?: return
+        val outputDirectory = stateModel.documentState.currentDirectory ?: return
         if (sources.isEmpty()) return
 
         val dialogBinding = DialogCreateArchiveBinding.inflate(layoutInflater)
@@ -1468,9 +1458,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startExtractDestinationSelection(archive: File) {
-        selectedPaths.clear()
-        pendingArchiveFile = archive
-        pendingFileOperation = FileOperation.EXTRACT
+        stateModel.documentState.selectedPaths.clear()
+        stateModel.documentState.pendingArchiveFile = archive
+        stateModel.documentState.pendingFileOperation = FileOperation.EXTRACT
         updateSelectionUi()
     }
 
@@ -1769,15 +1759,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun navigateDestinationInto(directory: File) {
-        val current = currentDirectory ?: return
+        val current = stateModel.documentState.currentDirectory ?: return
         saveCurrentDirectoryScrollPosition()
         if (loadDirectory(directory, restoreScrollPosition = true)) {
-            directoryHistory += current
+            stateModel.documentState.directoryHistory += current
         }
     }
 
     private fun navigateDestinationUp(): Boolean {
-        val current = currentDirectory ?: return false
+        val current = stateModel.documentState.currentDirectory ?: return false
         val storageRoot = getDefaultDirectory()
         val currentPath = runCatching { current.canonicalPath }.getOrElse { current.absolutePath }
         val rootPath = runCatching { storageRoot.canonicalPath }.getOrElse { storageRoot.absolutePath }
@@ -1787,14 +1777,14 @@ class MainActivity : AppCompatActivity() {
         if (!target.exists() || !target.canRead()) return false
         saveCurrentDirectoryScrollPosition()
         if (loadDirectory(target, restoreScrollPosition = true)) {
-            val historyTarget = directoryHistory.lastOrNull()
+            val historyTarget = stateModel.documentState.directoryHistory.lastOrNull()
             val historyPath = historyTarget?.let { history ->
                 runCatching { history.canonicalPath }.getOrElse { history.absolutePath }
             }
             if (historyPath == runCatching { target.canonicalPath }.getOrElse { target.absolutePath }) {
-                directoryHistory.removeAt(directoryHistory.lastIndex)
+                stateModel.documentState.directoryHistory.removeAt(stateModel.documentState.directoryHistory.lastIndex)
             } else {
-                directoryHistory.clear()
+                stateModel.documentState.directoryHistory.clear()
             }
             return true
         }
@@ -1802,12 +1792,12 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun goUpLevel() {
-        if (directoryHistory.isNotEmpty()) {
+        if (stateModel.documentState.directoryHistory.isNotEmpty()) {
             saveCurrentDirectoryScrollPosition()
-            val parent = directoryHistory.removeAt(directoryHistory.size - 1)
+            val parent = stateModel.documentState.directoryHistory.removeAt(stateModel.documentState.directoryHistory.size - 1)
             loadDirectory(parent, restoreScrollPosition = true)
         } else {
-            currentDirectory?.parentFile?.let { parent ->
+            stateModel.documentState.currentDirectory?.parentFile?.let { parent ->
                 if (parent.exists() && parent.canRead()) {
                     saveCurrentDirectoryScrollPosition()
                     loadDirectory(parent, restoreScrollPosition = true)
@@ -1824,10 +1814,10 @@ class MainActivity : AppCompatActivity() {
     
     private fun handleBackNavigation() {
         when (MainBackNavigationPolicy.decide(
-            isDirectorySelected = stateModel.selectedTopLevelItem == R.id.nav_directory,
-            hasPendingFileOperation = pendingFileOperation != null,
-            hasSelection = selectedPaths.isNotEmpty(),
-            hasDirectoryHistory = directoryHistory.isNotEmpty()
+            isDirectorySelected = stateModel.documentState.selectedTopLevelItem == R.id.nav_directory,
+            hasPendingFileOperation = stateModel.documentState.pendingFileOperation != null,
+            hasSelection = stateModel.documentState.selectedPaths.isNotEmpty(),
+            hasDirectoryHistory = stateModel.documentState.directoryHistory.isNotEmpty()
         )) {
             MainBackNavigationPolicy.Decision.DELEGATE_TO_TOP_LEVEL -> {
                 val handled = (supportFragmentManager.findFragmentById(R.id.fragmentContainer)

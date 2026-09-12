@@ -94,49 +94,6 @@ class EditorActivity : AppCompatActivity() {
         )
     }
 
-    private var filePath: String
-        get() = stateModel.filePath
-        set(value) { stateModel.filePath = value }
-    private var currentFile: File?
-        get() = stateModel.currentFile
-        set(value) { stateModel.currentFile = value }
-    // 字幕文件路径（当打开音频文件时，用于保存字幕）
-    private var subtitleFilePath: String
-        get() = stateModel.subtitleFilePath
-        set(value) { stateModel.subtitleFilePath = value }
-    private var subtitleFile: File?
-        get() = stateModel.subtitleFile
-        set(value) { stateModel.subtitleFile = value }
-    private var subtitleEntries: MutableList<SubtitleEntry>
-        get() = stateModel.subtitleEntries
-        set(value) { stateModel.subtitleEntries = value }
-    private var lastIndexedEntryCount: Int
-        get() = stateModel.lastIndexedEntryCount
-        set(value) { stateModel.lastIndexedEntryCount = value }
-    private var currentCharset: Charset
-        get() = stateModel.currentCharset
-        set(value) { stateModel.currentCharset = value }
-    private var currentFormat: SubtitleParser.SubtitleFormat
-        get() = stateModel.currentFormat
-        set(value) { stateModel.currentFormat = value }
-    
-    // 源视图模式标志
-    private var isSourceViewMode: Boolean
-        get() = stateModel.isSourceViewMode
-        set(value) { stateModel.isSourceViewMode = value }
-    // 当前内存中的原始文本。视图切换会更新它，但只有显式保存才会写入实际存储。
-    private var originalFileContent: String
-        get() = stateModel.originalFileContent
-        set(value) { stateModel.originalFileContent = value }
-    // 源编辑器当前显示的文本快照
-    private var sourceViewContent: String
-        get() = stateModel.sourceViewContent
-        set(value) { stateModel.sourceViewContent = value }
-    private var sourceViewNeedsListSync: Boolean
-        get() = stateModel.sourceViewNeedsListSync
-        set(value) { stateModel.sourceViewNeedsListSync = value }
-
-    // 大文件切换时，避免 TextWatcher 在 setText/逐字编辑期间反复复制整份文本。
     private var suppressSourceViewChanges = false
     private val sourceViewState = EditorSourceViewState()
     private var sourceViewHasPendingEdits: Boolean
@@ -144,9 +101,9 @@ class EditorActivity : AppCompatActivity() {
         set(value) { sourceViewState.pendingEdits = value }
     private var sourceViewTransitionJob: Job? = null
     private var sourceListParseJob: Job? = null
-    private var isSourceViewTransitioning: Boolean
-        get() = stateModel.isSourceViewTransitioning
-        set(value) { stateModel.isSourceViewTransitioning = value }
+    private var suppressHistoryRecording = false
+    private val cutPasteController = CutPasteController()
+
     private lateinit var sourceWaveformSyncController: EditorSourceWaveformSyncController
     private lateinit var subtitleDialogController: EditorSubtitleDialogController
     private lateinit var confirmationDialogController: EditorConfirmationDialogController
@@ -157,95 +114,23 @@ class EditorActivity : AppCompatActivity() {
     private val mediaDocumentController = EditorMediaDocumentController()
     private val listOperationsController = EditorListOperationsController()
     private lateinit var listPresentationController: EditorListPresentationController
-    private var sourceViewEntryCount: Int
-        get() = stateModel.sourceViewEntryCount
-        set(value) { stateModel.sourceViewEntryCount = value }
-    private var sourceViewEditGeneration: Long
-        get() = sourceViewState.editGeneration
-        set(value) { sourceViewState.editGeneration = value }
-    private var sourceViewEntriesGeneration: Long
-        get() = sourceViewState.entriesGeneration
-        set(value) { sourceViewState.entriesGeneration = value }
     private var pendingListIndexRefreshStart: Int? = null
     private lateinit var sourceLineEditController: EditorSourceLineEditController
 
-    // 切换视图前保存的滚动位置
-    private var savedScrollPosition: Int
-        get() = stateModel.savedScrollPosition
-        set(value) { stateModel.savedScrollPosition = value }
-    private var savedFirstVisibleItemPosition: Int
-        get() = stateModel.savedFirstVisibleItemPosition
-        set(value) { stateModel.savedFirstVisibleItemPosition = value }
-    
-    // 长按时的位置（用于时间偏移等操作）
-    private var longClickPosition: Int = -1
-    
-    // 是否有未保存的更改
-    private var hasUnsavedChanges: Boolean
-        get() = stateModel.hasUnsavedChanges
-        set(value) { stateModel.hasUnsavedChanges = value }
-
-    // 是否为新建且从未保存过的文件
-    private var isNewFile: Boolean
-        get() = stateModel.isNewFile
-        set(value) { stateModel.isNewFile = value }
-
-    // 当前格式信息（用于 toolbar subtitle 恢复）
-    private var currentFormatInfo: String
-        get() = stateModel.currentFormatInfo
-        set(value) { stateModel.currentFormatInfo = value }
-    
-    // 复制/剪贴板数据（支持多行）
-    private var clipboardTexts: List<String>
-        get() = stateModel.clipboardTexts
-        set(value) { stateModel.clipboardTexts = value }
-    private var historyEntriesSnapshot: List<SubtitleEntry>
-        get() = stateModel.historyEntriesSnapshot
-        set(value) { stateModel.historyEntriesSnapshot = value }
-    private var historySelectionSnapshot: Set<Long>
-        get() = stateModel.historySelectionSnapshot
-        set(value) { stateModel.historySelectionSnapshot = value }
-    private var sourceHistoryTextSnapshot: String
-        get() = stateModel.sourceHistoryTextSnapshot
-        set(value) { stateModel.sourceHistoryTextSnapshot = value }
-    private var historyBaselineInitialized: Boolean
-        get() = stateModel.historyBaselineInitialized
-        set(value) { stateModel.historyBaselineInitialized = value }
-    private var suppressHistoryRecording = false
-    private val cutPasteController = CutPasteController()
-    
-    // AI 翻译 / 快速转录 / 快速 TTS
     private lateinit var translationController: EditorTranslationController
     private lateinit var transcribeController: EditorTranscribeController
     private lateinit var ttsController: EditorTtsController
-
     private lateinit var searchController: EditorSearchController
     private lateinit var editorCoordinator: EditorCoordinator
     private lateinit var sourcePreviewController: EditorSourcePreviewController
-    
-    private var mediaType: EditorMediaType
-        get() = stateModel.mediaType
-        set(value) { stateModel.mediaType = value }
-    private var isAudioOnlyFromVideo: Boolean
-        get() = stateModel.isAudioOnlyFromVideo
-        set(value) { stateModel.isAudioOnlyFromVideo = value }
     private lateinit var mediaRepository: MediaRepository
     private lateinit var playbackController: EditorPlaybackController
     private lateinit var videoFullscreenController: EditorVideoFullscreenController
     private lateinit var waveformController: EditorWaveformController
     private lateinit var subtitlePreviewController: EditorSubtitlePreviewController
+    private var longClickPosition: Int = -1
     private var waveformMediaFile: File? = null
     private var waveformAudioStreamIndex: Int? = null
-    private var isVideoFullscreen: Boolean
-        get() = stateModel.isVideoFullscreen
-        set(value) { stateModel.isVideoFullscreen = value }
-    private var previousRequestedOrientation: Int
-        get() = stateModel.previousRequestedOrientation
-        set(value) { stateModel.previousRequestedOrientation = value }
-    private var videoViewportInlineIndex: Int
-        get() = stateModel.videoViewportInlineIndex
-        set(value) { stateModel.videoViewportInlineIndex = value }
-    private var lastRenderedUiState: EditorUiState? = null
 
     // 文件选择器
     private val openFileLauncher = registerForActivityResult(
@@ -294,25 +179,25 @@ class EditorActivity : AppCompatActivity() {
         mediaRepository = (application as SubtitleEditApplication).dependencies.mediaRepository(cacheDir)
         
         if (!stateModel.initialized) {
-            filePath = intent.getStringExtra(EXTRA_FILE_PATH) ?: ""
-            mediaType = if (intent.hasExtra(EXTRA_MEDIA_TYPE)) {
+            stateModel.filePath = intent.getStringExtra(EXTRA_FILE_PATH) ?: ""
+            stateModel.mediaType = if (intent.hasExtra(EXTRA_MEDIA_TYPE)) {
                 EditorMediaType.fromIntentValue(intent.getStringExtra(EXTRA_MEDIA_TYPE))
             } else if (intent.getBooleanExtra(EXTRA_IS_AUDIO_FILE, false)) {
                 EditorMediaType.AUDIO
             } else {
                 EditorMediaType.SUBTITLE_ONLY
             }
-            isAudioOnlyFromVideo = intent.getBooleanExtra(EXTRA_AUDIO_ONLY_FROM_VIDEO, false)
-            subtitleFilePath = intent.getStringExtra(EXTRA_SUBTITLE_FILE_PATH) ?: ""
+            stateModel.isAudioOnlyFromVideo = intent.getBooleanExtra(EXTRA_AUDIO_ONLY_FROM_VIDEO, false)
+            stateModel.subtitleFilePath = intent.getStringExtra(EXTRA_SUBTITLE_FILE_PATH) ?: ""
 
-            if (filePath.isNotEmpty()) {
-                if (mediaType.hasPlayableMedia) {
-                    currentFile = File(filePath)
-                    if (subtitleFilePath.isNotEmpty()) {
-                        subtitleFile = File(subtitleFilePath)
+            if (stateModel.filePath.isNotEmpty()) {
+                if (stateModel.mediaType.hasPlayableMedia) {
+                    stateModel.currentFile = File(stateModel.filePath)
+                    if (stateModel.subtitleFilePath.isNotEmpty()) {
+                        stateModel.subtitleFile = File(stateModel.subtitleFilePath)
                     }
                 } else {
-                    currentFile = File(filePath)
+                    stateModel.currentFile = File(stateModel.filePath)
                 }
             }
             stateModel.initialized = true
@@ -322,7 +207,7 @@ class EditorActivity : AppCompatActivity() {
         setupRecyclerView()
         listPresentationController = EditorListPresentationController(
             adapter = { subtitleAdapter },
-            entries = { subtitleEntries },
+            entries = { stateModel.subtitleEntries },
             selectedIds = {
                 if (::subtitleAdapter.isInitialized) {
                     subtitleAdapter.getSelectedEntries().mapTo(mutableSetOf()) { it.first.stableId }
@@ -335,15 +220,15 @@ class EditorActivity : AppCompatActivity() {
         saveSessionController = EditorSaveSessionController(this, stateModel.subtitleRepository)
         setupHistoryCoordinator()
         sourceViewCoordinator = EditorSourceViewCoordinator(
-            format = { currentFormat },
+            format = { stateModel.currentFormat },
             peekUndo = { stateModel.peekUndo() },
             updateLatestHistory = { content, entries -> stateModel.updateLatestSourceHistory(content, entries) },
             applyEntries = { entries -> applySourceViewEntries(entries) },
-            setEntriesGeneration = { sourceViewEntriesGeneration = sourceViewEditGeneration },
+            setEntriesGeneration = { stateModel.documentState.sourceViewEntriesGeneration = stateModel.documentState.sourceViewEditGeneration },
             clearPendingEdits = { sourceViewHasPendingEdits = false }
         )
         setupSubtitleDialogController()
-        confirmationDialogController = EditorConfirmationDialogController(this) { hasUnsavedChanges }
+        confirmationDialogController = EditorConfirmationDialogController(this) { stateModel.hasUnsavedChanges }
         setupSearchController()
         setupPlaybackController()
         setupWaveformController()
@@ -365,7 +250,7 @@ class EditorActivity : AppCompatActivity() {
             videoFullscreen = if (::videoFullscreenController.isInitialized) videoFullscreenController else null,
             mediaRelease = { mediaRepository.release() },
             isDocumentLoaded = { stateModel.documentLoaded },
-            isSourceMode = { isSourceViewMode },
+            isSourceMode = { stateModel.isSourceViewMode },
             hasPendingSourceEdits = { sourceViewHasPendingEdits },
             snapshotSource = { snapshotSourceViewContentIfNeeded() },
             scheduleSourcePreview = { scheduleSourceViewPreview() },
@@ -379,19 +264,19 @@ class EditorActivity : AppCompatActivity() {
                 stateModel.playbackSpeed = speed
             },
             saveSelectedIndices = { indices -> stateModel.selectedIndices = indices },
-            saveSourceScroll = { offset -> savedScrollPosition = offset },
+            saveSourceScroll = { offset -> stateModel.savedScrollPosition = offset },
             saveListScroll = { position, offset ->
-                savedFirstVisibleItemPosition = position
-                savedScrollPosition = offset
+                stateModel.savedFirstVisibleItemPosition = position
+                stateModel.savedScrollPosition = offset
             }
         )
         val navigationCoordinator = EditorNavigationCoordinator(
             activity = this,
             subtitleAdapter = subtitleAdapter,
-            isVideoFullscreen = { isVideoFullscreen },
+            isVideoFullscreen = { stateModel.isVideoFullscreen },
             exitVideoFullscreen = ::exitVideoFullscreen,
             cancelSelection = ::cancelSelection,
-            hasUnsavedChanges = { hasUnsavedChanges },
+            documentState = stateModel.documentState,
             saveAndFinish = { saveFile(SaveContinuation.FINISH) },
             finishWithoutSaving = ::finish
         )
@@ -403,9 +288,7 @@ class EditorActivity : AppCompatActivity() {
                 lifecycleOwner = this,
                 state = stateModel.uiState,
                 effects = stateModel.effects,
-                onStateChanged = { state, _ ->
-                    val previous = lastRenderedUiState
-                    lastRenderedUiState = state
+                onStateChanged = { state, previous ->
                     if (previous == null ||
                         previous.isSourceViewMode != state.isSourceViewMode ||
                         previous.selectedIndices != state.selectedIndices ||
@@ -421,12 +304,12 @@ class EditorActivity : AppCompatActivity() {
         
         if (stateModel.documentLoaded) {
             restoreDocumentState()
-            if (mediaType.hasPlayableMedia && filePath.isNotEmpty()) {
-                loadMediaFile(subtitleFilePath, restoreDocument = true)
+            if (stateModel.mediaType.hasPlayableMedia && stateModel.filePath.isNotEmpty()) {
+                loadMediaFile(stateModel.subtitleFilePath, restoreDocument = true)
             }
-        } else if (filePath.isNotEmpty()) {
-            if (mediaType.hasPlayableMedia) {
-                loadMediaFile(subtitleFilePath)
+        } else if (stateModel.filePath.isNotEmpty()) {
+            if (stateModel.mediaType.hasPlayableMedia) {
+                loadMediaFile(stateModel.subtitleFilePath)
             } else {
                 loadFile()
             }
@@ -452,11 +335,11 @@ class EditorActivity : AppCompatActivity() {
 
     override fun onPrepareOptionsMenu(menu: Menu): Boolean = editorCoordinator.prepareMenu(
         menuView = menu,
-        sourceMode = isSourceViewMode,
+        sourceMode = stateModel.isSourceViewMode,
         selectedCount = if (::subtitleAdapter.isInitialized) subtitleAdapter.getSelectedCount() else 0,
-        undo = if (isSourceViewMode) stateModel.peekUndoWithoutSelection() else stateModel.peekUndo(),
-        redo = if (isSourceViewMode) stateModel.peekRedoWithoutSelection() else stateModel.peekRedo(),
-        sourceTransitioning = isSourceViewTransitioning || sourceViewTransitionJob?.isActive == true
+        undo = if (stateModel.isSourceViewMode) stateModel.peekUndoWithoutSelection() else stateModel.peekUndo(),
+        redo = if (stateModel.isSourceViewMode) stateModel.peekRedoWithoutSelection() else stateModel.peekRedo(),
+        sourceTransitioning = stateModel.isSourceViewTransitioning || sourceViewTransitionJob?.isActive == true
     )
 
     private fun handleMenuClick(item: MenuItem): Boolean = editorCoordinator.handleMenu(item)
@@ -498,7 +381,7 @@ class EditorActivity : AppCompatActivity() {
             onSetTimeClick = { entry, position ->
                 setSubtitleTimeToCurrentPosition(entry, position)
             },
-            hasPlayableMedia = mediaType.hasPlayableMedia,
+            hasPlayableMedia = stateModel.mediaType.hasPlayableMedia,
             onSelectionChanged = {
                 recordListSelectionChange()
                 updateSelectedCountDisplay()
@@ -518,26 +401,26 @@ class EditorActivity : AppCompatActivity() {
         sourceLineEditController = EditorSourceLineEditController(
             lineCount = binding.etSourceView::getDocumentLineCount,
             lineText = binding.etSourceView::getDocumentLineText,
-            currentFormat = { currentFormat },
-            entries = { subtitleEntries }
+            currentFormat = { stateModel.currentFormat },
+            entries = { stateModel.subtitleEntries }
         )
         sourcePreviewController = EditorSourcePreviewController(
             scope = lifecycleScope,
-            isSourceViewMode = { isSourceViewMode },
+            isSourceViewMode = { stateModel.isSourceViewMode },
             suppressSourceViewChanges = { suppressSourceViewChanges },
-            editGeneration = { sourceViewEditGeneration },
-            currentFormat = { currentFormat },
+            editGeneration = { stateModel.documentState.sourceViewEditGeneration },
+            currentFormat = { stateModel.currentFormat },
             snapshotContent = ::snapshotSourceViewContentIfNeeded,
             onParsed = ::applySourcePreview
         )
         binding.etSourceView.addOnDocumentChangedListener {
-            if (isSourceViewMode && !suppressSourceViewChanges) {
+            if (stateModel.isSourceViewMode && !suppressSourceViewChanges) {
                 val updatedText = binding.etSourceView.getDocumentText()
-                recordSourceTextChange(sourceHistoryTextSnapshot, updatedText)
-                sourceHistoryTextSnapshot = updatedText
+                recordSourceTextChange(stateModel.sourceHistoryTextSnapshot, updatedText)
+                stateModel.sourceHistoryTextSnapshot = updatedText
                 stateModel.setSourceDocumentContent(updatedText)
                 sourceViewHasPendingEdits = true
-                sourceViewEditGeneration++
+                stateModel.documentState.sourceViewEditGeneration++
                 // SourceEditorView keeps one editable block per physical line. The debounced
                 // preview performs the full-text snapshot only when parsing is needed.
                 updateFormatInfo()
@@ -545,7 +428,7 @@ class EditorActivity : AppCompatActivity() {
             }
         }
         binding.etSourceView.addOnDocumentChangeListener { change ->
-            if (isSourceViewMode && !suppressSourceViewChanges) {
+            if (stateModel.isSourceViewMode && !suppressSourceViewChanges) {
                 if (change.oldLineCount != change.newLineCount) sourceLineEditController.invalidateLineIndex()
                 applySimpleSourceLineChange(change.startLine, change.oldLineCount, change.newLineCount)
             }
@@ -556,8 +439,8 @@ class EditorActivity : AppCompatActivity() {
         subtitleDialogController = EditorSubtitleDialogController(
             context = this,
             ensureListMode = ::ensureListMode,
-            currentFormat = { currentFormat },
-            entryAt = { position -> subtitleEntries.getOrNull(position) },
+            currentFormat = { stateModel.currentFormat },
+            entryAt = { position -> stateModel.subtitleEntries.getOrNull(position) },
             updateTime = { position, start, value ->
                 val result = if (start) {
                     stateModel.execute(EditorCommand.UpdateTime(position, startTime = value))
@@ -571,7 +454,7 @@ class EditorActivity : AppCompatActivity() {
                     .changedPositions.isNotEmpty()
             },
             updateCue = { position, identifier, settings ->
-                subtitleEntries.getOrNull(position)?.apply {
+                stateModel.subtitleEntries.getOrNull(position)?.apply {
                     cueIdentifier = identifier
                     cueSettings = settings
                 }
@@ -584,16 +467,14 @@ class EditorActivity : AppCompatActivity() {
     private fun setupHistoryCoordinator() {
         historyCoordinator = EditorHistoryCoordinator(
             stateModel = stateModel,
-            entries = { subtitleEntries },
+            documentState = stateModel.documentState,
             selectedIds = {
                 if (::subtitleAdapter.isInitialized) {
                     subtitleAdapter.getSelectedEntries().mapTo(mutableSetOf()) { it.first.stableId }
                 } else emptySet()
             },
-            sourceMode = { isSourceViewMode },
-            sourceText = { sourceViewContent },
-            sourceEntriesReady = { sourceViewEntriesGeneration == sourceViewEditGeneration },
-            currentOriginalText = { originalFileContent },
+            sourceMode = { stateModel.isSourceViewMode },
+            sourceEntriesReady = { stateModel.documentState.sourceViewEntriesGeneration == stateModel.documentState.sourceViewEditGeneration },
             applyOperation = ::applyHistoryOperation,
             invalidateMenu = ::invalidateOptionsMenu
         )
@@ -604,9 +485,9 @@ class EditorActivity : AppCompatActivity() {
             context = this,
             binding = binding,
             subtitleAdapter = subtitleAdapter,
-            isSourceViewMode = { isSourceViewMode },
+            isSourceViewMode = { stateModel.isSourceViewMode },
             ignoreSourceChanges = { suppressSourceViewChanges },
-            entries = { subtitleEntries },
+            entries = { stateModel.subtitleEntries },
             replaceSourceContent = { content ->
                 replaceSourceViewContent(content)
             },
@@ -630,9 +511,9 @@ class EditorActivity : AppCompatActivity() {
         playbackController = EditorPlaybackController(
             context = this,
             binding = binding,
-            mediaType = mediaType,
-            subtitles = { subtitleEntries },
-            isSourceViewMode = { isSourceViewMode },
+            mediaType = stateModel.mediaType,
+            subtitles = { stateModel.subtitleEntries },
+            isSourceViewMode = { stateModel.isSourceViewMode },
             onPlayingSubtitleChanged = { index ->
                 if (index == null) {
                     subtitleAdapter.clearPlayingHighlight()
@@ -649,14 +530,14 @@ class EditorActivity : AppCompatActivity() {
     private fun setupWaveformController() {
         sourceWaveformSyncController = EditorSourceWaveformSyncController(
             scope = lifecycleScope,
-            isSourceViewMode = { isSourceViewMode },
+            isSourceViewMode = { stateModel.isSourceViewMode },
             hasPendingSourceEdits = { sourceViewHasPendingEdits },
             isPreviewActive = { sourcePreviewController.isActive },
-            editGeneration = { sourceViewEditGeneration },
-            currentFormat = { currentFormat },
-            sourceContent = { sourceViewContent },
+            editGeneration = { stateModel.documentState.sourceViewEditGeneration },
+            currentFormat = { stateModel.currentFormat },
+            sourceContent = { stateModel.sourceViewContent },
             snapshotSourceContent = ::snapshotSourceViewContentIfNeeded,
-            currentEntries = { subtitleEntries },
+            currentEntries = { stateModel.subtitleEntries },
             cancelPreview = { sourcePreviewController.cancel() },
             schedulePreview = ::scheduleSourceViewPreview,
             recordHistory = ::recordSourceTextChange,
@@ -666,20 +547,20 @@ class EditorActivity : AppCompatActivity() {
             context = this,
             binding = binding,
             scope = lifecycleScope,
-            hasPlayableMedia = mediaType.hasPlayableMedia,
+            hasPlayableMedia = stateModel.mediaType.hasPlayableMedia,
             appCacheDir = cacheDir,
             mediaRepository = mediaRepository,
             currentPlaybackPositionMs = { playbackController.currentPositionMs },
             onSubtitleChanged = { changedIndex, updatedEntry, dragSessionKey, isFinal ->
-                val currentEntry = subtitleEntries.getOrNull(changedIndex)
+                val currentEntry = stateModel.subtitleEntries.getOrNull(changedIndex)
                     ?: return@EditorWaveformController
-                if (isSourceViewMode) {
-                    val updatedEntries = subtitleEntries.toMutableList().apply {
+                if (stateModel.isSourceViewMode) {
+                    val updatedEntries = stateModel.subtitleEntries.toMutableList().apply {
                         set(changedIndex, updatedEntry.copy())
                     }
                     waveformController.updateSubtitleEntries(
                         mapOf(changedIndex to updatedEntry.copy()),
-                        subtitleEntries.size
+                        stateModel.subtitleEntries.size
                     )
                     sourceWaveformSyncController.schedule(
                         updatedEntries,
@@ -687,7 +568,7 @@ class EditorActivity : AppCompatActivity() {
                         isFinal,
                         null
                     )
-                    subtitleEntries[changedIndex] = updatedEntry.copy()
+                    stateModel.subtitleEntries[changedIndex] = updatedEntry.copy()
                     markAsChanged()
                 } else {
                     currentEntry.startTime = updatedEntry.startTime
@@ -702,7 +583,7 @@ class EditorActivity : AppCompatActivity() {
                 }
             },
             onSelectedIndexChanged = { index ->
-                if (index in subtitleEntries.indices) {
+                if (index in stateModel.subtitleEntries.indices) {
                     (binding.rvSubtitles.layoutManager as? LinearLayoutManager)?.let { manager ->
                         manager.scrollToPositionWithOffset(index, 0)
                     }
@@ -723,22 +604,22 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun setupVideoPanel() {
-        val isVideo = mediaType == EditorMediaType.VIDEO
+        val isVideo = stateModel.mediaType == EditorMediaType.VIDEO
         binding.videoSection.visibility = if (isVideo) View.VISIBLE else View.GONE
         binding.audioPlaybackControls.visibility = if (isVideo) View.GONE else View.VISIBLE
-        if (mediaType != EditorMediaType.VIDEO) return
+        if (stateModel.mediaType != EditorMediaType.VIDEO) return
 
-        videoViewportInlineIndex = binding.videoSection.indexOfChild(binding.videoViewportContainer)
+        stateModel.videoViewportInlineIndex = binding.videoSection.indexOfChild(binding.videoViewportContainer)
             .coerceAtLeast(0)
         videoFullscreenController = EditorVideoFullscreenController(
             activity = this,
             binding = binding,
             isVideo = isVideo,
-            isFullscreen = { isVideoFullscreen },
-            setFullscreen = { isVideoFullscreen = it },
-            inlineViewportIndex = { videoViewportInlineIndex },
-            previousOrientation = { previousRequestedOrientation },
-            setPreviousOrientation = { previousRequestedOrientation = it }
+            isFullscreen = { stateModel.isVideoFullscreen },
+            setFullscreen = { stateModel.isVideoFullscreen = it },
+            inlineViewportIndex = { stateModel.videoViewportInlineIndex },
+            previousOrientation = { stateModel.previousRequestedOrientation },
+            setPreviousOrientation = { stateModel.previousRequestedOrientation = it }
         )
         videoFullscreenController.bind {
             playbackController.showVideoControlsForInteraction()
@@ -761,13 +642,13 @@ class EditorActivity : AppCompatActivity() {
         }
 
         val mediaFile = waveformMediaFile ?: return
-        if (mediaType == EditorMediaType.VIDEO && audioStreamIndex == null) {
-            waveformController.showNoAudioTrack(durationMs, subtitleEntries.toList())
+        if (stateModel.mediaType == EditorMediaType.VIDEO && audioStreamIndex == null) {
+            waveformController.showNoAudioTrack(durationMs, stateModel.subtitleEntries.toList())
         } else {
             waveformController.load(
                 mediaFile,
                 durationMs,
-                subtitleEntries.toList(),
+                stateModel.subtitleEntries.toList(),
                 ffmpegAudioStreamIndex
             )
         }
@@ -775,12 +656,12 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun scheduleSubtitlePreview() {
-        if (mediaType != EditorMediaType.VIDEO || !::subtitlePreviewController.isInitialized) return
+        if (stateModel.mediaType != EditorMediaType.VIDEO || !::subtitlePreviewController.isInitialized) return
         subtitlePreviewController.schedule(
-            format = currentFormat,
-            entries = subtitleEntries,
-            sourceViewMode = isSourceViewMode,
-            sourceContent = if (isSourceViewMode) sourceViewContent else originalFileContent
+            format = stateModel.currentFormat,
+            entries = stateModel.subtitleEntries,
+            sourceViewMode = stateModel.isSourceViewMode,
+            sourceContent = if (stateModel.isSourceViewMode) stateModel.sourceViewContent else stateModel.originalFileContent
         )
     }
 
@@ -795,10 +676,10 @@ class EditorActivity : AppCompatActivity() {
      * changed source block immediately and therefore do not make view switches or history wait.
      */
     private fun applySimpleSourceLineChange(startLine: Int, oldLineCount: Int, newLineCount: Int) {
-        if (subtitleEntries.isEmpty()) return
+        if (stateModel.subtitleEntries.isEmpty()) return
         val update = sourceLineEditController.resolve(startLine, oldLineCount, newLineCount) ?: return
         val entryIndex = update.entryIndex
-        val current = subtitleEntries.getOrNull(entryIndex) ?: return
+        val current = stateModel.subtitleEntries.getOrNull(entryIndex) ?: return
         val updated = update.entry
         current.startTime = updated.startTime
         current.endTime = updated.endTime
@@ -806,9 +687,9 @@ class EditorActivity : AppCompatActivity() {
         current.endTimeModified = updated.endTimeModified
         current.cueIdentifier = updated.cueIdentifier
         current.cueSettings = updated.cueSettings
-        sourceViewEntriesGeneration = sourceViewEditGeneration
+        stateModel.documentState.sourceViewEntriesGeneration = stateModel.documentState.sourceViewEditGeneration
         sourceViewHasPendingEdits = false
-        stateModel.updateSourceHistory(sourceViewContent, subtitleEntries)
+        stateModel.updateSourceHistory(stateModel.sourceViewContent, stateModel.subtitleEntries)
         if (::subtitleAdapter.isInitialized && entryIndex in 0 until subtitleAdapter.itemCount) {
             subtitleAdapter.notifyItemChanged(entryIndex)
         }
@@ -831,14 +712,14 @@ class EditorActivity : AppCompatActivity() {
             !sourceContainsSubtitleMarker(sourceSnapshot)
         if (canApplyEntries) {
             applySourceViewEntries(parsedDocument.entries)
-            stateModel.updateLatestSourceHistory(sourceSnapshot, subtitleEntries)
-            sourceViewEntriesGeneration = editGeneration
+            stateModel.updateLatestSourceHistory(sourceSnapshot, stateModel.subtitleEntries)
+            stateModel.documentState.sourceViewEntriesGeneration = editGeneration
             sourceViewHasPendingEdits = false
         }
 
-        if (mediaType == EditorMediaType.VIDEO && ::subtitlePreviewController.isInitialized) {
+        if (stateModel.mediaType == EditorMediaType.VIDEO && ::subtitlePreviewController.isInitialized) {
             subtitlePreviewController.schedule(
-                format = currentFormat,
+                format = stateModel.currentFormat,
                 entries = parsedDocument.entries,
                 sourceViewMode = true,
                 sourceContent = sourceSnapshot
@@ -848,13 +729,13 @@ class EditorActivity : AppCompatActivity() {
 
     /** 将波形拖动后的时间字段回写源视图，避免每次 MOVE 都触发逐行重建。 */
     private fun applySourceWaveformUpdatedSource(updatedSource: String) {
-        originalFileContent = updatedSource
-        sourceViewContent = updatedSource
-        sourceHistoryTextSnapshot = updatedSource
+        stateModel.originalFileContent = updatedSource
+        stateModel.sourceViewContent = updatedSource
+        stateModel.sourceHistoryTextSnapshot = updatedSource
         sourceViewHasPendingEdits = false
-        stateModel.updateLatestSourceHistory(updatedSource, subtitleEntries)
-        sourceViewEditGeneration++
-        sourceViewEntriesGeneration = sourceViewEditGeneration
+        stateModel.updateLatestSourceHistory(updatedSource, stateModel.subtitleEntries)
+        stateModel.documentState.sourceViewEditGeneration++
+        stateModel.documentState.sourceViewEntriesGeneration = stateModel.documentState.sourceViewEditGeneration
         setSourceViewEditorText(updatedSource, preserveScroll = true)
         updateFormatInfo()
         scheduleSubtitlePreview()
@@ -869,7 +750,7 @@ class EditorActivity : AppCompatActivity() {
             saveDraft = ::saveTranslationDraft,
             showMessage = ::showShortToast,
             aiTranslationService = (application as SubtitleEditApplication).dependencies.aiTranslationService,
-            subtitleFormatProvider = { currentFormat }
+            subtitleFormatProvider = { stateModel.currentFormat }
         )
         transcribeController = EditorTranscribeController(
             activity = this,
@@ -890,10 +771,10 @@ class EditorActivity : AppCompatActivity() {
     private fun updateSelectedCountDisplay() {
         val count = subtitleAdapter.getSelectedCount()
         if (count > 0) {
-            val formatName = SubtitleFormatPolicy.displayName(currentFormat)
-            supportActionBar?.subtitle = "$formatName | ${subtitleEntries.size} 条 | 选中：$count"
+            val formatName = SubtitleFormatPolicy.displayName(stateModel.currentFormat)
+            supportActionBar?.subtitle = "$formatName | ${stateModel.subtitleEntries.size} 条 | 选中：$count"
         } else {
-            supportActionBar?.subtitle = currentFormatInfo
+            supportActionBar?.subtitle = stateModel.currentFormatInfo
         }
         binding.toolbar.navigationIcon = ContextCompat.getDrawable(
             this,
@@ -911,13 +792,13 @@ class EditorActivity : AppCompatActivity() {
 
     private fun restoreDocumentState() {
         setDocumentTitle(stateModel.documentTitle)
-        if (isSourceViewMode) {
+        if (stateModel.isSourceViewMode) {
             binding.rvSubtitles.visibility = View.GONE
             binding.sourceViewContainer.visibility = View.VISIBLE
-            val wasUnsaved = hasUnsavedChanges
-            configureSourceViewEditor(sourceViewContent)
-            hasUnsavedChanges = wasUnsaved
-            binding.etSourceView.post { binding.etSourceView.scrollToDocumentY(savedScrollPosition) }
+            val wasUnsaved = stateModel.hasUnsavedChanges
+            configureSourceViewEditor(stateModel.sourceViewContent)
+            stateModel.hasUnsavedChanges = wasUnsaved
+            binding.etSourceView.post { binding.etSourceView.scrollToDocumentY(stateModel.savedScrollPosition) }
         } else {
             binding.sourceViewContainer.visibility = View.GONE
             binding.rvSubtitles.visibility = View.VISIBLE
@@ -928,9 +809,9 @@ class EditorActivity : AppCompatActivity() {
                 syncWaveform = false
             ) {
                 val layoutManager = binding.rvSubtitles.layoutManager as LinearLayoutManager
-                val position = savedFirstVisibleItemPosition
-                if (position in subtitleEntries.indices) {
-                    layoutManager.scrollToPositionWithOffset(position, savedScrollPosition)
+                val position = stateModel.savedFirstVisibleItemPosition
+                if (position in stateModel.subtitleEntries.indices) {
+                    layoutManager.scrollToPositionWithOffset(position, stateModel.savedScrollPosition)
                 }
             }
         }
@@ -939,12 +820,12 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun loadFile() {
-        if (filePath.isEmpty() || currentFile == null) {
+        if (stateModel.filePath.isEmpty() || stateModel.currentFile == null) {
             finishWithToast("文件路径无效")
             return
         }
 
-        val file = currentFile ?: run {
+        val file = stateModel.currentFile ?: run {
             finishWithToast("文件路径无效")
             return
         }
@@ -957,8 +838,8 @@ class EditorActivity : AppCompatActivity() {
         setDocumentTitle(file.name)
         // 使用用户设置的默认编码
         val settingsManager = SettingsManager.getInstance(this)
-        currentCharset = settingsManager.getDefaultEncoding()
-        val charset = currentCharset
+        stateModel.currentCharset = settingsManager.getDefaultEncoding()
+        val charset = stateModel.currentCharset
 
         lifecycleScope.launch {
             val content = runCatching {
@@ -970,8 +851,8 @@ class EditorActivity : AppCompatActivity() {
                 return@launch
             }
             parseContent(content, file.name)
-            hasUnsavedChanges = false
-            isNewFile = false
+            stateModel.hasUnsavedChanges = false
+            stateModel.isNewFile = false
         }
     }
 
@@ -986,7 +867,7 @@ class EditorActivity : AppCompatActivity() {
                 setDocumentTitle(stateModel.documentTitle)
                 takePersistableWritePermission(uri)
                 parseContent(content, fileName)
-                hasUnsavedChanges = false
+                stateModel.hasUnsavedChanges = false
                 com.subtitleedit.util.OverwritingToast.makeText(this@EditorActivity, "文件已打开：$fileName", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 com.subtitleedit.util.OverwritingToast.makeText(this@EditorActivity, "打开文件失败：${e.message}", Toast.LENGTH_SHORT).show()
@@ -1000,13 +881,13 @@ class EditorActivity : AppCompatActivity() {
     private fun getFileNameFromUri(uri: Uri): String = fileSessionController.fileName(uri)
     
     private fun reloadFile() {
-        val targetFile = if (mediaType.hasPlayableMedia) subtitleFile else currentFile
+        val targetFile = if (stateModel.mediaType.hasPlayableMedia) stateModel.subtitleFile else stateModel.currentFile
         if (targetFile == null || !targetFile.exists()) {
             showShortToast("当前文件无法重新加载编码，请通过「打开」功能重新选择文件")
             return
         }
 
-        val charset = currentCharset
+        val charset = stateModel.currentCharset
         lifecycleScope.launch {
             val content = runCatching {
                 withContext(Dispatchers.IO) {
@@ -1017,16 +898,16 @@ class EditorActivity : AppCompatActivity() {
                 return@launch
             }
             parseContent(content, targetFile.name)
-            hasUnsavedChanges = false
-            showShortToast("已切换编码为：${FileUtils.SUPPORTED_ENCODINGS.find { it.charset == currentCharset }?.displayName}")
+            stateModel.hasUnsavedChanges = false
+            showShortToast("已切换编码为：${FileUtils.SUPPORTED_ENCODINGS.find { it.charset == stateModel.currentCharset }?.displayName}")
         }
     }
     
     private fun parseContent(content: String, fileName: String? = null) {
         val document = stateModel.loadSubtitleContent(content, fileName)
-        currentFormat = document.format
+        stateModel.currentFormat = document.format
         
-        if (currentFormat.isSourceOnly) {
+        if (stateModel.currentFormat.isSourceOnly) {
             // Source-only documents still need a block model for waveform playback and for
             // keeping source rows aligned with the list view.  The source editor displays
             // the untouched full text, while these parsed entries provide the corresponding
@@ -1040,7 +921,7 @@ class EditorActivity : AppCompatActivity() {
         
         updateFormatInfo()
         
-        if (subtitleEntries.isEmpty() && !isSourceViewMode) {
+        if (stateModel.subtitleEntries.isEmpty() && !stateModel.isSourceViewMode) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "未找到字幕内容", Toast.LENGTH_SHORT).show()
         }
         
@@ -1057,26 +938,26 @@ class EditorActivity : AppCompatActivity() {
      * 并存，正是日志中 native heap 峰值与 ANR 的高风险窗口。
      */
     private fun enterSourceViewMode(onFinished: (() -> Unit)? = null) {
-        isSourceViewMode = true
+        stateModel.isSourceViewMode = true
         sourceListParseJob?.cancel()
         sourceListParseJob = null
         sourceWaveformSyncController.cancel()
         sourceViewHasPendingEdits = false
-        sourceViewEditGeneration++
-        sourceViewEntriesGeneration = sourceViewEditGeneration
+        stateModel.documentState.sourceViewEditGeneration++
+        stateModel.documentState.sourceViewEntriesGeneration = stateModel.documentState.sourceViewEditGeneration
         if (::searchController.isInitialized) searchController.clearSourceWorkForTransition()
         
         // 保存 RecyclerView 的滚动位置
         val layoutManager = binding.rvSubtitles.layoutManager as LinearLayoutManager
-        savedFirstVisibleItemPosition = layoutManager.findFirstVisibleItemPosition()
-        val firstView = layoutManager.findViewByPosition(savedFirstVisibleItemPosition)
-        savedScrollPosition = firstView?.top ?: 0
-        sourceViewEntryCount = subtitleEntries.size
+        stateModel.savedFirstVisibleItemPosition = layoutManager.findFirstVisibleItemPosition()
+        val firstView = layoutManager.findViewByPosition(stateModel.savedFirstVisibleItemPosition)
+        stateModel.savedScrollPosition = firstView?.top ?: 0
+        stateModel.sourceViewEntryCount = stateModel.subtitleEntries.size
 
         binding.rvSubtitles.visibility = View.GONE
         binding.sourceViewContainer.visibility = View.GONE
 
-        configureSourceViewEditor(sourceViewContent)
+        configureSourceViewEditor(stateModel.sourceViewContent)
 
         binding.rvSubtitles.animate().cancel()
         binding.sourceViewContainer.animate().cancel()
@@ -1084,10 +965,10 @@ class EditorActivity : AppCompatActivity() {
         binding.sourceViewContainer.alpha = 1f
         binding.sourceViewContainer.visibility = View.VISIBLE
         binding.etSourceView.post {
-            if (savedFirstVisibleItemPosition >= 0 &&
-                savedFirstVisibleItemPosition < sourceViewEntryCount
+            if (stateModel.savedFirstVisibleItemPosition >= 0 &&
+                stateModel.savedFirstVisibleItemPosition < stateModel.sourceViewEntryCount
             ) {
-                val estimatedScroll = savedFirstVisibleItemPosition * 80 - savedScrollPosition
+                val estimatedScroll = stateModel.savedFirstVisibleItemPosition * 80 - stateModel.savedScrollPosition
                 binding.etSourceView.scrollToDocumentY(estimatedScroll.coerceAtLeast(0))
             }
             onFinished?.invoke()
@@ -1102,11 +983,11 @@ class EditorActivity : AppCompatActivity() {
         sourceScrollPosition: Int? = null,
         onFinished: (() -> Unit)? = null
     ) {
-        isSourceViewMode = false
+        stateModel.isSourceViewMode = false
         if (::searchController.isInitialized) searchController.clearSourceWorkForTransition()
         
         // 保存 ScrollView 的滚动位置
-        savedScrollPosition = sourceScrollPosition ?: binding.etSourceView.getDocumentScrollOffset()
+        stateModel.savedScrollPosition = sourceScrollPosition ?: binding.etSourceView.getDocumentScrollOffset()
         
         submitSubtitleList(
             refreshAll = false,
@@ -1122,10 +1003,10 @@ class EditorActivity : AppCompatActivity() {
                 binding.rvSubtitles.visibility = View.VISIBLE
                 binding.rvSubtitles.post {
                     val layoutManager = binding.rvSubtitles.layoutManager as LinearLayoutManager
-                    if (subtitleEntries.isNotEmpty()) {
-                        val estimatedPosition = savedScrollPosition / 80
+                    if (stateModel.subtitleEntries.isNotEmpty()) {
+                        val estimatedPosition = stateModel.savedScrollPosition / 80
                         layoutManager.scrollToPositionWithOffset(
-                            estimatedPosition.coerceIn(0, subtitleEntries.lastIndex),
+                            estimatedPosition.coerceIn(0, stateModel.subtitleEntries.lastIndex),
                             0
                         )
                     }
@@ -1142,18 +1023,18 @@ class EditorActivity : AppCompatActivity() {
      * 切换源视图模式
      */
     private fun toggleSourceView() {
-        if (isSourceViewTransitioning || sourceViewTransitionJob?.isActive == true) {
+        if (stateModel.isSourceViewTransitioning || sourceViewTransitionJob?.isActive == true) {
             showShortToast("正在切换视图，请稍候")
             return
         }
-        if (currentFormat.isSourceOnly) {
-            showShortToast("${SubtitleFormatPolicy.displayName(currentFormat)} 文件使用源码视图编辑")
+        if (stateModel.currentFormat.isSourceOnly) {
+            showShortToast("${SubtitleFormatPolicy.displayName(stateModel.currentFormat)} 文件使用源码视图编辑")
             return
         }
 
-        isSourceViewTransitioning = true
+        stateModel.isSourceViewTransitioning = true
         invalidateOptionsMenu()
-        if (isSourceViewMode) {
+        if (stateModel.isSourceViewMode) {
             // 源视图 → 列表视图：直接切换，解析源视图当前内容
             doExitSourceView()
         } else {
@@ -1174,32 +1055,32 @@ class EditorActivity : AppCompatActivity() {
         sourceViewTransitionJob = lifecycleScope.launch {
             try {
                 sourcePreviewController.cancel()
-                val sourceBase = originalFileContent
-                val freshContent = if (!sourceViewNeedsListSync) {
+                val sourceBase = stateModel.originalFileContent
+                val freshContent = if (!stateModel.sourceViewNeedsListSync) {
                     sourceBase
                 } else {
-                    val listSnapshot = subtitleEntries.toList()
+                    val listSnapshot = stateModel.subtitleEntries.toList()
                     withContext(Dispatchers.Default) {
                         SubtitleSourceSynchronizer.apply(
                             content = sourceBase,
-                            format = currentFormat,
+                            format = stateModel.currentFormat,
                             oldEntries = SubtitleParser.parseDocument(
                                 sourceBase,
-                                format = currentFormat
+                                format = stateModel.currentFormat
                             ).entries,
                             newEntries = listSnapshot
                         )
                     }
                 }
 
-                originalFileContent = freshContent
-                sourceViewContent = freshContent
-                sourceHistoryTextSnapshot = freshContent
-                sourceViewNeedsListSync = false
+                stateModel.originalFileContent = freshContent
+                stateModel.sourceViewContent = freshContent
+                stateModel.sourceHistoryTextSnapshot = freshContent
+                stateModel.sourceViewNeedsListSync = false
                 sourceViewHasPendingEdits = false
                 enterSourceViewMode {
                     sourceViewTransitionJob = null
-                    isSourceViewTransitioning = false
+                    stateModel.isSourceViewTransitioning = false
                     invalidateOptionsMenu()
                     // 用完整源码内容重新建立 mpv 字幕轨。
                     scheduleSubtitlePreview()
@@ -1209,7 +1090,7 @@ class EditorActivity : AppCompatActivity() {
                 throw e
             } catch (e: Exception) {
                 sourceViewTransitionJob = null
-                isSourceViewTransitioning = false
+                stateModel.isSourceViewTransitioning = false
                 invalidateOptionsMenu()
                 showShortToast("切换到源视图失败：${e.message}")
             }
@@ -1222,7 +1103,7 @@ class EditorActivity : AppCompatActivity() {
     private fun doExitSourceView() {
         if (sourceViewTransitionJob?.isActive == true) return
         val sourceScrollPosition = binding.etSourceView.getDocumentScrollOffset()
-        var editedContent = sourceViewContent
+        var editedContent = stateModel.sourceViewContent
         // 先禁用源行编辑，再在后台构建字幕条目列表，避免切换期间两套编辑状态并存。
         binding.etSourceView.setDocumentEnabled(false)
         showShortToast("正在切换到列表视图…")
@@ -1230,9 +1111,9 @@ class EditorActivity : AppCompatActivity() {
             var needsBackgroundParse = false
             try {
                 sourceWaveformSyncController.cancelAndJoin()
-                editedContent = sourceViewContent
+                editedContent = stateModel.sourceViewContent
                 sourcePreviewController.cancel()
-                if (sourceViewEntriesGeneration != sourceViewEditGeneration) {
+                if (stateModel.documentState.sourceViewEntriesGeneration != stateModel.documentState.sourceViewEditGeneration) {
                     val appliedLocally = sourceViewCoordinator.applyDeletionLocally(editedContent)
                     if (!appliedLocally) {
                         // Keep the current rows for the transition and parse the large source
@@ -1241,21 +1122,21 @@ class EditorActivity : AppCompatActivity() {
                         needsBackgroundParse = true
                     }
                 }
-                originalFileContent = editedContent
-                sourceViewContent = editedContent
-                sourceHistoryTextSnapshot = editedContent
-                sourceViewNeedsListSync = false
+                stateModel.originalFileContent = editedContent
+                stateModel.sourceViewContent = editedContent
+                stateModel.sourceHistoryTextSnapshot = editedContent
+                stateModel.sourceViewNeedsListSync = false
                 syncEditHistoryBaseline()
                 exitSourceViewMode(sourceScrollPosition) {
                     binding.etSourceView.setDocumentEnabled(true)
                     sourceViewTransitionJob = null
-                    isSourceViewTransitioning = false
+                    stateModel.isSourceViewTransitioning = false
                     invalidateOptionsMenu()
                     updateFormatInfo()
                     // 等源码 Editable、解析临时对象和列表提交完成一个帧周期后，
                     // 再重建 mpv 字幕轨，避免切换瞬间额外复制所有条目。
                     if (needsBackgroundParse) {
-                        scheduleListSourceParse(editedContent, sourceViewEditGeneration)
+                        scheduleListSourceParse(editedContent, stateModel.documentState.sourceViewEditGeneration)
                     } else {
                         sourcePreviewController.scheduleListPreview(::scheduleSubtitlePreview)
                     }
@@ -1267,7 +1148,7 @@ class EditorActivity : AppCompatActivity() {
                 configureSourceViewEditor(editedContent)
                 binding.etSourceView.setDocumentEnabled(true)
                 sourceViewTransitionJob = null
-                isSourceViewTransitioning = false
+                stateModel.isSourceViewTransitioning = false
                 invalidateOptionsMenu()
                 showShortToast("解析失败：${e.message}")
             }
@@ -1280,15 +1161,15 @@ class EditorActivity : AppCompatActivity() {
         sourceListParseJob = lifecycleScope.launch {
             try {
                 val document = withContext(Dispatchers.Default) {
-                    SubtitleParser.parseDocument(content, format = currentFormat)
+                    SubtitleParser.parseDocument(content, format = stateModel.currentFormat)
                 }
-                if (!isActive || isSourceViewMode || sourceViewContent != content ||
-                    generation != sourceViewEditGeneration
+                if (!isActive || stateModel.isSourceViewMode || stateModel.sourceViewContent != content ||
+                    generation != stateModel.documentState.sourceViewEditGeneration
                 ) return@launch
                 applySourceViewEntries(document.entries)
-                sourceViewEntriesGeneration = generation
-                sourceViewNeedsListSync = false
-                stateModel.updateSourceHistory(content, subtitleEntries)
+                stateModel.documentState.sourceViewEntriesGeneration = generation
+                stateModel.sourceViewNeedsListSync = false
+                stateModel.updateSourceHistory(content, stateModel.subtitleEntries)
                 syncEditHistoryBaseline()
                 submitSubtitleList(
                     refreshAll = false,
@@ -1313,32 +1194,32 @@ class EditorActivity : AppCompatActivity() {
 
     private fun configureSourceViewEditor(content: String) {
         setSourceViewEditorText(content)
-        sourceHistoryTextSnapshot = content
+        stateModel.sourceHistoryTextSnapshot = content
         binding.etSourceView.setDocumentEnabled(true)
     }
 
     /** 搜索替换直接重写完整源码内容。 */
     private fun replaceSourceViewContent(content: String) {
-        recordSourceTextChange(sourceHistoryTextSnapshot, content)
+        recordSourceTextChange(stateModel.sourceHistoryTextSnapshot, content)
         setSourceViewEditorText(content)
-        originalFileContent = content
-        sourceViewContent = content
-        sourceHistoryTextSnapshot = content
-        sourceViewNeedsListSync = false
-        hasUnsavedChanges = true
+        stateModel.originalFileContent = content
+        stateModel.sourceViewContent = content
+        stateModel.sourceHistoryTextSnapshot = content
+        stateModel.sourceViewNeedsListSync = false
+        stateModel.hasUnsavedChanges = true
         sourceViewHasPendingEdits = true
-        sourceViewEditGeneration++
+        stateModel.documentState.sourceViewEditGeneration++
         updateFormatInfo()
         scheduleSourceViewPreview()
     }
 
     private fun snapshotSourceViewContentIfNeeded(): String {
-        if (!isSourceViewMode || !sourceViewHasPendingEdits) return sourceViewContent
+        if (!stateModel.isSourceViewMode || !sourceViewHasPendingEdits) return stateModel.sourceViewContent
         val visibleContent = binding.etSourceView.getDocumentText()
         val snapshot = visibleContent
-        originalFileContent = snapshot
-        sourceViewContent = snapshot
-        sourceHistoryTextSnapshot = snapshot
+        stateModel.originalFileContent = snapshot
+        stateModel.sourceViewContent = snapshot
+        stateModel.sourceHistoryTextSnapshot = snapshot
         sourceViewHasPendingEdits = false
         return snapshot
     }
@@ -1359,7 +1240,7 @@ class EditorActivity : AppCompatActivity() {
             .setMessage("确定要用草稿内容覆盖当前编辑内容吗？（只覆盖内容，不更改文件名）")
             .setPositiveButton("确定") { _, _ ->
                 parseContent(content)
-                hasUnsavedChanges = true
+                stateModel.hasUnsavedChanges = true
                 com.subtitleedit.util.OverwritingToast.makeText(this, "已加载草稿：$draftFileName", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("取消", null)
@@ -1374,21 +1255,21 @@ class EditorActivity : AppCompatActivity() {
         
         val selectedCount = subtitleAdapter.getSelectedCount()
         val hasSelection = selectedCount > 0
-        val hasClipboard = clipboardTexts.isNotEmpty()
+        val hasClipboard = stateModel.clipboardTexts.isNotEmpty()
         
         val regularActions = mutableListOf<Pair<String, () -> Unit>>()
-        if (currentFormat == SubtitleParser.SubtitleFormat.VTT) {
+        if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.VTT) {
             regularActions.add("WebVTT Cue 属性" to { showWebVttCueDialog(position) })
         }
         regularActions.add("时间偏移" to { showOffsetDialog(position) })
         if (hasClipboard) {
-            regularActions.add("向前粘贴 (${clipboardTexts.size}项)" to {
+            regularActions.add("向前粘贴 (${stateModel.clipboardTexts.size}项)" to {
                 insertSubtitle(after = false, refPosition = position, pasteAfterInsert = true)
             })
         }
         regularActions.add("向前插入" to { insertSubtitle(false, position) })
         if (hasClipboard) {
-            regularActions.add("向后粘贴 (${clipboardTexts.size}项)" to {
+            regularActions.add("向后粘贴 (${stateModel.clipboardTexts.size}项)" to {
                 insertSubtitle(after = true, refPosition = position, pasteAfterInsert = true)
             })
         }
@@ -1396,7 +1277,7 @@ class EditorActivity : AppCompatActivity() {
         regularActions.add("复制" to { copySingle(position) })
         regularActions.add("剪切 (粘贴后删除)" to { cutSingle(position) })
         regularActions.add(
-            (if (hasClipboard) "粘贴 (${clipboardTexts.size}项)[当前行]" else "粘贴") to {
+            (if (hasClipboard) "粘贴 (${stateModel.clipboardTexts.size}项)[当前行]" else "粘贴") to {
                 if (hasClipboard) pasteToPosition(position) else ensureClipboardNotEmpty()
             }
         )
@@ -1435,7 +1316,7 @@ class EditorActivity : AppCompatActivity() {
         itemsList.add("复制")
         itemsList.add("剪切 (粘贴后删除)")
         if (hasClipboard) {
-            itemsList.add("粘贴 (${clipboardTexts.size}项)")
+            itemsList.add("粘贴 (${stateModel.clipboardTexts.size}项)")
         } else {
             itemsList.add("粘贴")
         }
@@ -1464,10 +1345,10 @@ class EditorActivity : AppCompatActivity() {
      * 复制单个字幕（长按的字幕）
      */
     private fun copySingle(position: Int) {
-        if (isSourceViewMode) return
+        if (stateModel.isSourceViewMode) return
         
-        if (position >= 0 && position < subtitleEntries.size) {
-            clipboardTexts = listOf(subtitleEntries[position].text)
+        if (position >= 0 && position < stateModel.subtitleEntries.size) {
+            stateModel.clipboardTexts = listOf(stateModel.subtitleEntries[position].text)
             cutPasteController.clear()
             com.subtitleedit.util.OverwritingToast.makeText(this, "已复制", Toast.LENGTH_SHORT).show()
         }
@@ -1477,11 +1358,11 @@ class EditorActivity : AppCompatActivity() {
      * 剪切单个字幕（长按的字幕）
      */
     private fun cutSingle(position: Int) {
-        if (isSourceViewMode) return
+        if (stateModel.isSourceViewMode) return
         
-        if (position >= 0 && position < subtitleEntries.size) {
+        if (position >= 0 && position < stateModel.subtitleEntries.size) {
             // 先保存到剪贴板
-            clipboardTexts = listOf(subtitleEntries[position].text)
+            stateModel.clipboardTexts = listOf(stateModel.subtitleEntries[position].text)
             cutPasteController.markSingleCut(position)
             com.subtitleedit.util.OverwritingToast.makeText(this, "已剪切", Toast.LENGTH_SHORT).show()
         }
@@ -1495,9 +1376,9 @@ class EditorActivity : AppCompatActivity() {
         
         val selectedEntries = requireSelectedEntries("请先选择要剪切的字幕") ?: return
         
-        clipboardTexts = listOperationsController.copy(subtitleEntries, selectedEntries.map { it.second })
+        stateModel.clipboardTexts = listOperationsController.copy(stateModel.subtitleEntries, selectedEntries.map { it.second })
         cutPasteController.markMultiCut(selectedEntries.map { it.second })
-        com.subtitleedit.util.OverwritingToast.makeText(this, "已剪切 ${clipboardTexts.size} 项", Toast.LENGTH_SHORT).show()
+        com.subtitleedit.util.OverwritingToast.makeText(this, "已剪切 ${stateModel.clipboardTexts.size} 项", Toast.LENGTH_SHORT).show()
     }
     
     /**
@@ -1508,7 +1389,7 @@ class EditorActivity : AppCompatActivity() {
 
         val deletedIndices = cutPasteController.snapshotDeletedIndices()
         val historyBefore = currentHistoryListState()
-        listOperationsController.removePendingCut(subtitleEntries, cutPasteController)
+        listOperationsController.removePendingCut(stateModel.subtitleEntries, cutPasteController)
         syncAfterDelete(deletedIndices, historyBefore)
     }
     
@@ -1520,8 +1401,8 @@ class EditorActivity : AppCompatActivity() {
         
         if (!ensureClipboardNotEmpty()) return
 
-        if (position >= 0 && position < subtitleEntries.size) {
-            val targetSnapshot = SubtitleEntryOps.deepCopy(subtitleEntries[position])
+        if (position >= 0 && position < stateModel.subtitleEntries.size) {
+            val targetSnapshot = SubtitleEntryOps.deepCopy(stateModel.subtitleEntries[position])
             var targetPosition = position
             // 如果是剪切模式，先删除原字幕
             if (cutPasteController.hasPendingCut()) {
@@ -1529,16 +1410,16 @@ class EditorActivity : AppCompatActivity() {
                 performCutDelete()
             }
 
-            if (subtitleEntries.isEmpty()) {
-                EditorDocumentOperations.addAt(subtitleEntries, 0, targetSnapshot)
+            if (stateModel.subtitleEntries.isEmpty()) {
+                EditorDocumentOperations.addAt(stateModel.subtitleEntries, 0, targetSnapshot)
                 targetPosition = 0
             }
-            targetPosition = targetPosition.coerceIn(0, subtitleEntries.lastIndex)
+            targetPosition = targetPosition.coerceIn(0, stateModel.subtitleEntries.lastIndex)
 
-            val pasteResult = listOperationsController.pasteAt(subtitleEntries, targetPosition, clipboardTexts)
+            val pasteResult = listOperationsController.pasteAt(stateModel.subtitleEntries, targetPosition, stateModel.clipboardTexts)
             if (pasteResult.structureChanged) {
                 submitSubtitleList(refreshAll = true, markChanged = true)
-                com.subtitleedit.util.OverwritingToast.makeText(this, "已粘贴 ${clipboardTexts.size} 项", Toast.LENGTH_SHORT).show()
+                com.subtitleedit.util.OverwritingToast.makeText(this, "已粘贴 ${stateModel.clipboardTexts.size} 项", Toast.LENGTH_SHORT).show()
             } else {
                 notifyEntriesChanged(pasteResult.affectedPositions)
                 com.subtitleedit.util.OverwritingToast.makeText(this, "已粘贴", Toast.LENGTH_SHORT).show()
@@ -1552,7 +1433,7 @@ class EditorActivity : AppCompatActivity() {
     private fun deleteSingleSubtitle(position: Int) {
         if (!ensureListMode()) return
         
-        if (position >= 0 && position < subtitleEntries.size) {
+        if (position >= 0 && position < stateModel.subtitleEntries.size) {
                 showDeleteConfirm("确定要删除此字幕吗？") {
                     val historyBefore = currentHistoryListState()
                     stateModel.execute(EditorCommand.Delete(setOf(position)))
@@ -1571,22 +1452,22 @@ class EditorActivity : AppCompatActivity() {
         pasteAfterInsert: Boolean = false
     ) {
         if (!ensureListMode()) return
-        if (refPosition !in subtitleEntries.indices) return
+        if (refPosition !in stateModel.subtitleEntries.indices) return
         if (pasteAfterInsert && !ensureClipboardNotEmpty()) return
 
         // 剪切粘贴会删除来源行，先保留参考行时间并修正插入位置。
-        val refEntry = SubtitleEntryOps.deepCopy(subtitleEntries[refPosition])
+        val refEntry = SubtitleEntryOps.deepCopy(stateModel.subtitleEntries[refPosition])
         var insertPosition = if (after) refPosition + 1 else refPosition
         if (pasteAfterInsert && cutPasteController.hasPendingCut()) {
             insertPosition = cutPasteController.adjustPastePositionAfterCut(insertPosition)
             performCutDelete()
         }
-        insertPosition = insertPosition.coerceIn(0, subtitleEntries.size)
+        insertPosition = insertPosition.coerceIn(0, stateModel.subtitleEntries.size)
 
         val insertedEntries = listOperationsController.createInserted(
-            after, refEntry, subtitleEntries.getOrNull(insertPosition - 1),
-            subtitleEntries.getOrNull(insertPosition),
-            if (pasteAfterInsert) clipboardTexts else listOf("新字幕"), insertPosition
+            after, refEntry, stateModel.subtitleEntries.getOrNull(insertPosition - 1),
+            stateModel.subtitleEntries.getOrNull(insertPosition),
+            if (pasteAfterInsert) stateModel.clipboardTexts else listOf("新字幕"), insertPosition
         )
         stateModel.execute(EditorCommand.Insert(insertPosition, insertedEntries))
         renumberEntries(force = true)
@@ -1600,7 +1481,7 @@ class EditorActivity : AppCompatActivity() {
         }
         setWaveformSubtitlesKeepSelection(insertPosition)
         val message = if (pasteAfterInsert) {
-            "已${if (after) "向后" else "向前"}粘贴 ${clipboardTexts.size} 项"
+            "已${if (after) "向后" else "向前"}粘贴 ${stateModel.clipboardTexts.size} 项"
         } else {
             "已插入新字幕"
         }
@@ -1617,8 +1498,8 @@ class EditorActivity : AppCompatActivity() {
             this.endTime = realEnd
             this.text = "新字幕"
         }
-        val insertPos = subtitleEntries.indexOfFirst { it.startTime > realStart }
-            .let { if (it == -1) subtitleEntries.size else it }
+        val insertPos = stateModel.subtitleEntries.indexOfFirst { it.startTime > realStart }
+            .let { if (it == -1) stateModel.subtitleEntries.size else it }
 
         stateModel.execute(EditorCommand.Insert(insertPos, listOf(newEntry)))
         renumberEntries(force = true)
@@ -1673,9 +1554,9 @@ class EditorActivity : AppCompatActivity() {
         
         val selectedEntries = requireSelectedEntries("请先选择要复制的字幕") ?: return
         
-        clipboardTexts = listOperationsController.copy(subtitleEntries, selectedEntries.map { it.second })
+        stateModel.clipboardTexts = listOperationsController.copy(stateModel.subtitleEntries, selectedEntries.map { it.second })
         cutPasteController.clear()
-        com.subtitleedit.util.OverwritingToast.makeText(this, "已复制 ${clipboardTexts.size} 项", Toast.LENGTH_SHORT).show()
+        com.subtitleedit.util.OverwritingToast.makeText(this, "已复制 ${stateModel.clipboardTexts.size} 项", Toast.LENGTH_SHORT).show()
     }
     
     /**
@@ -1689,8 +1570,8 @@ class EditorActivity : AppCompatActivity() {
         val selectedEntries = requireSelectedEntries("请先选择要粘贴到的字幕") ?: return
 
         val selectedPositionsBeforeCut = selectedEntries.map { it.second }.sorted()
-        if (clipboardTexts.size < selectedPositionsBeforeCut.size) {
-            showShortToast("剪贴板行数不足：剪贴板 ${clipboardTexts.size} 行，当前选中 ${selectedPositionsBeforeCut.size} 行")
+        if (stateModel.clipboardTexts.size < selectedPositionsBeforeCut.size) {
+            showShortToast("剪贴板行数不足：剪贴板 ${stateModel.clipboardTexts.size} 行，当前选中 ${selectedPositionsBeforeCut.size} 行")
             return
         }
         var selectedPositions = selectedPositionsBeforeCut
@@ -1714,9 +1595,9 @@ class EditorActivity : AppCompatActivity() {
         }
 
         val pasteResult = SubtitlePasteOps.pasteToSelection(
-            entries = subtitleEntries,
+            entries = stateModel.subtitleEntries,
             selectedPositions = selectedPositions,
-            clipboardTexts = clipboardTexts
+            clipboardTexts = stateModel.clipboardTexts
         )
 
         submitSubtitleList(
@@ -1724,18 +1605,18 @@ class EditorActivity : AppCompatActivity() {
             selectedIndices = pasteResult.affectedPositions,
             markChanged = true
         )
-        com.subtitleedit.util.OverwritingToast.makeText(this, "已粘贴 ${clipboardTexts.size} 项", Toast.LENGTH_SHORT).show()
+        com.subtitleedit.util.OverwritingToast.makeText(this, "已粘贴 ${stateModel.clipboardTexts.size} 项", Toast.LENGTH_SHORT).show()
     }
     
     private fun markAsChanged() {
-        hasUnsavedChanges = true
+        stateModel.hasUnsavedChanges = true
     }
 
     private fun currentHistoryListState(): EditorEditHistory.ListState =
         EditorEditHistory.ListState(
-            entries = subtitleEntries.map { it.copy() },
+            entries = stateModel.subtitleEntries.map { it.copy() },
             selectedIds = if (::subtitleAdapter.isInitialized) {
-                val currentIds = subtitleEntries.mapTo(mutableSetOf()) { it.stableId }
+                val currentIds = stateModel.subtitleEntries.mapTo(mutableSetOf()) { it.stableId }
                 subtitleAdapter.getSelectedEntries()
                     .mapTo(mutableSetOf()) { it.first.stableId }
                     .filterTo(mutableSetOf()) { it in currentIds }
@@ -1767,7 +1648,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun recordListSelectionChange() {
-        if (suppressHistoryRecording || isSourceViewMode) return
+        if (suppressHistoryRecording || stateModel.isSourceViewMode) return
         recordListStateChange()
     }
 
@@ -1779,7 +1660,7 @@ class EditorActivity : AppCompatActivity() {
             return
         }
         syncEditHistoryBaseline()
-        hasUnsavedChanges = true
+        stateModel.hasUnsavedChanges = true
         invalidateOptionsMenu()
     }
 
@@ -1791,7 +1672,7 @@ class EditorActivity : AppCompatActivity() {
             return
         }
         syncEditHistoryBaseline()
-        hasUnsavedChanges = true
+        stateModel.hasUnsavedChanges = true
         invalidateOptionsMenu()
     }
 
@@ -1808,7 +1689,7 @@ class EditorActivity : AppCompatActivity() {
                 } else {
                     operation.afterSourceText
                 }
-                if (isSourceViewMode) {
+                if (stateModel.isSourceViewMode) {
                     applyListHistoryInSourceView(target.entries, targetSourceText)
                 } else {
                     applyListHistoryInListView(target, targetSourceText)
@@ -1836,22 +1717,22 @@ class EditorActivity : AppCompatActivity() {
             effectiveTargetEntries = targetEntries
             updated = targetSourceText
         } else {
-            val source = sourceViewContent
-            val currentEntries = SubtitleParser.parseDocument(source, format = currentFormat).entries
+            val source = stateModel.sourceViewContent
+            val currentEntries = SubtitleParser.parseDocument(source, format = stateModel.currentFormat).entries
             effectiveTargetEntries = SubtitleEntryOps.applyEditableHistoryTarget(
-                current = subtitleEntries,
+                current = stateModel.subtitleEntries,
                 target = targetEntries
             )
             updated = SubtitleSourceSynchronizer.apply(
                 content = source,
-                format = currentFormat,
+                format = stateModel.currentFormat,
                 oldEntries = currentEntries,
                 newEntries = effectiveTargetEntries
             )
         }
-        originalFileContent = updated
-        sourceViewContent = updated
-        sourceHistoryTextSnapshot = updated
+        stateModel.originalFileContent = updated
+        stateModel.sourceViewContent = updated
+        stateModel.sourceHistoryTextSnapshot = updated
         setSourceViewEditorText(updated, preserveScroll = true)
         applySourceViewEntries(effectiveTargetEntries.map { it.copy() })
         updateFormatInfo()
@@ -1866,31 +1747,31 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
-        val previousCount = subtitleEntries.size
+        val previousCount = stateModel.subtitleEntries.size
         val effectiveTargetEntries: List<SubtitleEntry>
         val updatedSource: String
         if (targetSourceText != null) {
             effectiveTargetEntries = target.entries
             updatedSource = targetSourceText
         } else {
-            val source = originalFileContent
-            val currentEntries = SubtitleParser.parseDocument(source, format = currentFormat).entries
+            val source = stateModel.originalFileContent
+            val currentEntries = SubtitleParser.parseDocument(source, format = stateModel.currentFormat).entries
             effectiveTargetEntries = SubtitleEntryOps.applyEditableHistoryTarget(
-                current = subtitleEntries,
+                current = stateModel.subtitleEntries,
                 target = target.entries
             )
             updatedSource = SubtitleSourceSynchronizer.apply(
                 content = source,
-                format = currentFormat,
+                format = stateModel.currentFormat,
                 oldEntries = currentEntries,
                 newEntries = effectiveTargetEntries
             )
         }
-        originalFileContent = updatedSource
-        sourceViewContent = updatedSource
-        sourceHistoryTextSnapshot = updatedSource
+        stateModel.originalFileContent = updatedSource
+        stateModel.sourceViewContent = updatedSource
+        stateModel.sourceHistoryTextSnapshot = updatedSource
         applySourceViewEntries(effectiveTargetEntries.map { it.copy() })
-        if (previousCount != subtitleEntries.size || subtitleAdapter.itemCount != subtitleEntries.size) {
+        if (previousCount != stateModel.subtitleEntries.size || subtitleAdapter.itemCount != stateModel.subtitleEntries.size) {
             submitSubtitleList(
                 refreshAll = false,
                 syncWaveform = false,
@@ -1906,8 +1787,8 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun canRestoreListEntriesInPlace(targetEntries: List<SubtitleEntry>): Boolean {
-        if (subtitleEntries.size != targetEntries.size) return false
-        return subtitleEntries.zip(targetEntries).all { (current, target) ->
+        if (stateModel.subtitleEntries.size != targetEntries.size) return false
+        return stateModel.subtitleEntries.zip(targetEntries).all { (current, target) ->
             current.stableId == target.stableId &&
                 current.cueIdentifier == target.cueIdentifier &&
                 current.cueSettings == target.cueSettings
@@ -1915,8 +1796,8 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun restoreListEntriesInPlace(target: EditorEditHistory.ListState) {
-        val source = originalFileContent
-        val currentEntries = subtitleEntries.toList()
+        val source = stateModel.originalFileContent
+        val currentEntries = stateModel.subtitleEntries.toList()
         val changedPositions = currentEntries.indices.filter { position ->
             val current = currentEntries[position]
             val historical = target.entries[position]
@@ -1927,7 +1808,7 @@ class EditorActivity : AppCompatActivity() {
         }
         val updatedSource = SubtitleSourceSynchronizer.apply(
             content = source,
-            format = currentFormat,
+            format = stateModel.currentFormat,
             oldEntries = currentEntries,
             newEntries = target.entries
         )
@@ -1940,9 +1821,9 @@ class EditorActivity : AppCompatActivity() {
             current.text = historical.text
             current.endTimeModified = historical.endTimeModified
         }
-        originalFileContent = updatedSource
-        sourceViewContent = updatedSource
-        sourceHistoryTextSnapshot = updatedSource
+        stateModel.originalFileContent = updatedSource
+        stateModel.sourceViewContent = updatedSource
+        stateModel.sourceHistoryTextSnapshot = updatedSource
         if (changedPositions.isNotEmpty()) {
             notifyEntriesChanged(
                 positions = changedPositions,
@@ -1959,18 +1840,18 @@ class EditorActivity : AppCompatActivity() {
         cachedEntries: List<SubtitleEntry>? = null
     ) {
         val selectedIds = currentHistoryListState().selectedIds
-        val previousCount = subtitleEntries.size
-        originalFileContent = targetText
-        sourceViewContent = targetText
-        sourceHistoryTextSnapshot = targetText
-        if (isSourceViewMode) {
+        val previousCount = stateModel.subtitleEntries.size
+        stateModel.originalFileContent = targetText
+        stateModel.sourceViewContent = targetText
+        stateModel.sourceHistoryTextSnapshot = targetText
+        if (stateModel.isSourceViewMode) {
             sourcePreviewController.cancel()
-            sourceViewEditGeneration++
+            stateModel.documentState.sourceViewEditGeneration++
             sourceViewHasPendingEdits = false
             setSourceViewEditorText(targetText, preserveScroll = true)
             if (cachedEntries != null) {
                 applySourceViewEntries(cachedEntries)
-                sourceViewEntriesGeneration = sourceViewEditGeneration
+                stateModel.documentState.sourceViewEntriesGeneration = stateModel.documentState.sourceViewEditGeneration
             } else {
                 scheduleSourceViewPreview()
             }
@@ -1979,12 +1860,12 @@ class EditorActivity : AppCompatActivity() {
         }
 
         if (cachedEntries == null) {
-            sourceViewNeedsListSync = false
-            scheduleListSourceParse(targetText, sourceViewEditGeneration)
+            stateModel.sourceViewNeedsListSync = false
+            scheduleListSourceParse(targetText, stateModel.documentState.sourceViewEditGeneration)
             return
         }
         applySourceViewEntries(cachedEntries)
-        if (previousCount != subtitleEntries.size || subtitleAdapter.itemCount != subtitleEntries.size) {
+        if (previousCount != stateModel.subtitleEntries.size || subtitleAdapter.itemCount != stateModel.subtitleEntries.size) {
             submitSubtitleList(
                 refreshAll = false,
                 selectedStableIds = selectedIds,
@@ -2013,7 +1894,7 @@ class EditorActivity : AppCompatActivity() {
         listPresentationController.notifyPositions(positionList, includeNeighbors)
         if (syncWaveform) syncWaveformSubtitles(changedPositions = positionList)
         if (markChanged) {
-            if (!isSourceViewMode) sourceViewNeedsListSync = true
+            if (!stateModel.isSourceViewMode) stateModel.sourceViewNeedsListSync = true
             recordListStateChange()
             markAsChanged()
         }
@@ -2028,14 +1909,14 @@ class EditorActivity : AppCompatActivity() {
     ) {
         if (changedPositions != null) {
             val changes = changedPositions.distinct().mapNotNull { index ->
-                subtitleEntries.getOrNull(index)?.let { index to it }
+                stateModel.subtitleEntries.getOrNull(index)?.let { index to it }
             }.toMap()
-            if (waveformController.updateSubtitleEntries(changes, subtitleEntries.size)) return
+            if (waveformController.updateSubtitleEntries(changes, stateModel.subtitleEntries.size)) return
         }
         if (preserveSelection) {
-            waveformController.setSubtitlesPreserveSelection(subtitleEntries.toList())
+            waveformController.setSubtitlesPreserveSelection(stateModel.subtitleEntries.toList())
         } else {
-            waveformController.setSubtitles(subtitleEntries.toList())
+            waveformController.setSubtitles(stateModel.subtitleEntries.toList())
         }
     }
 
@@ -2050,7 +1931,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun setWaveformSubtitlesKeepSelection(selectedIndex: Int) {
-        waveformController.setSubtitlesKeepSelection(subtitleEntries.toList(), selectedIndex)
+        waveformController.setSubtitlesKeepSelection(stateModel.subtitleEntries.toList(), selectedIndex)
     }
 
     private fun submitSubtitleList(
@@ -2067,10 +1948,10 @@ class EditorActivity : AppCompatActivity() {
         renumberEntries(force = refreshAll)
         stateModel.refreshDocument()
         val targetSelectedIds = listPresentationController.targetSelection(
-            selectedIndices, selectedStableIds, clearSelection
+            stateModel.selectedIndices, selectedStableIds, clearSelection
         )
         if (markChanged) recordListStateChange(targetSelectedIds)
-        subtitleAdapter.submitList(subtitleEntries.toList()) {
+        subtitleAdapter.submitList(stateModel.subtitleEntries.toList()) {
             // ListAdapter replaces row objects asynchronously. Rebind selection by stable ID
             // after the new list is installed so selected rows survive source parsing and undo.
             listPresentationController.bindSelection(targetSelectedIds, clearSelection)
@@ -2108,25 +1989,25 @@ class EditorActivity : AppCompatActivity() {
         stateModel.startNewSubtitleDocument()
         clearSubtitleEntries()
         // 添加默认字幕行：3秒时长，文本"请输入文本"
-        EditorDocumentOperations.addAt(subtitleEntries, subtitleEntries.size, SubtitleEntry(
+        EditorDocumentOperations.addAt(stateModel.subtitleEntries, stateModel.subtitleEntries.size, SubtitleEntry(
             index = 1,
             startTime = 0L,
             endTime = 3000L,
             text = "请输入文本"
         ))
-        sourceViewContent = ""
-        originalFileContent = ""
-        sourceViewNeedsListSync = false
-        currentCharset = StandardCharsets.UTF_8
-        currentFormat = SubtitleParser.SubtitleFormat.SRT
-        isSourceViewMode = false
+        stateModel.sourceViewContent = ""
+        stateModel.originalFileContent = ""
+        stateModel.sourceViewNeedsListSync = false
+        stateModel.currentCharset = StandardCharsets.UTF_8
+        stateModel.currentFormat = SubtitleParser.SubtitleFormat.SRT
+        stateModel.isSourceViewMode = false
         binding.rvSubtitles.visibility = android.view.View.VISIBLE
         binding.sourceViewContainer.visibility = android.view.View.GONE
         submitSubtitleList(refreshAll = true, clearSelection = true, syncWaveform = true)
         setDocumentTitle(stateModel.documentTitle)
-        currentFormatInfo = "格式：SRT | 条目数：${subtitleEntries.size}"
-        supportActionBar?.subtitle = currentFormatInfo
-        hasUnsavedChanges = false
+        stateModel.currentFormatInfo = "格式：SRT | 条目数：${stateModel.subtitleEntries.size}"
+        supportActionBar?.subtitle = stateModel.currentFormatInfo
+        stateModel.hasUnsavedChanges = false
         initializeEditHistoryBaseline(clearHistory = true)
         stateModel.documentLoaded = true
         com.subtitleedit.util.OverwritingToast.makeText(this, "已新建文件", Toast.LENGTH_SHORT).show()
@@ -2150,13 +2031,13 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
-        val targetFile = if (mediaType.hasPlayableMedia) {
-            subtitleFile
+        val targetFile = if (stateModel.mediaType.hasPlayableMedia) {
+            stateModel.subtitleFile
         } else {
-            currentFile
+            stateModel.currentFile
         }
         
-        if (isNewFile || targetFile == null) {
+        if (stateModel.isNewFile || targetFile == null) {
             launchSaveFilePicker()
             return
         }
@@ -2166,18 +2047,18 @@ class EditorActivity : AppCompatActivity() {
             executeSaveContinuation(stateModel.saveCoordinator.complete(false))
             return
         }
-        val charset = currentCharset
+        val charset = stateModel.currentCharset
         lifecycleScope.launch {
             val result = saveSessionController.saveFile(targetFile, content, charset)
             val saved = result.success
             if (!saved) showShortToast("保存失败：${result.error?.message}")
             if (saved) {
-                originalFileContent = content
-                sourceViewContent = content
-                sourceHistoryTextSnapshot = content
-                sourceViewNeedsListSync = false
+                stateModel.originalFileContent = content
+                stateModel.sourceViewContent = content
+                stateModel.sourceHistoryTextSnapshot = content
+                stateModel.sourceViewNeedsListSync = false
                 sourceViewHasPendingEdits = false
-                hasUnsavedChanges = false
+                stateModel.hasUnsavedChanges = false
                 showShortToast("保存成功")
             }
             executeSaveContinuation(stateModel.saveCoordinator.complete(saved))
@@ -2190,7 +2071,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun launchSaveFilePicker() {
-        val formatExtension = getFormatExtension(currentFormat)
+        val formatExtension = getFormatExtension(stateModel.currentFormat)
         saveFileLauncher.launch("subtitle.$formatExtension")
     }
     
@@ -2200,18 +2081,18 @@ class EditorActivity : AppCompatActivity() {
             executeSaveContinuation(stateModel.saveCoordinator.complete(false))
             return
         }
-        val charset = currentCharset
+        val charset = stateModel.currentCharset
         lifecycleScope.launch {
             val result = saveSessionController.saveUri(uri, content, charset)
             val saved = result.success
             if (!saved) showShortToast("保存失败：${result.error?.message}")
             if (saved) {
-                originalFileContent = content
-                sourceViewContent = content
-                sourceHistoryTextSnapshot = content
-                sourceViewNeedsListSync = false
+                stateModel.originalFileContent = content
+                stateModel.sourceViewContent = content
+                stateModel.sourceHistoryTextSnapshot = content
+                stateModel.sourceViewNeedsListSync = false
                 sourceViewHasPendingEdits = false
-                hasUnsavedChanges = false
+                stateModel.hasUnsavedChanges = false
                 val fileName = withContext(Dispatchers.IO) {
                     getFileNameFromUri(uri)
                 }
@@ -2242,14 +2123,14 @@ class EditorActivity : AppCompatActivity() {
     
     private fun showEncodingDialog() {
         val encodings = FileUtils.SUPPORTED_ENCODINGS.map { it.displayName }
-        val currentIndex = FileUtils.SUPPORTED_ENCODINGS.indexOfFirst { it.charset == currentCharset }
+        val currentIndex = FileUtils.SUPPORTED_ENCODINGS.indexOfFirst { it.charset == stateModel.currentCharset }
         
         AlertDialog.Builder(this)
             .setTitle("选择编码")
             .setSingleChoiceItems(encodings.toTypedArray(), currentIndex) { dialog, which ->
                 val newCharset = FileUtils.SUPPORTED_ENCODINGS[which].charset
-                if (newCharset != currentCharset) {
-                    currentCharset = newCharset
+                if (newCharset != stateModel.currentCharset) {
+                    stateModel.currentCharset = newCharset
                     reloadFile()
                 }
                 dialog.dismiss()
@@ -2264,7 +2145,7 @@ class EditorActivity : AppCompatActivity() {
     private fun saveDraft() {
         val content = getCurrentEditableContent(requireNonEmptyList = true) ?: return
         
-        val fileName = currentFile?.name ?: "未命名"
+        val fileName = stateModel.currentFile?.name ?: "未命名"
         val savedFileName = DraftManager.saveDraft(this, fileName, content)
         com.subtitleedit.util.OverwritingToast.makeText(this, "草稿已保存：$savedFileName", Toast.LENGTH_LONG).show()
     }
@@ -2287,7 +2168,7 @@ class EditorActivity : AppCompatActivity() {
 
     private fun showMergeSubtitlesDialog() {
         if (!ensureListMode()) return
-        if (subtitleEntries.size < 2) {
+        if (stateModel.subtitleEntries.size < 2) {
             showShortToast(getString(R.string.merge_subtitles_requires_entries))
             return
         }
@@ -2323,8 +2204,8 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun mergeSubtitles(maxGapMs: Long) {
-        val mergedEntries = SubtitleEntryOps.mergeAdjacent(subtitleEntries, maxGapMs)
-        val removedCount = subtitleEntries.size - mergedEntries.size
+        val mergedEntries = SubtitleEntryOps.mergeAdjacent(stateModel.subtitleEntries, maxGapMs)
+        val removedCount = stateModel.subtitleEntries.size - mergedEntries.size
         if (removedCount == 0) {
             showShortToast(getString(R.string.merge_subtitles_no_match))
             return
@@ -2333,8 +2214,8 @@ class EditorActivity : AppCompatActivity() {
         cutPasteController.clear()
         val historyBefore = currentHistoryListState()
         replaceSubtitleEntries(mergedEntries)
-        historyEntriesSnapshot = historyBefore.entries
-        historySelectionSnapshot = historyBefore.selectedIds
+        stateModel.historyEntriesSnapshot = historyBefore.entries
+        stateModel.historySelectionSnapshot = historyBefore.selectedIds
         submitSubtitleList(
             refreshAll = true,
             clearSelection = true,
@@ -2414,8 +2295,8 @@ class EditorActivity : AppCompatActivity() {
 
         when {
             // 有长按位置，对长按的那一行应用偏移（无论是否有选中状态）
-            longClickPos >= 0 && longClickPos < subtitleEntries.size -> {
-                val entry = subtitleEntries[longClickPos]
+            longClickPos >= 0 && longClickPos < stateModel.subtitleEntries.size -> {
+                val entry = stateModel.subtitleEntries[longClickPos]
                 stateModel.execute(EditorCommand.ApplyOffset(setOf(longClickPos), offsetMs))
                 
                 notifyEntriesChanged(listOf(longClickPos))
@@ -2429,7 +2310,7 @@ class EditorActivity : AppCompatActivity() {
             }
             // 都没有，对所有字幕应用偏移
             else -> {
-                stateModel.execute(EditorCommand.ApplyOffset(subtitleEntries.indices.toSet(), offsetMs))
+                stateModel.execute(EditorCommand.ApplyOffset(stateModel.subtitleEntries.indices.toSet(), offsetMs))
                 
                 submitSubtitleList(refreshAll = true, markChanged = true)
             }
@@ -2459,27 +2340,27 @@ class EditorActivity : AppCompatActivity() {
         deletedIndices: Set<Int>,
         historyBefore: EditorEditHistory.ListState
     ) {
-        historyEntriesSnapshot = historyBefore.entries
-        historySelectionSnapshot = historyBefore.selectedIds
+        stateModel.historyEntriesSnapshot = historyBefore.entries
+        stateModel.historySelectionSnapshot = historyBefore.selectedIds
         submitSubtitleList(
             refreshAll = false,
-            selectedStableIds = historySelectionSnapshot.filterTo(mutableSetOf()) { selectedId ->
-                subtitleEntries.any { it.stableId == selectedId }
+            selectedStableIds = stateModel.historySelectionSnapshot.filterTo(mutableSetOf()) { selectedId ->
+                stateModel.subtitleEntries.any { it.stableId == selectedId }
             },
             syncWaveform = false,
             markChanged = true,
             afterSubmit = {
                 val firstDeleted = deletedIndices.minOrNull()
-                    ?.coerceAtMost(subtitleEntries.size)
-                    ?: subtitleEntries.size
-                val remainingCount = subtitleEntries.size - firstDeleted
+                    ?.coerceAtMost(stateModel.subtitleEntries.size)
+                    ?: stateModel.subtitleEntries.size
+                val remainingCount = stateModel.subtitleEntries.size - firstDeleted
                 if (remainingCount > 0) {
                     subtitleAdapter.notifyItemRangeChanged(firstDeleted, remainingCount)
                 }
                 deletedIndices.forEach { deletedIdx ->
                     val offset = deletedIndices.count { it < deletedIdx }
                     val prevIdx = (deletedIdx - offset) - 1
-                    if (prevIdx >= 0 && prevIdx < subtitleEntries.size) {
+                    if (prevIdx >= 0 && prevIdx < stateModel.subtitleEntries.size) {
                         subtitleAdapter.notifyItemChanged(prevIdx)
                     }
                 }
@@ -2502,9 +2383,9 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun selectAllSubtitles() {
-        if (!ensureListMode() || subtitleEntries.isEmpty()) return
+        if (!ensureListMode() || stateModel.subtitleEntries.isEmpty()) return
 
-        if (subtitleAdapter.getSelectedCount() == subtitleEntries.size) {
+        if (subtitleAdapter.getSelectedCount() == stateModel.subtitleEntries.size) {
             subtitleAdapter.setAllSelection(false)
         } else {
             subtitleAdapter.setAllSelection(true)
@@ -2543,7 +2424,7 @@ class EditorActivity : AppCompatActivity() {
     /** 对当前选中的字幕行按各自时间范围执行离线语音转录。 */
     private fun showQuickTranscribe() {
         if (!ensureListMode()) return
-        val audioFile = currentFile?.takeIf { mediaType.hasPlayableMedia } ?: run {
+        val audioFile = stateModel.currentFile?.takeIf { stateModel.mediaType.hasPlayableMedia } ?: run {
             showShortToast("仅在打开音频或视频文件时可快速转录")
             return
         }
@@ -2554,7 +2435,7 @@ class EditorActivity : AppCompatActivity() {
         }
         transcribeController.start(
             selectedEntries = selectedEntries,
-            timelineEntries = subtitleEntries.toList(),
+            timelineEntries = stateModel.subtitleEntries.toList(),
             audioFile = audioFile,
             audioCacheKey = audioCacheKey,
             audioStreamIndex = stateModel.selectedAudioStreamIndex
@@ -2573,29 +2454,29 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun saveTranslationDraft(previewItems: List<TranslationPreviewItem>) {
-        val draftEntries = subtitleEntries.map { it.copy() }.toMutableList()
+        val draftEntries = stateModel.subtitleEntries.map { it.copy() }.toMutableList()
         previewItems.filter { it.apply }.forEach { item ->
             draftEntries.getOrNull(item.entryPosition)?.text = item.translatedText
         }
-        val fileName = currentFile?.name ?: "未命名"
-        val draftContent = serializeEntriesForFormat(currentFormat, draftEntries)
+        val fileName = stateModel.currentFile?.name ?: "未命名"
+        val draftContent = serializeEntriesForFormat(stateModel.currentFormat, draftEntries)
         val savedFileName = DraftManager.saveDraft(this, fileName, draftContent)
         showShortToast("翻译草稿已保存：$savedFileName")
     }
     
     private fun renumberEntries(force: Boolean = false) {
-        val currentCount = subtitleEntries.size
-        if (!force && currentCount == lastIndexedEntryCount) return
-        EditorDocumentOperations.renumber(subtitleEntries)
-        lastIndexedEntryCount = currentCount
+        val currentCount = stateModel.subtitleEntries.size
+        if (!force && currentCount == stateModel.lastIndexedEntryCount) return
+        EditorDocumentOperations.renumber(stateModel.subtitleEntries)
+        stateModel.lastIndexedEntryCount = currentCount
     }
 
     private fun replaceSubtitleEntries(
         entries: List<SubtitleEntry>,
         preserveStableIds: Boolean = false
     ) {
-        val previous = subtitleEntries
-        subtitleEntries = if (preserveStableIds) {
+        val previous = stateModel.subtitleEntries
+        stateModel.subtitleEntries = if (preserveStableIds) {
             SubtitleEntryOps.retainStableIds(previous, entries).toMutableList()
         } else {
             entries.toMutableList()
@@ -2611,8 +2492,8 @@ class EditorActivity : AppCompatActivity() {
      * after the edit has a new index.
      */
     private fun applySourceViewEntries(updatedEntries: List<SubtitleEntry>) {
-        if (subtitleEntries.size != updatedEntries.size) {
-            val previousEntries = subtitleEntries.toList()
+        if (stateModel.subtitleEntries.size != updatedEntries.size) {
+            val previousEntries = stateModel.subtitleEntries.toList()
             val previousIds = previousEntries.mapTo(mutableSetOf()) { it.stableId }
             val associatedEntries = if (updatedEntries.any { it.stableId in previousIds }) {
                 updatedEntries.map { it.copy() }
@@ -2630,9 +2511,9 @@ class EditorActivity : AppCompatActivity() {
                     ?: parsedEntry
             }
             val inserted = retainedEntries.subList(prefix, retainedEntries.size - suffix)
-            subtitleEntries = EditorDocumentOperations.replaceEntries(previousEntries)
-            subtitleEntries.subList(prefix, prefix + removedCount).clear()
-            EditorDocumentOperations.addAllAt(subtitleEntries, prefix, inserted)
+            stateModel.subtitleEntries = EditorDocumentOperations.replaceEntries(previousEntries)
+            stateModel.subtitleEntries.subList(prefix, prefix + removedCount).clear()
+            EditorDocumentOperations.addAllAt(stateModel.subtitleEntries, prefix, inserted)
             renumberEntries(force = true)
             pendingListIndexRefreshStart = minOf(
                 pendingListIndexRefreshStart ?: prefix,
@@ -2643,7 +2524,7 @@ class EditorActivity : AppCompatActivity() {
         }
 
         val changedPositions = updatedEntries.indices.filter { position ->
-            val current = subtitleEntries[position]
+            val current = stateModel.subtitleEntries[position]
             val updated = updatedEntries[position]
             current.index != updated.index ||
                 current.startTime != updated.startTime ||
@@ -2654,7 +2535,7 @@ class EditorActivity : AppCompatActivity() {
                 current.cueSettings != updated.cueSettings
         }
         changedPositions.forEach { position ->
-            val target = subtitleEntries[position]
+            val target = stateModel.subtitleEntries[position]
             val source = updatedEntries[position]
             EditorDocumentOperations.updateFields(target, source)
         }
@@ -2662,7 +2543,7 @@ class EditorActivity : AppCompatActivity() {
 
         if (changedPositions.isEmpty()) {
             syncWaveformSubtitles(preserveSelection = true, changedPositions = changedPositions)
-        } else if (::subtitleAdapter.isInitialized && subtitleAdapter.itemCount == subtitleEntries.size) {
+        } else if (::subtitleAdapter.isInitialized && subtitleAdapter.itemCount == stateModel.subtitleEntries.size) {
             // Reuse the same payload/neighbour refresh path as list-view edits.  The
             // RecyclerView is hidden in source mode, but retaining its row references keeps
             // the two editing modes consistent when the user switches back.
@@ -2684,37 +2565,37 @@ class EditorActivity : AppCompatActivity() {
      * cleared; while a marker is still present we keep them until parsing succeeds.
      */
     private fun sourceContainsSubtitleMarker(content: String): Boolean {
-        return SubtitleFormatPolicy.containsSubtitleMarker(content, currentFormat)
+        return SubtitleFormatPolicy.containsSubtitleMarker(content, stateModel.currentFormat)
     }
 
     private fun clearSubtitleEntries() {
-        EditorDocumentOperations.clear(subtitleEntries)
+        EditorDocumentOperations.clear(stateModel.subtitleEntries)
         renumberEntries(force = true)
     }
     
     private fun updateFormatInfo() {
-        val formatName = SubtitleFormatPolicy.displayName(currentFormat)
-        val countInfo = if (isSourceViewMode) {
+        val formatName = SubtitleFormatPolicy.displayName(stateModel.currentFormat)
+        val countInfo = if (stateModel.isSourceViewMode) {
             val lines = if (::binding.isInitialized) {
                 binding.etSourceView.getDocumentLineCount()
-            } else if (sourceViewContent.isEmpty()) {
+            } else if (stateModel.sourceViewContent.isEmpty()) {
                 0
             } else {
-                sourceViewContent.count { it == '\n' } + 1
+                stateModel.sourceViewContent.count { it == '\n' } + 1
             }
             "行数：$lines"
         } else {
-            "条目数：${subtitleEntries.size}"
+            "条目数：${stateModel.subtitleEntries.size}"
         }
-        currentFormatInfo = "格式：$formatName | $countInfo"
-        supportActionBar?.subtitle = currentFormatInfo
+        stateModel.currentFormatInfo = "格式：$formatName | $countInfo"
+        supportActionBar?.subtitle = stateModel.currentFormatInfo
     }
 
     private fun getFormatExtension(format: SubtitleParser.SubtitleFormat): String =
         SubtitleFormatPolicy.extension(format)
 
     private fun serializeEntriesForFormat(format: SubtitleParser.SubtitleFormat): String {
-        return serializeEntriesForFormat(format, subtitleEntries)
+        return serializeEntriesForFormat(format, stateModel.subtitleEntries)
     }
 
     private fun serializeEntriesForFormat(
@@ -2723,7 +2604,7 @@ class EditorActivity : AppCompatActivity() {
     ): String {
         if (format == SubtitleParser.SubtitleFormat.ASS ||
             format == SubtitleParser.SubtitleFormat.SSA
-        ) return sourceViewContent
+        ) return stateModel.sourceViewContent
 
         return SubtitleSerialization.serialize(
             stateModel.subtitleDocument.copy(
@@ -2732,12 +2613,12 @@ class EditorActivity : AppCompatActivity() {
             ),
             format,
             entries,
-            sourceViewContent
+            stateModel.sourceViewContent
         )
     }
 
     private fun getCurrentEditableContent(requireNonEmptyList: Boolean = false): String? {
-        val sourceContent = if (isSourceViewMode) snapshotSourceViewContentIfNeeded() else null
+        val sourceContent = if (stateModel.isSourceViewMode) snapshotSourceViewContentIfNeeded() else null
         val content = stateModel.buildSaveContent(sourceContent, requireNonEmptyList)
         if (content == null) {
             showShortToast("没有内容可保存")
@@ -2747,19 +2628,19 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun ensureListMode(): Boolean {
-        if (!isSourceViewMode) return true
+        if (!stateModel.isSourceViewMode) return true
         showShortToast("源视图模式下不支持此操作")
         return false
     }
 
     private fun ensureMediaMode(): Boolean {
-        if (mediaType.hasPlayableMedia) return true
+        if (stateModel.mediaType.hasPlayableMedia) return true
         showShortToast("此功能仅在打开音频或视频文件时可用")
         return false
     }
 
     private fun ensureClipboardNotEmpty(): Boolean {
-        if (clipboardTexts.isNotEmpty()) return true
+        if (stateModel.clipboardTexts.isNotEmpty()) return true
         showShortToast("剪贴板为空，请先复制")
         return false
     }
@@ -2807,7 +2688,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun getCurrentSubtitleFile(): File? {
-        return if (mediaType.hasPlayableMedia) subtitleFile else currentFile
+        return if (stateModel.mediaType.hasPlayableMedia) stateModel.subtitleFile else stateModel.currentFile
     }
 
     private fun finishWithToast(message: String) {
@@ -2848,7 +2729,7 @@ class EditorActivity : AppCompatActivity() {
     // ==================== 媒体播放器相关方法 ====================
     
     private fun setupMediaActions() {
-        if (!mediaType.hasPlayableMedia) return
+        if (!stateModel.mediaType.hasPlayableMedia) return
 
         binding.btnQuickTranscribe.setOnClickListener {
             showQuickTranscribe()
@@ -2880,13 +2761,13 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun loadMediaFile(subtitleFilePath: String?, restoreDocument: Boolean = false) {
-        if (filePath.isEmpty() || currentFile == null) {
+        if (stateModel.filePath.isEmpty() || stateModel.currentFile == null) {
             showShortToast("媒体文件路径无效")
             finish()
             return
         }
 
-        val originalFile = currentFile ?: return
+        val originalFile = stateModel.currentFile ?: return
         if (!originalFile.exists()) {
             showShortToast("媒体文件不存在")
             finish()
@@ -2895,7 +2776,7 @@ class EditorActivity : AppCompatActivity() {
 
         setDocumentTitle(originalFile.name)
 
-        if (mediaType == EditorMediaType.VIDEO) {
+        if (stateModel.mediaType == EditorMediaType.VIDEO) {
             doLoadMediaFile(
                 playbackFile = originalFile,
                 analysisFile = originalFile,
@@ -2907,7 +2788,7 @@ class EditorActivity : AppCompatActivity() {
 
         val checkingDialog = android.app.AlertDialog.Builder(this)
             .setMessage(
-                if (isAudioOnlyFromVideo) "正在检测视频音轨..." else "正在检测音频文件..."
+                if (stateModel.isAudioOnlyFromVideo) "正在检测视频音轨..." else "正在检测音频文件..."
             )
             .setCancelable(false)
             .create()
@@ -2917,13 +2798,13 @@ class EditorActivity : AppCompatActivity() {
             val preparedAudio = try {
                 mediaRepository.prepareAudio(
                     originalFile,
-                    inspectVideoAudioTrack = isAudioOnlyFromVideo
+                    inspectVideoAudioTrack = stateModel.isAudioOnlyFromVideo
                 )
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
                 checkingDialog.dismiss()
-                prepareMediaDocument(subtitleFilePath, restoreDocument)
+                prepareMediaDocument(stateModel.subtitleFilePath, restoreDocument)
                 stateModel.documentLoaded = true
                 showShortToast(error.message ?: "加载音频失败")
                 return@launch
@@ -2970,22 +2851,22 @@ class EditorActivity : AppCompatActivity() {
             syncWaveformSubtitles()
             return
         }
-        when (val preparation = mediaDocumentController.subtitlePreparation(subtitleFilePath, false)) {
+        when (val preparation = mediaDocumentController.subtitlePreparation(stateModel.subtitleFilePath, false)) {
             is EditorMediaDocumentController.Preparation.Companion -> loadSubtitleFile(preparation.file)
             EditorMediaDocumentController.Preparation.Empty -> {
                 prepareEmptyMediaDocument()
-                if (!subtitleFilePath.isNullOrBlank()) showShortToast("未找到同名字幕文件")
+                if (!stateModel.subtitleFilePath.isNullOrBlank()) showShortToast("未找到同名字幕文件")
             }
         }
     }
 
     private fun prepareEmptyMediaDocument() {
         clearSubtitleEntries()
-        currentFormat = SubtitleParser.SubtitleFormat.SRT
-        isSourceViewMode = false
-        sourceViewContent = ""
-        originalFileContent = ""
-        sourceViewNeedsListSync = false
+        stateModel.currentFormat = SubtitleParser.SubtitleFormat.SRT
+        stateModel.isSourceViewMode = false
+        stateModel.sourceViewContent = ""
+        stateModel.originalFileContent = ""
+        stateModel.sourceViewNeedsListSync = false
         binding.sourceViewContainer.visibility = View.GONE
         binding.rvSubtitles.visibility = View.VISIBLE
         submitSubtitleList(refreshAll = true, syncWaveform = false)
@@ -2997,8 +2878,8 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun loadSubtitleFile(subtitleFile: File) {
         val settingsManager = SettingsManager.getInstance(this)
-        currentCharset = settingsManager.getDefaultEncoding()
-        val charset = currentCharset
+        stateModel.currentCharset = settingsManager.getDefaultEncoding()
+        val charset = stateModel.currentCharset
 
         lifecycleScope.launch {
             val content = runCatching {
@@ -3014,8 +2895,8 @@ class EditorActivity : AppCompatActivity() {
                 return@launch
             }
             parseContent(content, subtitleFile.name)
-            hasUnsavedChanges = false
-            isNewFile = false
+            stateModel.hasUnsavedChanges = false
+            stateModel.isNewFile = false
         }
     }
     
