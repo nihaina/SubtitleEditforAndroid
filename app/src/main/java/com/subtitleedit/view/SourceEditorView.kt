@@ -26,6 +26,8 @@ import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.view.textclassifier.TextClassificationManager
+import android.view.textclassifier.TextClassificationContext
+import android.view.textclassifier.TextClassifier
 import android.view.textclassifier.TextSelection
 import android.widget.PopupWindow
 import androidx.core.view.ViewCompat
@@ -307,7 +309,14 @@ class SourceEditorView @JvmOverloads constructor(
                 }
                 MotionEvent.ACTION_UP,
                 MotionEvent.ACTION_CANCEL -> {
-                    finishInternalSelectionDrag()
+                    // Let a stationary long-press finish its asynchronous smart-word request;
+                    // the classifier may complete just after the finger is released. A real
+                    // drag or a cancelled gesture must invalidate that request because its seed
+                    // no longer describes the user's selection.
+                    finishInternalSelectionDrag(
+                        cancelSmartSelection = event.actionMasked == MotionEvent.ACTION_CANCEL ||
+                            selectionTouchMoved
+                    )
                     removeCallbacks(internalSelectionLongPressRunnable)
                     internalSelectionLongPressPosted = false
                     selectionGesture = null
@@ -315,7 +324,7 @@ class SourceEditorView @JvmOverloads constructor(
                     selectionTouchActive = false
                     return true
                 }
-                MotionEvent.ACTION_DOWN -> finishInternalSelectionDrag()
+                MotionEvent.ACTION_DOWN -> finishInternalSelectionDrag(cancelSmartSelection = true)
             }
         }
         when (event.actionMasked) {
@@ -895,14 +904,14 @@ class SourceEditorView @JvmOverloads constructor(
         updateSelectionHandlePopups()
     }
 
-    private fun finishInternalSelectionDrag() {
+    private fun finishInternalSelectionDrag(cancelSmartSelection: Boolean = selectionTouchMoved) {
         if (!internalSelectionDragActive) return
         internalSelectionDragActive = false
-        // A classifier result is only valid while the long-press gesture is still active. Once
-        // the pointer is released (or a fresh DOWN supersedes this gesture), keep the published
-        // range stable instead of applying a late asynchronous suggestion after the user has
-        // already seen/dragged the handles.
-        internalSelectionSmartSelectionCancelled = true
+        // A stationary long press may still have an asynchronous classifier result in flight;
+        // callers cancel it only when the pointer actually moved, the gesture was cancelled, or
+        // a fresh DOWN superseded it. This lets a valid smart-word range arrive just after
+        // ACTION_UP without allowing a drag result to be overwritten.
+        if (cancelSmartSelection) internalSelectionSmartSelectionCancelled = true
         removeCallbacks(selectionAutoScrollRunnable)
         selectionAutoScrollPosted = false
         parent?.requestDisallowInterceptTouchEvent(false)
@@ -919,27 +928,30 @@ class SourceEditorView @JvmOverloads constructor(
     private fun wordSelectionRange(text: CharSequence, offset: Int): Pair<Int, Int> {
         if (text.isEmpty()) return 0 to 0
         var pivot = offset.coerceIn(0, text.length - 1)
-        // Layout hit testing is right-biased at a glyph boundary. Treat punctuation directly
-        // after a word as the word character immediately before it, matching TextView's touch
-        // behavior instead of producing a punctuation-only range.
-        if (pivot > 0 && isPunctuation(text[pivot]) &&
-            isLetterOrDigitAt(text, pivot - 1)
-        ) {
-            pivot--
-        }
-
-        // ICU's word iterator has an intentional boundary bias for CJK text: the first
-        // character of a run and the second character can produce different initial ranges. That
-        // is useful for native cursor movement but is wrong for a touch selection seed. Start
-        // from the actual character under the finger and let TextClassifier expand it only when
-        // the platform dictionary recognizes a real word.
-        if (isCjkCharacter(text[pivot])) return characterClusterRange(text, pivot)
-
         val locales = resources.configuration.locales
         val iterator = BreakIterator.getWordInstance(
             if (locales.isEmpty) Locale.getDefault() else locales[0]
         )
         iterator.setText(text.toString())
+        // Punctuation and symbols are selectable characters in their own right. Do this before
+        // WordIterator's letter-before/letter-after handling, which would otherwise attach a
+        // punctuation mark to the neighboring word.
+        if (!isLetterOrDigitAt(text, pivot)) return characterClusterRange(text, pivot)
+
+        // A touch exactly at the boundary between two adjacent CJK words resolves to the
+        // insertion offset between them. WordIterator's beginning/end helpers intentionally use
+        // opposite sides of that offset, which can combine both words (for example, “特性上”).
+        // Resolve from the character to the right of the boundary so an unmatched single word
+        // such as “上” remains selectable instead of being merged into the preceding “特性”.
+        if (pivot > 0 && pivot < text.length &&
+            isCjkCharacter(text[pivot - 1]) && isCjkCharacter(text[pivot]) &&
+            iterator.isBoundary(pivot)
+        ) {
+            val rightOffset = (pivot + 1).coerceAtMost(text.length)
+            val rightStart = wordBeginning(iterator, text, rightOffset)
+            val rightEnd = wordEnd(iterator, text, rightOffset)
+            if (rightStart >= 0 && rightEnd > rightStart) return rightStart to rightEnd
+        }
         val start = wordBeginning(iterator, text, pivot)
         val end = wordEnd(iterator, text, pivot)
         if (start >= 0 && end > start) return start to end
@@ -979,9 +991,8 @@ class SourceEditorView @JvmOverloads constructor(
     }
 
     private fun fallbackWordRange(text: CharSequence, pivot: Int): Pair<Int, Int> {
-        // Do not group adjacent CJK ideographs: without a dictionary Android's own WordIterator
-        // selects one character, and grouping the whole run is the source of the long-press
-        // mismatch reported for phrases containing several Chinese words.
+        // If the localized word iterator has no dictionary boundary, retain a single CJK
+        // character. The iterator path above normally supplies the complete Chinese word.
         if (isCjkCharacter(text[pivot])) return characterClusterRange(text, pivot)
         if (isLetterOrDigitAt(text, pivot)) {
             var start = pivot
@@ -1020,19 +1031,6 @@ class SourceEditorView @JvmOverloads constructor(
         return Character.isLetterOrDigit(Character.codePointBefore(text, offset))
     }
 
-    private fun isPunctuation(character: Char): Boolean {
-        return when (Character.getType(character)) {
-            Character.CONNECTOR_PUNCTUATION.toInt(),
-            Character.DASH_PUNCTUATION.toInt(),
-            Character.END_PUNCTUATION.toInt(),
-            Character.FINAL_QUOTE_PUNCTUATION.toInt(),
-            Character.INITIAL_QUOTE_PUNCTUATION.toInt(),
-            Character.OTHER_PUNCTUATION.toInt(),
-            Character.START_PUNCTUATION.toInt() -> true
-            else -> false
-        }
-    }
-
     private fun isCjkCharacter(character: Char): Boolean {
         return when (Character.UnicodeScript.of(character.code)) {
             Character.UnicodeScript.HAN,
@@ -1050,17 +1048,14 @@ class SourceEditorView @JvmOverloads constructor(
         position: Int,
         generation: Long
     ) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || initialStart >= initialEnd) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || initialStart >= initialEnd ||
+            !isLetterOrDigitAt(text, initialStart)
+        ) return
         wordClassifierExecutor.execute {
             val suggested = runCatching {
                 suggestTextClassifierSelection(text, initialStart, initialEnd)
             }.getOrNull()
                 ?: return@execute
-            if (initialEnd - initialStart == 1 &&
-                isCjkCharacter(text[initialStart]) &&
-                suggested.second - suggested.first > 1 &&
-                !isStableCjkSuggestion(text, suggested)
-            ) return@execute
             post {
                 if (generation != internalSelectionGeneration ||
                     customHandleSide != null ||
@@ -1085,6 +1080,16 @@ class SourceEditorView @JvmOverloads constructor(
                     suggestedStart > initialStart || suggestedEnd < initialEnd ||
                     lines.getOrNull(position)?.text != text
                 ) return@post
+                // The classifier can occasionally join adjacent CJK words (for example,
+                // expanding “特性” to “特性上”). ICU's localized word boundary is the
+                // synchronous seed used by the system TextView, so do not allow an async
+                // suggestion to cross that boundary.
+                if (isCjkCharacter(text[initialStart])) {
+                    val localizedRange = wordSelectionRange(text, initialStart)
+                    if (suggestedStart < localizedRange.first ||
+                        suggestedEnd > localizedRange.second
+                    ) return@post
+                }
                 if (suggestedStart == initialStart && suggestedEnd == initialEnd) return@post
                 documentSelection = DocumentSelection(
                     anchorLine = position,
@@ -1103,33 +1108,6 @@ class SourceEditorView @JvmOverloads constructor(
         }
     }
 
-    /**
-     * A single CJK seed can occasionally be expanded by a classifier only because it is on one
-     * side of an ICU boundary (for example, the second character of an unrelated pair). Accept a
-     * smart range only when every CJK character inside that range independently maps to the same
-     * range. This removes the touch-position-dependent "粘连" selection while retaining genuine
-     * dictionary words such as 原作.
-     */
-    private fun isStableCjkSuggestion(text: String, candidate: Pair<Int, Int>): Boolean {
-        var index = candidate.first
-        var foundCjk = false
-        while (index < candidate.second) {
-            val codePoint = Character.codePointAt(text, index)
-            val next = (index + Character.charCount(codePoint)).coerceAtMost(candidate.second)
-            if (isCjkCharacter(text[index])) {
-                foundCjk = true
-                val suggestion = runCatching {
-                    suggestTextClassifierSelection(text, index, next)
-                }.getOrNull() ?: return false
-                if (suggestion.first != candidate.first || suggestion.second != candidate.second) {
-                    return false
-                }
-            }
-            index = next
-        }
-        return foundCjk
-    }
-
     /** Ask the platform classifier with the same request shape used by native TextView. */
     private fun suggestTextClassifierSelection(
         text: CharSequence,
@@ -1138,23 +1116,39 @@ class SourceEditorView @JvmOverloads constructor(
     ): Pair<Int, Int>? {
         val manager = context.getSystemService(TextClassificationManager::class.java)
             ?: return null
-        val classifier = manager.textClassifier
-        val locales = resources.configuration.locales
-        val defaultLocales = if (locales.isEmpty) LocaleList(Locale.getDefault()) else locales
-        val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val requestBuilder = TextSelection.Request.Builder(text, selectionStart, selectionEnd)
-                .setDefaultLocales(defaultLocales)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                requestBuilder.setIncludeTextClassification(true)
-            }
-            classifier.suggestSelection(requestBuilder.build())
+        // TextView uses a widget-scoped classification session. The manager-wide classifier can
+        // be a no-op (or use different heuristics) for custom views, which made source-view
+        // long-presses silently fall back to the one-character seed on some devices.
+        val classifier = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            manager.createTextClassificationSession(
+                TextClassificationContext.Builder(
+                    context.packageName,
+                    TextClassifier.WIDGET_TYPE_EDITTEXT
+                ).build()
+            )
         } else {
-            @Suppress("DEPRECATION")
-            classifier.suggestSelection(text, selectionStart, selectionEnd, defaultLocales)
+            manager.textClassifier
         }
-        val start = selection.selectionStartIndex.coerceIn(0, text.length)
-        val end = selection.selectionEndIndex.coerceIn(start, text.length)
-        return if (start < end) start to end else null
+        val locales = resources.configuration.locales
+        return try {
+            val defaultLocales = if (locales.isEmpty) LocaleList(Locale.getDefault()) else locales
+            val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val requestBuilder = TextSelection.Request.Builder(text, selectionStart, selectionEnd)
+                    .setDefaultLocales(defaultLocales)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    requestBuilder.setIncludeTextClassification(true)
+                }
+                classifier.suggestSelection(requestBuilder.build())
+            } else {
+                @Suppress("DEPRECATION")
+                classifier.suggestSelection(text, selectionStart, selectionEnd, defaultLocales)
+            }
+            val start = selection.selectionStartIndex.coerceIn(0, text.length)
+            val end = selection.selectionEndIndex.coerceIn(start, text.length)
+            if (start < end) start to end else null
+        } finally {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) classifier.destroy()
+        }
     }
 
     private fun startCustomHandleDrag(
