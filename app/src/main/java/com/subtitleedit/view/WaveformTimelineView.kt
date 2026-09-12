@@ -91,6 +91,9 @@ class WaveformTimelineView @JvmOverloads constructor(
 
         private const val MIN_SUBTITLE_DURATION_MS = 100L
 
+        /** 播放头在时间轴上的触摸命中范围（dp），避免必须点到细线本身。 */
+        private const val PLAYHEAD_TOUCH_TOLERANCE_DP = 24f
+
         private const val MIN_SPECTROGRAM_CACHE_BYTES = 16 * 1024 * 1024
         private const val MAX_SPECTROGRAM_CACHE_BYTES = 48 * 1024 * 1024
     }
@@ -129,6 +132,8 @@ class WaveformTimelineView @JvmOverloads constructor(
     private var isDraggingWaveform = false
     private var dragStartVisibleStartMs = 0L
     private var downOnSelectedSubtitle = false  // ACTION_DOWN 时是否点在已选中字幕上
+    private var isDraggingPlayhead = false
+    private var isIgnoringRulerTouch = false
     private var activePointerId = MotionEvent.INVALID_POINTER_ID
     private var lastActiveTouchX = 0f
     /** 打轴由另一根手指启动时，避免原有波形触摸序列在退出打轴后继续触发拖动或点击。 */
@@ -998,12 +1003,41 @@ class WaveformTimelineView @JvmOverloads constructor(
 
     private fun subtitleTrackY(): Float = height * 0.65f   // 10% + 55%
     private fun isInSubtitleArea(y: Float) = y >= subtitleTrackY() && y <= height.toFloat()
+    private fun timeRulerHeight(): Float = height * 0.08f
+    private fun isInTimeRuler(y: Float): Boolean = y >= 0f && y < timeRulerHeight()
+
+    private fun isNearPlayhead(x: Float): Boolean {
+        if (durationMs <= 0L || width <= 0) return false
+        val playheadX = timeToX((durationMs * currentPosition).toLong())
+        val tolerance = PLAYHEAD_TOUCH_TOLERANCE_DP * resources.displayMetrics.density
+        return abs(x - playheadX) <= tolerance
+    }
+
+    /** Move the playhead to a horizontal touch position and notify the playback controller. */
+    private fun seekPlayheadAtX(x: Float) {
+        if (durationMs <= 0L || width <= 0) return
+        val timeMs = xToTime(x)
+        currentPosition = timeMs.toFloat() / durationMs.toFloat()
+        onTimelineClickListener?.invoke(currentPosition)
+        invalidate()
+    }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!isTimestampingMode && discardTouchSequenceAfterTimestamping) {
             if (event.actionMasked == MotionEvent.ACTION_UP ||
                 event.actionMasked == MotionEvent.ACTION_CANCEL) {
                 discardTouchSequenceAfterTimestamping = false
+                activePointerId = MotionEvent.INVALID_POINTER_ID
+            }
+            return true
+        }
+
+        // A touch elsewhere on the ruler is intentionally inert. Consume the whole sequence so
+        // it cannot fall through to the waveform viewport-pan gesture.
+        if (isIgnoringRulerTouch) {
+            if (event.actionMasked == MotionEvent.ACTION_UP ||
+                event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                isIgnoringRulerTouch = false
                 activePointerId = MotionEvent.INVALID_POINTER_ID
             }
             return true
@@ -1041,6 +1075,34 @@ class WaveformTimelineView @JvmOverloads constructor(
                     activePointerId = MotionEvent.INVALID_POINTER_ID
                     discardTouchSequenceAfterTimestamping = false
                 }
+            }
+            return true
+        }
+
+        // The ruler is a dedicated playhead scrub area. Waveform touches continue to pan the
+        // viewport, while ruler touches select and drag the playback position directly.
+        if (isDraggingPlayhead) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_MOVE -> {
+                    if (event.pointerCount == 1) seekPlayheadAtX(event.x)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    isDraggingPlayhead = false
+                    activePointerId = MotionEvent.INVALID_POINTER_ID
+                }
+            }
+            return true
+        }
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && isInTimeRuler(event.y)) {
+            cancelPendingSingleTap()
+            if (isNearPlayhead(event.x)) {
+                suppressTapSelection = true
+                isDraggingPlayhead = true
+                activePointerId = event.getPointerId(0)
+                // DOWN only captures the current playhead; it does not seek to arbitrary ruler taps.
+                invalidate()
+            } else {
+                isIgnoringRulerTouch = true
             }
             return true
         }
