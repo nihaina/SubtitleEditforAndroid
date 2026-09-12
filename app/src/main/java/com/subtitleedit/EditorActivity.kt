@@ -711,7 +711,7 @@ class EditorActivity : AppCompatActivity() {
             sourceSnapshot.isBlank() ||
             !sourceContainsSubtitleMarker(sourceSnapshot)
         if (canApplyEntries) {
-            applySourceViewEntries(parsedDocument.entries)
+            applySourceViewEntries(normalizeSourceViewEntries(parsedDocument.entries))
             stateModel.updateLatestSourceHistory(sourceSnapshot, stateModel.subtitleEntries)
             stateModel.documentState.sourceViewEntriesGeneration = editGeneration
             sourceViewHasPendingEdits = false
@@ -724,6 +724,30 @@ class EditorActivity : AppCompatActivity() {
                 sourceViewMode = true,
                 sourceContent = sourceSnapshot
             )
+        }
+    }
+
+    /**
+     * LRC parsing intentionally gives cues without an explicit terminator a 24 ms
+     * implicit gap before the next cue. When a user deletes an existing terminator
+     * in source view, retain the former explicit boundary for the in-memory row so
+     * switching to list view does not show a spurious 24 ms drift.
+     */
+    private fun normalizeSourceViewEntries(parsed: List<SubtitleEntry>): List<SubtitleEntry> {
+        if (stateModel.currentFormat != SubtitleParser.SubtitleFormat.LRC) return parsed
+        val previous = stateModel.subtitleEntries
+        return parsed.mapIndexed { index, entry ->
+            val old = previous.getOrNull(index)
+            val next = parsed.getOrNull(index + 1)
+            if (old?.endTimeModified == true &&
+                !entry.endTimeModified &&
+                next != null &&
+                entry.endTime == next.startTime - 24L
+            ) {
+                entry.copy(endTime = next.startTime, endTimeModified = false)
+            } else {
+                entry
+            }
         }
     }
 
@@ -990,7 +1014,11 @@ class EditorActivity : AppCompatActivity() {
         stateModel.savedScrollPosition = sourceScrollPosition ?: binding.etSourceView.getDocumentScrollOffset()
         
         submitSubtitleList(
-            refreshAll = false,
+            // Source-view waveform drags update the existing SubtitleEntry objects in place.
+            // ListAdapter may therefore see the same object on both sides of DiffUtil and skip
+            // rebinding the time fields. Force a row refresh when the list becomes visible so
+            // the end-time change (including a cleared/adjacent end time) is shown immediately.
+            refreshAll = true,
             updateFormat = false,
             syncWaveform = false,
             schedulePreview = false,
@@ -1166,7 +1194,7 @@ class EditorActivity : AppCompatActivity() {
                 if (!isActive || stateModel.isSourceViewMode || stateModel.sourceViewContent != content ||
                     generation != stateModel.documentState.sourceViewEditGeneration
                 ) return@launch
-                applySourceViewEntries(document.entries)
+                applySourceViewEntries(normalizeSourceViewEntries(document.entries))
                 stateModel.documentState.sourceViewEntriesGeneration = generation
                 stateModel.sourceViewNeedsListSync = false
                 stateModel.updateSourceHistory(content, stateModel.subtitleEntries)
