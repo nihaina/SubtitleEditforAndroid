@@ -30,7 +30,6 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.appcompat.widget.SearchView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.Lifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.SimpleItemAnimator
 import com.subtitleedit.adapter.FileListAdapter
@@ -55,6 +54,7 @@ import com.subtitleedit.util.FilePathPolicy
 import com.subtitleedit.util.SelectionRangePolicy
 import com.subtitleedit.util.MainNavigationPolicy
 import com.subtitleedit.util.MainBackNavigationPolicy
+import com.subtitleedit.util.MainLifecycleCoordinator
 import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.FileSelectionPolicy
 import com.subtitleedit.util.FileOperationUiPolicy
@@ -124,9 +124,6 @@ class MainActivity : AppCompatActivity() {
     private var pendingArchiveFile: File?
         get() = stateModel.pendingArchiveFile
         set(value) { stateModel.pendingArchiveFile = value }
-    private var updateCheckStarted = false
-    private var pendingUpdate: UpdateChecker.UpdateInfo? = null
-    private var updateDialogShown = false
     private var showAllFileTypes = false
     private var showHiddenFiles = false
     private var sortField: FileSortField
@@ -138,6 +135,7 @@ class MainActivity : AppCompatActivity() {
     private val directoryWatcher = DirectoryWatcher(::refreshWatchedDirectory)
     private lateinit var directorySearchController: DirectorySearchController
     private lateinit var backNavigationCallback: OnBackPressedCallback
+    private lateinit var lifecycleCoordinator: MainLifecycleCoordinator
     private var directoryLoadJob: Job? = null
     private var fileCopyJob: Job? = null
     private var activeFileSearchView: SearchView? = null
@@ -250,6 +248,27 @@ class MainActivity : AppCompatActivity() {
         setupButtons()
         setupBottomNavigation()
         setupBackNavigation()
+        lifecycleCoordinator = MainLifecycleCoordinator(
+            activity = this,
+            lifecycleOwner = this,
+            scope = lifecycleScope,
+            directoryWatcher = directoryWatcher,
+            shouldShowDirectory = { stateModel.selectedTopLevelItem == R.id.nav_directory },
+            refreshDirectory = { currentDirectory?.let(::loadDirectory) },
+            saveDirectoryScroll = ::saveCurrentDirectoryScrollPosition,
+            readFileFilters = {
+                SettingsManager.getInstance(this).isShowAllFileTypesEnabled() to
+                    SettingsManager.getInstance(this).isShowHiddenFilesEnabled()
+            },
+            applyFileFilters = { showAll, showHidden ->
+                showAllFileTypes = showAll
+                showHiddenFiles = showHidden
+            },
+            shouldCheckUpdates = {
+                SettingsManager.getInstance(this).shouldCheckUpdatesOnStartup()
+            },
+            showUpdate = ::showPendingUpdate
+        )
         checkPermissions()
     }
 
@@ -264,39 +283,22 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        directoryWatcher.setEnabled(true)
-        val newShowAllFileTypes = SettingsManager.getInstance(this).isShowAllFileTypesEnabled()
-        val newShowHiddenFiles = SettingsManager.getInstance(this).isShowHiddenFilesEnabled()
-        showAllFileTypes = newShowAllFileTypes
-        showHiddenFiles = newShowHiddenFiles
-        if (stateModel.selectedTopLevelItem == R.id.nav_directory) currentDirectory?.let(::loadDirectory)
-        pendingUpdate?.let(::showPendingUpdate)
-        if (!updateCheckStarted && SettingsManager.getInstance(this).shouldCheckUpdatesOnStartup()) {
-            updateCheckStarted = true
-            lifecycleScope.launch {
-                val update = UpdateChecker.check(this@MainActivity) ?: return@launch
-                if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-                    showPendingUpdate(update)
-                } else {
-                    pendingUpdate = update
-                }
-            }
-        }
+        lifecycleCoordinator.onResume()
     }
 
     override fun onPause() {
-        if (stateModel.selectedTopLevelItem == R.id.nav_directory) {
-            saveCurrentDirectoryScrollPosition()
-        }
-        directoryWatcher.setEnabled(false)
+        lifecycleCoordinator.onPause()
         super.onPause()
     }
 
     private fun showPendingUpdate(update: UpdateChecker.UpdateInfo) {
-        pendingUpdate = null
-        if (updateDialogShown || isFinishing || isDestroyed) return
-        updateDialogShown = true
+        if (isFinishing || isDestroyed) return
         UpdateChecker.showUpdateDialog(this, update)
+    }
+
+    override fun onDestroy() {
+        if (::lifecycleCoordinator.isInitialized) lifecycleCoordinator.onDestroy()
+        super.onDestroy()
     }
     
     private fun setupToolbar() {
