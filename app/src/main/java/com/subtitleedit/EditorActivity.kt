@@ -60,6 +60,7 @@ import com.subtitleedit.editor.EditorMenuController
 import com.subtitleedit.editor.EditorLifecycleCoordinator
 import com.subtitleedit.editor.EditorCoordinator
 import com.subtitleedit.editor.EditorNavigationCoordinator
+import com.subtitleedit.editor.EditorStateCoordinator
 import com.subtitleedit.util.DraftManager
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.CutPasteController
@@ -81,7 +82,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
 
 /**
  * 字幕编辑界面
@@ -403,10 +403,26 @@ class EditorActivity : AppCompatActivity() {
         editorCoordinator = EditorCoordinator(
             menu = EditorMenuController(this, ::handleEditorMenuAction),
             lifecycle = lifecycleCoordinator,
-            navigation = navigationCoordinator
+            navigation = navigationCoordinator,
+            state = EditorStateCoordinator(
+                lifecycleOwner = this,
+                state = stateModel.uiState,
+                effects = stateModel.effects,
+                onStateChanged = { state, _ ->
+                    val previous = lastRenderedUiState
+                    lastRenderedUiState = state
+                    if (previous == null ||
+                        previous.isSourceViewMode != state.isSourceViewMode ||
+                        previous.selectedIndices != state.selectedIndices ||
+                        previous.documentLoaded != state.documentLoaded
+                    ) stateModel.onEvent(EditorEvent.RequestOptionsMenuRefresh)
+                },
+                invalidateMenu = ::invalidateOptionsMenu,
+                showMessage = ::showShortToast
+            )
         )
         editorCoordinator.bindNavigation()
-        observeUiState()
+        editorCoordinator.bindState()
         
         if (stateModel.documentLoaded) {
             restoreDocumentState()
@@ -422,34 +438,6 @@ class EditorActivity : AppCompatActivity() {
         }
     }
 
-    private fun observeUiState() {
-        lifecycleScope.launch {
-                repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
-                launch {
-                    stateModel.uiState.collect { state ->
-                        val previous = lastRenderedUiState
-                        lastRenderedUiState = state
-                        if (previous == null ||
-                            previous.isSourceViewMode != state.isSourceViewMode ||
-                            previous.selectedIndices != state.selectedIndices ||
-                            previous.documentLoaded != state.documentLoaded
-                        ) {
-                            stateModel.onEvent(EditorEvent.RequestOptionsMenuRefresh)
-                        }
-                    }
-                }
-                launch {
-                    stateModel.effects.collect { effect ->
-                        when (effect) {
-                            EditorEffect.InvalidateOptionsMenu -> invalidateOptionsMenu()
-                            is EditorEffect.ShowMessage -> showShortToast(effect.message)
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
     private fun setupToolbar() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)

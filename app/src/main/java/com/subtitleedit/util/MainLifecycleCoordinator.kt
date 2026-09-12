@@ -22,6 +22,13 @@ internal class MainLifecycleCoordinator(
 ) {
     private var updateCheckStarted = false
     private var pendingUpdate: UpdateChecker.UpdateInfo? = null
+    private var updateDialogShown = false
+
+    private fun deliverUpdate(update: UpdateChecker.UpdateInfo) {
+        if (updateDialogShown) return
+        updateDialogShown = true
+        showUpdate(update)
+    }
 
     fun onResume() {
         directoryWatcher.setEnabled(true)
@@ -30,14 +37,14 @@ internal class MainLifecycleCoordinator(
         if (shouldShowDirectory()) refreshDirectory()
         pendingUpdate?.let {
             pendingUpdate = null
-            showUpdate(it)
+            deliverUpdate(it)
         }
         if (!updateCheckStarted && shouldCheckUpdates()) {
             updateCheckStarted = true
             scope.launch {
                 val update = UpdateChecker.check(activity) ?: return@launch
                 if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-                    showUpdate(update)
+                    deliverUpdate(update)
                 } else {
                     pendingUpdate = update
                 }

@@ -14,11 +14,14 @@ import com.subtitleedit.EditorEditHistory
 internal class EditorCoordinator(
     private val menu: EditorMenuController,
     private val lifecycle: EditorLifecycleCoordinator,
-    private val navigation: EditorNavigationCoordinator
+    private val navigation: EditorNavigationCoordinator,
+    private val state: EditorStateCoordinator
 ) {
     fun bindNavigation() = navigation.bind()
 
     fun onNavigateUp() = navigation.onNavigateUp()
+
+    fun bindState() = state.bind()
 
     fun prepareMenu(
         menuView: Menu,
