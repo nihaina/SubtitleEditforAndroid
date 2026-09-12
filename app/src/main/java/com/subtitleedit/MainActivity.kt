@@ -177,10 +177,8 @@ class MainActivity : AppCompatActivity() {
         topLevelNavigationCoordinator = MainTopLevelNavigationCoordinator(
             activity = this,
             binding = binding,
-            selectedItem = { stateModel.selectedTopLevelItem },
-            setSelectedItem = { stateModel.selectedTopLevelItem = it },
+            state = stateModel.documentState,
             saveDirectoryScroll = ::saveCurrentDirectoryScrollPosition,
-            currentDirectory = { currentDirectory },
             loadDirectory = { directory, restore -> loadDirectory(directory, restore) },
             cancelDirectorySearch = { directorySearchController.cancel() },
             stopDirectoryWatcher = { directoryWatcher.stop() },

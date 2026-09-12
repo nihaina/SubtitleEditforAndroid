@@ -11,10 +11,8 @@ import java.io.File
 internal class MainTopLevelNavigationCoordinator(
     private val activity: AppCompatActivity,
     private val binding: ActivityMainBinding,
-    private val selectedItem: () -> Int,
-    private val setSelectedItem: (Int) -> Unit,
+    private val state: MainDocumentState,
     private val saveDirectoryScroll: () -> Unit,
-    private val currentDirectory: () -> File?,
     private val loadDirectory: (File, Boolean) -> Boolean,
     private val cancelDirectorySearch: () -> Unit,
     private val stopDirectoryWatcher: () -> Unit,
@@ -22,18 +20,18 @@ internal class MainTopLevelNavigationCoordinator(
     private val clearDirectorySelection: () -> Unit
 ) {
     fun bind(onPageSelected: (Int) -> Unit) {
-        binding.bottomNavigation.selectedItemId = selectedItem()
+        binding.bottomNavigation.selectedItemId = state.selectedTopLevelItem
         binding.bottomNavigation.setOnItemSelectedListener { item ->
             onPageSelected(item.itemId)
             true
         }
-        showPage(selectedItem())
+        showPage(state.selectedTopLevelItem)
     }
 
     fun showPage(itemId: Int) {
-        val wasDirectorySelected = selectedItem() == R.id.nav_directory
+        val wasDirectorySelected = state.selectedTopLevelItem == R.id.nav_directory
         if (wasDirectorySelected && itemId != R.id.nav_directory) saveDirectoryScroll()
-        setSelectedItem(itemId)
+        state.selectedTopLevelItem = itemId
 
         val directorySelected = itemId == R.id.nav_directory
         binding.directoryContent.visibility = if (directorySelected) View.VISIBLE else View.GONE
@@ -43,7 +41,7 @@ internal class MainTopLevelNavigationCoordinator(
 
         if (directorySelected) {
             activity.supportActionBar?.title = activity.getString(R.string.nav_directory)
-            currentDirectory()?.let { loadDirectory(it, true) }
+            state.currentDirectory?.let { loadDirectory(it, true) }
         } else {
             cancelDirectorySearch()
             stopDirectoryWatcher()

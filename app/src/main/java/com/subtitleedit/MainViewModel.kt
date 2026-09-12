@@ -14,15 +14,32 @@ internal data class DirectoryScrollPosition(
 )
 
 internal class MainViewModel : ViewModel() {
-    var currentDirectory: File? = null
-    val directoryHistory = mutableListOf<File>()
-    val directoryScrollPositions = mutableMapOf<String, DirectoryScrollPosition>()
-    val selectedPaths = linkedSetOf<String>()
-    var pendingFileOperation: FileOperation? = null
-    var pendingArchiveFile: File? = null
-    var searchQuery: String = ""
-    var isFileSearchActive: Boolean = false
-    var selectedTopLevelItem: Int = com.subtitleedit.R.id.nav_directory
-    var sortField: FileSortField? = null
-    var sortDirection: FileSortDirection? = null
+    val documentState = MainDocumentState()
+    var currentDirectory: File?
+        get() = documentState.currentDirectory
+        set(value) { documentState.currentDirectory = value }
+    val directoryHistory get() = documentState.directoryHistory
+    val directoryScrollPositions get() = documentState.directoryScrollPositions
+    val selectedPaths get() = documentState.selectedPaths
+    var pendingFileOperation: FileOperation?
+        get() = documentState.pendingFileOperation
+        set(value) { documentState.pendingFileOperation = value }
+    var pendingArchiveFile: File?
+        get() = documentState.pendingArchiveFile
+        set(value) { documentState.pendingArchiveFile = value }
+    var searchQuery: String
+        get() = documentState.searchQuery
+        set(value) { documentState.searchQuery = value }
+    var isFileSearchActive: Boolean
+        get() = documentState.isFileSearchActive
+        set(value) { documentState.isFileSearchActive = value }
+    var selectedTopLevelItem: Int
+        get() = documentState.selectedTopLevelItem
+        set(value) { documentState.selectedTopLevelItem = value }
+    var sortField: FileSortField?
+        get() = documentState.sortField
+        set(value) { documentState.sortField = value }
+    var sortDirection: FileSortDirection?
+        get() = documentState.sortDirection
+        set(value) { documentState.sortDirection = value }
 }
