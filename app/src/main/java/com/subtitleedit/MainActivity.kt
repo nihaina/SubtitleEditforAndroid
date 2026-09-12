@@ -22,6 +22,7 @@ import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -53,6 +54,7 @@ import com.subtitleedit.util.AndroidDirectoryPolicy
 import com.subtitleedit.util.FilePathPolicy
 import com.subtitleedit.util.SelectionRangePolicy
 import com.subtitleedit.util.MainNavigationPolicy
+import com.subtitleedit.util.MainBackNavigationPolicy
 import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.FileSelectionPolicy
 import com.subtitleedit.util.FileOperationUiPolicy
@@ -135,6 +137,7 @@ class MainActivity : AppCompatActivity() {
         set(value) { stateModel.sortDirection = value }
     private val directoryWatcher = DirectoryWatcher(::refreshWatchedDirectory)
     private lateinit var directorySearchController: DirectorySearchController
+    private lateinit var backNavigationCallback: OnBackPressedCallback
     private var directoryLoadJob: Job? = null
     private var fileCopyJob: Job? = null
     private var activeFileSearchView: SearchView? = null
@@ -246,7 +249,17 @@ class MainActivity : AppCompatActivity() {
         setupRecyclerView()
         setupButtons()
         setupBottomNavigation()
+        setupBackNavigation()
         checkPermissions()
+    }
+
+    private fun setupBackNavigation() {
+        backNavigationCallback = object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                handleBackNavigation()
+            }
+        }
+        onBackPressedDispatcher.addCallback(this, backNavigationCallback)
     }
 
     override fun onResume() {
@@ -1877,22 +1890,30 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
     
-    override fun onBackPressed() {
-        if (stateModel.selectedTopLevelItem != R.id.nav_directory) {
-            val handled = (supportFragmentManager.findFragmentById(R.id.fragmentContainer) as? TopLevelBackHandler)
-                ?.handleTopLevelBack() == true
-            if (!handled) super.onBackPressed()
-        } else if (pendingFileOperation != null) {
-            if (!navigateDestinationUp()) {
-                cancelDestinationSelection()
+    private fun handleBackNavigation() {
+        when (MainBackNavigationPolicy.decide(
+            isDirectorySelected = stateModel.selectedTopLevelItem == R.id.nav_directory,
+            hasPendingFileOperation = pendingFileOperation != null,
+            hasSelection = selectedPaths.isNotEmpty(),
+            hasDirectoryHistory = directoryHistory.isNotEmpty()
+        )) {
+            MainBackNavigationPolicy.Decision.DELEGATE_TO_TOP_LEVEL -> {
+                val handled = (supportFragmentManager.findFragmentById(R.id.fragmentContainer)
+                    as? TopLevelBackHandler)?.handleTopLevelBack() == true
+                if (!handled) finishFromBackNavigation()
             }
-        } else if (selectedPaths.isNotEmpty()) {
-            exitSelectionMode()
-        } else if (directoryHistory.isNotEmpty()) {
-            goUpLevel()
-        } else {
-            super.onBackPressed()
+            MainBackNavigationPolicy.Decision.NAVIGATE_DESTINATION -> {
+                if (!navigateDestinationUp()) cancelDestinationSelection()
+            }
+            MainBackNavigationPolicy.Decision.EXIT_SELECTION -> exitSelectionMode()
+            MainBackNavigationPolicy.Decision.GO_UP_LEVEL -> goUpLevel()
+            MainBackNavigationPolicy.Decision.FINISH -> finishFromBackNavigation()
         }
+    }
+
+    private fun finishFromBackNavigation() {
+        backNavigationCallback.isEnabled = false
+        onBackPressedDispatcher.onBackPressed()
     }
 
 }
