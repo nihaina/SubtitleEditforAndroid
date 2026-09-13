@@ -123,6 +123,9 @@ class AutoTranslateActivity : AppCompatActivity() {
         settingsManager = SettingsManager.getInstance(this)
         setupToolbar()
         setupList()
+        binding.btnAiSettings.setOnClickListener {
+            startActivity(Intent(this, AiSettingsActivity::class.java))
+        }
         binding.btnAddFiles.setOnClickListener {
             filePickerLauncher.launch(arrayOf("text/*", "application/*"))
         }
