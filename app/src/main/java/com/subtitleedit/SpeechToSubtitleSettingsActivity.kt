@@ -182,6 +182,10 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
             if (!loading) settingsManager.setSpeechTokenTimestampMergeEnabled(checked)
             updateSenseVoiceTimestampControls()
         }
+        binding.switchSenseVoiceTimestampSemanticMerge.setOnCheckedChangeListener { _, checked ->
+            if (!loading) settingsManager.setSpeechTokenTimestampSemanticMergeEnabled(checked)
+            updateSenseVoiceTimestampControls()
+        }
         bindSecondaryVadValue(
             slider = binding.sliderSenseVoiceTimestampMergeGap,
             input = binding.etSenseVoiceTimestampMergeGap,
@@ -294,6 +298,8 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         )
         binding.switchSenseVoiceTimestampMerge.isChecked =
             settingsManager.isSpeechTokenTimestampMergeEnabled()
+        binding.switchSenseVoiceTimestampSemanticMerge.isChecked =
+            settingsManager.isSpeechTokenTimestampSemanticMergeEnabled()
         loadSecondaryVadValue(
             binding.sliderSenseVoiceTimestampMergeGap,
             binding.etSenseVoiceTimestampMergeGap,
@@ -330,19 +336,27 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
     private fun updateSenseVoiceTimestampControls() {
         val enabled = binding.switchSenseVoiceTimestampExperiment.isEnabled &&
             binding.switchSenseVoiceTimestampExperiment.isChecked
-        binding.switchSenseVoiceTimestampDiscardText.isEnabled = enabled
-        binding.switchSenseVoiceTimestampDiscardText.alpha = if (enabled) 1f else 0.5f
-        binding.tvSenseVoiceTimestampDiscardTextHint.alpha = if (enabled) 1f else 0.5f
-        binding.layoutSenseVoiceTimestampGap.alpha = if (enabled) 1f else 0.5f
-        binding.sliderSenseVoiceTimestampGap.isEnabled = enabled
-        binding.etSenseVoiceTimestampGap.isEnabled = enabled
-        binding.switchSenseVoiceTimestampMerge.isEnabled = enabled
-        binding.switchSenseVoiceTimestampMerge.alpha = if (enabled) 1f else 0.5f
-        binding.tvSenseVoiceTimestampMergeHint.alpha = if (enabled) 1f else 0.5f
-        val mergeEnabled = enabled && binding.switchSenseVoiceTimestampMerge.isChecked
-        binding.layoutSenseVoiceTimestampMergeGap.alpha = if (mergeEnabled) 1f else 0.5f
-        binding.sliderSenseVoiceTimestampMergeGap.isEnabled = mergeEnabled
-        binding.etSenseVoiceTimestampMergeGap.isEnabled = mergeEnabled
+        val semanticMergeEnabled = enabled && binding.switchSenseVoiceTimestampSemanticMerge.isChecked
+        binding.switchSenseVoiceTimestampSemanticMerge.isEnabled = enabled
+        binding.switchSenseVoiceTimestampSemanticMerge.alpha = if (enabled) 1f else 0.5f
+        binding.tvSenseVoiceTimestampSemanticMergeHint.alpha = if (enabled) 1f else 0.5f
+        // Semantic mode needs the original token text and complete token timeline.
+        val discardTextEnabled = enabled && !semanticMergeEnabled
+        binding.switchSenseVoiceTimestampDiscardText.isEnabled = discardTextEnabled
+        binding.switchSenseVoiceTimestampDiscardText.alpha = if (discardTextEnabled) 1f else 0.5f
+        binding.tvSenseVoiceTimestampDiscardTextHint.alpha = if (discardTextEnabled) 1f else 0.5f
+        val splitEnabled = enabled && !semanticMergeEnabled
+        binding.layoutSenseVoiceTimestampGap.alpha = if (splitEnabled) 1f else 0.5f
+        binding.sliderSenseVoiceTimestampGap.isEnabled = splitEnabled
+        binding.etSenseVoiceTimestampGap.isEnabled = splitEnabled
+        val regularMergeEnabled = enabled && !semanticMergeEnabled
+        binding.switchSenseVoiceTimestampMerge.isEnabled = regularMergeEnabled
+        binding.switchSenseVoiceTimestampMerge.alpha = if (regularMergeEnabled) 1f else 0.5f
+        binding.tvSenseVoiceTimestampMergeHint.alpha = if (regularMergeEnabled) 1f else 0.5f
+        val mergeGapEnabled = regularMergeEnabled && binding.switchSenseVoiceTimestampMerge.isChecked
+        binding.layoutSenseVoiceTimestampMergeGap.alpha = if (mergeGapEnabled) 1f else 0.5f
+        binding.sliderSenseVoiceTimestampMergeGap.isEnabled = mergeGapEnabled
+        binding.etSenseVoiceTimestampMergeGap.isEnabled = mergeGapEnabled
     }
 
     private fun hasUsableTokenTimestampModel(): Boolean {

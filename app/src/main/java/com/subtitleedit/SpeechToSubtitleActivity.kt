@@ -23,12 +23,15 @@ import com.subtitleedit.task.LongTaskController
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.repository.DefaultSpeechRecognitionService
 import com.subtitleedit.repository.SpeechRecognitionService
+import com.subtitleedit.repository.AiTranslationService
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.TokenTimestampGenerator
 import com.subtitleedit.util.WhisperRecognizer
+import com.subtitleedit.util.SubtitleTextFormatter
+import com.subtitleedit.util.SubtitleFormattingOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -47,6 +50,8 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     private lateinit var settingsManager: SettingsManager
     private val speechRecognitionService: SpeechRecognitionService
         get() = (application as SubtitleEditApplication).dependencies.speechRecognitionService
+    private val aiTranslationService: AiTranslationService
+        get() = (application as SubtitleEditApplication).dependencies.aiTranslationService
     private val nativeMediaEngine
         get() = (application as SubtitleEditApplication).dependencies.nativeMediaEngine
 
@@ -718,6 +723,9 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         if (isCancelled) return Result.failure(Exception("用户取消"))
 
         val timelineSegments = timelineResult.getOrElse { return Result.failure(it) }
+        if (settingsManager.isSpeechTokenTimestampSemanticMergeEnabled()) {
+            return applySemanticTimestampMerge(timelineSegments, progressPrefix)
+        }
         if (!settingsManager.isSpeechTokenTimestampDiscardTextEnabled()) {
             appendRuntimeLog(
                 "实验打轴完成：生成 ${timelineSegments.size} 个字幕段，保留当前模型文本"
@@ -780,6 +788,123 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                 )
             }.also { segments ->
                 segments.forEach(::appendRecognizedSegment)
+            }
+        }
+    }
+
+    private suspend fun applySemanticTimestampMerge(
+        timelineSegments: List<TokenTimestampGenerator.Segment>,
+        progressPrefix: String
+    ): Result<List<WhisperRecognizer.SubtitleSegment>> {
+        val formatterOptions = SubtitleFormattingOptions(
+            removeSpaces = true,
+            endPunctuation = "，,、。．.？?！!：:；;…".toSet()
+        )
+        val cleaned = timelineSegments.map {
+            SubtitleTextFormatter.format(it.text, formatterOptions).replace(Regex("\\s+"), "")
+        }
+        val semanticSegments = timelineSegments.zip(cleaned)
+            .filter { it.second.isNotBlank() }
+            .map { it.first.copy(text = it.second) }
+        val joined = semanticSegments.joinToString("") { it.text }
+        if (joined.isBlank()) return Result.failure(Exception("实验打轴未生成有效文本"))
+        appendRuntimeLog("语义合并：已清理并拼接 ${timelineSegments.size} 个 token，提交 AI 恢复标点")
+        val provider = settingsManager.getAiProvider()
+        val apiKey = settingsManager.getAiApiKey(provider)
+        val model = settingsManager.getAiModel(provider)
+        val baseUrl = settingsManager.getAiBaseUrl(provider)
+        if (apiKey.isBlank() || model.isBlank() || baseUrl.isBlank()) {
+            return Result.failure(Exception("请先在 AI 翻译设置中配置 API、模型和密钥"))
+        }
+        val conversation = aiTranslationService.createConversation(
+            context = this,
+            provider = provider,
+            apiKey = apiKey,
+            model = model,
+            targetLanguage = "",
+            customPrompt = "",
+            baseUrl = baseUrl,
+            contextWindowTokens = settingsManager.getAiContextWindowTokens(provider),
+            subtitleFormat = SubtitleParser.SubtitleFormat.TXT,
+            reasoningLevel = settingsManager.getAiReasoningLevel(provider),
+            historySessionId = "semantic_${System.currentTimeMillis()}",
+            historyTitle = "语义合并标点"
+        )
+        val punctuated = withContext(Dispatchers.IO) {
+            conversation.restorePunctuation(joined) { isCancelled }
+        }.getOrElse { return Result.failure(it) }
+        val merged = mergeSegmentsByPunctuation(
+            semanticSegments,
+            preserveOriginalTextPunctuation(joined, punctuated)
+        )
+        appendRuntimeLog("语义合并完成：${timelineSegments.size} 个 token -> ${merged.size} 条字幕")
+        merged.forEach(::appendRecognizedSegment)
+        return Result.success(merged)
+    }
+
+    private fun mergeSegmentsByPunctuation(
+        segments: List<TokenTimestampGenerator.Segment>,
+        punctuated: String
+    ): List<WhisperRecognizer.SubtitleSegment> {
+        val result = mutableListOf<WhisperRecognizer.SubtitleSegment>()
+        var tokenIndex = 0
+        var sourceChars = 0
+        var start = segments.firstOrNull()?.startTime ?: 0L
+        val punctuation = setOf(
+            '，', ',', '、', '。', '.', '．', '！', '!', '？', '?',
+            '；', ';', '：', ':', '…', '⋯', '—', '–'
+        )
+        val text = StringBuilder()
+        for (char in punctuated) {
+            if (char.isWhitespace()) continue
+            if (char !in punctuation) {
+                if (tokenIndex < segments.size) {
+                    text.append(char)
+                    sourceChars++
+                    while (tokenIndex < segments.size && sourceChars >= segments[tokenIndex].text.replace(Regex("\\s+"), "").length) {
+                        tokenIndex++
+                        sourceChars = 0
+                    }
+                }
+            } else if (text.isNotEmpty() && tokenIndex > 0) {
+                text.append(if (char == ',') '，' else if (char == '.') '。' else char)
+                val end = segments[(tokenIndex - 1).coerceIn(0, segments.lastIndex)].endTime
+                result += WhisperRecognizer.SubtitleSegment(start, end, text.toString())
+                text.clear()
+                start = if (tokenIndex < segments.size) segments[tokenIndex].startTime else end
+            }
+        }
+        if (text.isNotEmpty()) {
+            val end = segments.last().endTime
+            result += WhisperRecognizer.SubtitleSegment(start, end, text.toString())
+        }
+        return result.ifEmpty {
+            segments.map { WhisperRecognizer.SubtitleSegment(it.startTime, it.endTime, it.text) }
+        }
+    }
+
+    private fun preserveOriginalTextPunctuation(original: String, aiText: String): String {
+        val allowed = setOf(
+            '，', ',', '、', '。', '.', '．', '！', '!', '？', '?',
+            '；', ';', '：', ':', '…', '⋯', '—', '–'
+        )
+        val punctuationAfter = mutableMapOf<Int, Char>()
+        var seen = 0
+        aiText.forEach { char ->
+            if (char in allowed) {
+                punctuationAfter[seen] = when (char) {
+                    ',' -> '，'
+                    '.' , '．' -> '。'
+                    else -> char
+                }
+            } else if (!char.isWhitespace()) {
+                seen++
+            }
+        }
+        return buildString(original.length + punctuationAfter.size) {
+            original.forEachIndexed { index, char ->
+                append(char)
+                punctuationAfter[index + 1]?.let(::append)
             }
         }
     }
@@ -858,6 +983,9 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             appendRuntimeLog(
                 "  Token 切分间隔：${settingsManager.getSpeechTokenTimestampGapMs()}ms"
             )
+            if (settingsManager.isSpeechTokenTimestampSemanticMergeEnabled()) {
+                appendRuntimeLog("  语义合并：启用（AI 恢复标点后按语义切分）")
+            }
             appendRuntimeLog(
                 "  合并语音段：${if (settingsManager.isSpeechTokenTimestampMergeEnabled()) {
                     "启用，最大间隔 ${settingsManager.getSpeechTokenTimestampMergeGapMs()}ms"

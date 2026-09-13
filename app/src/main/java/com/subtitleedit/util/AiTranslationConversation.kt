@@ -61,6 +61,22 @@ class AiTranslationConversation(
 
     fun cancel() = conversation.cancel()
 
+    /** Restore punctuation while preserving every original non-punctuation character. */
+    suspend fun restorePunctuation(
+        text: String,
+        isCancelled: () -> Boolean = { false }
+    ): Result<String> {
+        if (text.isBlank()) return Result.success(text)
+        return runCatching {
+            val prompt = "帮我添加标点，不做额外说明，不修改文本内容\n文本内容\n$text"
+            val result = conversation.sendUserMessage(prompt, isCancelled = isCancelled)
+            result.text.trim().removeCodeFences().trim()
+        }
+    }
+
+    private fun String.removeCodeFences(): String =
+        replace(Regex("(?m)^\\s*```(?:text)?\\s*$"), "")
+
     suspend fun translateSubtitles(
         subtitles: List<SubtitleEntry>,
         startPosition: Int = 1,

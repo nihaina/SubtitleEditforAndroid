@@ -96,6 +96,8 @@ class SettingsManager private constructor(context: Context) {
             "stt_token_timestamp_merge_enabled"
         private const val KEY_STT_TOKEN_TIMESTAMP_MERGE_GAP_MS =
             "stt_token_timestamp_merge_gap_ms"
+        private const val KEY_STT_TOKEN_TIMESTAMP_SEMANTIC_MERGE_ENABLED =
+            "stt_token_timestamp_semantic_merge_enabled"
         private const val KEY_QUICK_TRANSCRIBE_SOURCE_LANGUAGE = "quick_transcribe_source_language"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_TTS_ENGINE = "tts_engine"
@@ -827,6 +829,13 @@ class SettingsManager private constructor(context: Context) {
 
     fun setSpeechTokenTimestampMergeGapMs(gapMs: Int) {
         prefs.edit().putInt(KEY_STT_TOKEN_TIMESTAMP_MERGE_GAP_MS, gapMs.coerceIn(0, 5000)).apply()
+    }
+
+    fun isSpeechTokenTimestampSemanticMergeEnabled(): Boolean =
+        prefs.getBoolean(KEY_STT_TOKEN_TIMESTAMP_SEMANTIC_MERGE_ENABLED, false)
+
+    fun setSpeechTokenTimestampSemanticMergeEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_STT_TOKEN_TIMESTAMP_SEMANTIC_MERGE_ENABLED, enabled).apply()
     }
 
     fun getQuickTranscribeSourceLanguage(): String =
