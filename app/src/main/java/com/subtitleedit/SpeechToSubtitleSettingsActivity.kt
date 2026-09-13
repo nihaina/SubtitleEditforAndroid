@@ -175,7 +175,7 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
             slider = binding.sliderSenseVoiceTimestampGap,
             input = binding.etSenseVoiceTimestampGap,
             format = "%.0f",
-            normalize = { value -> snap(value, 50f, 100f, 2000f) },
+            normalize = { value -> snap(value, 50f, 0f, 2000f) },
             save = { value -> settingsManager.setSpeechTokenTimestampGapMs(value.toInt()) }
         )
         binding.switchSenseVoiceTimestampMerge.setOnCheckedChangeListener { _, checked ->

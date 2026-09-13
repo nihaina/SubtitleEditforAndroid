@@ -166,7 +166,7 @@
                                 android:layout_weight="1"
                                 android:stepSize="50"
                                 android:value="500"
-                                android:valueFrom="100"
+                                android:valueFrom="0"
                                 android:valueTo="2000" />
 
                             <com.google.android.material.textfield.TextInputLayout

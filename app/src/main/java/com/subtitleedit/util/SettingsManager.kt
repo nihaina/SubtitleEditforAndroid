@@ -806,11 +806,11 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun getSpeechTokenTimestampGapMs(): Int {
-        return prefs.getInt(KEY_STT_TOKEN_TIMESTAMP_GAP_MS, 500).coerceIn(100, 2000)
+        return prefs.getInt(KEY_STT_TOKEN_TIMESTAMP_GAP_MS, 500).coerceIn(0, 2000)
     }
 
     fun setSpeechTokenTimestampGapMs(gapMs: Int) {
-        prefs.edit().putInt(KEY_STT_TOKEN_TIMESTAMP_GAP_MS, gapMs.coerceIn(100, 2000)).apply()
+        prefs.edit().putInt(KEY_STT_TOKEN_TIMESTAMP_GAP_MS, gapMs.coerceIn(0, 2000)).apply()
     }
 
     fun isSpeechTokenTimestampMergeEnabled(): Boolean {

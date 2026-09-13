@@ -27,7 +27,7 @@ internal object TokenTimestampSegmenter {
             return emptyList()
         }
 
-        val gapThreshold = splitGapMs.coerceIn(100, 2000).toLong()
+        val gapThreshold = splitGapMs.coerceIn(0, 2000).toLong()
         val alignedTokens = tokens.indices.mapNotNull { index ->
             val timestamp = timestamps[index]
             val duration = durations.getOrNull(index)
@@ -102,7 +102,7 @@ internal object TokenTimestampSegmenter {
     fun mergeShortGaps(segments: List<Segment>, splitGapMs: Int): List<Segment> {
         if (segments.size < 2) return segments
 
-        val gapThreshold = splitGapMs.coerceIn(100, 2000).toLong()
+        val gapThreshold = splitGapMs.coerceIn(0, 2000).toLong()
         val merged = mutableListOf<Segment>()
         var current = segments.first()
         for (next in segments.drop(1)) {
