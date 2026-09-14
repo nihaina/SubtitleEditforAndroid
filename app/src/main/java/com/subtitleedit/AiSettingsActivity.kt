@@ -79,7 +79,11 @@ class AiSettingsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityAiSettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        ToolCardShadow.remove(binding.cardAiSettings)
+        ToolCardShadow.remove(
+            binding.cardAiSettings,
+            binding.cardAiTranslationSettings,
+            binding.cardAiSemanticSettings
+        )
 
         settingsManager = SettingsManager.getInstance(this)
 
