@@ -724,6 +724,8 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
 
         val timelineSegments = timelineResult.getOrElse { return Result.failure(it) }
         if (settingsManager.isSpeechTokenTimestampSemanticMergeEnabled()) {
+            showProgress("$progressPrefix 语义合并：准备 token 文本...", 55)
+            appendRuntimeLog("$progressPrefix 语义合并：开始整理 token 文本")
             return applySemanticTimestampMerge(timelineSegments, progressPrefix)
         }
         if (!settingsManager.isSpeechTokenTimestampDiscardTextEnabled()) {
@@ -808,7 +810,8 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             .map { it.first.copy(text = it.second) }
         val joined = semanticSegments.joinToString(" ") { it.text }
         if (joined.isBlank()) return Result.failure(Exception("实验打轴未生成有效文本"))
-        appendRuntimeLog("语义合并：已清理并拼接 ${timelineSegments.size} 个 token，提交 AI 恢复标点")
+        showProgress("$progressPrefix 语义合并：已整理 ${semanticSegments.size} 个 token，正在请求 AI 恢复标点...", 65)
+        appendRuntimeLog("$progressPrefix 语义合并：已清除句末标点并保留句内空格，以空格拼接 ${semanticSegments.size} 个 token")
         val provider = settingsManager.getAiProvider()
         val apiKey = settingsManager.getAiApiKey(provider)
         val model = settingsManager.getAiModel(provider)
@@ -833,11 +836,13 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         val punctuated = withContext(Dispatchers.IO) {
             conversation.restorePunctuation(joined) { isCancelled }
         }.getOrElse { return Result.failure(it) }
+        showProgress("$progressPrefix 语义合并：AI 标点恢复完成，正在按标点重建时间轴...", 90)
+        appendRuntimeLog("$progressPrefix 语义合并：AI 返回文本，开始按停顿标点映射时间点")
         val merged = mergeSegmentsByPunctuation(
             semanticSegments,
             preserveOriginalTextPunctuation(joined, punctuated)
         )
-        appendRuntimeLog("语义合并完成：${timelineSegments.size} 个 token -> ${merged.size} 条字幕")
+        appendRuntimeLog("$progressPrefix 语义合并完成：${timelineSegments.size} 个 token -> ${merged.size} 条字幕")
         merged.forEach(::appendRecognizedSegment)
         return Result.success(merged)
     }
