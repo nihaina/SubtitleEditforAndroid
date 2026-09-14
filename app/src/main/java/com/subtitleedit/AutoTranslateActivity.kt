@@ -379,7 +379,7 @@ class AutoTranslateActivity : AppCompatActivity() {
 
     private fun readTranslationConfig(showError: Boolean = true): TranslationConfig? {
         val provider = settingsManager.getAiTranslationProvider()
-        val apiKey = settingsManager.getAiApiKey()
+        val apiKey = settingsManager.getAiApiKey(provider)
         val model = settingsManager.getAiModel(provider)
         val targetLanguage = settingsManager.getAiTargetLanguage()
         val baseUrl = settingsManager.getAiBaseUrl(provider)

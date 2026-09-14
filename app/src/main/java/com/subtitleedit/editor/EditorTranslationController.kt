@@ -50,7 +50,7 @@ internal class EditorTranslationController(
         val settingsManager = SettingsManager.getInstance(activity)
         val provider = settingsManager.getAiTranslationProvider()
         val providerName = AiProviderConfig.getProvider(provider).displayName
-        val apiKey = settingsManager.getAiApiKey()
+        val apiKey = settingsManager.getAiApiKey(provider)
         if (apiKey.isEmpty()) {
             OverwritingToast.makeText(
                 activity,
@@ -60,7 +60,7 @@ internal class EditorTranslationController(
             return
         }
 
-        val model = settingsManager.getAiModel()
+        val model = settingsManager.getAiModel(provider)
         val targetLanguage = settingsManager.getAiTargetLanguage()
         val customPrompt = settingsManager.getAiCustomPrompt()
         if (targetLanguage.isBlank()) {
