@@ -34,6 +34,11 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_AI_CUSTOM_BASE_URL = "ai_custom_base_url"
         private const val KEY_AI_CONTEXT_WINDOW_TOKENS = "ai_context_window_tokens"
         private const val KEY_AI_REASONING_LEVEL = "ai_reasoning_level"
+        private const val KEY_AI_TRANSLATION_PROVIDER = "ai_translation_provider"
+        private const val KEY_AI_SEMANTIC_PROVIDER = "ai_semantic_provider"
+        private const val KEY_AI_SEMANTIC_MODEL = "ai_semantic_model"
+        private const val KEY_AI_SEMANTIC_CONTEXT_WINDOW_TOKENS = "ai_semantic_context_window_tokens"
+        private const val KEY_AI_SEMANTIC_REASONING_LEVEL = "ai_semantic_reasoning_level"
         private const val KEY_WAVEFORM_CACHE_LOCATION = "waveform_cache_location"
         private const val KEY_LOOP_SELECTED_SUBTITLE = "loop_selected_subtitle"
         private const val KEY_SHOW_ALL_FILE_TYPES = "show_all_file_types"
@@ -203,6 +208,22 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putString(KEY_AI_PROVIDER, provider).apply()
     }
 
+    fun getAiTranslationProvider(): String =
+        prefs.getString(KEY_AI_TRANSLATION_PROVIDER, null)?.takeIf { AiProviderConfig.providers.any { p -> p.id == it } }
+            ?: getAiProvider()
+
+    fun setAiTranslationProvider(provider: String) {
+        prefs.edit().putString(KEY_AI_TRANSLATION_PROVIDER, provider).apply()
+    }
+
+    fun getAiSemanticProvider(): String =
+        prefs.getString(KEY_AI_SEMANTIC_PROVIDER, null)?.takeIf { AiProviderConfig.providers.any { p -> p.id == it } }
+            ?: getAiProvider()
+
+    fun setAiSemanticProvider(provider: String) {
+        prefs.edit().putString(KEY_AI_SEMANTIC_PROVIDER, provider).apply()
+    }
+
     /**
      * 获取 AI API Key
      */
@@ -322,6 +343,35 @@ class SettingsManager private constructor(context: Context) {
         provider: String = getAiProvider()
     ) {
         prefs.edit().putString(providerKey(KEY_AI_REASONING_LEVEL, provider), level.name).apply()
+    }
+
+    fun getAiSemanticModel(provider: String = getAiSemanticProvider()): String {
+        val defaultModel = AiProviderConfig.getProvider(provider).defaultModel
+        return prefs.getString(providerKey(KEY_AI_SEMANTIC_MODEL, provider), null)
+            ?.takeIf { it.isNotBlank() } ?: defaultModel
+    }
+
+    fun setAiSemanticModel(provider: String, model: String) {
+        prefs.edit().putString(providerKey(KEY_AI_SEMANTIC_MODEL, provider), model).apply()
+    }
+
+    fun getAiSemanticContextWindowTokens(provider: String = getAiSemanticProvider()): Int {
+        val key = providerKey(KEY_AI_SEMANTIC_CONTEXT_WINDOW_TOKENS, provider)
+        return prefs.getInt(key, AiProviderConfig.defaultContextWindowTokens(provider))
+            .coerceIn(MIN_AI_CONTEXT_WINDOW_TOKENS, MAX_AI_CONTEXT_WINDOW_TOKENS)
+    }
+
+    fun setAiSemanticContextWindowTokens(tokens: Int, provider: String = getAiSemanticProvider()) {
+        prefs.edit().putInt(providerKey(KEY_AI_SEMANTIC_CONTEXT_WINDOW_TOKENS, provider), tokens.coerceIn(MIN_AI_CONTEXT_WINDOW_TOKENS, MAX_AI_CONTEXT_WINDOW_TOKENS)).apply()
+    }
+
+    fun getAiSemanticReasoningLevel(provider: String = getAiSemanticProvider()): AiProviderConfig.ReasoningLevel =
+        prefs.getString(providerKey(KEY_AI_SEMANTIC_REASONING_LEVEL, provider), null)
+            ?.let { runCatching { AiProviderConfig.ReasoningLevel.valueOf(it) }.getOrNull() }
+            ?: AiProviderConfig.defaultReasoningLevel(provider)
+
+    fun setAiSemanticReasoningLevel(level: AiProviderConfig.ReasoningLevel, provider: String = getAiSemanticProvider()) {
+        prefs.edit().putString(providerKey(KEY_AI_SEMANTIC_REASONING_LEVEL, provider), level.name).apply()
     }
 
     fun getAiBaseUrl(provider: String = getAiProvider()): String {

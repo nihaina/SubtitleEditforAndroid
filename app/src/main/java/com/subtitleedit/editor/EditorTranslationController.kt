@@ -48,7 +48,7 @@ internal class EditorTranslationController(
 
     fun start(selectedEntries: List<Pair<SubtitleEntry, Int>>) {
         val settingsManager = SettingsManager.getInstance(activity)
-        val provider = settingsManager.getAiProvider()
+        val provider = settingsManager.getAiTranslationProvider()
         val providerName = AiProviderConfig.getProvider(provider).displayName
         val apiKey = settingsManager.getAiApiKey()
         if (apiKey.isEmpty()) {

@@ -49,7 +49,7 @@ class ChatActivity : AppCompatActivity() {
         binding = ActivityChatBinding.inflate(layoutInflater)
         setContentView(binding.root)
         configuration = launchConfiguration(intent) ?: run {
-            Toast.makeText(this, "对话配置已失效，请从 AI 翻译设置重新打开", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "对话配置已失效，请从 AI 设置重新打开", Toast.LENGTH_LONG).show()
             finish()
             return
         }

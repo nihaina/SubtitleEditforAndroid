@@ -16,7 +16,7 @@
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
             app:navigationIcon="@drawable/ic_back"
-            app:title="AI 翻译设置" />
+            app:title="AI 设置" />
 
     </com.google.android.material.appbar.AppBarLayout>
 
@@ -177,6 +177,7 @@
                     </com.google.android.material.textfield.TextInputLayout>
 
                     <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/tilLegacyContextWindow"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginBottom="16dp"
@@ -193,6 +194,7 @@
                     </com.google.android.material.textfield.TextInputLayout>
 
                     <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/tilLegacyTargetLanguage"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:hint="@string/activity_ai_settings_hint_04"
@@ -206,6 +208,7 @@
                     </com.google.android.material.textfield.TextInputLayout>
 
                     <TextView
+                        android:id="@+id/tvLegacyReasoningLabel"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="16dp"
@@ -220,6 +223,7 @@
                         android:layout_marginBottom="8dp" />
 
                     <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/tilLegacyCustomPrompt"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
@@ -248,6 +252,203 @@
 
                 </LinearLayout>
 
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardAiTranslationSettings"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                app:cardCornerRadius="8dp"
+                app:cardElevation="2dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/activity_ai_settings_translation_title"
+                        android:textColor="@color/on_surface"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+                    <Spinner
+                        android:id="@+id/spinnerAiTranslationProvider"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/tilTranslationModel"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:hint="@string/activity_ai_settings_hint_02">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etTranslationModel"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <TextView
+                        android:id="@+id/btnFetchTranslationModels"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:padding="4dp"
+                        android:text="@string/activity_ai_settings_fetch_models"
+                        android:textColor="@color/primary"
+                        android:textSize="14sp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:visibility="gone" />
+                    <TextView
+                        android:id="@+id/tvTranslationModelLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/activity_ai_settings_text_03"
+                        android:visibility="gone" />
+                    <Spinner
+                        android:id="@+id/spinnerTranslationModel"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:visibility="gone" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:hint="@string/activity_ai_settings_hint_context_window">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etTranslationContextWindow"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="number" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <com.google.android.material.textfield.TextInputLayout
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:hint="@string/activity_ai_settings_hint_04">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etTranslationTargetLanguage"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/activity_ai_settings_reasoning_title" />
+                    <Spinner
+                        android:id="@+id/spinnerTranslationReasoningLevel"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:hint="@string/activity_ai_settings_custom_prompt_hint">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etTranslationCustomPrompt"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:minLines="3"
+                            android:gravity="top|start" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardAiSemanticSettings"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                app:cardCornerRadius="8dp"
+                app:cardElevation="2dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/activity_ai_settings_semantic_title"
+                        android:textColor="@color/on_surface"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/activity_ai_settings_semantic_prompt_hint"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="12sp" />
+                    <Spinner
+                        android:id="@+id/spinnerAiSemanticProvider"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/tilSemanticModel"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:hint="@string/activity_ai_settings_hint_02">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etSemanticModel"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <TextView
+                        android:id="@+id/btnFetchSemanticModels"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:padding="4dp"
+                        android:text="@string/activity_ai_settings_fetch_models"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:textColor="@color/primary"
+                        android:textSize="14sp"
+                        android:visibility="gone" />
+                    <TextView
+                        android:id="@+id/tvSemanticModelLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/activity_ai_settings_text_03"
+                        android:visibility="gone" />
+                    <Spinner
+                        android:id="@+id/spinnerSemanticModel"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:visibility="gone" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:hint="@string/activity_ai_settings_hint_context_window">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etSemanticContextWindow"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="number" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/activity_ai_settings_reasoning_title" />
+                    <Spinner
+                        android:id="@+id/spinnerSemanticReasoningLevel"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
         </LinearLayout>

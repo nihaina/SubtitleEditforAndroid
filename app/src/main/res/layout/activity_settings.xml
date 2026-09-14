@@ -116,7 +116,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="@string/activity_ai_settings_text_01"
+                    android:text="@string/activity_settings_ai_entry"
                     android:textSize="16sp"/>
 
             </LinearLayout>

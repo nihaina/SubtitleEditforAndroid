@@ -10,6 +10,8 @@ import android.text.TextWatcher
 import android.text.method.LinkMovementMethod
 import android.text.method.PasswordTransformationMethod
 import android.view.View
+import android.view.Menu
+import android.view.MenuItem
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Toast
@@ -39,6 +41,8 @@ class AiSettingsActivity : AppCompatActivity() {
     private val aiTranslationService: AiTranslationService
         get() = (application as SubtitleEditApplication).dependencies.aiTranslationService
     private var selectedProvider: String = AiProviderConfig.SILICONFLOW
+    private var selectedTranslationProvider: String = AiProviderConfig.SILICONFLOW
+    private var selectedSemanticProvider: String = AiProviderConfig.SILICONFLOW
     private var suppressTextSave = false
     private var isApiKeyVisible = false
     private var authenticationInProgress = false
@@ -81,16 +85,27 @@ class AiSettingsActivity : AppCompatActivity() {
 
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "AI 翻译设置"
+        supportActionBar?.title = "AI 设置"
         binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
 
         setupApiKeyActions()
         setupProviderSpinner()
         setupReasoningSettings()
         setupModelListAction()
-        binding.btnOpenAiChat.setOnClickListener { openAiChat() }
+        setupDedicatedSettings()
+        hideLegacyFeatureControls()
         loadSettings()
         setupSave()
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.menu_ai_settings, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        R.id.action_open_ai_chat -> { openAiChat(); true }
+        else -> super.onOptionsItemSelected(item)
     }
 
     override fun onStop() {
@@ -128,7 +143,7 @@ class AiSettingsActivity : AppCompatActivity() {
     private fun loadProviderFields(provider: String) {
         val config = AiProviderConfig.getProvider(provider)
         suppressTextSave = true
-        binding.tvProviderTitle.text = "AI 翻译设置（${config.displayName}）"
+        binding.tvProviderTitle.text = "AI 平台设置（${config.displayName}）"
         binding.tilApiKey.hint = "${config.displayName} API Key"
         binding.tvProviderWebsite.text = HtmlCompat.fromHtml(
             "官网：<a href=\"${config.websiteUrl}\">${config.websiteUrl}</a>",
@@ -167,6 +182,160 @@ class AiSettingsActivity : AppCompatActivity() {
             binding.etModel.setText(savedModel)
         }
         suppressTextSave = false
+        hideLegacyFeatureControls()
+    }
+
+    private fun hideLegacyFeatureControls() {
+        listOf(
+            binding.tilModel, binding.btnFetchModels, binding.tvModelLabel,
+            binding.spinnerModel, binding.etContextWindowTokens,
+            binding.etTargetLanguage, binding.spinnerReasoningLevel,
+            binding.etCustomPrompt, binding.btnOpenAiChat,
+            binding.tilLegacyContextWindow, binding.tilLegacyTargetLanguage,
+            binding.tvLegacyReasoningLabel, binding.tilLegacyCustomPrompt
+        ).forEach { it.visibility = View.GONE }
+    }
+
+    private fun providerNames() = AiProviderConfig.providers.map { it.displayName }
+
+    private fun setupDedicatedSettings() {
+        val names = providerNames()
+        selectedTranslationProvider = settingsManager.getAiTranslationProvider()
+        selectedSemanticProvider = settingsManager.getAiSemanticProvider()
+        suppressTextSave = true
+        fun setupProviderSpinner(spinner: android.widget.Spinner, initial: String, onChanged: (String) -> Unit) {
+            spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, names).apply {
+                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    if (!suppressTextSave) onChanged(AiProviderConfig.providers[position].id)
+                }
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            }
+            spinner.setSelection(AiProviderConfig.indexOf(initial))
+        }
+        setupProviderSpinner(binding.spinnerAiTranslationProvider, settingsManager.getAiTranslationProvider()) {
+            saveTranslationFields()
+            selectedTranslationProvider = it
+            settingsManager.setAiTranslationProvider(it)
+            loadTranslationFields(it)
+        }
+        setupProviderSpinner(binding.spinnerAiSemanticProvider, settingsManager.getAiSemanticProvider()) {
+            saveSemanticFields()
+            selectedSemanticProvider = it
+            settingsManager.setAiSemanticProvider(it)
+            loadSemanticFields(it)
+        }
+        setupReasoningSpinner(binding.spinnerTranslationReasoningLevel) { settingsManager.setAiReasoningLevel(it, selectedTranslationProvider) }
+        setupReasoningSpinner(binding.spinnerSemanticReasoningLevel) { settingsManager.setAiSemanticReasoningLevel(it, selectedSemanticProvider) }
+        binding.btnFetchTranslationModels.setOnClickListener { fetchModelsFor(false) }
+        binding.btnFetchSemanticModels.setOnClickListener { fetchModelsFor(true) }
+        binding.spinnerTranslationModel.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (!suppressTextSave && AiProviderConfig.getProvider(selectedTranslationProvider).models.isNotEmpty()) {
+                    settingsManager.setAiModel(selectedTranslationProvider, parent?.getItemAtPosition(position)?.toString().orEmpty())
+                }
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        binding.spinnerSemanticModel.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (!suppressTextSave && AiProviderConfig.getProvider(selectedSemanticProvider).models.isNotEmpty()) {
+                    settingsManager.setAiSemanticModel(selectedSemanticProvider, parent?.getItemAtPosition(position)?.toString().orEmpty())
+                }
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        listOf(binding.etTranslationModel, binding.etTranslationContextWindow, binding.etTranslationTargetLanguage, binding.etTranslationCustomPrompt,
+            binding.etSemanticModel, binding.etSemanticContextWindow).forEach { edit ->
+            edit.addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                override fun afterTextChanged(s: Editable?) { if (!suppressTextSave) saveDedicatedEdits() }
+            })
+        }
+        suppressTextSave = false
+        loadTranslationFields(selectedTranslationProvider)
+        loadSemanticFields(selectedSemanticProvider)
+    }
+
+    private fun setupReasoningSpinner(spinner: android.widget.Spinner, onChanged: (AiProviderConfig.ReasoningLevel) -> Unit) {
+        spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, AiProviderConfig.ReasoningLevel.entries.map { it.displayName }).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) { if (!suppressTextSave) onChanged(AiProviderConfig.ReasoningLevel.entries[position]) }
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+    }
+
+    private fun loadTranslationFields(provider: String) {
+        suppressTextSave = true
+        val config = AiProviderConfig.getProvider(provider)
+        binding.etTranslationModel.setText(settingsManager.getAiModel(provider))
+        binding.etTranslationContextWindow.setText(settingsManager.getAiContextWindowTokens(provider).toString())
+        binding.etTranslationTargetLanguage.setText(settingsManager.getAiTargetLanguage())
+        binding.spinnerTranslationReasoningLevel.setSelection(AiProviderConfig.ReasoningLevel.entries.indexOf(settingsManager.getAiReasoningLevel(provider)))
+        binding.etTranslationCustomPrompt.setText(settingsManager.getAiCustomPrompt())
+        updateModelControls(config, binding.tilTranslationModel, binding.etTranslationModel, binding.tvTranslationModelLabel, binding.spinnerTranslationModel, binding.btnFetchTranslationModels, settingsManager.getAiModel(provider), false)
+        suppressTextSave = false
+    }
+
+    private fun loadSemanticFields(provider: String) {
+        suppressTextSave = true
+        val config = AiProviderConfig.getProvider(provider)
+        binding.etSemanticModel.setText(settingsManager.getAiSemanticModel(provider))
+        binding.etSemanticContextWindow.setText(settingsManager.getAiSemanticContextWindowTokens(provider).toString())
+        binding.spinnerSemanticReasoningLevel.setSelection(AiProviderConfig.ReasoningLevel.entries.indexOf(settingsManager.getAiSemanticReasoningLevel(provider)))
+        updateModelControls(config, binding.tilSemanticModel, binding.etSemanticModel, binding.tvSemanticModelLabel, binding.spinnerSemanticModel, binding.btnFetchSemanticModels, settingsManager.getAiSemanticModel(provider), true)
+        suppressTextSave = false
+    }
+
+    private fun updateModelControls(config: AiProviderConfig.Provider, til: com.google.android.material.textfield.TextInputLayout?, edit: com.google.android.material.textfield.TextInputEditText, label: android.widget.TextView, spinner: android.widget.Spinner, fetch: android.view.View, saved: String, semantic: Boolean) {
+        val fixed = config.models.isNotEmpty()
+        til?.visibility = if (fixed) View.GONE else View.VISIBLE
+        edit.visibility = if (fixed) View.GONE else View.VISIBLE
+        label.visibility = if (fixed) View.VISIBLE else View.GONE
+        spinner.visibility = if (fixed) View.VISIBLE else View.GONE
+        fetch.visibility = if (config.customEndpoint) View.VISIBLE else View.GONE
+        if (fixed) {
+            spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, config.models).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+            spinner.setSelection(config.models.indexOf(saved).coerceAtLeast(0))
+        }
+    }
+
+    private fun saveDedicatedEdits() {
+        if (AiProviderConfig.getProvider(selectedTranslationProvider).models.isEmpty()) {
+            settingsManager.setAiModel(selectedTranslationProvider, binding.etTranslationModel.text?.toString()?.trim().orEmpty())
+        }
+        binding.etTranslationContextWindow.text?.toString()?.toIntOrNull()?.let { settingsManager.setAiContextWindowTokens(it, selectedTranslationProvider) }
+        settingsManager.setAiTargetLanguage(binding.etTranslationTargetLanguage.text?.toString()?.trim().orEmpty())
+        settingsManager.setAiCustomPrompt(binding.etTranslationCustomPrompt.text?.toString().orEmpty())
+        if (AiProviderConfig.getProvider(selectedSemanticProvider).models.isEmpty()) {
+            settingsManager.setAiSemanticModel(selectedSemanticProvider, binding.etSemanticModel.text?.toString()?.trim().orEmpty())
+        }
+        binding.etSemanticContextWindow.text?.toString()?.toIntOrNull()?.let { settingsManager.setAiSemanticContextWindowTokens(it, selectedSemanticProvider) }
+    }
+
+    private fun saveTranslationFields() = saveDedicatedEdits()
+    private fun saveSemanticFields() = saveDedicatedEdits()
+
+    private fun fetchModelsFor(semantic: Boolean) {
+        val provider = if (semantic) selectedSemanticProvider else selectedTranslationProvider
+        val config = AiProviderConfig.getProvider(provider)
+        if (!config.customEndpoint) return
+        val button = if (semantic) binding.btnFetchSemanticModels else binding.btnFetchTranslationModels
+        val modelEdit = if (semantic) binding.etSemanticModel else binding.etTranslationModel
+        val apiUrl = settingsManager.getAiBaseUrl(provider)
+        if (apiUrl.isBlank()) { showToast("请先在 AI 平台设置中填写 API 请求地址"); return }
+        button.isEnabled = false
+        lifecycleScope.launch {
+            try {
+                val models = aiTranslationService.fetchModels(apiUrl, settingsManager.getAiApiKey(provider))
+                if (models.isEmpty()) showToast("模型列表为空") else AlertDialog.Builder(this@AiSettingsActivity).setTitle("选择模型（${models.size}）").setItems(models.toTypedArray()) { _, which -> modelEdit.setText(models[which]) }.show()
+            } catch (e: Exception) { showToast(e.message ?: "获取模型列表失败") } finally { button.isEnabled = true }
+        }
     }
 
     private fun setupApiKeyActions() {
@@ -249,18 +418,20 @@ class AiSettingsActivity : AppCompatActivity() {
 
     private fun openAiChat() {
         saveCurrentProviderFields()
-        val config = AiProviderConfig.getProvider(selectedProvider)
-        val apiKey = settingsManager.getAiApiKey(selectedProvider)
+        saveDedicatedEdits()
+        val chatProvider = settingsManager.getAiTranslationProvider()
+        val config = AiProviderConfig.getProvider(chatProvider)
+        val apiKey = settingsManager.getAiApiKey(chatProvider)
         if (apiKey.isBlank()) {
             showToast(getString(R.string.ai_api_key_empty))
             return
         }
-        val baseUrl = settingsManager.getAiBaseUrl(selectedProvider)
+        val baseUrl = settingsManager.getAiBaseUrl(chatProvider)
         if (baseUrl.isBlank()) {
             showToast("请先填写 API 请求地址")
             return
         }
-        val model = settingsManager.getAiModel(selectedProvider)
+        val model = settingsManager.getAiModel(chatProvider)
         if (model.isBlank()) {
             showToast("请先填写模型名称")
             return
@@ -271,16 +442,16 @@ class AiSettingsActivity : AppCompatActivity() {
                 ChatLaunchConfiguration(
                     providerName = config.displayName,
                     backendConfig = ChatBackendConfig(
-                        providerId = selectedProvider,
+                        providerId = chatProvider,
                         apiKey = apiKey,
                         model = model,
                         baseUrl = baseUrl,
-                        contextWindowTokens = settingsManager.getAiContextWindowTokens(selectedProvider),
+                        contextWindowTokens = settingsManager.getAiContextWindowTokens(chatProvider),
                         reasoningLevel = ChatReasoningLevel.valueOf(
-                            settingsManager.getAiReasoningLevel(selectedProvider).name
+                            settingsManager.getAiReasoningLevel(chatProvider).name
                         ),
                         modelSupportsReasoning = AiProviderConfig
-                            .modelCapabilities(selectedProvider, model)
+                            .modelCapabilities(chatProvider, model)
                             .reasoning
                     )
                 )
@@ -364,20 +535,7 @@ class AiSettingsActivity : AppCompatActivity() {
 
     private fun saveCurrentProviderFields() {
         settingsManager.setAiApiKey(selectedProvider, binding.etApiKey.text?.toString()?.trim().orEmpty())
-        val config = AiProviderConfig.getProvider(selectedProvider)
-        if (config.models.isNotEmpty()) {
-            val model = binding.spinnerModel.selectedItem?.toString().orEmpty()
-            settingsManager.setAiModel(selectedProvider, model)
-        } else {
-            settingsManager.setAiModel(selectedProvider, binding.etModel.text?.toString()?.trim().orEmpty())
-        }
         settingsManager.setAiBaseUrl(selectedProvider, binding.etApiBaseUrl.text?.toString()?.trim().orEmpty())
-        binding.etContextWindowTokens.text?.toString()?.toIntOrNull()?.let {
-            settingsManager.setAiContextWindowTokens(it, selectedProvider)
-        }
-        AiProviderConfig.ReasoningLevel.entries
-            .getOrNull(binding.spinnerReasoningLevel.selectedItemPosition)
-            ?.let { settingsManager.setAiReasoningLevel(it, selectedProvider) }
     }
 
     private fun setupSave() {

@@ -378,15 +378,15 @@ class AutoTranslateActivity : AppCompatActivity() {
     }
 
     private fun readTranslationConfig(showError: Boolean = true): TranslationConfig? {
-        val provider = settingsManager.getAiProvider()
+        val provider = settingsManager.getAiTranslationProvider()
         val apiKey = settingsManager.getAiApiKey()
-        val model = settingsManager.getAiModel()
+        val model = settingsManager.getAiModel(provider)
         val targetLanguage = settingsManager.getAiTargetLanguage()
         val baseUrl = settingsManager.getAiBaseUrl(provider)
         val error = when {
             apiKey.isBlank() -> "请先在设置中配置 ${AiProviderConfig.getProvider(provider).displayName} API Key"
             targetLanguage.isBlank() -> "请先设置目标语言"
-            baseUrl.isBlank() -> "请先在 AI 翻译设置中填写 API 请求地址"
+            baseUrl.isBlank() -> "请先在 AI 设置的平台设置中填写 API 请求地址"
             else -> null
         }
         if (error != null) {

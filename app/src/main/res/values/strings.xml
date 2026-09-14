@@ -123,7 +123,8 @@
     <string name="tts_help_message">推荐使用Google TTS引擎，在谷歌商店搜索Google语音识别和语音合成并下载安装，然后在设置里下载对应的语音包，随后更改朗读引擎即可</string>
 
     <!-- Layout and menu text -->
-    <string name="activity_ai_settings_text_01">AI 翻译设置</string>
+    <string name="activity_ai_settings_text_01">AI 平台设置</string>
+    <string name="activity_settings_ai_entry">AI 设置</string>
     <string name="activity_ai_settings_text_02">平台</string>
     <string name="activity_ai_settings_hint_01" translatable="false">API Key</string>
     <string name="activity_ai_settings_hint_02">模型名称</string>
@@ -132,6 +133,9 @@
     <string name="activity_ai_settings_reasoning_title">思考强度</string>
     <string name="activity_ai_settings_custom_prompt_hint">自定义提示词（可选）</string>
     <string name="activity_ai_settings_open_chat">打开 AI 对话</string>
+    <string name="activity_ai_settings_translation_title">AI 翻译设置</string>
+    <string name="activity_ai_settings_semantic_title">语义合并</string>
+    <string name="activity_ai_settings_semantic_prompt_hint">语义合并使用的 AI 平台、模型和推理设置</string>
     <string name="activity_ai_settings_hint_04">目标语言</string>
     <string name="activity_ai_settings_hint_context_window">上下文上限（Token）</string>
     <string name="ai_api_key_show">显示 API Key</string>

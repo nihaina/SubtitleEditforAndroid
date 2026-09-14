@@ -812,12 +812,12 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         if (joined.isBlank()) return Result.failure(Exception("实验打轴未生成有效文本"))
         showProgress("$progressPrefix 语义合并：已整理 ${semanticSegments.size} 个 token，正在请求 AI 恢复标点...", 65)
         appendRuntimeLog("$progressPrefix 语义合并：已清除句末标点并保留句内空格，以空格拼接 ${semanticSegments.size} 个 token")
-        val provider = settingsManager.getAiProvider()
+        val provider = settingsManager.getAiSemanticProvider()
         val apiKey = settingsManager.getAiApiKey(provider)
-        val model = settingsManager.getAiModel(provider)
+        val model = settingsManager.getAiSemanticModel(provider)
         val baseUrl = settingsManager.getAiBaseUrl(provider)
         if (apiKey.isBlank() || model.isBlank() || baseUrl.isBlank()) {
-            return Result.failure(Exception("请先在 AI 翻译设置中配置 API、模型和密钥"))
+            return Result.failure(Exception("请先在 AI 设置中配置 API、模型和密钥"))
         }
         val conversation = aiTranslationService.createConversation(
             context = this,
@@ -827,9 +827,9 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             targetLanguage = "",
             customPrompt = "",
             baseUrl = baseUrl,
-            contextWindowTokens = settingsManager.getAiContextWindowTokens(provider),
+            contextWindowTokens = settingsManager.getAiSemanticContextWindowTokens(provider),
             subtitleFormat = SubtitleParser.SubtitleFormat.TXT,
-            reasoningLevel = settingsManager.getAiReasoningLevel(provider),
+            reasoningLevel = settingsManager.getAiSemanticReasoningLevel(provider),
             historySessionId = "semantic_${System.currentTimeMillis()}",
             historyTitle = "语义合并标点"
         )
