@@ -68,14 +68,31 @@ class AiTranslationConversation(
     ): Result<String> {
         if (text.isBlank()) return Result.success(text)
         return runCatching {
-            val prompt = "帮我添加标点，不做额外说明，不修改文本内容\n文本内容\n$text"
+            val prompt = "帮我格式化文本，按照语气的停顿尽可能细致的添加标点，不做额外说明，不修改文本内容\n文本内容\n" +
+                "[[PUNCTUATED_TEXT]]\n$text\n[[/PUNCTUATED_TEXT]]"
             val result = conversation.sendUserMessage(prompt, isCancelled = isCancelled)
-            result.text.trim().removeCodeFences().trim()
+            historyStore.append(
+                id = historySessionId,
+                title = historyTitle ?: "语义合并标点",
+                type = ChatHistoryStore.TYPE_TRANSLATION,
+                messages = result.messages
+            )
+            extractPunctuationResponse(result.text)
         }
     }
 
-    private fun String.removeCodeFences(): String =
-        replace(Regex("(?m)^\\s*```(?:text)?\\s*$"), "")
+    private fun extractPunctuationResponse(response: String): String {
+        val marked = Regex(
+            "(?is)\\[\\[PUNCTUATED_TEXT\\]\\](.*?)\\[\\[/PUNCTUATED_TEXT\\]\\]"
+        ).find(response)?.groupValues?.get(1)
+        if (!marked.isNullOrBlank()) return marked.trim()
+
+        val fenced = Regex("(?is)```(?:text)?\\s*(.*?)```").find(response)?.groupValues?.get(1)
+        if (!fenced.isNullOrBlank()) return fenced.trim()
+
+        return Regex("(?s)^\\s*(.*?)\\s*$").find(response)?.groupValues?.get(1)?.trim()
+            .orEmpty()
+    }
 
     suspend fun translateSubtitles(
         subtitles: List<SubtitleEntry>,

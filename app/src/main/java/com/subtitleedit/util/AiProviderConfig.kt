@@ -48,8 +48,8 @@ object AiProviderConfig {
             displayName = "DeepSeek",
             baseUrl = "https://api.deepseek.com/v1",
             websiteUrl = "https://platform.deepseek.com/",
-            defaultModel = "deepseek-v4-flash",
-            models = listOf("deepseek-v4-flash", "deepseek-v4-pro")
+            defaultModel = "deepseek-flash",
+            models = listOf("deepseek-flash", "deepseek-v4-pro")
         ),
         Provider(
             id = OPENAI,

@@ -272,7 +272,16 @@ class SettingsManager private constructor(context: Context) {
             } else {
                 defaultModel
             }
-        return stored.ifBlank { defaultModel }
+        val model = stored.ifBlank { defaultModel }
+        return if (provider == AiProviderConfig.DEEPSEEK &&
+            model in setOf("deepseek-v4-flash", "deepseek-v4-flash-vision-exp")
+        ) {
+            // DeepSeek retired the V4 Flash aliases; the official API model name is now
+            // deepseek-flash (currently backed by DeepSeek-V4.1-Flash).
+            "deepseek-flash"
+        } else {
+            model
+        }
     }
 
     fun setAiModel(provider: String, model: String) {
