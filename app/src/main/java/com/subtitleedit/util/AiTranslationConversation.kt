@@ -68,7 +68,7 @@ class AiTranslationConversation(
     ): Result<String> {
         if (text.isBlank()) return Result.success(text)
         return runCatching {
-            val prompt = "帮我添加标点，不做额外说明，不修改文本内容\n文本内容\n$text"
+            val prompt = "帮我格式化文本，添加标点，不修改原文本内容，不做额外说明\n文本内容\n$text"
             val result = conversation.sendUserMessage(prompt, isCancelled = isCancelled)
             result.text.trim().removeCodeFences().trim()
         }

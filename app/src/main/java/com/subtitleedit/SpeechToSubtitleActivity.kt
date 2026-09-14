@@ -797,16 +797,16 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         progressPrefix: String
     ): Result<List<WhisperRecognizer.SubtitleSegment>> {
         val formatterOptions = SubtitleFormattingOptions(
-            removeSpaces = true,
+            removeSpaces = false,
             endPunctuation = "，,、。．.？?！!：:；;…".toSet()
         )
         val cleaned = timelineSegments.map {
-            SubtitleTextFormatter.format(it.text, formatterOptions).replace(Regex("\\s+"), "")
+            SubtitleTextFormatter.format(it.text, formatterOptions)
         }
         val semanticSegments = timelineSegments.zip(cleaned)
             .filter { it.second.isNotBlank() }
             .map { it.first.copy(text = it.second) }
-        val joined = semanticSegments.joinToString("") { it.text }
+        val joined = semanticSegments.joinToString(" ") { it.text }
         if (joined.isBlank()) return Result.failure(Exception("实验打轴未生成有效文本"))
         appendRuntimeLog("语义合并：已清理并拼接 ${timelineSegments.size} 个 token，提交 AI 恢复标点")
         val provider = settingsManager.getAiProvider()
@@ -902,9 +902,13 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             }
         }
         return buildString(original.length + punctuationAfter.size) {
-            original.forEachIndexed { index, char ->
+            var seen = 0
+            original.forEach { char ->
                 append(char)
-                punctuationAfter[index + 1]?.let(::append)
+                if (!char.isWhitespace()) {
+                    seen++
+                    punctuationAfter[seen]?.let(::append)
+                }
             }
         }
     }
