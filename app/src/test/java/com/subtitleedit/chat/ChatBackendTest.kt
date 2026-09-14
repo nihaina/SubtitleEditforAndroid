@@ -16,16 +16,52 @@ import org.junit.Test
 class ChatBackendTest {
     private fun backend(
         baseUrl: String = "https://example.com/v1",
-        contextWindowTokens: Int = 256 * 1024
+        contextWindowTokens: Int = 256 * 1024,
+        reasoningLevel: ChatReasoningLevel = ChatReasoningLevel.AUTO,
+        modelSupportsReasoning: Boolean = false
     ) = ChatBackend(
         ChatBackendConfig(
             providerId = "custom",
             apiKey = "test-key",
             model = "test-model",
             baseUrl = baseUrl,
-            contextWindowTokens = contextWindowTokens
+            contextWindowTokens = contextWindowTokens,
+            reasoningLevel = reasoningLevel,
+            modelSupportsReasoning = modelSupportsReasoning
         )
     )
+
+    @Test
+    fun deepSeekReasoningParameters_useSupportedEffortValues() {
+        val expectedEfforts = mapOf(
+            ChatReasoningLevel.LOW to "low",
+            ChatReasoningLevel.MEDIUM to "high",
+            ChatReasoningLevel.HIGH to "high",
+            ChatReasoningLevel.XHIGH to "high",
+            ChatReasoningLevel.MAX to "max"
+        )
+
+        expectedEfforts.forEach { (level, effort) ->
+            val body = backend(
+                baseUrl = "https://api.deepseek.com/v1",
+                reasoningLevel = level
+            ).buildRequestBody(emptyList())
+
+            assertEquals("enabled", body.getJSONObject("thinking").getString("type"))
+            assertEquals(effort, body.getString("reasoning_effort"))
+        }
+    }
+
+    @Test
+    fun deepSeekReasoningParameters_disableThinkingWithoutEffort() {
+        val body = backend(
+            baseUrl = "https://api.deepseek.com/v1",
+            reasoningLevel = ChatReasoningLevel.OFF
+        ).buildRequestBody(emptyList())
+
+        assertEquals("disabled", body.getJSONObject("thinking").getString("type"))
+        assertFalse(body.has("reasoning_effort"))
+    }
 
     @Test
     fun requestBody_preservesReasoningToolCallsAndToolResults() {

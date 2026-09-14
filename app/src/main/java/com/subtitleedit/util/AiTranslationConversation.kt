@@ -68,8 +68,7 @@ class AiTranslationConversation(
     ): Result<String> {
         if (text.isBlank()) return Result.success(text)
         return runCatching {
-            val prompt = "帮我格式化文本，按照语气的停顿尽可能细致的添加标点，不做额外说明，不修改文本内容\n文本内容\n" +
-                "[[PUNCTUATED_TEXT]]\n$text\n[[/PUNCTUATED_TEXT]]"
+            val prompt = "帮我按照语气的停顿尽可能细分的添加标点，不做额外说明，对文中的错字误写不做纠正\n\n$text"
             val result = conversation.sendUserMessage(prompt, isCancelled = isCancelled)
             historyStore.append(
                 id = historySessionId,

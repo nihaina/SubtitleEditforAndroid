@@ -533,14 +533,30 @@ class ChatBackend(
             })
             "dashscope.aliyuncs.com", "api.siliconflow.cn", "aiping.cn" ->
                 body.put("enable_thinking", level != ChatReasoningLevel.OFF)
-            "api.deepseek.com" -> body.put("thinking", JSONObject().put(
-                "type", if (level == ChatReasoningLevel.OFF) "disabled" else "enabled"
-            ))
+            "api.deepseek.com" -> {
+                body.put("thinking", JSONObject().put(
+                    "type", if (level == ChatReasoningLevel.OFF) "disabled" else "enabled"
+                ))
+                deepSeekReasoningEffort(level)?.let { body.put("reasoning_effort", it) }
+            }
             "api.mistral.ai" -> Unit
             else -> if (level != ChatReasoningLevel.AUTO) {
                 body.put("reasoning_effort", if (level == ChatReasoningLevel.OFF) "low" else level.effort)
             }
         }
+    }
+
+    /**
+     * DeepSeek accepts only low/high/max for reasoning_effort. Keep the user-facing
+     * levels while mapping the intermediate values to the closest supported effort.
+     */
+    private fun deepSeekReasoningEffort(level: ChatReasoningLevel): String? = when (level) {
+        ChatReasoningLevel.OFF, ChatReasoningLevel.AUTO -> null
+        ChatReasoningLevel.LOW -> "low"
+        ChatReasoningLevel.MEDIUM,
+        ChatReasoningLevel.HIGH,
+        ChatReasoningLevel.XHIGH -> "high"
+        ChatReasoningLevel.MAX -> "max"
     }
 
     private fun extractStreamDelta(data: String): StreamDelta {
