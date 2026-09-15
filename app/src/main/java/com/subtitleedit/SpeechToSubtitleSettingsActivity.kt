@@ -336,20 +336,18 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
     private fun updateSenseVoiceTimestampControls() {
         val enabled = binding.switchSenseVoiceTimestampExperiment.isEnabled &&
             binding.switchSenseVoiceTimestampExperiment.isChecked
-        val semanticMergeEnabled = enabled && binding.switchSenseVoiceTimestampSemanticMerge.isChecked
-        binding.switchSenseVoiceTimestampSemanticMerge.isEnabled = enabled
-        binding.switchSenseVoiceTimestampSemanticMerge.alpha = if (enabled) 1f else 0.5f
-        binding.tvSenseVoiceTimestampSemanticMergeHint.alpha = if (enabled) 1f else 0.5f
-        // Semantic mode needs the original token text and complete token timeline.
-        val discardTextEnabled = enabled && !semanticMergeEnabled
+        binding.switchSenseVoiceTimestampSemanticMerge.isEnabled = true
+        binding.switchSenseVoiceTimestampSemanticMerge.alpha = 1f
+        binding.tvSenseVoiceTimestampSemanticMergeHint.alpha = 1f
+        val discardTextEnabled = enabled
         binding.switchSenseVoiceTimestampDiscardText.isEnabled = discardTextEnabled
         binding.switchSenseVoiceTimestampDiscardText.alpha = if (discardTextEnabled) 1f else 0.5f
         binding.tvSenseVoiceTimestampDiscardTextHint.alpha = if (discardTextEnabled) 1f else 0.5f
-        val splitEnabled = enabled && !semanticMergeEnabled
+        val splitEnabled = enabled
         binding.layoutSenseVoiceTimestampGap.alpha = if (splitEnabled) 1f else 0.5f
         binding.sliderSenseVoiceTimestampGap.isEnabled = splitEnabled
         binding.etSenseVoiceTimestampGap.isEnabled = splitEnabled
-        val regularMergeEnabled = enabled && !semanticMergeEnabled
+        val regularMergeEnabled = enabled
         binding.switchSenseVoiceTimestampMerge.isEnabled = regularMergeEnabled
         binding.switchSenseVoiceTimestampMerge.alpha = if (regularMergeEnabled) 1f else 0.5f
         binding.tvSenseVoiceTimestampMergeHint.alpha = if (regularMergeEnabled) 1f else 0.5f

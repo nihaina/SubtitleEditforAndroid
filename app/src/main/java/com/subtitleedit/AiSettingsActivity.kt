@@ -252,7 +252,7 @@ class AiSettingsActivity : AppCompatActivity() {
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
         listOf(binding.etTranslationModel, binding.etTranslationContextWindow, binding.etTranslationTargetLanguage, binding.etTranslationCustomPrompt,
-            binding.etSemanticModel, binding.etSemanticContextWindow).forEach { edit ->
+            binding.etSemanticModel, binding.etSemanticContextWindow, binding.etSemanticCustomPrompt).forEach { edit ->
             edit.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
@@ -291,6 +291,7 @@ class AiSettingsActivity : AppCompatActivity() {
         val config = AiProviderConfig.getProvider(provider)
         binding.etSemanticModel.setText(settingsManager.getAiSemanticModel(provider))
         binding.etSemanticContextWindow.setText(settingsManager.getAiSemanticContextWindowTokens(provider).toString())
+        binding.etSemanticCustomPrompt.setText(settingsManager.getAiSemanticCustomPrompt())
         binding.spinnerSemanticReasoningLevel.setSelection(AiProviderConfig.ReasoningLevel.entries.indexOf(settingsManager.getAiSemanticReasoningLevel(provider)))
         updateModelControls(config, binding.tilSemanticModel, binding.etSemanticModel, binding.tvSemanticModelLabel, binding.spinnerSemanticModel, binding.btnFetchSemanticModels, settingsManager.getAiSemanticModel(provider), true)
         suppressTextSave = false
@@ -320,6 +321,7 @@ class AiSettingsActivity : AppCompatActivity() {
             settingsManager.setAiSemanticModel(selectedSemanticProvider, binding.etSemanticModel.text?.toString()?.trim().orEmpty())
         }
         binding.etSemanticContextWindow.text?.toString()?.toIntOrNull()?.let { settingsManager.setAiSemanticContextWindowTokens(it, selectedSemanticProvider) }
+        settingsManager.setAiSemanticCustomPrompt(binding.etSemanticCustomPrompt.text?.toString().orEmpty())
     }
 
     private fun saveTranslationFields() = saveDedicatedEdits()

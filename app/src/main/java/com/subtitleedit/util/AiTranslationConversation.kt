@@ -61,18 +61,26 @@ class AiTranslationConversation(
 
     fun cancel() = conversation.cancel()
 
-    /** Restore punctuation while preserving every original non-punctuation character. */
+    /** Ask AI to group short subtitle segments while preserving the original text. */
     suspend fun restorePunctuation(
         text: String,
         isCancelled: () -> Boolean = { false }
     ): Result<String> {
         if (text.isBlank()) return Result.success(text)
         return runCatching {
-            val prompt = "帮我按照语气的停顿尽可能细分的添加标点，不做额外说明，对文中的错字误写不做纠正\n\n$text"
+            val prompt = buildString {
+                append("以下为用空格分离的字幕文本，帮我根据语义合并意思被截断的短字幕段，意思完整的字幕无论长短均不做合并,不修改原文，不做额外说明")
+                customPrompt.trim().takeIf { it.isNotEmpty() }?.let {
+                    append('\n')
+                    append(it)
+                }
+                append("\n\n")
+                append(text)
+            }
             val result = conversation.sendUserMessage(prompt, isCancelled = isCancelled)
             historyStore.append(
                 id = historySessionId,
-                title = historyTitle ?: "语义合并标点",
+                title = historyTitle ?: "语义合并",
                 type = ChatHistoryStore.TYPE_TRANSLATION,
                 messages = result.messages
             )

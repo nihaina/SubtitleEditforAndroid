@@ -39,6 +39,7 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_AI_SEMANTIC_MODEL = "ai_semantic_model"
         private const val KEY_AI_SEMANTIC_CONTEXT_WINDOW_TOKENS = "ai_semantic_context_window_tokens"
         private const val KEY_AI_SEMANTIC_REASONING_LEVEL = "ai_semantic_reasoning_level"
+        private const val KEY_AI_SEMANTIC_CUSTOM_PROMPT = "ai_semantic_custom_prompt"
         private const val KEY_WAVEFORM_CACHE_LOCATION = "waveform_cache_location"
         private const val KEY_LOOP_SELECTED_SUBTITLE = "loop_selected_subtitle"
         private const val KEY_SHOW_ALL_FILE_TYPES = "show_all_file_types"
@@ -310,6 +311,16 @@ class SettingsManager private constructor(context: Context) {
     /** 设置 AI 翻译自定义提示词 */
     fun setAiCustomPrompt(prompt: String) {
         prefs.edit().putString(KEY_AI_CUSTOM_PROMPT, prompt).apply()
+    }
+
+    /** 获取语义合并自定义提示词 */
+    fun getAiSemanticCustomPrompt(): String {
+        return prefs.getString(KEY_AI_SEMANTIC_CUSTOM_PROMPT, "") ?: ""
+    }
+
+    /** 设置语义合并自定义提示词 */
+    fun setAiSemanticCustomPrompt(prompt: String) {
+        prefs.edit().putString(KEY_AI_SEMANTIC_CUSTOM_PROMPT, prompt).apply()
     }
 
     fun getAiContextWindowTokens(provider: String = getAiProvider()): Int {

@@ -330,7 +330,7 @@
     <string name="activity_speech_to_subtitle_settings_text_53">设为 0 时仅合并重叠或首尾相接的字幕段</string>
     <string name="activity_speech_to_subtitle_settings_text_54" translatable="false">200</string>
     <string name="activity_speech_to_subtitle_settings_text_65">语义合并</string>
-    <string name="activity_speech_to_subtitle_settings_text_66">清除句末标点，保留句内空格并以空格拼接 token 文本，使用 AI 按语义恢复标点后重新切分字幕；开启后屏蔽“不保留实验打轴切分文本”“切分时间”和“合并语音段”设置</string>
+    <string name="activity_speech_to_subtitle_settings_text_66">转录完成后，先格式化字幕文本，再使用 AI 按语义合并只有几个字的短字幕段</string>
     <string name="activity_speech_to_subtitle_settings_text_55">ASR转录</string>
     <string name="activity_speech_to_subtitle_settings_text_56">VAD 参数设置</string>
     <string name="activity_speech_to_subtitle_settings_text_57">检测阈值</string>

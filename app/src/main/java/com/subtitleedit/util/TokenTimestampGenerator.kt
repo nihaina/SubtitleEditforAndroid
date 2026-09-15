@@ -43,11 +43,7 @@ class TokenTimestampGenerator(context: Context) {
             context = appContext,
             modelType = modelConfig.modelType,
             tokenTimestampExperiment = true,
-            tokenTimestampGapMs = if (settingsManager.isSpeechTokenTimestampSemanticMergeEnabled()) {
-                0
-            } else {
-                settingsManager.getSpeechTokenTimestampGapMs()
-            }
+            tokenTimestampGapMs = settingsManager.getSpeechTokenTimestampGapMs()
         )
         return recognizer.recognize(
             audioFile = pcmFile,
