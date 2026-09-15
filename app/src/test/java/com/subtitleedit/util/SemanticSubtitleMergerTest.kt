@@ -1,5 +1,6 @@
 package com.subtitleedit.util
 
+import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.WhisperRecognizer.SubtitleSegment
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -30,5 +31,20 @@ class SemanticSubtitleMergerTest {
         val result = SemanticSubtitleMerger.mergeByAiBoundaries(source, "您好")
 
         assertEquals(source, result)
+    }
+
+    @Test
+    fun mergeSubtitleEntriesByAiBoundariesCarriesMergedEndTime() {
+        val source = listOf(
+            SubtitleEntry(index = 1, startTime = 100L, endTime = 200L, text = "你"),
+            SubtitleEntry(index = 2, startTime = 210L, endTime = 300L, text = "好")
+        )
+
+        val merged = SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, "你好")
+
+        assertEquals(1, merged.size)
+        assertEquals(100L, merged[0].startTime)
+        assertEquals(300L, merged[0].endTime)
+        assertEquals("你好", merged[0].text)
     }
 }

@@ -329,8 +329,6 @@
     <string name="activity_speech_to_subtitle_settings_text_52">最大合并间隔</string>
     <string name="activity_speech_to_subtitle_settings_text_53">设为 0 时仅合并重叠或首尾相接的字幕段</string>
     <string name="activity_speech_to_subtitle_settings_text_54" translatable="false">200</string>
-    <string name="activity_speech_to_subtitle_settings_text_65">语义合并</string>
-    <string name="activity_speech_to_subtitle_settings_text_66">转录完成后，先格式化字幕文本，再使用 AI 按语义合并只有几个字的短字幕段</string>
     <string name="activity_speech_to_subtitle_settings_text_55">ASR转录</string>
     <string name="activity_speech_to_subtitle_settings_text_56">VAD 参数设置</string>
     <string name="activity_speech_to_subtitle_settings_text_57">检测阈值</string>
@@ -350,7 +348,7 @@
     <string name="activity_speech_to_subtitle_text_07">正在分析音频...</string>
     <string name="activity_speech_to_subtitle_text_08">运行日志与识别内容：</string>
     <string name="activity_speech_to_subtitle_text_09">等待识别...</string>
-    <string name="activity_speech_to_subtitle_text_10">转录结果添加进自动翻译</string>
+    <string name="activity_speech_to_subtitle_text_10">转录结果添加进AI字幕处理</string>
     <string name="activity_subtitle_format_editor_text_01">清除句内内容</string>
     <string name="activity_subtitle_format_editor_text_02">空格</string>
     <string name="activity_subtitle_format_editor_text_03">清除句末标点</string>
@@ -377,15 +375,18 @@
     <string name="activity_tools_text_07">视频转音频/格式转换 (MP3/AAC/MP4 等)</string>
     <string name="activity_tools_contentdescription_06">自动打轴</string>
     <string name="activity_tools_text_08">自动检测语音段并生成时间轴</string>
-    <string name="activity_tools_contentdescription_07">自动翻译</string>
-    <string name="activity_tools_text_09">使用 AI 同时翻译多个字幕文件</string>
-    <string name="auto_translate">自动翻译</string>
-    <string name="activity_auto_translate_text_01">翻译设置</string>
+    <string name="activity_tools_contentdescription_07">AI字幕处理</string>
+    <string name="activity_tools_text_09">使用 AI 处理多个字幕文件</string>
+    <string name="auto_translate">AI字幕处理</string>
+    <string name="activity_auto_translate_text_01">处理设置</string>
     <string name="activity_auto_translate_text_02">选择输出目录</string>
     <string name="activity_auto_translate_text_03">输出目录：Download/SubtitleEdit/Translate（默认）</string>
-    <string name="activity_auto_translate_text_04">待翻译文件</string>
+    <string name="activity_auto_translate_text_04">待处理文件</string>
     <string name="activity_auto_translate_text_05">添加文件</string>
-    <string name="activity_auto_translate_text_06">开始翻译</string>
+    <string name="activity_auto_translate_text_06">开始处理</string>
+    <string name="activity_auto_translate_text_07">语义合并</string>
+    <string name="activity_auto_translate_text_08">标点预测（暂未实现）</string>
+    <string name="activity_auto_translate_text_09">一键翻译</string>
     <string name="activity_vocal_separation_settings_text_01">通用四轨模型</string>
     <string name="activity_vocal_separation_settings_text_02">未选择通用四轨模型</string>
     <string name="activity_vocal_separation_settings_text_03">选择通用四轨模型</string>

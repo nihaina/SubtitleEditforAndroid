@@ -102,25 +102,6 @@
                         android:textColor="@color/on_surface_variant"
                         android:textSize="12sp" />
 
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchSenseVoiceTimestampSemanticMerge"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
-                        android:minHeight="40dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_65"
-                        android:textColor="@color/on_surface"
-                        android:textSize="14sp" />
-
-                    <TextView
-                        android:id="@+id/tvSenseVoiceTimestampSemanticMergeHint"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="@string/activity_speech_to_subtitle_settings_text_66"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="12sp" />
-
                     <TextView
                         android:id="@+id/tvSenseVoiceTimestampModelMissing"
                         android:layout_width="match_parent"

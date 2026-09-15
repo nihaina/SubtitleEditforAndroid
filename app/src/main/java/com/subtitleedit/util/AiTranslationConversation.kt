@@ -69,7 +69,7 @@ class AiTranslationConversation(
         if (text.isBlank()) return Result.success(text)
         return runCatching {
             val prompt = buildString {
-                append("以下为用空格分离的字幕文本，帮我根据语义合并意思被截断的短字幕段，意思完整的字幕无论长短均不做合并,不修改原文，不做额外说明")
+                append("以下为用空格分离的字幕文本，帮我根据语义合并意思被截断的短字幕段，意思完整的字幕无论长短均不做合并,避免产生过长字幕段,不修改原文，不做额外说明")
                 customPrompt.trim().takeIf { it.isNotEmpty() }?.let {
                     append('\n')
                     append(it)

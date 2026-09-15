@@ -26,6 +26,9 @@ import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.util.SemanticSubtitleMerger
+import com.subtitleedit.util.SubtitleFormattingOptions
+import com.subtitleedit.util.SubtitleTextFormatter
 import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.subtitle.SubtitleDocument
@@ -80,6 +83,8 @@ class AutoTranslateActivity : AppCompatActivity() {
         var translatedLines = 0
         var message = ""
         var document: SubtitleDocument? = null
+        var semanticMergeCompleted = false
+        var punctuationPredictionCompleted = false
         val translatedTexts = mutableListOf<String>()
         // Keep the output policy with the file so a retry uses the same choice made
         // in the conflict dialog instead of falling back to the startFile default.
@@ -200,7 +205,22 @@ class AutoTranslateActivity : AppCompatActivity() {
             OverwritingToast.makeText(this, "请先添加要翻译的文件", Toast.LENGTH_SHORT).show()
             return
         }
-        val config = readTranslationConfig() ?: return
+        if (!binding.switchSemanticMerge.isChecked &&
+            !binding.switchPunctuationPrediction.isChecked &&
+            !binding.switchOneClickTranslation.isChecked
+        ) {
+            OverwritingToast.makeText(this, "请至少选择一项处理功能", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (binding.switchSemanticMerge.isChecked && !isSemanticAiConfigured()) {
+            OverwritingToast.makeText(this, "请先在 AI 设置中配置可用的语义合并 AI", Toast.LENGTH_LONG).show()
+            return
+        }
+        val config = if (binding.switchOneClickTranslation.isChecked) {
+            readTranslationConfig()
+        } else {
+            null
+        }
         val outputUri = outputDirectoryUri ?: Uri.fromFile(getTranslateOutputDirectory())
         val hasConflict = files.any { file ->
             val extension = outputExtension(file)
@@ -229,7 +249,7 @@ class AutoTranslateActivity : AppCompatActivity() {
     }
 
     private fun beginQueuedFiles(
-        config: TranslationConfig,
+        config: TranslationConfig?,
         outputUri: Uri,
         overwriteOutput: Boolean
     ) {
@@ -255,7 +275,7 @@ class AutoTranslateActivity : AppCompatActivity() {
     private fun startFile(
         file: AutoTranslateFile,
         retry: Boolean = false,
-        config: TranslationConfig? = readTranslationConfig(),
+        config: TranslationConfig? = if (binding.switchOneClickTranslation.isChecked) readTranslationConfig(false) else null,
         outputUri: Uri = outputDirectoryUri ?: Uri.fromFile(getTranslateOutputDirectory()),
         overwriteOutput: Boolean = file.overwriteOutput
     ) {
@@ -272,83 +292,45 @@ class AutoTranslateActivity : AppCompatActivity() {
 
     private suspend fun processFile(
         file: AutoTranslateFile,
-        config: TranslationConfig,
+        initialConfig: TranslationConfig?,
         outputUri: Uri,
         overwriteOutput: Boolean
     ) {
         try {
-            val document = file.document ?: loadDocument(file).also { file.document = it }
+            var document = file.document ?: loadDocument(file).also { file.document = it }
             val entries = document.entries
             file.totalLines = entries.size
             postFileUpdate(file) { }
             if (entries.isEmpty()) throw IllegalArgumentException("未检测到可翻译的字幕行")
 
-            val translator = aiTranslationService.createConversation(
-                context = this,
-                provider = config.provider,
-                apiKey = config.apiKey,
-                model = config.model,
-                targetLanguage = config.targetLanguage,
-                customPrompt = config.customPrompt,
-                baseUrl = config.baseUrl,
-                contextWindowTokens = config.contextWindowTokens,
-                subtitleFormat = document.format,
-                reasoningLevel = config.reasoningLevel,
-                historySessionId = file.sessionId,
-                historyTitle = "自动翻译 · ${file.fileName} · ${config.targetLanguage}"
-            )
-            var consecutiveErrors = 0
-            while (file.translatedTexts.size < entries.size) {
-                val completed = file.translatedTexts.size
-                val result = translator.translateSubtitles(
-                    subtitles = entries.drop(completed),
-                    startPosition = completed + 1,
-                    progressCallback = { current, _ ->
-                        postFileUpdate(file) { file.translatedLines = completed + current }
-                    }
-                )
-                file.translatedTexts += result.translations
-                file.translatedLines = file.translatedTexts.size
+            if (isFeatureEnabled(Feature.SEMANTIC_MERGE) && !file.semanticMergeCompleted) {
+                document = applySemanticMerge(file, document)
+                file.document = document
+                file.semanticMergeCompleted = true
+            }
+            if (isFeatureEnabled(Feature.PUNCTUATION_PREDICTION) && !file.punctuationPredictionCompleted) {
+                // Reserved for the future punctuation prediction implementation.
+                file.message = "标点预测暂未实现"
                 postFileUpdate(file) { }
-                if (result.isComplete && result.translations.isNotEmpty()) {
-                    consecutiveErrors = 0
-                    continue
-                }
-                if (result.error != null) {
-                    consecutiveErrors++
-                    file.message = result.error.message ?: "翻译失败"
-                    if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                        file.status = FileStatus.STOPPED
-                        postFileUpdate(file) { }
-                        return
-                    }
-                    postFileUpdate(file) { }
-                    delay((consecutiveErrors * 500L).coerceAtMost(3_000L))
-                } else if (result.translations.isEmpty()) {
-                    consecutiveErrors++
-                    if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                        file.status = FileStatus.STOPPED
-                        file.message = "翻译未返回结果"
-                        postFileUpdate(file) { }
-                        return
-                    }
-                }
+                file.punctuationPredictionCompleted = true
+            }
+            if (isFeatureEnabled(Feature.TRANSLATION)) {
+                val config = initialConfig ?: readTranslationConfig(false)
+                    ?: throw IllegalArgumentException("请先配置一键翻译所需的 AI 设置")
+                document = translateDocument(file, document, config)
+                file.document = document
             }
 
-            val translatedEntries = entries.mapIndexed { index, entry ->
-                entry.copy(text = file.translatedTexts[index])
-            }
-            val translatedDocument = document.copy(entries = translatedEntries)
             SubtitleOutputWriter.writeText(
                 this,
                 outputUri,
                 file.fileName.substringBeforeLast("."),
                 outputExtension(file),
-                SubtitleParser.serialize(translatedDocument),
+                SubtitleParser.serialize(document),
                 overwrite = overwriteOutput
             )
             file.status = FileStatus.COMPLETED
-            file.message = "翻译完成"
+            file.message = "处理完成"
             postFileUpdate(file) { }
         } catch (_: CancellationException) {
             file.status = FileStatus.STOPPED
@@ -367,6 +349,120 @@ class AutoTranslateActivity : AppCompatActivity() {
                 updateTranslationControls()
             }
         }
+    }
+
+    private enum class Feature { SEMANTIC_MERGE, PUNCTUATION_PREDICTION, TRANSLATION }
+
+    private suspend fun isFeatureEnabled(feature: Feature): Boolean = withContext(kotlinx.coroutines.Dispatchers.Main) {
+        when (feature) {
+            Feature.SEMANTIC_MERGE -> binding.switchSemanticMerge.isChecked
+            Feature.PUNCTUATION_PREDICTION -> binding.switchPunctuationPrediction.isChecked
+            Feature.TRANSLATION -> binding.switchOneClickTranslation.isChecked
+        }
+    }
+
+    private suspend fun applySemanticMerge(
+        file: AutoTranslateFile,
+        document: SubtitleDocument
+    ): SubtitleDocument {
+        val options = SubtitleFormattingOptions(
+            removeSpaces = false,
+            endPunctuation = "，,、。．.？?！!：:；;…".toSet()
+        )
+        val formattedEntries = document.entries.mapNotNull { entry ->
+            SubtitleTextFormatter.format(entry.text, options)
+                .takeIf { it.isNotBlank() }
+                ?.let { text -> entry.copy(text = text) }
+        }
+        if (formattedEntries.isEmpty()) return document
+        val joined = formattedEntries.joinToString("  ") { it.text }
+        val provider = settingsManager.getAiSemanticProvider()
+        val apiKey = settingsManager.getAiApiKey(provider)
+        val model = settingsManager.getAiSemanticModel(provider)
+        val baseUrl = settingsManager.getAiBaseUrl(provider)
+        if (apiKey.isBlank() || model.isBlank() || baseUrl.isBlank()) {
+            throw IllegalArgumentException("请先在 AI 设置中配置可用的语义合并 AI")
+        }
+        postFileUpdate(file) {
+            file.message = "语义合并处理中"
+        }
+        val conversation = aiTranslationService.createConversation(
+            context = this,
+            provider = provider,
+            apiKey = apiKey,
+            model = model,
+            targetLanguage = "",
+            customPrompt = settingsManager.getAiSemanticCustomPrompt(),
+            baseUrl = baseUrl,
+            contextWindowTokens = settingsManager.getAiSemanticContextWindowTokens(provider),
+            subtitleFormat = document.format,
+            reasoningLevel = settingsManager.getAiSemanticReasoningLevel(provider),
+            historySessionId = "semantic_${file.sessionId}",
+            historyTitle = "语义合并 · ${file.fileName}"
+        )
+        val result = conversation.restorePunctuation(joined)
+            .getOrElse { throw it }
+        val mergedEntries = SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(formattedEntries, result)
+        return document.copy(entries = mergedEntries)
+    }
+
+    private suspend fun translateDocument(
+        file: AutoTranslateFile,
+        document: SubtitleDocument,
+        config: TranslationConfig
+    ): SubtitleDocument {
+        val entries = document.entries
+        val translator = aiTranslationService.createConversation(
+            context = this,
+            provider = config.provider,
+            apiKey = config.apiKey,
+            model = config.model,
+            targetLanguage = config.targetLanguage,
+            customPrompt = config.customPrompt,
+            baseUrl = config.baseUrl,
+            contextWindowTokens = config.contextWindowTokens,
+            subtitleFormat = document.format,
+            reasoningLevel = config.reasoningLevel,
+            historySessionId = file.sessionId,
+            historyTitle = "AI字幕处理 · ${file.fileName} · ${config.targetLanguage}"
+        )
+        var consecutiveErrors = 0
+        while (file.translatedTexts.size < entries.size) {
+            val completed = file.translatedTexts.size
+            val result = translator.translateSubtitles(
+                subtitles = entries.drop(completed),
+                startPosition = completed + 1,
+                progressCallback = { current, _ ->
+                    postFileUpdate(file) { file.translatedLines = completed + current }
+                }
+            )
+            file.translatedTexts += result.translations
+            file.translatedLines = file.translatedTexts.size
+            postFileUpdate(file) { }
+            if (result.isComplete && result.translations.isNotEmpty()) {
+                consecutiveErrors = 0
+                continue
+            }
+            if (result.error != null) {
+                consecutiveErrors++
+                file.message = result.error.message ?: "翻译失败"
+                if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                    throw result.error
+                }
+                postFileUpdate(file) { }
+                delay((consecutiveErrors * 500L).coerceAtMost(3_000L))
+            } else if (result.translations.isEmpty()) {
+                consecutiveErrors++
+                if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                    throw IllegalStateException("翻译未返回结果")
+                }
+            }
+        }
+        return document.copy(
+            entries = entries.mapIndexed { index, entry ->
+                entry.copy(text = file.translatedTexts[index])
+            }
+        )
     }
 
     private suspend fun loadDocument(file: AutoTranslateFile): SubtitleDocument {
@@ -403,6 +499,13 @@ class AutoTranslateActivity : AppCompatActivity() {
             contextWindowTokens = settingsManager.getAiContextWindowTokens(provider),
             reasoningLevel = settingsManager.getAiReasoningLevel(provider)
         )
+    }
+
+    private fun isSemanticAiConfigured(): Boolean {
+        val provider = settingsManager.getAiSemanticProvider()
+        return settingsManager.getAiApiKey(provider).isNotBlank() &&
+            settingsManager.getAiSemanticModel(provider).isNotBlank() &&
+            settingsManager.getAiBaseUrl(provider).isNotBlank()
     }
 
     private fun postFileUpdate(file: AutoTranslateFile, update: () -> Unit) {

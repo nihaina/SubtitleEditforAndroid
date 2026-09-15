@@ -23,18 +23,13 @@ import com.subtitleedit.task.LongTaskController
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.repository.DefaultSpeechRecognitionService
 import com.subtitleedit.repository.SpeechRecognitionService
-import com.subtitleedit.repository.AiTranslationService
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.SettingsManager
-import com.subtitleedit.util.SemanticSubtitleMerger
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.TokenTimestampGenerator
 import com.subtitleedit.util.WhisperRecognizer
-import com.subtitleedit.util.SubtitleTextFormatter
-import com.subtitleedit.util.SubtitleFormattingOptions
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
@@ -54,8 +49,6 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     private lateinit var settingsManager: SettingsManager
     private val speechRecognitionService: SpeechRecognitionService
         get() = (application as SubtitleEditApplication).dependencies.speechRecognitionService
-    private val aiTranslationService: AiTranslationService
-        get() = (application as SubtitleEditApplication).dependencies.aiTranslationService
     private val nativeMediaEngine
         get() = (application as SubtitleEditApplication).dependencies.nativeMediaEngine
 
@@ -377,17 +370,6 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             com.subtitleedit.util.OverwritingToast.makeText(this, "请先选择文件和模型", Toast.LENGTH_SHORT).show()
             return
         }
-        if (
-            settingsManager.isSpeechTokenTimestampSemanticMergeEnabled() &&
-            !isSemanticAiConfigured()
-        ) {
-            com.subtitleedit.util.OverwritingToast.makeText(
-                this,
-                "已开启语义合并，请先在 AI 设置中配置可用的语义合并 AI",
-                Toast.LENGTH_LONG
-            ).show()
-            return
-        }
         if (shouldUseVad() && !settingsManager.isVadUseBuiltInModel() && vadModelPath.isBlank()) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "请先选择外部 VAD 模型，或在模型设置中勾选使用内置", Toast.LENGTH_SHORT).show()
             return
@@ -689,14 +671,8 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             }
 
             if (isCancelled) return Result.failure(Exception("用户取消"))
-            var segments = recognitionResult.getOrElse { return Result.failure(it) }
+            val segments = recognitionResult.getOrElse { return Result.failure(it) }
             if (segments.isEmpty()) return Result.failure(Exception("未识别到语音内容"))
-
-            if (settingsManager.isSpeechTokenTimestampSemanticMergeEnabled()) {
-                showProgress("$progressPrefix 语义合并：准备字幕文本...", 90)
-                segments = applySemanticSubtitleMerge(segments, progressPrefix)
-                    .getOrElse { return Result.failure(it) }
-            }
 
             showProgress("$progressPrefix 正在生成字幕...", 95)
             appendRuntimeLog("识别完成：共 ${segments.size} 条字幕片段")
@@ -810,110 +786,6 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun applySemanticSubtitleMerge(
-        subtitleSegments: List<WhisperRecognizer.SubtitleSegment>,
-        progressPrefix: String
-    ): Result<List<WhisperRecognizer.SubtitleSegment>> {
-        val formatterOptions = SubtitleFormattingOptions(
-            removeSpaces = false,
-            endPunctuation = "，,、。．.？?！!：:；;…".toSet()
-        )
-        val formattedSegments = subtitleSegments.mapNotNull { segment ->
-            SubtitleTextFormatter.format(segment.text, formatterOptions)
-                .takeIf { it.isNotBlank() }
-                ?.let { text -> segment.copy(text = text) }
-        }
-        val joined = formattedSegments.joinToString("  ") { it.text }
-        if (joined.isBlank()) return Result.failure(Exception("转录未生成有效字幕文本"))
-        showProgress("$progressPrefix 语义合并：已整理 ${formattedSegments.size} 条字幕，正在请求 AI...", 90)
-        appendRuntimeLog("$progressPrefix 语义合并：已格式化字幕文本，并以两个空格拼接 ${formattedSegments.size} 条字幕")
-        val provider = settingsManager.getAiSemanticProvider()
-        val apiKey = settingsManager.getAiApiKey(provider)
-        val model = settingsManager.getAiSemanticModel(provider)
-        val baseUrl = settingsManager.getAiBaseUrl(provider)
-        if (!isSemanticAiConfigured()) {
-            return Result.failure(Exception("请先在 AI 设置中配置 API、模型和密钥"))
-        }
-        val conversation = aiTranslationService.createConversation(
-            context = this,
-            provider = provider,
-            apiKey = apiKey,
-            model = model,
-            targetLanguage = "",
-            customPrompt = settingsManager.getAiSemanticCustomPrompt(),
-            baseUrl = baseUrl,
-            contextWindowTokens = settingsManager.getAiSemanticContextWindowTokens(provider),
-            subtitleFormat = SubtitleParser.SubtitleFormat.TXT,
-            reasoningLevel = settingsManager.getAiSemanticReasoningLevel(provider),
-            historySessionId = "semantic_${System.currentTimeMillis()}",
-            historyTitle = "语义合并"
-        )
-        val punctuated: String
-        while (true) {
-            val punctuationResult = withContext(Dispatchers.IO) {
-                conversation.restorePunctuation(joined) { isCancelled }
-            }
-            if (punctuationResult.isSuccess) {
-                punctuated = punctuationResult.getOrThrow()
-                break
-            }
-
-            val error = punctuationResult.exceptionOrNull() ?: Exception("AI 未返回有效结果")
-            if (isCancelled || error is CancellationException || !awaitSemanticMergeRetry(progressPrefix, error)) {
-                return Result.failure(error)
-            }
-            appendRuntimeLog("$progressPrefix 语义合并：用户选择重试")
-            showProgress("$progressPrefix 语义合并：正在重试 AI 请求...", 65)
-        }
-        showProgress("$progressPrefix 语义合并：AI 返回文本，正在重建时间轴...", 95)
-        appendRuntimeLog("$progressPrefix 语义合并：AI 返回文本，开始匹配字幕边界")
-        val merged = SemanticSubtitleMerger.mergeByAiBoundaries(formattedSegments, punctuated)
-        appendRuntimeLog("$progressPrefix 语义合并完成：${formattedSegments.size} 条字幕 -> ${merged.size} 条字幕")
-        merged.forEach(::appendRecognizedSegment)
-        return Result.success(merged)
-    }
-
-    private fun isSemanticAiConfigured(): Boolean {
-        val provider = settingsManager.getAiSemanticProvider()
-        return settingsManager.getAiApiKey(provider).isNotBlank() &&
-            settingsManager.getAiSemanticModel(provider).isNotBlank() &&
-            settingsManager.getAiBaseUrl(provider).isNotBlank()
-    }
-
-    private suspend fun awaitSemanticMergeRetry(
-        progressPrefix: String,
-        error: Throwable
-    ): Boolean = suspendCancellableCoroutine { continuation ->
-        var dialog: AlertDialog? = null
-        continuation.invokeOnCancellation {
-            runOnUiThread { dialog?.dismiss() }
-        }
-        runOnUiThread {
-            if (!continuation.isActive || isFinishing || isDestroyed) {
-                if (continuation.isActive) continuation.resume(false)
-                return@runOnUiThread
-            }
-            val message = error.message?.takeIf { it.isNotBlank() } ?: "AI 请求失败"
-            dialog = AlertDialog.Builder(this@SpeechToSubtitleActivity)
-                .setTitle("语义合并失败")
-                .setMessage("$progressPrefix\n$message\n\n是否重试语义合并？")
-                .setPositiveButton("重试") { _, _ ->
-                    if (continuation.isActive) continuation.resume(true)
-                }
-                .setNegativeButton("取消") { _, _ ->
-                    if (continuation.isActive) continuation.resume(false)
-                }
-                .create()
-                .also { current ->
-                    current.setOnCancelListener {
-                        if (continuation.isActive) continuation.resume(false)
-                    }
-                    current.show()
-                }
-        }
-    }
-
-
     /**
      * 显示进度
      */
@@ -975,9 +847,6 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         appendRuntimeLog("  Tokens：${displayModelPath(tokensPath)}")
         if (modelType != SettingsManager.ASR_MODEL_SENSEVOICE) {
             appendRuntimeLog("  识别线程：${settingsManager.getSpeechWhisperThreads()}")
-        }
-        if (settingsManager.isSpeechTokenTimestampSemanticMergeEnabled()) {
-            appendRuntimeLog("  语义合并：启用（转录完成后按语义合并短字幕段）")
         }
         if (isTokenTimestampExperimentConfigured()) {
             appendRuntimeLog("  VAD：禁用，由当前 ASR 模型的实验 token 时间戳打轴替代")
