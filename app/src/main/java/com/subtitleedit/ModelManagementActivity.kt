@@ -40,6 +40,9 @@ class ModelManagementActivity : AppCompatActivity() {
         get() = (application as SubtitleEditApplication).dependencies.modelRepository
     private var requestedStorageAccess = false
 
+    private lateinit var asrImportController: AsrModelImportController
+    private lateinit var demucsImportController: DemucsModelImportController
+
     private data class ModelItem(
         val category: String,
         val displayName: String,
@@ -63,13 +66,65 @@ class ModelManagementActivity : AppCompatActivity() {
 
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "模型管理"
+        supportActionBar?.title = "模型导入"
         binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
+        asrImportController = AsrModelImportController(this, binding.asrModelImport)
+        demucsImportController = DemucsModelImportController(this, binding.demucsModelImport)
+        setupPageNavigation()
         binding.tvModelsDirectory.text =
             "下载模型目录：${modelRepository.modelsDirectory().absolutePath}\n" +
                 "NPU BIN 模型保存在应用内部目录"
 
-        if (hasStorageAccess()) loadModels() else requestStorageAccess()
+        if (hasStorageAccess()) loadModels() else showStorageAccessRequired()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::asrImportController.isInitialized) {
+            asrImportController.refresh()
+            demucsImportController.refresh()
+        }
+    }
+
+    private fun setupPageNavigation() {
+        binding.pageScroller.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updatePageWidth() }
+        binding.pageScroller.post { updatePageWidth() }
+        binding.pageScroller.setOnScrollChangeListener { _, scrollX, _, _, _ ->
+            val pageWidth = binding.pageScroller.width.coerceAtLeast(1)
+            val progress = scrollX.toFloat() / pageWidth
+            updatePageState(progress)
+            if (progress >= 0.5f && !hasStorageAccess() && !requestedStorageAccess) {
+                requestStorageAccess()
+            }
+        }
+        binding.tvImportPageName.setOnClickListener { binding.pageScroller.smoothScrollTo(0, 0) }
+        binding.tvManagePageName.setOnClickListener {
+            binding.pageScroller.smoothScrollTo(binding.pageScroller.width, 0)
+        }
+    }
+
+    private fun updatePageWidth() {
+        val pageWidth = binding.pageScroller.width
+        if (pageWidth <= 0) return
+        binding.pageContainer.layoutParams = binding.pageContainer.layoutParams.apply { width = pageWidth * 2 }
+        binding.scrollImport.layoutParams = binding.scrollImport.layoutParams.apply { width = pageWidth }
+        binding.managePage.layoutParams = binding.managePage.layoutParams.apply { width = pageWidth }
+        binding.pageIndicator.layoutParams = binding.pageIndicator.layoutParams.apply { width = pageWidth / 2 }
+        binding.pageIndicator.requestLayout()
+    }
+
+    private fun updatePageState(progress: Float) {
+        val clamped = progress.coerceIn(0f, 1f)
+        binding.pageIndicator.translationX = binding.pageHeader.width / 2f * clamped
+        binding.tvImportPageName.setTextColor(
+            ContextCompat.getColor(this, if (clamped < 0.5f) R.color.primary else R.color.on_surface_variant)
+        )
+        binding.tvManagePageName.setTextColor(
+            ContextCompat.getColor(this, if (clamped >= 0.5f) R.color.primary else R.color.on_surface_variant)
+        )
+        val title = if (clamped < 0.5f) "模型导入" else "模型管理"
+        supportActionBar?.title = title
+        binding.toolbar.title = title
     }
 
     private fun requestStorageAccess() {
@@ -417,4 +472,10 @@ class ModelManagementActivity : AppCompatActivity() {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    override fun onDestroy() {
+        if (::asrImportController.isInitialized) asrImportController.dispose()
+        if (::demucsImportController.isInitialized) demucsImportController.dispose()
+        super.onDestroy()
+    }
 }

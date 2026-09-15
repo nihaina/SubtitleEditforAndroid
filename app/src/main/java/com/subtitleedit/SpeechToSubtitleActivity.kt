@@ -185,7 +185,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
 
     private fun setupButtons() {
         binding.btnModelSettings.setOnClickListener {
-            startActivity(Intent(this, ModelSettingsActivity::class.java))
+            startActivity(Intent(this, ModelManagementActivity::class.java))
         }
 
         // 选择文件按钮

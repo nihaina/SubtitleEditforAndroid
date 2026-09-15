@@ -2776,7 +2776,7 @@ class EditorActivity : AppCompatActivity() {
             showQuickTranscribe()
         }
         binding.btnQuickTranscribe.setOnLongClickListener {
-            startActivity(Intent(this, ModelSettingsActivity::class.java))
+            startActivity(Intent(this, ModelManagementActivity::class.java))
             true
         }
 

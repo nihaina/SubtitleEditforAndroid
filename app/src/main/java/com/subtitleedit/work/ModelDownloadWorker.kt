@@ -16,7 +16,7 @@ import androidx.work.WorkerParameters
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.subtitleedit.SubtitleEditApplication
-import com.subtitleedit.VocalSeparationSettingsActivity
+import com.subtitleedit.ModelManagementActivity
 import com.subtitleedit.task.TaskProgress
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -103,7 +103,7 @@ internal class ModelDownloadWorker(
             .setContentIntent(PendingIntent.getActivity(
                 applicationContext,
                 id.hashCode(),
-                Intent(applicationContext, VocalSeparationSettingsActivity::class.java),
+                Intent(applicationContext, ModelManagementActivity::class.java),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             ))
             .addAction(
