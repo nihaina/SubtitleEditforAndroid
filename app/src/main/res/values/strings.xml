@@ -225,9 +225,6 @@
     <string name="activity_media_convert_text_15">声道</string>
     <string name="activity_media_convert_text_16">分享结果</string>
     <string name="activity_model_management_text_01">未发现模型</string>
-    <string name="activity_model_settings_text_01">语音转字幕高级配置</string>
-    <string name="activity_model_settings_text_02">配置固定分段等通用识别选项</string>
-    <string name="activity_model_settings_text_03">打开配置</string>
     <string name="activity_model_settings_text_04">Whisper 模型</string>
     <string name="activity_model_settings_text_05">Encoder 模型</string>
     <string name="activity_model_settings_text_06">选择 Encoder</string>

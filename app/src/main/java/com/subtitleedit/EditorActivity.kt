@@ -2829,7 +2829,7 @@ class EditorActivity : AppCompatActivity() {
 
         val checkingDialog = android.app.AlertDialog.Builder(this)
             .setMessage(
-                if (stateModel.isAudioOnlyFromVideo) "正在检测视频音轨..." else "正在检测音频文件..."
+                if (stateModel.isAudioOnlyFromVideo) "正在检测视频音轨..." else "正在准备音频文件..."
             )
             .setCancelable(false)
             .create()
@@ -2851,14 +2851,6 @@ class EditorActivity : AppCompatActivity() {
                 return@launch
             }
             checkingDialog.dismiss()
-
-            if (preparedAudio.wasFixed) {
-                com.subtitleedit.util.OverwritingToast.makeText(
-                    this@EditorActivity,
-                    "检测到音频 start time 不为 0,请注意处理,已临时修复，正在加载...",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
 
             doLoadMediaFile(
                 playbackFile = preparedAudio.playbackFile,

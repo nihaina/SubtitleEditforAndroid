@@ -63,7 +63,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun setupModelSettings() {
         binding.layoutModelSettings.setOnClickListener {
-            startActivity(Intent(this, ModelSettingsActivity::class.java))
+            startActivity(Intent(this, SpeechToSubtitleSettingsActivity::class.java))
         }
     }
 

@@ -258,9 +258,9 @@ class LogActivity : AppCompatActivity() {
 
     private fun activitySectionTitle(activity: String): String = when (activity) {
         "SpeechToSubtitleActivity" -> "语音转字幕"
+        "SpeechToSubtitleSettingsActivity" -> "语音转字幕配置"
         "AutoTimestampActivity" -> "自动打轴"
         "EditorActivity" -> "字幕编辑"
-        "ModelSettingsActivity" -> "模型配置"
         "SettingsActivity" -> "应用设置"
         "LogActivity" -> "运行日志"
         else -> activity.removeSuffix("Activity")

@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.util.Log
+import android.view.Menu
+import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.View
 import android.widget.AdapterView
@@ -155,6 +157,19 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         }
     }
 
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.menu_speech_to_subtitle, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        R.id.action_speech_to_subtitle_settings -> {
+            startActivity(Intent(this, SpeechToSubtitleSettingsActivity::class.java))
+            true
+        }
+        else -> super.onOptionsItemSelected(item)
+    }
+
     private fun setupSpinners() {
         // 语言选择器
         val languageAdapter = ArrayAdapter(
@@ -184,10 +199,6 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     }
 
     private fun setupButtons() {
-        binding.btnModelSettings.setOnClickListener {
-            startActivity(Intent(this, ModelManagementActivity::class.java))
-        }
-
         // 选择文件按钮
         binding.btnSelectFile.setOnClickListener {
             filePickerLauncher.launch(arrayOf("audio/*", "video/*"))

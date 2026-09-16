@@ -19,23 +19,21 @@ internal class DefaultMediaRepository(
         audioFile: File,
         inspectVideoAudioTrack: Boolean
     ): PreparedAudioFile = withContext(Dispatchers.IO) {
-        val mediaInformation = nativeMediaEngine.probe(audioFile, inspectVideoAudioTrack)
-        val audioStreamIndex = mediaInformation.defaultAudioStreamIndex
-
         if (inspectVideoAudioTrack) {
+            val mediaInformation = nativeMediaEngine.probe(audioFile, inspectVideoAudioTrack = true)
             return@withContext PreparedAudioFile(
                 playbackFile = audioFile,
                 wasFixed = false,
-                audioStreamIndex = audioStreamIndex
+                audioStreamIndex = mediaInformation.defaultAudioStreamIndex
             )
         }
 
-        val startTime = mediaInformation.startTimeSeconds
-        if (startTime <= 0.001) {
+        if (!audioFile.extension.equals("mp3", ignoreCase = true)) {
             return@withContext PreparedAudioFile(audioFile, wasFixed = false)
         }
 
-        Log.w(TAG, "音频 start time 不为 0：$startTime，开始转换为 WAV")
+        // MP3 即使从 0 开始，也可能因码率估算导致 MediaPlayer 跳转偏移。
+        Log.d(TAG, "MP3 音频使用临时 WAV 播放：${audioFile.name}")
         val wavFile = try {
             createTemporaryWav("audio_fixed_")
         } catch (e: CancellationException) {

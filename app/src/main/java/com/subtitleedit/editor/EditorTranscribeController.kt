@@ -93,7 +93,7 @@ internal class EditorTranscribeController(
             (modelType == SettingsManager.ASR_MODEL_PARAKEET_TDT &&
                 (decoderPath.isBlank() || joinerPath.isBlank()))
         ) {
-            showMessage("请先在语音转字幕配置中设置识别模型")
+            showMessage("请先在模型管理中设置识别模型")
             return
         }
 

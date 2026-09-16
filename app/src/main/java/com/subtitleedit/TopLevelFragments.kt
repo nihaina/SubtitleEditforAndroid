@@ -183,7 +183,7 @@ class SettingsFragment : Fragment() {
         b.layoutEncoding.setOnClickListener { showEncodingDialog() }
         b.layoutTheme.setOnClickListener { showThemeDialog() }
         b.layoutAiSettings.setOnClickListener { open(AiSettingsActivity::class.java) }
-        b.layoutModelSettings.setOnClickListener { open(ModelSettingsActivity::class.java) }
+        b.layoutModelSettings.setOnClickListener { open(SpeechToSubtitleSettingsActivity::class.java) }
         b.layoutVocalSeparationSettings.setOnClickListener { open(VocalSeparationSettingsActivity::class.java) }
         b.layoutTtsSettings.setOnClickListener { open(TtsSettingsActivity::class.java) }
         b.layoutModelManagement.setOnClickListener { open(ModelManagementActivity::class.java) }
