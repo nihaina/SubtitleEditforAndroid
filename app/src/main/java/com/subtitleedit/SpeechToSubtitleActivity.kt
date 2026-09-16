@@ -356,10 +356,12 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     }
 
     /**
-     * 更新开始按钮状态
+     * 更新模型提示与开始按钮状态
      */
     private fun updateStartButtonState() {
-        binding.btnStart.isEnabled = selectedMediaFiles.isNotEmpty() && isCurrentAsrModelComplete()
+        val hasAsrModel = isCurrentAsrModelComplete()
+        binding.tvAsrModelHint.visibility = if (hasAsrModel) View.GONE else View.VISIBLE
+        binding.btnStart.isEnabled = selectedMediaFiles.isNotEmpty() && hasAsrModel
     }
 
     /**

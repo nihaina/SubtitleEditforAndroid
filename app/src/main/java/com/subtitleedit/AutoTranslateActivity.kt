@@ -220,22 +220,12 @@ class AutoTranslateActivity : AppCompatActivity() {
             OverwritingToast.makeText(this, "请先添加要翻译的文件", Toast.LENGTH_SHORT).show()
             return
         }
-        if (!binding.switchSemanticMerge.isChecked &&
-            !binding.switchPunctuationPrediction.isChecked &&
-            !binding.switchOneClickTranslation.isChecked
-        ) {
-            OverwritingToast.makeText(this, "请至少选择一项处理功能", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (binding.switchSemanticMerge.isChecked && !isSemanticAiConfigured()) {
-            OverwritingToast.makeText(this, "请先在 AI 设置中配置可用的语义合并 AI", Toast.LENGTH_LONG).show()
-            return
-        }
         val config = if (binding.switchOneClickTranslation.isChecked) {
-            readTranslationConfig() ?: return
+            readTranslationConfig()
         } else {
             null
         }
+        if (!validateSelectedFeatures(config)) return
         val outputUri = outputDirectoryUri ?: Uri.fromFile(getTranslateOutputDirectory())
         val hasConflict = files.any { file ->
             val extension = outputExtension(file)
@@ -272,8 +262,6 @@ class AutoTranslateActivity : AppCompatActivity() {
             it.status == FileStatus.WAITING || it.status == FileStatus.STOPPED
         }
         if (queuedFiles.isEmpty()) return
-        queueRunning = true
-        updateTranslationControls()
         queuedFiles
             .forEach {
                 it.overwriteOutput = overwriteOutput
@@ -290,12 +278,12 @@ class AutoTranslateActivity : AppCompatActivity() {
     private fun startFile(
         file: AutoTranslateFile,
         retry: Boolean = false,
-        config: TranslationConfig? = if (binding.switchOneClickTranslation.isChecked) readTranslationConfig(false) else null,
+        config: TranslationConfig? = if (binding.switchOneClickTranslation.isChecked) readTranslationConfig() else null,
         outputUri: Uri = outputDirectoryUri ?: Uri.fromFile(getTranslateOutputDirectory()),
         overwriteOutput: Boolean = file.overwriteOutput
     ) {
         if (activeJobs[file.sessionId]?.isActive == true) return
-        if (binding.switchOneClickTranslation.isChecked && config == null) return
+        if (!validateSelectedFeatures(config)) return
         queueRunning = true
         updateTranslationControls()
         if (retry) file.message = ""
@@ -335,8 +323,8 @@ class AutoTranslateActivity : AppCompatActivity() {
                 file.punctuationPredictionCompleted = true
             }
             if (isFeatureEnabled(Feature.TRANSLATION)) {
-                val config = initialConfig ?: readTranslationConfig(false)
-                    ?: throw IllegalArgumentException("请先配置一键翻译所需的 AI 设置")
+                val config = initialConfig ?: readTranslationConfig()
+                    ?: throw IllegalArgumentException(getString(R.string.ai_processing_configuration_required))
                 document = translateDocument(file, document, config)
                 file.document = document
             }
@@ -406,7 +394,7 @@ class AutoTranslateActivity : AppCompatActivity() {
         val model = settingsManager.getAiSemanticModel(provider)
         val baseUrl = settingsManager.getAiBaseUrl(provider)
         if (apiKey.isBlank() || model.isBlank() || baseUrl.isBlank()) {
-            throw IllegalArgumentException("请先在 AI 设置中配置可用的语义合并 AI")
+            throw IllegalArgumentException(getString(R.string.ai_processing_configuration_required))
         }
         val conversation = aiTranslationService.createConversation(
             context = this,
@@ -502,20 +490,33 @@ class AutoTranslateActivity : AppCompatActivity() {
         return SubtitleParser.parseDocument(content, file.fileName, format)
     }
 
-    private fun readTranslationConfig(showError: Boolean = true): TranslationConfig? {
+    private fun validateSelectedFeatures(translationConfig: TranslationConfig?): Boolean {
+        val semanticMergeSelected = binding.switchSemanticMerge.isChecked
+        val translationSelected = binding.switchOneClickTranslation.isChecked
+        if (!semanticMergeSelected && !binding.switchPunctuationPrediction.isChecked && !translationSelected) {
+            OverwritingToast.makeText(this, "请至少选择一项处理功能", Toast.LENGTH_SHORT).show()
+            return false
+        }
+        if ((semanticMergeSelected && !isSemanticAiConfigured()) ||
+            (translationSelected && translationConfig == null)
+        ) {
+            OverwritingToast.makeText(
+                this,
+                getString(R.string.ai_processing_configuration_required),
+                Toast.LENGTH_LONG
+            ).show()
+            return false
+        }
+        return true
+    }
+
+    private fun readTranslationConfig(): TranslationConfig? {
         val provider = settingsManager.getAiTranslationProvider()
         val apiKey = settingsManager.getAiApiKey(provider)
         val model = settingsManager.getAiModel(provider)
         val targetLanguage = settingsManager.getAiTargetLanguage()
         val baseUrl = settingsManager.getAiBaseUrl(provider)
-        val error = when {
-            apiKey.isBlank() -> "请先在设置中配置 ${AiProviderConfig.getProvider(provider).displayName} API Key"
-            targetLanguage.isBlank() -> "请先设置目标语言"
-            baseUrl.isBlank() -> "请先在 AI 设置的平台设置中填写 API 请求地址"
-            else -> null
-        }
-        if (error != null) {
-            if (showError) OverwritingToast.makeText(this, error, Toast.LENGTH_LONG).show()
+        if (apiKey.isBlank() || model.isBlank() || targetLanguage.isBlank() || baseUrl.isBlank()) {
             return null
         }
         return TranslationConfig(

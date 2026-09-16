@@ -21,6 +21,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.viewpager.widget.PagerAdapter
+import androidx.viewpager.widget.ViewPager
 import com.google.android.material.card.MaterialCardView
 import com.subtitleedit.databinding.ActivityModelManagementBinding
 import com.subtitleedit.repository.ModelRepository
@@ -87,44 +89,34 @@ class ModelManagementActivity : AppCompatActivity() {
     }
 
     private fun setupPageNavigation() {
-        binding.pageScroller.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updatePageWidth() }
-        binding.pageScroller.post { updatePageWidth() }
-        binding.pageScroller.setOnScrollChangeListener { _, scrollX, _, _, _ ->
-            val pageWidth = binding.pageScroller.width.coerceAtLeast(1)
-            val progress = scrollX.toFloat() / pageWidth
-            updatePageState(progress)
-            if (progress >= 0.5f && !hasStorageAccess() && !requestedStorageAccess) {
-                requestStorageAccess()
+        val pages = listOf(binding.scrollImport, binding.managePage)
+        val titles = listOf("模型导入", "模型管理")
+        // Keep the inflated pages and their controller bindings while the pager owns attachment.
+        pages.forEach { binding.pagePager.removeView(it) }
+        binding.pagePager.adapter = object : PagerAdapter() {
+            override fun getCount(): Int = pages.size
+
+            override fun isViewFromObject(view: View, item: Any): Boolean = view === item
+
+            override fun instantiateItem(container: ViewGroup, position: Int): Any = pages[position].also {
+                container.addView(it)
             }
-        }
-        binding.tvImportPageName.setOnClickListener { binding.pageScroller.smoothScrollTo(0, 0) }
-        binding.tvManagePageName.setOnClickListener {
-            binding.pageScroller.smoothScrollTo(binding.pageScroller.width, 0)
-        }
-    }
 
-    private fun updatePageWidth() {
-        val pageWidth = binding.pageScroller.width
-        if (pageWidth <= 0) return
-        binding.pageContainer.layoutParams = binding.pageContainer.layoutParams.apply { width = pageWidth * 2 }
-        binding.scrollImport.layoutParams = binding.scrollImport.layoutParams.apply { width = pageWidth }
-        binding.managePage.layoutParams = binding.managePage.layoutParams.apply { width = pageWidth }
-        binding.pageIndicator.layoutParams = binding.pageIndicator.layoutParams.apply { width = pageWidth / 2 }
-        binding.pageIndicator.requestLayout()
-    }
+            override fun destroyItem(container: ViewGroup, position: Int, item: Any) {
+                container.removeView(item as View)
+            }
 
-    private fun updatePageState(progress: Float) {
-        val clamped = progress.coerceIn(0f, 1f)
-        binding.pageIndicator.translationX = binding.pageHeader.width / 2f * clamped
-        binding.tvImportPageName.setTextColor(
-            ContextCompat.getColor(this, if (clamped < 0.5f) R.color.primary else R.color.on_surface_variant)
-        )
-        binding.tvManagePageName.setTextColor(
-            ContextCompat.getColor(this, if (clamped >= 0.5f) R.color.primary else R.color.on_surface_variant)
-        )
-        val title = if (clamped < 0.5f) "模型导入" else "模型管理"
-        supportActionBar?.title = title
-        binding.toolbar.title = title
+            override fun getPageTitle(position: Int): CharSequence = titles[position]
+        }
+        binding.pageTabs.setupWithViewPager(binding.pagePager)
+        binding.pagePager.addOnPageChangeListener(object : ViewPager.SimpleOnPageChangeListener() {
+            override fun onPageSelected(position: Int) {
+                supportActionBar?.title = titles[position]
+                if (position == 1 && !hasStorageAccess() && !requestedStorageAccess) {
+                    requestStorageAccess()
+                }
+            }
+        })
     }
 
     private fun requestStorageAccess() {

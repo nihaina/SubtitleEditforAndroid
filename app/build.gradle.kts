@@ -191,6 +191,7 @@ dependencies {
 
     // RecyclerView
     implementation("androidx.recyclerview:recyclerview:1.3.2")
+    implementation("androidx.viewpager:viewpager:1.0.0")
 
     // Chat history storage
     implementation("androidx.room:room-runtime:2.6.1")
