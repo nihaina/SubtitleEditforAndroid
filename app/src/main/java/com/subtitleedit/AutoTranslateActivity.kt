@@ -30,8 +30,6 @@ import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SemanticSubtitleMerger
-import com.subtitleedit.util.SubtitleFormattingOptions
-import com.subtitleedit.util.SubtitleTextFormatter
 import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.subtitle.SubtitleDocument
@@ -391,15 +389,7 @@ class AutoTranslateActivity : AppCompatActivity() {
         document: SubtitleDocument
     ): SubtitleDocument {
         updateProcessingStage(file, ProcessingStage.SEMANTIC_MERGE)
-        val options = SubtitleFormattingOptions(
-            removeSpaces = false,
-            endPunctuation = "，,、。．.？?！!：:；;…".toSet()
-        )
-        val formattedEntries = document.entries.mapNotNull { entry ->
-            SubtitleTextFormatter.format(entry.text, options)
-                .takeIf { it.isNotBlank() }
-                ?.let { text -> entry.copy(text = text) }
-        }
+        val formattedEntries = SemanticSubtitleMerger.prepareSubtitleEntriesForAi(document.entries)
         if (formattedEntries.isEmpty()) return document
         val provider = settingsManager.getAiSemanticProvider()
         val apiKey = settingsManager.getAiApiKey(provider)

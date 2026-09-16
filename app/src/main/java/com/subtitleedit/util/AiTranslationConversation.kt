@@ -69,7 +69,7 @@ class AiTranslationConversation(
         if (text.isBlank()) return Result.success(text)
         return runCatching {
             val prompt = buildString {
-                append("以下为用空格分离的字幕文本，帮我根据语义合并意思被截断的短字幕段，意思完整的字幕无论长短均不做合并,避免产生过长字幕段,不修改原文，不做额外说明")
+                append("以下为换行分离的字幕文本，帮我根据语义合并意思被截断的短字幕段，意思完整的字幕无论长短均不做合并,避免产生过长字幕段,不修改原文，不做额外说明,以原格式输出")
                 customPrompt.trim().takeIf { it.isNotEmpty() }?.let {
                     append('\n')
                     append(it)
@@ -77,6 +77,9 @@ class AiTranslationConversation(
                 append("\n\n")
                 append(text)
             }
+            // The previous response's final cue provides context for this batch. Earlier
+            // batches stay in the history archive, but must not enter this AI request.
+            conversation.clear()
             val result = conversation.sendUserMessage(prompt, isCancelled = isCancelled)
             historyStore.append(
                 id = historySessionId,
@@ -84,21 +87,8 @@ class AiTranslationConversation(
                 type = ChatHistoryStore.TYPE_TRANSLATION,
                 messages = result.messages
             )
-            extractPunctuationResponse(result.text)
+            extractSemanticMergeResponse(result.text)
         }
-    }
-
-    private fun extractPunctuationResponse(response: String): String {
-        val marked = Regex(
-            "(?is)\\[\\[PUNCTUATED_TEXT\\]\\](.*?)\\[\\[/PUNCTUATED_TEXT\\]\\]"
-        ).find(response)?.groupValues?.get(1)
-        if (!marked.isNullOrBlank()) return marked.trim()
-
-        val fenced = Regex("(?is)```(?:text)?\\s*(.*?)```").find(response)?.groupValues?.get(1)
-        if (!fenced.isNullOrBlank()) return fenced.trim()
-
-        return Regex("(?s)^\\s*(.*?)\\s*$").find(response)?.groupValues?.get(1)?.trim()
-            .orEmpty()
     }
 
     suspend fun translateSubtitles(

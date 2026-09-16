@@ -112,6 +112,40 @@ class ChatBackendTest {
     }
 
     @Test
+    fun clearingConversationKeepsOnlyCurrentBatchInNextRequest() = runBlocking {
+        MockWebServer().use { server ->
+            repeat(2) {
+                server.enqueue(MockResponse()
+                    .setHeader("Content-Type", "text/event-stream")
+                    .setBody("data: {\"choices\":[{\"delta\":{\"content\":\"合并结果\"}}]}\n\n" +
+                        "data: [DONE]\n\n"))
+            }
+            val conversation = ChatConversation(
+                config = ChatBackendConfig(
+                    providerId = "custom",
+                    apiKey = "test-key",
+                    model = "test-model",
+                    baseUrl = server.url("/v1").toString(),
+                    contextWindowTokens = 256 * 1024
+                ),
+                systemPrompt = "根据当前字幕合并"
+            )
+            val first = conversation.sendUserMessage("第1至300条字幕")
+            conversation.clear()
+            val second = conversation.sendUserMessage("上一段最后一条合并结果\n第301至600条字幕")
+
+            server.takeRequest()
+            val messages = JSONObject(server.takeRequest().body.readUtf8()).getJSONArray("messages")
+            assertEquals(2, messages.length())
+            assertEquals("system", messages.getJSONObject(0).getString("role"))
+            assertEquals("上一段最后一条合并结果\n第301至600条字幕", messages.getJSONObject(1).getString("content"))
+            // Each result still supplies its messages to the persistent history archive.
+            assertEquals("第1至300条字幕", first.messages.first().content)
+            assertEquals("上一段最后一条合并结果\n第301至600条字幕", second.messages.first().content)
+        }
+    }
+
+    @Test
     fun toolCall_isExecutedAndContinuedInsideBackend() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse()
