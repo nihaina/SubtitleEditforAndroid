@@ -1,39 +1,51 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="@color/surface"
-    android:gravity="center_vertical"
-    android:minHeight="28dp"
-    android:orientation="horizontal">
+    android:minHeight="28dp">
+
+    <View
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@color/source_gutter_background"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="@id/tvSourceLineNumber"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
 
     <TextView
         android:id="@+id/tvSourceLineNumber"
         android:layout_width="wrap_content"
-        android:layout_height="match_parent"
-        android:background="@color/source_gutter_background"
+        android:layout_height="wrap_content"
         android:fontFamily="monospace"
-        android:gravity="end|center_vertical"
-        android:maxLines="1"
-        android:minHeight="28dp"
+        android:gravity="end|top"
+        android:includeFontPadding="false"
+        android:singleLine="true"
         android:minWidth="24dp"
         android:paddingStart="4dp"
         android:paddingEnd="8dp"
         android:textColor="@color/source_gutter_text"
         android:textSize="12sp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBaseline_toBaselineOf="@id/etSourceLine"
         tools:text="128" />
 
     <View
+        android:id="@+id/sourceGutterDivider"
         android:layout_width="1dp"
-        android:layout_height="match_parent"
-        android:background="@color/source_gutter_divider" />
+        android:layout_height="0dp"
+        android:background="@color/source_gutter_divider"
+        app:layout_constraintStart_toEndOf="@id/tvSourceLineNumber"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
 
     <com.subtitleedit.view.SourceLineEditText
         android:id="@+id/etSourceLine"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
         android:background="@null"
         android:fontFamily="monospace"
         android:gravity="center_vertical|start"
@@ -50,6 +62,10 @@
         android:textSelectHandleRight="@drawable/source_transparent_handle"
         android:textColor="@color/on_surface"
         android:textSize="14sp"
+        app:layout_constraintStart_toEndOf="@id/sourceGutterDivider"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
         tools:text="00:00:01,000 --&gt; 00:00:03,000" />
 
-</LinearLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>

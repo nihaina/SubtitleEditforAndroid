@@ -55,14 +55,6 @@
                     android:textStyle="bold"
                     android:textColor="@color/on_surface" />
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:text="@string/batch_convert_supported_formats"
-                    android:textSize="14sp"
-                    android:textColor="@color/on_surface_variant" />
-
                 <Button
                     android:id="@+id/btnSelectFile"
                     android:layout_width="wrap_content"

@@ -173,7 +173,6 @@
     <string name="activity_batch_convert_text_04">待转换文件</string>
     <string name="activity_batch_convert_text_05">添加文件</string>
     <string name="batch_convert_select_subtitle_files">选择字幕文件（可多选）</string>
-    <string name="batch_convert_supported_formats">支持 SRT、LRC、WebVTT、TXT 格式</string>
     <string name="batch_convert_selected_file_count">已选择 %1$d 个字幕文件</string>
     <string name="activity_editor_hint_01">替换为</string>
     <string name="activity_editor_text_01">替换</string>
@@ -392,7 +391,6 @@
     <string name="activity_auto_translate_text_07">语义合并</string>
     <string name="activity_auto_translate_text_08">标点预测（暂未实现）</string>
     <string name="activity_auto_translate_text_09">一键翻译</string>
-    <string name="auto_translate_supported_formats">支持 SRT、LRC、WebVTT、TXT、ASS、SSA 格式</string>
     <string name="auto_translate_default_output_directory" translatable="false">Download/SubtitleEdit/Translate</string>
     <string name="ai_processing_configuration_required">请先在AI设置中完成相关配置</string>
     <string name="activity_vocal_separation_settings_text_01">通用四轨模型</string>

@@ -1,13 +1,10 @@
 package com.subtitleedit.view
 
 import android.content.Context
-import android.graphics.Paint
-import android.graphics.Typeface
 import android.text.Editable
+import android.text.TextPaint
 import android.text.TextWatcher
 import android.text.style.BackgroundColorSpan
-import android.util.TypedValue
-import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -50,7 +47,9 @@ internal class SourceLineAdapter(
     private var pendingFocusColumn = 0
     private var pendingSelectionStart: Int? = null
     private var pendingSelectionEnd: Int? = null
-    private var gutterWidthPx = computeGutterWidth(1)
+    private var gutterNumberPaint: TextPaint? = null
+    private var gutterHorizontalPaddingPx = 0
+    private var gutterWidthPx = 0
 
     init {
         setHasStableIds(true)
@@ -180,6 +179,13 @@ internal class SourceLineAdapter(
         private var textChangeCount = 0
 
         init {
+            if (gutterNumberPaint == null) {
+                // Measure the same font that the inflated TextView actually renders. Device
+                // fonts can substitute proportional digits even for the monospace family.
+                gutterNumberPaint = TextPaint(lineNumber.paint)
+                gutterHorizontalPaddingPx = lineNumber.paddingLeft + lineNumber.paddingRight
+                setLineCount(lines.size, notify = false)
+            }
             // Keep one physical source line per holder. Enter is handled by SourceLineEditText
             // and converted into an adapter insertion before TextView can wrap the row.
             editor.setSingleLine(false)
@@ -200,9 +206,6 @@ internal class SourceLineAdapter(
             // The child selection color is retained for caret/keyboard editing; document ranges
             // are painted by SourceEditorView and never originate from TextView selection.
             editor.highlightColor = ContextCompat.getColor(context, R.color.source_selection)
-            editor.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-                updateLineNumberGravity()
-            }
             editor.selectionChanged = {
                 // Rebinding a recycled row can move the child EditText's native caret while its
                 // text is being restored. That is an implementation detail of RecyclerView, not
@@ -285,7 +288,6 @@ internal class SourceLineAdapter(
             binding = true
             try {
                 if (editor.text?.toString() != line.text) editor.setText(line.text)
-                updateLineNumberGravity()
                 applyHighlights(highlights)
             } finally {
                 binding = false
@@ -294,16 +296,6 @@ internal class SourceLineAdapter(
 
         fun bindIndex(position: Int) {
             lineNumber.text = (position + 1).toString()
-        }
-
-        private fun updateLineNumberGravity() {
-            val visualLineCount = editor.layout?.lineCount ?: 1
-            val gravity = if (visualLineCount > 1) {
-                Gravity.TOP or Gravity.END
-            } else {
-                Gravity.CENTER_VERTICAL or Gravity.END
-            }
-            if (lineNumber.gravity != gravity) lineNumber.gravity = gravity
         }
 
         fun bindGutterWidth(widthPx: Int) {
@@ -383,23 +375,17 @@ internal class SourceLineAdapter(
     }
 
     private fun computeGutterWidth(lineCount: Int): Int {
+        val numberPaint = gutterNumberPaint ?: return 0
         val resources = context.resources
         val density = resources.displayMetrics.density
         val digits = lineCount.coerceAtLeast(1).toString().length
-        val numberPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            typeface = Typeface.MONOSPACE
-            textSize = TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_SP,
-                12f,
-                resources.displayMetrics
-            )
-        }
-        val numberWidth = ceil(numberPaint.measureText("8".repeat(digits))).toInt()
-        val horizontalPadding = (12f * density).roundToInt() // XML: 4dp start + 8dp end
+        val numberWidth = ceil((0..9).maxOf {
+            numberPaint.measureText(it.toString().repeat(digits))
+        }).toInt()
         // Leave a small allowance for TextView/font rounding differences at digit boundaries
         // (for example, the transition from 9999 to 10000).
         val measurementAllowance = (2f * density).roundToInt()
         val minimumWidth = (24f * density).roundToInt()
-        return max(minimumWidth, numberWidth + horizontalPadding + measurementAllowance)
+        return max(minimumWidth, numberWidth + gutterHorizontalPaddingPx + measurementAllowance)
     }
 }
