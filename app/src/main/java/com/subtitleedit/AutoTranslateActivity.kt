@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Build
 import android.view.LayoutInflater
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageButton
@@ -132,7 +134,7 @@ class AutoTranslateActivity : AppCompatActivity() {
             )
         }
         outputDirectoryUri = uri
-        binding.tvOutputDir.text = "输出目录：${DirectoryDisplayPath.fromUri(this, uri)}"
+        binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, uri)
         settingsManager.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
     }
 
@@ -143,10 +145,7 @@ class AutoTranslateActivity : AppCompatActivity() {
         settingsManager = SettingsManager.getInstance(this)
         setupToolbar()
         setupList()
-        binding.btnAiSettings.setOnClickListener {
-            startActivity(Intent(this, AiSettingsActivity::class.java))
-        }
-        binding.btnAddFiles.setOnClickListener {
+        binding.btnSelectFile.setOnClickListener {
             filePickerLauncher.launch(arrayOf("text/*", "application/*"))
         }
         binding.btnSelectOutputDir.setOnClickListener {
@@ -175,6 +174,19 @@ class AutoTranslateActivity : AppCompatActivity() {
         }
     }
 
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.menu_auto_translate, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        R.id.action_auto_translate_settings -> {
+            startActivity(Intent(this, AiSettingsActivity::class.java))
+            true
+        }
+        else -> super.onOptionsItemSelected(item)
+    }
+
     private fun setupList() {
         adapter = AutoTranslateAdapter(
             onItemClick = { file ->
@@ -184,6 +196,7 @@ class AutoTranslateActivity : AppCompatActivity() {
         )
         binding.rvFileList.layoutManager = LinearLayoutManager(this)
         binding.rvFileList.adapter = adapter
+        updateFileListVisibility()
     }
 
     private fun restoreOutputDirectory() {
@@ -191,7 +204,7 @@ class AutoTranslateActivity : AppCompatActivity() {
             ?.let(Uri::parse)
             ?: return
         outputDirectoryUri = uri
-        binding.tvOutputDir.text = "输出目录：${DirectoryDisplayPath.fromUri(this, uri)}"
+        binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, uri)
     }
 
     private fun addInitialFiles(uris: List<Uri>) {
@@ -591,6 +604,11 @@ class AutoTranslateActivity : AppCompatActivity() {
     }
 
     private fun updateFileListVisibility() {
+        binding.tvSelectedFile.text = if (files.isEmpty()) {
+            getString(R.string.activity_media_convert_text_03)
+        } else {
+            getString(R.string.batch_convert_selected_file_count, files.size)
+        }
         binding.rvFileList.visibility = if (files.isEmpty()) View.GONE else View.VISIBLE
     }
 

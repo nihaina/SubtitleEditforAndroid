@@ -67,7 +67,7 @@ class BatchConvertActivity : AppCompatActivity() {
             )
             // 保存用户选择的输出目录 URI
             outputDirectoryUri = uri
-            binding.tvOutputDir.text = "输出目录：${DirectoryDisplayPath.fromUri(this, uri)}"
+            binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, uri)
             settingsManager.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
         }
     }
@@ -130,6 +130,7 @@ class BatchConvertActivity : AppCompatActivity() {
                 if (index >= 0) {
                     convertFiles.removeAt(index)
                     adapter.notifyItemRemoved(index)
+                    updateFileList()
                 }
             }
         )
@@ -138,10 +139,11 @@ class BatchConvertActivity : AppCompatActivity() {
             layoutManager = LinearLayoutManager(this@BatchConvertActivity)
             adapter = this@BatchConvertActivity.adapter
         }
+        updateFileList()
     }
     
     private fun setupButtons() {
-        binding.btnAddFiles.setOnClickListener {
+        binding.btnSelectFile.setOnClickListener {
             openFilePicker()
         }
         
@@ -167,7 +169,7 @@ class BatchConvertActivity : AppCompatActivity() {
             ?.let(Uri::parse)
             ?: return
         outputDirectoryUri = savedUri
-        binding.tvOutputDir.text = "输出目录：${DirectoryDisplayPath.fromUri(this, savedUri)}"
+        binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, savedUri)
     }
     
     private fun getFileNameFromUri(uri: Uri): String? {
@@ -204,6 +206,11 @@ class BatchConvertActivity : AppCompatActivity() {
     
     
     private fun updateFileList() {
+        binding.tvSelectedFile.text = if (convertFiles.isEmpty()) {
+            getString(R.string.activity_media_convert_text_03)
+        } else {
+            getString(R.string.batch_convert_selected_file_count, convertFiles.size)
+        }
         if (convertFiles.isEmpty()) {
             binding.rvFileList.visibility = View.GONE
         } else {
