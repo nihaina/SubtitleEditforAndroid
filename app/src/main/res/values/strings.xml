@@ -12,8 +12,8 @@
     <string name="file_searching">正在搜索子目录...</string>
     <string name="file_management_settings">文件管理设置</string>
     <string name="app_name">SubtitleEdit</string>
-    <string name="mp3_file_warning_title">该文件可能存在问题</string>
-    <string name="mp3_file_warning_message">该文件封装不规范\n\n%1$s\n\n可能导致跳转位置与实际播放内容不一致，建议转换文件格式</string>
+    <string name="mp3_file_warning_title">音视频文件可能存在问题</string>
+    <string name="mp3_file_warning_message">该文件封装不规范\n\n%1$s\n\n可能导致跳转时间与实际播放内容不一致，如果你发现声音和字幕存在偏移,建议转换文件格式</string>
     <string name="mp3_file_issue_start_time">音频开始时间不为 0（%1$.6f 秒）</string>
     <string name="mp3_file_issue_missing_index">缺少音频跳转索引</string>
     <string name="about">关于</string>
@@ -323,7 +323,7 @@
     <string name="activity_speech_to_subtitle_settings_text_43">实验功能不一定稳定，开启后所有打轴流程使用当前 ASR 模型的 token 时间戳替代 VAD 检测与分段；支持 SenseVoice 和 Parakeet，Whisper 受模型限制不支持；ASR 识别及 padding 机制不受影响，打轴时间会显著提高</string>
     <string name="activity_speech_to_subtitle_settings_text_44">切分时间</string>
     <string name="activity_speech_to_subtitle_settings_text_45">相邻 token 的时间间隔达到该值时切分，较短间隔将合并为同一字幕段</string>
-    <string name="activity_speech_to_subtitle_settings_text_46" translatable="false">500</string>
+    <string name="activity_speech_to_subtitle_settings_text_46" translatable="false">250</string>
     <string name="activity_speech_to_subtitle_settings_text_47">当前 ASR 模型为 Whisper 或模型文件配置不完整，请先在模型设置中选择并配置非 Whisper 模型</string>
     <string name="activity_speech_to_subtitle_settings_text_48">不保留实验打轴切分文本</string>
     <string name="activity_speech_to_subtitle_settings_text_49">开启后丢弃实验打轴模型切分出的文本，改用当前 ASR 模型按时间范围重新识别</string>
@@ -331,7 +331,7 @@
     <string name="activity_speech_to_subtitle_settings_text_51">开启后，在实验打轴按切分时间生成的最终时间轴中，合并间隔不超过指定时间的相邻字幕段，并按顺序拼接字幕内容</string>
     <string name="activity_speech_to_subtitle_settings_text_52">最大合并间隔</string>
     <string name="activity_speech_to_subtitle_settings_text_53">设为 0 时仅合并重叠或首尾相接的字幕段</string>
-    <string name="activity_speech_to_subtitle_settings_text_54" translatable="false">200</string>
+    <string name="activity_speech_to_subtitle_settings_text_54" translatable="false">150</string>
     <string name="activity_speech_to_subtitle_settings_text_55">ASR转录</string>
     <string name="activity_speech_to_subtitle_settings_text_56">VAD 参数设置</string>
     <string name="activity_speech_to_subtitle_settings_text_57">检测阈值</string>

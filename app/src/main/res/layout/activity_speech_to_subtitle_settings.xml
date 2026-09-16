@@ -165,7 +165,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
                                 android:stepSize="50"
-                                android:value="500"
+                                android:value="250"
                                 android:valueFrom="0"
                                 android:valueTo="2000" />
 
@@ -245,7 +245,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
                                 android:stepSize="50"
-                                android:value="200"
+                                android:value="150"
                                 android:valueFrom="0"
                                 android:valueTo="5000" />
 

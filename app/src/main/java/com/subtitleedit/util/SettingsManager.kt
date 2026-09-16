@@ -876,7 +876,7 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun getSpeechTokenTimestampGapMs(): Int {
-        return prefs.getInt(KEY_STT_TOKEN_TIMESTAMP_GAP_MS, 500).coerceIn(0, 2000)
+        return prefs.getInt(KEY_STT_TOKEN_TIMESTAMP_GAP_MS, 250).coerceIn(0, 2000)
     }
 
     fun setSpeechTokenTimestampGapMs(gapMs: Int) {
@@ -892,7 +892,7 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun getSpeechTokenTimestampMergeGapMs(): Int {
-        return prefs.getInt(KEY_STT_TOKEN_TIMESTAMP_MERGE_GAP_MS, 200).coerceIn(0, 5000)
+        return prefs.getInt(KEY_STT_TOKEN_TIMESTAMP_MERGE_GAP_MS, 150).coerceIn(0, 5000)
     }
 
     fun setSpeechTokenTimestampMergeGapMs(gapMs: Int) {

@@ -401,7 +401,6 @@ class AutoTranslateActivity : AppCompatActivity() {
                 ?.let { text -> entry.copy(text = text) }
         }
         if (formattedEntries.isEmpty()) return document
-        val joined = formattedEntries.joinToString("  ") { it.text }
         val provider = settingsManager.getAiSemanticProvider()
         val apiKey = settingsManager.getAiApiKey(provider)
         val model = settingsManager.getAiSemanticModel(provider)
@@ -424,10 +423,12 @@ class AutoTranslateActivity : AppCompatActivity() {
             historyTitle = "语义合并 · ${file.fileName}"
         )
         file.activeConversation = conversation
-        currentCoroutineContext().ensureActive()
-        val result = conversation.restorePunctuation(joined) { file.cancellationRequested }
-            .getOrElse { throw it }
-        val mergedEntries = SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(formattedEntries, result)
+        val mergedEntries = SemanticSubtitleMerger.mergeSubtitleEntriesInBatches(formattedEntries) { text ->
+            currentCoroutineContext().ensureActive()
+            if (file.cancellationRequested) throw CancellationException("语义合并已取消")
+            conversation.restorePunctuation(text) { file.cancellationRequested }
+                .getOrElse { throw it }
+        }
         return document.copy(entries = mergedEntries)
     }
 
