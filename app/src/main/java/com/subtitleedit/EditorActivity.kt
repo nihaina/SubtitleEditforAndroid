@@ -2859,6 +2859,20 @@ class EditorActivity : AppCompatActivity() {
                 restoreDocument = restoreDocument,
                 audioStreamIndex = preparedAudio.audioStreamIndex
             )
+            val issues = preparedAudio.mp3Issues
+            if (issues.hasIssues && !isFinishing && !isDestroyed) {
+                val details = buildList {
+                    issues.nonZeroStartTimeSeconds?.let { startTime ->
+                        add(getString(R.string.mp3_file_issue_start_time, startTime))
+                    }
+                    if (issues.missingSeekIndex) add(getString(R.string.mp3_file_issue_missing_index))
+                }.joinToString("\n") { "• $it" }
+                AlertDialog.Builder(this@EditorActivity)
+                    .setTitle(R.string.mp3_file_warning_title)
+                    .setMessage(getString(R.string.mp3_file_warning_message, details))
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show()
+            }
         }
     }
 

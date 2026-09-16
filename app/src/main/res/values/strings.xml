@@ -12,6 +12,10 @@
     <string name="file_searching">正在搜索子目录...</string>
     <string name="file_management_settings">文件管理设置</string>
     <string name="app_name">SubtitleEdit</string>
+    <string name="mp3_file_warning_title">该文件可能存在问题</string>
+    <string name="mp3_file_warning_message">该文件封装不规范\n\n%1$s\n\n可能导致跳转位置与实际播放内容不一致，建议转换文件格式</string>
+    <string name="mp3_file_issue_start_time">音频开始时间不为 0（%1$.6f 秒）</string>
+    <string name="mp3_file_issue_missing_index">缺少音频跳转索引</string>
     <string name="about">关于</string>
     <string name="version_format">版本 %1$s</string>
     <string name="github_project">GitHub 项目主页</string>

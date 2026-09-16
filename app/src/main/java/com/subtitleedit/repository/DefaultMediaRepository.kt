@@ -1,6 +1,8 @@
 package com.subtitleedit.repository
 
 import android.util.Log
+import com.subtitleedit.audio.Mp3FileIssues
+import com.subtitleedit.audio.Mp3SeekIndex
 import com.subtitleedit.nativebridge.DefaultNativeMediaEngine
 import com.subtitleedit.nativebridge.NativeMediaEngine
 import com.subtitleedit.util.FileHashUtils
@@ -32,6 +34,7 @@ internal class DefaultMediaRepository(
             return@withContext PreparedAudioFile(audioFile, wasFixed = false)
         }
 
+        val issues = inspectMp3(audioFile)
         // MP3 即使从 0 开始，也可能因码率估算导致 MediaPlayer 跳转偏移。
         Log.d(TAG, "MP3 音频使用临时 WAV 播放：${audioFile.name}")
         val wavFile = try {
@@ -40,7 +43,7 @@ internal class DefaultMediaRepository(
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "创建临时 WAV 文件失败，使用原文件", e)
-            return@withContext PreparedAudioFile(audioFile, wasFixed = false)
+            return@withContext PreparedAudioFile(audioFile, wasFixed = false, mp3Issues = issues)
         }
 
         val operation = nativeMediaEngine.openOperation()
@@ -50,7 +53,7 @@ internal class DefaultMediaRepository(
             }
             replaceTemporaryPlaybackFile(wavFile)
             Log.d(TAG, "WAV 转换成功：${wavFile.absolutePath}")
-            PreparedAudioFile(wavFile, wasFixed = true)
+            PreparedAudioFile(wavFile, wasFixed = true, mp3Issues = issues)
         } catch (e: CancellationException) {
             operation.cancel()
             wavFile.delete()
@@ -59,10 +62,28 @@ internal class DefaultMediaRepository(
             operation.cancel()
             wavFile.delete()
             Log.e(TAG, "WAV 转换异常，使用原文件", e)
-            PreparedAudioFile(audioFile, wasFixed = false)
+            PreparedAudioFile(audioFile, wasFixed = false, mp3Issues = issues)
         } finally {
             operation.cancel()
         }
+    }
+
+    private fun inspectMp3(file: File): Mp3FileIssues {
+        val startTime = try {
+            nativeMediaEngine.probe(file, inspectVideoAudioTrack = false).startTimeSeconds
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w(TAG, "无法检测 MP3 起始时间", error)
+            null
+        }
+        val hasSeekIndex = try {
+            Mp3SeekIndex.hasSeekIndex(file)
+        } catch (error: Exception) {
+            Log.w(TAG, "无法检测 MP3 跳转索引", error)
+            null
+        }
+        return Mp3FileIssues.from(startTime, hasSeekIndex)
     }
 
     override suspend fun getCacheKey(file: File): String = withContext(Dispatchers.IO) {
