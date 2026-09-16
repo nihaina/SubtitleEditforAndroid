@@ -4,6 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.view.Menu
+import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.View
 import android.widget.Toast
@@ -108,10 +110,20 @@ class VocalSeparationActivity : AppCompatActivity() {
         binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
     }
 
-    private fun setupButtons() {
-        binding.btnSeparationSettings.setOnClickListener {
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.menu_vocal_separation, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        R.id.action_vocal_separation_settings -> {
             startActivity(Intent(this, VocalSeparationSettingsActivity::class.java))
+            true
         }
+        else -> super.onOptionsItemSelected(item)
+    }
+
+    private fun setupButtons() {
         binding.btnSelectFile.setOnClickListener {
             filePickerLauncher.launch(arrayOf("audio/*", "video/*"))
         }

@@ -2,7 +2,7 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
     <item
         android:id="@+id/action_open_ai_chat"
-        android:icon="@drawable/ic_ai_translate"
+        android:icon="@drawable/ic_ai_chat"
         android:title="@string/activity_ai_settings_open_chat"
         app:showAsAction="always" />
 </menu>

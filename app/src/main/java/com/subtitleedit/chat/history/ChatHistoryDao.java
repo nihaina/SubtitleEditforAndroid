@@ -21,10 +21,10 @@ public interface ChatHistoryDao {
     @Insert
     void insertMessages(List<ChatHistoryMessageEntity> messages);
 
-    @Query("SELECT * FROM chat_sessions ORDER BY updatedAt DESC LIMIT :limit")
+    @Query("SELECT * FROM chat_sessions ORDER BY updatedAt DESC, rowid DESC LIMIT :limit")
     List<ChatHistorySessionEntity> recentSessions(int limit);
 
-    @Query("SELECT * FROM chat_sessions WHERE (:type = '' OR type = :type) ORDER BY updatedAt DESC LIMIT :limit")
+    @Query("SELECT * FROM chat_sessions WHERE (:type = '' OR type = :type) ORDER BY updatedAt DESC, rowid DESC LIMIT :limit")
     List<ChatHistorySessionEntity> recentSessionsByType(String type, int limit);
 
     @Query("SELECT * FROM chat_sessions WHERE id = :id LIMIT 1")
@@ -44,6 +44,15 @@ public interface ChatHistoryDao {
 
     @Query("DELETE FROM chat_sessions")
     void clearSessions();
+
+    @Query("""
+        DELETE FROM chat_sessions WHERE id IN (
+            SELECT id FROM chat_sessions
+            ORDER BY updatedAt DESC, rowid DESC
+            LIMIT -1 OFFSET :limit
+        )
+        """)
+    void deleteOldSessions(int limit);
 
     @Query("""
         SELECT m.sessionId AS sessionId, s.title AS title, s.type AS type,

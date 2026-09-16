@@ -173,6 +173,6 @@
             android:textColor="@color/on_surface_variant"
             android:textSize="12sp"
             android:visibility="gone"
-            tools:text="正在翻译：2 个文件 · 已完成 0/3 个文件 · 已翻译 80/320 条字幕" />
+            tools:text="正在处理：2 个文件 · 已完成 0/3 个文件 · 已翻译 80/320 条字幕" />
     </LinearLayout>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

@@ -22,6 +22,7 @@ import com.subtitleedit.databinding.ActivityAutoTranslateBinding
 import com.subtitleedit.repository.AiTranslationService
 import com.subtitleedit.repository.DefaultAiTranslationService
 import com.subtitleedit.util.AiProviderConfig
+import com.subtitleedit.util.AiTranslationConversation
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.OverwritingToast
@@ -34,7 +35,10 @@ import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.subtitle.SubtitleDocument
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -72,6 +76,14 @@ class AutoTranslateActivity : AppCompatActivity() {
 
     private enum class FileStatus { WAITING, RUNNING, COMPLETED, STOPPED }
 
+    private enum class ProcessingStage(val displayName: String) {
+        READING("读取字幕中"),
+        SEMANTIC_MERGE("语义合并处理中"),
+        PUNCTUATION_PREDICTION("标点预测"),
+        TRANSLATION("翻译中"),
+        SAVING("保存中")
+    }
+
     private class AutoTranslateFile(
         val uri: Uri,
         val fileName: String,
@@ -79,12 +91,15 @@ class AutoTranslateActivity : AppCompatActivity() {
         val sessionId: String = UUID.randomUUID().toString()
     ) {
         var status = FileStatus.WAITING
+        var processingStage = ProcessingStage.READING
         var totalLines = 0
         var translatedLines = 0
         var message = ""
         var document: SubtitleDocument? = null
         var semanticMergeCompleted = false
         var punctuationPredictionCompleted = false
+        @Volatile var cancellationRequested = false
+        @Volatile var activeConversation: AiTranslationConversation? = null
         val translatedTexts = mutableListOf<String>()
         // Keep the output policy with the file so a retry uses the same choice made
         // in the conflict dialog instead of falling back to the startFile default.
@@ -165,7 +180,7 @@ class AutoTranslateActivity : AppCompatActivity() {
             onItemClick = { file ->
                 if (file.status == FileStatus.STOPPED) startFile(file, retry = true)
             },
-            onRemoveClick = ::removeFile
+            onRemoveClick = ::confirmRemoveFile
         )
         binding.rvFileList.layoutManager = LinearLayoutManager(this)
         binding.rvFileList.adapter = adapter
@@ -217,7 +232,7 @@ class AutoTranslateActivity : AppCompatActivity() {
             return
         }
         val config = if (binding.switchOneClickTranslation.isChecked) {
-            readTranslationConfig()
+            readTranslationConfig() ?: return
         } else {
             null
         }
@@ -279,11 +294,14 @@ class AutoTranslateActivity : AppCompatActivity() {
         outputUri: Uri = outputDirectoryUri ?: Uri.fromFile(getTranslateOutputDirectory()),
         overwriteOutput: Boolean = file.overwriteOutput
     ) {
-        if (activeJobs[file.sessionId]?.isActive == true || config == null) return
+        if (activeJobs[file.sessionId]?.isActive == true) return
+        if (binding.switchOneClickTranslation.isChecked && config == null) return
         queueRunning = true
         updateTranslationControls()
         if (retry) file.message = ""
+        file.cancellationRequested = false
         file.status = FileStatus.RUNNING
+        file.processingStage = ProcessingStage.READING
         adapter.notifyItemChanged(files.indexOf(file))
         activeJobs[file.sessionId] = lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             processFile(file, config, outputUri, overwriteOutput)
@@ -307,9 +325,11 @@ class AutoTranslateActivity : AppCompatActivity() {
                 document = applySemanticMerge(file, document)
                 file.document = document
                 file.semanticMergeCompleted = true
+                postFileUpdate(file) { file.totalLines = document.entries.size }
             }
             if (isFeatureEnabled(Feature.PUNCTUATION_PREDICTION) && !file.punctuationPredictionCompleted) {
                 // Reserved for the future punctuation prediction implementation.
+                updateProcessingStage(file, ProcessingStage.PUNCTUATION_PREDICTION)
                 file.message = "标点预测暂未实现"
                 postFileUpdate(file) { }
                 file.punctuationPredictionCompleted = true
@@ -321,12 +341,15 @@ class AutoTranslateActivity : AppCompatActivity() {
                 file.document = document
             }
 
+            updateProcessingStage(file, ProcessingStage.SAVING)
+            val outputText = SubtitleParser.serialize(document)
+            currentCoroutineContext().ensureActive()
             SubtitleOutputWriter.writeText(
                 this,
                 outputUri,
                 file.fileName.substringBeforeLast("."),
                 outputExtension(file),
-                SubtitleParser.serialize(document),
+                outputText,
                 overwrite = overwriteOutput
             )
             file.status = FileStatus.COMPLETED
@@ -341,7 +364,8 @@ class AutoTranslateActivity : AppCompatActivity() {
             file.message = error.message ?: "处理失败"
             postFileUpdate(file) { }
         } finally {
-            withContext(kotlinx.coroutines.Dispatchers.Main) {
+            file.activeConversation = null
+            withContext(NonCancellable + kotlinx.coroutines.Dispatchers.Main) {
                 activeJobs.remove(file.sessionId)
                 if (activeJobs.values.none { it.isActive }) {
                     queueRunning = false
@@ -365,6 +389,7 @@ class AutoTranslateActivity : AppCompatActivity() {
         file: AutoTranslateFile,
         document: SubtitleDocument
     ): SubtitleDocument {
+        updateProcessingStage(file, ProcessingStage.SEMANTIC_MERGE)
         val options = SubtitleFormattingOptions(
             removeSpaces = false,
             endPunctuation = "，,、。．.？?！!：:；;…".toSet()
@@ -383,9 +408,6 @@ class AutoTranslateActivity : AppCompatActivity() {
         if (apiKey.isBlank() || model.isBlank() || baseUrl.isBlank()) {
             throw IllegalArgumentException("请先在 AI 设置中配置可用的语义合并 AI")
         }
-        postFileUpdate(file) {
-            file.message = "语义合并处理中"
-        }
         val conversation = aiTranslationService.createConversation(
             context = this,
             provider = provider,
@@ -400,7 +422,9 @@ class AutoTranslateActivity : AppCompatActivity() {
             historySessionId = "semantic_${file.sessionId}",
             historyTitle = "语义合并 · ${file.fileName}"
         )
-        val result = conversation.restorePunctuation(joined)
+        file.activeConversation = conversation
+        currentCoroutineContext().ensureActive()
+        val result = conversation.restorePunctuation(joined) { file.cancellationRequested }
             .getOrElse { throw it }
         val mergedEntries = SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(formattedEntries, result)
         return document.copy(entries = mergedEntries)
@@ -411,6 +435,7 @@ class AutoTranslateActivity : AppCompatActivity() {
         document: SubtitleDocument,
         config: TranslationConfig
     ): SubtitleDocument {
+        updateProcessingStage(file, ProcessingStage.TRANSLATION)
         val entries = document.entries
         val translator = aiTranslationService.createConversation(
             context = this,
@@ -426,15 +451,19 @@ class AutoTranslateActivity : AppCompatActivity() {
             historySessionId = file.sessionId,
             historyTitle = "AI字幕处理 · ${file.fileName} · ${config.targetLanguage}"
         )
+        file.activeConversation = translator
         var consecutiveErrors = 0
         while (file.translatedTexts.size < entries.size) {
+            currentCoroutineContext().ensureActive()
+            postFileUpdate(file) { file.message = "" }
             val completed = file.translatedTexts.size
             val result = translator.translateSubtitles(
                 subtitles = entries.drop(completed),
                 startPosition = completed + 1,
                 progressCallback = { current, _ ->
                     postFileUpdate(file) { file.translatedLines = completed + current }
-                }
+                },
+                isCancelled = { file.cancellationRequested }
             )
             file.translatedTexts += result.translations
             file.translatedLines = file.translatedTexts.size
@@ -508,24 +537,56 @@ class AutoTranslateActivity : AppCompatActivity() {
             settingsManager.getAiBaseUrl(provider).isNotBlank()
     }
 
+    private suspend fun updateProcessingStage(file: AutoTranslateFile, stage: ProcessingStage) {
+        withContext(kotlinx.coroutines.Dispatchers.Main) {
+            postFileUpdate(file) {
+                file.processingStage = stage
+                file.message = ""
+            }
+        }
+    }
+
     private fun postFileUpdate(file: AutoTranslateFile, update: () -> Unit) {
         runOnUiThread {
-            update()
             val index = files.indexOf(file)
-            if (index >= 0) adapter.notifyItemChanged(index)
+            if (index < 0) return@runOnUiThread
+            update()
+            adapter.notifyItemChanged(index)
             updateFileListVisibility()
             updateTranslationProgress()
         }
     }
 
-    private fun removeFile(file: AutoTranslateFile) {
+    private fun confirmRemoveFile(file: AutoTranslateFile) {
+        if (file.status != FileStatus.RUNNING) {
+            removeFile(file)
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("移除文件")
+            .setMessage("当前文件正在处理，是否移除？")
+            .setPositiveButton("移除") { _, _ -> removeFile(file) }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun cancelFile(file: AutoTranslateFile) {
+        file.cancellationRequested = true
         activeJobs[file.sessionId]?.cancel()
+        file.activeConversation?.cancel()
+    }
+
+    private fun removeFile(file: AutoTranslateFile) {
+        cancelFile(file)
+        activeJobs.remove(file.sessionId)
         val index = files.indexOf(file)
         if (index >= 0) {
             files.removeAt(index)
             adapter.notifyItemRemoved(index)
             updateFileListVisibility()
         }
+        queueRunning = activeJobs.values.any { it.isActive }
+        updateTranslationControls()
     }
 
     private fun updateFileListVisibility() {
@@ -542,23 +603,29 @@ class AutoTranslateActivity : AppCompatActivity() {
         if (!queueRunning) return
         val activeCount = files.count { it.status == FileStatus.RUNNING }
         val completedFiles = files.count { it.status == FileStatus.COMPLETED }
-        val totalLines = files.sumOf { it.totalLines }
-        val translatedLines = files.sumOf { it.translatedLines }
-        binding.tvTranslationProgress.text =
-            "正在翻译：$activeCount 个文件 · 已完成 $completedFiles/${files.size} 个文件 · " +
-                "已翻译 $translatedLines/$totalLines 条字幕"
+        val translationFiles = files.filter {
+            it.processingStage == ProcessingStage.TRANSLATION || it.translatedLines > 0
+        }
+        binding.tvTranslationProgress.text = buildString {
+            append("正在处理：$activeCount 个文件 · 已完成 $completedFiles/${files.size} 个文件")
+            if (translationFiles.isNotEmpty()) {
+                val totalLines = translationFiles.sumOf { it.totalLines }
+                val translatedLines = translationFiles.sumOf { it.translatedLines }
+                append(" · 已翻译 $translatedLines/$totalLines 条字幕")
+            }
+        }
     }
 
     private fun confirmExitWhileTranslating() {
         AlertDialog.Builder(this)
-            .setTitle("翻译进行中")
-            .setMessage("退出将停止正在进行的翻译，已完成的文件会保留。确定退出吗？")
+            .setTitle("处理进行中")
+            .setMessage("退出将停止正在进行的处理，已完成的文件会保留。确定退出吗？")
             .setPositiveButton("停止并退出") { _, _ ->
-                activeJobs.values.toList().forEach { it.cancel() }
+                files.forEach(::cancelFile)
                 queueRunning = false
                 finish()
             }
-            .setNegativeButton("继续翻译", null)
+            .setNegativeButton("继续处理", null)
             .show()
     }
 
@@ -630,15 +697,18 @@ class AutoTranslateActivity : AppCompatActivity() {
                 size.text = FileUtils.formatFileSize(file.fileSize)
                 val status = when (file.status) {
                     FileStatus.WAITING -> "等待"
-                    FileStatus.RUNNING -> "翻译中"
+                    FileStatus.RUNNING -> file.processingStage.displayName
                     FileStatus.COMPLETED -> "已完成"
                     FileStatus.STOPPED -> "已停止，点击重试"
                 }
-                stats.text = "字幕 ${file.totalLines} · 已翻译 ${file.translatedLines}"
+                stats.text = if (file.processingStage == ProcessingStage.TRANSLATION || file.translatedLines > 0) {
+                    "字幕 ${file.totalLines} · 已翻译 ${file.translatedLines}"
+                } else {
+                    "字幕 ${file.totalLines}"
+                }
                 statusText.text = if (file.message.isBlank()) status else "$status：${file.message}"
                 itemView.setOnClickListener { onItemClick(file) }
                 remove.setOnClickListener { onRemoveClick(file) }
-                remove.isEnabled = file.status != FileStatus.RUNNING
             }
         }
 
