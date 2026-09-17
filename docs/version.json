@@ -1,7 +1,7 @@
 {
-  "versionCode": 8,
-  "versionName": "1.1.8",
+  "versionCode": 9,
+  "versionName": "1.1.9",
   "downloadUrl": "https://github.com/nihaina/SubtitleEditforAndroid/releases/latest",
-  "releaseNotes": "1.重做源视图编辑功能\n2.字幕编辑现在支持撤回恢复\n3.AI翻译重新添加自定义提示词\n4.优化较大字幕文件的加载\n5.自动翻译等功能文件名冲突时，可以直接覆盖\n6.可以在文件管理页快速转换字幕格式",
+  "releaseNotes": "1.修复源视图编辑的部分bug\n2.优化编辑时的撤回恢复操作\n3.将模型下载统一迁移到模型管理，且下载支持断点续传\n4.文件管理页选择文件时不再允许跨目录\n5.添加语义合并，标点预测功能，不同功能可以分别设置不同ai\n6.添加编辑mp3文件时，对mp3文件的规范性检测\n7.格式化工具可以处理句首标点\n8.目录页现在会显示音视频文件的封面缩略图\n9.将软件注册为字幕文件的打开方式，可以在其他软件里用该软件打开字幕\n10.AI对话的历史记录限制为100条",
   "forceUpdate": false
 }
