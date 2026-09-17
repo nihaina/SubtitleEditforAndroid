@@ -2867,7 +2867,9 @@ class EditorActivity : AppCompatActivity() {
                     issues.nonZeroStartTimeSeconds?.let { startTime ->
                         add(getString(R.string.mp3_file_issue_start_time, startTime))
                     }
-                    if (issues.missingSeekIndex) add(getString(R.string.mp3_file_issue_missing_index))
+                    if (issues.dataRateBelowNominalBitrate) {
+                        add(getString(R.string.mp3_file_issue_low_data_rate))
+                    }
                 }.joinToString("\n") { "• $it" }
                 AlertDialog.Builder(this@EditorActivity)
                     .setTitle(R.string.mp3_file_warning_title)

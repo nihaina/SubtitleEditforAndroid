@@ -11,8 +11,9 @@ internal class DefaultNativeMediaEngine : NativeMediaEngine {
     override fun probe(file: File, inspectVideoAudioTrack: Boolean): MediaProbeResult {
         val mediaInformation = FFprobeKit.getMediaInformation(file.absolutePath)
             .getMediaInformation()
+        val audioStream = selectDefaultAudioStream(mediaInformation)
         val audioStreamIndex = if (inspectVideoAudioTrack) {
-            selectDefaultAudioStreamIndex(mediaInformation)
+            audioStream?.getIndex()?.toInt()
                 ?: if (hasAudioTrack(file)) null
                 else throw IllegalStateException("视频没有可用音轨")
         } else {
@@ -20,7 +21,11 @@ internal class DefaultNativeMediaEngine : NativeMediaEngine {
         }
         return MediaProbeResult(
             startTimeSeconds = mediaInformation?.getStartTime()?.toDoubleOrNull() ?: 0.0,
-            defaultAudioStreamIndex = audioStreamIndex
+            defaultAudioStreamIndex = audioStreamIndex,
+            // MP3 duration may itself be estimated from this bitrate. The repository measures
+            // real frame bytes and sample counts independently before comparing the rates.
+            audioBitrateBitsPerSecond = audioStream?.getAllProperties()
+                ?.optString("bit_rate")?.toDoubleOrNull()
         )
     }
 
@@ -63,9 +68,9 @@ internal class DefaultNativeMediaEngine : NativeMediaEngine {
         override fun cancel() = commandOperation.cancel()
     }
 
-    private fun selectDefaultAudioStreamIndex(
+    private fun selectDefaultAudioStream(
         mediaInformation: com.arthenica.ffmpegkit.MediaInformation?
-    ): Int? {
+    ): com.arthenica.ffmpegkit.StreamInformation? {
         val audioStreams = mediaInformation?.getStreams()
             ?.filter { stream ->
                 stream.getType().equals("audio", ignoreCase = true) ||
@@ -74,12 +79,11 @@ internal class DefaultNativeMediaEngine : NativeMediaEngine {
                         .equals("audio", ignoreCase = true)
             }
             .orEmpty()
-        val selectedStream = audioStreams.firstOrNull { stream ->
+        return audioStreams.firstOrNull { stream ->
             stream.getAllProperties()
                 ?.optJSONObject("disposition")
                 ?.optInt("default", 0) == 1
         } ?: audioStreams.firstOrNull()
-        return selectedStream?.getIndex()?.toInt()
     }
 
     private fun hasAudioTrack(mediaFile: File): Boolean {

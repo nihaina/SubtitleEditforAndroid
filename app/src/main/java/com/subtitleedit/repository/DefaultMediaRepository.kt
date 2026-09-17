@@ -2,7 +2,7 @@ package com.subtitleedit.repository
 
 import android.util.Log
 import com.subtitleedit.audio.Mp3FileIssues
-import com.subtitleedit.audio.Mp3SeekIndex
+import com.subtitleedit.audio.Mp3FrameStats
 import com.subtitleedit.nativebridge.DefaultNativeMediaEngine
 import com.subtitleedit.nativebridge.NativeMediaEngine
 import com.subtitleedit.util.FileHashUtils
@@ -69,21 +69,26 @@ internal class DefaultMediaRepository(
     }
 
     private fun inspectMp3(file: File): Mp3FileIssues {
-        val startTime = try {
-            nativeMediaEngine.probe(file, inspectVideoAudioTrack = false).startTimeSeconds
+        val probe = try {
+            nativeMediaEngine.probe(file, inspectVideoAudioTrack = false)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            Log.w(TAG, "无法检测 MP3 起始时间", error)
+            Log.w(TAG, "无法检测 MP3 起始时间和码率", error)
             null
         }
-        val hasSeekIndex = try {
-            Mp3SeekIndex.hasSeekIndex(file)
+        val audioData = try {
+            Mp3FrameStats.read(file)
         } catch (error: Exception) {
-            Log.w(TAG, "无法检测 MP3 跳转索引", error)
+            Log.w(TAG, "无法统计 MP3 音频帧", error)
             null
         }
-        return Mp3FileIssues.from(startTime, hasSeekIndex)
+        return Mp3FileIssues.from(
+            startTimeSeconds = probe?.startTimeSeconds,
+            audioSizeBytes = audioData?.byteCount,
+            durationSeconds = audioData?.durationSeconds,
+            nominalBitrateBitsPerSecond = probe?.audioBitrateBitsPerSecond
+        )
     }
 
     override suspend fun getCacheKey(file: File): String = withContext(Dispatchers.IO) {
