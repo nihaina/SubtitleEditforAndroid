@@ -39,6 +39,47 @@ class SubtitleTextFormatterTest {
         assertEquals("abc", SubtitleTextFormatter.format("a,b,c", options))
     }
 
+    // ==================== startPunctuation ====================
+
+    @Test
+    fun startPunctuation_onlyRemovesSelectedLeadingRun() {
+        val options = SubtitleFormattingOptions(startPunctuation = setOf('，', ','))
+        assertEquals("你好，世界，", SubtitleTextFormatter.format("，,你好，世界，", options))
+        assertEquals("！,你好，", SubtitleTextFormatter.format("，！,你好，", options))
+    }
+
+    @Test
+    fun startPunctuation_handlesLeadingAndInterspersedWhitespace() {
+        val options = SubtitleFormattingOptions(startPunctuation = setOf('-', '—'))
+        assertEquals("Hello world! ", SubtitleTextFormatter.format(" \t-　— Hello world! ", options))
+    }
+
+    @Test
+    fun startPunctuation_canRemoveSelectedOpeningQuotesAndBrackets() {
+        val options = SubtitleFormattingOptions(startPunctuation = setOf('“', '（'))
+        assertEquals("你好）”", SubtitleTextFormatter.format("“（你好）”", options))
+        assertEquals("「你好」", SubtitleTextFormatter.format("「你好」", options))
+    }
+
+    @Test
+    fun startPunctuation_handlesEmptyAndPunctuationOnlyLines() {
+        val options = SubtitleFormattingOptions(startPunctuation = setOf('!', '。'))
+        assertEquals("", SubtitleTextFormatter.format("", options))
+        assertEquals("\n\nHello!\nWorld。\n", SubtitleTextFormatter.format("!。!!\n\n!Hello!\n。World。\n", options))
+    }
+
+    @Test
+    fun startPunctuation_combinesWithOtherFormattingOptions() {
+        val options = SubtitleFormattingOptions(
+            removeSpaces = true,
+            innerPunctuation = setOf(','),
+            startPunctuation = setOf('-'),
+            endPunctuation = setOf('!'),
+            addEndPunctuation = "。"
+        )
+        assertEquals("Helloworld。", SubtitleTextFormatter.format("- Hello, world!", options))
+    }
+
     // ==================== endPunctuation ====================
 
     @Test

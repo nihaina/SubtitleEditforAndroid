@@ -355,6 +355,7 @@
     <string name="speech_to_subtitle_asr_model_required">请先在模型管理处导入识别模型</string>
     <string name="activity_subtitle_format_editor_text_01">清除句内内容</string>
     <string name="activity_subtitle_format_editor_text_02">空格</string>
+    <string name="subtitle_format_clear_start_punctuation">清理句首标点</string>
     <string name="activity_subtitle_format_editor_text_03">清除句末标点</string>
     <string name="activity_subtitle_format_editor_text_04">标点替换</string>
     <string name="activity_subtitle_format_editor_hint_01">要替换的标点</string>

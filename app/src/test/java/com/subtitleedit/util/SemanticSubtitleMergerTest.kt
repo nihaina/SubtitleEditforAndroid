@@ -32,15 +32,17 @@ class SemanticSubtitleMergerTest {
     }
 
     @Test
-    fun prepareForAiPreservesContentAndMetadataWhileFormattingLineEndings() {
+    fun prepareForAiPreservesContentAndMetadataWhileFormattingLineStartsAndEndings() {
         val cases = listOf(
+            "，,、。．.？?！!：:；;…你好，世界！" to "你好，世界",
+            " \t，　… Hello world! " to "Hello world",
             "“你好，世界！”" to "“你好，世界”",
             "Don't stop!" to "Don't stop",
             "3.14" to "3.14",
             "[笑声]" to "[笑声]",
             "♪" to "♪",
             "😊" to "😊",
-            "你好。\n世界！" to "你好\n世界"
+            "，你好。\n…世界！" to "你好\n世界"
         )
         val source = subtitleEntries(cases.size).mapIndexed { index, entry ->
             entry.copy(text = cases[index].first)
@@ -58,7 +60,7 @@ class SemanticSubtitleMergerTest {
     fun punctuationOnlyEntriesAreExcludedBeforeBatchCountingAndSending() = runBlocking {
         val expected = subtitleEntries(301)
         val source = expected.flatMap { entry ->
-            listOf(entry.copy(text = "${entry.text}。"), entry.copy(text = "”"))
+            listOf(entry.copy(text = "，${entry.text}。"), entry.copy(text = "”"))
         }
         val requests = mutableListOf<String>()
         val prepared = SemanticSubtitleMerger.prepareSubtitleEntriesForAi(source)

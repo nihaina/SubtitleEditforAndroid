@@ -3,6 +3,7 @@ package com.subtitleedit.util
 data class SubtitleFormattingOptions(
     val removeSpaces: Boolean = false,
     val innerPunctuation: Set<Char> = emptySet(),
+    val startPunctuation: Set<Char> = emptySet(),
     val endPunctuation: Set<Char> = emptySet(),
     val replaceFrom: String = "",
     val replaceTo: String = "",
@@ -46,6 +47,13 @@ object SubtitleTextFormatter {
             }
             line = line.filterIndexed { index, char ->
                 char !in options.innerPunctuation || index >= protectedSuffixStart
+            }
+        }
+
+        if (options.startPunctuation.isNotEmpty()) {
+            line = line.trimStart()
+            while (line.isNotEmpty() && line.first() in options.startPunctuation) {
+                line = line.drop(1).trimStart()
             }
         }
 

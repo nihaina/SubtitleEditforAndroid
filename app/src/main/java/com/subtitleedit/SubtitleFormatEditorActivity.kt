@@ -47,6 +47,7 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
     private var hasChanges = false
     private var formattingJob: Job? = null
     private val innerPunctuationChecks = linkedMapOf<Char, TextView>()
+    private val startPunctuationChecks = linkedMapOf<Char, TextView>()
     private val endPunctuationChecks = linkedMapOf<Char, TextView>()
     private val addEndPunctuationValues = listOf("", "。", ".", "！", "!", "？", "?", "，", ",", "…")
 
@@ -141,6 +142,7 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
             '（', '）', '(', ')', '【', '】', '[', ']', '—', '–', '-', '…', '·'
         )
         addPunctuationChecks(binding.gridInnerPunctuation, punctuation, innerPunctuationChecks, emptySet())
+        addPunctuationChecks(binding.gridStartPunctuation, punctuation, startPunctuationChecks, emptySet())
         addPunctuationChecks(
             binding.gridEndPunctuation,
             punctuation,
@@ -228,7 +230,7 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
         }
         val options = collectOptions()
         if (!options.removeSpaces && options.innerPunctuation.isEmpty() &&
-            options.endPunctuation.isEmpty() && options.replaceFrom.isEmpty() &&
+            options.startPunctuation.isEmpty() && options.endPunctuation.isEmpty() && options.replaceFrom.isEmpty() &&
             options.addEndPunctuation.isEmpty()
         ) {
             OverwritingToast.makeText(this, "请先选择格式化项目", Toast.LENGTH_SHORT).show()
@@ -281,11 +283,15 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
         val inner = mutableSetOf<Char>()
         inner += innerPunctuationChecks.filterValues { it.isSelected }.keys
 
+        val start = mutableSetOf<Char>()
+        start += startPunctuationChecks.filterValues { it.isSelected }.keys
+
         val end = mutableSetOf<Char>()
         end += endPunctuationChecks.filterValues { it.isSelected }.keys
         return SubtitleFormattingOptions(
             removeSpaces = binding.cbRemoveSpaces.isChecked,
             innerPunctuation = inner,
+            startPunctuation = start,
             endPunctuation = end,
             replaceFrom = binding.etReplaceFrom.text?.toString().orEmpty(),
             replaceTo = binding.etReplaceTo.text?.toString().orEmpty(),

@@ -8,11 +8,13 @@ object SemanticSubtitleMerger {
     private const val NEW_ENTRIES_PER_BATCH = 300
     private val punctuationOnlyText = Regex("""[\p{P}\p{Z}\p{Cc}\p{Cf}\s]*""")
 
-    /** Format cue endings and drop cues containing only punctuation or invisible characters. */
+    /** Format cue starts and endings and drop cues containing only punctuation or invisible characters. */
     fun prepareSubtitleEntriesForAi(entries: List<SubtitleEntry>): List<SubtitleEntry> {
+        val punctuation = "，,、。．.？?！!：:；;…".toSet()
         val options = SubtitleFormattingOptions(
             removeSpaces = false,
-            endPunctuation = "，,、。．.？?！!：:；;…".toSet()
+            startPunctuation = punctuation,
+            endPunctuation = punctuation
         )
         return entries.mapNotNull { entry ->
             SubtitleTextFormatter.format(entry.text, options)
