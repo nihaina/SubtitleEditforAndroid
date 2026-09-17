@@ -75,6 +75,98 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".OpenSubtitleActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <!-- MIME matching also handles content:// URIs whose paths are opaque IDs. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/x-subrip" />
+                <data android:mimeType="application/srt" />
+                <data android:mimeType="application/x-srt" />
+                <data android:mimeType="text/srt" />
+                <data android:mimeType="text/x-srt" />
+                <data android:mimeType="text/vtt" />
+                <data android:mimeType="application/vtt" />
+                <data android:mimeType="text/lrc" />
+                <data android:mimeType="text/x-lrc" />
+                <data android:mimeType="application/lrc" />
+                <data android:mimeType="application/x-lrc" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <!-- Some file managers use generic/incorrect MIME types. Limit that fallback
+                 to subtitle/text extensions instead of advertising support for every file. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:mimeType="*/*" />
+                <data android:pathSuffix=".lrc" tools:targetApi="s" />
+                <data android:pathSuffix=".srt" tools:targetApi="s" />
+                <data android:pathSuffix=".vtt" tools:targetApi="s" />
+                <data android:pathSuffix=".txt" tools:targetApi="s" />
+                <data android:pathSuffix=".LRC" tools:targetApi="s" />
+                <data android:pathSuffix=".SRT" tools:targetApi="s" />
+                <data android:pathSuffix=".VTT" tools:targetApi="s" />
+                <data android:pathSuffix=".TXT" tools:targetApi="s" />
+                <!-- Legacy path matching for Android 8–11, including multi-dot names. -->
+                <data android:pathPattern=".*\\.lrc" />
+                <data android:pathPattern=".*\\.srt" />
+                <data android:pathPattern=".*\\.vtt" />
+                <data android:pathPattern=".*\\.txt" />
+                <data android:pathPattern=".*\\.LRC" />
+                <data android:pathPattern=".*\\.SRT" />
+                <data android:pathPattern=".*\\.VTT" />
+                <data android:pathPattern=".*\\.TXT" />
+                <data android:pathPattern=".*\\..*\\.lrc" />
+                <data android:pathPattern=".*\\..*\\.srt" />
+                <data android:pathPattern=".*\\..*\\.vtt" />
+                <data android:pathPattern=".*\\..*\\.txt" />
+                <data android:pathPattern=".*\\..*\\.LRC" />
+                <data android:pathPattern=".*\\..*\\.SRT" />
+                <data android:pathPattern=".*\\..*\\.VTT" />
+                <data android:pathPattern=".*\\..*\\.TXT" />
+            </intent-filter>
+            <!-- A URI with no MIME type needs a separate filter. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:pathSuffix=".lrc" tools:targetApi="s" />
+                <data android:pathSuffix=".srt" tools:targetApi="s" />
+                <data android:pathSuffix=".vtt" tools:targetApi="s" />
+                <data android:pathSuffix=".txt" tools:targetApi="s" />
+                <data android:pathSuffix=".LRC" tools:targetApi="s" />
+                <data android:pathSuffix=".SRT" tools:targetApi="s" />
+                <data android:pathSuffix=".VTT" tools:targetApi="s" />
+                <data android:pathSuffix=".TXT" tools:targetApi="s" />
+                <data android:pathPattern=".*\\.lrc" />
+                <data android:pathPattern=".*\\.srt" />
+                <data android:pathPattern=".*\\.vtt" />
+                <data android:pathPattern=".*\\.txt" />
+                <data android:pathPattern=".*\\.LRC" />
+                <data android:pathPattern=".*\\.SRT" />
+                <data android:pathPattern=".*\\.VTT" />
+                <data android:pathPattern=".*\\.TXT" />
+                <data android:pathPattern=".*\\..*\\.lrc" />
+                <data android:pathPattern=".*\\..*\\.srt" />
+                <data android:pathPattern=".*\\..*\\.vtt" />
+                <data android:pathPattern=".*\\..*\\.txt" />
+                <data android:pathPattern=".*\\..*\\.LRC" />
+                <data android:pathPattern=".*\\..*\\.SRT" />
+                <data android:pathPattern=".*\\..*\\.VTT" />
+                <data android:pathPattern=".*\\..*\\.TXT" />
+            </intent-filter>
+        </activity>
+
+        <activity
             android:name=".ArchivePreviewActivity"
             android:exported="false"
             android:theme="@style/Theme.SubtitleEditforAndroid" />

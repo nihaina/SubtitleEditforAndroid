@@ -19,12 +19,17 @@ internal class EditorFileSessionController(
         repository.readUri(context, uri, charset)
 
     fun fileName(uri: Uri): String {
-        var name = "未命名"
-        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-            if (cursor.moveToFirst() && index >= 0) name = cursor.getString(index)
-        }
-        if (name == "未命名") uri.path?.substringAfterLast('/')?.takeIf { it.isNotEmpty() }?.let { name = it }
-        return name
+        val fallback = uri.lastPathSegment?.substringAfterLast('/')
+            ?.takeIf { it.isNotBlank() } ?: "未命名"
+        if (uri.scheme != ContentResolver.SCHEME_CONTENT) return fallback
+
+        // A readable external provider may omit DISPLAY_NAME or reject metadata queries.
+        // That should not prevent opening the content we have already read successfully.
+        return runCatching {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (cursor.moveToFirst() && index >= 0) cursor.getString(index) else null
+            }
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: fallback
     }
 }

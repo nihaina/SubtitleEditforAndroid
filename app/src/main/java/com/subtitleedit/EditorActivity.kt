@@ -307,6 +307,8 @@ class EditorActivity : AppCompatActivity() {
             if (stateModel.mediaType.hasPlayableMedia && stateModel.filePath.isNotEmpty()) {
                 loadMediaFile(stateModel.subtitleFilePath, restoreDocument = true)
             }
+        } else if (intent.action == Intent.ACTION_VIEW && intent.data != null) {
+            openFileFromUri(requireNotNull(intent.data))
         } else if (stateModel.filePath.isNotEmpty()) {
             if (stateModel.mediaType.hasPlayableMedia) {
                 loadMediaFile(stateModel.subtitleFilePath)
