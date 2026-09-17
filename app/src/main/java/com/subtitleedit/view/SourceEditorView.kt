@@ -72,6 +72,12 @@ class SourceEditorView @JvmOverloads constructor(
         // metrics remain monotonic as rows are recycled.
         isSmoothScrollbarEnabled = false
     }
+
+    // Item-based extent is the number of visible source lines, which varies as wrapped rows
+    // enter the viewport. Keep the handle size stable for both drawing and drag mapping.
+    protected override val useFixedSizeScrollThumb: Boolean
+        get() = true
+
     private val lines = mutableListOf<SourceLineBlock>()
     private val offsets = LineOffsets()
     private val highlights = mutableListOf<Highlight>()
