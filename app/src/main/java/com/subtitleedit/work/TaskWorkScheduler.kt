@@ -13,6 +13,7 @@ import com.subtitleedit.task.TaskProgress
 import com.subtitleedit.task.TaskState
 import com.subtitleedit.task.TaskStatus
 import com.subtitleedit.task.TaskStateStore
+import com.subtitleedit.usecase.DownloadAsrModelUseCase
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -29,13 +30,28 @@ internal class TaskWorkScheduler(
     private val workManager = WorkManager.getInstance(context)
     private val enqueueMutex = Mutex()
 
-    suspend fun enqueueGeneralModelDownload(): UUID = enqueueMutex.withLock {
+    suspend fun enqueueGeneralModelDownload(): UUID = enqueueModelDownload(
+        GENERAL_MODEL_WORK, ModelDownloadWorker.KIND_DEMIX_GENERAL
+    )
+
+    suspend fun enqueueAsrModelDownload(kind: String, optionId: String): UUID {
+        require(kind in DownloadAsrModelUseCase.KINDS) { "不支持的语音识别模型任务" }
+        require(optionId.isNotBlank()) { "未指定模型版本" }
+        return enqueueModelDownload(ASR_MODEL_WORK, kind, optionId)
+    }
+
+    private suspend fun enqueueModelDownload(
+        uniqueName: String,
+        kind: String,
+        optionId: String? = null
+    ): UUID = enqueueMutex.withLock {
         withContext(Dispatchers.IO) {
-            findActiveModelDownload()?.let { return@withContext it }
+            findModelDownload(uniqueName)?.let { return@withContext it }
             val request = OneTimeWorkRequestBuilder<ModelDownloadWorker>()
                 .setInputData(
                     Data.Builder()
-                        .putString(ModelDownloadWorker.KEY_MODEL_KIND, ModelDownloadWorker.KIND_DEMIX_GENERAL)
+                        .putString(ModelDownloadWorker.KEY_MODEL_KIND, kind)
+                        .putString(ModelDownloadWorker.KEY_MODEL_OPTION, optionId)
                         .build()
                 )
                 .setConstraints(
@@ -49,9 +65,11 @@ internal class TaskWorkScheduler(
                     TimeUnit.SECONDS
                 )
                 .addTag(ModelDownloadWorker.TAG_MODEL_DOWNLOAD)
+                .addTag(uniqueName)
+                .addTag(MODEL_KIND_TAG_PREFIX + kind)
                 .build()
             workManager.enqueueUniqueWork(
-                GENERAL_MODEL_WORK, ExistingWorkPolicy.KEEP, request
+                uniqueName, ExistingWorkPolicy.KEEP, request
             ).result.get()
             request.id
         }
@@ -62,15 +80,21 @@ internal class TaskWorkScheduler(
             workInfo?.toTaskState()?.also(taskStateStore::updateState)
         }
 
-    suspend fun findActiveModelDownload(preferredId: UUID? = null): UUID? = withContext(Dispatchers.IO) {
-        if (preferredId != null) {
-            workManager.getWorkInfoById(preferredId).get()?.let { return@withContext it.id }
+    suspend fun findActiveModelDownload(preferredId: UUID? = null): UUID? =
+        findModelDownload(GENERAL_MODEL_WORK, preferredId)
+
+    suspend fun findActiveAsrModelDownload(preferredId: UUID? = null): UUID? =
+        findModelDownload(ASR_MODEL_WORK, preferredId)
+
+    private suspend fun findModelDownload(uniqueName: String, preferredId: UUID? = null): UUID? =
+        withContext(Dispatchers.IO) {
+            val workInfos = workManager.getWorkInfosForUniqueWork(uniqueName).get()
+            // A previously observed task may have finished while its Activity was being recreated.
+            if (preferredId != null) {
+                workInfos.firstOrNull { it.id == preferredId }?.let { return@withContext it.id }
+            }
+            workInfos.firstOrNull { !it.state.isFinished }?.id
         }
-        workManager.getWorkInfosForUniqueWork(GENERAL_MODEL_WORK)
-            .get()
-            .firstOrNull { !it.state.isFinished }
-            ?.id
-    }
 
     suspend fun cancel(workId: UUID) = withContext(Dispatchers.IO) {
         workManager.cancelWorkById(workId).result.get()
@@ -84,7 +108,9 @@ internal class TaskWorkScheduler(
         val data = if (state.isFinished) outputData else progress
         return TaskState(
             id = id.toString(),
-            type = ModelDownloadWorker.KIND_DEMIX_GENERAL,
+            type = tags.firstOrNull { it.startsWith(MODEL_KIND_TAG_PREFIX) }
+                ?.removePrefix(MODEL_KIND_TAG_PREFIX)
+                ?: ModelDownloadWorker.KIND_DEMIX_GENERAL,
             status = when (state) {
                 WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED -> TaskStatus.QUEUED
                 WorkInfo.State.RUNNING -> TaskStatus.RUNNING
@@ -112,6 +138,8 @@ internal class TaskWorkScheduler(
 
     companion object {
         private const val GENERAL_MODEL_WORK = "download-demix-general"
+        private const val ASR_MODEL_WORK = "download-asr-model"
+        private const val MODEL_KIND_TAG_PREFIX = "model-kind:"
         fun progressData(message: String, current: Long, total: Long): Data = Data.Builder()
             .putString(ModelDownloadWorker.KEY_MESSAGE, message)
             .putLong(ModelDownloadWorker.KEY_CURRENT, current)

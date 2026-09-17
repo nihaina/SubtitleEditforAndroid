@@ -2,6 +2,7 @@ package com.subtitleedit
 
 import android.Manifest
 import android.content.Intent
+import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -19,6 +20,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.subtitleedit.databinding.ViewAsrModelImportBinding
 import com.subtitleedit.repository.ModelRepository
+import com.subtitleedit.task.TaskStatus
+import com.subtitleedit.usecase.DownloadAsrModelUseCase
 import com.subtitleedit.util.ModelDownloadProgressDialog
 import com.subtitleedit.util.ModelDownloader
 import com.subtitleedit.util.OverwritingToast
@@ -29,10 +32,13 @@ import com.subtitleedit.util.SettingsManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
+import java.util.UUID
 
 /**
  * 模型设置页面
@@ -51,6 +57,11 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
     private var modelType: String = SettingsManager.ASR_MODEL_SENSEVOICE
     private var accessWarningShown = false
     private var modelDownloadJob: Job? = null
+    private var modelDownloadWorkId: UUID? = null
+    private var pendingNotificationAction: (() -> Unit)? = null
+    private val notificationPermissionPreferences by lazy {
+        host.getSharedPreferences("task_notifications", Context.MODE_PRIVATE)
+    }
     private var modelDownloadDialog: ModelDownloadProgressDialog? = null
     private var pendingStorageAction: (() -> Unit)? = null
 
@@ -96,9 +107,27 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         ActivityResultContracts.RequestPermission()
     ) { continuePendingModelDownload() }
 
+    private val notificationPermissionLauncher = host.registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        notificationPermissionPreferences.edit().putBoolean("requested", true).apply()
+        val action = pendingNotificationAction
+        pendingNotificationAction = null
+        if (action != null) {
+            if (!granted) {
+                OverwritingToast.makeText(
+                    host, "未开启通知，下载仍会继续，可在此页面查看进度", Toast.LENGTH_LONG
+                ).show()
+            }
+            action()
+        }
+    }
+
     init {
         settingsManager = SettingsManager.getInstance(host)
         setupButtons()
+        restoreModelDownloadState()
+        observeAsrModelDownload()
         loadSavedSettings()
     }
 
@@ -250,239 +279,121 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
     }
 
     private fun startSenseVoiceDownload(option: ModelDownloader.SenseVoiceModelOption) {
-        if (modelDownloadJob?.isActive == true) return
         val isNpu = option.architecture == ModelDownloader.SenseVoiceArchitecture.QNN
         if (isNpu && !ensureQnnRuntimeAvailable()) return
-        if (isNpu &&
-            "arm64-v8a" !in Build.SUPPORTED_ABIS
-        ) {
+        if (isNpu && "arm64-v8a" !in Build.SUPPORTED_ABIS) {
             OverwritingToast.makeText(
-                host,
-                "SenseVoice NPU 模型仅支持 arm64-v8a 骁龙设备",
-                Toast.LENGTH_LONG
+                host, "SenseVoice NPU 模型仅支持 arm64-v8a 骁龙设备", Toast.LENGTH_LONG
             ).show()
             return
         }
-
-        val progressDialog = ModelDownloadProgressDialog(
-            host,
-            "下载 SenseVoice ${option.displayName} 模型"
-        ) { modelDownloadJob?.cancel() }
-        modelDownloadDialog = progressDialog
-        progressDialog.show()
-        setAsrModelActionsEnabled(false)
-
-        modelDownloadJob = host.lifecycleScope.launch {
-            try {
-                val isNpu = option.architecture == ModelDownloader.SenseVoiceArchitecture.QNN
-                val importer = SenseVoiceNpuModelImporter(
-                    host,
-                    host.contentResolver
-                )
-                val previousNpuModelPath = if (isNpu) {
-                    settingsManager.getSenseVoiceModelPath(SettingsManager.SENSEVOICE_PROVIDER_NPU)
-                } else {
-                    ""
-                }
-                val previousNpuTokensPath = if (isNpu) {
-                    settingsManager.getSenseVoiceTokensPath(SettingsManager.SENSEVOICE_PROVIDER_NPU)
-                } else {
-                    ""
-                }
-                var downloadedFiles: ModelDownloader.SenseVoiceFiles? = null
-                var reusedGeneratedModel = false
-                val selectedFiles = if (isNpu) {
-                    val durationSeconds = option.durationSeconds
-                        ?: throw IllegalStateException("SenseVoice NPU 模型缺少时长信息")
-                    modelDownloadDialog?.update(
-                        ModelDownloader.Progress("正在检查已生成的 SenseVoice NPU BIN 模型")
-                    )
-                    val installed = withContext(Dispatchers.IO) {
-                        importer.findInstalledModel(durationSeconds)
-                    }
-                    if (installed != null) {
-                        reusedGeneratedModel = true
-                        installed.contextBinary to installed.tokens
-                    } else {
-                        val files = modelRepository.downloadSenseVoice(option) { progress ->
-                            host.runOnUiThread { modelDownloadDialog?.update(progress) }
-                        }
-                        downloadedFiles = files
-                        val imported = withContext(Dispatchers.IO) {
-                            importer.importFromFiles(
-                                modelFile = files.model,
-                                tokensFile = files.tokens,
-                                durationSeconds = durationSeconds
-                            ) { message ->
-                                host.runOnUiThread {
-                                    modelDownloadDialog?.update(ModelDownloader.Progress(message))
-                                }
-                            }
-                        }
-                        imported.contextBinary to imported.tokens
-                    }
-                } else {
-                    val files = modelRepository.downloadSenseVoice(option) { progress ->
-                        host.runOnUiThread { modelDownloadDialog?.update(progress) }
-                    }
-                    downloadedFiles = files
-                    files.model to files.tokens
-                }
-                val selectedModel = Uri.fromFile(selectedFiles.first).toString()
-                val selectedTokens = Uri.fromFile(selectedFiles.second).toString()
-                modelType = SettingsManager.ASR_MODEL_SENSEVOICE
-                settingsManager.setAsrModelType(modelType)
-                settingsManager.setSenseVoiceProvider(
-                    if (isNpu) {
-                        SettingsManager.SENSEVOICE_PROVIDER_NPU
-                    } else {
-                        SettingsManager.SENSEVOICE_PROVIDER_CPU
-                    }
-                )
-                option.durationSeconds?.let(settingsManager::setSenseVoiceNpuDurationSeconds)
-                settingsManager.setSenseVoiceModelPath(selectedModel)
-                settingsManager.setSenseVoiceTokensPath(selectedTokens)
-                if (isNpu) {
-                    withContext(Dispatchers.IO) {
-                        importer.deleteManagedContextBinary(
-                            previousNpuModelPath,
-                            except = selectedFiles.first
-                        )
-                        downloadedFiles?.model?.delete()
-                    }
-                    releasePersistedReadPermission(previousNpuModelPath)
-                    releasePersistedReadPermission(previousNpuTokensPath)
-                }
-                loadModelPaths()
-                updateAsrModelUi()
-                progressDialog.dismiss()
-                OverwritingToast.makeText(
-                    host,
-                    if (reusedGeneratedModel) {
-                        "检测到已生成的 SenseVoice ${option.displayName} BIN 模型，已直接导入"
-                    } else if (isNpu) {
-                        "SenseVoice ${option.displayName} 已生成 BIN 模型并自动选择"
-                    } else {
-                        "SenseVoice ${option.displayName} 模型已下载、解压并自动选择\n" +
-                            "${downloadedFiles?.model?.parentFile?.absolutePath}"
-                    },
-                    Toast.LENGTH_LONG
-                ).show()
-            } catch (e: CancellationException) {
-                progressDialog.dismiss()
-                throw e
-            } catch (e: Exception) {
-                progressDialog.dismiss()
-                OverwritingToast.makeText(
-                    host,
-                    "SenseVoice ${option.displayName} 模型下载或导入失败：${e.message}",
-                    Toast.LENGTH_LONG
-                ).show()
-            } finally {
-                setAsrModelActionsEnabled(true)
-                if (modelDownloadDialog === progressDialog) modelDownloadDialog = null
-                modelDownloadJob = null
-            }
-        }
+        startAsrModelDownload(DownloadAsrModelUseCase.KIND_SENSEVOICE, option.id)
     }
 
     private fun startWhisperDownload(option: ModelDownloader.WhisperModelOption) {
-        if (modelDownloadJob?.isActive == true) return
-        val progressDialog = ModelDownloadProgressDialog(
-            host,
-            "下载 Whisper ${option.displayName} 模型"
-        ) { modelDownloadJob?.cancel() }
-        modelDownloadDialog = progressDialog
-        progressDialog.show()
-        setAsrModelActionsEnabled(false)
-
-        modelDownloadJob = host.lifecycleScope.launch {
-            try {
-                val files = modelRepository.downloadWhisper(option) { progress ->
-                    host.runOnUiThread { modelDownloadDialog?.update(progress) }
-                }
-                modelType = SettingsManager.ASR_MODEL_WHISPER
-                settingsManager.setAsrModelType(modelType)
-                settingsManager.setWhisperEncoderPath(Uri.fromFile(files.encoder).toString())
-                settingsManager.setWhisperDecoderPath(Uri.fromFile(files.decoder).toString())
-                settingsManager.setWhisperTokensPath(Uri.fromFile(files.tokens).toString())
-                loadModelPaths()
-                updateAsrModelUi()
-                progressDialog.dismiss()
-                OverwritingToast.makeText(
-                    host,
-                    "Whisper ${option.displayName} 模型已下载、解压并自动选择\n${files.encoder.parentFile?.absolutePath}",
-                    Toast.LENGTH_LONG
-                ).show()
-            } catch (e: CancellationException) {
-                progressDialog.dismiss()
-                throw e
-            } catch (e: Exception) {
-                progressDialog.dismiss()
-                OverwritingToast.makeText(
-                    host,
-                    "Whisper ${option.displayName} 模型下载失败：${e.message}",
-                    Toast.LENGTH_LONG
-                ).show()
-            } finally {
-                setAsrModelActionsEnabled(true)
-                if (modelDownloadDialog === progressDialog) modelDownloadDialog = null
-                modelDownloadJob = null
-            }
-        }
+        startAsrModelDownload(DownloadAsrModelUseCase.KIND_WHISPER, option.id)
     }
 
     private fun startParakeetDownload(option: ModelDownloader.ParakeetModelOption) {
-        if (modelDownloadJob?.isActive == true) return
-        val progressDialog = ModelDownloadProgressDialog(
-            host,
-            "下载 ${option.displayName} 模型"
-        ) { modelDownloadJob?.cancel() }
-        modelDownloadDialog = progressDialog
-        progressDialog.show()
-        setAsrModelActionsEnabled(false)
+        startAsrModelDownload(DownloadAsrModelUseCase.KIND_PARAKEET, option.modelType)
+    }
 
+    private fun startAsrModelDownload(kind: String, optionId: String) {
+        if (modelDownloadJob?.isActive == true || pendingNotificationAction != null) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(host, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED &&
+            !notificationPermissionPreferences.getBoolean("requested", false)
+        ) {
+            pendingNotificationAction = { observeAsrModelDownload(kind, optionId) }
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        observeAsrModelDownload(kind, optionId)
+    }
+
+    private fun restoreModelDownloadState() {
+        val key = "asr-model-download"
+        val savedState = host.savedStateRegistry.consumeRestoredStateForKey(key)
+        modelDownloadWorkId = savedState?.getString("work-id")?.let {
+            runCatching { UUID.fromString(it) }.getOrNull()
+        }
+        host.savedStateRegistry.registerSavedStateProvider(key) {
+            Bundle().apply { putString("work-id", modelDownloadWorkId?.toString()) }
+        }
+    }
+
+    private fun observeAsrModelDownload(kind: String? = null, optionId: String? = null) {
+        if (modelDownloadJob?.isActive == true) return
+        setAsrModelActionsEnabled(false)
         modelDownloadJob = host.lifecycleScope.launch {
+            var progressDialog: ModelDownloadProgressDialog? = null
             try {
-                val files = modelRepository.downloadParakeet(option) { progress ->
-                    host.runOnUiThread { modelDownloadDialog?.update(progress) }
+                val scheduler = (host.application as SubtitleEditApplication).dependencies.taskWorkScheduler
+                val workId = if (kind != null) {
+                    scheduler.enqueueAsrModelDownload(kind, requireNotNull(optionId))
+                } else {
+                    scheduler.findActiveAsrModelDownload(modelDownloadWorkId) ?: return@launch
                 }
-                modelType = option.modelType
-                settingsManager.setAsrModelType(modelType)
-                when (option.architecture) {
-                    ModelDownloader.ParakeetArchitecture.TDT -> {
-                        settingsManager.setParakeetTdtEncoderPath(Uri.fromFile(requireNotNull(files.encoder)).toString())
-                        settingsManager.setParakeetTdtDecoderPath(Uri.fromFile(requireNotNull(files.decoder)).toString())
-                        settingsManager.setParakeetTdtJoinerPath(Uri.fromFile(requireNotNull(files.joiner)).toString())
-                        settingsManager.setParakeetTdtTokensPath(Uri.fromFile(files.tokens).toString())
-                    }
-                    ModelDownloader.ParakeetArchitecture.CTC -> {
-                        settingsManager.setParakeetCtcModelPath(Uri.fromFile(requireNotNull(files.model)).toString())
-                        settingsManager.setParakeetCtcTokensPath(Uri.fromFile(files.tokens).toString())
+                modelDownloadWorkId = workId
+                progressDialog = ModelDownloadProgressDialog(host, "下载语音识别模型") {
+                    host.lifecycleScope.launch {
+                        try {
+                            scheduler.cancel(workId)
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (error: Exception) {
+                            OverwritingToast.makeText(host, "取消下载失败：${error.message}", Toast.LENGTH_LONG).show()
+                        }
                     }
                 }
-                loadModelPaths()
-                updateAsrModelUi()
-                progressDialog.dismiss()
-                OverwritingToast.makeText(
-                    host,
-                    "${option.displayName} 模型已下载、解压并自动选择\n${files.tokens.parentFile?.absolutePath}",
-                    Toast.LENGTH_LONG
-                ).show()
-            } catch (e: CancellationException) {
-                progressDialog.dismiss()
-                throw e
-            } catch (e: Exception) {
-                progressDialog.dismiss()
-                OverwritingToast.makeText(
-                    host,
-                    "${option.displayName} 模型下载失败：${e.message}",
-                    Toast.LENGTH_LONG
-                ).show()
+                modelDownloadDialog = progressDialog
+                progressDialog.show()
+                scheduler.observeTask(workId).takeWhile { taskState ->
+                    if (taskState == null) {
+                        modelDownloadWorkId = null
+                        throw IllegalStateException("下载任务不存在")
+                    }
+                    taskState.progress.message.takeIf(String::isNotBlank)?.let { message ->
+                        progressDialog.update(ModelDownloader.Progress(
+                            message, taskState.progress.current, taskState.progress.total
+                        ))
+                    }
+                    when (taskState.status) {
+                        TaskStatus.SUCCEEDED -> {
+                            modelDownloadWorkId = null
+                            loadSavedSettings()
+                            OverwritingToast.makeText(
+                                host, "语音识别模型已下载、导入并自动选择", Toast.LENGTH_LONG
+                            ).show()
+                            false
+                        }
+                        TaskStatus.FAILED -> {
+                            modelDownloadWorkId = null
+                            OverwritingToast.makeText(
+                                host, "模型下载或导入失败：${taskState.errorMessage ?: "模型任务失败"}", Toast.LENGTH_LONG
+                            ).show()
+                            false
+                        }
+                        TaskStatus.CANCELLED -> {
+                            modelDownloadWorkId = null
+                            false
+                        }
+                        else -> true
+                    }
+                }.collect { }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                OverwritingToast.makeText(host, "模型任务失败：${error.message}", Toast.LENGTH_LONG).show()
             } finally {
-                setAsrModelActionsEnabled(true)
+                progressDialog?.dismiss()
                 if (modelDownloadDialog === progressDialog) modelDownloadDialog = null
                 modelDownloadJob = null
+                setAsrModelActionsEnabled(true)
+                if (isActive && !host.isDestroyed && modelDownloadWorkId == null) {
+                    migrateLegacySenseVoiceNpuSelectionIfNeeded()
+                }
             }
         }
     }
@@ -518,6 +429,12 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         binding.btnSwitchAsrModel.isEnabled = enabled
         binding.btnSelectEncoder.isEnabled = enabled
         binding.btnSelectTokens.isEnabled = enabled
+        binding.btnSelectDecoder.isEnabled = enabled
+        binding.btnSelectJoiner.isEnabled = enabled
+        binding.tvSenseVoiceCpuOption.isEnabled = enabled
+        binding.tvSenseVoiceNpuOption.isEnabled = enabled
+        binding.tvParakeetTdtOption.isEnabled = enabled
+        binding.tvParakeetCtcOption.isEnabled = enabled
     }
 
     private fun runWithModelStorageAccess(action: () -> Unit) {
@@ -1282,6 +1199,7 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
     fun dispose() {
         modelDownloadJob?.cancel()
         pendingStorageAction = null
+        pendingNotificationAction = null
         modelDownloadDialog?.dismiss()
         modelDownloadDialog = null
     }

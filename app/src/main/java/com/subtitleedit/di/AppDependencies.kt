@@ -20,6 +20,8 @@ import com.subtitleedit.repository.SpeechRecognitionService
 import com.subtitleedit.repository.SubtitleRepository
 import com.subtitleedit.task.TaskStateStore
 import com.subtitleedit.usecase.DownloadGeneralModelUseCase
+import com.subtitleedit.usecase.DownloadAsrModelUseCase
+import com.subtitleedit.util.AsrModelDownloadInstaller
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.work.TaskWorkScheduler
 import java.io.File
@@ -53,6 +55,10 @@ internal class AppDependencies(application: Application) {
         DefaultSpeechRecognitionService()
     }
     val taskStateStore: TaskStateStore by lazy { TaskStateStore() }
+    val downloadAsrModel: DownloadAsrModelUseCase by lazy {
+        val installer = AsrModelDownloadInstaller(appContext, modelRepository)
+        DownloadAsrModelUseCase(modelRepository, installer::prepareSenseVoice, installer::selectModel)
+    }
     val downloadGeneralModel: DownloadGeneralModelUseCase by lazy {
         DownloadGeneralModelUseCase(modelRepository) { file ->
             SettingsManager.getInstance(appContext)

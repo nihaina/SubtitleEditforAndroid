@@ -2870,6 +2870,9 @@ class EditorActivity : AppCompatActivity() {
                     if (issues.dataRateBelowNominalBitrate) {
                         add(getString(R.string.mp3_file_issue_low_data_rate))
                     }
+                    if (issues.dataRateAboveNominalBitrate) {
+                        add(getString(R.string.mp3_file_issue_high_data_rate))
+                    }
                 }.joinToString("\n") { "• $it" }
                 AlertDialog.Builder(this@EditorActivity)
                     .setTitle(R.string.mp3_file_warning_title)

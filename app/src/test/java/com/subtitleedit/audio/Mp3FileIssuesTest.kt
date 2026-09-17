@@ -7,10 +7,19 @@ import org.junit.Test
 
 class Mp3FileIssuesTest {
     @Test
-    fun matchingOrHigherDataRatesDoNotWarn() {
+    fun matchingDataRatesDoNotWarn() {
         // Ten seconds of audio at 320 kbps is 400,000 bytes.
         assertFalse(Mp3FileIssues.from(0.0, 400_000L, 10.0, 320_000.0).hasIssues)
-        assertFalse(Mp3FileIssues.from(0.0, 410_000L, 10.0, 320_000.0).hasIssues)
+    }
+
+    @Test
+    fun anyDataRateAboveNominalWarnsWithoutTolerance() {
+        for (audioBytes in listOf(400_001L, 410_000L)) {
+            val issues = Mp3FileIssues.from(0.0, audioBytes, 10.0, 320_000.0)
+            assertTrue(issues.dataRateAboveNominalBitrate)
+            assertFalse(issues.dataRateBelowNominalBitrate)
+            assertTrue(issues.hasIssues)
+        }
     }
 
     @Test
@@ -27,6 +36,7 @@ class Mp3FileIssuesTest {
     fun lowerMeasuredRateWarnsWithoutAStartTimeOffset() {
         val issues = Mp3FileIssues.from(0.0, 397_500L, 10.0, 320_000.0)
         assertTrue(issues.dataRateBelowNominalBitrate)
+        assertFalse(issues.dataRateAboveNominalBitrate)
         assertTrue(issues.hasIssues)
     }
 
@@ -52,5 +62,13 @@ class Mp3FileIssuesTest {
         val both = Mp3FileIssues.from(0.0001, 397_500L, 10.0, 320_000.0)
         assertEquals(0.0001, both.nonZeroStartTimeSeconds)
         assertTrue(both.dataRateBelowNominalBitrate)
+    }
+
+    @Test
+    fun startTimeIssueCanOccurTogetherWithHighDataRate() {
+        val issues = Mp3FileIssues.from(0.025, 400_001L, 10.0, 320_000.0)
+        assertEquals(0.025, issues.nonZeroStartTimeSeconds)
+        assertTrue(issues.dataRateAboveNominalBitrate)
+        assertFalse(issues.dataRateBelowNominalBitrate)
     }
 }

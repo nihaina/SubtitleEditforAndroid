@@ -18,6 +18,8 @@ import androidx.work.workDataOf
 import com.subtitleedit.SubtitleEditApplication
 import com.subtitleedit.ModelManagementActivity
 import com.subtitleedit.task.TaskProgress
+import com.subtitleedit.usecase.DownloadAsrModelUseCase
+import com.subtitleedit.util.ModelDownloader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -37,14 +39,13 @@ internal class ModelDownloadWorker(
             ?: return@withContext Result.failure(workDataOf(KEY_ERROR to "应用依赖未初始化"))
         var lastProgress = TaskProgress()
         try {
-            require(inputData.getString(KEY_MODEL_KIND) == KIND_DEMIX_GENERAL) {
-                "不支持的模型任务"
-            }
+            val kind = inputData.getString(KEY_MODEL_KIND)
+            require(kind == KIND_DEMIX_GENERAL || kind in DownloadAsrModelUseCase.KINDS) { "不支持的模型任务" }
             setForeground(getForegroundInfo())
             setProgress(TaskWorkScheduler.progressData("正在准备模型下载", 0L, -1L))
             val workerContext = currentCoroutineContext()
             var lastProgressAt = 0L
-            val modelFile = application.dependencies.downloadGeneralModel { progress ->
+            val onProgress: (ModelDownloader.Progress) -> Unit = { progress ->
                 workerContext.ensureActive()
                 val now = SystemClock.elapsedRealtime()
                 val messageChanged = lastProgress.message != progress.message
@@ -56,7 +57,17 @@ internal class ModelDownloadWorker(
                     setProgressAsync(TaskWorkScheduler.progressData(
                         lastProgress.message, lastProgress.current, lastProgress.total
                     ))
+                    setForegroundAsync(createForegroundInfo(lastProgress.message, lastProgress))
                 }
+            }
+            val modelFile = if (kind == KIND_DEMIX_GENERAL) {
+                application.dependencies.downloadGeneralModel(onProgress)
+            } else {
+                application.dependencies.downloadAsrModel(
+                    requireNotNull(kind),
+                    requireNotNull(inputData.getString(KEY_MODEL_OPTION)) { "未指定模型版本" },
+                    onProgress
+                )
             }
             Result.success(
                 workDataOf(
@@ -82,7 +93,7 @@ internal class ModelDownloadWorker(
         }
     }
 
-    private fun createForegroundInfo(message: String): ForegroundInfo {
+    private fun createForegroundInfo(message: String, progress: TaskProgress = TaskProgress()): ForegroundInfo {
         val notificationManager = applicationContext.getSystemService(
             Context.NOTIFICATION_SERVICE
         ) as NotificationManager
@@ -100,6 +111,12 @@ internal class ModelDownloadWorker(
             .setContentText(message)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setProgress(
+                100,
+                if (progress.total > 0) ((progress.current * 100L) / progress.total).coerceIn(0L, 100L).toInt() else 0,
+                progress.total <= 0
+            )
             .setContentIntent(PendingIntent.getActivity(
                 applicationContext,
                 id.hashCode(),
@@ -125,6 +142,7 @@ internal class ModelDownloadWorker(
         const val TAG_MODEL_DOWNLOAD = "model-download"
         const val KIND_DEMIX_GENERAL = "demix-general"
         const val KEY_MODEL_KIND = "model_kind"
+        const val KEY_MODEL_OPTION = "model_option"
         const val KEY_MESSAGE = "message"
         const val KEY_CURRENT = "current"
         const val KEY_TOTAL = "total"

@@ -20,7 +20,7 @@ class Mp3FrameStatsTest {
         val file = mp3(id3(ByteArray(9193)), audio, audio, id3v1())
         // This is what a no-index probe does: estimate duration from bytes / nominal bitrate.
         val estimatedDuration = audio.size * 2 * 8.0 / 320_000.0
-        assertFalse(Mp3FileIssues.from(0.0, file.length(), estimatedDuration, 320_000.0).hasIssues)
+        assertFalse(Mp3FileIssues.from(0.0, file.length(), estimatedDuration, 320_000.0).dataRateBelowNominalBitrate)
 
         val stats = requireNotNull(Mp3FrameStats.read(file))
         assertEquals(2088L, stats.byteCount)

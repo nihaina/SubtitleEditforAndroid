@@ -16,6 +16,7 @@
     <string name="mp3_file_warning_message">该文件封装不规范\n\n%1$s\n\n往往不会产生问题，但如果你发现声音和字幕存在偏移,建议转换文件格式</string>
     <string name="mp3_file_issue_start_time">音频开始时间不为 0（%1$.6f 秒）</string>
     <string name="mp3_file_issue_low_data_rate">实际数据速率略低于标称码率</string>
+    <string name="mp3_file_issue_high_data_rate">实际数据速率高于标称码率</string>
     <string name="about">关于</string>
     <string name="version_format">版本 %1$s</string>
     <string name="github_project">GitHub 项目主页</string>
