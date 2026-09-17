@@ -40,6 +40,11 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_AI_SEMANTIC_CONTEXT_WINDOW_TOKENS = "ai_semantic_context_window_tokens"
         private const val KEY_AI_SEMANTIC_REASONING_LEVEL = "ai_semantic_reasoning_level"
         private const val KEY_AI_SEMANTIC_CUSTOM_PROMPT = "ai_semantic_custom_prompt"
+        private const val KEY_AI_PUNCTUATION_PROVIDER = "ai_punctuation_provider"
+        private const val KEY_AI_PUNCTUATION_MODEL = "ai_punctuation_model"
+        private const val KEY_AI_PUNCTUATION_CONTEXT_WINDOW_TOKENS = "ai_punctuation_context_window_tokens"
+        private const val KEY_AI_PUNCTUATION_REASONING_LEVEL = "ai_punctuation_reasoning_level"
+        private const val KEY_AI_PUNCTUATION_CUSTOM_PROMPT = "ai_punctuation_custom_prompt"
         private const val KEY_WAVEFORM_CACHE_LOCATION = "waveform_cache_location"
         private const val KEY_LOOP_SELECTED_SUBTITLE = "loop_selected_subtitle"
         private const val KEY_SHOW_ALL_FILE_TYPES = "show_all_file_types"
@@ -223,6 +228,14 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putString(KEY_AI_SEMANTIC_PROVIDER, provider).apply()
     }
 
+    fun getAiPunctuationProvider(): String =
+        prefs.getString(KEY_AI_PUNCTUATION_PROVIDER, null)?.takeIf { AiProviderConfig.providers.any { p -> p.id == it } }
+            ?: getAiProvider()
+
+    fun setAiPunctuationProvider(provider: String) {
+        prefs.edit().putString(KEY_AI_PUNCTUATION_PROVIDER, provider).apply()
+    }
+
     /**
      * 获取 AI API Key
      */
@@ -321,6 +334,16 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putString(KEY_AI_SEMANTIC_CUSTOM_PROMPT, prompt).apply()
     }
 
+    /** 获取标点预测自定义提示词 */
+    fun getAiPunctuationCustomPrompt(): String {
+        return prefs.getString(KEY_AI_PUNCTUATION_CUSTOM_PROMPT, "") ?: ""
+    }
+
+    /** 设置标点预测自定义提示词 */
+    fun setAiPunctuationCustomPrompt(prompt: String) {
+        prefs.edit().putString(KEY_AI_PUNCTUATION_CUSTOM_PROMPT, prompt).apply()
+    }
+
     fun getAiContextWindowTokens(provider: String = getAiProvider()): Int {
         val scopedKey = providerKey(KEY_AI_CONTEXT_WINDOW_TOKENS, provider)
         val default = AiProviderConfig.defaultContextWindowTokens(provider)
@@ -390,6 +413,35 @@ class SettingsManager private constructor(context: Context) {
 
     fun setAiSemanticReasoningLevel(level: AiProviderConfig.ReasoningLevel, provider: String = getAiSemanticProvider()) {
         prefs.edit().putString(providerKey(KEY_AI_SEMANTIC_REASONING_LEVEL, provider), level.name).apply()
+    }
+
+    fun getAiPunctuationModel(provider: String = getAiPunctuationProvider()): String {
+        val defaultModel = AiProviderConfig.getProvider(provider).defaultModel
+        return prefs.getString(providerKey(KEY_AI_PUNCTUATION_MODEL, provider), null)
+            ?.takeIf { it.isNotBlank() } ?: defaultModel
+    }
+
+    fun setAiPunctuationModel(provider: String, model: String) {
+        prefs.edit().putString(providerKey(KEY_AI_PUNCTUATION_MODEL, provider), model).apply()
+    }
+
+    fun getAiPunctuationContextWindowTokens(provider: String = getAiPunctuationProvider()): Int {
+        val key = providerKey(KEY_AI_PUNCTUATION_CONTEXT_WINDOW_TOKENS, provider)
+        return prefs.getInt(key, AiProviderConfig.defaultContextWindowTokens(provider))
+            .coerceIn(MIN_AI_CONTEXT_WINDOW_TOKENS, MAX_AI_CONTEXT_WINDOW_TOKENS)
+    }
+
+    fun setAiPunctuationContextWindowTokens(tokens: Int, provider: String = getAiPunctuationProvider()) {
+        prefs.edit().putInt(providerKey(KEY_AI_PUNCTUATION_CONTEXT_WINDOW_TOKENS, provider), tokens.coerceIn(MIN_AI_CONTEXT_WINDOW_TOKENS, MAX_AI_CONTEXT_WINDOW_TOKENS)).apply()
+    }
+
+    fun getAiPunctuationReasoningLevel(provider: String = getAiPunctuationProvider()): AiProviderConfig.ReasoningLevel =
+        prefs.getString(providerKey(KEY_AI_PUNCTUATION_REASONING_LEVEL, provider), null)
+            ?.let { runCatching { AiProviderConfig.ReasoningLevel.valueOf(it) }.getOrNull() }
+            ?: AiProviderConfig.defaultReasoningLevel(provider)
+
+    fun setAiPunctuationReasoningLevel(level: AiProviderConfig.ReasoningLevel, provider: String = getAiPunctuationProvider()) {
+        prefs.edit().putString(providerKey(KEY_AI_PUNCTUATION_REASONING_LEVEL, provider), level.name).apply()
     }
 
     fun getAiBaseUrl(provider: String = getAiProvider()): String {

@@ -2,12 +2,14 @@ package com.subtitleedit.util
 
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.WhisperRecognizer.SubtitleSegment
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertThrows
 import org.junit.Test
 import java.io.IOException
 
@@ -110,12 +112,12 @@ class SemanticSubtitleMergerTest {
     }
 
     @Test
-    fun mergeByAiBoundariesKeepsSourceWhenAiChangesText() {
+    fun mergeByAiBoundariesRejectsChangedText() {
         val source = listOf(SubtitleSegment(0L, 100L, "你好"))
 
-        val result = SemanticSubtitleMerger.mergeByAiBoundaries(source, "您好")
-
-        assertEquals(source, result)
+        assertThrows(IOException::class.java) {
+            SemanticSubtitleMerger.mergeByAiBoundaries(source, "您好")
+        }
     }
 
     @Test
@@ -214,14 +216,14 @@ class SemanticSubtitleMergerTest {
     }
 
     @Test
-    fun unmatchedSubtitlesAreNotMerged() {
+    fun unmatchedOrSplitSubtitlesFailInsteadOfBeingSilentlyKept() {
         val source = subtitleEntries(3).mapIndexed { index, entry ->
             entry.copy(text = listOf("12", "3 4", "56")[index])
         }
-
         for (response in listOf("12三四\n56", "123\n4\n56")) {
-            assertEquals(response, source,
-                SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, response))
+            assertThrows(IOException::class.java) {
+                SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, response)
+            }
         }
     }
 
@@ -239,67 +241,59 @@ class SemanticSubtitleMergerTest {
     }
 
     @Test
-    fun matchedGroupsSurviveMissingTextAndExtraResponseLines() {
+    fun missingOrExtraTextMakesTheWholeBatchFail() {
         val source = subtitleEntries(3).mapIndexed { index, entry ->
             entry.copy(text = listOf("12", "3 4", "56")[index])
         }
-        for (response in listOf("123 4", "合并后的字幕：\n123 4\n56\n处理完成")) {
-            assertEquals(listOf(
-                source[0].copy(text = "123 4", endTime = source[1].endTime),
-                source[2]
-            ), SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, response))
+        for (response in listOf("123 4", "合并后的字幕：\n123 4\n56", "123 4\n56\n处理完成")) {
+            assertThrows(IOException::class.java) {
+                SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, response)
+            }
         }
     }
 
     @Test
-    fun missingRepeatedTextDoesNotStealALaterOccurrence() {
+    fun missingRepeatedTextIsAnError() {
         val source = subtitleEntries(4).mapIndexed { index, entry ->
             entry.copy(text = listOf("甲", "乙", "甲", "丙")[index])
         }
 
-        val merged = SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, "乙\n甲丙")
-
-        assertEquals(source.take(2) + source[2].copy(text = "甲丙", endTime = source[3].endTime), merged)
+        assertThrows(IOException::class.java) {
+            SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, "乙\n甲丙")
+        }
     }
 
     @Test
-    fun changedTextBetweenMatchesDoesNotCauseAnUnsafeMerge() {
+    fun changedTextBetweenMatchesIsAnError() {
         val source = subtitleEntries(3).mapIndexed { index, entry ->
             entry.copy(text = listOf("12", "3 4", "56")[index])
         }
 
-        assertEquals(source, SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(
-            source, "12新增内容3 4\n56"
-        ))
+        assertThrows(IOException::class.java) {
+            SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, "12新增内容3 4\n56")
+        }
     }
 
     @Test
-    fun sixHundredEntriesKeepValidMergesWhenEachBatchContainsOneChangedCue() = runBlocking {
-        val source = subtitleEntries(600).map { it.copy(text = it.text.replace("条", " 条")) }
-        val requests = mutableListOf<String>()
+    fun changedCueDoesNotCommitAnyOfItsBatch() = runBlocking {
+        val source = subtitleEntries(600)
+        val session = SemanticSubtitleMerger.Session(source)
+        val progress = mutableListOf<Int>()
+        var requestCount = 0
 
-        val merged = SemanticSubtitleMerger.mergeSubtitleEntriesInBatches(source) { text ->
-            requests += text
-            val lines = text.lines()
-            val carry = if (requests.size > 1) lines.first() + "\n" else ""
-            val newLines = if (requests.size > 1) lines.drop(1) else lines
-            "合并后的字幕：\n" + carry + newLines.chunked(2).joinToString("\n") { it.joinToString("") }
-                .replace(" ", "")
-                .replace("第150条", "第一百五十条")
-                .replace("第450条", "第四百五十条") + "\n处理完成"
-        }
+        val failure = runCatching {
+            session.run(onProgress = { count, _ -> progress += count }) { text ->
+                requestCount++
+                text.replace("第150条", "第一百五十条")
+            }
+        }.exceptionOrNull()
 
-        val expected = source.chunked(2).flatMap { pair ->
-            if (pair.last().text in listOf("第150 条", "第450 条")) pair else listOf(
-                pair.first().copy(text = pair.joinToString("") { it.text }, endTime = pair.last().endTime)
-            )
-        }
-        assertEquals(listOf(300, 301), requests.map { it.lines().size })
-        assertEquals(302, merged.size)
-        assertEquals(expected, merged)
-        val saved = SubtitleParser.parseSRT(SubtitleParser.toSRT(merged))
-        assertEquals(expected.map { it.text }, saved.map { it.text })
-        assertEquals(source.joinToString("") { it.text }, saved.joinToString("") { it.text })
+        assertEquals(IOException::class.java, failure?.javaClass)
+        assertEquals(1, requestCount)
+        assertEquals(0, session.processedCount)
+        assertEquals(listOf(0), progress)
+        val retried = session.run { it }
+        assertEquals(source, retried)
     }
 
     @Test
@@ -456,43 +450,61 @@ class SemanticSubtitleMergerTest {
     }
 
     @Test
-    fun missingResponseTailCarriesOriginalLastCueWithoutDroppingText() = runBlocking {
+    fun missingResponseTailRetriesTheSameBatch() = runBlocking {
         val source = subtitleEntries(301)
-        var requestCount = 0
-
-        val merged = SemanticSubtitleMerger.mergeSubtitleEntriesInBatches(source) { text ->
-            if (++requestCount == 1) {
-                text.substringBeforeLast('\n').replace("第298条\n第299条", "第298条第299条")
-            } else {
-                assertEquals("第300条\n第301条", text)
-                text.replace("\n", "")
+        val session = SemanticSubtitleMerger.Session(source)
+        val requests = mutableListOf<String>()
+        val failure = runCatching {
+            session.run { text ->
+                requests += text
+                text.substringBeforeLast('\n')
             }
+        }.exceptionOrNull()
+
+        assertEquals(IOException::class.java, failure?.javaClass)
+        assertEquals(0, session.processedCount)
+        val merged = session.run { text ->
+            requests += text
+            text
         }
 
-        assertEquals(source.take(297) + listOf(
-            source[297].copy(text = "第298条第299条", endTime = source[298].endTime),
-            source[299].copy(text = "第300条第301条", endTime = source[300].endTime)
-        ), merged)
+        assertEquals(requests[0], requests[1])
+        assertEquals("第300条\n第301条", requests[2])
+        assertEquals(source, merged)
     }
 
     @Test
-    fun invalidLaterResponsePreservesPreviousMergedTailAndCompletedGroups() = runBlocking {
-        val source = subtitleEntries(301)
-        var requestCount = 0
-
-        val merged = SemanticSubtitleMerger.mergeSubtitleEntriesInBatches(source) { text ->
-            if (++requestCount == 1) {
-                text.replace("第1条\n第2条", "第1条第2条")
-                    .replace("第299条\n第300条", "第299条第300条")
-            } else {
-                "AI修改了原文"
+    fun matchingFailureCanResumeWithPreviousMergedTailAndCompletedGroups() = runBlocking {
+        val source = subtitleEntries(601)
+        val session = SemanticSubtitleMerger.Session(source)
+        val requests = mutableListOf<String>()
+        val progress = mutableListOf<Pair<Int, Int>>()
+        val failure = runCatching {
+            session.run(onProgress = { count, total -> progress += count to total }) { text ->
+                requests += text
+                if (requests.size == 1) {
+                    text.replace("第1条\n第2条", "第1条第2条")
+                        .replace("第299条\n第300条", "第299条第300条")
+                } else "AI修改了原文"
             }
+        }.exceptionOrNull()
+
+        assertEquals(IOException::class.java, failure?.javaClass)
+        assertEquals(300, session.processedCount)
+        assertEquals(listOf(0 to 601, 300 to 601), progress)
+        val merged = session.run(onProgress = { count, total -> progress += count to total }) { text ->
+            requests += text
+            text.replace("第300条\n第301条", "第300条第301条")
         }
 
+        assertEquals(requests[1], requests[2])
+        assertEquals("第299条第300条", requests[2].lineSequence().first())
+        assertEquals(listOf(0 to 601, 300 to 601, 300 to 601, 600 to 601, 601 to 601), progress)
         assertEquals(listOf(source[0].copy(text = "第1条第2条", endTime = source[1].endTime)) +
             source.subList(2, 298) +
-            source[298].copy(text = "第299条第300条", endTime = source[299].endTime) +
-            source[300], merged)
+            source[298].copy(text = "第299条第300条第301条", endTime = source[300].endTime) +
+            source.drop(301), merged)
+        assertEquals(merged, session.run { throw AssertionError("Completed session must not send again") })
     }
 
     @Test
@@ -528,6 +540,36 @@ class SemanticSubtitleMergerTest {
 
         assertSame(failure, result.exceptionOrNull())
         assertEquals(2, requestCount)
+    }
+
+    @Test
+    fun progressCountsSourceCuesAndNetworkFailureOrCancellationCanResume() = runBlocking {
+        for (failure in listOf(IOException("请求失败"), CancellationException("已取消"))) {
+            val source = subtitleEntries(601)
+            val session = SemanticSubtitleMerger.Session(source)
+            var requestCount = 0
+            val error = runCatching {
+                session.run { text ->
+                    if (++requestCount == 2) throw failure
+                    text.replace("\n", "")
+                }
+            }.exceptionOrNull()
+
+            assertSame(failure, error)
+            assertEquals(300, session.processedCount)
+            val progress = mutableListOf<Int>()
+            val result = session.run(onProgress = { count, _ -> progress += count }) { text ->
+                if (progress.size == 1) {
+                    assertEquals(source.take(300).joinToString("") { it.text }, text.lines().first())
+                }
+                text.replace("\n", "")
+            }
+
+            assertEquals(listOf(300, 600, 601), progress)
+            assertEquals(listOf(source.first().copy(
+                text = source.joinToString("") { it.text }, endTime = source.last().endTime
+            )), result)
+        }
     }
 
     private fun subtitleEntries(count: Int): List<SubtitleEntry> = (1..count).map { position ->

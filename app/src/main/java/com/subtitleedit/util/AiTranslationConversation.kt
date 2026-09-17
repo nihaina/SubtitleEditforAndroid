@@ -65,11 +65,28 @@ class AiTranslationConversation(
     suspend fun restorePunctuation(
         text: String,
         isCancelled: () -> Boolean = { false }
+    ): Result<String> = processSubtitleText(
+        text,
+        "以下为换行分离的字幕文本，帮我根据语义合并意思被截断的短字幕段，意思完整的字幕无论长短均不做合并,避免产生过长字幕段,不修改原文，不做额外说明,以原格式输出",
+        "语义合并",
+        isCancelled
+    )
+
+    suspend fun predictPunctuation(
+        text: String,
+        isCancelled: () -> Boolean = { false }
+    ): Result<String> = processSubtitleText(text, PUNCTUATION_PREDICTION_PROMPT, "标点预测", isCancelled)
+
+    private suspend fun processSubtitleText(
+        text: String,
+        instruction: String,
+        defaultHistoryTitle: String,
+        isCancelled: () -> Boolean
     ): Result<String> {
         if (text.isBlank()) return Result.success(text)
         return runCatching {
             val prompt = buildString {
-                append("以下为换行分离的字幕文本，帮我根据语义合并意思被截断的短字幕段，意思完整的字幕无论长短均不做合并,避免产生过长字幕段,不修改原文，不做额外说明,以原格式输出")
+                append(instruction)
                 customPrompt.trim().takeIf { it.isNotEmpty() }?.let {
                     append('\n')
                     append(it)
@@ -77,13 +94,13 @@ class AiTranslationConversation(
                 append("\n\n")
                 append(text)
             }
-            // The previous response's final cue provides context for this batch. Earlier
-            // batches stay in the history archive, but must not enter this AI request.
+            // The caller provides all context needed for this batch. Earlier batches
+            // stay in the history archive, but must not enter this AI request.
             conversation.clear()
             val result = conversation.sendUserMessage(prompt, isCancelled = isCancelled)
             historyStore.append(
                 id = historySessionId,
-                title = historyTitle ?: "语义合并",
+                title = historyTitle ?: defaultHistoryTitle,
                 type = ChatHistoryStore.TYPE_TRANSLATION,
                 messages = result.messages
             )

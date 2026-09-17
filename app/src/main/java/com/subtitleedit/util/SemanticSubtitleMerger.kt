@@ -2,6 +2,7 @@ package com.subtitleedit.util
 
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.WhisperRecognizer.SubtitleSegment
+import java.io.IOException
 
 /** Matches original subtitle text to AI output lines to recover merged time ranges. */
 object SemanticSubtitleMerger {
@@ -23,42 +24,53 @@ object SemanticSubtitleMerger {
         }
     }
 
+    /** A file keeps this session so a failed batch can resume with its previous merged tail. */
+    class Session(private val entries: List<SubtitleEntry>) {
+        val totalCount: Int get() = entries.size
+        var processedCount: Int = 0
+            private set
+        private val completed = mutableListOf<SubtitleEntry>()
+        private var pending: SubtitleEntry? = null
+        private var pendingText = ""
+
+        suspend fun run(
+            onProgress: (Int, Int) -> Unit = { _, _ -> },
+            requestMerge: suspend (String) -> String
+        ): List<SubtitleEntry> {
+            onProgress(processedCount, totalCount)
+            while (processedCount < entries.size) {
+                val end = (processedCount + NEW_ENTRIES_PER_BATCH).coerceAtMost(entries.size)
+                val batch = buildList {
+                    pending?.let(::add)
+                    addAll(entries.subList(processedCount, end))
+                }
+                val request = batch.mapIndexed { index, entry ->
+                    if (index == 0 && pending != null) pendingText else entry.text
+                }.joinToString("\n")
+                val aiText = requestMerge(request)
+                val merged = mergeSubtitleEntriesByAiBoundaries(batch, aiText)
+                val last = merged.last()
+                val lastLine = aiText.lineSequence().lastOrNull { it.isNotBlank() }?.trim()
+                val nextPendingText = lastLine?.takeIf {
+                    it.filterNot(Char::isWhitespace) == last.text.filterNot(Char::isWhitespace)
+                } ?: last.text
+                // Commit only after the entire reply matches. Failed requests leave this
+                // checkpoint, including the previous batch's tail, untouched.
+                completed.addAll(merged.dropLast(1))
+                pending = last
+                pendingText = nextPendingText
+                processedCount = end
+                onProgress(processedCount, totalCount)
+            }
+            return completed + listOfNotNull(pending)
+        }
+    }
+
     /** Carry the previous response's final merged cue into the next 300 source entries. */
     suspend fun mergeSubtitleEntriesInBatches(
         entries: List<SubtitleEntry>,
         requestMerge: suspend (String) -> String
-    ): List<SubtitleEntry> {
-        if (entries.isEmpty()) return emptyList()
-        val completed = mutableListOf<SubtitleEntry>()
-        var pending: SubtitleEntry? = null
-        var pendingText = ""
-        var processed = 0
-        while (processed < entries.size) {
-            val end = (processed + NEW_ENTRIES_PER_BATCH).coerceAtMost(entries.size)
-            val batch = buildList {
-                pending?.let(::add)
-                addAll(entries.subList(processed, end))
-            }
-            val request = batch.mapIndexed { index, entry ->
-                if (index == 0 && pending != null) pendingText else entry.text
-            }.joinToString("\n")
-            val aiText = requestMerge(request)
-            val merged = mergeSubtitleEntriesByAiBoundaries(batch, aiText)
-            completed.addAll(merged.dropLast(1))
-            val last = merged.last()
-            pending = last
-            val lastLine = aiText.lineSequence().lastOrNull { it.isNotBlank() }?.trim()
-            // Preserve the AI line's spacing when sending it again. If the response
-            // omitted/changed the tail or added commentary, carry the intact source
-            // cue instead; never lose unmatched subtitles or send commentary as a cue.
-            pendingText = lastLine?.takeIf {
-                it.filterNot(Char::isWhitespace) == last.text.filterNot(Char::isWhitespace)
-            } ?: last.text
-            processed = end
-        }
-        pending?.let(completed::add)
-        return completed
-    }
+    ): List<SubtitleEntry> = Session(entries).run(requestMerge = requestMerge)
 
     fun mergeSubtitleEntriesByAiBoundaries(
         entries: List<SubtitleEntry>,
@@ -130,37 +142,34 @@ object SemanticSubtitleMerger {
                 .filter { it.isNotEmpty() }.toList()
             CueText(parts.joinToString(""), parts.map { it.length })
         }
-        val matches = arrayOfNulls<CueMatch>(sourceTexts.size)
-        var nextSource = 0
+        val matches = mutableListOf<CueMatch>()
         offset = 0
-        // Walk the reply from front to back. Both cursors only advance: a repeated
-        // phrase cannot reuse a previous occurrence, and a missing source cue does
-        // not prevent later cues from matching and merging.
-        while (offset < response.length && nextSource < cues.size) {
-            var matched = false
-            for (index in nextSource until cues.size) {
-                val cue = cues[index]
-                if (cue.text.isEmpty() || !response.startsWith(cue.text, offset)) continue
-                var partStart = offset
-                val fitsLines = cue.partLengths.all { length ->
-                    val partEnd = partStart + length
-                    val fits = lineAt[partStart] == lineAt[partEnd - 1]
-                    partStart = partEnd
-                    fits
-                }
-                if (!fitsLines) continue
-                matches[index] = CueMatch(offset, offset + cue.text.length)
-                offset += cue.text.length
-                nextSource = index + 1
-                matched = true
-                break
+        // Every source cue must occur in order, with no omitted, changed or added text.
+        // Matching a prefix of an altered line is not a successful match.
+        cues.forEachIndexed { index, cue ->
+            if (cue.text.isEmpty() || !response.startsWith(cue.text, offset)) {
+                throw IOException("语义合并文本匹配失败：本批第 ${index + 1} 条字幕不匹配")
             }
-            if (!matched) offset++
+            var partStart = offset
+            val fitsLines = cue.partLengths.all { length ->
+                val partEnd = partStart + length
+                val fits = lineAt[partStart] == lineAt[partEnd - 1]
+                partStart = partEnd
+                fits
+            }
+            if (!fitsLines) {
+                throw IOException("语义合并文本匹配失败：本批第 ${index + 1} 条字幕被拆行")
+            }
+            matches += CueMatch(offset, offset + cue.text.length)
+            offset += cue.text.length
+        }
+        if (offset != response.length) {
+            throw IOException("语义合并文本匹配失败：返回了多余文本")
         }
         val boundaries = (0..sourceTexts.size).toMutableSet()
         for (index in 1 until sourceTexts.size) {
-            val previous = matches[index - 1] ?: continue
-            val current = matches[index] ?: continue
+            val previous = matches[index - 1]
+            val current = matches[index]
             if (previous.end == current.start && lineAt[previous.end - 1] == lineAt[current.start]) {
                 boundaries.remove(index)
             }
