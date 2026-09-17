@@ -3,12 +3,14 @@ package com.subtitleedit.adapter
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
+import android.media.ThumbnailUtils
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.graphics.drawable.Drawable
 import android.os.Handler
 import android.os.Looper
+import android.os.Build
 import android.util.LruCache
 import android.widget.ImageView
 import android.widget.TextView
@@ -57,11 +59,14 @@ class FileListAdapter(
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
     private val mediaDurationCache = ConcurrentHashMap<String, String>()
-    private val pendingDurationKeys = ConcurrentHashMap.newKeySet<String>()
+    private val missingMediaThumbnailCache = LruCache<String, Boolean>(512)
+    private val pendingMediaPreviewKeys = ConcurrentHashMap.newKeySet<String>()
     private val directoryItemCountCache = ConcurrentHashMap<String, Int>()
     private val pendingDirectoryCountKeys = ConcurrentHashMap.newKeySet<String>()
     private val modifiedTimeFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
     private var relativePathRoot: File? = null
+
+    private data class MediaPreview(val duration: String, val thumbnail: Bitmap?)
 
     fun setRelativePathRoot(root: File?) {
         val previousPath = relativePathRoot?.absolutePath
@@ -123,6 +128,11 @@ class FileListAdapter(
         if (position != RecyclerView.NO_POSITION) {
             holder.bindSelectionVisual(getItem(position))
         }
+    }
+
+    override fun onViewRecycled(holder: FileViewHolder) {
+        holder.clearPendingBindings()
+        super.onViewRecycled(holder)
     }
 
     inner class FileViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
@@ -197,7 +207,7 @@ class FileListAdapter(
 
                 val isMediaFile = extension in AUDIO_EXTENSIONS || extension in VIDEO_EXTENSIONS
                 if (isMediaFile) {
-                    bindMediaDuration(file)
+                    bindMediaPreview(file, thumbnailKey, extension in VIDEO_EXTENSIONS)
                 } else {
                     tvMediaDuration.tag = null
                     tvMediaDuration.visibility = View.GONE
@@ -253,6 +263,12 @@ class FileListAdapter(
             }
         }
 
+        fun clearPendingBindings() {
+            ivFileIcon.tag = null
+            tvMediaDuration.tag = null
+            tvFileSize.tag = null
+        }
+
         private fun bindDirectoryItemCount(file: File, cacheKey: String) {
             tvFileSize.tag = cacheKey
             directoryItemCountCache[cacheKey]?.let { count ->
@@ -288,27 +304,39 @@ class FileListAdapter(
             tvFileSize.visibility = if (count < 0) View.GONE else View.VISIBLE
         }
 
-        private fun bindMediaDuration(file: File) {
-            val cacheKey = thumbnailKey(file)
+        private fun bindMediaPreview(file: File, cacheKey: String, isVideo: Boolean) {
             tvMediaDuration.tag = cacheKey
-            mediaDurationCache[cacheKey]?.let { duration ->
-                tvMediaDuration.text = duration
-                tvMediaDuration.visibility = if (duration.isEmpty()) View.GONE else View.VISIBLE
-                return
+            val cachedThumbnail = thumbnailCache.get(cacheKey)
+            cachedThumbnail?.let(::showThumbnail)
+            val cachedDuration = mediaDurationCache[cacheKey]
+            if (cachedDuration != null) {
+                showMediaDuration(cachedDuration)
+            } else {
+                tvMediaDuration.text = "00:00"
+                tvMediaDuration.visibility = View.INVISIBLE
             }
+            // Remember files without artwork as well, so scrolling does not repeatedly scan
+            // every coverless audio file. An evicted bitmap can still be loaded again.
+            if (cachedDuration != null &&
+                (cachedThumbnail != null || missingMediaThumbnailCache.get(cacheKey) == true)
+            ) return
+            if (!pendingMediaPreviewKeys.add(cacheKey)) return
 
-            tvMediaDuration.text = "00:00"
-            tvMediaDuration.visibility = View.INVISIBLE
-            if (!pendingDurationKeys.add(cacheKey)) return
-
+            val targetSize = (48 * itemView.resources.displayMetrics.density + 0.5f).toInt()
             thumbnailExecutor.execute {
-                val duration = readMediaDuration(file)
-                mediaDurationCache[cacheKey] = duration
-                pendingDurationKeys.remove(cacheKey)
+                val preview = readMediaPreview(file, targetSize, isVideo)
+                mediaDurationCache[cacheKey] = preview.duration
+                if (preview.thumbnail != null) {
+                    thumbnailCache.put(cacheKey, preview.thumbnail)
+                    missingMediaThumbnailCache.remove(cacheKey)
+                } else {
+                    missingMediaThumbnailCache.put(cacheKey, true)
+                }
+                pendingMediaPreviewKeys.remove(cacheKey)
                 mainHandler.post {
-                    if (tvMediaDuration.tag == cacheKey) {
-                        tvMediaDuration.text = duration
-                        tvMediaDuration.visibility = if (duration.isEmpty()) View.GONE else View.VISIBLE
+                    if (ivFileIcon.tag == cacheKey && tvMediaDuration.tag == cacheKey) {
+                        showMediaDuration(preview.duration)
+                        preview.thumbnail?.let(::showThumbnail)
                     } else {
                         val position = currentList.indexOfFirst { thumbnailKey(it) == cacheKey }
                         if (position >= 0) notifyItemChanged(position)
@@ -317,12 +345,20 @@ class FileListAdapter(
             }
         }
 
-        private fun bindImageThumbnail(file: File, cacheKey: String) {
-            ivFileIcon.setPadding(0, 0, 0, 0)
-            ivFileIcon.scaleType = ImageView.ScaleType.CENTER_CROP
+        private fun showMediaDuration(duration: String) {
+            tvMediaDuration.text = duration
+            tvMediaDuration.visibility = if (duration.isEmpty()) View.GONE else View.VISIBLE
+        }
 
+        private fun showThumbnail(bitmap: Bitmap) {
+            ivFileIcon.scaleType = ImageView.ScaleType.CENTER_CROP
+            ivFileIcon.setPadding(0, 0, 0, 0)
+            ivFileIcon.setImageBitmap(bitmap)
+        }
+
+        private fun bindImageThumbnail(file: File, cacheKey: String) {
             thumbnailCache.get(cacheKey)?.let {
-                ivFileIcon.setImageBitmap(it)
+                showThumbnail(it)
                 return
             }
 
@@ -336,9 +372,7 @@ class FileListAdapter(
                 mainHandler.post {
                     if (ivFileIcon.tag != cacheKey) return@post
                     if (bitmap != null) {
-                        ivFileIcon.scaleType = ImageView.ScaleType.CENTER_CROP
-                        ivFileIcon.setPadding(0, 0, 0, 0)
-                        ivFileIcon.setImageBitmap(bitmap)
+                        showThumbnail(bitmap)
                     } else {
                         ivFileIcon.scaleType = ImageView.ScaleType.FIT_CENTER
                         ivFileIcon.setPadding(iconPadding, iconPadding, iconPadding, iconPadding)
@@ -388,19 +422,64 @@ class FileListAdapter(
             )
         }
 
-        private fun readMediaDuration(file: File): String {
+        private fun readMediaPreview(file: File, targetSize: Int, isVideo: Boolean): MediaPreview {
             val retriever = MediaMetadataRetriever()
             return try {
                 retriever.setDataSource(file.absolutePath)
-                val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                    ?.toLongOrNull()
-                    ?: return ""
-                formatMediaDuration(durationMs)
+                val duration = runCatching {
+                    retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                        ?.toLongOrNull()?.let(::formatMediaDuration)
+                }.getOrNull().orEmpty()
+                // Read cover art and duration from one retriever. Artwork decoding errors must
+                // not discard an otherwise valid duration or prevent the video-frame fallback.
+                val cover = runCatching {
+                    retriever.embeddedPicture?.let { decodeEmbeddedCover(it, targetSize) }
+                }.getOrNull()
+                val thumbnail = cover ?: if (isVideo) {
+                    runCatching {
+                        val frame = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                            retriever.getScaledFrameAtTime(
+                                -1L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, targetSize, targetSize
+                            )
+                        } else {
+                            retriever.getFrameAtTime(-1L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                        }
+                        frame?.let {
+                            ThumbnailUtils.extractThumbnail(
+                                it, targetSize, targetSize, ThumbnailUtils.OPTIONS_RECYCLE_INPUT
+                            )
+                        }
+                    }.getOrNull()
+                } else null
+                MediaPreview(duration, thumbnail)
             } catch (_: Exception) {
-                ""
+                MediaPreview("", null)
             } finally {
-                retriever.release()
+                runCatching { retriever.release() }
             }
+        }
+
+        private fun decodeEmbeddedCover(data: ByteArray, targetSize: Int): Bitmap? {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+            // Bound decoding by the longer edge, including unusually wide/tall artwork.
+            // Only a small square preview belongs in the shared thumbnail cache.
+            var sampleSize = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sampleSize * 2) >= targetSize) {
+                sampleSize *= 2
+            }
+            val bitmap = BitmapFactory.decodeByteArray(
+                data, 0, data.size,
+                BitmapFactory.Options().apply {
+                    inSampleSize = sampleSize
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                }
+            ) ?: return null
+            return ThumbnailUtils.extractThumbnail(
+                bitmap, targetSize, targetSize, ThumbnailUtils.OPTIONS_RECYCLE_INPUT
+            )
         }
 
         private fun formatMediaDuration(durationMs: Long): String {
