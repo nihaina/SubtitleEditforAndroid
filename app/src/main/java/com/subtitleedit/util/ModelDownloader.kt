@@ -5,26 +5,16 @@ import android.os.Environment
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import okhttp3.Call
-import okhttp3.Callback
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
-import java.io.BufferedOutputStream
-import java.io.EOFException
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 object ModelDownloader {
     const val SENSEVOICE_MODEL_URL =
@@ -37,7 +27,6 @@ object ModelDownloader {
     const val SEPARATION_DIRECTORY_NAME = "separation"
     private const val DEMIX_MODEL_NAME = "htdemucs_fp16weights.onnx"
     private const val MIN_ONNX_SIZE = 1024L * 1024L
-    private const val BUFFER_SIZE = 1024 * 1024
     private const val MAX_ARCHIVE_ENTRIES = 10_000
     private const val MAX_EXTRACTED_BYTES = 8L * 1024L * 1024L * 1024L
 
@@ -48,6 +37,7 @@ object ModelDownloader {
         .followRedirects(true)
         .followSslRedirects(true)
         .build()
+    private val fileDownloader = ResumableModelDownload(client)
     private val senseVoiceMutex = Mutex()
     private val whisperMutex = Mutex()
     private val parakeetMutex = Mutex()
@@ -466,113 +456,7 @@ object ModelDownloader {
         message: String,
         onProgress: (Progress) -> Unit,
         minimumSize: Long = 1L
-    ) {
-        destination.parentFile?.listFiles { file ->
-            file.name.startsWith("${destination.name}.part.")
-        }?.forEach { it.delete() }
-        val partFile = File(
-            destination.parentFile,
-            "${destination.name}.part.${System.currentTimeMillis()}.${System.nanoTime()}"
-        )
-        val backupFile = File(destination.parentFile, "${destination.name}.backup")
-        if (backupFile.exists()) {
-            if (destination.exists()) backupFile.delete() else backupFile.renameTo(destination)
-        }
-        var completed = false
-        var backupCreated = false
-        try {
-            val request = Request.Builder()
-                .url(url)
-                .header("User-Agent", "SubtitleEdit-Android")
-                .build()
-            val call = client.newCall(request)
-            executeDownload(call) { response ->
-                    if (!response.isSuccessful) {
-                        throw ModelDownloadHttpException(response.code)
-                    }
-                    val body = response.body ?: throw IOException("模型下载响应为空")
-                    val total = body.contentLength()
-                    var downloaded = 0L
-                    var lastReportAt = 0L
-                    body.byteStream().use { input ->
-                        BufferedOutputStream(FileOutputStream(partFile), BUFFER_SIZE).use { output ->
-                            val buffer = ByteArray(BUFFER_SIZE)
-                            while (true) {
-                                if (call.isCanceled()) throw CancellationException("模型下载已取消")
-                                val read = input.read(buffer)
-                                if (read < 0) break
-                                output.write(buffer, 0, read)
-                                downloaded += read
-                                val now = System.currentTimeMillis()
-                                if (now - lastReportAt >= 250L || downloaded == total) {
-                                    onProgress(Progress(message, downloaded, total))
-                                    lastReportAt = now
-                                }
-                            }
-                        }
-                    }
-                    if (downloaded <= 0L || total > 0L && downloaded != total) {
-                        throw EOFException("模型文件下载不完整")
-                    }
-            }
-
-            if (partFile.length() < minimumSize) {
-                throw IOException("下载的模型文件大小异常")
-            }
-            if (destination.exists()) {
-                backupFile.delete()
-                if (!destination.renameTo(backupFile)) {
-                    throw IOException("无法备份旧模型文件")
-                }
-                backupCreated = true
-            }
-            try {
-                if (!partFile.renameTo(destination)) {
-                    partFile.copyTo(destination, overwrite = true)
-                    partFile.delete()
-                }
-                if (!destination.isFile || destination.length() < minimumSize) {
-                    throw IOException("安装后的模型文件校验失败")
-                }
-                backupFile.delete()
-                completed = true
-            } catch (e: Exception) {
-                destination.delete()
-                if (backupCreated && !backupFile.renameTo(destination)) {
-                    e.addSuppressed(IOException("新模型安装失败，旧模型也无法恢复"))
-                }
-                throw e
-            }
-        } catch (e: Exception) {
-            currentCoroutineContext().ensureActive()
-            throw e
-        } finally {
-            if (!completed) partFile.delete()
-        }
-    }
-
-    private suspend fun executeDownload(
-        call: Call,
-        block: (Response) -> Unit
-    ) = suspendCancellableCoroutine<Unit> { continuation ->
-        continuation.invokeOnCancellation { call.cancel() }
-        call.enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                if (continuation.isActive) continuation.resumeWithException(e)
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                try {
-                    block(response)
-                    if (continuation.isActive) continuation.resume(Unit)
-                } catch (e: Exception) {
-                    if (continuation.isActive) continuation.resumeWithException(e)
-                } finally {
-                    response.close()
-                }
-            }
-        })
-    }
+    ) = fileDownloader.download(url, destination, message, onProgress, minimumSize)
 
     private suspend fun extractTarBz2(
         archive: File,

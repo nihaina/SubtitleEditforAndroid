@@ -40,6 +40,24 @@ internal class TaskWorkScheduler(
         return enqueueModelDownload(ASR_MODEL_WORK, kind, optionId)
     }
 
+    suspend fun retryModelDownload(workId: UUID): UUID {
+        val previous = withContext(Dispatchers.IO) { workManager.getWorkInfoById(workId).get() }
+        requireNotNull(previous) { "下载任务不存在，请重新选择模型下载" }
+        require(ModelDownloadWorker.TAG_MODEL_DOWNLOAD in previous.tags) { "不是模型下载任务" }
+        if (!previous.state.isFinished) return workId
+        require(previous.state == WorkInfo.State.FAILED || previous.state == WorkInfo.State.CANCELLED) {
+            "下载任务已完成"
+        }
+        val kind = previous.outputData.getString(ModelDownloadWorker.KEY_MODEL_KIND)
+            ?: previous.tags.firstOrNull { it.startsWith(MODEL_KIND_TAG_PREFIX) }?.removePrefix(MODEL_KIND_TAG_PREFIX)
+            ?: ModelDownloadWorker.KIND_DEMIX_GENERAL
+        if (kind == ModelDownloadWorker.KIND_DEMIX_GENERAL) return enqueueGeneralModelDownload()
+        val optionId = previous.outputData.getString(ModelDownloadWorker.KEY_MODEL_OPTION)
+            ?: previous.tags.firstOrNull { it.startsWith(MODEL_OPTION_TAG_PREFIX) }?.removePrefix(MODEL_OPTION_TAG_PREFIX)
+        requireNotNull(optionId) { "下载任务缺少模型版本，请重新选择模型下载" }
+        return enqueueAsrModelDownload(kind, optionId)
+    }
+
     private suspend fun enqueueModelDownload(
         uniqueName: String,
         kind: String,
@@ -67,6 +85,7 @@ internal class TaskWorkScheduler(
                 .addTag(ModelDownloadWorker.TAG_MODEL_DOWNLOAD)
                 .addTag(uniqueName)
                 .addTag(MODEL_KIND_TAG_PREFIX + kind)
+                .apply { optionId?.let { addTag(MODEL_OPTION_TAG_PREFIX + it) } }
                 .build()
             workManager.enqueueUniqueWork(
                 uniqueName, ExistingWorkPolicy.KEEP, request
@@ -140,6 +159,7 @@ internal class TaskWorkScheduler(
         private const val GENERAL_MODEL_WORK = "download-demix-general"
         private const val ASR_MODEL_WORK = "download-asr-model"
         private const val MODEL_KIND_TAG_PREFIX = "model-kind:"
+        private const val MODEL_OPTION_TAG_PREFIX = "model-option:"
         fun progressData(message: String, current: Long, total: Long): Data = Data.Builder()
             .putString(ModelDownloadWorker.KEY_MESSAGE, message)
             .putLong(ModelDownloadWorker.KEY_CURRENT, current)

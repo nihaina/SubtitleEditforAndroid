@@ -41,6 +41,7 @@ class DemucsModelImportController(private val host: AppCompatActivity, private v
     private var modelDownloadJob: Job? = null
     private var modelDownloadWorkId: UUID? = null
     private var modelDownloadDialog: ModelDownloadProgressDialog? = null
+    private var modelDownloadErrorDialog: AlertDialog? = null
     private var pendingGeneralModelDownload = false
     private var pendingNotificationPermission = false
 
@@ -89,6 +90,7 @@ class DemucsModelImportController(private val host: AppCompatActivity, private v
         settings = SettingsManager.getInstance(host)
         setupListeners()
         loadSettings()
+        restoreModelDownloadState()
         restoreActiveGeneralModelDownload()
     }
 
@@ -156,6 +158,17 @@ class DemucsModelImportController(private val host: AppCompatActivity, private v
         observeGeneralModelDownload(enqueue = false)
     }
 
+    private fun restoreModelDownloadState() {
+        val key = "demix-model-download"
+        val savedState = host.savedStateRegistry.consumeRestoredStateForKey(key)
+        modelDownloadWorkId = savedState?.getString("work-id")?.let {
+            runCatching { UUID.fromString(it) }.getOrNull()
+        }
+        host.savedStateRegistry.registerSavedStateProvider(key) {
+            Bundle().apply { putString("work-id", modelDownloadWorkId?.toString()) }
+        }
+    }
+
     private fun observeGeneralModelDownload(enqueue: Boolean) {
         if (modelDownloadJob?.isActive == true) return
         setModelDownloadActionsEnabled(false)
@@ -213,8 +226,7 @@ class DemucsModelImportController(private val host: AppCompatActivity, private v
                             false
                         }
                         TaskStatus.FAILED -> {
-                            modelDownloadWorkId = null
-                            showError("人声分离模型下载失败：" + (taskState.errorMessage ?: "模型任务失败"))
+                            showModelDownloadFailure(taskState.errorMessage ?: "模型任务失败")
                             false
                         }
                         TaskStatus.CANCELLED -> {
@@ -481,8 +493,21 @@ class DemucsModelImportController(private val host: AppCompatActivity, private v
         loadSettings()
     }
 
+    private fun showModelDownloadFailure(error: String) {
+        modelDownloadErrorDialog?.dismiss()
+        modelDownloadErrorDialog = AlertDialog.Builder(host)
+            .setTitle("人声分离模型下载失败")
+            .setMessage("$error\n\n重试时会尝试从已保存的下载进度继续。")
+            .setPositiveButton("重试") { _, _ -> startGeneralModelDownload() }
+            .setNegativeButton("关闭") { _, _ -> modelDownloadWorkId = null }
+            .setOnCancelListener { modelDownloadWorkId = null }
+            .show()
+    }
+
     fun dispose() {
         modelDownloadJob?.cancel()
+        modelDownloadErrorDialog?.dismiss()
+        modelDownloadErrorDialog = null
         modelDownloadDialog?.dismiss()
         modelDownloadDialog = null
     }

@@ -63,6 +63,7 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         host.getSharedPreferences("task_notifications", Context.MODE_PRIVATE)
     }
     private var modelDownloadDialog: ModelDownloadProgressDialog? = null
+    private var modelDownloadErrorDialog: AlertDialog? = null
     private var pendingStorageAction: (() -> Unit)? = null
 
     // Encoder 文件选择器
@@ -323,14 +324,20 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         }
     }
 
-    private fun observeAsrModelDownload(kind: String? = null, optionId: String? = null) {
+    private fun observeAsrModelDownload(
+        kind: String? = null,
+        optionId: String? = null,
+        retryWorkId: UUID? = null
+    ) {
         if (modelDownloadJob?.isActive == true) return
         setAsrModelActionsEnabled(false)
         modelDownloadJob = host.lifecycleScope.launch {
             var progressDialog: ModelDownloadProgressDialog? = null
             try {
                 val scheduler = (host.application as SubtitleEditApplication).dependencies.taskWorkScheduler
-                val workId = if (kind != null) {
+                val workId = if (retryWorkId != null) {
+                    scheduler.retryModelDownload(retryWorkId)
+                } else if (kind != null) {
                     scheduler.enqueueAsrModelDownload(kind, requireNotNull(optionId))
                 } else {
                     scheduler.findActiveAsrModelDownload(modelDownloadWorkId) ?: return@launch
@@ -369,10 +376,7 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
                             false
                         }
                         TaskStatus.FAILED -> {
-                            modelDownloadWorkId = null
-                            OverwritingToast.makeText(
-                                host, "模型下载或导入失败：${taskState.errorMessage ?: "模型任务失败"}", Toast.LENGTH_LONG
-                            ).show()
+                            showModelDownloadFailure(workId, taskState.errorMessage ?: "模型任务失败")
                             false
                         }
                         TaskStatus.CANCELLED -> {
@@ -396,6 +400,19 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
                 }
             }
         }
+    }
+
+    private fun showModelDownloadFailure(workId: UUID, error: String) {
+        modelDownloadErrorDialog?.dismiss()
+        modelDownloadErrorDialog = AlertDialog.Builder(host)
+            .setTitle("模型下载或导入失败")
+            .setMessage("$error\n\n重试时会尝试从已保存的下载进度继续。")
+            .setPositiveButton("重试") { _, _ ->
+                runWithModelStorageAccess { observeAsrModelDownload(retryWorkId = workId) }
+            }
+            .setNegativeButton("关闭") { _, _ -> modelDownloadWorkId = null }
+            .setOnCancelListener { modelDownloadWorkId = null }
+            .show()
     }
 
     private fun confirmResetCurrentAsrModel() {
@@ -1198,6 +1215,8 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
 
     fun dispose() {
         modelDownloadJob?.cancel()
+        modelDownloadErrorDialog?.dismiss()
+        modelDownloadErrorDialog = null
         pendingStorageAction = null
         pendingNotificationAction = null
         modelDownloadDialog?.dismiss()

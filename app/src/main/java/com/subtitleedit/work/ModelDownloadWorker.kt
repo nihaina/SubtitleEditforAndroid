@@ -85,6 +85,8 @@ internal class ModelDownloadWorker(
                 return@withContext Result.retry()
             }
             Result.failure(workDataOf(
+                KEY_MODEL_KIND to inputData.getString(KEY_MODEL_KIND),
+                KEY_MODEL_OPTION to inputData.getString(KEY_MODEL_OPTION),
                 KEY_ERROR to (error.message ?: "模型任务失败").take(500),
                 KEY_MESSAGE to lastProgress.message,
                 KEY_CURRENT to lastProgress.current,
