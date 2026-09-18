@@ -48,6 +48,37 @@ class SubtitleParserTest {
     }
 
     @Test
+    fun detectFormat_textFilesKeepSourceModeWithSubtitleLikeContent() {
+        val samples = listOf(
+            srtSample,
+            "[00:01.00]log message",
+            "WEBVTT\n\n00:00.000 --> 00:01.000\nHello",
+            "[Events]\nvalue=example"
+        )
+        for (extension in listOf("txt", "md", "log", "json", "xml", "csv", "ini", "conf")) {
+            for (content in samples) {
+                assertEquals(
+                    "$extension should open as plain text",
+                    SubtitleParser.SubtitleFormat.TXT,
+                    SubtitleParser.detectFormat(content, "sample.${extension.uppercase()}")
+                )
+            }
+        }
+    }
+
+    @Test
+    fun detectFormat_emptyTextFilesKeepSourceMode() {
+        for (fileName in listOf("empty.txt", "empty.json", "empty.xml")) {
+            for (content in listOf("", "   \n  ", "\uFEFF")) {
+                assertEquals(
+                    SubtitleParser.SubtitleFormat.TXT,
+                    SubtitleParser.parseDocument(content, fileName).format
+                )
+            }
+        }
+    }
+
+    @Test
     fun detectFormat_emptyIsUnknown() {
         assertEquals(SubtitleParser.SubtitleFormat.UNKNOWN, SubtitleParser.detectFormat(""))
         assertEquals(SubtitleParser.SubtitleFormat.UNKNOWN, SubtitleParser.detectFormat("   \n  "))

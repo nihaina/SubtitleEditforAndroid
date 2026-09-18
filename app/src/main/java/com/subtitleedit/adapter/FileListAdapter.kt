@@ -20,6 +20,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.card.MaterialCardView
 import com.subtitleedit.R
 import com.subtitleedit.util.ArchiveManager
+import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.FileUtils
 import java.io.File
 import java.text.SimpleDateFormat
@@ -44,7 +45,6 @@ class FileListAdapter(
             "mp4", "mkv", "avi", "mov", "webm", "flv", "wmv", "m4v",
             "ts", "3gp", "mpg", "mpeg", "mts", "m2ts"
         )
-        val TEXT_EXTENSIONS = setOf("md", "log", "json", "xml", "csv", "ini", "conf")
         val IMAGE_EXTENSIONS = setOf(
             "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif", "tif", "tiff", "avif"
         )
@@ -192,7 +192,7 @@ class FileListAdapter(
                             extension in AUDIO_EXTENSIONS -> R.drawable.ic_file_audio
                             extension in VIDEO_EXTENSIONS -> R.drawable.ic_file_video
                             extension in ArchiveManager.recognizedExtensions -> archiveIcon(file)
-                            FileUtils.isSubtitleFile(file) || extension in TEXT_EXTENSIONS ->
+                            FileUtils.isSubtitleFile(file) || FileTypePolicy.isText(file) ->
                                 R.drawable.ic_file_text
                             else -> R.drawable.ic_file
                         }

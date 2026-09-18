@@ -11,6 +11,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.subtitleedit.R
 import com.subtitleedit.model.ArchivePreviewItem
 import com.subtitleedit.util.ArchiveManager
+import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.FileUtils
 import java.io.File
 import java.text.SimpleDateFormat
@@ -82,7 +83,7 @@ class ArchivePreviewAdapter(
             val suffix = file.extension.lowercase()
             return when {
                 FileUtils.isAudioFile(file) -> R.drawable.ic_file_audio
-                FileUtils.isSubtitleFile(file) || suffix in TEXT_EXTENSIONS -> R.drawable.ic_file_text
+                FileUtils.isSubtitleFile(file) || FileTypePolicy.isText(file) -> R.drawable.ic_file_text
                 suffix in VIDEO_EXTENSIONS -> R.drawable.ic_file_video
                 suffix in ArchiveManager.recognizedExtensions -> R.drawable.ic_file_archive
                 else -> R.drawable.ic_file
@@ -100,6 +101,5 @@ class ArchivePreviewAdapter(
 
     private companion object {
         val VIDEO_EXTENSIONS = setOf("mp4", "mkv", "avi", "mov", "webm", "flv", "wmv", "m4v")
-        val TEXT_EXTENSIONS = setOf("md", "log", "json", "xml", "csv", "ini", "conf", "txt")
     }
 }

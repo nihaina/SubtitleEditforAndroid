@@ -723,8 +723,8 @@ class MainActivity : AppCompatActivity() {
             } else {
                 showShortToast("当前库暂不支持 ${file.extension.uppercase()} 格式")
             }
-        } else if (FileUtils.isSubtitleFile(file)) {
-            // 打开字幕文件进行编辑
+        } else if (FileUtils.isSubtitleFile(file) || FileTypePolicy.isText(file)) {
+            // 打开字幕或文本文件进行编辑
             openFileForEdit(file)
         } else if (FileUtils.isAudioFile(file)) {
             openMediaFileForEdit(file, EditorMediaType.AUDIO)

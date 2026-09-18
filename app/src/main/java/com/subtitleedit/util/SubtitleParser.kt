@@ -64,6 +64,9 @@ object SubtitleParser {
         val lines = content.toSubtitleLines()
         val extension = fileName?.substringAfterLast('.', "")?.lowercase().orEmpty()
 
+        // 文本文件始终使用原文编辑，避免其中的时间戳或配置节被误识别为字幕。
+        if (extension in FileTypePolicy.textExtensions) return SubtitleFormat.TXT
+
         handlers.asSequence()
             .filter { extension in it.extensions }
             .firstOrNull { it.isMine(lines, fileName) }
@@ -73,7 +76,6 @@ object SubtitleParser {
         when (extension) {
             "ass" -> if (trimmed.isNotEmpty()) return SubtitleFormat.ASS
             "ssa" -> if (trimmed.isNotEmpty()) return SubtitleFormat.SSA
-            "txt" -> if (trimmed.isNotEmpty()) return SubtitleFormat.TXT
         }
 
         handlers.firstOrNull { it.isMine(lines, fileName) }?.let { return it.format }
