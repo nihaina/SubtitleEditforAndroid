@@ -12,8 +12,8 @@ In any case, libonnxruntime.so is always needed.
 
 ## Qualcomm QNN support
 
-`libsherpa-onnx-jni.so` is built from sherpa-onnx v1.13.5 with
-`SHERPA_ONNX_ENABLE_QNN=ON` and ONNX Runtime 1.27.1.
+`libsherpa-onnx-jni.so` is built from sherpa-onnx v1.13.8 with
+`SHERPA_ONNX_ENABLE_QNN=ON` and ONNX Runtime 1.28.2.
 
 The `qnn` build flavor additionally packages the QNN 2.40.0.251030 runtime
 libraries taken from the upstream `asr-models-qnn` release. V68, V69, V73,
