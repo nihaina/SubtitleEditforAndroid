@@ -29,6 +29,50 @@ index 59d16f5..1dba665 100644
        }
        prev_id = y;
      }  // for (int32_t t = 0; ...)
+diff --git a/sherpa-onnx/csrc/offline-recognizer-ctc-impl.h b/sherpa-onnx/csrc/offline-recognizer-ctc-impl.h
+index 8647e65..e9962c9 100644
+--- a/sherpa-onnx/csrc/offline-recognizer-ctc-impl.h
++++ b/sherpa-onnx/csrc/offline-recognizer-ctc-impl.h
+@@ -30,9 +30,12 @@ OfflineRecognitionResult Convert(const OfflineCtcDecoderResult &src,
+   OfflineRecognitionResult r;
+   r.tokens.reserve(src.tokens.size());
+   r.timestamps.reserve(src.timestamps.size());
++  r.durations.reserve(src.durations.size());
+ 
+   std::string text;
+ 
++  float frame_shift_s = frame_shift_ms / 1000. * subsampling_factor;
++
+   for (int32_t i = 0; i != src.tokens.size(); ++i) {
+     if (sym_table.Contains("SIL") && src.tokens[i] == sym_table["SIL"]) {
+       // tdnn models from yesno have a SIL token, we should remove it.
+@@ -57,6 +60,13 @@ OfflineRecognitionResult Convert(const OfflineCtcDecoderResult &src,
+     }
+ 
+     r.tokens.push_back(std::move(sym));
++
++    if (i < src.timestamps.size()) {
++      r.timestamps.push_back(frame_shift_s * src.timestamps[i]);
++    }
++    if (i < src.durations.size()) {
++      r.durations.push_back(frame_shift_s * src.durations[i]);
++    }
+   }
+ 
+   if (sym_table.IsByteBpe()) {
+@@ -69,12 +79,6 @@ OfflineRecognitionResult Convert(const OfflineCtcDecoderResult &src,
+ 
+   r.text = std::move(text);
+ 
+-  float frame_shift_s = frame_shift_ms / 1000. * subsampling_factor;
+-  for (auto t : src.timestamps) {
+-    float time = frame_shift_s * t;
+-    r.timestamps.push_back(time);
+-  }
+-
+   r.words = std::move(src.words);
+ 
+   return r;
 diff --git a/sherpa-onnx/csrc/offline-recognizer-sense-voice-impl.h b/sherpa-onnx/csrc/offline-recognizer-sense-voice-impl.h
 index 8b9cffa..d714b51 100644
 --- a/sherpa-onnx/csrc/offline-recognizer-sense-voice-impl.h

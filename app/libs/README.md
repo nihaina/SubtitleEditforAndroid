@@ -102,9 +102,9 @@ val recognizer = OfflineRecognizer(config)
 git apply /path/to/SubtitleEditforAndroid/app/libs/sherpa-onnx-v1.13.8-sensevoice-ctc-durations.patch
 ```
 
-补丁统计 CTC greedy search 中连续相同非 blank token 的帧数，并由 SenseVoice
-结果转换器输出秒单位的 `durations`。它不是基于指定文本的强制对齐；本次升级保持原补丁范围，
-未修改通用 `offline-recognizer-ctc-impl.h`，因此 Parakeet CTC 返回的 `durations` 仍为空。
+补丁统计 CTC greedy search 中连续相同非 blank token 的帧数，并由通用 CTC 结果转换器输出秒单位的
+`durations`；SenseVoice、QNN/Ascend CTC 路径也复用这套转换。它不是基于指定文本的强制对齐，
+而是 CTC 贪心解码中每个 token 连续占用的输出帧数，因此 Parakeet CTC 也会返回对应的 `durations`。
 
 ### 注意事项
 
