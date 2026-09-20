@@ -31,11 +31,11 @@ class SubtitlePunctuationPredictorTest {
 
             val result = SubtitlePunctuationPredictor.predictSubtitleEntriesInBatches(source) { text ->
                 requests += text
-                text.lines().joinToString("\n") { "$it。" }
+                punctuateRequest(text, "。")
             }
 
             assertEquals("Requests for $count entries", ranges.map { range ->
-                range.joinToString("\n") { "第${it}条" }
+                "start\n" + range.joinToString("\n\n") { "${it + 1000}\n第${it}条" } + "\nend"
             }, requests)
             assertEquals(source.map { it.copy(text = "${it.text}。") }, result)
         }
@@ -51,22 +51,24 @@ class SubtitlePunctuationPredictorTest {
 
         val result = SubtitlePunctuationPredictor.predictSubtitleEntriesInBatches(prepared) { text ->
             requests += text
-            val reply = text.lines().chunked(150).joinToString("\n\n") { lines ->
-                "```text\n" + lines.joinToString("\n") { "$it。" } + "\n```"
+            val blocks = punctuateRequest(text, "。").removePrefix("start\n").removeSuffix("\nend")
+                .split("\n\n")
+            val reply = blocks.chunked(150).joinToString("\n\n") { chunk ->
+                "```text\n" + chunk.joinToString("\n\n") + "\n```"
             }
             extractSemanticMergeResponse(reply)
         }
 
-        assertEquals(listOf(300, 1), requests.map { it.lines().size })
-        assertEquals("第301条", requests.last())
+        assertEquals(listOf(300, 1), requests.map { text -> text.lines().count { it.startsWith("第") } })
+        assertEquals("start\n1301\n第301条\nend", requests.last())
         assertEquals(prepared.map { it.copy(text = "${it.text}。") }, result)
     }
 
     @Test
-    fun repeatedTextConsumesDistinctMatchesAndKeepsAllCueMetadata() = runBlocking {
+    fun repeatedTextUsesSequenceNumbersAndKeepsAllCueMetadata() = runBlocking {
         val source = subtitleEntries(3).map { it.copy(text = "你好") }
         val result = SubtitlePunctuationPredictor.predictSubtitleEntriesInBatches(source) {
-            "你好！\n你好？\n你好。"
+            "1003\n你好。\n\n1001\n你好！\n\n1002\n你好？"
         }
 
         assertEquals(listOf(
@@ -86,9 +88,9 @@ class SubtitlePunctuationPredictorTest {
             entry.copy(text = if (index == 0) "你好\n\n世界" else "Hello  world")
         }
         val result = SubtitlePunctuationPredictor.predictSubtitleEntriesInBatches(source) { text ->
-            assertEquals("你好\n\n世界\nHello  world", text)
+            assertEquals("start\n1001\n你好\n\n世界\n\n1002\nHello  world\nend", text)
             extractSemanticMergeResponse(
-                "[[PUNCTUATED_TEXT]]\r\n你好，\r\n\r\n世界！\r\nHello,  world!\r\n[[/PUNCTUATED_TEXT]]"
+                "[[PUNCTUATED_TEXT]]\r\n1001\r\n你好，\r\n\r\n世界！\r\n\r\n1002\r\nHello,  world!\r\n[[/PUNCTUATED_TEXT]]"
             )
         }
 
@@ -105,7 +107,7 @@ class SubtitlePunctuationPredictorTest {
             val result = runCatching {
                 SubtitlePunctuationPredictor.predictSubtitleEntriesInBatches(subtitleEntries(601)) {
                     requestCount++
-                    (1..lineCount).joinToString("\n") { "第${it}条。" }
+                    (1..lineCount).joinToString("\n\n") { "${it + 1000}\n第${it}条。" }
                 }
             }
 
@@ -162,13 +164,13 @@ class SubtitlePunctuationPredictorTest {
     }
 
     @Test
-    fun matchesByTextEvenWhenResponseLinesAreReordered() {
+    fun matchesBySequenceEvenWhenResponseBlocksAreReordered() {
         val source = subtitleEntries(3).mapIndexed { index, entry ->
             entry.copy(text = listOf("你好世界", "Hello  world", "再见")[index])
         }
 
         val result = SubtitlePunctuationPredictor.matchSubtitleEntries(
-            source, "再见！\n你好，世界。\nHello, world!"
+            source, "1003\n再见！\n\n1001\n你好，世界。\n\n1002\nHello, world!"
         )
 
         assertEquals(listOf(
@@ -183,7 +185,11 @@ class SubtitlePunctuationPredictorTest {
         val source = subtitleEntries(2).mapIndexed { index, entry ->
             entry.copy(text = listOf("你好", "世界")[index])
         }
-        for (reply in listOf("您好！\n世界。", "你好！\n你好。", "你好新增！\n世界。")) {
+        for (reply in listOf(
+            "1001\n您好！\n\n1002\n世界。",
+            "1001\n你好！\n\n1002\n你好。",
+            "1001\n你好新增！\n\n1002\n世界。"
+        )) {
             assertThrows(IOException::class.java) {
                 SubtitlePunctuationPredictor.matchSubtitleEntries(source, reply)
             }
@@ -195,7 +201,7 @@ class SubtitlePunctuationPredictorTest {
         for ((original, changed) in listOf("1+2=3" to "1+2=4", "你好😊" to "你好😢", "价格$5" to "价格5")) {
             assertThrows(IOException::class.java) {
                 SubtitlePunctuationPredictor.matchSubtitleEntries(
-                    listOf(SubtitleEntry(text = original)), "$changed。"
+                    listOf(SubtitleEntry(text = original)), "1\n$changed。"
                 )
             }
         }
@@ -210,7 +216,7 @@ class SubtitlePunctuationPredictorTest {
         val error = runCatching {
             session.run(onProgress = { count, total -> progress += count to total }) { text ->
                 requests += text
-                val reply = text.lines().joinToString("\n") { "$it！" }
+                val reply = punctuateRequest(text, "！")
                 if (requests.size == 2) reply.replace("第450条", "错误内容") else reply
             }
         }.exceptionOrNull()
@@ -220,12 +226,12 @@ class SubtitlePunctuationPredictorTest {
         assertEquals(listOf(0 to 601, 300 to 601), progress)
         val result = session.run(onProgress = { count, total -> progress += count to total }) { text ->
             requests += text
-            text.lines().joinToString("\n") { "$it？" }
+            punctuateRequest(text, "？")
         }
 
         assertEquals(requests[1], requests[2])
-        assertEquals("第301条", requests[2].lines().first())
-        assertEquals("第601条", requests[3])
+        assertEquals(listOf("start", "1301", "第301条"), requests[2].lines().take(3))
+        assertEquals("start\n1601\n第601条\nend", requests[3])
         assertEquals(listOf(0 to 601, 300 to 601, 300 to 601, 600 to 601, 601 to 601), progress)
         assertEquals(source.mapIndexed { index, entry ->
             entry.copy(text = entry.text + if (index < 300) "！" else "？")
@@ -250,11 +256,107 @@ class SubtitlePunctuationPredictorTest {
             assertEquals(300, session.processedCount)
             val requests = mutableListOf<String>()
             val result = session.run { text -> requests += text; text }
-            assertEquals("第301条", requests.first().lines().first())
+            assertEquals(listOf("start", "1301", "第301条"), requests.first().lines().take(3))
             assertEquals(2, requests.size)
             assertEquals(source, result)
         }
     }
+
+    @Test
+    fun numberedRepliesPreserveNumericAndMultilineSubtitleText() {
+        val source = listOf(
+            SubtitleEntry(index = 7, text = "你好\n\n123\n世界"),
+            SubtitleEntry(index = 9, text = "456")
+        )
+        val response = "```text\r\nstart\r\n9\r\n456！\r\n\r\n7\r\n你好，\r\n\r\n123\r\n世界。\r\nend\r\n```"
+
+        assertEquals(listOf(
+            source[0].copy(text = "你好，\n\n123\n世界。"),
+            source[1].copy(text = "456！")
+        ), SubtitlePunctuationPredictor.matchSubtitleEntries(source, response))
+    }
+
+    @Test
+    fun numericParagraphBeforeTheNextCueIsKeptAsSubtitleText() {
+        val source = listOf(SubtitleEntry(text = "你好\n\n123"), SubtitleEntry(text = "世界"))
+
+        assertEquals(source, SubtitlePunctuationPredictor.matchSubtitleEntries(
+            source, "start\n1\n你好\n\n123\n\n2\n世界\nend"
+        ))
+    }
+
+    @Test
+    fun fallbackSequenceNumbersContinueAcrossBatches() = runBlocking {
+        val source = subtitleEntries(301).map { it.copy(index = 0) }
+        val requests = mutableListOf<String>()
+
+        val result = SubtitlePunctuationPredictor.predictSubtitleEntriesInBatches(source) { text ->
+            requests += text
+            text
+        }
+
+        assertEquals(source, result)
+        assertEquals("start\n301\n第301条\nend", requests.last())
+    }
+
+    @Test
+    fun numericSubtitleTextIsNotMistakenForSequenceNumbers() {
+        val source = listOf(SubtitleEntry(text = "123"), SubtitleEntry(text = "456"))
+
+        assertEquals(source, SubtitlePunctuationPredictor.matchSubtitleEntries(source, "1\n123\n\n2\n456"))
+    }
+
+    @Test
+    fun swappedTextUnderTheWrongSequenceNumbersIsRejected() {
+        val source = listOf(SubtitleEntry(index = 7, text = "你好"), SubtitleEntry(index = 9, text = "世界"))
+
+        assertThrows(IOException::class.java) {
+            SubtitlePunctuationPredictor.matchSubtitleEntries(source, "7\n世界！\n\n9\n你好。")
+        }
+    }
+
+    @Test
+    fun validatesEveryLineInOrderAndRejectsChangedLineCounts() {
+        val source = listOf(SubtitleEntry(text = "你好\n世界"))
+        for (text in listOf("世界！\n你好。", "你好世界。", "你\n好世界。", "你好！\n世界。\n多余")) {
+            assertThrows(IOException::class.java) {
+                SubtitlePunctuationPredictor.matchSubtitleEntries(source, "start\n1\n$text\nend")
+            }
+        }
+        assertEquals(listOf(source[0].copy(text = "你 好！\n世，界。")),
+            SubtitlePunctuationPredictor.matchSubtitleEntries(source, "1\n你 好！\n世，界。"))
+    }
+
+    @Test
+    fun missingUnknownAndRepeatedSequenceNumbersAreRejected() {
+        val source = listOf(SubtitleEntry(text = "你好"), SubtitleEntry(text = "你好"))
+        for (reply in listOf("你好！\n你好。", "1\n你好！", "1\n你好！\n\n1\n你好。", "1\n你好！\n\n9\n你好。")) {
+            assertThrows(IOException::class.java) {
+                SubtitlePunctuationPredictor.matchSubtitleEntries(source, reply)
+            }
+        }
+    }
+
+    @Test
+    fun numericParagraphsCanEqualOtherCueSequenceNumbers() {
+        val source = listOf(SubtitleEntry(text = "你好\n\n2\n世界"), SubtitleEntry(text = "结束"))
+        assertEquals(source, SubtitlePunctuationPredictor.matchSubtitleEntries(
+            source, "start\n1\n你好\n\n2\n世界\n\n2\n结束\nend"
+        ))
+    }
+
+    @Test
+    fun numberedRepliesRejectMissingDuplicatedAndChangedText() {
+        val source = listOf(SubtitleEntry(text = "你好"), SubtitleEntry(text = "世界"))
+        for (body in listOf("1\n你好！", "1\n你好！\n\n2\n你好。", "1\n您好！\n\n2\n世界。")) {
+            assertThrows(IOException::class.java) {
+                SubtitlePunctuationPredictor.matchSubtitleEntries(source, "start\n$body\nend")
+            }
+        }
+    }
+
+    private fun punctuateRequest(text: String, punctuation: String): String =
+        text.lines().joinToString("\n") { if (it.startsWith("第")) it + punctuation else it }
 
     private fun subtitleEntries(count: Int): List<SubtitleEntry> = (1..count).map { position ->
         SubtitleEntry(

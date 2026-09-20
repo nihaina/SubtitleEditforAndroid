@@ -153,6 +153,90 @@ class SemanticSubtitleMergerTest {
     }
 
     @Test
+    fun tripleSpacesSeparateReturnedGroupsBeforeSequentialMatching() {
+        val source = subtitleEntries(3).mapIndexed { index, entry ->
+            entry.copy(text = listOf("123", "456", "78")[index])
+        }
+
+        assertEquals(listOf(
+            source[0],
+            source[1].copy(text = "45678", endTime = source[2].endTime)
+        ), SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, "123   45678"))
+        assertEquals(source,
+            SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, "123   456   78"))
+    }
+
+    @Test
+    fun repeatedTextIsConsumedLeftToRightWithinTripleSpaceGroups() {
+        val source = subtitleEntries(3).mapIndexed { index, entry ->
+            entry.copy(text = listOf("123", "45", "123")[index])
+        }
+
+        assertEquals(listOf(
+            source[0].copy(text = "12345", endTime = source[1].endTime),
+            source[2]
+        ), SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, "12345   123"))
+        assertEquals(listOf(
+            source[0],
+            source[1].copy(text = "45123", endTime = source[2].endTime)
+        ), SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, "123   45123"))
+    }
+
+    @Test
+    fun sequentialMatchingIgnoresPunctuationAndSpacesAndPreservesSourceText() {
+        val source = subtitleEntries(3).mapIndexed { index, entry ->
+            entry.copy(text = listOf("1，23！", "4 5？", "1 23")[index])
+        }
+
+        assertEquals(listOf(
+            source[0].copy(text = "1，23！4 5？", endTime = source[1].endTime),
+            source[2]
+        ), SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, "1 23，4！5。   123？"))
+    }
+
+    @Test
+    fun tripleSpaceRepliesRejectSkippedReorderedChangedOrSplitText() {
+        val source = subtitleEntries(3).mapIndexed { index, entry ->
+            entry.copy(text = listOf("123", "45", "123")[index])
+        }
+        for (reply in listOf("12345", "45123   123", "12346   123", "12345   12   3", "12345   123   额外")) {
+            assertThrows(IOException::class.java) {
+                SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, reply)
+            }
+        }
+    }
+
+    @Test
+    fun tripleSpaceGroupsCarryOnlyTheFinalGroupAcrossBatchesAndRetries() = runBlocking {
+        val source = subtitleEntries(301).toMutableList().apply {
+            this[298] = this[298].copy(text = "123")
+            this[299] = this[299].copy(text = "45")
+            this[300] = this[300].copy(text = "123")
+        }
+        val session = SemanticSubtitleMerger.Session(source)
+        val requests = mutableListOf<String>()
+        val failure = runCatching {
+            session.run { text ->
+                requests += text
+                if (requests.size == 1) {
+                    source.take(298).joinToString("   ") { it.text } + "   123,45!"
+                } else "12345"
+            }
+        }.exceptionOrNull()
+
+        assertEquals(IOException::class.java, failure?.javaClass)
+        assertEquals(300, session.processedCount)
+        assertEquals("123,45!\n123", requests[1])
+        val merged = session.run { text ->
+            assertEquals(requests[1], text)
+            "1，23 45 123！"
+        }
+        assertEquals(source.take(298) + source[298].copy(
+            text = "12345123", endTime = source[300].endTime
+        ), merged)
+    }
+
+    @Test
     fun spacesAndTabsWithinReturnedLineDoNotSeparateSubtitles() {
         val source = subtitleEntries(3).mapIndexed { index, entry ->
             entry.copy(text = listOf("12", "3 4", "56")[index])

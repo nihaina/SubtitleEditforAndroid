@@ -66,8 +66,8 @@ class AiTranslationConversation(
         text: String,
         isCancelled: () -> Boolean = { false }
     ): Result<String> = processSubtitleText(
-        text,
-        "以下为换行分离的字幕文本，帮我根据语义合并意思被截断的短字幕段，意思完整的字幕无论长短均不做合并,避免产生过长字幕段,不修改原文，不做额外说明,以原格式输出",
+        text.lineSequence().filter { it.isNotBlank() }.joinToString("   "),
+        "以下为空格分离的字幕文本，帮我根据语义合并意思被截断的字幕段，意思完整的字幕无论长短均不做合并,避免产生过长字幕段,不修改原文，不拆分单段字幕,不做额外说明,以原格式输出",
         "语义合并",
         isCancelled
     )

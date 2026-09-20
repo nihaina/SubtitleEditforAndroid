@@ -43,6 +43,19 @@ class AiTranslationProtocolTest {
     }
 
     @Test
+    fun untimedInputKeepsTranslationMarkersAndOriginalOrFallbackSequenceNumbers() {
+        val subtitles = listOf(
+            SubtitleEntry(index = 7, startTime = 1_000, endTime = 2_000, text = "123"),
+            SubtitleEntry(startTime = 3_000, endTime = 4_000, text = "两行\r\n字幕")
+        )
+
+        assertEquals(
+            "start\n7\n123\n\n302\n两行\n字幕\nend",
+            buildTimedSubtitleContent(subtitles, startPosition = 301, includeTimestamps = false)
+        )
+    }
+
+    @Test
     fun userContent_putsOnlyInstructionBeforeSourceText() {
         val subtitles = listOf(testSubtitle(1, "hello"))
 

@@ -4,10 +4,12 @@ import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.WhisperRecognizer.SubtitleSegment
 import java.io.IOException
 
-/** Matches original subtitle text to AI output lines to recover merged time ranges. */
+/** Matches source cues from left to right to recover the AI's merged groups and time ranges. */
 object SemanticSubtitleMerger {
     private const val NEW_ENTRIES_PER_BATCH = 300
     private val punctuationOnlyText = Regex("""[\p{P}\p{Z}\p{Cc}\p{Cf}\s]*""")
+    private val matchingIgnoredCharacters = Regex("""[\p{P}\p{Z}\p{Cc}\p{Cf}\s]""")
+    private val responseSeparator = Regex(" {3,}|\\r\\n|[\\r\\n]")
 
     /** Format cue starts and endings and drop cues containing only punctuation or invisible characters. */
     fun prepareSubtitleEntriesForAi(entries: List<SubtitleEntry>): List<SubtitleEntry> {
@@ -50,9 +52,9 @@ object SemanticSubtitleMerger {
                 val aiText = requestMerge(request)
                 val merged = mergeSubtitleEntriesByAiBoundaries(batch, aiText)
                 val last = merged.last()
-                val lastLine = aiText.lineSequence().lastOrNull { it.isNotBlank() }?.trim()
+                val lastLine = responseGroups(aiText).lastOrNull()
                 val nextPendingText = lastLine?.takeIf {
-                    it.filterNot(Char::isWhitespace) == last.text.filterNot(Char::isWhitespace)
+                    matchingText(it) == matchingText(last.text)
                 } ?: last.text
                 // Commit only after the entire reply matches. Failed requests leave this
                 // checkpoint, including the previous batch's tail, untouched.
@@ -121,14 +123,19 @@ object SemanticSubtitleMerger {
 
     private data class CueText(val text: String, val partLengths: List<Int>)
 
+    private fun matchingText(text: String): String = text.replace(matchingIgnoredCharacters, "")
+
+    private fun responseGroups(text: String): Sequence<String> =
+        responseSeparator.splitToSequence(text).map(String::trim)
+            .filter { matchingText(it).isNotEmpty() }
+
     private fun collectBoundaries(
         sourceTexts: List<String>,
         aiText: String
     ): Set<Int> {
-        // Ignore spacing for matching, but retain each character's output line so
-        // spaces never become subtitle boundaries and line breaks still do.
-        val lines = aiText.lineSequence().map { it.filterNot(Char::isWhitespace) }
-            .filter { it.isNotEmpty() }.toList()
+        // Split groups before removing punctuation/spacing, then advance a single
+        // cursor through the response so repeated source text is consumed in order.
+        val lines = responseGroups(aiText).map(::matchingText).toList()
         val response = lines.joinToString("")
         val lineAt = IntArray(response.length)
         var offset = 0
@@ -138,7 +145,7 @@ object SemanticSubtitleMerger {
         }
 
         val cues = sourceTexts.map { text ->
-            val parts = text.lineSequence().map { it.filterNot(Char::isWhitespace) }
+            val parts = text.lineSequence().map(::matchingText)
                 .filter { it.isNotEmpty() }.toList()
             CueText(parts.joinToString(""), parts.map { it.length })
         }

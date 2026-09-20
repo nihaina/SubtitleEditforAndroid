@@ -24,8 +24,12 @@ object SubtitlePunctuationPredictor {
             while (processedCount < entries.size) {
                 val end = (processedCount + ENTRIES_PER_BATCH).coerceAtMost(entries.size)
                 val batch = entries.subList(processedCount, end)
-                val response = requestPrediction(batch.joinToString("\n") { it.text })
-                val punctuated = matchSubtitleEntries(batch, response)
+                val response = requestPrediction(buildTimedSubtitleContent(
+                    batch,
+                    startPosition = processedCount + 1,
+                    includeTimestamps = false
+                ))
+                val punctuated = matchSubtitleEntries(batch, response, startPosition = processedCount + 1)
                 completed += punctuated
                 processedCount = end
                 onProgress(processedCount, totalCount)
@@ -40,24 +44,55 @@ object SubtitlePunctuationPredictor {
         requestPrediction: suspend (String) -> String
     ): List<SubtitleEntry> = Session(entries).run(requestPrediction = requestPrediction)
 
-    /** Match text without punctuation/spacing, consuming repeated lines one occurrence at a time. */
-    fun matchSubtitleEntries(entries: List<SubtitleEntry>, response: String): List<SubtitleEntry> {
-        val returnedLines = mutableMapOf<String, ArrayDeque<String>>()
-        response.lineSequence().map(String::trim).filter(String::isNotEmpty).forEach { line ->
-            returnedLines.getOrPut(matchingText(line)) { ArrayDeque() }.addLast(line)
+    fun matchSubtitleEntries(
+        entries: List<SubtitleEntry>,
+        response: String,
+        startPosition: Int = 1
+    ): List<SubtitleEntry> {
+        val content = extractSemanticMergeResponse(response)
+            .replace("\r\n", "\n").replace('\r', '\n')
+        val sequences = entries.mapIndexed { offset, entry ->
+            entry.index.takeIf { it > 0 } ?: (startPosition + offset)
         }
-        val result = entries.mapIndexed { index, entry ->
-            entry.copy(text = entry.text.lines().joinToString("\n") { line ->
-                if (line.isBlank()) line else {
-                    returnedLines[matchingText(line)]?.removeFirstOrNull()
-                        ?: throw IOException("标点预测文本匹配失败：本批第 ${index + 1} 条字幕不匹配")
+        val expectedBySequence = sequences.zip(entries).toMap()
+        if (expectedBySequence.size != entries.size) {
+            throw IOException("标点预测文本匹配失败：原字幕序号重复")
+        }
+        val lines = (markedTranslationContent(content) ?: content).lines()
+        val returnedBySequence = mutableMapOf<Int, String>()
+        var cursor = 0
+        while (cursor < lines.size) {
+            if (lines[cursor].isBlank()) {
+                cursor++
+                continue
+            }
+            val sequence = lines[cursor++].trim().toIntOrNull()
+                ?: throw IOException("标点预测文本匹配失败：缺少有效序号")
+            val entry = expectedBySequence[sequence]
+                ?: throw IOException("标点预测文本匹配失败：返回了多余序号 $sequence")
+            if (sequence in returnedBySequence) {
+                throw IOException("标点预测文本匹配失败：序号 $sequence 重复")
+            }
+            // Consume exactly this cue's lines, so numeric subtitle text is never a header.
+            val expectedLines = entry.text.lines()
+            val end = cursor + expectedLines.size
+            if (end > lines.size) {
+                throw IOException("标点预测文本匹配失败：序号 $sequence 的行数不匹配")
+            }
+            val returnedLines = lines.subList(cursor, end)
+            expectedLines.zip(returnedLines).forEachIndexed { index, (original, returned) ->
+                if (matchingText(original) != matchingText(returned)) {
+                    throw IOException("标点预测文本匹配失败：序号 $sequence 的第 ${index + 1} 行不匹配")
                 }
-            })
+            }
+            returnedBySequence[sequence] = returnedLines.joinToString("\n")
+            cursor = end
         }
-        if (returnedLines.values.any { it.isNotEmpty() }) {
-            throw IOException("标点预测文本匹配失败：返回了多余或重复文本")
+        return entries.mapIndexed { index, entry ->
+            val sequence = sequences[index]
+            entry.copy(text = returnedBySequence[sequence]
+                ?: throw IOException("标点预测文本匹配失败：缺少序号 $sequence"))
         }
-        return result
     }
 
     private fun matchingText(text: String): String = text.replace(matchingIgnoredCharacters, "")

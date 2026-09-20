@@ -57,15 +57,18 @@ private fun wrapTranslationBlock(content: String): String = buildString {
 
 internal fun buildTimedSubtitleContent(
     subtitles: List<SubtitleEntry>,
-    startPosition: Int = 1
+    startPosition: Int = 1,
+    includeTimestamps: Boolean = true
 ): String = wrapTranslationBlock(
     subtitles.mapIndexed { offset, subtitle ->
         val sequence = subtitle.index.takeIf { it > 0 } ?: (startPosition + offset)
         buildString {
             append(sequence)
             append('\n')
-            append(subtitle.getTimeAxisSRT())
-            append('\n')
+            if (includeTimestamps) {
+                append(subtitle.getTimeAxisSRT())
+                append('\n')
+            }
             append(normalizeSubtitleText(subtitle.text))
         }
     }.joinToString("\n\n")
@@ -522,7 +525,7 @@ private fun extractTimedSubtitleBlocks(content: String): List<TimedSubtitleBlock
  * A null result means the response uses the legacy format or a stream whose final `end`
  * marker has not arrived yet; those responses use the existing prefix parser.
  */
-private fun markedTranslationContent(content: String): String? {
+internal fun markedTranslationContent(content: String): String? {
     val normalized = normalizeSubtitleText(content)
     if (!TRANSLATION_BLOCK_START_LINE.containsMatchIn(normalized)) return null
     val completeBlocks = MARKED_TRANSLATION_BLOCK.findAll(normalized)
