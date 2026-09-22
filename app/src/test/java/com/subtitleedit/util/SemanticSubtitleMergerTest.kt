@@ -10,10 +10,30 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
 
 class SemanticSubtitleMergerTest {
+    @Test
+    fun crossPositionMatchesAreAllKeptAsOriginalCuesWhenTheConflictIsSmall() {
+        val source = subtitleEntries(4).mapIndexed { index, entry ->
+            entry.copy(text = listOf("123", "45", "678", "123")[index])
+        }
+
+        assertEquals(source,
+            SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, "1245   678123"))
+    }
+
+    @Test
+    fun moreThanFiveUnmatchedCuesStillFailTheBatch() {
+        val source = subtitleEntries(6).map { it.copy(text = "source") }
+
+        assertThrows(IOException::class.java) {
+            SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, "changed")
+        }
+    }
+
     @Test
     fun prepareForAiDropsPunctuationOnlyEntriesIncludingQuotesAndDashes() {
         val punctuation = listOf(
@@ -112,12 +132,10 @@ class SemanticSubtitleMergerTest {
     }
 
     @Test
-    fun mergeByAiBoundariesRejectsChangedText() {
+    fun mergeByAiBoundariesKeepsAChangedCueWhenOnlyOneCueIsUnmatched() {
         val source = listOf(SubtitleSegment(0L, 100L, "你好"))
 
-        assertThrows(IOException::class.java) {
-            SemanticSubtitleMerger.mergeByAiBoundaries(source, "您好")
-        }
+        assertEquals(source, SemanticSubtitleMerger.mergeByAiBoundaries(source, "您好"))
     }
 
     @Test
@@ -195,19 +213,19 @@ class SemanticSubtitleMergerTest {
     }
 
     @Test
-    fun tripleSpaceRepliesRejectSkippedReorderedChangedOrSplitText() {
+    fun tripleSpaceRepliesWithAtMostFiveBadCuesAreTolerated() {
         val source = subtitleEntries(3).mapIndexed { index, entry ->
             entry.copy(text = listOf("123", "45", "123")[index])
         }
         for (reply in listOf("12345", "45123   123", "12346   123", "12345   12   3", "12345   123   额外")) {
-            assertThrows(IOException::class.java) {
+            assertTrue(runCatching {
                 SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, reply)
-            }
+            }.isSuccess)
         }
     }
 
     @Test
-    fun tripleSpaceGroupsCarryOnlyTheFinalGroupAcrossBatchesAndRetries() = runBlocking {
+    fun tripleSpaceGroupsKeepMalformedTailWithinTolerance() = runBlocking {
         val source = subtitleEntries(301).toMutableList().apply {
             this[298] = this[298].copy(text = "123")
             this[299] = this[299].copy(text = "45")
@@ -215,25 +233,14 @@ class SemanticSubtitleMergerTest {
         }
         val session = SemanticSubtitleMerger.Session(source)
         val requests = mutableListOf<String>()
-        val failure = runCatching {
-            session.run { text ->
-                requests += text
-                if (requests.size == 1) {
-                    source.take(298).joinToString("   ") { it.text } + "   123,45!"
-                } else "12345"
-            }
-        }.exceptionOrNull()
-
-        assertEquals(IOException::class.java, failure?.javaClass)
-        assertEquals(300, session.processedCount)
-        assertEquals("123,45!\n123", requests[1])
         val merged = session.run { text ->
-            assertEquals(requests[1], text)
-            "1，23 45 123！"
+            requests += text
+            if (requests.size == 1) {
+                source.take(298).joinToString("   ") { it.text } + "   123,45!"
+            } else "12345"
         }
-        assertEquals(source.take(298) + source[298].copy(
-            text = "12345123", endTime = source[300].endTime
-        ), merged)
+        assertEquals(source.size - 1, merged.size)
+        assertEquals(2, requests.size)
     }
 
     @Test
@@ -300,14 +307,12 @@ class SemanticSubtitleMergerTest {
     }
 
     @Test
-    fun unmatchedOrSplitSubtitlesFailInsteadOfBeingSilentlyKept() {
+    fun unmatchedOrSplitSubtitlesUpToFiveAreKeptAsOriginalCues() {
         val source = subtitleEntries(3).mapIndexed { index, entry ->
             entry.copy(text = listOf("12", "3 4", "56")[index])
         }
         for (response in listOf("12三四\n56", "123\n4\n56")) {
-            assertThrows(IOException::class.java) {
-                SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, response)
-            }
+            assertEquals(source, SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, response))
         }
     }
 
@@ -325,59 +330,54 @@ class SemanticSubtitleMergerTest {
     }
 
     @Test
-    fun missingOrExtraTextMakesTheWholeBatchFail() {
+    fun missingOrExtraTextWithinFiveCuesIsTolerated() {
         val source = subtitleEntries(3).mapIndexed { index, entry ->
             entry.copy(text = listOf("12", "3 4", "56")[index])
         }
         for (response in listOf("123 4", "合并后的字幕：\n123 4\n56", "123 4\n56\n处理完成")) {
-            assertThrows(IOException::class.java) {
+            assertTrue(runCatching {
                 SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, response)
-            }
+            }.isSuccess)
         }
     }
 
     @Test
-    fun missingRepeatedTextIsAnError() {
+    fun missingRepeatedTextWithinFiveCuesIsTolerated() {
         val source = subtitleEntries(4).mapIndexed { index, entry ->
             entry.copy(text = listOf("甲", "乙", "甲", "丙")[index])
         }
 
-        assertThrows(IOException::class.java) {
+        assertTrue(runCatching {
             SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, "乙\n甲丙")
-        }
+        }.isSuccess)
     }
 
     @Test
-    fun changedTextBetweenMatchesIsAnError() {
+    fun changedTextBetweenMatchesWithinFiveCuesIsTolerated() {
         val source = subtitleEntries(3).mapIndexed { index, entry ->
             entry.copy(text = listOf("12", "3 4", "56")[index])
         }
 
-        assertThrows(IOException::class.java) {
-            SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, "12新增内容3 4\n56")
-        }
+        assertEquals(source,
+            SemanticSubtitleMerger.mergeSubtitleEntriesByAiBoundaries(source, "12新增内容3 4\n56"))
     }
 
     @Test
-    fun changedCueDoesNotCommitAnyOfItsBatch() = runBlocking {
+    fun changedCueWithinTheToleranceDoesNotAbortTheBatch() = runBlocking {
         val source = subtitleEntries(600)
         val session = SemanticSubtitleMerger.Session(source)
         val progress = mutableListOf<Int>()
         var requestCount = 0
 
-        val failure = runCatching {
-            session.run(onProgress = { count, _ -> progress += count }) { text ->
-                requestCount++
-                text.replace("第150条", "第一百五十条")
-            }
-        }.exceptionOrNull()
+        val result = session.run(onProgress = { count, _ -> progress += count }) { text ->
+            requestCount++
+            text.replace("第150条", "第一百五十条")
+        }
 
-        assertEquals(IOException::class.java, failure?.javaClass)
-        assertEquals(1, requestCount)
-        assertEquals(0, session.processedCount)
-        assertEquals(listOf(0), progress)
-        val retried = session.run { it }
-        assertEquals(source, retried)
+        assertEquals(source, result)
+        assertEquals(2, requestCount)
+        assertEquals(600, session.processedCount)
+        assertEquals(listOf(0, 300, 600), progress)
     }
 
     @Test
@@ -534,26 +534,17 @@ class SemanticSubtitleMergerTest {
     }
 
     @Test
-    fun missingResponseTailRetriesTheSameBatch() = runBlocking {
+    fun missingResponseTailWithinToleranceKeepsTheOriginalCue() = runBlocking {
         val source = subtitleEntries(301)
         val session = SemanticSubtitleMerger.Session(source)
         val requests = mutableListOf<String>()
-        val failure = runCatching {
-            session.run { text ->
-                requests += text
-                text.substringBeforeLast('\n')
-            }
-        }.exceptionOrNull()
-
-        assertEquals(IOException::class.java, failure?.javaClass)
-        assertEquals(0, session.processedCount)
         val merged = session.run { text ->
             requests += text
-            text
+            text.substringBeforeLast('\n')
         }
 
-        assertEquals(requests[0], requests[1])
-        assertEquals("第300条\n第301条", requests[2])
+        assertEquals(301, session.processedCount)
+        assertEquals(2, requests.size)
         assertEquals(source, merged)
     }
 

@@ -123,6 +123,15 @@ object SemanticSubtitleMerger {
 
     private data class CueText(val text: String, val partLengths: List<Int>)
 
+    private data class TolerantCueMatch(
+        val start: Int,
+        val end: Int,
+        val groupStart: Int,
+        val groupEnd: Int
+    )
+
+    private const val MAX_TOLERATED_UNMATCHED_CUES = 5
+
     private fun matchingText(text: String): String = text.replace(matchingIgnoredCharacters, "")
 
     private fun responseGroups(text: String): Sequence<String> =
@@ -130,6 +139,15 @@ object SemanticSubtitleMerger {
             .filter { matchingText(it).isNotEmpty() }
 
     private fun collectBoundaries(
+        sourceTexts: List<String>,
+        aiText: String
+    ): Set<Int> = try {
+        collectStrictBoundaries(sourceTexts, aiText)
+    } catch (strictFailure: IOException) {
+        collectTolerantBoundaries(sourceTexts, aiText, strictFailure)
+    }
+
+    private fun collectStrictBoundaries(
         sourceTexts: List<String>,
         aiText: String
     ): Set<Int> {
@@ -178,6 +196,146 @@ object SemanticSubtitleMerger {
             val previous = matches[index - 1]
             val current = matches[index]
             if (previous.end == current.start && lineAt[previous.end - 1] == lineAt[current.start]) {
+                boundaries.remove(index)
+            }
+        }
+        return boundaries
+    }
+
+    /**
+     * Recover a small malformed part without allowing a later occurrence to satisfy an
+     * earlier cue. A candidate is chosen from left to right; candidates that overlap or
+     * move backwards form one failed range and are all kept as their source cues.
+     */
+    private fun collectTolerantBoundaries(
+        sourceTexts: List<String>,
+        aiText: String,
+        strictFailure: IOException
+    ): Set<Int> {
+        val groups = responseGroups(aiText).toList()
+        val normalizedGroups = groups.map(::matchingText)
+        val groupStarts = IntArray(normalizedGroups.size)
+        var responseLength = 0
+        normalizedGroups.forEachIndexed { index, group ->
+            groupStarts[index] = responseLength
+            responseLength += group.length
+        }
+        val response = normalizedGroups.joinToString("")
+        val groupAt = { position: Int ->
+            normalizedGroups.indices.firstOrNull { index ->
+                position < groupStarts[index] + normalizedGroups[index].length
+            } ?: normalizedGroups.lastIndex
+        }
+        val cues = sourceTexts.map { text -> matchingText(text) }
+        val occurrences = cues.map { cue ->
+            if (cue.isEmpty()) emptyList()
+            else buildList {
+                var searchFrom = 0
+                while (searchFrom <= response.length - cue.length) {
+                    val found = response.indexOf(cue, searchFrom)
+                    if (found < 0) break
+                    add(TolerantCueMatch(
+                        start = found,
+                        end = found + cue.length,
+                        groupStart = groupAt(found),
+                        groupEnd = groupAt(found + cue.length - 1)
+                    ))
+                    searchFrom = found + 1
+                }
+            }
+        }
+
+        val chosen = arrayOfNulls<TolerantCueMatch>(cues.size)
+        var cursor = 0
+        occurrences.forEachIndexed { index, candidates ->
+            val match = candidates.firstOrNull { it.start >= cursor }
+                ?: candidates.firstOrNull()
+            chosen[index] = match
+            if (match != null) cursor = match.end
+        }
+
+        val failed = mutableSetOf<Int>()
+        chosen.forEachIndexed { index, match ->
+            if (match == null || match.groupStart != match.groupEnd) failed += index
+        }
+        // A backward move or overlap proves that independent substring matches crossed
+        // positions. Keep the complete conflict interval, including its valid-looking cues.
+        val conflictGroupRanges = mutableListOf<IntRange>()
+        for (left in chosen.indices) {
+            val leftMatch = chosen[left] ?: continue
+            for (right in left + 1 until chosen.size) {
+                val rightMatch = chosen[right] ?: continue
+                if (rightMatch.start < leftMatch.start || rightMatch.start < leftMatch.end) {
+                    for (index in left..right) failed += index
+                    conflictGroupRanges += minOf(leftMatch.groupStart, rightMatch.groupStart)..
+                        maxOf(leftMatch.groupEnd, rightMatch.groupEnd)
+                }
+            }
+        }
+
+        // Once a candidate moved across positions, every cue represented by the affected
+        // response groups is unreliable. This catches 123/45/678/123 against 1245/678123:
+        // the first 123 was found in the later group, so all four cues stay unchanged.
+        conflictGroupRanges.forEach { range ->
+            chosen.forEachIndexed { index, match ->
+                if (match != null && match.groupEnd >= range.first && match.groupStart <= range.last) {
+                    failed += index
+                }
+            }
+        }
+
+        // A response group containing unmatched characters is not a valid merge group.
+        // Mark every source cue found in that group so the original cues are retained.
+        normalizedGroups.forEachIndexed { groupIndex, group ->
+            val groupStart = groupStarts[groupIndex]
+            val groupEnd = groupStart + group.length
+            val inGroup = chosen.mapIndexedNotNull { index, match ->
+                match?.takeIf { it.end > groupStart && it.start < groupEnd }
+                    ?.let { index to it }
+            }
+            if (inGroup.isEmpty()) {
+                // An entirely unknown group still belongs to the nearest source cue;
+                // retain that cue instead of silently accepting extra AI text.
+                val nearest = chosen.mapIndexedNotNull { index, match ->
+                    match?.let { index to it }
+                }.firstOrNull { it.second.start >= groupEnd }
+                    ?: chosen.mapIndexedNotNull { index, match -> match?.let { index to it } }
+                        .lastOrNull { it.second.end <= groupStart }
+                nearest?.first?.let { failed += it }
+                return@forEachIndexed
+            }
+            val ordered = inGroup.sortedBy { it.second.start }
+            var previous: Pair<Int, TolerantCueMatch>? = null
+            var coveredEnd = groupStart
+            ordered.forEach { current ->
+                val start = maxOf(current.second.start, groupStart)
+                val end = minOf(current.second.end, groupEnd)
+                if (start != coveredEnd) {
+                    // Keep only the cues adjacent to an unexplained response span;
+                    // a single changed cue must not make an entire large group fail.
+                    previous?.first?.let { failed += it }
+                    failed += current.first
+                }
+                coveredEnd = maxOf(coveredEnd, end)
+                previous = current
+            }
+            if (coveredEnd != groupEnd) {
+                previous?.first?.let { failed += it }
+            }
+        }
+
+        if (failed.size > MAX_TOLERATED_UNMATCHED_CUES) {
+            throw strictFailure
+        }
+
+        val boundaries = (0..sourceTexts.size).toMutableSet()
+        for (index in 1 until sourceTexts.size) {
+            if (index - 1 in failed || index in failed) continue
+            val previous = chosen[index - 1] ?: continue
+            val current = chosen[index] ?: continue
+            if (previous.end == current.start &&
+                previous.groupEnd == current.groupStart
+            ) {
                 boundaries.remove(index)
             }
         }
