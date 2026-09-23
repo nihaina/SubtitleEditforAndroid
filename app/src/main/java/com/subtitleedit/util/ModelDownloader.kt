@@ -41,6 +41,7 @@ object ModelDownloader {
     private val senseVoiceMutex = Mutex()
     private val whisperMutex = Mutex()
     private val parakeetMutex = Mutex()
+    private val qwen3AsrMutex = Mutex()
     private val demixMutex = Mutex()
 
     data class Progress(
@@ -103,6 +104,21 @@ object ModelDownloader {
         val architecture: ParakeetArchitecture,
         val directoryName: String,
         val url: String,
+        val sizeLabel: String
+    )
+
+    data class Qwen3AsrFiles(
+        val convFrontend: File,
+        val encoder: File,
+        val decoder: File,
+        val tokenizer: File
+    )
+
+    data class Qwen3AsrModelOption(
+        val id: String,
+        val displayName: String,
+        val directoryName: String,
+        val remoteModelDirectory: String,
         val sizeLabel: String
     )
 
@@ -193,6 +209,30 @@ object ModelDownloader {
     )
 
     val PARAKEET_MODELS = listOf(PARAKEET_TDT_MODEL, PARAKEET_CTC_JA_MODEL)
+
+    val QWEN3_ASR_0_6B_MODEL = Qwen3AsrModelOption(
+        id = "0.6b",
+        displayName = "0.6B INT8",
+        directoryName = "sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25",
+        remoteModelDirectory = "model_0.6B",
+        sizeLabel = "约 953 MB"
+    )
+    val QWEN3_ASR_1_7B_MODEL = Qwen3AsrModelOption(
+        id = "1.7b",
+        displayName = "1.7B INT8",
+        directoryName = "qwen3-asr-onnx-1.7B-int8",
+        remoteModelDirectory = "model_1.7B",
+        sizeLabel = "约 2.5 GB"
+    )
+    val QWEN3_ASR_MODELS = listOf(QWEN3_ASR_0_6B_MODEL, QWEN3_ASR_1_7B_MODEL)
+    private val qwen3TokenizerFiles = setOf(
+        "chat_template.json",
+        "config.json",
+        "merges.txt",
+        "preprocessor_config.json",
+        "tokenizer_config.json",
+        "vocab.json"
+    )
 
     @Suppress("DEPRECATION")
     fun modelsDirectory(): File = File(
@@ -389,6 +429,73 @@ object ModelDownloader {
             } catch (e: Exception) {
                 stagingDir.deleteRecursively()
                 archive.delete()
+                throw e
+            }
+        }
+    }
+
+    suspend fun downloadQwen3Asr(
+        option: Qwen3AsrModelOption,
+        onProgress: (Progress) -> Unit
+    ): Qwen3AsrFiles = qwen3AsrMutex.withLock {
+        withContext(kotlinx.coroutines.Dispatchers.IO) {
+            require(option in QWEN3_ASR_MODELS) { "不支持的 Qwen3-ASR 模型规格" }
+            val modelsDir = requireModelsDirectory()
+            val targetDir = File(modelsDir, option.directoryName)
+            val stagingDir = File(modelsDir, ".qwen3_${option.id}_modelscope_downloading")
+            val legacyStagingDir = File(modelsDir, ".qwen3_${option.id}_downloading")
+            val legacyArchive = File(modelsDir, "${option.directoryName}.tar.bz2")
+            recoverQwen3AsrBackup(targetDir, option)
+            findQwen3AsrFiles(targetDir)?.let {
+                onProgress(Progress("检测到本地 Qwen3-ASR ${option.displayName} 模型，跳过下载并直接导入"))
+                return@withContext it
+            }
+            if (!stagingDir.exists() && !stagingDir.mkdirs()) {
+                throw IOException("无法创建 Qwen3-ASR 模型下载目录")
+            }
+
+            try {
+                val baseUrl = "https://modelscope.cn/models/zengshuishui/Qwen3-ASR-onnx/resolve/master"
+                val modelDir = File(stagingDir, option.remoteModelDirectory)
+                val tokenizerDir = File(stagingDir, "tokenizer")
+                if ((!modelDir.exists() && !modelDir.mkdirs()) ||
+                    (!tokenizerDir.exists() && !tokenizerDir.mkdirs())
+                ) {
+                    throw IOException("无法创建 Qwen3-ASR 文件目录")
+                }
+                val modelPath = option.remoteModelDirectory
+                val files = listOf(
+                    Triple("$modelPath/conv_frontend.onnx", modelDir, "conv_frontend.onnx"),
+                    Triple("$modelPath/encoder.int8.onnx", modelDir, "encoder.int8.onnx"),
+                    Triple("$modelPath/decoder.int8.onnx", modelDir, "decoder.int8.onnx")
+                ) + qwen3TokenizerFiles.map { name -> Triple("tokenizer/$name", tokenizerDir, name) }
+                files.forEach { (path, parent, name) ->
+                    val destination = File(parent, name)
+                    if (!destination.isFile || destination.length() == 0L) {
+                        downloadFile(
+                            "$baseUrl/$path",
+                            destination,
+                            "正在下载 Qwen3-ASR ${option.displayName}：$name",
+                            onProgress
+                        )
+                    }
+                }
+
+                val stagedFiles = findQwen3AsrFiles(stagingDir)
+                    ?: throw IOException("Qwen3-ASR 模型文件不完整或损坏")
+                installQwen3AsrDirectory(stagingDir, targetDir, option)
+                val installedFiles = findQwen3AsrFiles(targetDir)
+                    ?: throw IOException("Qwen3-ASR 模型安装后校验失败")
+                legacyStagingDir.deleteRecursively()
+                legacyArchive.delete()
+                onProgress(Progress("Qwen3-ASR ${option.displayName} 模型已下载并导入"))
+                installedFiles
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (stagingDir.exists() && findQwen3AsrFiles(stagingDir) == null) {
+                    onProgress(Progress("Qwen3-ASR 下载未完成，可重试继续下载"))
+                }
                 throw e
             }
         }
@@ -644,6 +751,62 @@ object ModelDownloader {
             .minByOrNull { tokenDistance(model, it) }
             ?: return null
         return SenseVoiceFiles(model, tokens)
+    }
+
+    internal fun findQwen3AsrFiles(root: File): Qwen3AsrFiles? {
+        if (!root.isDirectory) return null
+        val files = runCatching { root.walkTopDown().filter { it.isFile }.toList() }.getOrNull()
+            ?: return null
+        fun modelFile(name: String): File? = files.firstOrNull {
+            it.name.equals(name, ignoreCase = true) && it.length() >= MIN_ONNX_SIZE
+        }
+        val convFrontend = modelFile("conv_frontend.onnx") ?: return null
+        val encoder = modelFile("encoder.int8.onnx") ?: return null
+        val decoder = modelFile("decoder.int8.onnx") ?: return null
+        if (setOf(convFrontend.parentFile, encoder.parentFile, decoder.parentFile).size != 1) return null
+        val tokenizer = files.asSequence()
+            .filter { it.name.lowercase() in qwen3TokenizerFiles && it.length() > 0L }
+            .groupBy { it.parentFile }
+            .entries
+            .firstOrNull { (_, children) -> children.map { it.name.lowercase() }.toSet().containsAll(qwen3TokenizerFiles) }
+            ?.key ?: return null
+        return Qwen3AsrFiles(convFrontend, encoder, decoder, tokenizer)
+    }
+
+    private fun installQwen3AsrDirectory(
+        source: File,
+        destination: File,
+        option: Qwen3AsrModelOption
+    ) {
+        val backup = File(destination.parentFile, ".qwen3_${option.id}_backup")
+        backup.deleteRecursively()
+        if (destination.exists() && !destination.renameTo(backup)) {
+            throw IOException("无法备份旧的 Qwen3-ASR 模型目录")
+        }
+        try {
+            moveDirectory(source, destination)
+            if (findQwen3AsrFiles(destination) == null) throw IOException("安装后的 Qwen3-ASR 文件校验失败")
+            backup.deleteRecursively()
+        } catch (e: Exception) {
+            destination.deleteRecursively()
+            if (backup.exists()) backup.renameTo(destination)
+            throw e
+        }
+    }
+
+    private fun recoverQwen3AsrBackup(destination: File, option: Qwen3AsrModelOption) {
+        val backup = File(destination.parentFile, ".qwen3_${option.id}_backup")
+        if (!backup.exists()) return
+        if (findQwen3AsrFiles(destination) != null) {
+            backup.deleteRecursively()
+            return
+        }
+        if (findQwen3AsrFiles(backup) != null) {
+            destination.deleteRecursively()
+            if (!backup.renameTo(destination)) moveDirectory(backup, destination)
+        } else {
+            backup.deleteRecursively()
+        }
     }
 
     private fun senseVoiceModelPriority(fileName: String): Int = when {

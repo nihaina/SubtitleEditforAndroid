@@ -118,6 +118,7 @@ class WhisperRecognizer(
                 isSenseVoiceNpu() -> "libmodel.so"
                 isSenseVoice() -> "sensevoice.onnx"
                 isParakeetCtc() -> "model.int8.onnx"
+                isQwen3Asr() -> "encoder.int8.onnx"
                 else -> "encoder.int8.onnx"
             }
             val resolvedEncoderFile = resolveModelPath(
@@ -138,12 +139,16 @@ class WhisperRecognizer(
             } else {
                 null
             }
-            val joinerFile = if (isParakeetTdt()) {
-                resolveModelPath(joinerPath, "joiner.int8.onnx")
+            val joinerFile = if (isParakeetTdt() || isQwen3Asr()) {
+                resolveModelPath(
+                    joinerPath,
+                    if (isQwen3Asr()) "conv_frontend.onnx" else "joiner.int8.onnx"
+                )
             } else {
                 null
             }
-            val tokensFile = resolveModelPath(tokensPath, "tokens.txt")
+            val tokenizerDirectory = if (isQwen3Asr()) resolveModelDirectory(tokensPath) else null
+            val tokensFile = if (isQwen3Asr()) null else resolveModelPath(tokensPath, "tokens.txt")
 
             if (encoderFile == null) {
                 return Result.failure(Exception("无法读取${if (isSingleFileModel()) "模型" else " encoder"}文件"))
@@ -154,8 +159,14 @@ class WhisperRecognizer(
             if (isParakeetTdt() && joinerFile == null) {
                 return Result.failure(Exception("无法读取 joiner 文件"))
             }
-            if (tokensFile == null) {
+            if (isQwen3Asr() && joinerFile == null) {
+                return Result.failure(Exception("无法读取 Qwen3-ASR conv_frontend 文件"))
+            }
+            if (!isQwen3Asr() && tokensFile == null) {
                 return Result.failure(Exception("无法读取 tokens 文件"))
+            }
+            if (isQwen3Asr() && tokenizerDirectory == null) {
+                return Result.failure(Exception("无法读取 Qwen3-ASR tokenizer 文件夹"))
             }
             Log.d(TAG, "模型文件准备完成:")
             if (useNpuContextBinary) {
@@ -168,7 +179,8 @@ class WhisperRecognizer(
             }
             decoderFile?.let { Log.d(TAG, "  decoder: $it") }
             joinerFile?.let { Log.d(TAG, "  joiner: $it") }
-            Log.d(TAG, "  tokens: $tokensFile")
+            if (isQwen3Asr()) Log.d(TAG, "  tokenizer: $tokenizerDirectory")
+            else Log.d(TAG, "  tokens: $tokensFile")
 
             if (useVad) {
                 initializeVadInstances()
@@ -211,7 +223,7 @@ class WhisperRecognizer(
                                 QnnConfig()
                             }
                         ),
-                        tokens = tokensFile,
+                        tokens = tokensFile.orEmpty(),
                         numThreads = if (qnn) 1 else 4,
                         debug = true,
                         provider = if (qnn) "qnn" else "cpu"
@@ -223,15 +235,27 @@ class WhisperRecognizer(
                         decoder = decoderFile!!,
                         joiner = joinerFile!!
                     ),
-                    tokens = tokensFile,
+                    tokens = tokensFile.orEmpty(),
                     numThreads = settingsManager().getSpeechWhisperThreads(),
                     debug = true,
                     provider = "cpu",
                     modelType = "nemo_transducer"
                 )
+                isQwen3Asr() -> OfflineModelConfig(
+                    qwen3Asr = OfflineQwen3AsrModelConfig(
+                        convFrontend = joinerFile!!,
+                        encoder = encoderFile,
+                        decoder = decoderFile!!,
+                        tokenizer = tokenizerDirectory!!
+                    ),
+                    tokens = "",
+                    numThreads = settingsManager().getSpeechWhisperThreads(),
+                    debug = true,
+                    provider = "cpu"
+                )
                 isParakeetCtc() -> OfflineModelConfig(
                     nemo = OfflineNemoEncDecCtcModelConfig(model = encoderFile),
-                    tokens = tokensFile,
+                    tokens = tokensFile.orEmpty(),
                     numThreads = settingsManager().getSpeechWhisperThreads(),
                     debug = true,
                     provider = "cpu"
@@ -246,7 +270,7 @@ class WhisperRecognizer(
                         enableTokenTimestamps = true,
                         enableSegmentTimestamps = false
                     ),
-                    tokens = tokensFile,
+                    tokens = tokensFile.orEmpty(),
                     numThreads = settingsManager().getSpeechWhisperThreads(),
                     debug = true,
                     provider = "cpu"
@@ -472,6 +496,15 @@ class WhisperRecognizer(
         }
 
         return copyUriToCache(uri, fileName)?.absolutePath
+    }
+
+    private fun resolveModelDirectory(uriString: String): String? {
+        val uri = Uri.parse(uriString)
+        if (uri.scheme.isNullOrEmpty() || uri.scheme == "file") {
+            val directory = File(uri.path ?: uriString)
+            return directory.takeIf { it.isDirectory }?.absolutePath
+        }
+        return null
     }
 
     /** 仅用于不支持文件描述符的内容提供方。 */
@@ -847,18 +880,22 @@ class WhisperRecognizer(
                                 "切分间隔 ${tokenTimestampGapMs}ms"
                         )
                     }
-                } else if (usesSegmentLevelResult() && segmentResultTimeRange != null) {
+                } else if (usesSegmentLevelResult()) {
+                    val resultRange = segmentResultTimeRange ?: SegmentTimeRange(
+                        startTimeMs,
+                        startTimeMs + audioData.size.toLong() * 1000L / SAMPLE_RATE
+                    )
                     segments.add(
                         SubtitleSegment(
-                            startTime = segmentResultTimeRange.startTimeMs,
-                            endTime = segmentResultTimeRange.endTimeMs,
+                            startTime = resultRange.startTimeMs,
+                            endTime = resultRange.endTimeMs,
                             text = text
                         )
                     )
                     Log.d(
                         TAG,
-                        "段级识别结果: ${segmentResultTimeRange.startTimeMs}ms - " +
-                            "${segmentResultTimeRange.endTimeMs}ms, 文本: ${text.take(50)}..."
+                        "段级识别结果: ${resultRange.startTimeMs}ms - " +
+                            "${resultRange.endTimeMs}ms, 文本: ${text.take(50)}..."
                     )
                 } else {
                     // Whisper 返回的时间戳是相对于当前段的
@@ -1158,13 +1195,17 @@ class WhisperRecognizer(
 
     private fun isParakeetCtc(): Boolean = modelType == SettingsManager.ASR_MODEL_PARAKEET_CTC_JA
 
+    private fun isQwen3Asr(): Boolean = modelType == SettingsManager.ASR_MODEL_QWEN3_ASR
+
     private fun isParakeet(): Boolean = isParakeetTdt() || isParakeetCtc()
 
     private fun usesSegmentLevelResult(): Boolean =
-        (isSenseVoice() && !shouldUseTokenTimestampExperiment()) || isParakeet()
+        (isSenseVoice() && !shouldUseTokenTimestampExperiment()) || isParakeet() || isQwen3Asr()
 
     private fun shouldUseTokenTimestampExperiment(): Boolean =
-        tokenTimestampExperiment && modelType != SettingsManager.ASR_MODEL_WHISPER
+        tokenTimestampExperiment &&
+            modelType != SettingsManager.ASR_MODEL_WHISPER &&
+            !isQwen3Asr()
 
     private fun shouldUseDynamicPadding(): Boolean =
         settingsManager().isSpeechVadDynamicPaddingEnabled()
@@ -1180,6 +1221,7 @@ class WhisperRecognizer(
         SettingsManager.ASR_MODEL_SENSEVOICE -> "SenseVoice"
         SettingsManager.ASR_MODEL_PARAKEET_TDT -> "Parakeet TDT"
         SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> "Parakeet CTC 日语"
+        SettingsManager.ASR_MODEL_QWEN3_ASR -> "Qwen3-ASR"
         else -> "Whisper"
     }
 

@@ -259,6 +259,13 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                 joinerPath = ""
                 tokensPath = settingsManager.getParakeetCtcTokensPath()
             }
+            SettingsManager.ASR_MODEL_QWEN3_ASR -> {
+                val variant = settingsManager.getQwen3AsrModelVariant()
+                encoderPath = settingsManager.getQwen3AsrEncoderPath(variant)
+                decoderPath = settingsManager.getQwen3AsrDecoderPath(variant)
+                joinerPath = settingsManager.getQwen3AsrConvFrontendPath(variant)
+                tokensPath = settingsManager.getQwen3AsrTokenizerPath(variant)
+            }
             else -> {
                 encoderPath = settingsManager.getWhisperEncoderPath()
                 decoderPath = settingsManager.getWhisperDecoderPath()
@@ -857,7 +864,10 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         if (modelType == SettingsManager.ASR_MODEL_PARAKEET_TDT) {
             appendRuntimeLog("  Joiner：${displayModelPath(joinerPath)}")
         }
-        appendRuntimeLog("  Tokens：${displayModelPath(tokensPath)}")
+        if (modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) {
+            appendRuntimeLog("  Conv Frontend：${displayModelPath(joinerPath)}")
+        }
+        appendRuntimeLog("  ${if (modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) "Tokenizer" else "Tokens"}：${displayModelPath(tokensPath)}")
         if (modelType != SettingsManager.ASR_MODEL_SENSEVOICE) {
             appendRuntimeLog("  识别线程：${settingsManager.getSpeechWhisperThreads()}")
         }
@@ -946,6 +956,8 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             SettingsManager.ASR_MODEL_SENSEVOICE,
             SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> true
             SettingsManager.ASR_MODEL_PARAKEET_TDT -> decoderPath.isNotBlank() && joinerPath.isNotBlank()
+            SettingsManager.ASR_MODEL_QWEN3_ASR ->
+                decoderPath.isNotBlank() && joinerPath.isNotBlank() && tokensPath.isNotBlank()
             else -> decoderPath.isNotBlank()
         }
     }
@@ -956,6 +968,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         SettingsManager.ASR_MODEL_SENSEVOICE -> "SenseVoice"
         SettingsManager.ASR_MODEL_PARAKEET_TDT -> "Parakeet TDT 0.6B v3"
         SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> "Parakeet CTC 0.6B 日语"
+        SettingsManager.ASR_MODEL_QWEN3_ASR -> "Qwen3-ASR"
         else -> "Whisper"
     }
 
@@ -988,6 +1001,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     private fun shouldUseTokenTimestampExperiment(): Boolean =
         settingsManager.isSpeechTokenTimestampEnabled() &&
             modelType != SettingsManager.ASR_MODEL_WHISPER &&
+            modelType != SettingsManager.ASR_MODEL_QWEN3_ASR &&
             shouldPrepareTimeline()
 
     private fun tokenTimestampModelPath(): String =

@@ -12,6 +12,7 @@ internal interface ModelRepository {
     val parakeetTdtModel: ModelDownloader.ParakeetModelOption
     val parakeetCtcJaModel: ModelDownloader.ParakeetModelOption
     val parakeetModels: List<ModelDownloader.ParakeetModelOption>
+    val qwen3AsrModels: List<ModelDownloader.Qwen3AsrModelOption>
     val separationDirectoryName: String
 
     suspend fun downloadSenseVoice(
@@ -28,6 +29,11 @@ internal interface ModelRepository {
         option: ModelDownloader.ParakeetModelOption,
         onProgress: (ModelDownloader.Progress) -> Unit
     ): ModelDownloader.ParakeetFiles
+
+    suspend fun downloadQwen3Asr(
+        option: ModelDownloader.Qwen3AsrModelOption,
+        onProgress: (ModelDownloader.Progress) -> Unit
+    ): ModelDownloader.Qwen3AsrFiles
 
     suspend fun downloadDemixGeneralModel(
         onProgress: (ModelDownloader.Progress) -> Unit

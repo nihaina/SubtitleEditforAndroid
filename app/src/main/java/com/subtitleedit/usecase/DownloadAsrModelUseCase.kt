@@ -42,6 +42,22 @@ internal sealed class DownloadedAsrModel {
             ModelDownloader.ParakeetArchitecture.CTC -> listOf(requireNotNull(files.model), files.tokens)
         }
     }
+
+    data class Qwen3Asr(
+        val option: ModelDownloader.Qwen3AsrModelOption,
+        val files: ModelDownloader.Qwen3AsrFiles
+    ) : DownloadedAsrModel() {
+        override val modelFile get() = files.encoder
+        override val requiredFiles get() = listOf(
+            files.convFrontend, files.encoder, files.decoder,
+            File(files.tokenizer, "config.json"),
+            File(files.tokenizer, "tokenizer_config.json"),
+            File(files.tokenizer, "vocab.json"),
+            File(files.tokenizer, "merges.txt"),
+            File(files.tokenizer, "chat_template.json"),
+            File(files.tokenizer, "preprocessor_config.json")
+        )
+    }
 }
 
 internal class DownloadAsrModelUseCase(
@@ -73,6 +89,11 @@ internal class DownloadAsrModelUseCase(
                 requireNotNull(option) { "不支持的 Parakeet 模型：$optionId" }
                 DownloadedAsrModel.Parakeet(option, repository.downloadParakeet(option, onProgress))
             }
+            KIND_QWEN3_ASR -> {
+                val option = repository.qwen3AsrModels.firstOrNull { it.id == optionId }
+                requireNotNull(option) { "不支持的 Qwen3-ASR 模型：$optionId" }
+                DownloadedAsrModel.Qwen3Asr(option, repository.downloadQwen3Asr(option, onProgress))
+            }
             else -> throw IllegalArgumentException("不支持的模型任务：$kind")
         }
         currentCoroutineContext().ensureActive()
@@ -87,6 +108,7 @@ internal class DownloadAsrModelUseCase(
         const val KIND_SENSEVOICE = "sensevoice"
         const val KIND_WHISPER = "whisper"
         const val KIND_PARAKEET = "parakeet"
-        val KINDS = setOf(KIND_SENSEVOICE, KIND_WHISPER, KIND_PARAKEET)
+        const val KIND_QWEN3_ASR = "qwen3_asr"
+        val KINDS = setOf(KIND_SENSEVOICE, KIND_WHISPER, KIND_PARAKEET, KIND_QWEN3_ASR)
     }
 }

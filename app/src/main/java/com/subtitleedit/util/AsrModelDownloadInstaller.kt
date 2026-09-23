@@ -74,6 +74,15 @@ internal class AsrModelDownloadInstaller(
                 }
                 settings.setAsrModelType(downloaded.option.modelType)
             }
+            is DownloadedAsrModel.Qwen3Asr -> {
+                val variant = downloaded.option.id
+                settings.setQwen3AsrModelVariant(variant)
+                settings.setQwen3AsrConvFrontendPath(Uri.fromFile(downloaded.files.convFrontend).toString(), variant)
+                settings.setQwen3AsrEncoderPath(Uri.fromFile(downloaded.files.encoder).toString(), variant)
+                settings.setQwen3AsrDecoderPath(Uri.fromFile(downloaded.files.decoder).toString(), variant)
+                settings.setQwen3AsrTokenizerPath(Uri.fromFile(downloaded.files.tokenizer).toString(), variant)
+                settings.setAsrModelType(SettingsManager.ASR_MODEL_QWEN3_ASR)
+            }
         }
     }
 

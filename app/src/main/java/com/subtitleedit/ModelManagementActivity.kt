@@ -26,6 +26,7 @@ import androidx.viewpager.widget.ViewPager
 import com.google.android.material.card.MaterialCardView
 import com.subtitleedit.databinding.ActivityModelManagementBinding
 import com.subtitleedit.repository.ModelRepository
+import com.subtitleedit.util.ModelDownloader
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SenseVoiceNpuModelImporter
 import com.subtitleedit.util.SettingsManager
@@ -219,6 +220,15 @@ class ModelManagementActivity : AppCompatActivity() {
                                 calculateSize(file)
                             )
                         }
+                        file.isDirectory && modelRepository.qwen3AsrModels.any { it.directoryName == file.name } -> {
+                            val option = modelRepository.qwen3AsrModels.first { it.directoryName == file.name }
+                            items += ModelItem(
+                                "Qwen3-ASR 模型",
+                                "Qwen3-ASR ${option.displayName}",
+                                file,
+                                calculateSize(file)
+                            )
+                        }
                         file.isDirectory && file.name == modelRepository.separationDirectoryName -> {
                             file.listFiles().orEmpty().filterNot { it.name.startsWith(".") }.forEach { model ->
                                 items += ModelItem("人声分离模型", model.name, model, calculateSize(model))
@@ -244,8 +254,9 @@ class ModelManagementActivity : AppCompatActivity() {
             "SenseVoice 模型" to 0,
             "Whisper 模型" to 1,
             "Parakeet 模型" to 2,
-            "人声分离模型" to 3,
-            "其他模型文件" to 4
+            "Qwen3-ASR 模型" to 3,
+            "人声分离模型" to 4,
+            "其他模型文件" to 5
         )
         return items.sortedWith(
             compareBy<ModelItem> { categoryOrder[it.category] ?: Int.MAX_VALUE }
@@ -413,6 +424,17 @@ class ModelManagementActivity : AppCompatActivity() {
         )
         if (parakeetCtcPaths.any { pointsInsideTarget(it, target) }) {
             settingsManager.clearParakeetCtcModelPaths()
+        }
+        ModelDownloader.QWEN3_ASR_MODELS.forEach { option ->
+            val qwen3Paths = listOf(
+                settingsManager.getQwen3AsrEncoderPath(option.id),
+                settingsManager.getQwen3AsrDecoderPath(option.id),
+                settingsManager.getQwen3AsrConvFrontendPath(option.id),
+                settingsManager.getQwen3AsrTokenizerPath(option.id)
+            )
+            if (qwen3Paths.any { pointsInsideTarget(it, target) }) {
+                settingsManager.clearQwen3AsrModelPaths(option.id)
+            }
         }
         if (pointsInsideTarget(settingsManager.getVadModelPath(), target)) {
             settingsManager.setVadModelPath("")

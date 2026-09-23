@@ -81,6 +81,13 @@ internal class EditorTranscribeController(
                 joinerPath = ""
                 tokensPath = settings.getParakeetCtcTokensPath()
             }
+            SettingsManager.ASR_MODEL_QWEN3_ASR -> {
+                val variant = settings.getQwen3AsrModelVariant()
+                encoderPath = settings.getQwen3AsrEncoderPath(variant)
+                decoderPath = settings.getQwen3AsrDecoderPath(variant)
+                joinerPath = settings.getQwen3AsrConvFrontendPath(variant)
+                tokensPath = settings.getQwen3AsrTokenizerPath(variant)
+            }
             else -> {
                 encoderPath = settings.getWhisperEncoderPath()
                 decoderPath = settings.getWhisperDecoderPath()
@@ -91,6 +98,8 @@ internal class EditorTranscribeController(
         if (encoderPath.isBlank() || tokensPath.isBlank() ||
             (modelType == SettingsManager.ASR_MODEL_WHISPER && decoderPath.isBlank()) ||
             (modelType == SettingsManager.ASR_MODEL_PARAKEET_TDT &&
+                (decoderPath.isBlank() || joinerPath.isBlank())) ||
+            (modelType == SettingsManager.ASR_MODEL_QWEN3_ASR &&
                 (decoderPath.isBlank() || joinerPath.isBlank()))
         ) {
             showMessage("请先在模型管理中设置识别模型")

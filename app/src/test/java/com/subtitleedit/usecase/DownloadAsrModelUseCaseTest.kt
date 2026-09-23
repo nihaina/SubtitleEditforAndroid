@@ -66,6 +66,27 @@ class DownloadAsrModelUseCaseTest {
     }
 
     @Test
+    fun qwen3AsrVariantsDownloadAndSelectCompleteModelBundles() = runBlocking {
+        val repository = FakeRepository()
+        val selected = mutableListOf<DownloadedAsrModel>()
+        val progress = mutableListOf<ModelDownloader.Progress>()
+        val useCase = useCase(repository, selected)
+
+        repository.qwen3AsrModels.forEach { option ->
+            val output = useCase(DownloadAsrModelUseCase.KIND_QWEN3_ASR, option.id, progress::add)
+            val result = selected.last() as DownloadedAsrModel.Qwen3Asr
+            assertEquals(option, result.option)
+            assertEquals(result.files.encoder, output)
+            assertEquals(9, result.requiredFiles.size)
+        }
+
+        assertEquals(repository.qwen3AsrModels.map { it.id }, repository.requestedOptions)
+        assertEquals(2, selected.size)
+        assertTrue(progress.all { it == repository.progress })
+        assertEquals(2, progress.size)
+    }
+
+    @Test
     fun unknownKindsAndVariantsFailWithoutDownloadingOrChangingSelection() = runBlocking {
         val repository = FakeRepository()
         val selected = mutableListOf<DownloadedAsrModel>()
@@ -148,6 +169,17 @@ class DownloadAsrModelUseCaseTest {
         val whisperFiles = ModelDownloader.WhisperFiles(
             modelFile("encoder.onnx"), modelFile("decoder.onnx"), modelFile("tokens.txt")
         )
+        val qwen3AsrFiles = ModelDownloader.Qwen3AsrFiles(
+            convFrontend = modelFile("conv_frontend.onnx"),
+            encoder = modelFile("encoder.int8.onnx"),
+            decoder = modelFile("decoder.int8.onnx"),
+            tokenizer = temporaryFolder.newFolder().apply {
+                listOf(
+                    "config.json", "tokenizer_config.json", "vocab.json", "merges.txt",
+                    "chat_template.json", "preprocessor_config.json"
+                ).forEach { File(this, it).writeText("tokenizer") }
+            }
+        )
 
         override suspend fun downloadWhisper(
             option: ModelDownloader.WhisperModelOption,
@@ -174,6 +206,16 @@ class DownloadAsrModelUseCaseTest {
             } else {
                 ModelDownloader.ParakeetFiles(model = modelFile("model.onnx"), tokens = modelFile("tokens.txt"))
             }
+        }
+
+        override suspend fun downloadQwen3Asr(
+            option: ModelDownloader.Qwen3AsrModelOption,
+            onProgress: (ModelDownloader.Progress) -> Unit
+        ): ModelDownloader.Qwen3AsrFiles {
+            requestedOptions.add(option.id)
+            onProgress(progress)
+            afterDownload()
+            return qwen3AsrFiles
         }
     }
 }

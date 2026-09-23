@@ -71,6 +71,11 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_PARAKEET_TDT_TOKENS_PATH = "parakeet_tdt_tokens_path"
         private const val KEY_PARAKEET_CTC_MODEL_PATH = "parakeet_ctc_model_path"
         private const val KEY_PARAKEET_CTC_TOKENS_PATH = "parakeet_ctc_tokens_path"
+        private const val KEY_QWEN3_ASR_ENCODER_PATH = "qwen3_asr_encoder_path"
+        private const val KEY_QWEN3_ASR_DECODER_PATH = "qwen3_asr_decoder_path"
+        private const val KEY_QWEN3_ASR_CONV_FRONTEND_PATH = "qwen3_asr_conv_frontend_path"
+        private const val KEY_QWEN3_ASR_TOKENIZER_PATH = "qwen3_asr_tokenizer_path"
+        private const val KEY_QWEN3_ASR_MODEL_VARIANT = "qwen3_asr_model_variant"
         private const val KEY_VAD_MODEL_PATH = "vad_model_path"
         private const val KEY_VAD_USE_BUILT_IN_MODEL = "vad_use_built_in_model"
         private const val KEY_VAD_THRESHOLD = "vad_threshold"
@@ -131,6 +136,7 @@ class SettingsManager private constructor(context: Context) {
         const val ASR_MODEL_SENSEVOICE = "sensevoice"
         const val ASR_MODEL_PARAKEET_TDT = "parakeet_tdt"
         const val ASR_MODEL_PARAKEET_CTC_JA = "parakeet_ctc_ja"
+        const val ASR_MODEL_QWEN3_ASR = "qwen3_asr"
 
         const val SENSEVOICE_PROVIDER_CPU = "cpu"
         const val SENSEVOICE_PROVIDER_NPU = "npu"
@@ -143,7 +149,8 @@ class SettingsManager private constructor(context: Context) {
             ASR_MODEL_WHISPER,
             ASR_MODEL_SENSEVOICE,
             ASR_MODEL_PARAKEET_TDT,
-            ASR_MODEL_PARAKEET_CTC_JA
+            ASR_MODEL_PARAKEET_CTC_JA,
+            ASR_MODEL_QWEN3_ASR
         )
 
         val TRANSCRIPTION_LANGUAGE_OPTIONS = listOf(
@@ -658,6 +665,58 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit()
             .putString(KEY_PARAKEET_CTC_MODEL_PATH, "")
             .putString(KEY_PARAKEET_CTC_TOKENS_PATH, "")
+            .apply()
+    }
+
+    fun getQwen3AsrModelVariant(): String =
+        prefs.getString(KEY_QWEN3_ASR_MODEL_VARIANT, ModelDownloader.QWEN3_ASR_0_6B_MODEL.id)
+            ?.takeIf { it in ModelDownloader.QWEN3_ASR_MODELS.map(ModelDownloader.Qwen3AsrModelOption::id) }
+            ?: ModelDownloader.QWEN3_ASR_0_6B_MODEL.id
+
+    fun setQwen3AsrModelVariant(variant: String) {
+        val normalized = variant.takeIf {
+            it in ModelDownloader.QWEN3_ASR_MODELS.map(ModelDownloader.Qwen3AsrModelOption::id)
+        } ?: ModelDownloader.QWEN3_ASR_0_6B_MODEL.id
+        prefs.edit().putString(KEY_QWEN3_ASR_MODEL_VARIANT, normalized).apply()
+    }
+
+    private fun qwen3AsrPathKey(key: String, variant: String = getQwen3AsrModelVariant()): String =
+        "$key.$variant"
+
+    fun getQwen3AsrEncoderPath(variant: String = getQwen3AsrModelVariant()): String =
+        prefs.getString(qwen3AsrPathKey(KEY_QWEN3_ASR_ENCODER_PATH, variant), "") ?: ""
+
+    fun setQwen3AsrEncoderPath(path: String, variant: String = getQwen3AsrModelVariant()) {
+        prefs.edit().putString(qwen3AsrPathKey(KEY_QWEN3_ASR_ENCODER_PATH, variant), path).apply()
+    }
+
+    fun getQwen3AsrDecoderPath(variant: String = getQwen3AsrModelVariant()): String =
+        prefs.getString(qwen3AsrPathKey(KEY_QWEN3_ASR_DECODER_PATH, variant), "") ?: ""
+
+    fun setQwen3AsrDecoderPath(path: String, variant: String = getQwen3AsrModelVariant()) {
+        prefs.edit().putString(qwen3AsrPathKey(KEY_QWEN3_ASR_DECODER_PATH, variant), path).apply()
+    }
+
+    fun getQwen3AsrConvFrontendPath(variant: String = getQwen3AsrModelVariant()): String =
+        prefs.getString(qwen3AsrPathKey(KEY_QWEN3_ASR_CONV_FRONTEND_PATH, variant), "") ?: ""
+
+    fun setQwen3AsrConvFrontendPath(path: String, variant: String = getQwen3AsrModelVariant()) {
+        prefs.edit().putString(qwen3AsrPathKey(KEY_QWEN3_ASR_CONV_FRONTEND_PATH, variant), path).apply()
+    }
+
+    fun getQwen3AsrTokenizerPath(variant: String = getQwen3AsrModelVariant()): String =
+        prefs.getString(qwen3AsrPathKey(KEY_QWEN3_ASR_TOKENIZER_PATH, variant), "") ?: ""
+
+    fun setQwen3AsrTokenizerPath(path: String, variant: String = getQwen3AsrModelVariant()) {
+        prefs.edit().putString(qwen3AsrPathKey(KEY_QWEN3_ASR_TOKENIZER_PATH, variant), path).apply()
+    }
+
+    fun clearQwen3AsrModelPaths(variant: String = getQwen3AsrModelVariant()) {
+        prefs.edit()
+            .putString(qwen3AsrPathKey(KEY_QWEN3_ASR_ENCODER_PATH, variant), "")
+            .putString(qwen3AsrPathKey(KEY_QWEN3_ASR_DECODER_PATH, variant), "")
+            .putString(qwen3AsrPathKey(KEY_QWEN3_ASR_CONV_FRONTEND_PATH, variant), "")
+            .putString(qwen3AsrPathKey(KEY_QWEN3_ASR_TOKENIZER_PATH, variant), "")
             .apply()
     }
 

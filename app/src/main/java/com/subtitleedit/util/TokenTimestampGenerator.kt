@@ -133,7 +133,8 @@ class TokenTimestampGenerator(context: Context) {
 
     companion object {
         fun isSupported(settingsManager: SettingsManager): Boolean =
-            settingsManager.getAsrModelType() != SettingsManager.ASR_MODEL_WHISPER
+            settingsManager.getAsrModelType() != SettingsManager.ASR_MODEL_WHISPER &&
+                settingsManager.getAsrModelType() != SettingsManager.ASR_MODEL_QWEN3_ASR
 
         fun isConfigured(context: Context): Boolean {
             val settings = SettingsManager.getInstance(context.applicationContext)
@@ -178,7 +179,9 @@ class TokenTimestampGenerator(context: Context) {
             }
 
         private fun isConfigured(context: Context, config: ModelConfig): Boolean {
-            if (config.modelType == SettingsManager.ASR_MODEL_WHISPER) return false
+            if (config.modelType == SettingsManager.ASR_MODEL_WHISPER ||
+                config.modelType == SettingsManager.ASR_MODEL_QWEN3_ASR
+            ) return false
             val requiredPaths = buildList {
                 add(config.encoderPath)
                 add(config.tokensPath)

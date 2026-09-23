@@ -18,6 +18,8 @@ internal class DefaultModelRepository : ModelRepository {
         get() = ModelDownloader.PARAKEET_CTC_JA_MODEL
     override val parakeetModels: List<ModelDownloader.ParakeetModelOption>
         get() = ModelDownloader.PARAKEET_MODELS
+    override val qwen3AsrModels: List<ModelDownloader.Qwen3AsrModelOption>
+        get() = ModelDownloader.QWEN3_ASR_MODELS
     override val separationDirectoryName: String
         get() = ModelDownloader.SEPARATION_DIRECTORY_NAME
 
@@ -35,6 +37,11 @@ internal class DefaultModelRepository : ModelRepository {
         option: ModelDownloader.ParakeetModelOption,
         onProgress: (ModelDownloader.Progress) -> Unit
     ): ModelDownloader.ParakeetFiles = ModelDownloader.downloadParakeet(option, onProgress)
+
+    override suspend fun downloadQwen3Asr(
+        option: ModelDownloader.Qwen3AsrModelOption,
+        onProgress: (ModelDownloader.Progress) -> Unit
+    ): ModelDownloader.Qwen3AsrFiles = ModelDownloader.downloadQwen3Asr(option, onProgress)
 
     override suspend fun downloadDemixGeneralModel(
         onProgress: (ModelDownloader.Progress) -> Unit

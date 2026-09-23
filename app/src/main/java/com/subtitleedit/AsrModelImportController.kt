@@ -13,6 +13,7 @@ import android.graphics.Typeface
 import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.Toast
+import androidx.documentfile.provider.DocumentFile
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -32,6 +33,9 @@ import com.subtitleedit.util.SettingsManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.takeWhile
@@ -93,6 +97,10 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         uri?.let { handleSelectedTokens(it) }
     }
 
+    private val qwen3TokenizerPickerLauncher = host.registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri -> uri?.let { handleSelectedQwen3Tokenizer(it) } }
+
     // VAD 模型文件选择器
     private val vadPickerLauncher = host.registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -150,7 +158,8 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
 
         binding.btnSelectTokens.setOnClickListener {
             if (isSenseVoiceNpu() && !ensureQnnRuntimeAvailable()) return@setOnClickListener
-            tokensPickerLauncher.launch(arrayOf("*/*"))
+            if (isQwen3Asr()) qwen3TokenizerPickerLauncher.launch(null)
+            else tokensPickerLauncher.launch(arrayOf("*/*"))
         }
 
         binding.btnSelectVad.setOnClickListener {
@@ -197,6 +206,8 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
                 confirmParakeetDownload(modelRepository.parakeetTdtModel)
             SettingsManager.ASR_MODEL_PARAKEET_CTC_JA ->
                 confirmParakeetDownload(modelRepository.parakeetCtcJaModel)
+            SettingsManager.ASR_MODEL_QWEN3_ASR ->
+                showQwen3AsrDownloadModelPicker()
             else -> showWhisperDownloadModelPicker()
         }
     }
@@ -279,6 +290,34 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             .show()
     }
 
+    private fun confirmQwen3AsrDownload(option: ModelDownloader.Qwen3AsrModelOption) {
+        AlertDialog.Builder(host)
+            .setTitle("一键下载导入 Qwen3-ASR ${option.displayName}")
+            .setMessage(
+                "从 ModelScope 下载 int8 模型文件与 tokenizer。\n\n" +
+                    "文件存放至：\n/Download/SubtitleEdit/models/${option.directoryName}\n\n" +
+                    "模型文件约 ${option.sizeLabel}。"
+            )
+            .setPositiveButton("下载并导入") { _, _ ->
+                runWithModelStorageAccess { startQwen3AsrDownload(option) }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showQwen3AsrDownloadModelPicker() {
+        val options = modelRepository.qwen3AsrModels
+        val labels = options.map { "${it.displayName}（${it.sizeLabel}）" }.toTypedArray()
+        AlertDialog.Builder(host)
+            .setTitle("选择 Qwen3-ASR 模型")
+            .setItems(labels) { _, which ->
+                val option = options[which]
+                confirmQwen3AsrDownload(option)
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
     private fun startSenseVoiceDownload(option: ModelDownloader.SenseVoiceModelOption) {
         val isNpu = option.architecture == ModelDownloader.SenseVoiceArchitecture.QNN
         if (isNpu && !ensureQnnRuntimeAvailable()) return
@@ -297,6 +336,10 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
 
     private fun startParakeetDownload(option: ModelDownloader.ParakeetModelOption) {
         startAsrModelDownload(DownloadAsrModelUseCase.KIND_PARAKEET, option.modelType)
+    }
+
+    private fun startQwen3AsrDownload(option: ModelDownloader.Qwen3AsrModelOption) {
+        startAsrModelDownload(DownloadAsrModelUseCase.KIND_QWEN3_ASR, option.id)
     }
 
     private fun startAsrModelDownload(kind: String, optionId: String) {
@@ -433,6 +476,7 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             SettingsManager.ASR_MODEL_SENSEVOICE -> settingsManager.clearSenseVoiceModelPaths()
             SettingsManager.ASR_MODEL_PARAKEET_TDT -> settingsManager.clearParakeetTdtModelPaths()
             SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> settingsManager.clearParakeetCtcModelPaths()
+            SettingsManager.ASR_MODEL_QWEN3_ASR -> settingsManager.clearQwen3AsrModelPaths()
             else -> settingsManager.clearWhisperModelPaths()
         }
         loadModelPaths()
@@ -574,6 +618,7 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             SettingsManager.ASR_MODEL_SENSEVOICE -> settingsManager.setSenseVoiceModelPath(encoderPath)
             SettingsManager.ASR_MODEL_PARAKEET_TDT -> settingsManager.setParakeetTdtEncoderPath(encoderPath)
             SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> settingsManager.setParakeetCtcModelPath(encoderPath)
+            SettingsManager.ASR_MODEL_QWEN3_ASR -> settingsManager.setQwen3AsrEncoderPath(encoderPath)
             else -> settingsManager.setWhisperEncoderPath(encoderPath)
         }
         binding.tvEncoderFile.text = fileName
@@ -727,10 +772,10 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             }
 
             decoderPath = uri.toString()
-            if (modelType == SettingsManager.ASR_MODEL_PARAKEET_TDT) {
-                settingsManager.setParakeetTdtDecoderPath(decoderPath)
-            } else {
-                settingsManager.setWhisperDecoderPath(decoderPath)
+            when (modelType) {
+                SettingsManager.ASR_MODEL_PARAKEET_TDT -> settingsManager.setParakeetTdtDecoderPath(decoderPath)
+                SettingsManager.ASR_MODEL_QWEN3_ASR -> settingsManager.setQwen3AsrDecoderPath(decoderPath)
+                else -> settingsManager.setWhisperDecoderPath(decoderPath)
             }
             binding.tvDecoderFile.text = fileName
             updateAsrModelUi()
@@ -744,18 +789,20 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         try {
             host.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             val fileName = getFileNameFromUri(uri)
-            if (!fileName.contains("joiner", ignoreCase = true) ||
+            val expectedName = if (isQwen3Asr()) "conv_frontend" else "joiner"
+            if (!fileName.contains(expectedName, ignoreCase = true) ||
                 !fileName.endsWith(".onnx", ignoreCase = true)
             ) {
                 OverwritingToast.makeText(
                     host,
-                    "请选择 joiner 模型文件（文件名应包含 'joiner' 且以 .onnx 结尾）",
+                    "请选择 ${if (isQwen3Asr()) "conv_frontend" else "joiner"} 模型文件（文件名应包含 '$expectedName' 且以 .onnx 结尾）",
                     Toast.LENGTH_LONG
                 ).show()
                 return
             }
             joinerPath = uri.toString()
-            settingsManager.setParakeetTdtJoinerPath(joinerPath)
+            if (isQwen3Asr()) settingsManager.setQwen3AsrConvFrontendPath(joinerPath)
+            else settingsManager.setParakeetTdtJoinerPath(joinerPath)
             binding.tvJoinerFile.text = fileName
             updateAsrModelUi()
         } catch (e: Exception) {
@@ -795,6 +842,98 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
 
         } catch (e: Exception) {
             com.subtitleedit.util.OverwritingToast.makeText(host, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun handleSelectedQwen3Tokenizer(uri: Uri) {
+        val requiredFiles = listOf(
+            "chat_template.json", "config.json", "merges.txt",
+            "preprocessor_config.json", "tokenizer_config.json", "vocab.json"
+        )
+        val source = DocumentFile.fromTreeUri(host, uri)
+        val sourceFiles = source?.listFiles()?.associateBy { it.name?.lowercase(Locale.ROOT) }
+        val selectedFiles = requiredFiles.mapNotNull { name ->
+            sourceFiles?.get(name.lowercase(Locale.ROOT))?.takeIf { it.isFile }
+                ?.let { name to it }
+        }
+        if (selectedFiles.size != requiredFiles.size) {
+            OverwritingToast.makeText(
+                host,
+                "请选择包含六个 Qwen3-ASR tokenizer 配置文件的文件夹",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        val variant = settingsManager.getQwen3AsrModelVariant()
+        val modelDirectory = File(host.filesDir, "models/qwen3-asr/$variant")
+        val target = File(modelDirectory, "tokenizer")
+        val staging = File(modelDirectory, ".tokenizer_importing")
+        val backup = File(modelDirectory, ".tokenizer_backup")
+        val progressDialog = ModelDownloadProgressDialog(host, "导入 Qwen3-ASR tokenizer") {
+            modelDownloadJob?.cancel(CancellationException("用户取消 Qwen3-ASR tokenizer 导入"))
+        }
+        progressDialog.show()
+        setAsrModelActionsEnabled(false)
+        modelDownloadJob = host.lifecycleScope.launch {
+            try {
+                val imported = withContext(Dispatchers.IO) {
+                    if (!modelDirectory.exists() && !modelDirectory.mkdirs()) {
+                        throw IllegalStateException("无法创建 Qwen3-ASR 模型目录")
+                    }
+                    staging.deleteRecursively()
+                    backup.deleteRecursively()
+                    if (!staging.mkdirs()) throw IllegalStateException("无法创建 tokenizer 暂存目录")
+                    selectedFiles.forEach { (name, document) ->
+                        currentCoroutineContext().ensureActive()
+                        val output = File(staging, name)
+                        host.contentResolver.openInputStream(document.uri)?.use { input ->
+                            output.outputStream().use { destination ->
+                                val buffer = ByteArray(64 * 1024)
+                                while (true) {
+                                    currentCoroutineContext().ensureActive()
+                                    val count = input.read(buffer)
+                                    if (count < 0) break
+                                    destination.write(buffer, 0, count)
+                                }
+                            }
+                        } ?: throw IllegalStateException("无法读取 $name")
+                        if (output.length() == 0L) throw IllegalStateException("$name 文件为空")
+                    }
+                    currentCoroutineContext().ensureActive()
+                    if (target.exists() && !target.renameTo(backup)) {
+                        throw IllegalStateException("无法备份现有 tokenizer 文件夹")
+                    }
+                    try {
+                        if (!staging.renameTo(target)) {
+                            throw IllegalStateException("无法安装 tokenizer 文件夹")
+                        }
+                    } catch (error: Exception) {
+                        if (backup.exists() && !backup.renameTo(target)) {
+                            error.addSuppressed(IllegalStateException("无法恢复原 tokenizer 文件夹"))
+                        }
+                        throw error
+                    }
+                    backup.deleteRecursively()
+                    target
+                }
+                tokensPath = Uri.fromFile(imported).toString()
+                settingsManager.setQwen3AsrTokenizerPath(tokensPath, variant)
+                binding.tvTokensFile.text = "tokenizer/"
+                updateAsrModelUi()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                OverwritingToast.makeText(host, "Tokenizer 导入失败：${e.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                withContext(NonCancellable + Dispatchers.IO) {
+                    staging.deleteRecursively()
+                    if (backup.exists() && !target.exists()) backup.renameTo(target)
+                }
+                progressDialog.dismiss()
+                setAsrModelActionsEnabled(true)
+                modelDownloadJob = null
+            }
         }
     }
 
@@ -905,6 +1044,15 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
 
                 4. 手动导入需要选择 model.int8.onnx 和 tokens.txt。
             """.trimIndent()
+            SettingsManager.ASR_MODEL_QWEN3_ASR -> """
+                Qwen3-ASR 模型说明：
+
+                一键下载会自动获取 sherpa-onnx 所需的 conv_frontend、encoder、decoder 和 tokenizer 文件。
+
+                手动导入需要选择 conv_frontend.onnx、encoder.int8.onnx、decoder.int8.onnx 和包含六个 tokenizer 配置文件的文件夹。
+
+                当前按语音段生成字幕时间，暂不使用 Qwen3-ASR 的 token 时间戳。
+            """.trimIndent()
             else -> """
                 Whisper 模型下载指引：
 
@@ -943,19 +1091,22 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
     private fun showAsrModelPicker() {
         val types = arrayOf(
             SettingsManager.ASR_MODEL_SENSEVOICE,
+            SettingsManager.ASR_MODEL_QWEN3_ASR,
             SettingsManager.ASR_MODEL_PARAKEET_TDT,
             SettingsManager.ASR_MODEL_WHISPER
         )
         val labels = arrayOf(
             "SenseVoice",
+            "Qwen3-ASR",
             "Parakeet",
             "Whisper"
         )
         val checked = when (modelType) {
             SettingsManager.ASR_MODEL_SENSEVOICE -> 0
+            SettingsManager.ASR_MODEL_QWEN3_ASR -> 1
             SettingsManager.ASR_MODEL_PARAKEET_TDT,
-            SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> 1
-            else -> 2
+            SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> 2
+            else -> 3
         }
         AlertDialog.Builder(host)
             .setTitle("选择识别模型")
@@ -1013,6 +1164,13 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
                 joinerPath = ""
                 tokensPath = settingsManager.getParakeetCtcTokensPath()
             }
+            SettingsManager.ASR_MODEL_QWEN3_ASR -> {
+                val variant = settingsManager.getQwen3AsrModelVariant()
+                encoderPath = settingsManager.getQwen3AsrEncoderPath(variant)
+                decoderPath = settingsManager.getQwen3AsrDecoderPath(variant)
+                joinerPath = settingsManager.getQwen3AsrConvFrontendPath(variant)
+                tokensPath = settingsManager.getQwen3AsrTokenizerPath(variant)
+            }
             else -> {
                 encoderPath = settingsManager.getWhisperEncoderPath()
                 decoderPath = settingsManager.getWhisperDecoderPath()
@@ -1031,7 +1189,11 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         } ?: "未选择"
         binding.tvDecoderFile.text = decoderPath.takeIf { it.isNotEmpty() }?.let { getFileNameFromUri(Uri.parse(it)) } ?: "未选择"
         binding.tvJoinerFile.text = joinerPath.takeIf { it.isNotEmpty() }?.let { getFileNameFromUri(Uri.parse(it)) } ?: "未选择"
-        binding.tvTokensFile.text = tokensPath.takeIf { it.isNotEmpty() }?.let { getFileNameFromUri(Uri.parse(it)) } ?: "未选择"
+        binding.tvTokensFile.text = when {
+            tokensPath.isEmpty() -> "未选择"
+            isQwen3Asr() -> "tokenizer/"
+            else -> getFileNameFromUri(Uri.parse(tokensPath))
+        }
     }
 
     private fun discardInaccessibleAsrModels() {
@@ -1042,22 +1204,24 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
                 SettingsManager.ASR_MODEL_SENSEVOICE -> settingsManager.setSenseVoiceModelPath("")
                 SettingsManager.ASR_MODEL_PARAKEET_TDT -> settingsManager.setParakeetTdtEncoderPath("")
                 SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> settingsManager.setParakeetCtcModelPath("")
+                SettingsManager.ASR_MODEL_QWEN3_ASR -> settingsManager.setQwen3AsrEncoderPath("")
                 else -> settingsManager.setWhisperEncoderPath("")
             }
             discarded = true
         }
         if (decoderPath.isNotBlank() && !canReadSavedUri(decoderPath)) {
             decoderPath = ""
-            if (modelType == SettingsManager.ASR_MODEL_PARAKEET_TDT) {
-                settingsManager.setParakeetTdtDecoderPath("")
-            } else {
-                settingsManager.setWhisperDecoderPath("")
+            when (modelType) {
+                SettingsManager.ASR_MODEL_PARAKEET_TDT -> settingsManager.setParakeetTdtDecoderPath("")
+                SettingsManager.ASR_MODEL_QWEN3_ASR -> settingsManager.setQwen3AsrDecoderPath("")
+                else -> settingsManager.setWhisperDecoderPath("")
             }
             discarded = true
         }
         if (joinerPath.isNotBlank() && !canReadSavedUri(joinerPath)) {
             joinerPath = ""
-            settingsManager.setParakeetTdtJoinerPath("")
+            if (isQwen3Asr()) settingsManager.setQwen3AsrConvFrontendPath("")
+            else settingsManager.setParakeetTdtJoinerPath("")
             discarded = true
         }
         if (tokensPath.isNotBlank() && !canReadSavedUri(tokensPath)) {
@@ -1066,6 +1230,7 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
                 SettingsManager.ASR_MODEL_SENSEVOICE -> settingsManager.setSenseVoiceTokensPath("")
                 SettingsManager.ASR_MODEL_PARAKEET_TDT -> settingsManager.setParakeetTdtTokensPath("")
                 SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> settingsManager.setParakeetCtcTokensPath("")
+                SettingsManager.ASR_MODEL_QWEN3_ASR -> settingsManager.setQwen3AsrTokenizerPath("")
                 else -> settingsManager.setWhisperTokensPath("")
             }
             discarded = true
@@ -1084,7 +1249,8 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
     private fun canReadSavedUri(uriString: String): Boolean = runCatching {
         val uri = Uri.parse(uriString)
         if (uri.scheme == "file") {
-            uri.path?.let(::File)?.isFile == true
+            val file = uri.path?.let(::File) ?: return false
+            file.isFile || (isQwen3Asr() && uriString == tokensPath && file.isDirectory)
         } else {
             host.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
         }
@@ -1119,6 +1285,7 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         val parakeetTdt = modelType == SettingsManager.ASR_MODEL_PARAKEET_TDT
         val parakeetCtc = modelType == SettingsManager.ASR_MODEL_PARAKEET_CTC_JA
         val parakeet = parakeetTdt || parakeetCtc
+        val qwen3Asr = isQwen3Asr()
         val hasSelectedModel = encoderPath.isNotBlank() || decoderPath.isNotBlank() ||
             joinerPath.isNotBlank() || tokensPath.isNotBlank()
         binding.tvAsrModelTitle.text = if (parakeet) "Parakeet 模型" else "${currentModelDisplayName()} 模型"
@@ -1129,13 +1296,18 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             senseVoiceNpu -> "SenseVoice NPU 模型"
             senseVoice -> "SenseVoice CPU 模型"
             parakeetCtc -> "CTC 模型"
+            qwen3Asr -> "Encoder 模型"
             else -> "Encoder 模型"
         }
         binding.btnSelectEncoder.text = if (senseVoice || parakeetCtc) "选择模型" else "选择 Encoder"
         binding.btnSelectEncoder.visibility = View.VISIBLE
         binding.btnSelectTokens.visibility = View.VISIBLE
         binding.layoutDecoder.visibility = if (senseVoice || parakeetCtc) View.GONE else View.VISIBLE
-        binding.layoutJoiner.visibility = if (parakeetTdt) View.VISIBLE else View.GONE
+        binding.layoutJoiner.visibility = if (parakeetTdt || qwen3Asr) View.VISIBLE else View.GONE
+        binding.tvJoinerLabel.text = if (qwen3Asr) "Conv Frontend 模型" else "Joiner 模型"
+        binding.btnSelectJoiner.text = if (qwen3Asr) "选择 Conv Frontend" else "选择 Joiner"
+        binding.tvTokensLabel.text = if (qwen3Asr) "Tokenizer 文件夹" else "Tokens 文件"
+        binding.btnSelectTokens.text = if (qwen3Asr) "选择 Tokenizer 文件夹" else "选择 Tokens"
         binding.btnWhisperConfig.visibility = if (modelType == SettingsManager.ASR_MODEL_WHISPER) View.VISIBLE else View.GONE
         binding.layoutSenseVoiceProviderOptions.visibility = if (senseVoice) View.VISIBLE else View.GONE
         binding.layoutParakeetVariantOptions.visibility = if (parakeet) View.VISIBLE else View.GONE
@@ -1178,6 +1350,8 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         modelType == SettingsManager.ASR_MODEL_SENSEVOICE &&
             settingsManager.getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU
 
+    private fun isQwen3Asr(): Boolean = modelType == SettingsManager.ASR_MODEL_QWEN3_ASR
+
     private fun ensureQnnRuntimeAvailable(): Boolean {
         if (QnnRuntimeAvailability.isAvailable(host)) return true
         AlertDialog.Builder(host)
@@ -1206,6 +1380,7 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         SettingsManager.ASR_MODEL_SENSEVOICE -> "SenseVoice"
         SettingsManager.ASR_MODEL_PARAKEET_TDT -> "Parakeet TDT 0.6B v3"
         SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> "Parakeet CTC 0.6B 日语"
+        SettingsManager.ASR_MODEL_QWEN3_ASR -> "Qwen3-ASR"
         else -> "Whisper"
     }
 
