@@ -838,6 +838,12 @@ class WhisperRecognizer(
                 return segments
             }
 
+            if (isQwen3Asr()) {
+                Qwen3AsrLanguageMapper.toModelLanguage(language)?.let { qwenLanguage ->
+                    stream.setOption("language", qwenLanguage)
+                }
+            }
+
             Log.d(TAG, "输入音频数据: ${audioData.size} 个采样点")
             // 输入音频数据
             stream.acceptWaveform(audioData, SAMPLE_RATE)
@@ -849,7 +855,11 @@ class WhisperRecognizer(
             Log.d(TAG, "获取识别结果...")
             // 获取结果
             val result = rec.getResult(stream)
-            val text = result.text.trim()
+            val text = if (isQwen3Asr()) {
+                Qwen3AsrTextNormalizer.normalize(result.text)
+            } else {
+                result.text.trim()
+            }
 
             Log.d(TAG, "识别结果: $text")
 
