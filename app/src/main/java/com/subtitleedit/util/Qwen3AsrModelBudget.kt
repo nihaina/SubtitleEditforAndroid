@@ -8,7 +8,10 @@ import java.io.RandomAccessFile
  * Schema: ONNX ModelProto.graph -> GraphProto.input -> ValueInfoProto.type -> tensor shape.
  */
 internal object Qwen3AsrModelBudget {
-    fun readCacheLength(decoder: File): Int? = RandomAccessFile(decoder, "r").use { file ->
+    /** sherpa-onnx uses this runtime default when the exported KV dimension is symbolic. */
+    const val DEFAULT_DYNAMIC_CACHE_LENGTH = 512
+
+    fun readCacheLength(decoder: File): Int = RandomAccessFile(decoder, "r").use { file ->
         val reader = ProtoReader(file)
         val graph = reader.message(file.length(), 7) ?: error("Qwen decoder 缺少 ONNX graph")
         val input = reader.message(graph, 11, occurrence = 4)
@@ -31,7 +34,7 @@ internal object Qwen3AsrModelBudget {
         value?.takeIf { it > 0 }?.let {
             require(it <= Int.MAX_VALUE) { "Qwen decoder KV cache 长度超出支持范围" }
             it.toInt()
-        }
+        } ?: DEFAULT_DYNAMIC_CACHE_LENGTH
     }
 
     private class ProtoReader(private val file: RandomAccessFile) {

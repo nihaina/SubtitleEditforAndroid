@@ -28,7 +28,6 @@ internal class Qwen3AsrBudget private constructor(
         const val SAMPLE_RATE = 16_000
         const val FRAME_SHIFT = 160
         const val MIN_SAMPLES = SAMPLE_RATE / 2
-        const val CONFIGURED_TOTAL_TOKENS = 512
         const val SAFETY_TOKENS = 8
         // sherpa's empty-system scaffold is 15 tokens; supported forced-language names
         // add a few tokens. Reserve 32 conservatively. Qwen hotwords are NOT enabled here.
@@ -36,9 +35,12 @@ internal class Qwen3AsrBudget private constructor(
 
         fun fromCacheLength(cacheLength: Int?): Qwen3AsrBudget {
             require(cacheLength == null || cacheLength > 0) { "Qwen KV cache 长度必须大于 0" }
-            val total = min(cacheLength ?: CONFIGURED_TOTAL_TOKENS, CONFIGURED_TOTAL_TOKENS)
+            // A symbolic cache dimension is valid for sherpa's decoder; use its runtime
+            // default rather than failing before recognition starts.
+            val total = cacheLength ?: Qwen3AsrModelBudget.DEFAULT_DYNAMIC_CACHE_LENGTH
             require(total >= 128) { "Qwen decoder 上下文过小，无法预留音频及文本生成空间" }
-            return Qwen3AsrBudget(total, min(256, total / 2), PROMPT_TOKENS)
+            val output = min(256, maxOf(64, total / 2))
+            return Qwen3AsrBudget(total, output, PROMPT_TOKENS)
         }
 
         // Official processor / sherpa FeatToAudioTokensLen, with centered 10 ms STFT frames.

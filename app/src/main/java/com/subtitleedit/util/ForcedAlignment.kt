@@ -54,7 +54,8 @@ internal object ForcedAlignmentSegmenter {
 
             val next = normalized.getOrNull(index + 1)
             val gap = next?.let { it.startTimeMs - unit.endTimeMs }
-            if (next != null && gap != null && gap >= gapThreshold) {
+            if (next != null && gap != null &&
+                (gap >= gapThreshold || isSentenceBoundary(unit.text))) {
                 val extension = min(contextMs, gap / 2L)
                 addSegment(
                     output = output,
@@ -102,4 +103,7 @@ internal object ForcedAlignmentSegmenter {
         } else {
             ""
         }
+
+    private fun isSentenceBoundary(text: String): Boolean =
+        text.lastOrNull()?.let { it in charArrayOf('。', '！', '？', '；', '.', '!', '?', ';') } == true
 }

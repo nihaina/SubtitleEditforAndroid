@@ -15,7 +15,8 @@ class Qwen3AsrModelBudgetTest {
         for (length in listOf(128L, 512L, 2048L, 0L, -1L, null)) {
             val file = temp.newFile()
             file.writeBytes(message(7, graphInputs(length)))
-            assertEquals(length?.takeIf { it > 0 }?.toInt(), Qwen3AsrModelBudget.readCacheLength(file))
+            assertEquals(length?.takeIf { it > 0 }?.toInt() ?: Qwen3AsrModelBudget.DEFAULT_DYNAMIC_CACHE_LENGTH,
+                Qwen3AsrModelBudget.readCacheLength(file))
         }
     }
 

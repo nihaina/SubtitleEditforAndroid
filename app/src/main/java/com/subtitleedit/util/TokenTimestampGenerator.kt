@@ -124,11 +124,9 @@ class TokenTimestampGenerator(context: Context) {
                     context = appContext,
                     modelType = SettingsManager.ASR_MODEL_QWEN3_ASR,
                 )
-                val recognized = recognizer.recognize(
+                val recognized = recognizer.recognizeQwenChunks(
                     audioFile = pcmFile,
-                    progressCallback = { progress, status, _ ->
-                        progressCallback(5 + progress / 3, status)
-                    },
+                    progressCallback = { progress, status -> progressCallback(5 + progress / 3, status) },
                     isCancelled = isCancelled,
                 ).getOrThrow()
                 if (recognized.isEmpty()) error("Qwen3-ASR 未识别到文本")
@@ -137,9 +135,7 @@ class TokenTimestampGenerator(context: Context) {
                 if (isCancelled()) error("用户取消")
                 progressCallback(40, "加载 Qwen3 ForcedAligner")
                 Qwen3ForcedAlignerOnnx(requireNotNull(alignerFile)).use { aligner ->
-                    Pcm16WavReader(pcmFile).use { reader ->
-                        require(reader.sampleRate == 16_000) { "Qwen 对齐音频必须是 16kHz" }
-                        recognized.forEachIndexed { index, segment ->
+                    recognized.forEachIndexed { index, segment ->
                             if (isCancelled()) error("用户取消")
                             if (segment.text.isBlank()) return@forEachIndexed
                             // Qwen ASR may emit a punctuation-only tail. It has no alignable
@@ -150,10 +146,7 @@ class TokenTimestampGenerator(context: Context) {
                                 progressCallback(40 + (index + 1) * 50 / recognized.size, "跳过不可对齐片段 ${index + 1}/${recognized.size}")
                                 return@forEachIndexed
                             }
-                            val startSample = (segment.startTime * 16L).coerceAtLeast(0L)
-                            val sampleCount = ((segment.endTime - segment.startTime).coerceAtLeast(1L) * 16L)
-                                .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-                            val samples = reader.readRange(startSample, sampleCount)
+                            val samples = segment.audio
                             if (samples.isEmpty()) return@forEachIndexed
                             val features = extractor.extract(samples)
                             val encoded = runCatching {
@@ -178,12 +171,11 @@ class TokenTimestampGenerator(context: Context) {
                             )
                             output += aligned.map { unit ->
                                 unit.copy(
-                                    startTimeMs = unit.startTimeMs + segment.startTime,
-                                    endTimeMs = unit.endTimeMs + segment.startTime,
+                                    startTimeMs = unit.startTimeMs + segment.startTimeMs,
+                                    endTimeMs = unit.endTimeMs + segment.startTimeMs,
                                 )
                             }
                             progressCallback(40 + (index + 1) * 50 / recognized.size, "对齐 ${index + 1}/${recognized.size}")
-                        }
                     }
                 }
                 val durationMs = Pcm16WavReader(pcmFile).use { it.totalSamples * 1000L / it.sampleRate }

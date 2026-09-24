@@ -6,10 +6,10 @@ import kotlin.random.Random
 
 class Qwen3AsrChunkerTest {
     @Test
-    fun reservesGenerationAndRespectsSmallerModelCaches() {
-        for (cache in listOf(null, 128, 256, 512, 1024, 4096)) {
+    fun reservesGenerationAndUsesActualModelCacheLength() {
+        for (cache in listOf(256, 512, 1024, 4096)) {
             val budget = Qwen3AsrBudget.fromCacheLength(cache)
-            assertTrue(budget.totalTokens <= (cache ?: 512))
+            assertEquals(cache, budget.totalTokens)
             assertTrue(budget.outputTokens >= 64)
             assertTrue(budget.accepts(budget.maxSamples))
             assertFalse(budget.accepts(budget.maxSamples + Qwen3AsrBudget.FRAME_SHIFT))
@@ -19,7 +19,9 @@ class Qwen3AsrChunkerTest {
         val budget = Qwen3AsrBudget.fromCacheLength(512)
         assertEquals(256, budget.outputTokens)
         assertEquals(216, budget.audioTokens)
-        assertEquals(266240, budget.maxSamples) // 16.64 seconds; never a 30/60/120-second input.
+        assertEquals(266240, budget.maxSamples)
+        val largerBudget = Qwen3AsrBudget.fromCacheLength(4096)
+        assertTrue(largerBudget.maxSamples > budget.maxSamples * 10)
     }
 
     @Test
@@ -35,6 +37,7 @@ class Qwen3AsrChunkerTest {
         for (cache in listOf(-1, 0, 64, 127)) {
             assertThrows(IllegalArgumentException::class.java) { Qwen3AsrBudget.fromCacheLength(cache) }
         }
+        assertEquals(512, Qwen3AsrBudget.fromCacheLength(null).totalTokens)
         assertThrows(IllegalArgumentException::class.java) {
             Qwen3AsrChunker(Qwen3AsrBudget.fromCacheLength(512), 0)
         }
@@ -75,7 +78,7 @@ class Qwen3AsrChunkerTest {
     fun neverDropsOrDuplicatesSamplesForDifferentUserLengthsAndModelBudgets() {
         val random = Random(42)
         val audio = FloatArray(123 * 16000 + 113) { random.nextFloat() * 2 - 1 }
-        for (cache in listOf(128, 256, 512, 1024)) {
+        for (cache in listOf(128, 256, 512, 1024, 4096)) {
             for (requested in listOf(5, 15, 30, 60, 120)) {
                 val chunker = Qwen3AsrChunker(Qwen3AsrBudget.fromCacheLength(cache), requested)
                 val chunks = chunker.split(audio)

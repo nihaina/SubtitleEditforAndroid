@@ -55,6 +55,44 @@ class WhisperRecognizer(
         val timestampGapBoundaryBefore: Boolean = false
     )
 
+    /** Official-style Qwen chunk result: one complete ASR text per audio chunk. */
+    data class QwenChunkResult(
+        val startTimeMs: Long,
+        val endTimeMs: Long,
+        val audio: FloatArray,
+        val text: String,
+    )
+
+    fun recognizeQwenChunks(
+        audioFile: File,
+        progressCallback: (progress: Int, status: String) -> Unit = { _, _ -> },
+        isCancelled: () -> Boolean = { false },
+    ): Result<List<QwenChunkResult>> = runCatching {
+        require(isQwen3Asr()) { "Qwen 专用识别接口只能用于 Qwen3-ASR" }
+        initRecognizer().getOrThrow()
+        val chunker = requireNotNull(qwenChunker) { "Qwen 分块预算未初始化" }
+        val chunks = mutableListOf<QwenChunkResult>()
+        Pcm16WavReader(audioFile).use { reader ->
+            require(reader.sampleRate == SAMPLE_RATE) { "Qwen 音频必须是 16kHz" }
+            val total = reader.totalSamples
+            var cursor = 0L
+            var index = 0
+            while (cursor < total) {
+                if (isCancelled()) throw CancellationException("用户取消")
+                val window = reader.readRange(cursor, minOf(chunker.maxSamples.toLong(), total - cursor).toInt())
+                val cut = chunker.nextEnd(window, hasMoreAudio = cursor + window.size < total)
+                val audio = if (cut == window.size) window else window.copyOf(cut)
+                val start = cursor * 1000L / SAMPLE_RATE
+                val end = (cursor + cut) * 1000L / SAMPLE_RATE
+                progressCallback((cursor * 100L / total).toInt(), "Qwen 官方流程识别第 ${++index} 段")
+                val text = decodeQwenText(audio).trim()
+                if (text.isNotEmpty()) chunks += QwenChunkResult(start, end, audio, text)
+                cursor += cut
+            }
+        }
+        chunks
+    }
+
     /**
      * VAD 检测到的语音段
      */
@@ -1085,6 +1123,19 @@ class WhisperRecognizer(
         }
 
         return segments
+    }
+
+    private fun decodeQwenText(audioData: FloatArray): String {
+        val rec = requireNotNull(recognizer) { "Qwen 识别器未初始化" }
+        val stream = rec.createStream()
+        try {
+            Qwen3AsrLanguageMapper.toModelLanguage(language)?.let { stream.setOption("language", it) }
+            stream.acceptWaveform(audioData, SAMPLE_RATE)
+            rec.decode(stream)
+            return Qwen3AsrTextNormalizer.normalize(rec.getResult(stream).text)
+        } finally {
+            stream.release()
+        }
     }
 
     /**

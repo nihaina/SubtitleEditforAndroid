@@ -129,6 +129,7 @@ internal class Qwen3ForcedAlignerOnnx(
                                 sequenceLength = input.inputIds.size,
                                 timestampPositions = input.timestampPositions,
                                 units = input.units,
+                                maxTimeMs = validFrames * 10L,
                             )
                         }
                     }
@@ -142,6 +143,7 @@ internal class Qwen3ForcedAlignerOnnx(
         sequenceLength: Int,
         timestampPositions: IntArray,
         units: List<String>,
+        maxTimeMs: Long,
     ): List<ForcedAlignmentUnit> {
         val rows = flattenRows(logits)
         require(rows.isNotEmpty()) { "对齐模型 logits 为空" }
@@ -155,8 +157,11 @@ internal class Qwen3ForcedAlignerOnnx(
         val rawTimestamps = timestampPositions.mapIndexed { index, position ->
             val row = rows[if (useFullSequence) position else index]
             val classIndex = row.indices.maxByOrNull { row[it] } ?: 0
-            classIndex.toLong() * timestampSegmentMs
+            (classIndex.toLong() * timestampSegmentMs).coerceIn(0L, maxTimeMs)
         }
+        // The official processor parses each pair in sequence and only repairs local
+        // non-monotonic predictions. A global LIS rewrite can flatten a long prefix into
+        // the final timestamp, which is the reported "words merged at the end" failure.
         val timestamps = fixTimestampAnomalies(rawTimestamps.toLongArray())
 
         return units.mapIndexed { index, text ->
@@ -166,63 +171,13 @@ internal class Qwen3ForcedAlignerOnnx(
         }
     }
 
-    /** Port of Qwen3ForceAlignProcessor.fix_timestamp(). */
+    /** Port of Qwen3ForceAlignProcessor.fix_timestamp(), preserving local pair order. */
     private fun fixTimestampAnomalies(values: LongArray): LongArray {
         if (values.size < 2) return values
-        val lengths = IntArray(values.size) { 1 }
-        val parents = IntArray(values.size) { -1 }
-        for (index in 1 until values.size) {
-            for (previous in 0 until index) {
-                if (values[previous] <= values[index] &&
-                    lengths[previous] + 1 > lengths[index]
-                ) {
-                    lengths[index] = lengths[previous] + 1
-                    parents[index] = previous
-                }
-            }
-        }
-        val lis = mutableSetOf<Int>()
-        var cursor = lengths.indices.maxByOrNull { lengths[it] } ?: return values
-        while (cursor >= 0) {
-            lis += cursor
-            cursor = parents[cursor]
-        }
-        val normal = BooleanArray(values.size) { it in lis }
         val result = values.copyOf()
-        var index = 0
-        while (index < result.size) {
-            if (normal[index]) {
-                index++
-                continue
-            }
-            val start = index
-            while (index < result.size && !normal[index]) index++
-            val end = index
-            val anomalyCount = end - start
-            var leftIndex = start - 1
-            while (leftIndex >= 0 && !normal[leftIndex]) leftIndex--
-            var rightIndex = end
-            while (rightIndex < result.size && !normal[rightIndex]) rightIndex++
-            val left = leftIndex.takeIf { it >= 0 }?.let { result[it] }
-            val right = rightIndex.takeIf { it < result.size }?.let { result[it] }
-            if (anomalyCount <= 2) {
-                for (offset in start until end) {
-                    result[offset] = when {
-                        left == null -> right ?: result[offset]
-                        right == null -> left
-                        offset - (start - 1) <= end - offset -> left
-                        else -> right
-                    }
-                }
-            } else if (left != null && right != null) {
-                val step = (right - left).toDouble() / (anomalyCount + 1)
-                for (offset in start until end) {
-                    result[offset] = (left + step * (offset - start + 1)).toLong()
-                }
-            } else if (left != null) {
-                for (offset in start until end) result[offset] = left
-            } else if (right != null) {
-                for (offset in start until end) result[offset] = right
+        for (index in result.indices) {
+            if (index > 0 && result[index] < result[index - 1]) {
+                result[index] = result[index - 1]
             }
         }
         return result
