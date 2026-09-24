@@ -27,6 +27,7 @@ import com.subtitleedit.util.ModelDownloadProgressDialog
 import com.subtitleedit.util.ModelDownloader
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.QnnRuntimeAvailability
+import com.subtitleedit.util.Qwen3ForcedAlignerOnnx
 import com.subtitleedit.util.SenseVoiceNpuModelImporter
 import com.subtitleedit.util.SenseVoiceNpuModelPathPolicy
 import com.subtitleedit.util.SettingsManager
@@ -101,6 +102,10 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         ActivityResultContracts.OpenDocumentTree()
     ) { uri -> uri?.let { handleSelectedQwen3Tokenizer(it) } }
 
+    private val qwen3ForcedAlignerPickerLauncher = host.registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { importQwen3ForcedAligner(it) } }
+
     // VAD 模型文件选择器
     private val vadPickerLauncher = host.registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -160,6 +165,11 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             if (isSenseVoiceNpu() && !ensureQnnRuntimeAvailable()) return@setOnClickListener
             if (isQwen3Asr()) qwen3TokenizerPickerLauncher.launch(null)
             else tokensPickerLauncher.launch(arrayOf("*/*"))
+        }
+        binding.btnSelectQwen3ForcedAligner.setOnClickListener {
+            qwen3ForcedAlignerPickerLauncher.launch(
+                arrayOf("application/octet-stream", "application/onnx", "*/*")
+            )
         }
 
         binding.btnSelectVad.setOnClickListener {
@@ -479,6 +489,9 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             SettingsManager.ASR_MODEL_QWEN3_ASR -> settingsManager.clearQwen3AsrModelPaths()
             else -> settingsManager.clearWhisperModelPaths()
         }
+        if (modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) {
+            settingsManager.clearQwen3ForcedAlignerPath()
+        }
         loadModelPaths()
         updateAsrModelUi()
         OverwritingToast.makeText(host, "已清除当前模型选择，请重新选择", Toast.LENGTH_SHORT).show()
@@ -492,6 +505,7 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         binding.btnSelectTokens.isEnabled = enabled
         binding.btnSelectDecoder.isEnabled = enabled
         binding.btnSelectJoiner.isEnabled = enabled
+        binding.btnSelectQwen3ForcedAligner.isEnabled = enabled
         binding.tvSenseVoiceCpuOption.isEnabled = enabled
         binding.tvSenseVoiceNpuOption.isEnabled = enabled
         binding.tvParakeetTdtOption.isEnabled = enabled
@@ -937,6 +951,68 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         }
     }
 
+    private fun importQwen3ForcedAligner(uri: Uri) {
+        val targetDirectory = File(host.filesDir, "models/qwen3-asr/forced-aligner")
+        val target = File(targetDirectory, "forced_aligner.onnx")
+        val staging = File(targetDirectory, ".forced_aligner_importing")
+        val backup = File(targetDirectory, ".forced_aligner_backup")
+        binding.btnSelectQwen3ForcedAligner.isEnabled = false
+        host.lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    if (!targetDirectory.exists() && !targetDirectory.mkdirs()) {
+                        error("无法创建 ForcedAligner 模型目录")
+                    }
+                    staging.delete()
+                    backup.delete()
+                    host.contentResolver.openInputStream(uri)?.use { input ->
+                        staging.outputStream().use { output ->
+                            input.copyTo(output, 64 * 1024)
+                        }
+                    } ?: error("无法读取所选 ONNX 文件")
+                    if (!staging.isFile || staging.length() == 0L) {
+                        error("所选 ONNX 文件为空")
+                    }
+                    // Validate the graph before replacing the currently installed model.
+                    Qwen3ForcedAlignerOnnx(staging).use { }
+                    if (target.exists() && !target.renameTo(backup)) {
+                        error("无法备份现有 ForcedAligner 模型")
+                    }
+                    try {
+                        if (!staging.renameTo(target)) error("无法安装 ForcedAligner 模型")
+                    } catch (error: Exception) {
+                        if (backup.exists()) backup.renameTo(target)
+                        throw error
+                    }
+                    backup.delete()
+                }
+                settingsManager.setQwen3ForcedAlignerPath(Uri.fromFile(target).toString())
+                updateAsrModelUi()
+                OverwritingToast.makeText(
+                    host,
+                    "Qwen3 ForcedAligner 已导入",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } catch (error: Exception) {
+                withContext(Dispatchers.IO) {
+                    staging.delete()
+                    if (backup.exists() && !target.exists()) backup.renameTo(target)
+                }
+                OverwritingToast.makeText(
+                    host,
+                    "ForcedAligner 导入失败：${error.message}",
+                    Toast.LENGTH_LONG
+                ).show()
+            } finally {
+                withContext(Dispatchers.IO) {
+                    staging.delete()
+                    backup.delete()
+                }
+                binding.btnSelectQwen3ForcedAligner.isEnabled = true
+            }
+        }
+    }
+
     private fun handleSelectedVad(uri: Uri) {
         try {
             host.contentResolver.takePersistableUriPermission(
@@ -1308,6 +1384,22 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         binding.btnSelectJoiner.text = if (qwen3Asr) "选择 Conv Frontend" else "选择 Joiner"
         binding.tvTokensLabel.text = if (qwen3Asr) "Tokenizer 文件夹" else "Tokens 文件"
         binding.btnSelectTokens.text = if (qwen3Asr) "选择 Tokenizer 文件夹" else "选择 Tokens"
+        binding.layoutQwen3ForcedAligner.visibility = if (qwen3Asr) View.VISIBLE else View.GONE
+        if (qwen3Asr) {
+            val alignerPath = settingsManager.getQwen3ForcedAlignerPath()
+            val alignerFile = localFile(alignerPath)
+            binding.tvQwen3ForcedAlignerPath.text = when {
+                alignerFile?.isFile == true -> "已配置：${alignerFile.name}"
+                alignerPath.isNotBlank() -> "配置文件不可读，请重新导入"
+                else -> "尚未配置 ForcedAligner ONNX"
+            }
+            binding.tvQwen3ForcedAlignerPath.setTextColor(
+                ContextCompat.getColor(
+                    host,
+                    if (alignerFile?.isFile == true) R.color.on_surface_variant else R.color.error
+                )
+            )
+        }
         binding.btnWhisperConfig.visibility = if (modelType == SettingsManager.ASR_MODEL_WHISPER) View.VISIBLE else View.GONE
         binding.layoutSenseVoiceProviderOptions.visibility = if (senseVoice) View.VISIBLE else View.GONE
         binding.layoutParakeetVariantOptions.visibility = if (parakeet) View.VISIBLE else View.GONE
@@ -1340,6 +1432,16 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         )
         binding.tvParakeetTdtOption.setTypeface(null, if (parakeetTdt) Typeface.BOLD else Typeface.NORMAL)
         binding.tvParakeetCtcOption.setTypeface(null, if (parakeetCtc) Typeface.BOLD else Typeface.NORMAL)
+    }
+
+    private fun localFile(path: String): File? {
+        if (path.isBlank()) return null
+        val uri = Uri.parse(path)
+        return if (uri.scheme.isNullOrEmpty() || uri.scheme == "file") {
+            File(uri.path ?: path)
+        } else {
+            null
+        }
     }
 
     private fun isSingleFileModel(): Boolean =
