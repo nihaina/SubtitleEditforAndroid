@@ -6,8 +6,17 @@ build/
 
 # Local config
 local.properties
+*.local.properties
+.netrc
+_netrc
+.pypirc
+**/.cargo/credentials
+**/.cargo/credentials.toml
 
 # Local editor / AI assistant settings
+.vscode/
+*.code-workspace
+.history/
 .claude/
 .cursor/
 .windsurf/
@@ -18,6 +27,12 @@ local.properties
 .aider*
 .env
 .env.*
+
+# Local-only notes and machine-specific settings
+*.local.md
+*.local.json
+/local/
+/private/
 
 # Android Studio
 .idea/
@@ -41,9 +56,51 @@ app/build/
 */build/
 __pycache__/
 *.pyc
+*.pyo
 bin/
 gen/
 out/
+
+# Python export/validation environments and caches
+.venv/
+.venv-*/
+venv/
+venv-*/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.ipynb_checkpoints/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local model downloads, experiments and diagnostics (repository root only)
+/downloads/
+/models/
+/checkpoints/
+/scratch/
+/tmp/
+/temp/
+/diagnostics/
+/recordings/
+/chat/
+/.cache/
+
+# Downloaded/exported weights; keep the VAD model bundled with the app
+*.onnx
+*.onnx.data
+*.safetensors
+*.safetensors.index.json
+*.gguf
+!app/src/main/assets/silero_vad.onnx
+
+# Local Qwen export/validation reports can include input paths and transcripts
+forced_aligner*.validation.json
+*.audio-validation.json
+*.audio-validation.npz
+parity_*.npz
 
 # Tests
 test-results/
@@ -100,7 +157,7 @@ coverage/
 # External native build
 .externalNativeBuild
 .cxx/
-native/*/target/
+target/
 .cmake/
 
 # Version control

@@ -106,31 +106,36 @@ class TokenTimestampGenerator(context: Context) {
             return Result.failure(IllegalStateException("未加载 libqwen_tokenizer，请检查 APK ABI"))
         }
         return runCatching {
-            progressCallback(5, "Qwen3-ASR 识别文本")
-            val recognizer = speechRecognitionService.createRecognizer(
-                encoderPath = settingsManager.getQwen3AsrEncoderPath(),
-                decoderPath = settingsManager.getQwen3AsrDecoderPath(),
-                joinerPath = settingsManager.getQwen3AsrConvFrontendPath(),
-                tokensPath = tokenizerPath,
-                vadModelPath = "",
-                useVad = false,
-                language = language,
-                contentResolver = appContext.contentResolver,
-                context = appContext,
-                modelType = SettingsManager.ASR_MODEL_QWEN3_ASR,
-            )
-            val recognized = recognizer.recognize(
-                audioFile = pcmFile,
-                progressCallback = { progress, status, _ ->
-                    progressCallback(5 + progress / 3, status)
-                },
-                isCancelled = isCancelled,
-            ).getOrThrow()
-            if (recognized.isEmpty()) error("Qwen3-ASR 未识别到文本")
-            val extractor = QwenLogMelExtractor()
-            val output = mutableListOf<ForcedAlignmentUnit>()
-            Qwen3ForcedAlignerOnnx(requireNotNull(alignerFile)).use { aligner ->
-                Qwen3ForcedAlignmentTextEncoder(tokenizerDirectory).use { encoder ->
+            if (isCancelled()) error("用户取消")
+            progressCallback(1, "检查 Qwen3 对齐 tokenizer")
+            // Validate official token IDs before spending time on ASR or loading ONNX weights.
+            Qwen3ForcedAlignmentTextEncoder(tokenizerDirectory).use { encoder ->
+                progressCallback(5, "Qwen3-ASR 识别文本")
+                val recognizer = speechRecognitionService.createRecognizer(
+                    encoderPath = settingsManager.getQwen3AsrEncoderPath(),
+                    decoderPath = settingsManager.getQwen3AsrDecoderPath(),
+                    joinerPath = settingsManager.getQwen3AsrConvFrontendPath(),
+                    tokensPath = tokenizerPath,
+                    vadModelPath = "",
+                    useVad = false,
+                    language = language,
+                    contentResolver = appContext.contentResolver,
+                    context = appContext,
+                    modelType = SettingsManager.ASR_MODEL_QWEN3_ASR,
+                )
+                val recognized = recognizer.recognize(
+                    audioFile = pcmFile,
+                    progressCallback = { progress, status, _ ->
+                        progressCallback(5 + progress / 3, status)
+                    },
+                    isCancelled = isCancelled,
+                ).getOrThrow()
+                if (recognized.isEmpty()) error("Qwen3-ASR 未识别到文本")
+                val extractor = QwenLogMelExtractor()
+                val output = mutableListOf<ForcedAlignmentUnit>()
+                if (isCancelled()) error("用户取消")
+                progressCallback(40, "加载 Qwen3 ForcedAligner")
+                Qwen3ForcedAlignerOnnx(requireNotNull(alignerFile)).use { aligner ->
                     Pcm16WavReader(pcmFile).use { reader ->
                         require(reader.sampleRate == 16_000) { "Qwen 对齐音频必须是 16kHz" }
                         recognized.forEachIndexed { index, segment ->
@@ -163,17 +168,17 @@ class TokenTimestampGenerator(context: Context) {
                         }
                     }
                 }
+                val durationMs = Pcm16WavReader(pcmFile).use { it.totalSamples * 1000L / it.sampleRate }
+                val segments = ForcedAlignmentSegmenter.split(
+                    output,
+                    0L,
+                    durationMs,
+                    settingsManager.getSpeechTokenTimestampGapMs()
+                ).map { Segment(it.startTimeMs, it.endTimeMs, it.text) }
+                if (segments.isEmpty()) error("Qwen3 ForcedAligner 未生成有效时间轴")
+                progressCallback(100, "Qwen3 对齐完成")
+                segments
             }
-            val durationMs = Pcm16WavReader(pcmFile).use { it.totalSamples * 1000L / it.sampleRate }
-            val segments = ForcedAlignmentSegmenter.split(
-                output,
-                0L,
-                durationMs,
-                settingsManager.getSpeechTokenTimestampGapMs()
-            ).map { Segment(it.startTimeMs, it.endTimeMs, it.text) }
-            if (segments.isEmpty()) error("Qwen3 ForcedAligner 未生成有效时间轴")
-            progressCallback(100, "Qwen3 对齐完成")
-            segments
         }
     }
 

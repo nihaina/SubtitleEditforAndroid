@@ -19,6 +19,26 @@ fi
 
 export ANDROID_NDK_HOME="$ndk_home"
 export CARGO_REGISTRIES_CRATES_IO_PROTOCOL="sparse"
+
+# Rust panic locations can retain absolute source paths even in release binaries.
+# Encode arguments separately so workspace/toolchain paths may contain spaces.
+encoded_rustflags="${CARGO_ENCODED_RUSTFLAGS:-}"
+if [[ -z "${CARGO_ENCODED_RUSTFLAGS+x}" ]]; then
+  read -r -a inherited_rustflags <<< "${RUSTFLAGS:-}"
+  for flag in "${inherited_rustflags[@]}"; do
+    encoded_rustflags+="${encoded_rustflags:+$'\x1f'}$flag"
+  done
+fi
+for mapping in \
+  "${HOME}=/build-home" \
+  "${CARGO_HOME:-${HOME}/.cargo}=/cargo" \
+  "${RUSTUP_HOME:-${HOME}/.rustup}=/rustup" \
+  "$ndk_home=/android-ndk" \
+  "$repo_root=/src/subtitleedit"; do
+  encoded_rustflags+="${encoded_rustflags:+$'\x1f'}--remap-path-prefix=$mapping"
+done
+export CARGO_ENCODED_RUSTFLAGS="$encoded_rustflags"
+
 mkdir -p "$output_dir"
 cd "$crate_dir"
 

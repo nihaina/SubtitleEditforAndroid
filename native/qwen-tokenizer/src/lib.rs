@@ -1,8 +1,8 @@
+use ahash::AHashMap;
 use jni::objects::{JClass, JObject, JString};
 use jni::sys::{jlong, jobjectArray};
 use jni::JNIEnv;
 use serde_json::Value;
-use ahash::AHashMap;
 use std::ffi::{CStr, CString};
 use std::fs;
 use std::os::raw::{c_char, c_void};
@@ -35,7 +35,7 @@ fn load_tokenizer(directory: &Path) -> Result<Tokenizer, String> {
     let tokenizer_json = directory.join("tokenizer.json");
     if tokenizer_json.is_file() {
         if let Ok(tokenizer) = Tokenizer::from_file(tokenizer_json) {
-            return Ok(tokenizer);
+            return prepare_forced_aligner_tokenizer(tokenizer);
         }
     }
 
@@ -44,8 +44,8 @@ fn load_tokenizer(directory: &Path) -> Result<Tokenizer, String> {
     // tokenizer_config.json's added_tokens_decoder.
     let vocab_text = fs::read_to_string(directory.join("vocab.json"))
         .map_err(|error| format!("读取 vocab.json 失败：{error}"))?;
-    let mut vocab: AHashMap<String, u32> =
-        serde_json::from_str(&vocab_text).map_err(|error| format!("解析 vocab.json 失败：{error}"))?;
+    let mut vocab: AHashMap<String, u32> = serde_json::from_str(&vocab_text)
+        .map_err(|error| format!("解析 vocab.json 失败：{error}"))?;
     let merges_text = fs::read_to_string(directory.join("merges.txt"))
         .map_err(|error| format!("读取 merges.txt 失败：{error}"))?;
     let merges = merges_text
@@ -74,7 +74,17 @@ fn load_tokenizer(directory: &Path) -> Result<Tokenizer, String> {
                 continue;
             };
             vocab.insert(content.to_owned(), id);
-            added_tokens.push(AddedToken::from(content.to_owned(), true));
+            let flag = |key: &str, default: bool| {
+                token.get(key).and_then(Value::as_bool).unwrap_or(default)
+            };
+            let special = flag("special", false);
+            added_tokens.push(
+                AddedToken::from(content.to_owned(), special)
+                    .normalized(flag("normalized", !special))
+                    .single_word(flag("single_word", false))
+                    .lstrip(flag("lstrip", false))
+                    .rstrip(flag("rstrip", false)),
+            );
         }
     }
 
@@ -87,7 +97,69 @@ fn load_tokenizer(directory: &Path) -> Result<Tokenizer, String> {
     tokenizer
         .with_pre_tokenizer(Some(ByteLevel::default().add_prefix_space(false)))
         .with_decoder(Some(ByteLevel::default()));
-    tokenizer.add_special_tokens(&added_tokens);
+    tokenizer.add_tokens(&added_tokens);
+    prepare_forced_aligner_tokenizer(tokenizer)
+}
+
+/// ASR and ForcedAligner share the base vocabulary. The ASR download ends at
+/// <asr_text>=151704; the official aligner adds <timestamp>=151705 (non-special,
+/// non-normalized AddedToken). Complete this private instance only; never edit
+/// the ASR files or accept an incompatible ID layout.
+fn prepare_forced_aligner_tokenizer(mut tokenizer: Tokenizer) -> Result<Tokenizer, String> {
+    for (token, id) in [
+        ("<|audio_start|>", 151669),
+        ("<|audio_pad|>", 151676),
+        ("<|audio_end|>", 151670),
+        ("<asr_text>", 151704),
+    ] {
+        if tokenizer.token_to_id(token) != Some(id) {
+            return Err(format!(
+                "Qwen tokenizer 不兼容：{token} 必须使用官方 ID {id}"
+            ));
+        }
+    }
+    const TIMESTAMP_ID: u32 = 151705;
+    match tokenizer.token_to_id("<timestamp>") {
+        Some(id) if id != TIMESTAMP_ID => {
+            return Err(format!(
+                "Qwen tokenizer 不兼容：<timestamp> ID 为 {id}，要求 {TIMESTAMP_ID}"
+            ));
+        }
+        None => {
+            let vocab = tokenizer.get_vocab(true);
+            if vocab.len() != TIMESTAMP_ID as usize
+                || vocab.values().copied().max() != Some(TIMESTAMP_ID - 1)
+                || vocab
+                    .values()
+                    .copied()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len()
+                    != vocab.len()
+            {
+                return Err(
+                    "Qwen tokenizer 不兼容：缺少 <timestamp>，且 ID 151705 不能安全补齐".into(),
+                );
+            }
+        }
+        _ => {}
+    }
+    tokenizer.add_tokens(&[AddedToken::from("<timestamp>".to_owned(), false).normalized(false)]);
+    if tokenizer.token_to_id("<timestamp>") != Some(TIMESTAMP_ID) {
+        return Err("Qwen tokenizer 无法注册官方 <timestamp>=151705".into());
+    }
+    for (token, id) in [
+        ("<|audio_start|>", 151669),
+        ("<|audio_pad|>", 151676),
+        ("<|audio_end|>", 151670),
+        ("<timestamp>", TIMESTAMP_ID),
+    ] {
+        let encoded = tokenizer
+            .encode(token, false)
+            .map_err(|e| format!("Qwen tokenizer 标记编码失败：{e}"))?;
+        if encoded.get_ids() != [id] {
+            return Err(format!("Qwen tokenizer 未将 {token} 编码为单个官方 token"));
+        }
+    }
     Ok(tokenizer)
 }
 
@@ -194,18 +266,13 @@ fn split_units(text: &str, language: &str) -> Vec<String> {
         .collect()
 }
 
-fn encode_base(handle: *mut c_void, text: &str, language: &str) -> QwenEncoded {
-    if handle.is_null() {
-        return QwenEncoded::empty();
-    }
-    let tokenizer = unsafe { &*(handle as *mut Tokenizer) };
-    let timestamp_id = match tokenizer.token_to_id("<timestamp>") {
-        Some(value) => value,
-        None => return QwenEncoded::empty(),
-    };
+fn encode_text(tokenizer: &Tokenizer, text: &str, language: &str) -> Result<QwenEncoded, String> {
+    let timestamp_id = tokenizer
+        .token_to_id("<timestamp>")
+        .ok_or("Qwen tokenizer 缺少 <timestamp>；请使用兼容的 ASR/ForcedAligner tokenizer")?;
     let units = split_units(text, language);
     if units.is_empty() {
-        return QwenEncoded::empty();
+        return Err("Qwen 对齐文本没有可对齐的文字或数字（清理标点后为空）".into());
     }
 
     // Exact wrapper used by Qwen3ForceAlignProcessor.encode_timestamp().
@@ -215,10 +282,9 @@ fn encode_base(handle: *mut c_void, text: &str, language: &str) -> QwenEncoded {
         input_text.push_str("<timestamp><timestamp>");
     }
     // Let the official tokenizer apply its configured BOS/EOS and AddedToken behavior.
-    let encoding = match tokenizer.encode(input_text, true) {
-        Ok(value) => value,
-        Err(_) => return QwenEncoded::empty(),
-    };
+    let encoding = tokenizer
+        .encode(input_text, true)
+        .map_err(|error| format!("Qwen tokenizer 编码失败：{error}"))?;
     let ids = encoding
         .get_ids()
         .iter()
@@ -231,18 +297,30 @@ fn encode_base(handle: *mut c_void, text: &str, language: &str) -> QwenEncoded {
         .filter_map(|(index, value)| (*value == timestamp_id).then_some(index as i32))
         .collect::<Vec<_>>();
     if positions.len() != units.len() * 2 {
-        return QwenEncoded::empty();
+        return Err(format!(
+            "Qwen tokenizer 时间戳数量错误：期望 {}，实际 {}",
+            units.len() * 2,
+            positions.len()
+        ));
     }
 
     let units_json = serde_json::to_string(&units).unwrap_or_else(|_| "[]".into());
     let ids_len = ids.len();
-    QwenEncoded {
+    Ok(QwenEncoded {
         input_ids: leak_vec(ids),
         input_ids_len: ids_len,
         timestamp_positions: leak_vec(positions),
         timestamp_positions_len: units.len() * 2,
         units_json: CString::new(units_json).unwrap().into_raw(),
+    })
+}
+
+fn encode_base(handle: *mut c_void, text: &str, language: &str) -> QwenEncoded {
+    if handle.is_null() {
+        return QwenEncoded::empty();
     }
+    encode_text(unsafe { &*(handle as *mut Tokenizer) }, text, language)
+        .unwrap_or_else(|_| QwenEncoded::empty())
 }
 
 #[no_mangle]
@@ -269,20 +347,18 @@ pub extern "C" fn qwen_tokenizer_encode(
 pub extern "C" fn qwen_tokenizer_free_encoded(value: QwenEncoded) {
     if !value.input_ids.is_null() && value.input_ids_len > 0 {
         unsafe {
-            drop(Vec::from_raw_parts(
+            drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
                 value.input_ids,
                 value.input_ids_len,
-                value.input_ids_len,
-            ));
+            )));
         }
     }
     if !value.timestamp_positions.is_null() && value.timestamp_positions_len > 0 {
         unsafe {
-            drop(Vec::from_raw_parts(
+            drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
                 value.timestamp_positions,
                 value.timestamp_positions_len,
-                value.timestamp_positions_len,
-            ));
+            )));
         }
     }
     if !value.units_json.is_null() {
@@ -302,11 +378,13 @@ pub extern "system" fn Java_com_subtitleedit_util_QwenHuggingFaceTokenizer_nativ
         Ok(value) => value.to_string_lossy().into_owned(),
         Err(_) => return 0,
     };
-    let path = match CString::new(value) {
-        Ok(value) => value,
-        Err(_) => return 0,
-    };
-    qwen_tokenizer_create(path.as_ptr()) as jlong
+    match load_tokenizer(Path::new(&value)) {
+        Ok(tokenizer) => Box::into_raw(Box::new(tokenizer)) as jlong,
+        Err(error) => {
+            let _ = env.throw_new("java/lang/IllegalArgumentException", error);
+            0
+        }
+    }
 }
 
 #[no_mangle]
@@ -334,23 +412,24 @@ pub extern "system" fn Java_com_subtitleedit_util_QwenHuggingFaceTokenizer_nativ
         Ok(value) => value.to_string_lossy().into_owned(),
         Err(_) => String::new(),
     };
-    let input_c = match CString::new(input.as_str()) {
-        Ok(value) => value,
-        Err(_) => return std::ptr::null_mut(),
-    };
-    let language_c = match CString::new(language_value.as_str()) {
-        Ok(value) => value,
-        Err(_) => return std::ptr::null_mut(),
-    };
-    let encoded = qwen_tokenizer_encode(
-        handle as *mut c_void,
-        input_c.as_ptr(),
-        language_c.as_ptr(),
-    );
-    if encoded.input_ids_len == 0 || encoded.timestamp_positions_len == 0 {
-        qwen_tokenizer_free_encoded(encoded);
+    if handle == 0 {
+        let _ = env.throw_new(
+            "java/lang/IllegalStateException",
+            "Qwen tokenizer 未初始化或已关闭",
+        );
         return std::ptr::null_mut();
     }
+    let encoded = match encode_text(
+        unsafe { &*(handle as *mut Tokenizer) },
+        &input,
+        &language_value,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = env.throw_new("java/lang/IllegalArgumentException", error);
+            return std::ptr::null_mut();
+        }
+    };
 
     let object_class = match env.find_class("java/lang/Object") {
         Ok(value) => value,
@@ -391,12 +470,11 @@ pub extern "system" fn Java_com_subtitleedit_util_QwenHuggingFaceTokenizer_nativ
         }
     };
     let position_values = unsafe {
-        std::slice::from_raw_parts(
-            encoded.timestamp_positions,
-            encoded.timestamp_positions_len,
-        )
+        std::slice::from_raw_parts(encoded.timestamp_positions, encoded.timestamp_positions_len)
     };
-    if env.set_int_array_region(&positions, 0, position_values).is_err()
+    if env
+        .set_int_array_region(&positions, 0, position_values)
+        .is_err()
         || env
             .set_object_array_element(&result, 1, JObject::from(positions))
             .is_err()
@@ -419,24 +497,21 @@ pub extern "system" fn Java_com_subtitleedit_util_QwenHuggingFaceTokenizer_nativ
     };
     for (index, value) in unit_values.iter().enumerate() {
         let unit = match env.new_string(value) {
-            Ok(value) => value,
+            Ok(value) => env.auto_local(value),
             Err(_) => {
                 qwen_tokenizer_free_encoded(encoded);
                 return std::ptr::null_mut();
             }
         };
         if env
-            .set_object_array_element(&units, index as i32, unit)
+            .set_object_array_element(&units, index as i32, &*unit)
             .is_err()
         {
             qwen_tokenizer_free_encoded(encoded);
             return std::ptr::null_mut();
         }
     }
-    if env
-        .set_object_array_element(&result, 2, units)
-        .is_err()
-    {
+    if env.set_object_array_element(&result, 2, units).is_err() {
         qwen_tokenizer_free_encoded(encoded);
         return std::ptr::null_mut();
     }
@@ -457,15 +532,16 @@ impl QwenEncoded {
     }
 }
 
-fn leak_vec<T>(mut values: Vec<T>) -> *mut T {
-    let pointer = values.as_mut_ptr();
-    std::mem::forget(values);
-    pointer
+fn leak_vec<T>(values: Vec<T>) -> *mut T {
+    Box::into_raw(values.into_boxed_slice()) as *mut T
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{encode_base, is_cjk_char, load_tokenizer, split_units};
+    use super::{
+        encode_base, encode_text, is_cjk_char, load_tokenizer, prepare_forced_aligner_tokenizer,
+        split_units,
+    };
     use std::ffi::CString;
     use std::path::Path;
 
@@ -479,7 +555,10 @@ mod tests {
 
     #[test]
     fn keeps_korean_words_together() {
-        assert_eq!(split_units("안녕하세요 세계", "Korean"), ["안녕하세요", "세계"]);
+        assert_eq!(
+            split_units("안녕하세요 세계", "Korean"),
+            ["안녕하세요", "세계"]
+        );
     }
 
     #[test]
@@ -493,7 +572,8 @@ mod tests {
         let Ok(directory) = std::env::var("QWEN_TOKENIZER_DIR") else {
             return;
         };
-        let tokenizer = load_tokenizer(Path::new(&directory)).expect("official Qwen assets must load");
+        let tokenizer =
+            load_tokenizer(Path::new(&directory)).expect("official Qwen assets must load");
         let input = CString::new("甚至出现 trading").unwrap();
         let language = CString::new("Chinese").unwrap();
         let encoded = encode_base(
@@ -506,5 +586,135 @@ mod tests {
         let ids = unsafe { std::slice::from_raw_parts(encoded.input_ids, encoded.input_ids_len) };
         assert_eq!(&ids[..3], &[151669, 151676, 151670]);
         super::qwen_tokenizer_free_encoded(encoded);
+    }
+
+    fn synthetic_asr_tokenizer() -> tokenizers::Tokenizer {
+        use tokenizers::{AddedToken, Tokenizer};
+        let mut vocab: ahash::AHashMap<String, u32> =
+            (0..151705).map(|id| (format!("t{id}"), id)).collect();
+        let markers = [
+            ("<|audio_start|>", 151669),
+            ("<|audio_pad|>", 151676),
+            ("<|audio_end|>", 151670),
+            ("<asr_text>", 151704),
+        ];
+        for (token, id) in markers {
+            vocab.remove(&format!("t{id}"));
+            vocab.insert(token.into(), id);
+        }
+        let bpe = tokenizers::models::bpe::BPE::builder()
+            .vocab_and_merges(vocab, vec![])
+            .build()
+            .unwrap();
+        let mut tokenizer = Tokenizer::new(bpe);
+        tokenizer.add_tokens(
+            &markers
+                .iter()
+                .map(|(token, _)| AddedToken::from((*token).to_owned(), true))
+                .collect::<Vec<_>>(),
+        );
+        tokenizer
+    }
+
+    #[test]
+    fn completes_asr_timestamp_using_official_id_without_changing_source() {
+        let original = synthetic_asr_tokenizer();
+        assert_eq!(original.token_to_id("<timestamp>"), None);
+        let tokenizer = prepare_forced_aligner_tokenizer(original.clone()).unwrap();
+        assert_eq!(tokenizer.token_to_id("<timestamp>"), Some(151705));
+        assert_eq!(original.token_to_id("<timestamp>"), None);
+        let timestamp = tokenizer
+            .get_added_tokens_decoder()
+            .get(&151705)
+            .unwrap()
+            .clone();
+        assert!(!timestamp.special);
+        assert!(!timestamp.normalized);
+        let twice = prepare_forced_aligner_tokenizer(tokenizer).unwrap();
+        assert_eq!(
+            twice
+                .encode("<timestamp><timestamp>", false)
+                .unwrap()
+                .get_ids(),
+            [151705, 151705]
+        );
+    }
+
+    #[test]
+    fn rejects_incompatible_timestamp_ids_instead_of_remapping_weights() {
+        let mut occupied = synthetic_asr_tokenizer();
+        occupied.add_tokens(&[tokenizers::AddedToken::from("<other>".to_owned(), false)]);
+        assert!(prepare_forced_aligner_tokenizer(occupied.clone())
+            .unwrap_err()
+            .contains("不能安全补齐"));
+        occupied.add_tokens(&[tokenizers::AddedToken::from(
+            "<timestamp>".to_owned(),
+            false,
+        )]);
+        assert!(prepare_forced_aligner_tokenizer(occupied)
+            .unwrap_err()
+            .contains("151706"));
+    }
+
+    #[test]
+    fn reports_empty_alignment_units() {
+        let tokenizer = prepare_forced_aligner_tokenizer(synthetic_asr_tokenizer()).unwrap();
+        let error = encode_text(&tokenizer, "...！？", "Chinese").err().unwrap();
+        assert!(error.contains("清理标点后为空"));
+    }
+
+    #[test]
+    fn tokenizer_json_path_also_completes_timestamp() {
+        let directory =
+            std::env::temp_dir().join(format!("qwen-asr-json-test-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        synthetic_asr_tokenizer()
+            .save(directory.join("tokenizer.json"), false)
+            .unwrap();
+        let tokenizer = load_tokenizer(&directory).unwrap();
+        assert_eq!(tokenizer.token_to_id("<timestamp>"), Some(151705));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn actual_assets_match_official_processor_ids_and_positions() {
+        let Ok(directory) = std::env::var("QWEN_TOKENIZER_DIR") else {
+            return;
+        };
+        let tokenizer = load_tokenizer(Path::new(&directory)).unwrap();
+        let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../app/src/test/resources/qwen3_forced_alignment_inputs.json"
+        ))
+        .unwrap();
+        for case in fixtures["cases"].as_array().unwrap() {
+            let text = case["text"].as_str().unwrap();
+            let encoded =
+                encode_text(&tokenizer, text, case["language"].as_str().unwrap()).unwrap();
+            let ids =
+                unsafe { std::slice::from_raw_parts(encoded.input_ids, encoded.input_ids_len) }
+                    .to_vec();
+            let positions = unsafe {
+                std::slice::from_raw_parts(
+                    encoded.timestamp_positions,
+                    encoded.timestamp_positions_len,
+                )
+            }
+            .to_vec();
+            super::qwen_tokenizer_free_encoded(encoded);
+            let expected_ids = case["raw_ids"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|x| x.as_i64().unwrap())
+                .collect::<Vec<_>>();
+            let expected_positions = case["raw_timestamp_positions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|x| x.as_i64().unwrap() as i32)
+                .collect::<Vec<_>>();
+            assert_eq!(ids, expected_ids, "{text}");
+            assert_eq!(positions, expected_positions, "{text}");
+        }
     }
 }

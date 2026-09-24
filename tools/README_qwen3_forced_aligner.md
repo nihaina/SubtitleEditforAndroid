@@ -5,25 +5,33 @@
 使用官方 `Qwen/Qwen3-ForcedAligner-0.6B` 权重、`qwen-asr==0.0.6` 和
 `transformers==4.57.6`。`-hf` 是另一套 Transformers 原生实现，不能直接混用本脚本。
 
-本次电脑环境为 Python 3.12.7、PyTorch 2.5.1+cpu、ONNX 1.22.0、ONNX Runtime
+参考验证环境为 Python 3.12.7、PyTorch 2.5.1+cpu、ONNX 1.22.0、ONNX Runtime
 1.20.1。导出和验证都在 CPU 上执行，不需要 CUDA、FlashAttention 或 Android 工具链。
 
-本机 Python 环境：`D:\Temp\qwen3-export-venv\Scripts\python.exe`。
-依赖从清华 PyPI 镜像安装，模型与处理器文件来自 Qwen 官方 ModelScope 仓库。
-下载的每个文件都按照 ModelScope 返回的 SHA-256 校验；清单保存在
+建议在项目根目录创建独立虚拟环境；以下 PowerShell 示例使用被 Git 忽略的
+`.venv-qwen3-export/`。依赖可从清华 PyPI 镜像安装，模型与处理器文件来自
+Qwen 官方 ModelScope 仓库。参考验证使用的文件已按 ModelScope 返回的 SHA-256
+校验；下载清单保存在
 `build/qwen3-forced-aligner/official/modelscope_manifest.json`。
 
-在项目根目录执行：
+在项目根目录创建环境，并将上述依赖安装到该环境中：
+
+```powershell
+python -m venv .venv-qwen3-export
+$qwenPython = Join-Path $PWD '.venv-qwen3-export/Scripts/python.exe'
+```
+
+使用该环境执行导出：
 
 ```powershell
 $env:PYTHONIOENCODING = 'utf-8'
-& D:\Temp\qwen3-export-venv\Scripts\python.exe `
+& $qwenPython `
   tools/export_qwen3_forced_aligner_onnx.py `
   --model build/qwen3-forced-aligner/official `
   --output build/qwen3-forced-aligner/forced_aligner.onnx
 ```
 
-原始官方权重保存在 `build/qwen3-forced-aligner/official/`。换电脑时可用官方
+原始官方权重保存在 `build/qwen3-forced-aligner/official/`。可用官方
 ModelScope 下载命令获取：
 
 ```text
@@ -63,7 +71,8 @@ modelscope download --model Qwen/Qwen3-ForcedAligner-0.6B --local_dir build/qwen
 ## 真实音频验证
 
 ```powershell
-& D:\Temp\qwen3-export-venv\Scripts\python.exe `
+$qwenPython = Join-Path $PWD '.venv-qwen3-export/Scripts/python.exe'
+& $qwenPython `
   tools/verify_qwen3_forced_aligner_onnx.py `
   --model build/qwen3-forced-aligner/official `
   --onnx build/qwen3-forced-aligner/forced_aligner.onnx `
@@ -89,6 +98,39 @@ JNI 仍输出一个 `<|audio_pad|>`。Kotlin 在得到 log-mel 的有效帧数�
 官方公式展开 input IDs，平移所有 timestamp positions，并用展开后的长度
 构造 attention mask。缺少外部权重文件时不再显示为已配置。
 
+ASR 下载包的 tokenizer 不含对齐用的 `<timestamp>`。JNI 会检查基础词表与
+官方 token ID，并仅在对齐使用的内存实例中补齐 `<timestamp>=151705`
+（`special=false`、`normalized=false`）。不会修改 ASR tokenizer 文件，也无需
+重新下载或导入 ONNX 权重。已包含该标记的官方 ForcedAligner tokenizer 同样
+受支持；ID 冲突或不兼容时明确报错。该检查在开始识别前执行。
+
 对应单元测试覆盖完整双文件安装、复制/校验失败、取消和回滚，以及基于官方
 processor 生成的四组 token ID/时间戳位置样例。桌面数值校验、Android 构建和
 单元测试不能替代真机端到端及内存测试；FP16/INT8 量化仍未包含在本次产物中。
+
+### 可选真机回归测试
+
+`QwenForcedAlignmentNativeTest` 使用真实 tokenizer 检查 JNI 编码、音频占位符
+展开、错误信息和重复关闭；不提供测试参数时自动跳过。准备一个可由应用读取的
+独立测试目录（不要覆盖已安装模型），包含：
+
+- `tokenizer/`：应用下载的六个 ASR tokenizer 文件，保留不含 `<timestamp>` 的原配置。
+- `qwen3_forced_alignment_inputs.json`：复制自 `app/src/test/resources/`。
+- `asr_zh.wav` 与 `forced_aligner.audio-validation.json`：可选，来自上述桌面音频验证。
+
+构建并安装对应 ABI 的 debug APK 和 `standardDebugAndroidTest` APK 后运行：
+
+```text
+adb shell am instrument -w -e class com.subtitleedit.util.QwenForcedAlignmentNativeTest -e qwenTestDirectory /data/user/0/com.subtitleedit/files/qwen-alignment-test com.subtitleedit.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+如需执行包含 log-mel 和 ONNX 推理的第三项测试，再添加
+`-e qwenAlignerModel /data/user/0/com.subtitleedit/files/models/qwen3-asr/forced-aligner/forced_aligner.onnx`。
+该测试只读取模型文件，将中文样例的全部起止时间戳与官方参考结果逐一比较。
+
+## 本地产物与隐私
+
+模型权重、转换产物、音频样例和验证报告统一放在被忽略的 `build/` 目录；
+报告可能包含输入文件的完整路径和转录文本，分享前应先检查。个人环境说明可保存在
+`*.local.md` 或 `local/`，不写入共享文档。共享示例使用项目相对路径或环境变量，
+避免包含本机用户名、盘符、设备序列号和访问凭据。

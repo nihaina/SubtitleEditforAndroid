@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-FFMPEG_KIT_DIR="${FFMPEG_KIT_DIR:-/home/nihaina/src/subtitleedit-ffmpeg-kit-next}"
+FFMPEG_KIT_DIR="${FFMPEG_KIT_DIR:-${HOME}/src/subtitleedit-ffmpeg-kit-next}"
 WORK_DIR="${SUBTITLEEDIT_MPV_WORK_DIR:-${HOME}/subtitleedit-mpv-build}"
 MPV_ANDROID_COMMIT="20a3fa526fac6d3fe267aee0d4c349893fee65a3"
 MPV_VERSION="0.41.0"

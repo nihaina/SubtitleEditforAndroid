@@ -1,13 +1,19 @@
 # mpv Android runtime
 
 The runtime is built against the exact FFmpeg shared libraries produced by
-FFmpegKit Next. Run the build from the FFmpegKit Android Nix shell:
+FFmpegKit Next. From this repository's root, set the FFmpegKit checkout path and
+run the build in its Android Nix shell:
 
 ```bash
-cd /home/nihaina/src/subtitleedit-ffmpeg-kit-next
+export FFMPEG_KIT_DIR="${HOME}/src/subtitleedit-ffmpeg-kit-next"
+subtitleedit_root="$(pwd)"
+cd "${FFMPEG_KIT_DIR}"
 nix develop .#android-r27d -c \
-  /mnt/d/Work/VSCode/SubtitleEditforAndroid/native/mpv/build-runtime.sh
+  "${subtitleedit_root}/native/mpv/build-runtime.sh"
 ```
+
+Set `FFMPEG_KIT_DIR` to your checkout if it is elsewhere. The script uses
+`${HOME}/src/subtitleedit-ffmpeg-kit-next` by default.
 
 Pinned inputs:
 

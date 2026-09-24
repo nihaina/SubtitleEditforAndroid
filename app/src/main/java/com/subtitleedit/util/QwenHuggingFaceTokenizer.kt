@@ -5,12 +5,12 @@ import java.io.File
 /**
  * JNI facade for the HuggingFace `tokenizers` Rust library.
  *
- * The native library is optional because the repository does not vendor a Rust toolchain or
- * prebuilt tokenizers binaries. When present, it reads the official Qwen tokenizer directory and
- * applies the official forced-aligner audio/timestamp wrapper before tokenization.
+ * Reads the official Qwen tokenizer directory and applies the official forced-aligner
+ * audio/timestamp wrapper. The private native instance adds the aligner's official timestamp
+ * token when given compatible ASR assets; the shared ASR files are never rewritten.
  */
 internal class QwenHuggingFaceTokenizer private constructor(
-    private val handle: Long,
+    private var handle: Long,
 ) : AutoCloseable {
     data class EncodedText(
         val inputIds: LongArray,
@@ -18,10 +18,12 @@ internal class QwenHuggingFaceTokenizer private constructor(
         val units: List<String>,
     )
 
+    @Synchronized
     fun encodeForForcedAlignment(text: String, language: String): EncodedText {
+        check(handle != 0L) { "Qwen tokenizer 已关闭" }
         require(text.isNotBlank()) { "Qwen 对齐文本不能为空" }
         val result = nativeEncode(handle, text, language)
-            ?: error("Qwen tokenizer 无法生成 ForcedAligner 输入；请检查文本和 tokenizer 版本")
+            ?: error("Qwen tokenizer JNI 未返回编码结果；请确认安装了配套的最新版原生库")
         require(result.size >= 3) { "Qwen tokenizer 返回数据不完整" }
         val ids = result[0] as? LongArray ?: error("Qwen tokenizer input_ids 类型错误")
         val positions = result[1] as? IntArray ?: error("Qwen tokenizer timestamp positions 类型错误")
@@ -33,8 +35,12 @@ internal class QwenHuggingFaceTokenizer private constructor(
         return EncodedText(ids, positions, units.toList())
     }
 
+    @Synchronized
     override fun close() {
-        nativeDestroy(handle)
+        if (handle != 0L) {
+            nativeDestroy(handle)
+            handle = 0L
+        }
     }
 
     companion object {
