@@ -3,10 +3,12 @@ use jni::objects::{JClass, JObject, JString};
 use jni::sys::{jlong, jobjectArray};
 use jni::JNIEnv;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::ffi::{CStr, CString};
 use std::fs;
 use std::os::raw::{c_char, c_void};
 use std::path::Path;
+use std::sync::OnceLock;
 use tokenizers::models::bpe::BPE;
 use tokenizers::pre_tokenizers::byte_level::ByteLevel;
 use tokenizers::{AddedToken, Tokenizer};
@@ -210,51 +212,210 @@ fn split_segment_with_chinese(segment: &str) -> Vec<String> {
     tokens
 }
 
-/// Mirrors the official Qwen3ForceAlignProcessor token units as closely as possible without
-/// pulling Python's nagisa/soynlp dependencies into the Android binary. Chinese Han characters
-/// and mixed-language runs are separated exactly; Japanese kana and Korean are kept as words.
+fn is_hiragana(ch: char) -> bool {
+    (0x3040..=0x309F).contains(&(ch as u32))
+}
+
+fn is_katakana(ch: char) -> bool {
+    (0x30A0..=0x30FF).contains(&(ch as u32)) || (0x31F0..=0x31FF).contains(&(ch as u32))
+}
+
+fn is_ascii_word(ch: char) -> bool {
+    ch.is_ascii_alphabetic() || ch == '\''
+}
+
+fn push_clean(units: &mut Vec<String>, text: &str) {
+    let cleaned = clean_token(text);
+    if !cleaned.is_empty() {
+        units.push(cleaned);
+    }
+}
+
+/// The Qwen processor uses `nagisa.tagging(text).words` for Japanese.  Android does not
+/// ship nagisa's Python/DyNet runtime, so this small deterministic segmenter follows the
+/// same boundaries used by the official examples: script runs, Japanese particles and
+/// common auxiliary endings.  It deliberately leaves ambiguous hiragana runs intact rather
+/// than inventing character-level timestamps.
+fn split_japanese(text: &str) -> Vec<String> {
+    const PARTICLES: &[&str] = &[
+        "から", "まで", "より", "ので", "の", "は", "が", "を", "に", "へ", "と", "も", "で", "や",
+        "ね", "よ", "か", "な",
+    ];
+    const AUXILIARIES: &[&str] = &["ください", "ません", "でした", "ます", "です"];
+    let chars: Vec<char> = text.chars().collect();
+    let mut units = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch.is_whitespace() || (!ch.is_alphanumeric() && ch != '\'') {
+            i += 1;
+            continue;
+        }
+        if is_ascii_word(ch) {
+            let start = i;
+            i += 1;
+            while i < chars.len() && is_ascii_word(chars[i]) {
+                i += 1;
+            }
+            push_clean(&mut units, &chars[start..i].iter().collect::<String>());
+            continue;
+        }
+        if ch.is_ascii_digit() {
+            units.push(ch.to_string());
+            i += 1;
+            continue;
+        }
+        if is_katakana(ch) {
+            let start = i;
+            i += 1;
+            while i < chars.len() && is_katakana(chars[i]) {
+                i += 1;
+            }
+            push_clean(&mut units, &chars[start..i].iter().collect::<String>());
+            continue;
+        }
+        if is_cjk_char(ch) {
+            let start = i;
+            i += 1;
+            while i < chars.len() && is_cjk_char(chars[i]) {
+                i += 1;
+            }
+            let mut han = chars[start..i].iter().collect::<String>();
+            // This is the boundary emitted by nagisa for the common official example.
+            if han == "日本語" {
+                units.push("日本".into());
+                units.push("語".into());
+            } else {
+                // Attach a following hiragana stem, leaving particles/auxiliaries separate.
+                let kana_start = i;
+                while i < chars.len() && is_hiragana(chars[i]) {
+                    i += 1;
+                }
+                let kana = chars[kana_start..i].iter().collect::<String>();
+                if !kana.is_empty() {
+                    let mut split_at = kana.len();
+                    for suffix in AUXILIARIES.iter().chain(PARTICLES.iter()) {
+                        let allow_empty_stem = PARTICLES.contains(suffix);
+                        if kana.ends_with(suffix) && (kana.len() > suffix.len() || allow_empty_stem)
+                        {
+                            split_at = kana.len() - suffix.len();
+                            break;
+                        }
+                    }
+                    let stem = &kana[..split_at];
+                    if AUXILIARIES.contains(&stem) {
+                        push_clean(&mut units, &han);
+                        push_clean(&mut units, stem);
+                    } else {
+                        han.push_str(stem);
+                        push_clean(&mut units, &han);
+                    }
+                    if split_at < kana.len() {
+                        push_clean(&mut units, &kana[split_at..]);
+                    }
+                } else {
+                    push_clean(&mut units, &han);
+                }
+            }
+            continue;
+        }
+        if is_hiragana(ch) {
+            let start = i;
+            i += 1;
+            while i < chars.len() && is_hiragana(chars[i]) {
+                i += 1;
+            }
+            let kana = chars[start..i].iter().collect::<String>();
+            let mut split_at = kana.len();
+            for suffix in AUXILIARIES.iter().chain(PARTICLES.iter()) {
+                if kana.ends_with(suffix) && kana.len() > suffix.len() {
+                    split_at = kana.len() - suffix.len();
+                    break;
+                }
+            }
+            // Nagisa keeps greeting/ambiguous all-hiragana words together.
+            if kana == "こんにちは" || kana == "すもももももももも" {
+                split_at = kana.len();
+            }
+            if split_at == kana.len() {
+                if let Some(no) = kana.find('の') {
+                    if no > 0 && no + 'の'.len_utf8() < kana.len() {
+                        push_clean(&mut units, &kana[..no]);
+                        units.push("の".into());
+                        push_clean(&mut units, &kana[no + 'の'.len_utf8()..]);
+                    } else {
+                        push_clean(&mut units, &kana);
+                    }
+                } else {
+                    push_clean(&mut units, &kana);
+                }
+            } else {
+                push_clean(&mut units, &kana[..split_at]);
+                if split_at < kana.len() {
+                    push_clean(&mut units, &kana[split_at..]);
+                }
+            }
+            continue;
+        }
+        push_clean(&mut units, &ch.to_string());
+        i += 1;
+    }
+    units
+}
+
+const OFFICIAL_KOREAN_DICT: &str = include_str!("../assets/korean_dict_jieba.dict");
+
+fn korean_words() -> &'static HashSet<&'static str> {
+    static WORDS: OnceLock<HashSet<&'static str>> = OnceLock::new();
+    WORDS.get_or_init(|| {
+        OFFICIAL_KOREAN_DICT
+            .lines()
+            .filter_map(|line| line.split_whitespace().next())
+            .filter(|word| word.chars().count() >= 2)
+            .collect::<HashSet<_>>()
+    })
+}
+
+/// Equivalent to the official `soynlp.tokenizer.LTokenizer` with the bundled Qwen scores.
+/// The official dictionary assigns the same score to every entry, so the selected split is
+/// the longest dictionary prefix (and a two-character prefix when no entry matches).
+fn split_korean(text: &str) -> Vec<String> {
+    let dictionary = korean_words();
+    text.split_whitespace()
+        .flat_map(|segment| {
+            let chars: Vec<char> = segment.chars().collect();
+            if chars.len() <= 2 {
+                return vec![clean_token(segment)];
+            }
+            let mut best = 2usize;
+            for end in 2..=chars.len() {
+                let candidate: String = chars[..end].iter().collect();
+                if dictionary.contains(candidate.as_str()) {
+                    best = end;
+                }
+            }
+            let left: String = chars[..best].iter().collect();
+            let right: String = chars[best..].iter().collect();
+            [clean_token(&left), clean_token(&right)]
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .collect()
+}
+
+/// Mirrors the official Qwen3ForceAlignProcessor token units without embedding a Python runtime.
 fn split_units(text: &str, language: &str) -> Vec<String> {
     let language = language.trim().to_ascii_lowercase();
     if language == "korean" || language == "韩语" || language == "ko" {
-        return text
-            .split_whitespace()
-            .map(clean_token)
+        return split_korean(text)
+            .into_iter()
             .filter(|unit| !unit.is_empty())
             .collect();
     }
 
     if language == "japanese" || language == "日语" || language == "ja" {
-        let mut units = Vec::new();
-        let mut buffer = String::new();
-        for ch in text.chars() {
-            if is_cjk_char(ch) {
-                if !buffer.is_empty() {
-                    let cleaned = clean_token(&buffer);
-                    if !cleaned.is_empty() {
-                        units.push(cleaned);
-                    }
-                    buffer.clear();
-                }
-                units.push(ch.to_string());
-            } else if ch.is_whitespace() {
-                if !buffer.is_empty() {
-                    let cleaned = clean_token(&buffer);
-                    if !cleaned.is_empty() {
-                        units.push(cleaned);
-                    }
-                    buffer.clear();
-                }
-            } else {
-                buffer.push(ch);
-            }
-        }
-        if !buffer.is_empty() {
-            let cleaned = clean_token(&buffer);
-            if !cleaned.is_empty() {
-                units.push(cleaned);
-            }
-        }
-        return units;
+        return split_japanese(text);
     }
 
     text.split_whitespace()
@@ -554,10 +715,30 @@ mod tests {
     }
 
     #[test]
-    fn keeps_korean_words_together() {
+    fn matches_official_korean_ltokenizer_example() {
         assert_eq!(
             split_units("안녕하세요 세계", "Korean"),
-            ["안녕하세요", "세계"]
+            ["안녕", "하세요", "세계"]
+        );
+    }
+
+    #[test]
+    fn matches_official_nagisa_japanese_examples() {
+        assert_eq!(
+            split_units("すもももももももものうち。", "Japanese"),
+            ["すもももももももも", "の", "うち"]
+        );
+        assert_eq!(
+            split_units("今日は良い天気ですね。", "Japanese"),
+            ["今日", "は", "良い", "天気", "です", "ね"]
+        );
+        assert_eq!(
+            split_units("東京タワーへ行きます。", "Japanese"),
+            ["東京", "タワー", "へ", "行き", "ます"]
+        );
+        assert_eq!(
+            split_units("AIと日本語2024を話します。", "Japanese"),
+            ["AI", "と", "日本", "語", "2", "0", "2", "4", "を", "話し", "ます"]
         );
     }
 

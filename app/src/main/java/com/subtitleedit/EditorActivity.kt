@@ -2778,7 +2778,7 @@ class EditorActivity : AppCompatActivity() {
             showQuickTranscribe()
         }
         binding.btnQuickTranscribe.setOnLongClickListener {
-            startActivity(Intent(this, ModelManagementActivity::class.java))
+            startActivity(Intent(this, SpeechToSubtitleSettingsActivity::class.java))
             true
         }
 

@@ -2,6 +2,7 @@ package com.subtitleedit.util
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import com.subtitleedit.repository.DefaultSpeechRecognitionService
 import com.subtitleedit.repository.SpeechRecognitionService
 import java.io.File
@@ -141,13 +142,30 @@ class TokenTimestampGenerator(context: Context) {
                         recognized.forEachIndexed { index, segment ->
                             if (isCancelled()) error("用户取消")
                             if (segment.text.isBlank()) return@forEachIndexed
+                            // Qwen ASR may emit a punctuation-only tail. It has no alignable
+                            // units after the official tokenizer's character filtering; skip it
+                            // instead of aborting the whole audio job.
+                            if (!hasAlignableQwenText(segment.text)) {
+                                Log.w(TAG, "跳过不可对齐的 Qwen 文本段 ${index + 1}/${recognized.size}: ${segment.text}")
+                                progressCallback(40 + (index + 1) * 50 / recognized.size, "跳过不可对齐片段 ${index + 1}/${recognized.size}")
+                                return@forEachIndexed
+                            }
                             val startSample = (segment.startTime * 16L).coerceAtLeast(0L)
                             val sampleCount = ((segment.endTime - segment.startTime).coerceAtLeast(1L) * 16L)
                                 .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
                             val samples = reader.readRange(startSample, sampleCount)
                             if (samples.isEmpty()) return@forEachIndexed
                             val features = extractor.extract(samples)
-                            val encoded = encoder.encode(segment.text, language, features.first().size)
+                            val encoded = runCatching {
+                                encoder.encode(segment.text, language, features.first().size)
+                            }.getOrElse { error ->
+                                if (error.message?.contains("没有可对齐") == true) {
+                                    Log.w(TAG, "跳过不可对齐的 Qwen 文本段 ${index + 1}/${recognized.size}: ${segment.text}")
+                                    progressCallback(40 + (index + 1) * 50 / recognized.size, "跳过不可对齐片段 ${index + 1}/${recognized.size}")
+                                    return@forEachIndexed
+                                }
+                                throw error
+                            }
                             val aligned = aligner.align(
                                 Qwen3ForcedAlignerOnnx.Input(
                                     inputIds = encoded.inputIds,
@@ -181,6 +199,9 @@ class TokenTimestampGenerator(context: Context) {
             }
         }
     }
+
+    private fun hasAlignableQwenText(text: String): Boolean =
+        text.any { it == '\'' || it.isLetterOrDigit() }
 
     private fun localFile(path: String): File? {
         if (path.isBlank()) return null
@@ -262,6 +283,8 @@ class TokenTimestampGenerator(context: Context) {
     }
 
     companion object {
+        private const val TAG = "TokenTimestampGenerator"
+
         fun isSupported(settingsManager: SettingsManager): Boolean =
             settingsManager.getAsrModelType() != SettingsManager.ASR_MODEL_WHISPER &&
                 (settingsManager.getAsrModelType() != SettingsManager.ASR_MODEL_QWEN3_ASR ||

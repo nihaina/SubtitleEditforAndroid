@@ -9,6 +9,7 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.k2fsa.sherpa.onnx.*
 import java.io.File
+import java.util.concurrent.CancellationException
 
 /**
  * Whisper 语音识别器
@@ -39,6 +40,7 @@ class WhisperRecognizer(
     private var recognizer: OfflineRecognizer? = null
     private var vad: Vad? = null
     private var secondaryVad: Vad? = null
+    private var qwenChunker: Qwen3AsrChunker? = null
     private var qnnExecutableModelCopy: File? = null
     // 原生识别器只接受文件路径。对 SAF URI 保持描述符存活，避免复制大型模型文件。
     private val modelFileDescriptors = mutableListOf<ParcelFileDescriptor>()
@@ -168,6 +170,18 @@ class WhisperRecognizer(
             if (isQwen3Asr() && tokenizerDirectory == null) {
                 return Result.failure(Exception("无法读取 Qwen3-ASR tokenizer 文件夹"))
             }
+            qwenChunker = if (isQwen3Asr()) {
+                val cacheLength = Qwen3AsrModelBudget.readCacheLength(File(requireNotNull(decoderFile)))
+                Qwen3AsrChunker(
+                    Qwen3AsrBudget.fromCacheLength(cacheLength),
+                    settingsManager().getSpeechFixedSegmentSeconds(),
+                ).also {
+                    Log.i(TAG, "Qwen 分块预算：KV=${cacheLength ?: "dynamic"}, " +
+                        "总量=${it.budget.totalTokens}, 提示词预留=${it.budget.promptTokens}, " +
+                        "生成预留=${it.budget.outputTokens}, 音频=${it.budget.audioTokens}, " +
+                        "块长上限=${it.maxSamples * 1000L / SAMPLE_RATE}ms")
+                }
+            } else null
             Log.d(TAG, "模型文件准备完成:")
             if (useNpuContextBinary) {
                 Log.d(TAG, "  QNN context binary: ${npuRuntimeFiles?.contextBinaryPath}")
@@ -246,7 +260,9 @@ class WhisperRecognizer(
                         convFrontend = joinerFile!!,
                         encoder = encoderFile,
                         decoder = decoderFile!!,
-                        tokenizer = tokenizerDirectory!!
+                        tokenizer = tokenizerDirectory!!,
+                        maxTotalLen = requireNotNull(qwenChunker).budget.totalTokens,
+                        maxNewTokens = requireNotNull(qwenChunker).budget.outputTokens,
                     ),
                     tokens = "",
                     numThreads = settingsManager().getSpeechWhisperThreads(),
@@ -555,6 +571,7 @@ class WhisperRecognizer(
             val allSegments = mutableListOf<SubtitleSegment>()
 
             Pcm16WavReader(audioFile).use { reader ->
+                if (isQwen3Asr()) require(reader.sampleRate == SAMPLE_RATE) { "Qwen 音频必须是 16kHz" }
                 val totalSamples = reader.totalSamples
                 val totalDurationMs = (totalSamples * 1000L) / SAMPLE_RATE
 
@@ -644,7 +661,12 @@ class WhisperRecognizer(
                         val recognizedSegments = recognizeSegment(
                             audioData = segmentData,
                             startTimeMs = recognitionStartTimeMs,
-                            segmentResultTimeRange = segmentResultTimeRange
+                            segmentResultTimeRange = segmentResultTimeRange,
+                            isCancelled = isCancelled,
+                            qwenProgress = { current, count ->
+                                progressCallback(5 + index * 95 / vadSegments.size,
+                                    "正在识别第 ${index + 1}/${vadSegments.size} 个语音段（Qwen 子段 $current/$count）", null)
+                            },
                         )
                         // 将扩展窗口的识别结果裁回原始 VAD 时间轴，padding 不会出现在输出字幕中。
                         val segments = constrainToVadRange(recognizedSegments, vadSegment)
@@ -660,6 +682,32 @@ class WhisperRecognizer(
                                 )
                             }
                         }
+                    }
+                } else if (isQwen3Asr()) {
+                    // Read only one budget-sized window. Advance to its low-energy cut rather
+                    // than first cutting at the user's fixed boundary through a spoken word.
+                    val chunker = requireNotNull(qwenChunker)
+                    var cursor = 0L
+                    var index = 0
+                    while (cursor < totalSamples) {
+                        if (isCancelled()) throw CancellationException("用户取消")
+                        val count = minOf(chunker.maxSamples.toLong(), totalSamples - cursor).toInt()
+                        val window = reader.readRange(cursor, count)
+                        check(window.isNotEmpty()) { "Qwen 无法读取音频分块" }
+                        val cut = chunker.nextEnd(window, hasMoreAudio = cursor + window.size < totalSamples)
+                        val end = cursor + cut
+                        val progress = (cursor * 100L / totalSamples).toInt()
+                        val status = "正在识别 Qwen 第 ${++index} 段（${cursor * 1000L / SAMPLE_RATE}–${end * 1000L / SAMPLE_RATE}ms）"
+                        progressCallback(progress, status, null)
+                        val segments = recognizeSegment(
+                            if (cut == window.size) window else window.copyOf(cut),
+                            cursor * 1000L / SAMPLE_RATE,
+                            SegmentTimeRange(cursor * 1000L / SAMPLE_RATE, end * 1000L / SAMPLE_RATE),
+                            isCancelled = isCancelled,
+                        )
+                        allSegments.addAll(segments)
+                        segments.forEach { progressCallback(progress, status, it) }
+                        cursor = end
                     }
                 } else {
                     // 没有 VAD 时逐段读取，SenseVoice NPU 使用模型自身的固定输入时长。
@@ -710,7 +758,8 @@ class WhisperRecognizer(
                                 SegmentTimeRange(startTimeMs, endTimeMs)
                             } else {
                                 null
-                            }
+                            },
+                            isCancelled = isCancelled,
                         )
                         allSegments.addAll(segments)
 
@@ -787,8 +836,51 @@ class WhisperRecognizer(
     private fun recognizeSegment(
         audioData: FloatArray,
         startTimeMs: Long,
-        segmentResultTimeRange: SegmentTimeRange? = null
+        segmentResultTimeRange: SegmentTimeRange? = null,
+        isCancelled: () -> Boolean = { false },
+        qwenProgress: (Int, Int) -> Unit = { _, _ -> },
     ): List<SubtitleSegment> {
+        if (isCancelled()) throw CancellationException("用户取消")
+        if (!isQwen3Asr()) return decodeSegment(audioData, startTimeMs, segmentResultTimeRange, isCancelled)
+        val chunker = checkNotNull(qwenChunker) { "Qwen 分块预算未初始化" }
+        val chunks = chunker.split(audioData)
+        val segments = mutableListOf<SubtitleSegment>()
+        chunks.forEachIndexed { index, chunk ->
+            if (isCancelled()) throw CancellationException("用户取消")
+            val times = chunk.timeRangeMs(
+                startTimeMs,
+                segmentResultTimeRange?.endTimeMs ?: (startTimeMs + audioData.size * 1000L / SAMPLE_RATE),
+                audioData.size,
+            )
+            val chunkStart = times.first
+            val chunkEnd = times.last
+            val range = SegmentTimeRange(
+                maxOf(chunkStart, segmentResultTimeRange?.startTimeMs ?: chunkStart),
+                minOf(chunkEnd, segmentResultTimeRange?.endTimeMs ?: chunkEnd),
+            )
+            if (range.endTimeMs <= range.startTimeMs) return@forEachIndexed
+            var samples = if (chunks.size == 1) audioData else
+                audioData.copyOfRange(chunk.startSample, chunk.endSample)
+            // As in the official processor, pad a very short final chunk for inference only;
+            // the returned range still ends at the original audio sample.
+            if (samples.size < Qwen3AsrBudget.MIN_SAMPLES) samples = samples.copyOf(Qwen3AsrBudget.MIN_SAMPLES)
+            check(chunker.budget.accepts(samples.size)) { "Qwen 音频分块超出 token 预算" }
+            qwenProgress(index + 1, chunks.size)
+            Log.d(TAG, "Qwen 子段 ${index + 1}/${chunks.size}: ${chunkStart}..${chunkEnd}ms, " +
+                "audioTokens=${Qwen3AsrBudget.audioTokensForFrames(samples.size / Qwen3AsrBudget.FRAME_SHIFT)}, " +
+                "outputReserve=${chunker.budget.outputTokens}")
+            segments += decodeSegment(samples, chunkStart, range, isCancelled)
+        }
+        return segments
+    }
+
+    private fun decodeSegment(
+        audioData: FloatArray,
+        startTimeMs: Long,
+        segmentResultTimeRange: SegmentTimeRange? = null,
+        isCancelled: () -> Boolean = { false },
+    ): List<SubtitleSegment> {
+        if (isCancelled()) throw CancellationException("用户取消")
         val maxSamples = senseVoiceNpuMaxSamples()
         if (maxSamples != null && audioData.size > maxSamples) {
             return audioData
@@ -810,17 +902,20 @@ class WhisperRecognizer(
                         recognizeSegment(
                             audioData = samples.toFloatArray(),
                             startTimeMs = chunkStartTimeMs,
-                            segmentResultTimeRange = chunkResultRange
+                            segmentResultTimeRange = chunkResultRange,
+                            isCancelled = isCancelled,
                         )
                     }
                 }
         }
         val segments = mutableListOf<SubtitleSegment>()
+        var openedStream: OfflineStream? = null
 
         try {
             // 检查 recognizer 是否已初始化
             val rec = recognizer
             if (rec == null) {
+                if (isQwen3Asr()) error("Qwen 识别器未初始化")
                 Log.e(TAG, "recognizer 为 null，无法创建 stream")
                 return segments
             }
@@ -834,9 +929,11 @@ class WhisperRecognizer(
                     rec.createStream(hotwords)
                 }
             } catch (e: Exception) {
+                if (isQwen3Asr()) throw e
                 Log.e(TAG, "创建 stream 失败", e)
                 return segments
             }
+            openedStream = stream
 
             if (isQwen3Asr()) {
                 Qwen3AsrLanguageMapper.toModelLanguage(language)?.let { qwenLanguage ->
@@ -851,6 +948,7 @@ class WhisperRecognizer(
             Log.d(TAG, "执行识别...")
             // 执行识别
             rec.decode(stream)
+            if (isCancelled()) throw CancellationException("用户取消")
 
             Log.d(TAG, "获取识别结果...")
             // 获取结果
@@ -859,6 +957,9 @@ class WhisperRecognizer(
                 Qwen3AsrTextNormalizer.normalize(result.text)
             } else {
                 result.text.trim()
+            }
+            if (isQwen3Asr() && text.isEmpty()) {
+                Log.w(TAG, "Qwen 当前预算内音频段返回空文本：samples=${audioData.size}, tokens=${result.tokens.size}")
             }
 
             Log.d(TAG, "识别结果: $text")
@@ -974,10 +1075,13 @@ class WhisperRecognizer(
                 }
             }
 
-            stream.release()
-
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "识别段失败", e)
+            if (isQwen3Asr()) throw e
+        } finally {
+            openedStream?.release()
         }
 
         return segments
@@ -999,6 +1103,7 @@ class WhisperRecognizer(
 
             val texts = mutableListOf<String>()
             Pcm16WavReader(audioFile).use { reader ->
+                if (isQwen3Asr()) require(reader.sampleRate == SAMPLE_RATE) { "Qwen 音频必须是 16kHz" }
                 val dynamicPaddingEnabled = shouldUseDynamicPadding()
                 val sampleRanges = ranges.map { range ->
                     val startMs = range.first.coerceAtLeast(0L)
@@ -1069,7 +1174,9 @@ class WhisperRecognizer(
                                     SegmentTimeRange(recognitionStartMs, recognitionEndMs)
                                 } else {
                                     null
-                                }
+                                },
+                                isCancelled = isCancelled,
+                                qwenProgress = { _, _ -> progressCallback(index + 1, ranges.size) },
                             ),
                             rangeStartTime = startMs,
                             rangeEndTime = endMs
@@ -1150,6 +1257,7 @@ class WhisperRecognizer(
         try {
             recognizer?.release()
             recognizer = null
+            qwenChunker = null
             vad?.release()
             vad = null
             secondaryVad?.release()

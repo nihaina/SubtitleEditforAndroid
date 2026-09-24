@@ -866,6 +866,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         }
         if (modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) {
             appendRuntimeLog("  Conv Frontend：${displayModelPath(joinerPath)}")
+            appendRuntimeLog("  Qwen 分段：按模型预算限制块长，在上限内优先选择低能量切点")
         }
         appendRuntimeLog("  ${if (modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) "Tokenizer" else "Tokens"}：${displayModelPath(tokensPath)}")
         if (modelType != SettingsManager.ASR_MODEL_SENSEVOICE) {
@@ -907,6 +908,8 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             settingsManager.getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU
         ) {
             "NPU 模型固定分段 ${settingsManager.getSenseVoiceNpuDurationSeconds()} 秒"
+        } else if (modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) {
+            "分段上限 ${settingsManager.getSpeechFixedSegmentSeconds()} 秒（实际长度受模型预算限制）"
         } else {
             "固定分段 ${settingsManager.getSpeechFixedSegmentSeconds()} 秒"
         }

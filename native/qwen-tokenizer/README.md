@@ -28,10 +28,19 @@ JNI returns a single audio-pad token. After log-mel extraction, Kotlin's
 shifts every timestamp position by the inserted token count, and the caller builds
 the attention mask using the expanded sequence length. No JNI ABI change is needed.
 
-Chinese mixed text follows the official character/word split. Japanese and
-Korean use a dependency-free fallback (whitespace and script runs) instead of
-the optional Python `nagisa`/`soynlp` packages; validate those languages against
-the desktop processor before using the result for measurements.
+Chinese mixed text follows the official character/word split. Japanese uses a
+small native segmenter that follows the boundaries emitted by the official
+`nagisa.tagging(...).words` examples (script runs, particles and common
+auxiliary endings). Korean uses the official Qwen
+`korean_dict_jieba.dict` resource bundled in this crate and the equivalent
+`soynlp.LTokenizer` longest-prefix rule. The Python runtimes are not embedded;
+the parity tests in `src/lib.rs` cover the Japanese and Korean examples used to
+calibrate these implementations. The HuggingFace BPE tokenizer remains the
+source of all token IDs in both cases.
+
+The Korean dictionary is downloaded from the official Qwen3-ASR repository and
+is compiled into the native library as read-only data. Updating the upstream
+dictionary requires rebuilding `libqwen_tokenizer.so` for every Android ABI.
 
 ## Build in WSL
 
