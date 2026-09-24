@@ -1001,7 +1001,8 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     private fun shouldUseTokenTimestampExperiment(): Boolean =
         settingsManager.isSpeechTokenTimestampEnabled() &&
             modelType != SettingsManager.ASR_MODEL_WHISPER &&
-            modelType != SettingsManager.ASR_MODEL_QWEN3_ASR &&
+            (modelType != SettingsManager.ASR_MODEL_QWEN3_ASR ||
+                TokenTimestampGenerator.isQwen3ForcedAlignerConfigured(settingsManager)) &&
             shouldPrepareTimeline()
 
     private fun tokenTimestampModelPath(): String =

@@ -1,17 +1,25 @@
 package com.subtitleedit
 
+import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.slider.Slider
 import com.google.android.material.textfield.TextInputEditText
 import com.subtitleedit.databinding.ActivitySpeechToSubtitleSettingsBinding
 import com.subtitleedit.util.OverwritingToast
+import com.subtitleedit.util.Qwen3ForcedAlignerOnnx
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.TokenTimestampGenerator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.Locale
 
 class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
@@ -21,6 +29,10 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
     private var loading = false
     private var updatingSecondaryVadMode = false
     private var updatingSecondaryVadValue = false
+
+    private val qwen3ForcedAlignerPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let(::importQwen3ForcedAligner) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,6 +45,13 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         setupToolbar()
         setupListeners()
         loadSettings()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::binding.isInitialized && ::settingsManager.isInitialized) {
+            updateQwen3ForcedAlignerUi()
+        }
     }
 
     private fun setupToolbar() {
@@ -182,6 +201,9 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
             if (!loading) settingsManager.setSpeechTokenTimestampMergeEnabled(checked)
             updateSenseVoiceTimestampControls()
         }
+        binding.btnSelectQwen3ForcedAligner.setOnClickListener {
+            qwen3ForcedAlignerPickerLauncher.launch(arrayOf("application/octet-stream", "application/onnx", "*/*"))
+        }
         bindSecondaryVadValue(
             slider = binding.sliderSenseVoiceTimestampMergeGap,
             input = binding.etSenseVoiceTimestampMergeGap,
@@ -304,6 +326,91 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         updateVadMergeControls()
         updateSecondaryVadMergeControls()
         updateSenseVoiceTimestampControls()
+        updateQwen3ForcedAlignerUi()
+    }
+
+    private fun updateQwen3ForcedAlignerUi() {
+        val isQwen3 = settingsManager.getAsrModelType() == SettingsManager.ASR_MODEL_QWEN3_ASR
+        binding.layoutQwen3ForcedAligner.visibility = if (isQwen3) View.VISIBLE else View.GONE
+        if (!isQwen3) return
+        val path = settingsManager.getQwen3ForcedAlignerPath()
+        val file = pathToLocalFile(path)
+        binding.tvQwen3ForcedAlignerPath.text = when {
+            file?.isFile == true -> "已配置：${file.name}"
+            path.isNotBlank() -> "配置文件不可读，请重新导入"
+            else -> "尚未配置 ForcedAligner ONNX"
+        }
+        binding.tvQwen3ForcedAlignerPath.setTextColor(
+            getColor(if (file?.isFile == true) R.color.on_surface_variant else R.color.error)
+        )
+    }
+
+    private fun importQwen3ForcedAligner(uri: Uri) {
+        val targetDirectory = File(filesDir, "models/qwen3-asr/forced-aligner")
+        val target = File(targetDirectory, "forced_aligner.onnx")
+        val staging = File(targetDirectory, ".forced_aligner_importing")
+        val backup = File(targetDirectory, ".forced_aligner_backup")
+        binding.btnSelectQwen3ForcedAligner.isEnabled = false
+        lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    if (!targetDirectory.exists() && !targetDirectory.mkdirs()) {
+                        error("无法创建 ForcedAligner 模型目录")
+                    }
+                    staging.delete()
+                    backup.delete()
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        staging.outputStream().use { output ->
+                            input.copyTo(output, 64 * 1024)
+                        }
+                    } ?: error("无法读取所选 ONNX 文件")
+                    if (!staging.isFile || staging.length() == 0L) {
+                        error("所选 ONNX 文件为空")
+                    }
+                    // Check the graph contract before replacing an existing model.
+                    Qwen3ForcedAlignerOnnx(staging).use { }
+                    if (target.exists() && !target.renameTo(backup)) {
+                        error("无法备份现有 ForcedAligner 模型")
+                    }
+                    try {
+                        if (!staging.renameTo(target)) error("无法安装 ForcedAligner 模型")
+                    } catch (error: Exception) {
+                        if (backup.exists()) backup.renameTo(target)
+                        throw error
+                    }
+                    backup.delete()
+                }
+                settingsManager.setQwen3ForcedAlignerPath(Uri.fromFile(target).toString())
+                updateQwen3ForcedAlignerUi()
+                OverwritingToast.makeText(this@SpeechToSubtitleSettingsActivity, "Qwen3 ForcedAligner 已导入", Toast.LENGTH_SHORT).show()
+            } catch (error: Exception) {
+                withContext(Dispatchers.IO) {
+                    staging.delete()
+                    if (backup.exists() && !target.exists()) backup.renameTo(target)
+                }
+                OverwritingToast.makeText(
+                    this@SpeechToSubtitleSettingsActivity,
+                    "ForcedAligner 导入失败：${error.message}",
+                    Toast.LENGTH_LONG
+                ).show()
+            } finally {
+                withContext(Dispatchers.IO) {
+                    staging.delete()
+                    backup.delete()
+                }
+                binding.btnSelectQwen3ForcedAligner.isEnabled = true
+            }
+        }
+    }
+
+    private fun pathToLocalFile(path: String): File? {
+        if (path.isBlank()) return null
+        val uri = Uri.parse(path)
+        return if (uri.scheme.isNullOrEmpty() || uri.scheme == "file") {
+            File(uri.path ?: path)
+        } else {
+            null
+        }
     }
 
     private fun updateVadMergeControls() {

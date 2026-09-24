@@ -336,6 +336,9 @@
     <string name="activity_speech_to_subtitle_settings_text_53">设为 0 时仅合并重叠或首尾相接的字幕段</string>
     <string name="activity_speech_to_subtitle_settings_text_54" translatable="false">150</string>
     <string name="activity_speech_to_subtitle_settings_text_55">ASR转录</string>
+    <string name="activity_speech_to_subtitle_settings_qwen_aligner_title">Qwen3 ForcedAligner 模型</string>
+    <string name="activity_speech_to_subtitle_settings_qwen_aligner_hint">选择桌面端导出的 Qwen3-ForcedAligner ONNX 文件。仅在当前 ASR 模型为 Qwen3-ASR 时使用，属于实验功能。</string>
+    <string name="activity_speech_to_subtitle_settings_qwen_aligner_select">导入 ForcedAligner ONNX</string>
     <string name="activity_speech_to_subtitle_settings_text_56">VAD 参数设置</string>
     <string name="activity_speech_to_subtitle_settings_text_57">检测阈值</string>
     <string name="activity_speech_to_subtitle_settings_text_58">值越低越容易检测到语音，但可能误判噪音</string>

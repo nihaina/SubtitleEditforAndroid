@@ -106,6 +106,33 @@ git apply /path/to/SubtitleEditforAndroid/app/libs/sherpa-onnx-v1.13.8-sensevoic
 `durations`；SenseVoice、QNN/Ascend CTC 路径也复用这套转换。它不是基于指定文本的强制对齐，
 而是 CTC 贪心解码中每个 token 连续占用的输出帧数，因此 Parakeet CTC 也会返回对应的 `durations`。
 
+### Qwen3-ForcedAligner 实验接口
+
+Qwen3-ASR 的生成式解码不会返回 token 时间。项目现在包含一个独立的 ONNX 对齐推理内核：
+`com.subtitleedit.util.Qwen3ForcedAlignerOnnx`。它对应 Qwen 官方
+`Qwen3-ForcedAligner-0.6B` 的 token-classification 结构，输入为：
+
+- `input_ids`：`int64[1, sequence]`
+- `input_features`：`float[1, mel_bins, frames]`
+- `attention_mask`：`int64[1, sequence]`
+- `feature_attention_mask`：`int64[1, frames]`（与官方 `Qwen3ASRProcessor` 输出一致）
+
+输出 `logits` 的每一行是一个 timestamp 类别，官方模型的类别步长为 80 ms。调用方将文本单元
+编码成两个 timestamp placeholder 位置（开始、结束），推理结果会转换为
+`ForcedAlignmentUnit`，再由 `ForcedAlignmentSegmenter` 按静音间隔生成字幕段。
+
+上游目前发布的是 Transformers/SafeTensors 模型，并没有可直接供 Android 使用的 ONNX 文件；
+因此本接口不会自动下载或启用 Qwen3 对齐实验。还需要先把官方模型导出为上述输入输出契约，
+并提供 Qwen processor 的 log-mel 特征和 tokenizer 输入。模型未配置时，现有 Qwen3-ASR
+仍按语音段生成字幕，不受影响。
+
+仓库中的 `tools/export_qwen3_forced_aligner_onnx.py` 提供了桌面端导出尝试。导出需要官方
+`qwen-asr` 和 PyTorch，导出后的模型再由 `Qwen3ForcedAlignerOnnx` 加载。
+
+Qwen 官方当前仓库通常提供 `vocab.json`、`merges.txt`、`tokenizer_config.json` 等六个
+tokenizer 配置文件而不提供 `tokenizer.json`。Android JNI 会从这些官方文件重建 ByteLevel
+BPE；如果用户提供了转换得到的 `tokenizer.json`，也会优先使用它。
+
 ### 注意事项
 
 - 无需额外的 AAR 依赖

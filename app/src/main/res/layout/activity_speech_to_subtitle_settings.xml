@@ -102,6 +102,51 @@
                         android:textColor="@color/on_surface_variant"
                         android:textSize="12sp" />
 
+                    <LinearLayout
+                        android:id="@+id/layoutQwen3ForcedAligner"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:id="@+id/tvQwen3ForcedAlignerTitle"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/activity_speech_to_subtitle_settings_qwen_aligner_title"
+                            android:textColor="@color/on_surface"
+                            android:textSize="14sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tvQwen3ForcedAlignerHint"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="@string/activity_speech_to_subtitle_settings_qwen_aligner_hint"
+                            android:textColor="@color/on_surface_variant"
+                            android:textSize="12sp" />
+
+                        <Button
+                            android:id="@+id/btnSelectQwen3ForcedAligner"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:minHeight="40dp"
+                            android:text="@string/activity_speech_to_subtitle_settings_qwen_aligner_select" />
+
+                        <TextView
+                            android:id="@+id/tvQwen3ForcedAlignerPath"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:textColor="@color/on_surface_variant"
+                            android:textSize="12sp" />
+
+                    </LinearLayout>
+
                     <TextView
                         android:id="@+id/tvSenseVoiceTimestampModelMissing"
                         android:layout_width="match_parent"

@@ -39,6 +39,8 @@ local.properties
 # Generated
 app/build/
 */build/
+__pycache__/
+*.pyc
 bin/
 gen/
 out/
@@ -98,6 +100,7 @@ coverage/
 # External native build
 .externalNativeBuild
 .cxx/
+native/*/target/
 .cmake/
 
 # Version control

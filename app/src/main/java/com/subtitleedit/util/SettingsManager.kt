@@ -76,6 +76,7 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_QWEN3_ASR_CONV_FRONTEND_PATH = "qwen3_asr_conv_frontend_path"
         private const val KEY_QWEN3_ASR_TOKENIZER_PATH = "qwen3_asr_tokenizer_path"
         private const val KEY_QWEN3_ASR_MODEL_VARIANT = "qwen3_asr_model_variant"
+        private const val KEY_QWEN3_FORCED_ALIGNER_PATH = "qwen3_forced_aligner_path"
         private const val KEY_VAD_MODEL_PATH = "vad_model_path"
         private const val KEY_VAD_USE_BUILT_IN_MODEL = "vad_use_built_in_model"
         private const val KEY_VAD_THRESHOLD = "vad_threshold"
@@ -718,6 +719,18 @@ class SettingsManager private constructor(context: Context) {
             .putString(qwen3AsrPathKey(KEY_QWEN3_ASR_CONV_FRONTEND_PATH, variant), "")
             .putString(qwen3AsrPathKey(KEY_QWEN3_ASR_TOKENIZER_PATH, variant), "")
             .apply()
+    }
+
+    /** Optional exported Qwen3-ForcedAligner ONNX graph used by the timestamp experiment. */
+    fun getQwen3ForcedAlignerPath(): String =
+        prefs.getString(KEY_QWEN3_FORCED_ALIGNER_PATH, "") ?: ""
+
+    fun setQwen3ForcedAlignerPath(path: String) {
+        prefs.edit().putString(KEY_QWEN3_FORCED_ALIGNER_PATH, path).apply()
+    }
+
+    fun clearQwen3ForcedAlignerPath() {
+        prefs.edit().putString(KEY_QWEN3_FORCED_ALIGNER_PATH, "").apply()
     }
 
     /**
