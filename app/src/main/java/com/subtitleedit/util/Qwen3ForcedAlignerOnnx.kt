@@ -53,24 +53,26 @@ internal class Qwen3ForcedAlignerOnnx(
     private val session: OrtSession
 
     init {
-        require(modelFile.isFile && modelFile.length() > 0L) {
-            "Qwen3-ForcedAligner ONNX 文件不存在或为空"
+        require(Qwen3ForcedAlignerModelFiles.isComplete(modelFile)) {
+            "Qwen3-ForcedAligner .onnx 或配套的 .onnx.data 文件缺失/不可读，请重新导入两个文件"
         }
-        session = environment.createSession(modelFile.absolutePath, OrtSession.SessionOptions())
-        require(session.inputNames.contains(inputNames.inputIds)) {
-            "对齐模型缺少输入 ${inputNames.inputIds}，实际输入：${session.inputNames}"
+        val opened = OrtSession.SessionOptions().use { options ->
+            environment.createSession(modelFile.absolutePath, options)
         }
-        require(session.inputNames.contains(inputNames.inputFeatures)) {
-            "对齐模型缺少输入 ${inputNames.inputFeatures}，实际输入：${session.inputNames}"
-        }
-        require(session.inputNames.contains(inputNames.attentionMask)) {
-            "对齐模型缺少输入 ${inputNames.attentionMask}，实际输入：${session.inputNames}"
-        }
-        require(session.inputNames.contains(inputNames.featureAttentionMask)) {
-            "对齐模型缺少输入 ${inputNames.featureAttentionMask}，实际输入：${session.inputNames}"
-        }
-        require(session.outputNames.contains(outputName)) {
-            "对齐模型缺少输出 $outputName，实际输出：${session.outputNames}"
+        try {
+            for (name in listOf(inputNames.inputIds, inputNames.inputFeatures,
+                inputNames.attentionMask, inputNames.featureAttentionMask)) {
+                require(opened.inputNames.contains(name)) {
+                    "对齐模型缺少输入 $name，实际输入：${opened.inputNames}"
+                }
+            }
+            require(opened.outputNames.contains(outputName)) {
+                "对齐模型缺少输出 $outputName，实际输出：${opened.outputNames}"
+            }
+            session = opened
+        } catch (error: Throwable) {
+            opened.close()
+            throw error
         }
     }
 
@@ -86,11 +88,21 @@ internal class Qwen3ForcedAlignerOnnx(
         require(input.featureAttentionMask.size == input.inputFeatures.first().size) {
             "音频特征和 feature_attention_mask 长度不一致"
         }
+        val validFrames = input.featureAttentionMask.count { it == 1L }
+        require(input.featureAttentionMask.withIndex().all { (index, value) ->
+            value == if (index < validFrames) 1L else 0L
+        }) { "音频特征掩码必须为连续的有效帧及右侧补零" }
+        require(input.inputIds.count { it == Qwen3ForcedAlignmentInput.AUDIO_PAD_ID } ==
+            Qwen3ForcedAlignmentInput.audioTokenCount(validFrames)
+        ) { "audio_pad 数量与音频帧数不匹配，请按官方 processor 展开占位符" }
         require(input.units.size * 2 == input.timestampPositions.size) {
             "每个对齐单元必须对应两个 timestamp 位置"
         }
         require(input.timestampPositions.all { it in input.inputIds.indices }) {
             "timestamp 位置超出 input_ids 范围"
+        }
+        require(input.timestampPositions.all { input.inputIds[it] == Qwen3ForcedAlignmentInput.TIMESTAMP_ID }) {
+            "timestamp 位置未随 audio_pad 展开同步更新"
         }
 
         val features = arrayOf(input.inputFeatures)

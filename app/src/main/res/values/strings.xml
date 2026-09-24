@@ -337,8 +337,9 @@
     <string name="activity_speech_to_subtitle_settings_text_54" translatable="false">150</string>
     <string name="activity_speech_to_subtitle_settings_text_55">ASR转录</string>
     <string name="activity_model_management_qwen_aligner_title">Qwen3 ForcedAligner 模型</string>
-    <string name="activity_model_management_qwen_aligner_hint">选择桌面端导出的 Qwen3-ForcedAligner ONNX 文件。仅在当前 ASR 模型为 Qwen3-ASR 时使用，属于实验功能。</string>
-    <string name="activity_model_management_qwen_aligner_select">导入 ForcedAligner ONNX</string>
+    <string name="activity_model_management_qwen_aligner_hint">在文件选择器中长按并多选同次导出的 .onnx 和 .onnx.data 两个文件（如 forced_aligner.onnx 与 forced_aligner.onnx.data），请保留原文件名。0.6B / 1.7B 共用，供 Qwen3-ASR 实验性打轴使用。</string>
+    <string name="activity_model_management_qwen_aligner_select">导入 ONNX + DATA（两个文件）</string>
+    <string name="qwen_aligner_select_pair">请同时选择 .onnx 和配套的同名 .onnx.data 两个文件</string>
     <string name="activity_speech_to_subtitle_settings_text_56">VAD 参数设置</string>
     <string name="activity_speech_to_subtitle_settings_text_57">检测阈值</string>
     <string name="activity_speech_to_subtitle_settings_text_58">值越低越容易检测到语音，但可能误判噪音</string>

@@ -99,8 +99,8 @@ class TokenTimestampGenerator(context: Context) {
         if (tokenizerDirectory == null || !tokenizerDirectory.isDirectory) {
             return Result.failure(IllegalStateException("无法读取 Qwen3 tokenizer 目录"))
         }
-        if (alignerFile == null || !alignerFile.isFile) {
-            return Result.failure(IllegalStateException("无法读取 Qwen3-ForcedAligner ONNX 文件"))
+        if (!Qwen3ForcedAlignerModelFiles.isComplete(alignerFile)) {
+            return Result.failure(IllegalStateException("请重新导入配套的 ForcedAligner .onnx 和 .onnx.data 两个文件"))
         }
         if (!QwenHuggingFaceTokenizer.isAvailable()) {
             return Result.failure(IllegalStateException("未加载 libqwen_tokenizer，请检查 APK ABI"))
@@ -129,7 +129,7 @@ class TokenTimestampGenerator(context: Context) {
             if (recognized.isEmpty()) error("Qwen3-ASR 未识别到文本")
             val extractor = QwenLogMelExtractor()
             val output = mutableListOf<ForcedAlignmentUnit>()
-            Qwen3ForcedAlignerOnnx(alignerFile).use { aligner ->
+            Qwen3ForcedAlignerOnnx(requireNotNull(alignerFile)).use { aligner ->
                 Qwen3ForcedAlignmentTextEncoder(tokenizerDirectory).use { encoder ->
                     Pcm16WavReader(pcmFile).use { reader ->
                         require(reader.sampleRate == 16_000) { "Qwen 对齐音频必须是 16kHz" }
@@ -141,8 +141,8 @@ class TokenTimestampGenerator(context: Context) {
                                 .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
                             val samples = reader.readRange(startSample, sampleCount)
                             if (samples.isEmpty()) return@forEachIndexed
-                            val encoded = encoder.encode(segment.text, language)
                             val features = extractor.extract(samples)
+                            val encoded = encoder.encode(segment.text, language, features.first().size)
                             val aligned = aligner.align(
                                 Qwen3ForcedAlignerOnnx.Input(
                                     inputIds = encoded.inputIds,
@@ -304,7 +304,7 @@ class TokenTimestampGenerator(context: Context) {
             } else {
                 null
             }
-            return file?.let { it.isFile && it.length() > 0L } == true
+            return Qwen3ForcedAlignerModelFiles.isComplete(file)
         }
 
         private fun isQwen3AsrConfigured(

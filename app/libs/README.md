@@ -126,8 +126,14 @@ Qwen3-ASR 的生成式解码不会返回 token 时间。项目现在包含一个
 并提供 Qwen processor 的 log-mel 特征和 tokenizer 输入。模型未配置时，现有 Qwen3-ASR
 仍按语音段生成字幕，不受影响。
 
-仓库中的 `tools/export_qwen3_forced_aligner_onnx.py` 提供了桌面端导出尝试。导出需要官方
-`qwen-asr` 和 PyTorch，导出后的模型再由 `Qwen3ForcedAlignerOnnx` 加载。
+仓库中的 `tools/export_qwen3_forced_aligner_onnx.py` 使用官方 `qwen-asr` 和 PyTorch
+导出动态音频/文本长度模型，桌面参考校验见 `tools/README_qwen3_forced_aligner.md`。
+FP32 产物为 `.onnx` 与同名 `.onnx.data` 两个文件，需在模型管理的 Qwen3-ASR 区域
+同时多选导入，保留原文件名。应用会在同一暂存目录中校验后整组安装，并显示导入进度。
+
+JNI 文本编码之后，Kotlin 按 log-mel 有效帧数展开 `<|audio_pad|>`，同步平移
+timestamp positions，并用新序列长度构造 attention mask。模型和外部权重缺一时
+不会视为已配置。当前桌面数值验证和单元测试不代表已经完成真机内存/性能验证。
 
 Qwen 官方当前仓库通常提供 `vocab.json`、`merges.txt`、`tokenizer_config.json` 等六个
 tokenizer 配置文件而不提供 `tokenizer.json`。Android JNI 会从这些官方文件重建 ByteLevel

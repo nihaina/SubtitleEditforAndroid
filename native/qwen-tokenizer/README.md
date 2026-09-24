@@ -13,6 +13,11 @@ the audio start/pad/end tokens are prepended and every text unit is followed by
 two `<timestamp>` tokens. The chat template is intentionally not used because
 the official forced-aligner path passes this raw wrapper string to the tokenizer.
 
+JNI returns a single audio-pad token. After log-mel extraction, Kotlin's
+`Qwen3ForcedAlignmentInput` expands it to `(frames / 100) * 13 + ceil((frames % 100) / 8)`,
+shifts every timestamp position by the inserted token count, and the caller builds
+the attention mask using the expanded sequence length. No JNI ABI change is needed.
+
 Chinese mixed text follows the official character/word split. Japanese and
 Korean use a dependency-free fallback (whitespace and script runs) instead of
 the optional Python `nagisa`/`soynlp` packages; validate those languages against

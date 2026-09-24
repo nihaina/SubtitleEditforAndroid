@@ -28,6 +28,8 @@ import com.subtitleedit.util.ModelDownloader
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.QnnRuntimeAvailability
 import com.subtitleedit.util.Qwen3ForcedAlignerOnnx
+import com.subtitleedit.util.Qwen3ForcedAlignerImporter
+import com.subtitleedit.util.Qwen3ForcedAlignerModelFiles
 import com.subtitleedit.util.SenseVoiceNpuModelImporter
 import com.subtitleedit.util.SenseVoiceNpuModelPathPolicy
 import com.subtitleedit.util.SettingsManager
@@ -103,8 +105,8 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
     ) { uri -> uri?.let { handleSelectedQwen3Tokenizer(it) } }
 
     private val qwen3ForcedAlignerPickerLauncher = host.registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri -> uri?.let { importQwen3ForcedAligner(it) } }
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris -> if (uris.isNotEmpty()) importQwen3ForcedAligner(uris) }
 
     // VAD 模型文件选择器
     private val vadPickerLauncher = host.registerForActivityResult(
@@ -167,9 +169,8 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             else tokensPickerLauncher.launch(arrayOf("*/*"))
         }
         binding.btnSelectQwen3ForcedAligner.setOnClickListener {
-            qwen3ForcedAlignerPickerLauncher.launch(
-                arrayOf("application/octet-stream", "application/onnx", "*/*")
-            )
+            if (modelDownloadJob?.isActive == true) return@setOnClickListener
+            qwen3ForcedAlignerPickerLauncher.launch(arrayOf("*/*"))
         }
 
         binding.btnSelectVad.setOnClickListener {
@@ -951,64 +952,59 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         }
     }
 
-    private fun importQwen3ForcedAligner(uri: Uri) {
-        val targetDirectory = File(host.filesDir, "models/qwen3-asr/forced-aligner")
-        val target = File(targetDirectory, "forced_aligner.onnx")
-        val staging = File(targetDirectory, ".forced_aligner_importing")
-        val backup = File(targetDirectory, ".forced_aligner_backup")
-        binding.btnSelectQwen3ForcedAligner.isEnabled = false
-        host.lifecycleScope.launch {
+    private fun importQwen3ForcedAligner(uris: List<Uri>) {
+        if (modelDownloadJob?.isActive == true) return
+        if (uris.size != 2 || uris.distinct().size != 2) {
+            OverwritingToast.makeText(host, host.getString(R.string.qwen_aligner_select_pair), Toast.LENGTH_LONG).show()
+            return
+        }
+        val progressDialog = ModelDownloadProgressDialog(host, "导入 Qwen3 ForcedAligner") {
+            modelDownloadJob?.cancel(CancellationException("用户取消 ForcedAligner 导入"))
+        }
+        modelDownloadDialog = progressDialog
+        progressDialog.show()
+        progressDialog.update(ModelDownloader.Progress("正在读取两个模型文件"))
+        setAsrModelActionsEnabled(false)
+        modelDownloadJob = host.lifecycleScope.launch {
             try {
-                withContext(Dispatchers.IO) {
-                    if (!targetDirectory.exists() && !targetDirectory.mkdirs()) {
-                        error("无法创建 ForcedAligner 模型目录")
-                    }
-                    staging.delete()
-                    backup.delete()
-                    host.contentResolver.openInputStream(uri)?.use { input ->
-                        staging.outputStream().use { output ->
-                            input.copyTo(output, 64 * 1024)
+                val sources = withContext(Dispatchers.IO) {
+                    uris.map { uri ->
+                        val document = DocumentFile.fromSingleUri(host, uri)
+                            ?: error("无法读取所选文件信息")
+                        Qwen3ForcedAlignerImporter.Source(
+                            name = document.name ?: error("无法读取模型文件名，请保留导出时的原始文件名"),
+                            size = document.length().takeIf { it > 0L },
+                        ) {
+                            host.contentResolver.openInputStream(uri) ?: error("无法读取 ${document.name}")
                         }
-                    } ?: error("无法读取所选 ONNX 文件")
-                    if (!staging.isFile || staging.length() == 0L) {
-                        error("所选 ONNX 文件为空")
                     }
-                    // Validate the graph before replacing the currently installed model.
-                    Qwen3ForcedAlignerOnnx(staging).use { }
-                    if (target.exists() && !target.renameTo(backup)) {
-                        error("无法备份现有 ForcedAligner 模型")
-                    }
-                    try {
-                        if (!staging.renameTo(target)) error("无法安装 ForcedAligner 模型")
-                    } catch (error: Exception) {
-                        if (backup.exists()) backup.renameTo(target)
-                        throw error
-                    }
-                    backup.delete()
                 }
-                settingsManager.setQwen3ForcedAlignerPath(Uri.fromFile(target).toString())
+                Qwen3ForcedAlignerImporter(File(host.filesDir, "models/qwen3-asr/forced-aligner")).install(
+                    sources = sources,
+                    validate = { graph -> Qwen3ForcedAlignerOnnx(graph).use { } },
+                    publish = { graph -> settingsManager.setQwen3ForcedAlignerPath(Uri.fromFile(graph).toString()) },
+                    onProgress = { progress ->
+                        withContext(Dispatchers.Main) {
+                            progressDialog.update(ModelDownloader.Progress(progress.message, progress.copied, progress.total))
+                        }
+                    }
+                )
                 updateAsrModelUi()
-                OverwritingToast.makeText(
-                    host,
-                    "Qwen3 ForcedAligner 已导入",
-                    Toast.LENGTH_SHORT
-                ).show()
+                OverwritingToast.makeText(host, "Qwen3 ForcedAligner 模型及权重已导入", Toast.LENGTH_SHORT).show()
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Exception) {
-                withContext(Dispatchers.IO) {
-                    staging.delete()
-                    if (backup.exists() && !target.exists()) backup.renameTo(target)
-                }
                 OverwritingToast.makeText(
                     host,
                     "ForcedAligner 导入失败：${error.message}",
                     Toast.LENGTH_LONG
                 ).show()
             } finally {
-                withContext(Dispatchers.IO) {
-                    staging.delete()
-                    backup.delete()
-                }
-                binding.btnSelectQwen3ForcedAligner.isEnabled = true
+                progressDialog.dismiss()
+                if (modelDownloadDialog === progressDialog) modelDownloadDialog = null
+                modelDownloadJob = null
+                setAsrModelActionsEnabled(true)
+                if (!host.isDestroyed) updateAsrModelUi()
             }
         }
     }
@@ -1388,15 +1384,16 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         if (qwen3Asr) {
             val alignerPath = settingsManager.getQwen3ForcedAlignerPath()
             val alignerFile = localFile(alignerPath)
+            val complete = Qwen3ForcedAlignerModelFiles.isComplete(alignerFile)
             binding.tvQwen3ForcedAlignerPath.text = when {
-                alignerFile?.isFile == true -> "已配置：${alignerFile.name}"
-                alignerPath.isNotBlank() -> "配置文件不可读，请重新导入"
-                else -> "尚未配置 ForcedAligner ONNX"
+                complete -> "已配置：${alignerFile!!.name} + ${Qwen3ForcedAlignerModelFiles.dataFile(alignerFile).name}"
+                alignerPath.isNotBlank() -> "模型或权重文件缺失/不可读，请重新导入两个文件"
+                else -> "尚未配置 ForcedAligner 模型及权重"
             }
             binding.tvQwen3ForcedAlignerPath.setTextColor(
                 ContextCompat.getColor(
                     host,
-                    if (alignerFile?.isFile == true) R.color.on_surface_variant else R.color.error
+                    if (complete) R.color.on_surface_variant else R.color.error
                 )
             )
         }

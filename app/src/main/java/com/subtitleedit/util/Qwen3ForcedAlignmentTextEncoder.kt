@@ -8,8 +8,8 @@ internal class Qwen3ForcedAlignmentTextEncoder(
 ) : AutoCloseable {
     private val tokenizer = QwenHuggingFaceTokenizer.open(tokenizerDirectory)
 
-    fun encode(text: String, language: String): QwenHuggingFaceTokenizer.EncodedText =
-        tokenizer.encodeForForcedAlignment(text, language)
+    fun encode(text: String, language: String, validFrames: Int): QwenHuggingFaceTokenizer.EncodedText =
+        Qwen3ForcedAlignmentInput.expand(tokenizer.encodeForForcedAlignment(text, language), validFrames)
 
     override fun close() = tokenizer.close()
 }
