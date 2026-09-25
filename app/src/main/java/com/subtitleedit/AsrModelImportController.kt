@@ -490,9 +490,6 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             SettingsManager.ASR_MODEL_QWEN3_ASR -> settingsManager.clearQwen3AsrModelPaths()
             else -> settingsManager.clearWhisperModelPaths()
         }
-        if (modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) {
-            settingsManager.clearQwen3ForcedAlignerPath()
-        }
         loadModelPaths()
         updateAsrModelUi()
         OverwritingToast.makeText(host, "已清除当前模型选择，请重新选择", Toast.LENGTH_SHORT).show()
