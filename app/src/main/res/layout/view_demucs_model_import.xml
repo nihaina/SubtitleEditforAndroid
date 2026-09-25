@@ -40,9 +40,9 @@
                             android:gravity="center_vertical|end"
                             android:orientation="horizontal">
 
-                            <com.google.android.material.button.MaterialButton
+                            <Button
                                 android:id="@+id/btnSwitchDemixModel"
-                                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                                style="@style/Widget.Material3.Button.OutlinedButton"
                                 android:layout_width="wrap_content"
                                 android:layout_height="36dp"
                                 android:layout_marginEnd="4dp"
@@ -51,17 +51,6 @@
                                 android:minHeight="0dp"
                                 android:minWidth="0dp"
                                 android:text="@string/activity_model_settings_text_09" />
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/btnModelHelp"
-                                style="@style/Widget.MaterialComponents.Button.TextButton"
-                                android:layout_width="wrap_content"
-                                android:layout_height="36dp"
-                                android:insetTop="0dp"
-                                android:insetBottom="0dp"
-                                android:minHeight="0dp"
-                                android:minWidth="0dp"
-                                android:text="@string/tts_help" />
 
                         </LinearLayout>
                     </LinearLayout>
@@ -87,9 +76,9 @@
                             android:gravity="center_vertical"
                             android:orientation="horizontal">
 
-                            <com.google.android.material.button.MaterialButton
+                            <Button
                                 android:id="@+id/btnSelectGeneralModel"
-                                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                                style="@style/Widget.Material3.Button.OutlinedButton"
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
@@ -165,9 +154,9 @@
                         android:textColor="@color/on_surface_variant"
                         android:textIsSelectable="true" />
 
-                    <com.google.android.material.button.MaterialButton
+                    <Button
                         android:id="@+id/btnSelectVocalsModel"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/activity_vocal_separation_settings_text_06" />
@@ -181,9 +170,9 @@
                         android:textColor="@color/on_surface_variant"
                         android:textIsSelectable="true" />
 
-                    <com.google.android.material.button.MaterialButton
+                    <Button
                         android:id="@+id/btnSelectDrumsModel"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/activity_vocal_separation_settings_text_08" />
@@ -197,9 +186,9 @@
                         android:textColor="@color/on_surface_variant"
                         android:textIsSelectable="true" />
 
-                    <com.google.android.material.button.MaterialButton
+                    <Button
                         android:id="@+id/btnSelectBassModel"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/activity_vocal_separation_settings_text_10" />
@@ -213,9 +202,9 @@
                         android:textColor="@color/on_surface_variant"
                         android:textIsSelectable="true" />
 
-                    <com.google.android.material.button.MaterialButton
+                    <Button
                         android:id="@+id/btnSelectOtherModel"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/activity_vocal_separation_settings_text_12" />
@@ -228,6 +217,18 @@
                         android:layout_marginTop="8dp"
                         android:text="@string/activity_vocal_separation_settings_text_13"
                         android:textColor="@color/on_surface_variant"
+                        android:textSize="12sp" />
+
+                    <TextView
+                        android:id="@+id/tvModelGuide"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:gravity="end"
+                        android:text="@string/tts_help"
+                        android:textColor="@color/primary"
                         android:textSize="12sp" />
 
                 </LinearLayout>
