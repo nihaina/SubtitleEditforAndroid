@@ -37,15 +37,27 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginStart="12dp"
-                            android:gravity="center_vertical|end"
-                            android:orientation="horizontal">
+                            android:gravity="end"
+                            android:orientation="vertical">
+
+                            <Button
+                                android:id="@+id/btnDemixConfig"
+                                style="@style/Widget.Material3.Button.TextButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="36dp"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:minHeight="0dp"
+                                android:minWidth="0dp"
+                                android:paddingTop="0dp"
+                                android:paddingBottom="0dp"
+                                android:text="@string/activity_model_settings_text_08" />
 
                             <Button
                                 android:id="@+id/btnSwitchDemixModel"
                                 style="@style/Widget.Material3.Button.OutlinedButton"
                                 android:layout_width="wrap_content"
                                 android:layout_height="36dp"
-                                android:layout_marginEnd="4dp"
                                 android:insetTop="0dp"
                                 android:insetBottom="0dp"
                                 android:minHeight="0dp"

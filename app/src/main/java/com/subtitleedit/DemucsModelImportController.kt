@@ -97,6 +97,9 @@ class DemucsModelImportController(private val host: AppCompatActivity, private v
     private fun setupListeners() {
         val modelMimeTypes = arrayOf("application/octet-stream", "application/onnx", "*/*")
         binding.tvModelGuide.setOnClickListener { showModelHelp() }
+        binding.btnDemixConfig.setOnClickListener {
+            host.startActivity(Intent(host, VocalSeparationSettingsActivity::class.java))
+        }
         binding.btnSwitchDemixModel.setOnClickListener { showDemixModelPicker() }
         binding.btnSelectGeneralModel.setOnClickListener { generalModelPicker.launch(modelMimeTypes) }
         binding.btnDownloadGeneralModel.setOnClickListener { confirmGeneralModelDownload() }

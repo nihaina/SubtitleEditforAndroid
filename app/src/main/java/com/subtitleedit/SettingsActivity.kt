@@ -32,7 +32,6 @@ class SettingsActivity : AppCompatActivity() {
         setupEncodingSetting()
         setupCacheSection()
         setupModelSettings()
-        setupVocalSeparationSettings()
         setupTtsSettings()
         setupModelManagement()
         setupAiSettings()
@@ -64,12 +63,6 @@ class SettingsActivity : AppCompatActivity() {
     private fun setupModelSettings() {
         binding.layoutModelSettings.setOnClickListener {
             startActivity(Intent(this, SpeechToSubtitleSettingsActivity::class.java))
-        }
-    }
-
-    private fun setupVocalSeparationSettings() {
-        binding.layoutVocalSeparationSettings.setOnClickListener {
-            startActivity(Intent(this, VocalSeparationSettingsActivity::class.java))
         }
     }
 
