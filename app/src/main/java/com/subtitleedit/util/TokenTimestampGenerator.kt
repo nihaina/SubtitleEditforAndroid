@@ -149,8 +149,9 @@ class TokenTimestampGenerator(context: Context) {
                             val samples = segment.audio
                             if (samples.isEmpty()) return@forEachIndexed
                             val features = extractor.extract(samples)
+                            val alignmentText = JapaneseNumberNormalizer.normalize(segment.text, language)
                             val encoded = runCatching {
-                                encoder.encode(segment.text, language, features.first().size)
+                                encoder.encode(alignmentText.textForAlignment, language, features.first().size)
                             }.getOrElse { error ->
                                 if (error.message?.contains("没有可对齐") == true) {
                                     Log.w(TAG, "跳过不可对齐的 Qwen 文本段 ${index + 1}/${recognized.size}: ${segment.text}")
@@ -169,7 +170,7 @@ class TokenTimestampGenerator(context: Context) {
                                     units = encoded.units,
                                 )
                             )
-                            output += aligned.map { unit ->
+                            output += alignmentText.restore(aligned).map { unit ->
                                 unit.copy(
                                     startTimeMs = unit.startTimeMs + segment.startTimeMs,
                                     endTimeMs = unit.endTimeMs + segment.startTimeMs,
