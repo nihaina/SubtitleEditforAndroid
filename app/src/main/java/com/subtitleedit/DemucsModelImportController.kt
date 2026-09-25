@@ -101,6 +101,7 @@ class DemucsModelImportController(private val host: AppCompatActivity, private v
             host.startActivity(Intent(host, VocalSeparationSettingsActivity::class.java))
         }
         binding.btnSwitchDemixModel.setOnClickListener { showDemixModelPicker() }
+        binding.btnSwitchDemixModelFt.setOnClickListener { showDemixModelPicker() }
         binding.btnSelectGeneralModel.setOnClickListener { generalModelPicker.launch(modelMimeTypes) }
         binding.btnDownloadGeneralModel.setOnClickListener { confirmGeneralModelDownload() }
         binding.btnResetGeneralModel.setOnClickListener { confirmResetGeneralModelSelection() }
@@ -256,6 +257,7 @@ class DemucsModelImportController(private val host: AppCompatActivity, private v
         binding.btnDownloadGeneralModel.isEnabled = enabled
         binding.btnResetGeneralModel.isEnabled = enabled
         binding.btnSwitchDemixModel.isEnabled = enabled
+        binding.btnSwitchDemixModelFt.isEnabled = enabled
         binding.btnSelectGeneralModel.isEnabled = enabled
     }
 
