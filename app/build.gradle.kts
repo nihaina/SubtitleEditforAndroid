@@ -64,6 +64,9 @@ val generateArchiveLicenseAssets by tasks.registering(Sync::class) {
     from("src/main/cpp/third_party/7zip/7zip-LICENSE.txt") {
         into("licenses")
     }
+    from(rootProject.file("native/qwen-tokenizer/assets/NAGISA_LICENSE.txt")) {
+        into("licenses")
+    }
     from(rootProject.file("THIRD_PARTY_NOTICES.md")) {
         into("licenses")
     }

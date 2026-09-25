@@ -4,6 +4,14 @@ SubtitleEdit for Android includes the following archive-related components.
 Their licenses apply to those components independently of the project's
 GPL-3.0 license.
 
+## Nagisa 0.3.0
+
+The Japanese word-segmentation model and vocabulary are from Nagisa 0.3.0,
+copyright 2018 taishi-i, under the MIT License. The model's inference path is
+ported to Rust; the original Python and DyNet runtimes are not included. The
+license is distributed in `native/qwen-tokenizer/assets/NAGISA_LICENSE.txt`
+and in the APK at `assets/licenses/NAGISA_LICENSE.txt`.
+
 ## 7-Zip 26.02
 
 Copyright (C) 1999-2026 Igor Pavlov.

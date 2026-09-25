@@ -29,14 +29,23 @@ shifts every timestamp position by the inserted token count, and the caller buil
 the attention mask using the expanded sequence length. No JNI ABI change is needed.
 
 Chinese mixed text follows the official character/word split. Japanese uses a
-small native segmenter that follows the boundaries emitted by the official
-`nagisa.tagging(...).words` examples (script runs, particles and common
-auxiliary endings). Korean uses the official Qwen
+Rust inference port of the Nagisa 0.3.0 character-feature BiLSTM and BMES
+decoder. Its vocabulary and segmentation-only weights are converted from the
+upstream model and embedded as a 9.8 MB compressed asset; Python and DyNet are
+not part of the Android runtime. Tests compare the native output with
+`nagisa.tagging(text).words`. Korean uses the official Qwen
 `korean_dict_jieba.dict` resource bundled in this crate and the equivalent
-`soynlp.LTokenizer` longest-prefix rule. The Python runtimes are not embedded;
-the parity tests in `src/lib.rs` cover the Japanese and Korean examples used to
-calibrate these implementations. The HuggingFace BPE tokenizer remains the
-source of all token IDs in both cases.
+`soynlp.LTokenizer` longest-prefix rule. The HuggingFace BPE tokenizer remains
+the source of all token IDs in every language.
+
+The model asset can be regenerated with Python 3, NumPy, and Nagisa 0.3.0:
+
+```bash
+python -m pip install nagisa==0.3.0 numpy
+python tools/convert_nagisa_model.py native/qwen-tokenizer/assets/nagisa_v001.bin.gz
+```
+
+The Nagisa MIT license is included in the application license assets.
 
 The Korean dictionary is downloaded from the official Qwen3-ASR repository and
 is compiled into the native library as read-only data. Updating the upstream
@@ -72,7 +81,9 @@ QWEN_TOKENIZER_DIR=/path/to/tokenizer cargo test
 
 The fixture test compares every raw token ID and timestamp position against
 the official Python processor outputs in
-`app/src/test/resources/qwen3_forced_alignment_inputs.json`.
+`app/src/test/resources/qwen3_forced_alignment_inputs.json`. Japanese
+segmentation tests use the official Nagisa 0.3.0 output as their expected
+boundaries.
 
 Replace the example NDK path with its actual WSL-visible location. The
 helper does not modify the Windows Android SDK. When Windows Gradle packaging is
