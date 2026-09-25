@@ -399,7 +399,7 @@
 
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- VAD 模型 -->
+            <!-- VAD 模型配置入口 -->
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -413,49 +413,45 @@
                     android:orientation="vertical"
                     android:padding="16dp">
 
-                    <TextView
-                        android:layout_width="wrap_content"
+                    <LinearLayout
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="@string/activity_model_settings_text_14"
-                        android:textSize="16sp"
-                        android:textStyle="bold"
-                        android:textColor="@color/on_surface" />
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/activity_model_settings_text_14" android:textColor="@color/on_surface" android:textSize="16sp" android:textStyle="bold" />
+                        <Button android:id="@+id/btnVadConfig" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="36dp" android:minWidth="0dp" android:minHeight="0dp" android:text="配置" />
+                    </LinearLayout>
+
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="请在配置页面选择 VAD 模型并调整参数" android:textColor="@color/on_surface_variant" android:textSize="12sp" />
 
                     <TextView
                         android:id="@+id/tvVadFile"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:text="@string/activity_model_settings_text_15"
-                        android:textSize="12sp"
                         android:textColor="@color/on_surface_variant"
-                        android:ellipsize="middle"
-                        android:singleLine="true" />
+                        android:textSize="12sp" />
 
                     <LinearLayout
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
+                        android:layout_marginTop="4dp"
                         android:gravity="center_vertical"
                         android:orientation="horizontal">
-
                         <Button
                             android:id="@+id/btnSelectVad"
                             style="@style/Widget.Material3.Button.OutlinedButton"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="@string/activity_model_settings_text_16" />
-
+                            android:text="选择 VAD 模型" />
                         <com.google.android.material.checkbox.MaterialCheckBox
                             android:id="@+id/cbUseBuiltInVad"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginStart="12dp"
-                            android:text="@string/activity_model_settings_text_17"
-                            android:textColor="@color/on_surface"
-                            android:textSize="14sp" />
-
+                            android:text="使用内置模型" />
                     </LinearLayout>
+
 
                 </LinearLayout>
 

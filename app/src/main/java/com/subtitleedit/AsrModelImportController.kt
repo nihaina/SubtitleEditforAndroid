@@ -173,12 +173,12 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             qwen3ForcedAlignerPickerLauncher.launch(arrayOf("*/*"))
         }
 
-        binding.btnSelectVad.setOnClickListener {
-            vadPickerLauncher.launch(arrayOf("*/*"))
+        binding.btnVadConfig.setOnClickListener {
+            host.startActivity(Intent(host, VadModelSettingsActivity::class.java))
         }
-
-        binding.cbUseBuiltInVad.setOnCheckedChangeListener { _, isChecked ->
-            settingsManager.setVadUseBuiltInModel(isChecked)
+        binding.btnSelectVad.setOnClickListener { vadPickerLauncher.launch(arrayOf("*/*")) }
+        binding.cbUseBuiltInVad.setOnCheckedChangeListener { _, checked ->
+            settingsManager.setVadUseBuiltInModel(checked)
             updateVadModelUi()
         }
 
@@ -559,11 +559,11 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         // 加载模型路径
         modelType = settingsManager.getAsrModelType()
         loadModelPaths()
+        updateAsrModelUi()
         vadModelPath = settingsManager.getVadModelPath()
         discardInaccessibleVadModel()
         binding.cbUseBuiltInVad.isChecked = settingsManager.isVadUseBuiltInModel()
         updateVadModelUi()
-        updateAsrModelUi()
 
         migrateLegacySenseVoiceNpuSelectionIfNeeded()
     }
@@ -1031,7 +1031,6 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             vadModelPath = uri.toString()
             settingsManager.setVadModelPath(vadModelPath)
             settingsManager.setVadUseBuiltInModel(false)
-            binding.cbUseBuiltInVad.isChecked = false
             updateVadModelUi()
             com.subtitleedit.util.OverwritingToast.makeText(host, "外部 VAD 模型已选择", Toast.LENGTH_SHORT).show()
 
@@ -1041,14 +1040,6 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
     }
 
     private fun updateVadModelUi() {
-        val useBuiltIn = settingsManager.isVadUseBuiltInModel()
-        binding.btnSelectVad.isEnabled = !useBuiltIn
-        binding.btnSelectVad.alpha = if (useBuiltIn) 0.6f else 1f
-        binding.tvVadFile.text = when {
-            useBuiltIn -> "当前使用：内置 silero_vad.onnx"
-            vadModelPath.isNotBlank() -> "当前使用：外部模型 ${getFileNameFromUri(Uri.parse(vadModelPath))}"
-            else -> "当前使用：外部模型（未选择）"
-        }
     }
 
     private fun getFileNameFromUri(uri: Uri): String {

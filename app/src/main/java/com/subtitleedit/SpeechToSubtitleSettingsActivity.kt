@@ -19,7 +19,6 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySpeechToSubtitleSettingsBinding
     private lateinit var settingsManager: SettingsManager
     private var loading = false
-    private var updatingSecondaryVadMode = false
     private var updatingSecondaryVadValue = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,98 +46,6 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
     }
 
     private fun setupListeners() {
-        binding.switchVadDynamicPadding.setOnCheckedChangeListener { _, checked ->
-            if (!loading) settingsManager.setSpeechVadDynamicPaddingEnabled(checked)
-        }
-        binding.sliderVadThreshold.setLabelFormatter { value ->
-            String.format(Locale.US, "%.2f", normalizeVadThreshold(value))
-        }
-        bindSecondaryVadValue(
-            slider = binding.sliderVadThreshold,
-            input = binding.etVadThreshold,
-            format = "%.2f",
-            normalize = ::normalizeVadThreshold,
-            save = settingsManager::setVadThreshold
-        )
-        bindSecondaryVadValue(
-            slider = binding.sliderMinSilence,
-            input = binding.etMinSilence,
-            format = "%.2f",
-            normalize = { value -> snap(value, 0.01f, 0.01f, 2.0f) },
-            save = settingsManager::setVadMinSilenceDuration
-        )
-        bindSecondaryVadValue(
-            slider = binding.sliderMinSpeech,
-            input = binding.etMinSpeech,
-            format = "%.2f",
-            normalize = { value -> snap(value, 0.01f, 0.01f, 1.0f) },
-            save = settingsManager::setVadMinSpeechDuration
-        )
-        bindSecondaryVadValue(
-            slider = binding.sliderMaxSpeech,
-            input = binding.etMaxSpeech,
-            format = "%.1f",
-            normalize = { value -> snap(value, 1.0f, 1.0f, 60.0f) },
-            save = settingsManager::setVadMaxSpeechDuration
-        )
-        binding.switchVadMerge.setOnCheckedChangeListener { _, checked ->
-            if (!loading) settingsManager.setSpeechVadMergeEnabled(checked)
-            updateVadMergeControls()
-        }
-        bindSecondaryVadValue(
-            slider = binding.sliderVadMergeGap,
-            input = binding.etVadMergeGap,
-            format = "%.0f",
-            normalize = { value -> snap(value, 50f, 0f, 5000f) },
-            save = { value -> settingsManager.setSpeechVadMergeGapMs(value.toInt()) }
-        )
-
-        binding.switchSecondaryVadSchemeOne.setOnCheckedChangeListener { _, checked ->
-            updateSecondaryVadMode(SettingsManager.SECONDARY_VAD_MODE_UNCOVERED, checked)
-        }
-        binding.switchSecondaryVadSchemeTwo.setOnCheckedChangeListener { _, checked ->
-            updateSecondaryVadMode(SettingsManager.SECONDARY_VAD_MODE_WITHIN_SEGMENTS, checked)
-        }
-        binding.switchSecondaryVadMerge.setOnCheckedChangeListener { _, checked ->
-            if (!loading) settingsManager.setSpeechSecondaryVadMergeEnabled(checked)
-            updateSecondaryVadMergeControls()
-        }
-        bindSecondaryVadValue(
-            slider = binding.sliderSecondaryVadMergeGap,
-            input = binding.etSecondaryVadMergeGap,
-            format = "%.0f",
-            normalize = { value -> snap(value, 50f, 0f, 5000f) },
-            save = { value -> settingsManager.setSpeechSecondaryVadMergeGapMs(value.toInt()) }
-        )
-
-        bindSecondaryVadValue(
-            slider = binding.sliderSecondaryVadThreshold,
-            input = binding.etSecondaryVadThreshold,
-            format = "%.2f",
-            normalize = ::normalizeSecondaryVadThreshold,
-            save = settingsManager::setSpeechSecondaryVadThreshold
-        )
-        bindSecondaryVadValue(
-            slider = binding.sliderSecondaryVadMinSilence,
-            input = binding.etSecondaryVadMinSilence,
-            format = "%.2f",
-            normalize = { value -> snap(value, 0.01f, 0.01f, 2.0f) },
-            save = settingsManager::setSpeechSecondaryVadMinSilenceDuration
-        )
-        bindSecondaryVadValue(
-            slider = binding.sliderSecondaryVadMinSpeech,
-            input = binding.etSecondaryVadMinSpeech,
-            format = "%.2f",
-            normalize = { value -> snap(value, 0.01f, 0.01f, 1.0f) },
-            save = settingsManager::setSpeechSecondaryVadMinSpeechDuration
-        )
-        bindSecondaryVadValue(
-            slider = binding.sliderSecondaryVadMaxSpeech,
-            input = binding.etSecondaryVadMaxSpeech,
-            format = "%.1f",
-            normalize = { value -> snap(value, 1.0f, 1.0f, 60.0f) },
-            save = settingsManager::setSpeechSecondaryVadMaxSpeechDuration
-        )
 
         binding.sliderFixedSegmentSeconds.addOnChangeListener { _, value, fromUser ->
             if (fromUser) binding.etFixedSegmentSeconds.setText(String.format(Locale.US, "%d", value.toInt()))
@@ -197,86 +104,6 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         val segmentSeconds = settingsManager.getSpeechFixedSegmentSeconds()
         binding.sliderFixedSegmentSeconds.value = segmentSeconds.toFloat()
         binding.etFixedSegmentSeconds.setText(String.format(Locale.US, "%d", segmentSeconds))
-        binding.switchVadDynamicPadding.isChecked = settingsManager.isSpeechVadDynamicPaddingEnabled()
-        loadSecondaryVadValue(
-            binding.sliderVadThreshold,
-            binding.etVadThreshold,
-            settingsManager.getVadThreshold(),
-            "%.2f"
-        )
-        loadSecondaryVadValue(
-            binding.sliderMinSilence,
-            binding.etMinSilence,
-            settingsManager.getVadMinSilenceDuration(),
-            "%.2f"
-        )
-        loadSecondaryVadValue(
-            binding.sliderMinSpeech,
-            binding.etMinSpeech,
-            settingsManager.getVadMinSpeechDuration(),
-            "%.2f"
-        )
-        loadSecondaryVadValue(
-            binding.sliderMaxSpeech,
-            binding.etMaxSpeech,
-            settingsManager.getVadMaxSpeechDuration(),
-            "%.1f"
-        )
-        binding.switchVadMerge.isChecked = settingsManager.isSpeechVadMergeEnabled()
-        loadSecondaryVadValue(
-            binding.sliderVadMergeGap,
-            binding.etVadMergeGap,
-            settingsManager.getSpeechVadMergeGapMs().toFloat(),
-            "%.0f"
-        )
-
-        when (settingsManager.getSpeechSecondaryVadMode()) {
-            SettingsManager.SECONDARY_VAD_MODE_UNCOVERED -> {
-                binding.switchSecondaryVadSchemeOne.isChecked = true
-                binding.switchSecondaryVadSchemeTwo.isChecked = false
-            }
-            SettingsManager.SECONDARY_VAD_MODE_WITHIN_SEGMENTS -> {
-                binding.switchSecondaryVadSchemeOne.isChecked = false
-                binding.switchSecondaryVadSchemeTwo.isChecked = true
-            }
-            else -> {
-                binding.switchSecondaryVadSchemeOne.isChecked = false
-                binding.switchSecondaryVadSchemeTwo.isChecked = false
-            }
-        }
-        binding.switchSecondaryVadMerge.isChecked =
-            settingsManager.isSpeechSecondaryVadMergeEnabled()
-        loadSecondaryVadValue(
-            binding.sliderSecondaryVadMergeGap,
-            binding.etSecondaryVadMergeGap,
-            settingsManager.getSpeechSecondaryVadMergeGapMs().toFloat(),
-            "%.0f"
-        )
-        loadSecondaryVadValue(
-            binding.sliderSecondaryVadThreshold,
-            binding.etSecondaryVadThreshold,
-            settingsManager.getSpeechSecondaryVadThreshold(),
-            "%.2f"
-        )
-        loadSecondaryVadValue(
-            binding.sliderSecondaryVadMinSilence,
-            binding.etSecondaryVadMinSilence,
-            settingsManager.getSpeechSecondaryVadMinSilenceDuration(),
-            "%.2f"
-        )
-        loadSecondaryVadValue(
-            binding.sliderSecondaryVadMinSpeech,
-            binding.etSecondaryVadMinSpeech,
-            settingsManager.getSpeechSecondaryVadMinSpeechDuration(),
-            "%.2f"
-        )
-        loadSecondaryVadValue(
-            binding.sliderSecondaryVadMaxSpeech,
-            binding.etSecondaryVadMaxSpeech,
-            settingsManager.getSpeechSecondaryVadMaxSpeechDuration(),
-            "%.1f"
-        )
-
         val tokenTimestampModelAvailable = hasUsableTokenTimestampModel()
         binding.switchSenseVoiceTimestampExperiment.isEnabled = tokenTimestampModelAvailable
         binding.switchSenseVoiceTimestampExperiment.isChecked =
@@ -301,29 +128,7 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
             "%.0f"
         )
         loading = false
-        updateVadMergeControls()
-        updateSecondaryVadMergeControls()
         updateSenseVoiceTimestampControls()
-    }
-
-    private fun updateVadMergeControls() {
-        val enabled = binding.switchVadMerge.isChecked
-        val alpha = if (enabled) 1f else 0.5f
-        binding.tvVadMergeGapTitle.alpha = alpha
-        binding.tvVadMergeGapHint.alpha = alpha
-        binding.layoutVadMergeGap.alpha = alpha
-        binding.sliderVadMergeGap.isEnabled = enabled
-        binding.etVadMergeGap.isEnabled = enabled
-    }
-
-    private fun updateSecondaryVadMergeControls() {
-        val enabled = binding.switchSecondaryVadMerge.isChecked
-        val alpha = if (enabled) 1f else 0.5f
-        binding.tvSecondaryVadMergeGapTitle.alpha = alpha
-        binding.tvSecondaryVadMergeGapHint.alpha = alpha
-        binding.layoutSecondaryVadMergeGap.alpha = alpha
-        binding.sliderSecondaryVadMergeGap.isEnabled = enabled
-        binding.etSecondaryVadMergeGap.isEnabled = enabled
     }
 
     private fun updateSenseVoiceTimestampControls() {
@@ -348,30 +153,6 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
 
     private fun hasUsableTokenTimestampModel(): Boolean {
         return TokenTimestampGenerator.isConfigured(this)
-    }
-
-    private fun updateSecondaryVadMode(mode: String, checked: Boolean) {
-        if (loading || updatingSecondaryVadMode) return
-
-        updatingSecondaryVadMode = true
-        if (checked) {
-            if (mode == SettingsManager.SECONDARY_VAD_MODE_UNCOVERED) {
-                binding.switchSecondaryVadSchemeTwo.isChecked = false
-            } else {
-                binding.switchSecondaryVadSchemeOne.isChecked = false
-            }
-            settingsManager.setSpeechSecondaryVadMode(mode)
-        } else {
-            val activeMode = when {
-                binding.switchSecondaryVadSchemeOne.isChecked ->
-                    SettingsManager.SECONDARY_VAD_MODE_UNCOVERED
-                binding.switchSecondaryVadSchemeTwo.isChecked ->
-                    SettingsManager.SECONDARY_VAD_MODE_WITHIN_SEGMENTS
-                else -> SettingsManager.SECONDARY_VAD_MODE_NONE
-            }
-            settingsManager.setSpeechSecondaryVadMode(activeMode)
-        }
-        updatingSecondaryVadMode = false
     }
 
     private fun bindSecondaryVadValue(
@@ -420,14 +201,6 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
     ) {
         slider.value = value
         input.setText(String.format(Locale.US, format, value))
-    }
-
-    private fun normalizeSecondaryVadThreshold(value: Float): Float {
-        return snap(value, 0.01f, 0.01f, 0.9f)
-    }
-
-    private fun normalizeVadThreshold(value: Float): Float {
-        return snap(value, 0.01f, 0.01f, 0.9f)
     }
 
     private fun snap(value: Float, step: Float, min: Float, max: Float): Float {

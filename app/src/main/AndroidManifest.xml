@@ -245,10 +245,14 @@
             android:exported="false"
             android:theme="@style/Theme.SubtitleEditforAndroid" />
 
-        <activity
-            android:name=".SpeechToSubtitleSettingsActivity"
-            android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+          <activity
+             android:name=".SpeechToSubtitleSettingsActivity"
+             android:exported="false"
+             android:theme="@style/Theme.SubtitleEditforAndroid" />
+          <activity
+             android:name=".VadModelSettingsActivity"
+             android:exported="false"
+             android:theme="@style/Theme.SubtitleEditforAndroid" />
 
         <activity
             android:name=".WhisperSettingsActivity"
