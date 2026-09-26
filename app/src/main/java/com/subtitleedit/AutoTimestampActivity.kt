@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.util.Log
+import android.view.Menu
+import android.view.MenuItem
 import android.view.MotionEvent
 import android.widget.ArrayAdapter
 import android.widget.Toast
@@ -18,6 +20,7 @@ import com.subtitleedit.nativebridge.NativeMediaOperation
 import com.subtitleedit.nativebridge.PcmFormat
 import com.subtitleedit.task.LongTaskController
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.repository.SpeechRecognitionService
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
@@ -37,6 +40,26 @@ import java.io.File
  */
 class AutoTimestampActivity : AppCompatActivity() {
 
+    private enum class TimelineSource { VAD, TOKEN, ASR }
+
+    private data class AsrModelPaths(
+        val modelType: String,
+        val encoder: String,
+        val decoder: String,
+        val joiner: String,
+        val tokens: String
+    ) {
+        fun isComplete(): Boolean = encoder.isNotBlank() && tokens.isNotBlank() &&
+            when (modelType) {
+                SettingsManager.ASR_MODEL_SENSEVOICE,
+                SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> true
+                SettingsManager.ASR_MODEL_PARAKEET_TDT,
+                SettingsManager.ASR_MODEL_QWEN3_ASR ->
+                    decoder.isNotBlank() && joiner.isNotBlank()
+                else -> decoder.isNotBlank()
+            }
+    }
+
     private companion object {
         const val OUTPUT_DIRECTORY_KEY = "auto_timestamp"
     }
@@ -55,6 +78,8 @@ class AutoTimestampActivity : AppCompatActivity() {
     }
     private val isCancelled: Boolean get() = taskController.isCancellationRequested
     private lateinit var settingsManager: SettingsManager
+    private val speechRecognitionService: SpeechRecognitionService
+        get() = (application as SubtitleEditApplication).dependencies.speechRecognitionService
     private val nativeMediaEngine
         get() = (application as SubtitleEditApplication).dependencies.nativeMediaEngine
     private var mediaOperation: NativeMediaOperation? = null
@@ -140,6 +165,30 @@ class AutoTimestampActivity : AppCompatActivity() {
         binding.toolbar.setNavigationOnClickListener {
             onBackPressedDispatcher.onBackPressed()
         }
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.menu_auto_timestamp, menu)
+        return true
+    }
+
+    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+        menu.findItem(R.id.action_auto_timestamp_settings)?.isEnabled = !isGenerating
+        return super.onPrepareOptionsMenu(menu)
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        R.id.action_auto_timestamp_settings -> {
+            if (!isGenerating) {
+                if (settingsManager.isAsrVadTimestampEnabled()) {
+                    startActivity(Intent(this, VadModelSettingsActivity::class.java))
+                } else {
+                    AsrSettingsNavigation.open(this, settingsManager)
+                }
+            }
+            true
+        }
+        else -> super.onOptionsItemSelected(item)
     }
 
     private fun setupSpinners() {
@@ -265,22 +314,22 @@ class AutoTimestampActivity : AppCompatActivity() {
     }
 
     private fun updateSecondaryProcessingAvailability() {
-        val tokenTimestampExperimentEnabled = isTokenTimestampExperimentEnabled()
-        if (tokenTimestampExperimentEnabled && binding.switchSecondaryProcessing.isChecked) {
+        val asrTimelineEnabled = !settingsManager.isAsrVadTimestampEnabled()
+        if (asrTimelineEnabled && binding.switchSecondaryProcessing.isChecked) {
             binding.switchSecondaryProcessing.isChecked = false
         }
-        binding.switchSecondaryProcessing.isEnabled = !tokenTimestampExperimentEnabled
+        binding.switchSecondaryProcessing.isEnabled = !asrTimelineEnabled
         binding.switchSecondaryProcessing.alpha =
-            if (tokenTimestampExperimentEnabled) 0.55f else 1f
+            if (asrTimelineEnabled) 0.55f else 1f
         binding.tvSecondaryProcessingHint.text = getString(
-            if (tokenTimestampExperimentEnabled) {
+            if (asrTimelineEnabled) {
                 R.string.activity_auto_timestamp_text_17
             } else {
                 R.string.activity_auto_timestamp_text_13
             }
         )
         updateSecondaryProcessingState(
-            !tokenTimestampExperimentEnabled && binding.switchSecondaryProcessing.isChecked
+            !asrTimelineEnabled && binding.switchSecondaryProcessing.isChecked
         )
         updateGenerateButtonState()
     }
@@ -327,17 +376,17 @@ class AutoTimestampActivity : AppCompatActivity() {
                 return
             }
         }
-        val tokenTimestampExperimentEnabled = isTokenTimestampExperimentEnabled()
-        if (!tokenTimestampExperimentEnabled && !settingsManager.isAsrVadTimestampEnabled()) {
+        val timelineSource = timelineSource()
+        if (timelineSource == TimelineSource.ASR && !currentAsrModelPaths().isComplete()) {
             com.subtitleedit.util.OverwritingToast.makeText(
                 this,
-                "请在当前识别模型配置中启用 VAD 打轴或 ASR 模型打轴",
+                "请先配置当前 ASR 模型",
                 Toast.LENGTH_SHORT
             ).show()
             return
         }
         if (
-            tokenTimestampExperimentEnabled &&
+            timelineSource == TimelineSource.TOKEN &&
             !TokenTimestampGenerator.isConfigured(this)
         ) {
             com.subtitleedit.util.OverwritingToast.makeText(
@@ -352,7 +401,7 @@ class AutoTimestampActivity : AppCompatActivity() {
             return
         }
         if (
-            !tokenTimestampExperimentEnabled &&
+            timelineSource == TimelineSource.VAD &&
             !settingsManager.isVadUseBuiltInModel() &&
             settingsManager.getVadModelPath().isBlank()
         ) {
@@ -418,10 +467,11 @@ class AutoTimestampActivity : AppCompatActivity() {
         } else {
             appendOperationLog("二次处理：关闭")
         }
-        appendVadConfig(refinementSubtitle != null)
-        isGenerating = true
+        appendTimelineConfig(refinementSubtitle != null)
         mediaOperation?.cancel()
         mediaOperation = nativeMediaEngine.openOperation()
+        isGenerating = true
+        invalidateOptionsMenu()
 
         generationJob = taskController.launch(lifecycleScope) { task ->
             task.onCancel { mediaOperation?.cancel() }
@@ -474,6 +524,7 @@ class AutoTimestampActivity : AppCompatActivity() {
                 binding.progressBar.visibility = android.view.View.GONE
                 binding.btnCancel.visibility = android.view.View.GONE
                 isGenerating = false
+                invalidateOptionsMenu()
                 updateGenerateButtonState()
                 generationJob = null
             }
@@ -534,7 +585,12 @@ class AutoTimestampActivity : AppCompatActivity() {
 
             if (isCancelled) return Result.failure(Exception("用户取消"))
 
-            binding.tvStatus.text = "$progressPrefix 正在检测语音段..."
+            val timelineSource = timelineSource()
+            binding.tvStatus.text = if (timelineSource == TimelineSource.VAD) {
+                "$progressPrefix 正在检测语音段..."
+            } else {
+                "$progressPrefix 正在识别语音..."
+            }
             val originalEntries = if (refinementSubtitle != null) {
                 appendOperationLog("读取参考字幕：${refinementSubtitle.fileName}")
                 withContext(Dispatchers.IO) {
@@ -544,9 +600,8 @@ class AutoTimestampActivity : AppCompatActivity() {
                 emptyList()
             }
 
-            val tokenTimestampExperimentEnabled = isTokenTimestampExperimentEnabled()
             val segmentsResult = withContext(Dispatchers.IO) {
-                if (tokenTimestampExperimentEnabled) {
+                if (timelineSource == TimelineSource.TOKEN) {
                     val generator = TokenTimestampGenerator(this@AutoTimestampActivity)
                     val modelName = TokenTimestampGenerator.modelDisplayName(settingsManager)
                     val result = if (refinementSubtitle != null) {
@@ -583,6 +638,8 @@ class AutoTimestampActivity : AppCompatActivity() {
                             )
                         }
                     }
+                } else if (timelineSource == TimelineSource.ASR) {
+                    generateAsrTimeline(pcmFile, progressPrefix)
                 } else {
                     runCatching {
                         val generator = VadTimestampGenerator(this@AutoTimestampActivity)
@@ -609,10 +666,12 @@ class AutoTimestampActivity : AppCompatActivity() {
                 "Token 时间戳实验打轴"
             }
             appendOperationLog(
-                if (tokenTimestampExperimentEnabled && refinementSubtitle != null) {
+                if (timelineSource == TimelineSource.TOKEN && refinementSubtitle != null) {
                     "$timelineName：在未覆盖区间生成 ${segments.size} 个新增时间段"
-                } else if (tokenTimestampExperimentEnabled) {
+                } else if (timelineSource == TimelineSource.TOKEN) {
                     "$timelineName：生成 ${segments.size} 个时间段"
+                } else if (timelineSource == TimelineSource.ASR) {
+                    "ASR 模型打轴：识别后保留 ${segments.size} 个时间段，丢弃转录文本"
                 } else if (refinementSubtitle != null) {
                     "二次 VAD：在未覆盖区间检测到 ${segments.size} 个新增语音段"
                 } else {
@@ -655,6 +714,73 @@ class AutoTimestampActivity : AppCompatActivity() {
                 taskCacheDir.deleteRecursively()
             }
         }
+    }
+
+    private fun generateAsrTimeline(
+        pcmFile: File,
+        progressPrefix: String
+    ): Result<List<VadTimestampGenerator.VadSegment>> {
+        val model = currentAsrModelPaths()
+        if (!model.isComplete()) {
+            return Result.failure(IllegalStateException("请先配置当前 ASR 模型"))
+        }
+        val recognizer = speechRecognitionService.createRecognizer(
+            encoderPath = model.encoder,
+            decoderPath = model.decoder,
+            joinerPath = model.joiner,
+            tokensPath = model.tokens,
+            vadModelPath = "",
+            useVad = false,
+            language = "自动检测",
+            contentResolver = contentResolver,
+            context = this,
+            modelType = model.modelType
+        )
+        return recognizer.recognize(
+            audioFile = pcmFile,
+            progressCallback = { progress, status, _ ->
+                runOnUiThread {
+                    binding.tvStatus.text = "$progressPrefix ASR 打轴：$status ($progress%)"
+                }
+            },
+            isCancelled = { isCancelled }
+        ).map { subtitles ->
+            // Let the model finish its configured transcription flow, then retain only timing.
+            subtitles.map { subtitle ->
+                VadTimestampGenerator.VadSegment(subtitle.startTime, subtitle.endTime)
+            }
+        }
+    }
+
+    private fun currentAsrModelPaths(): AsrModelPaths = when (val type = settingsManager.getAsrModelType()) {
+        SettingsManager.ASR_MODEL_SENSEVOICE -> AsrModelPaths(
+            type, settingsManager.getSenseVoiceModelPath(), "", "",
+            settingsManager.getSenseVoiceTokensPath()
+        )
+        SettingsManager.ASR_MODEL_PARAKEET_TDT -> AsrModelPaths(
+            type, settingsManager.getParakeetTdtEncoderPath(),
+            settingsManager.getParakeetTdtDecoderPath(),
+            settingsManager.getParakeetTdtJoinerPath(),
+            settingsManager.getParakeetTdtTokensPath()
+        )
+        SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> AsrModelPaths(
+            type, settingsManager.getParakeetCtcModelPath(), "", "",
+            settingsManager.getParakeetCtcTokensPath()
+        )
+        SettingsManager.ASR_MODEL_QWEN3_ASR -> {
+            val variant = settingsManager.getQwen3AsrModelVariant()
+            AsrModelPaths(
+                type, settingsManager.getQwen3AsrEncoderPath(variant),
+                settingsManager.getQwen3AsrDecoderPath(variant),
+                settingsManager.getQwen3AsrConvFrontendPath(variant),
+                settingsManager.getQwen3AsrTokenizerPath(variant)
+            )
+        }
+        else -> AsrModelPaths(
+            type, settingsManager.getWhisperEncoderPath(),
+            settingsManager.getWhisperDecoderPath(), "",
+            settingsManager.getWhisperTokensPath()
+        )
     }
 
     private fun loadSubtitleEntries(file: SelectedMediaFile): Result<List<SubtitleEntry>> {
@@ -869,8 +995,33 @@ class AutoTimestampActivity : AppCompatActivity() {
         settingsManager.isSpeechTokenTimestampEnabled() &&
             TokenTimestampGenerator.isSupported(settingsManager)
 
-    private fun appendVadConfig(secondaryProcessing: Boolean) {
-        if (isTokenTimestampExperimentEnabled()) {
+    private fun timelineSource(): TimelineSource = when {
+        settingsManager.isAsrVadTimestampEnabled() -> TimelineSource.VAD
+        isTokenTimestampExperimentEnabled() -> TimelineSource.TOKEN
+        else -> TimelineSource.ASR
+    }
+
+    private fun appendTimelineConfig(secondaryProcessing: Boolean) {
+        if (timelineSource() == TimelineSource.ASR) {
+            val model = currentAsrModelPaths()
+            appendOperationLog("ASR 模型打轴：${asrModelDisplayName(model.modelType)}")
+            appendOperationLog("  先完成语音识别，再丢弃转录文本，仅使用字幕时间段")
+            if (model.modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) {
+                appendOperationLog("  Qwen3-ASR：按模型预算和低能量切点分块")
+            } else {
+                val segmentSeconds = if (
+                    model.modelType == SettingsManager.ASR_MODEL_SENSEVOICE &&
+                    settingsManager.getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU
+                ) {
+                    settingsManager.getSenseVoiceNpuDurationSeconds()
+                } else {
+                    settingsManager.getSpeechFixedSegmentSeconds()
+                }
+                appendOperationLog("  固定分段：${segmentSeconds}s")
+            }
+            return
+        }
+        if (timelineSource() == TimelineSource.TOKEN) {
             appendOperationLog(
                 if (settingsManager.getAsrModelType() == SettingsManager.ASR_MODEL_QWEN3_ASR) {
                     "Qwen3 强制对齐打轴配置："
@@ -934,6 +1085,14 @@ class AutoTimestampActivity : AppCompatActivity() {
                 appendSecondaryVadMergeConfig()
             }
         }
+    }
+
+    private fun asrModelDisplayName(type: String): String = when (type) {
+        SettingsManager.ASR_MODEL_SENSEVOICE -> "SenseVoice"
+        SettingsManager.ASR_MODEL_PARAKEET_TDT -> "Parakeet TDT"
+        SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> "Parakeet CTC 日语"
+        SettingsManager.ASR_MODEL_QWEN3_ASR -> "Qwen3-ASR"
+        else -> "Whisper"
     }
 
     private fun appendSecondaryVadMergeConfig() {

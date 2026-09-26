@@ -162,9 +162,14 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         return true
     }
 
+    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+        menu.findItem(R.id.action_speech_to_subtitle_settings)?.isEnabled = !isConverting
+        return super.onPrepareOptionsMenu(menu)
+    }
+
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
         R.id.action_speech_to_subtitle_settings -> {
-            AsrSettingsNavigation.open(this, settingsManager)
+            if (!isConverting) AsrSettingsNavigation.open(this, settingsManager)
             true
         }
         else -> super.onOptionsItemSelected(item)
@@ -431,14 +436,16 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     }
 
     private fun startConversion(overwriteOutput: Boolean) {
+        if (taskController.isRunning) return
         mediaOperation?.cancel()
         mediaOperation = nativeMediaEngine.openOperation()
+        isConverting = true
+        invalidateOptionsMenu()
         realtimeResults.clear()
         lastProgressLog = ""
         conversionJob = taskController.launch(lifecycleScope) { task ->
             task.onCancel { mediaOperation?.cancel() }
             try {
-                isConverting = true
                 showProgress("正在准备...", 0)
                 binding.tvRealtimeResult.text = ""
                 appendRuntimeLog("开始语音转字幕")
@@ -492,6 +499,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                 mediaOperation?.cancel()
                 mediaOperation = null
                 isConverting = false
+                invalidateOptionsMenu()
                 hideProgress()
                 updateStartButtonState()
             }

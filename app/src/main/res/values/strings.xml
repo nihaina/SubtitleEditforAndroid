@@ -153,7 +153,6 @@
     <string name="ai_api_key_auth_title">验证身份</string>
     <string name="ai_api_key_auth_subtitle">查看或复制 API Key</string>
     <string name="ai_api_key_auth_error">身份验证未完成</string>
-    <string name="activity_auto_timestamp_text_01">自动检测音频中的语音段并生成带时间轴的字幕模板。生成的字幕内容为请输入文本，您可以在字幕编辑器中填写实际内容。</string>
     <string name="activity_auto_timestamp_text_02">音频/视频文件（可多选）</string>
     <string name="activity_auto_timestamp_text_03">选择文件（可多选）</string>
     <string name="activity_auto_timestamp_text_04">未选择</string>

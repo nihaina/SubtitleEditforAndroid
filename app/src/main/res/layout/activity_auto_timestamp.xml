@@ -33,29 +33,10 @@
             android:orientation="vertical"
             android:padding="16dp">
 
-            <!-- 说明 -->
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                app:cardCornerRadius="8dp"
-                app:cardElevation="2dp"
-                app:cardBackgroundColor="@color/primary_container">
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:padding="12dp"
-                    android:text="@string/activity_auto_timestamp_text_01"
-                    android:textSize="14sp"
-                    android:textColor="@color/on_primary_container" />
-
-            </com.google.android.material.card.MaterialCardView>
-
             <!-- 音频文件选择 -->
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
                 app:cardCornerRadius="8dp"
                 app:cardElevation="2dp">
 
