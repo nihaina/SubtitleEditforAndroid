@@ -164,7 +164,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
         R.id.action_speech_to_subtitle_settings -> {
-            startActivity(Intent(this, SpeechToSubtitleSettingsActivity::class.java))
+            AsrSettingsNavigation.open(this, settingsManager)
             true
         }
         else -> super.onOptionsItemSelected(item)
@@ -577,6 +577,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
 
     private fun shouldUseVad(): Boolean {
         return !shouldUseTokenTimestampExperiment() &&
+            settingsManager.isAsrVadTimestampEnabled(modelType) &&
             shouldPrepareTimeline()
     }
 

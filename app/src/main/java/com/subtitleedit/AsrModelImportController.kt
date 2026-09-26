@@ -196,7 +196,7 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             selectParakeetVariant(SettingsManager.ASR_MODEL_PARAKEET_CTC_JA)
         }
         binding.btnWhisperConfig.setOnClickListener {
-            host.startActivity(Intent(host, WhisperSettingsActivity::class.java))
+            AsrSettingsNavigation.open(host, settingsManager)
         }
 
         binding.tvModelGuide.setOnClickListener {
@@ -1385,7 +1385,8 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
                 )
             )
         }
-        binding.btnWhisperConfig.visibility = if (modelType == SettingsManager.ASR_MODEL_WHISPER) View.VISIBLE else View.GONE
+        binding.btnWhisperConfig.visibility =
+            if (modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) View.GONE else View.VISIBLE
         binding.layoutSenseVoiceProviderOptions.visibility = if (senseVoice) View.VISIBLE else View.GONE
         binding.layoutParakeetVariantOptions.visibility = if (parakeet) View.VISIBLE else View.GONE
         binding.tvSenseVoiceCpuOption.setTextColor(

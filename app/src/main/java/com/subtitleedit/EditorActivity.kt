@@ -2778,7 +2778,7 @@ class EditorActivity : AppCompatActivity() {
             showQuickTranscribe()
         }
         binding.btnQuickTranscribe.setOnLongClickListener {
-            startActivity(Intent(this, SpeechToSubtitleSettingsActivity::class.java))
+            AsrSettingsNavigation.open(this)
             true
         }
 

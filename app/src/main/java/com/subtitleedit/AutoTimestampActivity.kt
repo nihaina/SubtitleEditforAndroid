@@ -328,6 +328,14 @@ class AutoTimestampActivity : AppCompatActivity() {
             }
         }
         val tokenTimestampExperimentEnabled = isTokenTimestampExperimentEnabled()
+        if (!tokenTimestampExperimentEnabled && !settingsManager.isAsrVadTimestampEnabled()) {
+            com.subtitleedit.util.OverwritingToast.makeText(
+                this,
+                "请在当前识别模型配置中启用 VAD 打轴或实验打轴",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
         if (
             tokenTimestampExperimentEnabled &&
             !TokenTimestampGenerator.isConfigured(this)

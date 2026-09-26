@@ -149,33 +149,6 @@
             </LinearLayout>
 
             <LinearLayout
-                android:id="@+id/layoutModelSettings"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginTop="4dp"
-                android:clickable="true"
-                android:focusable="true"
-                android:background="?attr/selectableItemBackground">
-
-                <ImageView
-                    android:layout_width="24dp"
-                    android:layout_height="24dp"
-                    android:src="@drawable/ic_mic"
-                    android:layout_marginEnd="12dp"
-                    app:tint="?attr/colorOnSurface"/>
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/activity_settings_text_03"
-                    android:textSize="16sp"/>
-
-            </LinearLayout>
-
-            <LinearLayout
                 android:id="@+id/layoutTtsSettings"
                 android:layout_width="match_parent"
                 android:layout_height="48dp"

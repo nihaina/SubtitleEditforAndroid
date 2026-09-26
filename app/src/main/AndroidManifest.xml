@@ -246,7 +246,11 @@
             android:theme="@style/Theme.SubtitleEditforAndroid" />
 
           <activity
-             android:name=".SpeechToSubtitleSettingsActivity"
+             android:name=".SenseVoiceSettingsActivity"
+             android:exported="false"
+             android:theme="@style/Theme.SubtitleEditforAndroid" />
+          <activity
+             android:name=".ParakeetSettingsActivity"
              android:exported="false"
              android:theme="@style/Theme.SubtitleEditforAndroid" />
           <activity

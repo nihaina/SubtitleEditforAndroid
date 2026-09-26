@@ -258,6 +258,8 @@ class LogActivity : AppCompatActivity() {
 
     private fun activitySectionTitle(activity: String): String = when (activity) {
         "SpeechToSubtitleActivity" -> "语音转字幕"
+        "SenseVoiceSettingsActivity" -> "SenseVoice 配置"
+        "ParakeetSettingsActivity" -> "Parakeet 配置"
         "SpeechToSubtitleSettingsActivity" -> "语音转字幕配置"
         "AutoTimestampActivity" -> "自动打轴"
         "EditorActivity" -> "字幕编辑"

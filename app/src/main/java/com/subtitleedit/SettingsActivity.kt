@@ -31,7 +31,6 @@ class SettingsActivity : AppCompatActivity() {
         setupToolbar()
         setupEncodingSetting()
         setupCacheSection()
-        setupModelSettings()
         setupTtsSettings()
         setupModelManagement()
         setupAiSettings()
@@ -57,12 +56,6 @@ class SettingsActivity : AppCompatActivity() {
 
         binding.toolbar.setNavigationOnClickListener {
             onBackPressed()
-        }
-    }
-
-    private fun setupModelSettings() {
-        binding.layoutModelSettings.setOnClickListener {
-            startActivity(Intent(this, SpeechToSubtitleSettingsActivity::class.java))
         }
     }
 

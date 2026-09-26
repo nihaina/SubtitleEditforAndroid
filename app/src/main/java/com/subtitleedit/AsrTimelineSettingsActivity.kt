@@ -8,22 +8,25 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.slider.Slider
 import com.google.android.material.textfield.TextInputEditText
-import com.subtitleedit.databinding.ActivitySpeechToSubtitleSettingsBinding
+import com.subtitleedit.databinding.ActivityAsrTimelineSettingsBinding
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.TokenTimestampGenerator
 import java.util.Locale
 
-class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
+abstract class AsrTimelineSettingsActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivitySpeechToSubtitleSettingsBinding
+    protected abstract val modelType: String
+    protected abstract val modelName: String
+
+    private lateinit var binding: ActivityAsrTimelineSettingsBinding
     private lateinit var settingsManager: SettingsManager
     private var loading = false
     private var updatingSecondaryVadValue = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivitySpeechToSubtitleSettingsBinding.inflate(layoutInflater)
+        binding = ActivityAsrTimelineSettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
         ToolCardShadow.removeFrom(binding.root)
 
@@ -38,7 +41,7 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.setDisplayShowHomeEnabled(true)
-        supportActionBar?.title = "语音转字幕配置"
+        supportActionBar?.title = "$modelName 配置"
 
         binding.toolbar.setNavigationOnClickListener {
             onBackPressedDispatcher.onBackPressed()
@@ -46,6 +49,18 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
     }
 
     private fun setupListeners() {
+        binding.switchUseVadTimestamp.setOnCheckedChangeListener { _, checked ->
+            if (!loading) settingsManager.setAsrVadTimestampEnabled(modelType, checked)
+            if (!checked && !loading) {
+                loading = true
+                binding.switchSenseVoiceTimestampExperiment.isChecked =
+                    binding.switchSenseVoiceTimestampExperiment.isEnabled &&
+                        settingsManager.isSpeechTokenTimestampEnabled()
+                loading = false
+            }
+            updateSenseVoiceTimestampControls()
+            updateTimelineSections()
+        }
 
         binding.sliderFixedSegmentSeconds.addOnChangeListener { _, value, fromUser ->
             if (fromUser) binding.etFixedSegmentSeconds.setText(String.format(Locale.US, "%d", value.toInt()))
@@ -74,6 +89,7 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
             }
             settingsManager.setSpeechTokenTimestampEnabled(checked)
             updateSenseVoiceTimestampControls()
+            updateTimelineSections()
         }
         binding.switchSenseVoiceTimestampDiscardText.setOnCheckedChangeListener { _, checked ->
             if (!loading) settingsManager.setSpeechTokenTimestampDiscardTextEnabled(checked)
@@ -100,6 +116,8 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
 
     private fun loadSettings() {
         loading = true
+
+        binding.switchUseVadTimestamp.isChecked = settingsManager.isAsrVadTimestampEnabled(modelType)
 
         val segmentSeconds = settingsManager.getSpeechFixedSegmentSeconds()
         binding.sliderFixedSegmentSeconds.value = segmentSeconds.toFloat()
@@ -129,6 +147,15 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
         )
         loading = false
         updateSenseVoiceTimestampControls()
+        updateTimelineSections()
+    }
+
+    private fun updateTimelineSections() {
+        val useVad = binding.switchUseVadTimestamp.isChecked
+        binding.cardSenseVoiceTimestampExperiment.visibility = if (useVad) View.GONE else View.VISIBLE
+        binding.cardFixedSegment.visibility = if (!useVad && !binding.switchSenseVoiceTimestampExperiment.isChecked) {
+            View.VISIBLE
+        } else View.GONE
     }
 
     private fun updateSenseVoiceTimestampControls() {
@@ -152,7 +179,7 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
     }
 
     private fun hasUsableTokenTimestampModel(): Boolean {
-        return TokenTimestampGenerator.isConfigured(this)
+        return settingsManager.getAsrModelType() == modelType && TokenTimestampGenerator.isConfigured(this)
     }
 
     private fun bindSecondaryVadValue(
@@ -217,4 +244,16 @@ class SpeechToSubtitleSettingsActivity : AppCompatActivity() {
             }
         }
     }
+}
+
+class SenseVoiceSettingsActivity : AsrTimelineSettingsActivity() {
+    override val modelType = SettingsManager.ASR_MODEL_SENSEVOICE
+    override val modelName = "SenseVoice"
+}
+
+class ParakeetSettingsActivity : AsrTimelineSettingsActivity() {
+    override val modelType: String by lazy {
+        SettingsManager.getInstance(this).getAsrModelType()
+    }
+    override val modelName = "Parakeet"
 }

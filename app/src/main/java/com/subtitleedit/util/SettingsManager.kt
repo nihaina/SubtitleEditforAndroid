@@ -113,6 +113,7 @@ class SettingsManager private constructor(context: Context) {
             "stt_token_timestamp_merge_enabled"
         private const val KEY_STT_TOKEN_TIMESTAMP_MERGE_GAP_MS =
             "stt_token_timestamp_merge_gap_ms"
+        private const val KEY_ASR_TIMELINE_PREFIX = "asr_timeline_"
         private const val KEY_QUICK_TRANSCRIBE_SOURCE_LANGUAGE = "quick_transcribe_source_language"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_TTS_ENGINE = "tts_engine"
@@ -839,12 +840,39 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putFloat(KEY_VAD_MAX_SPEECH_DURATION, normalized).apply()
     }
 
+    private fun timelineModel(type: String = getAsrModelType()): String? = when (type) {
+        ASR_MODEL_SENSEVOICE -> ASR_MODEL_SENSEVOICE
+        ASR_MODEL_PARAKEET_TDT, ASR_MODEL_PARAKEET_CTC_JA -> "parakeet"
+        else -> null
+    }
+
+    private fun timelineKey(name: String, type: String = getAsrModelType()): String? =
+        timelineModel(type)?.let { "$KEY_ASR_TIMELINE_PREFIX${it}_$name" }
+
+    fun isAsrVadTimestampEnabled(type: String = getAsrModelType()): Boolean {
+        val key = timelineKey("vad_enabled", type) ?: return true
+        return prefs.getBoolean(key, type != ASR_MODEL_SENSEVOICE)
+    }
+
+    fun setAsrVadTimestampEnabled(type: String, enabled: Boolean) {
+        timelineKey("vad_enabled", type)?.let { prefs.edit().putBoolean(it, enabled).apply() }
+    }
+
     fun getSpeechFixedSegmentSeconds(): Int {
-        return prefs.getInt(KEY_STT_FIXED_SEGMENT_SECONDS, 30)
+        val key = timelineKey("fixed_segment_seconds")
+        val fallback = if (getAsrModelType() == ASR_MODEL_SENSEVOICE ||
+            getAsrModelType() == ASR_MODEL_WHISPER) {
+            prefs.getInt(KEY_STT_FIXED_SEGMENT_SECONDS, 30)
+        } else 30
+        return (key?.let { prefs.getInt(it, fallback) } ?: fallback).coerceIn(5, 120)
     }
 
     fun setSpeechFixedSegmentSeconds(seconds: Int) {
-        prefs.edit().putInt(KEY_STT_FIXED_SEGMENT_SECONDS, seconds.coerceIn(5, 120)).apply()
+        val key = timelineKey("fixed_segment_seconds")
+            ?: if (getAsrModelType() == ASR_MODEL_WHISPER) KEY_STT_FIXED_SEGMENT_SECONDS else null
+        key?.let {
+            prefs.edit().putInt(it, seconds.coerceIn(5, 120)).apply()
+        }
     }
 
     fun isSpeechVadDynamicPaddingEnabled(): Boolean {
@@ -984,43 +1012,67 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun isSpeechTokenTimestampEnabled(): Boolean {
-        return prefs.getBoolean(KEY_STT_TOKEN_TIMESTAMP_ENABLED, true)
+        val type = getAsrModelType()
+        if (isAsrVadTimestampEnabled(type)) return false
+        val key = timelineKey("token_enabled", type) ?: return false
+        val fallback = type == ASR_MODEL_SENSEVOICE &&
+            prefs.getBoolean(KEY_STT_TOKEN_TIMESTAMP_ENABLED, true)
+        return prefs.getBoolean(key, fallback)
     }
 
     fun setSpeechTokenTimestampEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_STT_TOKEN_TIMESTAMP_ENABLED, enabled).apply()
+        timelineKey("token_enabled")?.let { prefs.edit().putBoolean(it, enabled).apply() }
     }
 
     fun isSpeechTokenTimestampDiscardTextEnabled(): Boolean {
-        return prefs.getBoolean(KEY_STT_TOKEN_TIMESTAMP_DISCARD_TEXT_ENABLED, false)
+        val key = timelineKey("token_discard_text") ?: return false
+        val fallback = getAsrModelType() == ASR_MODEL_SENSEVOICE &&
+            prefs.getBoolean(KEY_STT_TOKEN_TIMESTAMP_DISCARD_TEXT_ENABLED, false)
+        return prefs.getBoolean(key, fallback)
     }
 
     fun setSpeechTokenTimestampDiscardTextEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_STT_TOKEN_TIMESTAMP_DISCARD_TEXT_ENABLED, enabled).apply()
+        timelineKey("token_discard_text")?.let { prefs.edit().putBoolean(it, enabled).apply() }
     }
 
     fun getSpeechTokenTimestampGapMs(): Int {
-        return prefs.getInt(KEY_STT_TOKEN_TIMESTAMP_GAP_MS, 250).coerceIn(0, 2000)
+        val key = timelineKey("token_gap_ms") ?: return 250
+        val fallback = if (getAsrModelType() == ASR_MODEL_SENSEVOICE) {
+            prefs.getInt(KEY_STT_TOKEN_TIMESTAMP_GAP_MS, 250)
+        } else 250
+        return prefs.getInt(key, fallback).coerceIn(0, 2000)
     }
 
     fun setSpeechTokenTimestampGapMs(gapMs: Int) {
-        prefs.edit().putInt(KEY_STT_TOKEN_TIMESTAMP_GAP_MS, gapMs.coerceIn(0, 2000)).apply()
+        timelineKey("token_gap_ms")?.let {
+            prefs.edit().putInt(it, gapMs.coerceIn(0, 2000)).apply()
+        }
     }
 
     fun isSpeechTokenTimestampMergeEnabled(): Boolean {
-        return prefs.getBoolean(KEY_STT_TOKEN_TIMESTAMP_MERGE_ENABLED, true)
+        val key = timelineKey("token_merge_enabled") ?: return false
+        val fallback = if (getAsrModelType() == ASR_MODEL_SENSEVOICE) {
+            prefs.getBoolean(KEY_STT_TOKEN_TIMESTAMP_MERGE_ENABLED, true)
+        } else true
+        return prefs.getBoolean(key, fallback)
     }
 
     fun setSpeechTokenTimestampMergeEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_STT_TOKEN_TIMESTAMP_MERGE_ENABLED, enabled).apply()
+        timelineKey("token_merge_enabled")?.let { prefs.edit().putBoolean(it, enabled).apply() }
     }
 
     fun getSpeechTokenTimestampMergeGapMs(): Int {
-        return prefs.getInt(KEY_STT_TOKEN_TIMESTAMP_MERGE_GAP_MS, 150).coerceIn(0, 5000)
+        val key = timelineKey("token_merge_gap_ms") ?: return 150
+        val fallback = if (getAsrModelType() == ASR_MODEL_SENSEVOICE) {
+            prefs.getInt(KEY_STT_TOKEN_TIMESTAMP_MERGE_GAP_MS, 150)
+        } else 150
+        return prefs.getInt(key, fallback).coerceIn(0, 5000)
     }
 
     fun setSpeechTokenTimestampMergeGapMs(gapMs: Int) {
-        prefs.edit().putInt(KEY_STT_TOKEN_TIMESTAMP_MERGE_GAP_MS, gapMs.coerceIn(0, 5000)).apply()
+        timelineKey("token_merge_gap_ms")?.let {
+            prefs.edit().putInt(it, gapMs.coerceIn(0, 5000)).apply()
+        }
     }
 
     fun getQuickTranscribeSourceLanguage(): String =
