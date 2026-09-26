@@ -89,8 +89,8 @@ android {
         applicationId = "com.subtitleedit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
-        versionName = "1.1.9"
+        versionCode = 10
+        versionName = "1.2.0"
 
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
