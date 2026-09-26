@@ -7,17 +7,15 @@ internal object TokenTimestampSegmenter {
     data class Segment(
         val startTimeMs: Long,
         val endTimeMs: Long,
-        val text: String,
-        val hardBoundaryBefore: Boolean = false
+        val text: String
     )
 
-    fun split(
+    fun fromTokens(
         tokens: Array<String>,
         timestamps: FloatArray,
         durations: FloatArray,
         audioStartTimeMs: Long,
-        audioEndTimeMs: Long,
-        splitGapMs: Int
+        audioEndTimeMs: Long
     ): List<Segment> {
         if (
             tokens.isEmpty() ||
@@ -27,7 +25,6 @@ internal object TokenTimestampSegmenter {
             return emptyList()
         }
 
-        val gapThreshold = splitGapMs.coerceIn(0, 2000).toLong()
         val alignedTokens = tokens.indices.mapNotNull { index ->
             val timestamp = timestamps[index]
             val duration = durations.getOrNull(index)
@@ -46,7 +43,7 @@ internal object TokenTimestampSegmenter {
         if (alignedTokens.isEmpty()) return emptyList()
 
         val maxLocalTimeMs = audioEndTimeMs - audioStartTimeMs
-        val boundaryContextMs = (gapThreshold / 2L).coerceIn(100L, 500L)
+        val boundaryContextMs = 100L
         var previousStartTimeMs = 0L
         val normalizedTokens = alignedTokens.map { token ->
             val normalizedStartTimeMs = token.startTimeMs
@@ -65,24 +62,21 @@ internal object TokenTimestampSegmenter {
         var segmentStartTimeMs = audioStartTimeMs +
             (normalizedTokens.first().startTimeMs - boundaryContextMs).coerceAtLeast(0L)
         var currentText = StringBuilder()
-        var hardBoundaryBefore = false
 
         normalizedTokens.forEachIndexed { index, token ->
             currentText.append(token.text)
             val next = normalizedTokens.getOrNull(index + 1)
             val blankGapMs = next?.let { it.startTimeMs - token.endTimeMs }
-            if (next != null && blankGapMs != null && blankGapMs >= gapThreshold) {
+            if (next != null && blankGapMs != null && blankGapMs >= 0L) {
                 val boundaryExtensionMs = minOf(boundaryContextMs, blankGapMs / 2L)
                 addSegment(
                     output = segments,
                     startTimeMs = segmentStartTimeMs,
                     endTimeMs = audioStartTimeMs + token.endTimeMs + boundaryExtensionMs,
-                    text = currentText.toString(),
-                    hardBoundaryBefore = hardBoundaryBefore
+                    text = currentText.toString()
                 )
                 currentText = StringBuilder()
                 segmentStartTimeMs = audioStartTimeMs + next.startTimeMs - boundaryExtensionMs
-                hardBoundaryBefore = true
             }
         }
 
@@ -93,32 +87,9 @@ internal object TokenTimestampSegmenter {
                 maxLocalTimeMs,
                 normalizedTokens.last().endTimeMs + boundaryContextMs
             ),
-            text = currentText.toString(),
-            hardBoundaryBefore = hardBoundaryBefore
+            text = currentText.toString()
         )
         return segments
-    }
-
-    fun mergeShortGaps(segments: List<Segment>, splitGapMs: Int): List<Segment> {
-        if (segments.size < 2) return segments
-
-        val gapThreshold = splitGapMs.coerceIn(0, 2000).toLong()
-        val merged = mutableListOf<Segment>()
-        var current = segments.first()
-        for (next in segments.drop(1)) {
-            val gapMs = next.startTimeMs - current.endTimeMs
-            if (!next.hardBoundaryBefore && gapMs < gapThreshold) {
-                current = current.copy(
-                    endTimeMs = maxOf(current.endTimeMs, next.endTimeMs),
-                    text = joinText(current.text, next.text)
-                )
-            } else {
-                merged += current
-                current = next
-            }
-        }
-        merged += current
-        return merged
     }
 
     fun mergeSegments(segments: List<Segment>, maxGapMs: Int): List<Segment> {
@@ -147,16 +118,14 @@ internal object TokenTimestampSegmenter {
         output: MutableList<Segment>,
         startTimeMs: Long,
         endTimeMs: Long,
-        text: String,
-        hardBoundaryBefore: Boolean
+        text: String
     ) {
         val normalizedText = text.trim()
         if (normalizedText.isEmpty()) return
         output += Segment(
             startTimeMs = startTimeMs,
             endTimeMs = endTimeMs.coerceAtLeast(startTimeMs + 1L),
-            text = normalizedText,
-            hardBoundaryBefore = hardBoundaryBefore
+            text = normalizedText
         )
     }
 

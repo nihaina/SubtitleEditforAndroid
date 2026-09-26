@@ -105,10 +105,6 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_STT_HOTWORDS_SCORE = "stt_hotwords_score"
         private const val KEY_STT_TOKEN_TIMESTAMP_ENABLED =
             "stt_token_timestamp_enabled"
-        private const val KEY_STT_TOKEN_TIMESTAMP_DISCARD_TEXT_ENABLED =
-            "stt_token_timestamp_discard_text_enabled"
-        private const val KEY_STT_TOKEN_TIMESTAMP_GAP_MS =
-            "stt_token_timestamp_gap_ms"
         private const val KEY_STT_TOKEN_TIMESTAMP_MERGE_ENABLED =
             "stt_token_timestamp_merge_enabled"
         private const val KEY_STT_TOKEN_TIMESTAMP_MERGE_GAP_MS =
@@ -843,6 +839,7 @@ class SettingsManager private constructor(context: Context) {
     private fun timelineModel(type: String = getAsrModelType()): String? = when (type) {
         ASR_MODEL_SENSEVOICE -> ASR_MODEL_SENSEVOICE
         ASR_MODEL_PARAKEET_TDT, ASR_MODEL_PARAKEET_CTC_JA -> "parakeet"
+        ASR_MODEL_QWEN3_ASR -> ASR_MODEL_QWEN3_ASR
         else -> null
     }
 
@@ -851,7 +848,7 @@ class SettingsManager private constructor(context: Context) {
 
     fun isAsrVadTimestampEnabled(type: String = getAsrModelType()): Boolean {
         val key = timelineKey("vad_enabled", type) ?: return true
-        return prefs.getBoolean(key, type != ASR_MODEL_SENSEVOICE)
+        return prefs.getBoolean(key, type != ASR_MODEL_SENSEVOICE && type != ASR_MODEL_QWEN3_ASR)
     }
 
     fun setAsrVadTimestampEnabled(type: String, enabled: Boolean) {
@@ -860,10 +857,13 @@ class SettingsManager private constructor(context: Context) {
 
     fun getSpeechFixedSegmentSeconds(): Int {
         val key = timelineKey("fixed_segment_seconds")
-        val fallback = if (getAsrModelType() == ASR_MODEL_SENSEVOICE ||
-            getAsrModelType() == ASR_MODEL_WHISPER) {
-            prefs.getInt(KEY_STT_FIXED_SEGMENT_SECONDS, 30)
-        } else 30
+        val fallback = when {
+            getAsrModelType() == ASR_MODEL_QWEN3_ASR -> 30
+            key != null -> 120
+            getAsrModelType() == ASR_MODEL_WHISPER ->
+                prefs.getInt(KEY_STT_FIXED_SEGMENT_SECONDS, 30)
+            else -> 30
+        }
         return (key?.let { prefs.getInt(it, fallback) } ?: fallback).coerceIn(5, 120)
     }
 
@@ -1015,38 +1015,16 @@ class SettingsManager private constructor(context: Context) {
         val type = getAsrModelType()
         if (isAsrVadTimestampEnabled(type)) return false
         val key = timelineKey("token_enabled", type) ?: return false
-        val fallback = type == ASR_MODEL_SENSEVOICE &&
-            prefs.getBoolean(KEY_STT_TOKEN_TIMESTAMP_ENABLED, true)
+        val fallback = when (type) {
+            ASR_MODEL_SENSEVOICE -> prefs.getBoolean(KEY_STT_TOKEN_TIMESTAMP_ENABLED, true)
+            ASR_MODEL_QWEN3_ASR -> true
+            else -> false
+        }
         return prefs.getBoolean(key, fallback)
     }
 
     fun setSpeechTokenTimestampEnabled(enabled: Boolean) {
         timelineKey("token_enabled")?.let { prefs.edit().putBoolean(it, enabled).apply() }
-    }
-
-    fun isSpeechTokenTimestampDiscardTextEnabled(): Boolean {
-        val key = timelineKey("token_discard_text") ?: return false
-        val fallback = getAsrModelType() == ASR_MODEL_SENSEVOICE &&
-            prefs.getBoolean(KEY_STT_TOKEN_TIMESTAMP_DISCARD_TEXT_ENABLED, false)
-        return prefs.getBoolean(key, fallback)
-    }
-
-    fun setSpeechTokenTimestampDiscardTextEnabled(enabled: Boolean) {
-        timelineKey("token_discard_text")?.let { prefs.edit().putBoolean(it, enabled).apply() }
-    }
-
-    fun getSpeechTokenTimestampGapMs(): Int {
-        val key = timelineKey("token_gap_ms") ?: return 250
-        val fallback = if (getAsrModelType() == ASR_MODEL_SENSEVOICE) {
-            prefs.getInt(KEY_STT_TOKEN_TIMESTAMP_GAP_MS, 250)
-        } else 250
-        return prefs.getInt(key, fallback).coerceIn(0, 2000)
-    }
-
-    fun setSpeechTokenTimestampGapMs(gapMs: Int) {
-        timelineKey("token_gap_ms")?.let {
-            prefs.edit().putInt(it, gapMs.coerceIn(0, 2000)).apply()
-        }
     }
 
     fun isSpeechTokenTimestampMergeEnabled(): Boolean {

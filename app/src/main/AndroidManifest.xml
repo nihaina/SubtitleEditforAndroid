@@ -254,6 +254,10 @@
              android:exported="false"
              android:theme="@style/Theme.SubtitleEditforAndroid" />
           <activity
+             android:name=".Qwen3AsrSettingsActivity"
+             android:exported="false"
+             android:theme="@style/Theme.SubtitleEditforAndroid" />
+          <activity
              android:name=".VadModelSettingsActivity"
              android:exported="false"
              android:theme="@style/Theme.SubtitleEditforAndroid" />

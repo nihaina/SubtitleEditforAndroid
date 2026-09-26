@@ -27,8 +27,7 @@ class WhisperRecognizer(
     private val contentResolver: ContentResolver,
     private val context: Context,
     private val modelType: String = SettingsManager.ASR_MODEL_WHISPER,
-    private val tokenTimestampExperiment: Boolean = false,
-    private val tokenTimestampGapMs: Int = 500
+    private val tokenTimestampExperiment: Boolean = false
 ) {
 
     companion object {
@@ -51,8 +50,7 @@ class WhisperRecognizer(
     data class SubtitleSegment(
         val startTime: Long,  // 毫秒
         val endTime: Long,    // 毫秒
-        val text: String,
-        val timestampGapBoundaryBefore: Boolean = false
+        val text: String
     )
 
     /** Official-style Qwen chunk result: one complete ASR text per audio chunk. */
@@ -817,17 +815,13 @@ class WhisperRecognizer(
 
             val sortedSegments = allSegments.sortedBy { it.startTime }
             val finalSegments = if (shouldUseTokenTimestampExperiment()) {
-                val tokenSegments = TokenTimestampSegmenter.mergeShortGaps(
-                    segments = sortedSegments.map {
-                        TokenTimestampSegmenter.Segment(
-                            startTimeMs = it.startTime,
-                            endTimeMs = it.endTime,
-                            text = it.text,
-                            hardBoundaryBefore = it.timestampGapBoundaryBefore
-                        )
-                    },
-                    splitGapMs = tokenTimestampGapMs
-                )
+                val tokenSegments = sortedSegments.map {
+                    TokenTimestampSegmenter.Segment(
+                        startTimeMs = it.startTime,
+                        endTimeMs = it.endTime,
+                        text = it.text
+                    )
+                }
                 val settings = settingsManager()
                 val mergedSegments = if (settings.isSpeechTokenTimestampMergeEnabled()) {
                     TokenTimestampSegmenter.mergeSegments(
@@ -847,8 +841,7 @@ class WhisperRecognizer(
                     SubtitleSegment(
                         startTime = it.startTimeMs,
                         endTime = it.endTimeMs,
-                        text = it.text,
-                        timestampGapBoundaryBefore = it.hardBoundaryBefore
+                        text = it.text.trim()
                     )
                 }
             } else {
@@ -1004,13 +997,12 @@ class WhisperRecognizer(
 
             if (text.isNotEmpty()) {
                 if (shouldUseTokenTimestampExperiment()) {
-                    val tokenSegments = TokenTimestampSegmenter.split(
+                    val tokenSegments = TokenTimestampSegmenter.fromTokens(
                         tokens = result.tokens,
                         timestamps = result.timestamps,
                         durations = result.durations,
                         audioStartTimeMs = startTimeMs,
-                        audioEndTimeMs = startTimeMs + audioData.size.toLong() * 1000L / SAMPLE_RATE,
-                        splitGapMs = tokenTimestampGapMs
+                        audioEndTimeMs = startTimeMs + audioData.size.toLong() * 1000L / SAMPLE_RATE
                     )
                     if (tokenSegments.isEmpty()) {
                         Log.w(TAG, "${modelDisplayName()} 未返回有效 token 时间戳，跳过当前输入窗口")
@@ -1019,14 +1011,12 @@ class WhisperRecognizer(
                             SubtitleSegment(
                                 startTime = it.startTimeMs,
                                 endTime = it.endTimeMs,
-                                text = it.text,
-                                timestampGapBoundaryBefore = it.hardBoundaryBefore
+                                text = it.text
                             )
                         }
                         Log.d(
                             TAG,
-                            "${modelDisplayName()} token 时间戳生成 ${tokenSegments.size} 个字幕段，" +
-                                "切分间隔 ${tokenTimestampGapMs}ms"
+                            "${modelDisplayName()} token 时间戳生成 ${tokenSegments.size} 个逐 token 时间段"
                         )
                     }
                 } else if (usesSegmentLevelResult()) {

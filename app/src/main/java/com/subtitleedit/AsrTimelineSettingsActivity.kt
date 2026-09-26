@@ -91,16 +91,6 @@ abstract class AsrTimelineSettingsActivity : AppCompatActivity() {
             updateSenseVoiceTimestampControls()
             updateTimelineSections()
         }
-        binding.switchSenseVoiceTimestampDiscardText.setOnCheckedChangeListener { _, checked ->
-            if (!loading) settingsManager.setSpeechTokenTimestampDiscardTextEnabled(checked)
-        }
-        bindSecondaryVadValue(
-            slider = binding.sliderSenseVoiceTimestampGap,
-            input = binding.etSenseVoiceTimestampGap,
-            format = "%.0f",
-            normalize = { value -> snap(value, 50f, 0f, 2000f) },
-            save = { value -> settingsManager.setSpeechTokenTimestampGapMs(value.toInt()) }
-        )
         binding.switchSenseVoiceTimestampMerge.setOnCheckedChangeListener { _, checked ->
             if (!loading) settingsManager.setSpeechTokenTimestampMergeEnabled(checked)
             updateSenseVoiceTimestampControls()
@@ -129,14 +119,6 @@ abstract class AsrTimelineSettingsActivity : AppCompatActivity() {
                 settingsManager.isSpeechTokenTimestampEnabled()
         binding.tvSenseVoiceTimestampModelMissing.visibility =
             if (tokenTimestampModelAvailable) View.GONE else View.VISIBLE
-        binding.switchSenseVoiceTimestampDiscardText.isChecked =
-            settingsManager.isSpeechTokenTimestampDiscardTextEnabled()
-        loadSecondaryVadValue(
-            binding.sliderSenseVoiceTimestampGap,
-            binding.etSenseVoiceTimestampGap,
-            settingsManager.getSpeechTokenTimestampGapMs().toFloat(),
-            "%.0f"
-        )
         binding.switchSenseVoiceTimestampMerge.isChecked =
             settingsManager.isSpeechTokenTimestampMergeEnabled()
         loadSecondaryVadValue(
@@ -153,22 +135,11 @@ abstract class AsrTimelineSettingsActivity : AppCompatActivity() {
     private fun updateTimelineSections() {
         val useVad = binding.switchUseVadTimestamp.isChecked
         binding.cardSenseVoiceTimestampExperiment.visibility = if (useVad) View.GONE else View.VISIBLE
-        binding.cardFixedSegment.visibility = if (!useVad && !binding.switchSenseVoiceTimestampExperiment.isChecked) {
-            View.VISIBLE
-        } else View.GONE
     }
 
     private fun updateSenseVoiceTimestampControls() {
         val enabled = binding.switchSenseVoiceTimestampExperiment.isEnabled &&
             binding.switchSenseVoiceTimestampExperiment.isChecked
-        val discardTextEnabled = enabled
-        binding.switchSenseVoiceTimestampDiscardText.isEnabled = discardTextEnabled
-        binding.switchSenseVoiceTimestampDiscardText.alpha = if (discardTextEnabled) 1f else 0.5f
-        binding.tvSenseVoiceTimestampDiscardTextHint.alpha = if (discardTextEnabled) 1f else 0.5f
-        val splitEnabled = enabled
-        binding.layoutSenseVoiceTimestampGap.alpha = if (splitEnabled) 1f else 0.5f
-        binding.sliderSenseVoiceTimestampGap.isEnabled = splitEnabled
-        binding.etSenseVoiceTimestampGap.isEnabled = splitEnabled
         val mergeEnabled = enabled && binding.switchSenseVoiceTimestampMerge.isChecked
         binding.switchSenseVoiceTimestampMerge.isEnabled = enabled
         binding.switchSenseVoiceTimestampMerge.alpha = if (enabled) 1f else 0.5f

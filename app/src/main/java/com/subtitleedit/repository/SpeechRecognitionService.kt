@@ -17,7 +17,6 @@ internal interface SpeechRecognitionService {
         contentResolver: ContentResolver,
         context: Context,
         modelType: String = SettingsManager.ASR_MODEL_WHISPER,
-        tokenTimestampExperiment: Boolean = false,
-        tokenTimestampGapMs: Int = 500
+        tokenTimestampExperiment: Boolean = false
     ): WhisperRecognizer
 }

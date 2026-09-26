@@ -331,7 +331,7 @@ class AutoTimestampActivity : AppCompatActivity() {
         if (!tokenTimestampExperimentEnabled && !settingsManager.isAsrVadTimestampEnabled()) {
             com.subtitleedit.util.OverwritingToast.makeText(
                 this,
-                "请在当前识别模型配置中启用 VAD 打轴或实验打轴",
+                "请在当前识别模型配置中启用 VAD 打轴或 ASR 模型打轴",
                 Toast.LENGTH_SHORT
             ).show()
             return
@@ -342,7 +342,11 @@ class AutoTimestampActivity : AppCompatActivity() {
         ) {
             com.subtitleedit.util.OverwritingToast.makeText(
                 this,
-                "实验打轴需要先在模型设置中配置当前非 Whisper ASR 模型",
+                if (settingsManager.getAsrModelType() == SettingsManager.ASR_MODEL_QWEN3_ASR) {
+                    "请先导入 Qwen3-ASR 和 ForcedAligner 模型"
+                } else {
+                    "实验打轴需要先在模型设置中配置当前非 Whisper ASR 模型"
+                },
                 Toast.LENGTH_LONG
             ).show()
             return
@@ -554,7 +558,7 @@ class AutoTimestampActivity : AppCompatActivity() {
                             progressCallback = { progress, status ->
                                 runOnUiThread {
                                     binding.tvStatus.text =
-                                        "$progressPrefix $modelName token 打轴：$status ($progress%)"
+                                        "$progressPrefix $modelName 打轴：$status ($progress%)"
                                 }
                             },
                             isCancelled = { isCancelled }
@@ -565,7 +569,7 @@ class AutoTimestampActivity : AppCompatActivity() {
                             progressCallback = { progress, status ->
                                 runOnUiThread {
                                     binding.tvStatus.text =
-                                        "$progressPrefix $modelName token 打轴：$status ($progress%)"
+                                        "$progressPrefix $modelName 打轴：$status ($progress%)"
                                 }
                             },
                             isCancelled = { isCancelled }
@@ -599,11 +603,16 @@ class AutoTimestampActivity : AppCompatActivity() {
             if (refinementSubtitle == null && segments.isEmpty()) {
                 return Result.failure(Exception("未检测到任何语音段"))
             }
+            val timelineName = if (settingsManager.getAsrModelType() == SettingsManager.ASR_MODEL_QWEN3_ASR) {
+                "强制对齐打轴"
+            } else {
+                "Token 时间戳实验打轴"
+            }
             appendOperationLog(
                 if (tokenTimestampExperimentEnabled && refinementSubtitle != null) {
-                    "Token 时间戳实验打轴：在未覆盖区间生成 ${segments.size} 个新增时间段"
+                    "$timelineName：在未覆盖区间生成 ${segments.size} 个新增时间段"
                 } else if (tokenTimestampExperimentEnabled) {
-                    "Token 时间戳实验打轴：生成 ${segments.size} 个时间段"
+                    "$timelineName：生成 ${segments.size} 个时间段"
                 } else if (refinementSubtitle != null) {
                     "二次 VAD：在未覆盖区间检测到 ${segments.size} 个新增语音段"
                 } else {
@@ -862,16 +871,19 @@ class AutoTimestampActivity : AppCompatActivity() {
 
     private fun appendVadConfig(secondaryProcessing: Boolean) {
         if (isTokenTimestampExperimentEnabled()) {
-            appendOperationLog("Token 时间戳实验打轴配置：")
+            appendOperationLog(
+                if (settingsManager.getAsrModelType() == SettingsManager.ASR_MODEL_QWEN3_ASR) {
+                    "Qwen3 强制对齐打轴配置："
+                } else {
+                    "Token 时间戳实验打轴配置："
+                }
+            )
             appendOperationLog(
                 "  模型：${TokenTimestampGenerator.modelDisplayName(settingsManager)} " +
                     "(${Uri.parse(TokenTimestampGenerator.modelPath(settingsManager)).lastPathSegment})"
             )
             appendOperationLog(
                 "  Tokens：${Uri.parse(TokenTimestampGenerator.tokensPath(settingsManager)).lastPathSegment}"
-            )
-            appendOperationLog(
-                "  Token 切分间隔：${settingsManager.getSpeechTokenTimestampGapMs()}ms"
             )
             appendOperationLog(
                 "  合并语音段：${if (settingsManager.isSpeechTokenTimestampMergeEnabled()) {

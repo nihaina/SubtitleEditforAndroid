@@ -21,6 +21,8 @@ internal object ForcedAlignmentSegmenter {
         val endTimeMs: Long,
         val text: String,
         val hardBoundaryBefore: Boolean = false,
+        val alignedStartTimeMs: Long = startTimeMs,
+        val alignedEndTimeMs: Long = endTimeMs,
     )
 
     fun split(
@@ -46,6 +48,7 @@ internal object ForcedAlignmentSegmenter {
         val output = mutableListOf<Segment>()
         var currentText = StringBuilder()
         var segmentStart = max(0L, normalized.first().startTimeMs - contextMs)
+        var alignedSegmentStart = normalized.first().startTimeMs
         var hardBoundaryBefore = false
 
         normalized.forEachIndexed { index, unit ->
@@ -62,11 +65,14 @@ internal object ForcedAlignmentSegmenter {
                     audioStartTimeMs = audioStartTimeMs,
                     startTimeMs = segmentStart,
                     endTimeMs = unit.endTimeMs + extension,
+                    alignedStartTimeMs = alignedSegmentStart,
+                    alignedEndTimeMs = unit.endTimeMs,
                     text = currentText.toString(),
                     hardBoundaryBefore = hardBoundaryBefore,
                 )
                 currentText = StringBuilder()
                 segmentStart = next.startTimeMs - extension
+                alignedSegmentStart = next.startTimeMs
                 hardBoundaryBefore = true
             }
         }
@@ -76,10 +82,33 @@ internal object ForcedAlignmentSegmenter {
             audioStartTimeMs = audioStartTimeMs,
             startTimeMs = segmentStart,
             endTimeMs = min(maxLocalTimeMs, normalized.last().endTimeMs + contextMs),
+            alignedStartTimeMs = alignedSegmentStart,
+            alignedEndTimeMs = normalized.last().endTimeMs,
             text = currentText.toString(),
             hardBoundaryBefore = hardBoundaryBefore,
         )
         return output
+    }
+
+    fun mergeSegments(segments: List<Segment>, maxGapMs: Int): List<Segment> {
+        if (segments.size < 2) return segments
+        val threshold = maxGapMs.coerceIn(0, 5000).toLong()
+        val merged = mutableListOf<Segment>()
+        var current = segments.first()
+        for (next in segments.drop(1)) {
+            if (next.alignedStartTimeMs - current.alignedEndTimeMs <= threshold) {
+                current = current.copy(
+                    endTimeMs = max(current.endTimeMs, next.endTimeMs),
+                    alignedEndTimeMs = max(current.alignedEndTimeMs, next.alignedEndTimeMs),
+                    text = current.text + mergeJoiner(current.text.last(), next.text.first()) + next.text,
+                )
+            } else {
+                merged += current
+                current = next
+            }
+        }
+        merged += current
+        return merged
     }
 
     private fun addSegment(
@@ -87,6 +116,8 @@ internal object ForcedAlignmentSegmenter {
         audioStartTimeMs: Long,
         startTimeMs: Long,
         endTimeMs: Long,
+        alignedStartTimeMs: Long,
+        alignedEndTimeMs: Long,
         text: String,
         hardBoundaryBefore: Boolean,
     ) {
@@ -94,11 +125,26 @@ internal object ForcedAlignmentSegmenter {
         if (normalizedText.isEmpty()) return
         val start = audioStartTimeMs + startTimeMs.coerceAtLeast(0L)
         val end = audioStartTimeMs + endTimeMs.coerceAtLeast(startTimeMs + 1L)
-        output += Segment(start, max(start + 1L, end), normalizedText, hardBoundaryBefore)
+        output += Segment(
+            start,
+            max(start + 1L, end),
+            normalizedText,
+            hardBoundaryBefore,
+            audioStartTimeMs + alignedStartTimeMs,
+            audioStartTimeMs + alignedEndTimeMs,
+        )
     }
 
     private fun joiner(left: Char, right: Char): String =
         if (left.isLetterOrDigit() && right.isLetterOrDigit() && left.code < 128 && right.code < 128) {
+            " "
+        } else {
+            ""
+        }
+
+    private fun mergeJoiner(left: Char, right: Char): String =
+        if (right.isLetterOrDigit() && right.code < 128 &&
+            left.code < 128 && (left.isLetterOrDigit() || left in ".!?;,:")) {
             " "
         } else {
             ""

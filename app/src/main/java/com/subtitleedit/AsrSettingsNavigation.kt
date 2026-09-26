@@ -12,11 +12,12 @@ internal object AsrSettingsNavigation {
             SettingsManager.ASR_MODEL_SENSEVOICE -> SenseVoiceSettingsActivity::class.java
             SettingsManager.ASR_MODEL_PARAKEET_TDT,
             SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> ParakeetSettingsActivity::class.java
+            SettingsManager.ASR_MODEL_QWEN3_ASR -> Qwen3AsrSettingsActivity::class.java
             SettingsManager.ASR_MODEL_WHISPER -> WhisperSettingsActivity::class.java
             else -> null
         }
         if (destination == null) {
-            OverwritingToast.makeText(context, "Qwen3-ASR 配置页后续添加", Toast.LENGTH_SHORT).show()
+            OverwritingToast.makeText(context, "当前模型没有配置页", Toast.LENGTH_SHORT).show()
         } else {
             context.startActivity(Intent(context, destination))
         }

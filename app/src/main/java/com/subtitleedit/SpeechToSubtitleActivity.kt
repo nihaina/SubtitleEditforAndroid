@@ -381,7 +381,11 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         ) {
             com.subtitleedit.util.OverwritingToast.makeText(
                 this,
-                "实验打轴需要先在模型设置中配置当前非 Whisper ASR 模型",
+                if (modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) {
+                    "请先导入 Qwen3-ASR 和 ForcedAligner 模型"
+                } else {
+                    "实验打轴需要先在模型设置中配置当前非 Whisper ASR 模型"
+                },
                 Toast.LENGTH_LONG
             ).show()
             return
@@ -716,7 +720,8 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         selectedLanguage: String,
         progressPrefix: String
     ): Result<List<WhisperRecognizer.SubtitleSegment>> {
-        appendRuntimeLog("实验打轴：初始化 ${currentAsrModelDisplayName()} 模型，仅生成时间轴")
+        val timelineName = if (modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) "强制对齐打轴" else "实验打轴"
+        appendRuntimeLog("$timelineName：初始化 ${currentAsrModelDisplayName()} 模型")
         if (modelType == SettingsManager.ASR_MODEL_SENSEVOICE) {
             appendRuntimeLog(
                 "SenseVoice 指定语言：$selectedLanguage " +
@@ -730,7 +735,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                 progressCallback = { progress, status ->
                     runOnUiThread {
                         showProgress(
-                            "$progressPrefix 实验打轴：$status",
+                            "$progressPrefix $timelineName：$status",
                             10 + (progress * 0.4).toInt()
                         )
                     }
@@ -741,70 +746,18 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         if (isCancelled) return Result.failure(Exception("用户取消"))
 
         val timelineSegments = timelineResult.getOrElse { return Result.failure(it) }
-        if (!settingsManager.isSpeechTokenTimestampDiscardTextEnabled()) {
-            appendRuntimeLog(
-                "实验打轴完成：生成 ${timelineSegments.size} 个字幕段，保留当前模型文本"
-            )
-            return Result.success(
-                timelineSegments.map { segment ->
-                    WhisperRecognizer.SubtitleSegment(
-                        startTime = segment.startTime,
-                        endTime = segment.endTime,
-                        text = segment.text
-                    )
-                }.also { segments ->
-                    segments.forEach(::appendRecognizedSegment)
-                }
-            )
-        }
-        val ranges = timelineSegments.map { it.startTime..it.endTime }
-        appendRuntimeLog("实验打轴完成：生成 ${ranges.size} 个时间范围，已丢弃打轴模型文本")
-
-        appendRuntimeLog("识别：初始化 ${currentAsrModelDisplayName()}，按实验时间轴生成字幕文本")
-        val textRecognizer = speechRecognitionService.createRecognizer(
-            encoderPath = encoderPath,
-            decoderPath = decoderPath,
-            joinerPath = joinerPath,
-            tokensPath = tokensPath,
-            vadModelPath = "",
-            useVad = false,
-            language = selectedLanguage,
-            contentResolver = contentResolver,
-            context = this@SpeechToSubtitleActivity,
-            modelType = modelType
-        )
-        val textResult = withContext(Dispatchers.IO) {
-            textRecognizer.recognizeRanges(
-                audioFile = pcmFile,
-                ranges = ranges,
-                progressCallback = { current, total ->
-                    runOnUiThread {
-                        val rangeProgress = if (total > 0) current * 40 / total else 40
-                        showProgress(
-                            "$progressPrefix 正在按实验时间轴识别第 $current/$total 段...",
-                            50 + rangeProgress
-                        )
-                    }
-                },
-                isCancelled = { isCancelled }
-            )
-        }
-        if (isCancelled) return Result.failure(Exception("用户取消"))
-
-        return textResult.mapCatching { texts ->
-            if (texts.size != ranges.size) {
-                error("按时间轴识别结果数量与时间范围不一致")
-            }
-            ranges.mapIndexed { index, range ->
+        appendRuntimeLog("$timelineName 完成：生成 ${timelineSegments.size} 个字幕段，保留当前模型文本")
+        return Result.success(
+            timelineSegments.map { segment ->
                 WhisperRecognizer.SubtitleSegment(
-                    startTime = range.first,
-                    endTime = range.last,
-                    text = texts[index]
+                    startTime = segment.startTime,
+                    endTime = segment.endTime,
+                    text = segment.text
                 )
             }.also { segments ->
                 segments.forEach(::appendRecognizedSegment)
             }
-        }
+        )
     }
 
     /**
@@ -874,16 +827,15 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             appendRuntimeLog("  识别线程：${settingsManager.getSpeechWhisperThreads()}")
         }
         if (isTokenTimestampExperimentConfigured()) {
-            appendRuntimeLog("  VAD：禁用，由当前 ASR 模型的实验 token 时间戳打轴替代")
+            val qwenForcedAlignment = modelType == SettingsManager.ASR_MODEL_QWEN3_ASR
+            val timelineName = if (qwenForcedAlignment) "强制对齐" else "实验打轴"
+            appendRuntimeLog("  VAD：禁用，由$timelineName 划分语音段")
             appendRuntimeLog(
-                "  实验打轴模型：${TokenTimestampGenerator.modelDisplayName(settingsManager)} " +
+                "  $timelineName 模型：${TokenTimestampGenerator.modelDisplayName(settingsManager)} " +
                     "(${displayModelPath(tokenTimestampModelPath())})"
             )
             appendRuntimeLog(
-                "  实验打轴 Tokens：${displayModelPath(tokenTimestampTokensPath())}"
-            )
-            appendRuntimeLog(
-                "  Token 切分间隔：${settingsManager.getSpeechTokenTimestampGapMs()}ms"
+                "  ${if (qwenForcedAlignment) "Tokenizer" else "实验打轴 Tokens"}：${displayModelPath(tokenTimestampTokensPath())}"
             )
             appendRuntimeLog(
                 "  合并语音段：${if (settingsManager.isSpeechTokenTimestampMergeEnabled()) {

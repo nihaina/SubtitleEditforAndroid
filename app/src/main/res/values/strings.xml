@@ -169,7 +169,7 @@
     <string name="activity_auto_timestamp_text_14">字幕文件（SRT/LRC）</string>
     <string name="activity_auto_timestamp_text_15">选择字幕文件</string>
     <string name="activity_auto_timestamp_text_16">未选择字幕文件</string>
-    <string name="activity_auto_timestamp_text_17">Token 时间戳实验打轴开启时不可使用二次处理</string>
+    <string name="activity_auto_timestamp_text_17">ASR 模型打轴开启时不可使用二次处理</string>
     <string name="activity_batch_convert_text_01">转换设置</string>
     <string name="activity_batch_convert_text_02">选择输出目录</string>
     <string name="activity_batch_convert_text_03">输出目录：Download/SubtitleEdit/Convert（默认）</string>
@@ -281,8 +281,8 @@
     <string name="activity_settings_text_18">开启后，工具会记住上次手动选择的输出目录</string>
     <string name="activity_speech_to_subtitle_settings_text_01">VAD相关</string>
     <string name="activity_speech_to_subtitle_settings_text_02">固定分段时长</string>
-    <string name="activity_speech_to_subtitle_settings_text_03">未使用 VAD 分段时生效</string>
-    <string name="activity_speech_to_subtitle_settings_text_04" translatable="false">30</string>
+    <string name="activity_speech_to_subtitle_settings_text_03">关闭 VAD 时用于模型识别分段，实验打轴也会使用；模型自身限制可能缩短单段时长</string>
+    <string name="activity_speech_to_subtitle_settings_text_04" translatable="false">120</string>
     <string name="activity_whisper_settings_title">Whisper 配置</string>
     <string name="activity_whisper_settings_threads_title">Whisper 线程数</string>
     <string name="activity_whisper_settings_threads_hint">线程越多速度可能越快，但内存和发热也会增加</string>
@@ -324,20 +324,23 @@
     <string name="activity_speech_to_subtitle_settings_text_41">实验功能</string>
     <string name="activity_speech_to_subtitle_settings_text_42">使用 token 时间戳划分语音段</string>
     <string name="activity_speech_to_subtitle_settings_text_43">实验功能不一定稳定。开启后使用当前模型的 token 时间戳划分语音段；识别及 padding 机制不受影响，打轴时间会显著提高</string>
-    <string name="activity_speech_to_subtitle_settings_text_44">切分时间</string>
-    <string name="activity_speech_to_subtitle_settings_text_45">相邻 token 的时间间隔达到该值时切分，较短间隔将合并为同一字幕段</string>
-    <string name="activity_speech_to_subtitle_settings_text_46" translatable="false">250</string>
     <string name="activity_speech_to_subtitle_settings_text_47">当前模型文件配置不完整，请先在模型导入中完成配置</string>
-    <string name="activity_speech_to_subtitle_settings_text_48">不保留实验打轴切分文本</string>
-    <string name="activity_speech_to_subtitle_settings_text_49">开启后丢弃实验打轴模型切分出的文本，改用当前 ASR 模型按时间范围重新识别</string>
     <string name="activity_speech_to_subtitle_settings_text_50">合并语音段</string>
-    <string name="activity_speech_to_subtitle_settings_text_51">开启后，在实验打轴按切分时间生成的最终时间轴中，合并间隔不超过指定时间的相邻字幕段，并按顺序拼接字幕内容</string>
+    <string name="activity_speech_to_subtitle_settings_text_51">开启后，合并实验打轴中间隔不超过指定时间的相邻字幕段，并按顺序拼接字幕内容</string>
     <string name="activity_speech_to_subtitle_settings_text_52">最大合并间隔</string>
     <string name="activity_speech_to_subtitle_settings_text_53">设为 0 时仅合并重叠或首尾相接的字幕段</string>
     <string name="activity_speech_to_subtitle_settings_text_54" translatable="false">150</string>
     <string name="activity_speech_to_subtitle_settings_text_55">ASR转录</string>
+    <string name="qwen3_asr_settings_title">Qwen3-ASR 配置</string>
+    <string name="qwen3_asr_vad_title">使用 VAD 打轴</string>
+    <string name="qwen3_asr_vad_switch">使用 VAD 检测并划分语音段</string>
+    <string name="qwen3_asr_vad_hint">开启后使用 VAD 打轴；关闭后可选择强制对齐模型划分语音段</string>
+    <string name="qwen3_asr_forced_alignment_switch">使用强制对齐模型划分语音段</string>
+    <string name="qwen3_asr_forced_alignment_hint">先用 Qwen3-ASR 转录，再用配套的 ForcedAligner 对齐文本并生成时间轴</string>
+    <string name="qwen3_asr_forced_alignment_missing">Qwen3-ASR 或 ForcedAligner 模型文件配置不完整，请先在模型导入中完成配置</string>
+    <string name="qwen3_asr_merge_hint">开启后，合并强制对齐结果中间隔不超过指定时间的相邻字幕段，并按顺序拼接文本</string>
     <string name="activity_model_management_qwen_aligner_title">Qwen3 ForcedAligner 模型</string>
-    <string name="activity_model_management_qwen_aligner_hint">在文件选择器中长按并多选同次导出的 .onnx 和 .onnx.data 两个文件（如 forced_aligner.onnx 与 forced_aligner.onnx.data），请保留原文件名。0.6B / 1.7B 共用，供 Qwen3-ASR 实验性打轴使用。</string>
+    <string name="activity_model_management_qwen_aligner_hint">在文件选择器中长按并多选同次导出的 .onnx 和 .onnx.data 两个文件（如 forced_aligner.onnx 与 forced_aligner.onnx.data），请保留原文件名。0.6B / 1.7B 共用，供 Qwen3-ASR 强制对齐打轴使用。</string>
     <string name="activity_model_management_qwen_aligner_select">导入 ONNX + DATA（两个文件）</string>
     <string name="qwen_aligner_select_pair">请同时选择 .onnx 和配套的同名 .onnx.data 两个文件</string>
     <string name="activity_speech_to_subtitle_settings_text_56">VAD 参数设置</string>

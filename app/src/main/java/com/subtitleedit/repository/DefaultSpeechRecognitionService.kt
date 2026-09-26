@@ -17,8 +17,7 @@ internal class DefaultSpeechRecognitionService : SpeechRecognitionService {
         contentResolver: ContentResolver,
         context: Context,
         modelType: String,
-        tokenTimestampExperiment: Boolean,
-        tokenTimestampGapMs: Int
+        tokenTimestampExperiment: Boolean
     ) = WhisperRecognizer(
         encoderPath = encoderPath,
         decoderPath = decoderPath,
@@ -30,7 +29,6 @@ internal class DefaultSpeechRecognitionService : SpeechRecognitionService {
         contentResolver = contentResolver,
         context = context,
         modelType = modelType,
-        tokenTimestampExperiment = tokenTimestampExperiment,
-        tokenTimestampGapMs = tokenTimestampGapMs
+        tokenTimestampExperiment = tokenTimestampExperiment
     )
 }

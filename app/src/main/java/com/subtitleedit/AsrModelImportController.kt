@@ -1385,8 +1385,6 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
                 )
             )
         }
-        binding.btnWhisperConfig.visibility =
-            if (modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) View.GONE else View.VISIBLE
         binding.layoutSenseVoiceProviderOptions.visibility = if (senseVoice) View.VISIBLE else View.GONE
         binding.layoutParakeetVariantOptions.visibility = if (parakeet) View.VISIBLE else View.GONE
         binding.tvSenseVoiceCpuOption.setTextColor(

@@ -28,18 +28,23 @@ class TokenTimestampGenerator(context: Context) {
         units: List<ForcedAlignmentUnit>,
         audioStartTimeMs: Long,
         audioEndTimeMs: Long,
-        splitGapMs: Int = settingsManager.getSpeechTokenTimestampGapMs(),
-    ): List<Segment> = ForcedAlignmentSegmenter.split(
-        units = units,
-        audioStartTimeMs = audioStartTimeMs,
-        audioEndTimeMs = audioEndTimeMs,
-        splitGapMs = splitGapMs,
-    ).map { segment ->
-        Segment(
-            startTime = segment.startTimeMs,
-            endTime = segment.endTimeMs,
-            text = segment.text,
+        splitGapMs: Int = QWEN_FORCED_ALIGNMENT_SPLIT_GAP_MS,
+    ): List<Segment> {
+        val aligned = ForcedAlignmentSegmenter.split(
+            units = units,
+            audioStartTimeMs = audioStartTimeMs,
+            audioEndTimeMs = audioEndTimeMs,
+            splitGapMs = splitGapMs,
         )
+        val segments = if (settingsManager.isSpeechTokenTimestampMergeEnabled()) {
+            ForcedAlignmentSegmenter.mergeSegments(
+                segments = aligned,
+                maxGapMs = settingsManager.getSpeechTokenTimestampMergeGapMs()
+            ).map { Segment(it.startTimeMs, it.endTimeMs, it.text) }
+        } else {
+            aligned.map { Segment(it.startTimeMs, it.endTimeMs, it.text) }
+        }
+        return segments
     }
 
     fun generateSegments(
@@ -69,8 +74,7 @@ class TokenTimestampGenerator(context: Context) {
             contentResolver = appContext.contentResolver,
             context = appContext,
             modelType = modelConfig.modelType,
-            tokenTimestampExperiment = true,
-            tokenTimestampGapMs = settingsManager.getSpeechTokenTimestampGapMs()
+            tokenTimestampExperiment = true
         )
         return recognizer.recognize(
             audioFile = pcmFile,
@@ -180,12 +184,7 @@ class TokenTimestampGenerator(context: Context) {
                     }
                 }
                 val durationMs = Pcm16WavReader(pcmFile).use { it.totalSamples * 1000L / it.sampleRate }
-                val segments = ForcedAlignmentSegmenter.split(
-                    output,
-                    0L,
-                    durationMs,
-                    settingsManager.getSpeechTokenTimestampGapMs()
-                ).map { Segment(it.startTimeMs, it.endTimeMs, it.text) }
+                val segments = segmentsFromForcedAlignment(output, 0L, durationMs)
                 if (segments.isEmpty()) error("Qwen3 ForcedAligner 未生成有效时间轴")
                 progressCallback(100, "Qwen3 对齐完成")
                 segments
@@ -277,6 +276,7 @@ class TokenTimestampGenerator(context: Context) {
 
     companion object {
         private const val TAG = "TokenTimestampGenerator"
+        private const val QWEN_FORCED_ALIGNMENT_SPLIT_GAP_MS = 250
 
         fun isSupported(settingsManager: SettingsManager): Boolean =
             settingsManager.getAsrModelType() != SettingsManager.ASR_MODEL_WHISPER &&

@@ -42,4 +42,40 @@ class ForcedAlignmentSegmenterTest {
         assertEquals(1, segments.size)
         assertEquals("hello world你好", segments.single().text)
     }
+
+    @Test
+    fun mergeUsesAlignedGapRatherThanPaddedSubtitleBoundary() {
+        val segments = ForcedAlignmentSegmenter.split(
+            units = listOf(
+                ForcedAlignmentUnit("hello", 100, 200),
+                ForcedAlignmentUnit("world", 460, 560),
+            ),
+            audioStartTimeMs = 1_000,
+            audioEndTimeMs = 2_000,
+            splitGapMs = 250,
+        )
+
+        assertEquals(2, segments.size)
+        assertEquals(10L, segments[1].startTimeMs - segments[0].endTimeMs)
+        assertEquals(2, ForcedAlignmentSegmenter.mergeSegments(segments, maxGapMs = 150).size)
+        val merged = ForcedAlignmentSegmenter.mergeSegments(segments, maxGapMs = 260)
+        assertEquals(1, merged.size)
+        assertEquals("hello world", merged.single().text)
+    }
+
+    @Test
+    fun mergeKeepsSpaceAfterEnglishSentencePunctuation() {
+        val segments = ForcedAlignmentSegmenter.split(
+            units = listOf(
+                ForcedAlignmentUnit("Hello.", 0, 200),
+                ForcedAlignmentUnit("World", 250, 450),
+            ),
+            audioStartTimeMs = 0,
+            audioEndTimeMs = 1_000,
+            splitGapMs = 250,
+        )
+
+        assertEquals(2, segments.size)
+        assertEquals("Hello. World", ForcedAlignmentSegmenter.mergeSegments(segments, 50).single().text)
+    }
 }
