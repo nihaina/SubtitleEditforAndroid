@@ -718,7 +718,7 @@ class SettingsManager private constructor(context: Context) {
             .apply()
     }
 
-    /** Optional exported Qwen3-ForcedAligner ONNX graph used by the timestamp experiment. */
+    /** Selected local Qwen3-ForcedAligner ONNX graph. */
     fun getQwen3ForcedAlignerPath(): String =
         prefs.getString(KEY_QWEN3_FORCED_ALIGNER_PATH, "") ?: ""
 

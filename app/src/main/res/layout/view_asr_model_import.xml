@@ -401,6 +401,24 @@
                                 app:iconPadding="0dp"
                                 app:iconSize="18dp"
                                 app:iconTint="@color/white" />
+
+                            <TextView
+                                android:id="@+id/btnResetQwen3ForcedAligner"
+                                android:layout_width="wrap_content"
+                                android:layout_height="28dp"
+                                android:layout_marginStart="8dp"
+                                android:background="?attr/selectableItemBackgroundBorderless"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:gravity="center"
+                                android:minWidth="52dp"
+                                android:paddingStart="6dp"
+                                android:paddingEnd="6dp"
+                                android:singleLine="true"
+                                android:text="@string/activity_model_settings_text_07"
+                                android:textColor="@color/primary"
+                                android:textSize="14sp"
+                                android:visibility="gone" />
                         </LinearLayout>
 
                         <TextView

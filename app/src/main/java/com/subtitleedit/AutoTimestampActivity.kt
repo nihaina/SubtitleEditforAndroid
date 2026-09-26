@@ -993,7 +993,7 @@ class AutoTimestampActivity : AppCompatActivity() {
 
     private fun isTokenTimestampExperimentEnabled(): Boolean =
         settingsManager.isSpeechTokenTimestampEnabled() &&
-            TokenTimestampGenerator.isSupported(settingsManager)
+            TokenTimestampGenerator.isSupported(this, settingsManager)
 
     private fun timelineSource(): TimelineSource = when {
         settingsManager.isAsrVadTimestampEnabled() -> TimelineSource.VAD

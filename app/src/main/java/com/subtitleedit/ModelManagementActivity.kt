@@ -26,11 +26,16 @@ import androidx.viewpager.widget.ViewPager
 import com.google.android.material.card.MaterialCardView
 import com.subtitleedit.databinding.ActivityModelManagementBinding
 import com.subtitleedit.repository.ModelRepository
+import com.subtitleedit.util.InternalModelExport
+import com.subtitleedit.util.ModelDownloadProgressDialog
 import com.subtitleedit.util.ModelDownloader
 import com.subtitleedit.util.OverwritingToast
+import com.subtitleedit.util.Qwen3ForcedAlignerModelFiles
 import com.subtitleedit.util.SenseVoiceNpuModelImporter
 import com.subtitleedit.util.SettingsManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -43,6 +48,8 @@ class ModelManagementActivity : AppCompatActivity() {
         get() = (application as SubtitleEditApplication).dependencies.modelRepository
     private var requestedStorageAccess = false
     private var modelScanVersion = 0
+    private var pendingExportItem: ModelItem? = null
+    private var exportJob: Job? = null
 
     private lateinit var asrImportController: AsrModelImportController
     private lateinit var demucsImportController: DemucsModelImportController
@@ -51,7 +58,9 @@ class ModelManagementActivity : AppCompatActivity() {
         val category: String,
         val displayName: String,
         val file: File,
-        val size: Long
+        val size: Long,
+        val exportKind: InternalModelExport.Kind? = null,
+        val canDelete: Boolean = true
     )
 
     private val manageStorageLauncher = registerForActivityResult(
@@ -73,13 +82,13 @@ class ModelManagementActivity : AppCompatActivity() {
         supportActionBar?.title = "模型导入"
         binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
         asrImportController = AsrModelImportController(this, binding.asrModelImport) {
-            if (binding.pagePager.currentItem == 1) loadModels()
+            loadModels()
         }
         demucsImportController = DemucsModelImportController(this, binding.demucsModelImport)
         setupPageNavigation()
         binding.tvModelsDirectory.text =
             "下载模型目录：${modelRepository.modelsDirectory().absolutePath}\n" +
-                "NPU BIN、强制对齐模型保存在应用内部目录"
+                "SenseVoice NPU BIN 保存在应用内部目录"
 
         loadModels()
     }
@@ -117,7 +126,9 @@ class ModelManagementActivity : AppCompatActivity() {
         binding.pagePager.addOnPageChangeListener(object : ViewPager.SimpleOnPageChangeListener() {
             override fun onPageSelected(position: Int) {
                 supportActionBar?.title = titles[position]
-                if (position == 1) {
+                if (position == 0) {
+                    asrImportController.refresh()
+                } else {
                     loadModels()
                     if (!hasStorageAccess() && !requestedStorageAccess) requestStorageAccess()
                 }
@@ -148,6 +159,12 @@ class ModelManagementActivity : AppCompatActivity() {
     private fun handleStorageAccessResult() {
         requestedStorageAccess = false
         loadModels()
+        val pending = pendingExportItem
+        pendingExportItem = null
+        if (pending != null) {
+            if (hasStorageAccess()) confirmExportModel(pending)
+            else OverwritingToast.makeText(this, "导出模型需要下载目录存储权限", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun hasStorageAccess(): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -165,7 +182,10 @@ class ModelManagementActivity : AppCompatActivity() {
             val result = withContext(Dispatchers.IO) { runCatching { scanModels() } }
             if (scanVersion != modelScanVersion) return@launch
             binding.progressBar.visibility = View.GONE
-            result.onSuccess(::renderModels).onFailure {
+            result.onSuccess { items ->
+                asrImportController.refreshForcedAlignerStatus()
+                renderModels(items)
+            }.onFailure {
                 binding.modelContainer.removeAllViews()
                 binding.tvEmpty.text = "模型目录读取失败：${it.message}"
                 binding.tvEmpty.visibility = View.VISIBLE
@@ -176,7 +196,8 @@ class ModelManagementActivity : AppCompatActivity() {
     private fun scanModels(): List<ModelItem> {
         val items = mutableListOf<ModelItem>()
         val root = modelRepository.modelsDirectory()
-        if (hasStorageAccess() && root.isDirectory) {
+        val canScanDownloads = hasStorageAccess()
+        if (canScanDownloads && root.isDirectory) {
             root.listFiles().orEmpty()
                 .filterNot { it.name.startsWith(".") || it.name.contains(".part.") || it.name.endsWith(".backup") }
                 .forEach { file ->
@@ -229,6 +250,25 @@ class ModelManagementActivity : AppCompatActivity() {
                                 calculateSize(file)
                             )
                         }
+                        file.isDirectory && file.name == Qwen3ForcedAlignerModelFiles.DIRECTORY_NAME -> {
+                            val complete = Qwen3ForcedAlignerModelFiles.findCompleteGraph(file) != null
+                            items += ModelItem(
+                                "Qwen3 强制对齐模型",
+                                if (complete) "Qwen3 ForcedAligner"
+                                else "Qwen3 ForcedAligner（文件不完整）",
+                                file, calculateSize(file)
+                            )
+                        }
+                        file.isDirectory && file.name in listOf(
+                            InternalModelExport.Kind.SENSEVOICE_NPU_5.directoryName,
+                            InternalModelExport.Kind.SENSEVOICE_NPU_10.directoryName
+                        ) -> {
+                            val seconds = if (file.name == InternalModelExport.Kind.SENSEVOICE_NPU_5.directoryName) 5 else 10
+                            items += ModelItem(
+                                "SenseVoice 模型", "SenseVoice NPU $seconds 秒 BIN（已导出）",
+                                file, calculateSize(file)
+                            )
+                        }
                         file.isDirectory && file.name == modelRepository.separationDirectoryName -> {
                             file.listFiles().orEmpty().filterNot { it.name.startsWith(".") }.forEach { model ->
                                 items += ModelItem("人声分离模型", model.name, model, calculateSize(model))
@@ -240,13 +280,22 @@ class ModelManagementActivity : AppCompatActivity() {
                     }
                 }
         }
-        val forcedAlignerDirectory = File(filesDir, "models/qwen3-asr/forced-aligner")
-        if (forcedAlignerDirectory.isDirectory) {
+        val selectedPath = settingsManager.getQwen3ForcedAlignerPath()
+        val selectedUri = runCatching { Uri.parse(selectedPath) }.getOrNull()
+        val selectedGraph = if (selectedUri?.scheme.isNullOrEmpty() || selectedUri?.scheme == "file") {
+            selectedUri?.path?.let(::File)
+        } else null
+        val downloadedDirectory = File(root, Qwen3ForcedAlignerModelFiles.DIRECTORY_NAME)
+        if (Qwen3ForcedAlignerModelFiles.isConfigured(selectedGraph, filesDir) &&
+            runCatching { selectedGraph!!.parentFile?.canonicalFile != downloadedDirectory.canonicalFile }
+                .getOrDefault(false)
+        ) {
+            val graph = requireNotNull(selectedGraph)
             items += ModelItem(
-                "Qwen3 强制对齐模型",
-                "Qwen3 ForcedAligner",
-                forcedAlignerDirectory,
-                calculateSize(forcedAlignerDirectory)
+                "Qwen3 强制对齐模型", "Qwen3 ForcedAligner（已选择）",
+                graph,
+                graph.length() + Qwen3ForcedAlignerModelFiles.dataFile(graph).length(),
+                canDelete = false
             )
         }
         val npuImporter = SenseVoiceNpuModelImporter(this, contentResolver)
@@ -256,7 +305,9 @@ class ModelManagementActivity : AppCompatActivity() {
                 "SenseVoice 模型",
                 "SenseVoice NPU ${model.durationSeconds} 秒 BIN",
                 directory,
-                calculateSize(directory)
+                calculateSize(directory),
+                if (model.durationSeconds == 5) InternalModelExport.Kind.SENSEVOICE_NPU_5
+                else InternalModelExport.Kind.SENSEVOICE_NPU_10
             )
         }
         val categoryOrder = mapOf(
@@ -318,12 +369,33 @@ class ModelManagementActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        details.addView(TextView(this).apply {
+        val titleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        titleRow.addView(TextView(this).apply {
             text = item.displayName
             textSize = 14f
             setTypeface(typeface, Typeface.BOLD)
             setTextColor(ContextCompat.getColor(this@ModelManagementActivity, R.color.on_surface))
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         })
+        if (item.exportKind != null) {
+            titleRow.addView(TextView(this).apply {
+                text = "导出"
+                contentDescription = "导出 ${item.displayName}"
+                textSize = 14f
+                gravity = Gravity.CENTER
+                minimumHeight = dp(40)
+                setPadding(dp(8), 0, dp(8), 0)
+                setTextColor(ContextCompat.getColor(this@ModelManagementActivity, R.color.primary))
+                isClickable = true
+                isFocusable = true
+                background = selectableItemBackgroundBorderless()
+                setOnClickListener { confirmExportModel(item) }
+            })
+        }
+        details.addView(titleRow)
         details.addView(TextView(this).apply {
             text = item.file.absolutePath
             textSize = 11f
@@ -345,13 +417,71 @@ class ModelManagementActivity : AppCompatActivity() {
             isClickable = true
             isFocusable = true
             background = selectableItemBackgroundBorderless()
-            setOnClickListener { confirmDeleteModel(item, this) }
+            setOnClickListener {
+                if (exportJob?.isActive != true) confirmDeleteModel(item, this)
+            }
         }
         row.addView(details)
-        row.addView(deleteAction)
+        if (item.canDelete) row.addView(deleteAction)
         card.addView(row)
         ToolCardShadow.remove(card)
         return card
+    }
+
+    private fun confirmExportModel(item: ModelItem) {
+        val kind = item.exportKind ?: return
+        if (exportJob?.isActive == true) return
+        if (!hasStorageAccess()) {
+            pendingExportItem = item
+            if (!requestedStorageAccess) requestStorageAccess()
+            return
+        }
+        val destination = InternalModelExport.directory(modelRepository.modelsDirectory(), kind)
+        if (destination.exists()) {
+            AlertDialog.Builder(this)
+                .setTitle("覆盖已导出的模型？")
+                .setMessage("下载模型目录中已存在 ${item.displayName}。覆盖前会完整复制并校验新模型。")
+                .setPositiveButton("覆盖导出") { _, _ -> startExportModel(item, kind) }
+                .setNegativeButton("取消", null)
+                .show()
+        } else {
+            startExportModel(item, kind)
+        }
+    }
+
+    private fun startExportModel(item: ModelItem, kind: InternalModelExport.Kind) {
+        if (exportJob?.isActive == true) return
+        val dialog = ModelDownloadProgressDialog(this, "导出 ${item.displayName}") {
+            exportJob?.cancel()
+        }
+        dialog.show()
+        exportJob = lifecycleScope.launch {
+            try {
+                val destination = withContext(Dispatchers.IO) {
+                    InternalModelExport.export(item.file, modelRepository.modelsDirectory(), kind) { copied, total ->
+                        withContext(Dispatchers.Main) {
+                            dialog.update(ModelDownloader.Progress("正在导出模型", copied, total))
+                        }
+                    }
+                }
+                OverwritingToast.makeText(
+                    this@ModelManagementActivity,
+                    "已导出至 ${destination.absolutePath}",
+                    Toast.LENGTH_LONG
+                ).show()
+                loadModels()
+            } catch (error: CancellationException) {
+                OverwritingToast.makeText(this@ModelManagementActivity, "已取消模型导出", Toast.LENGTH_SHORT).show()
+            } catch (error: Exception) {
+                OverwritingToast.makeText(
+                    this@ModelManagementActivity,
+                    "导出失败：${error.message}", Toast.LENGTH_LONG
+                ).show()
+            } finally {
+                dialog.dismiss()
+                exportJob = null
+            }
+        }
     }
 
     private fun confirmDeleteModel(item: ModelItem, action: TextView) {

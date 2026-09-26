@@ -250,19 +250,19 @@ class SenseVoiceNpuModelImporter(
         }
     }
 
-    private companion object {
-        const val SAMPLE_RATE = 16000
-        const val FEATURE_DIM = 80
-        const val COPY_BUFFER_SIZE = 1024 * 1024
-        const val MIN_MODEL_SIZE_BYTES = 1024L * 1024L
-        const val MODEL_KEY_LENGTH = 16
-        const val IMPORT_DIRECTORY = "sensevoice-qnn-import"
-        const val MANAGED_MODELS_DIRECTORY = "models/sensevoice-qnn"
-        const val QNN_RUNTIME_VERSION = "2.40.0.251030"
-        const val MODEL_LIBRARY_NAME = "libmodel.so"
-        const val TOKENS_FILE_NAME = "tokens.txt"
-        const val CONTEXT_BINARY_NAME = "model.bin"
-        const val QNN_BACKEND_LIBRARY = "libQnnHtp.so"
-        const val QNN_SYSTEM_LIBRARY = "libQnnSystem.so"
+    companion object {
+        private const val SAMPLE_RATE = 16000
+        private const val FEATURE_DIM = 80
+        private const val COPY_BUFFER_SIZE = 1024 * 1024
+        private const val MIN_MODEL_SIZE_BYTES = 1024L * 1024L
+        private const val MODEL_KEY_LENGTH = 16
+        private const val IMPORT_DIRECTORY = "sensevoice-qnn-import"
+        private const val MANAGED_MODELS_DIRECTORY = "models/sensevoice-qnn"
+        internal const val QNN_RUNTIME_VERSION = "2.40.0.251030"
+        private const val MODEL_LIBRARY_NAME = "libmodel.so"
+        private const val TOKENS_FILE_NAME = "tokens.txt"
+        private const val CONTEXT_BINARY_NAME = "model.bin"
+        private const val QNN_BACKEND_LIBRARY = "libQnnHtp.so"
+        private const val QNN_SYSTEM_LIBRARY = "libQnnSystem.so"
     }
 }

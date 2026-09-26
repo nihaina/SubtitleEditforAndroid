@@ -33,6 +33,11 @@ class Qwen3AsrSettingsActivity : AppCompatActivity() {
         loadSettings()
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (::settingsManager.isInitialized) loadSettings()
+    }
+
     private fun setupListeners() {
         binding.btnVadSettings.setOnClickListener {
             startActivity(Intent(this, VadModelSettingsActivity::class.java))

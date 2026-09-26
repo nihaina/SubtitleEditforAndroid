@@ -1365,7 +1365,7 @@ class WhisperRecognizer(
         tokenTimestampExperiment &&
             modelType != SettingsManager.ASR_MODEL_WHISPER &&
             (!isQwen3Asr() ||
-                TokenTimestampGenerator.isQwen3ForcedAlignerConfigured(settingsManager()))
+                TokenTimestampGenerator.isQwen3ForcedAlignerConfigured(context, settingsManager()))
 
     private fun shouldUseDynamicPadding(): Boolean =
         settingsManager().isSpeechVadDynamicPaddingEnabled()

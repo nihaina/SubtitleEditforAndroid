@@ -214,4 +214,34 @@ class Qwen3ForcedAlignerImporterTest {
         assertFalse(Qwen3ForcedAlignerModelFiles.isComplete(graph))
         assertFalse(Qwen3ForcedAlignerModelFiles.isComplete(null))
     }
+
+    @Test fun externalModelRequiresSelectionAndResetDoesNotRestoreIt() {
+        val models = temporary.newFolder("downloaded-models")
+        val privateFiles = temporary.newFolder("private-files")
+        val directory = File(models, Qwen3ForcedAlignerModelFiles.DIRECTORY_NAME)
+        assertTrue(directory.mkdir())
+        val graph = directory.resolve(graphName)
+        graph.writeText("graph")
+        Qwen3ForcedAlignerModelFiles.dataFile(graph).writeText("weights")
+
+        assertEquals(graph, Qwen3ForcedAlignerModelFiles.findCompleteGraph(directory))
+        assertTrue(Qwen3ForcedAlignerModelFiles.isConfigured(graph, privateFiles))
+        assertEquals(null, Qwen3ForcedAlignerModelFiles.configuredGraph(null, privateFiles))
+        assertEquals(graph, Qwen3ForcedAlignerModelFiles.configuredGraph(graph, privateFiles))
+        val otherDirectory = temporary.newFolder("other-local-folder")
+        val otherGraph = otherDirectory.resolve(graphName)
+        otherGraph.writeText("graph")
+        Qwen3ForcedAlignerModelFiles.dataFile(otherGraph).writeText("weights")
+        assertTrue(Qwen3ForcedAlignerModelFiles.isConfigured(otherGraph, privateFiles))
+        val legacyDirectory = File(privateFiles, "models/qwen3-asr/forced-aligner")
+        assertTrue(legacyDirectory.mkdirs())
+        val legacy = legacyDirectory.resolve(graphName)
+        legacy.writeText("graph")
+        Qwen3ForcedAlignerModelFiles.dataFile(legacy).writeText("weights")
+        assertFalse(Qwen3ForcedAlignerModelFiles.isConfigured(legacy, privateFiles))
+        assertEquals(null, Qwen3ForcedAlignerModelFiles.configuredGraph(legacy, privateFiles))
+        Qwen3ForcedAlignerModelFiles.dataFile(graph).delete()
+        assertEquals(null, Qwen3ForcedAlignerModelFiles.findCompleteGraph(directory))
+        assertEquals(null, Qwen3ForcedAlignerModelFiles.configuredGraph(graph, privateFiles))
+    }
 }

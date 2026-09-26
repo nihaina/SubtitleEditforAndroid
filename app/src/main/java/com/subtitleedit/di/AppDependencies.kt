@@ -24,6 +24,7 @@ import com.subtitleedit.usecase.DownloadAsrModelUseCase
 import com.subtitleedit.util.AsrModelDownloadInstaller
 import com.subtitleedit.util.ModelDownloader
 import com.subtitleedit.util.Qwen3ForcedAlignerOnnx
+import com.subtitleedit.util.Qwen3ForcedAlignerModelFiles
 import com.subtitleedit.util.Qwen3ForcedAlignerReleaseDownloader
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.work.TaskWorkScheduler
@@ -71,7 +72,7 @@ internal class AppDependencies(application: Application) {
     suspend fun downloadQwen3ForcedAligner(onProgress: (ModelDownloader.Progress) -> Unit): File {
         val settings = SettingsManager.getInstance(appContext)
         return Qwen3ForcedAlignerReleaseDownloader.downloadAndInstall(
-            modelDirectory = File(appContext.filesDir, "models/qwen3-asr/forced-aligner"),
+            modelDirectory = File(modelRepository.modelsDirectory(), Qwen3ForcedAlignerModelFiles.DIRECTORY_NAME),
             validate = { graph -> Qwen3ForcedAlignerOnnx(graph).use { } },
             publish = { graph -> settings.setQwen3ForcedAlignerPath(Uri.fromFile(graph).toString()) },
             onProgress = onProgress,

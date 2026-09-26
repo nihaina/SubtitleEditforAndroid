@@ -104,7 +104,7 @@ class TokenTimestampGenerator(context: Context) {
         if (tokenizerDirectory == null || !tokenizerDirectory.isDirectory) {
             return Result.failure(IllegalStateException("无法读取 Qwen3 tokenizer 目录"))
         }
-        if (!Qwen3ForcedAlignerModelFiles.isComplete(alignerFile)) {
+        if (!Qwen3ForcedAlignerModelFiles.isConfigured(alignerFile, appContext.filesDir)) {
             return Result.failure(IllegalStateException("请重新导入配套的 ForcedAligner .onnx 和 .onnx.data 两个文件"))
         }
         if (!QwenHuggingFaceTokenizer.isAvailable()) {
@@ -278,10 +278,10 @@ class TokenTimestampGenerator(context: Context) {
         private const val TAG = "TokenTimestampGenerator"
         private const val QWEN_FORCED_ALIGNMENT_SPLIT_GAP_MS = 250
 
-        fun isSupported(settingsManager: SettingsManager): Boolean =
+        fun isSupported(context: Context, settingsManager: SettingsManager): Boolean =
             settingsManager.getAsrModelType() != SettingsManager.ASR_MODEL_WHISPER &&
                 (settingsManager.getAsrModelType() != SettingsManager.ASR_MODEL_QWEN3_ASR ||
-                    isQwen3ForcedAlignerConfigured(settingsManager))
+                    isQwen3ForcedAlignerConfigured(context, settingsManager))
 
         fun isConfigured(context: Context): Boolean {
             val settings = SettingsManager.getInstance(context.applicationContext)
@@ -315,7 +315,7 @@ class TokenTimestampGenerator(context: Context) {
             else -> "Whisper"
         }
 
-        fun isQwen3ForcedAlignerConfigured(settingsManager: SettingsManager): Boolean {
+        fun isQwen3ForcedAlignerConfigured(context: Context, settingsManager: SettingsManager): Boolean {
             if (settingsManager.getAsrModelType() != SettingsManager.ASR_MODEL_QWEN3_ASR) return false
             val path = settingsManager.getQwen3ForcedAlignerPath()
             if (path.isBlank()) return false
@@ -325,14 +325,14 @@ class TokenTimestampGenerator(context: Context) {
             } else {
                 null
             }
-            return Qwen3ForcedAlignerModelFiles.isComplete(file)
+            return Qwen3ForcedAlignerModelFiles.isConfigured(file, context.filesDir)
         }
 
         private fun isQwen3AsrConfigured(
             context: Context,
             settings: SettingsManager,
         ): Boolean {
-            if (!isQwen3ForcedAlignerConfigured(settings)) return false
+            if (!isQwen3ForcedAlignerConfigured(context, settings)) return false
             val variant = settings.getQwen3AsrModelVariant()
             val modelFiles = listOf(
                 settings.getQwen3AsrEncoderPath(variant),

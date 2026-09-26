@@ -4,6 +4,19 @@ import java.io.File
 
 /** This export stores external tensors in <graph filename>.data, alongside the graph. */
 internal object Qwen3ForcedAlignerModelFiles {
+    const val DIRECTORY_NAME = "qwen3-forced-aligner"
+
+    fun findCompleteGraph(directory: File): File? = directory.listFiles()
+        ?.firstOrNull { it.name.endsWith(".onnx", ignoreCase = true) && isComplete(it) }
+
+    fun isConfigured(graph: File?, privateFilesDirectory: File): Boolean =
+        isComplete(graph) && runCatching {
+            !graph!!.canonicalFile.toPath().startsWith(privateFilesDirectory.canonicalFile.toPath())
+        }.getOrDefault(false)
+
+    fun configuredGraph(savedGraph: File?, privateFilesDirectory: File): File? =
+        savedGraph?.takeIf { isConfigured(it, privateFilesDirectory) }
+
     fun graphName(names: List<String>): String {
         require(names.size == 2 && names.distinct().size == 2) {
             "请同时选择一个 .onnx 模型和一个配套的 .onnx.data 权重文件（共两个）"

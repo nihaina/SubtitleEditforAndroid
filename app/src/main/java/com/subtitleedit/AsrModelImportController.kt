@@ -30,11 +30,11 @@ import com.subtitleedit.task.TaskStatus
 import com.subtitleedit.usecase.DownloadAsrModelUseCase
 import com.subtitleedit.util.ModelDownloadProgressDialog
 import com.subtitleedit.util.ModelDownloader
+import com.subtitleedit.util.InternalModelExport
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.QnnRuntimeAvailability
-import com.subtitleedit.util.Qwen3ForcedAlignerOnnx
-import com.subtitleedit.util.Qwen3ForcedAlignerImporter
 import com.subtitleedit.util.Qwen3ForcedAlignerModelFiles
+import com.subtitleedit.util.Qwen3ForcedAlignerPathResolver
 import com.subtitleedit.util.Qwen3ForcedAlignerReleaseDownloader
 import com.subtitleedit.util.SenseVoiceNpuModelImporter
 import com.subtitleedit.util.SenseVoiceNpuModelPathPolicy
@@ -161,6 +161,12 @@ class AsrModelImportController(
     private fun setupButtons() {
         binding.btnSelectEncoder.setOnClickListener {
             if (isSenseVoiceNpu() && !ensureQnnRuntimeAvailable()) return@setOnClickListener
+            if (isSenseVoiceNpu() && restoreAvailableModelPathsIfMissing(includeQwen = false)) {
+                loadModelPaths()
+                updateAsrModelUi()
+                OverwritingToast.makeText(host, "已找到 SenseVoice NPU BIN 模型", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             encoderPickerLauncher.launch(arrayOf("*/*"))
         }
         binding.btnDownloadAsrModel.setOnClickListener { showAsrDownloadOptions() }
@@ -181,9 +187,14 @@ class AsrModelImportController(
         }
         binding.btnSelectQwen3ForcedAligner.setOnClickListener {
             if (modelDownloadJob?.isActive == true) return@setOnClickListener
-            qwen3ForcedAlignerPickerLauncher.launch(arrayOf("*/*"))
+            runWithModelStorageAccess {
+                qwen3ForcedAlignerPickerLauncher.launch(arrayOf("*/*"))
+            }
         }
-        binding.btnDownloadQwen3ForcedAligner.setOnClickListener { confirmQwen3ForcedAlignerDownload() }
+        binding.btnDownloadQwen3ForcedAligner.setOnClickListener {
+            runWithModelStorageAccess { confirmQwen3ForcedAlignerDownload() }
+        }
+        binding.btnResetQwen3ForcedAligner.setOnClickListener { confirmResetQwen3ForcedAligner() }
 
         binding.btnVadConfig.setOnClickListener {
             host.startActivity(Intent(host, VadModelSettingsActivity::class.java))
@@ -330,6 +341,10 @@ class AsrModelImportController(
 
     private fun confirmQwen3ForcedAlignerDownload() {
         if (modelDownloadJob?.isActive == true) return
+        if (adoptAvailableQwenForcedAligner()) {
+            OverwritingToast.makeText(host, "已找到 ForcedAligner 模型，无需重新下载", Toast.LENGTH_SHORT).show()
+            return
+        }
         if (hasConfiguredQwen3ForcedAligner()) {
             OverwritingToast.makeText(host, "ForcedAligner 已导入，可在模型管理中查看或删除", Toast.LENGTH_SHORT).show()
             return
@@ -338,17 +353,33 @@ class AsrModelImportController(
             .setTitle("一键下载导入 Qwen3 ForcedAligner")
             .setMessage(
                 "从项目 Release 下载两卷压缩模型，约 1.38 GB；解压后模型约 3.67 GB。" +
-                    "\n\n下载、解压和校验完成后，会自动替换现有 ForcedAligner 模型。解压时还需约 5.2 GB 可用空间。" +
+                    "\n\n模型将保存至 Download/SubtitleEdit/models/${Qwen3ForcedAlignerModelFiles.DIRECTORY_NAME}。" +
+                    "解压时还需约 5.2 GB 可用空间。" +
                     "\n\n离开页面后任务会继续运行，可从通知中取消。"
             )
-            .setPositiveButton("下载并导入") { _, _ -> startQwen3ForcedAlignerDownload() }
+            .setPositiveButton("下载并导入") { _, _ ->
+                runWithModelStorageAccess { startQwen3ForcedAlignerDownload() }
+            }
             .setNegativeButton("取消", null)
             .show()
     }
 
     private fun startQwen3ForcedAlignerDownload() {
+        if (adoptAvailableQwenForcedAligner()) return
         if (hasConfiguredQwen3ForcedAligner()) return
         startAsrModelDownload(ModelDownloadWorker.KIND_QWEN3_FORCED_ALIGNER)
+    }
+
+    private fun confirmResetQwen3ForcedAligner() {
+        AlertDialog.Builder(host)
+            .setTitle("重置强制对齐模型选择")
+            .setMessage("清除 ForcedAligner 模型选择？模型文件不会被删除，可再次选择使用。")
+            .setPositiveButton("重置") { _, _ ->
+                settingsManager.clearQwen3ForcedAlignerPath()
+                updateAsrModelUi()
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun showQwen3AsrDownloadModelPicker() {
@@ -546,6 +577,7 @@ class AsrModelImportController(
         binding.btnSelectJoiner.isEnabled = enabled
         binding.btnSelectQwen3ForcedAligner.isEnabled = enabled
         binding.btnDownloadQwen3ForcedAligner.isEnabled = enabled
+        binding.btnResetQwen3ForcedAligner.isEnabled = enabled
         binding.tvSenseVoiceCpuOption.isEnabled = enabled
         binding.tvSenseVoiceNpuOption.isEnabled = enabled
         binding.tvParakeetTdtOption.isEnabled = enabled
@@ -597,6 +629,7 @@ class AsrModelImportController(
     private fun loadSavedSettings() {
         // 加载模型路径
         modelType = settingsManager.getAsrModelType()
+        restoreAvailableModelPathsIfMissing()
         loadModelPaths()
         updateAsrModelUi()
         vadModelPath = settingsManager.getVadModelPath()
@@ -997,40 +1030,33 @@ class AsrModelImportController(
             OverwritingToast.makeText(host, host.getString(R.string.qwen_aligner_select_pair), Toast.LENGTH_LONG).show()
             return
         }
-        val progressDialog = ModelDownloadProgressDialog(host, "导入 Qwen3 ForcedAligner") {
-            modelDownloadJob?.cancel(CancellationException("用户取消 ForcedAligner 导入"))
-        }
-        modelDownloadDialog = progressDialog
-        progressDialog.show()
-        progressDialog.update(ModelDownloader.Progress("正在读取两个模型文件"))
         setAsrModelActionsEnabled(false)
         modelDownloadJob = host.lifecycleScope.launch {
             try {
-                val sources = withContext(Dispatchers.IO) {
-                    uris.map { uri ->
+                val graph = withContext(Dispatchers.IO) {
+                    val files = uris.map { uri ->
                         val document = DocumentFile.fromSingleUri(host, uri)
                             ?: error("无法读取所选文件信息")
-                        Qwen3ForcedAlignerImporter.Source(
-                            name = document.name ?: error("无法读取模型文件名，请保留导出时的原始文件名"),
-                            size = document.length().takeIf { it > 0L },
-                        ) {
-                            host.contentResolver.openInputStream(uri) ?: error("无法读取 ${document.name}")
-                        }
+                        val name = document.name ?: error("无法读取模型文件名，请保留原始文件名")
+                        val file = Qwen3ForcedAlignerPathResolver.resolve(host, uri)
+                            ?: error("无法取得 $name 的本地文件路径，请从设备本地存储选择")
+                        check(file.name == name) { "$name 的文件路径与所选文件不一致" }
+                        name to file
                     }
+                    val graphName = Qwen3ForcedAlignerModelFiles.graphName(files.map { it.first })
+                    val selectedGraph = files.single { it.first == graphName }.second
+                    check(files.all { it.second.canonicalFile.parentFile == selectedGraph.canonicalFile.parentFile }) {
+                        "模型与权重文件必须位于同一文件夹"
+                    }
+                    check(Qwen3ForcedAlignerModelFiles.isConfigured(selectedGraph, host.filesDir)) {
+                        "ForcedAligner 模型或配套权重缺失/不可读，请检查两个文件"
+                    }
+                    selectedGraph
                 }
-                Qwen3ForcedAlignerImporter(File(host.filesDir, "models/qwen3-asr/forced-aligner")).install(
-                    sources = sources,
-                    validate = { graph -> Qwen3ForcedAlignerOnnx(graph).use { } },
-                    publish = { graph -> settingsManager.setQwen3ForcedAlignerPath(Uri.fromFile(graph).toString()) },
-                    onProgress = { progress ->
-                        withContext(Dispatchers.Main) {
-                            progressDialog.update(ModelDownloader.Progress(progress.message, progress.copied, progress.total))
-                        }
-                    }
-                )
+                settingsManager.setQwen3ForcedAlignerPath(Uri.fromFile(graph).toString())
                 updateAsrModelUi()
                 onModelsChanged()
-                OverwritingToast.makeText(host, "Qwen3 ForcedAligner 模型及权重已导入", Toast.LENGTH_SHORT).show()
+                OverwritingToast.makeText(host, "已选择 Qwen3 ForcedAligner 模型及权重", Toast.LENGTH_SHORT).show()
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -1040,8 +1066,6 @@ class AsrModelImportController(
                     Toast.LENGTH_LONG
                 ).show()
             } finally {
-                progressDialog.dismiss()
-                if (modelDownloadDialog === progressDialog) modelDownloadDialog = null
                 modelDownloadJob = null
                 setAsrModelActionsEnabled(true)
                 if (!host.isDestroyed) updateAsrModelUi()
@@ -1154,7 +1178,7 @@ class AsrModelImportController(
 
                 ASR 模型手动导入需要选择 conv_frontend.onnx、encoder.int8.onnx、decoder.int8.onnx 和包含六个 tokenizer 配置文件的文件夹。
 
-                强制对齐打轴还需要 Qwen3 ForcedAligner 模型。点击其旁的蓝色下载按钮，可从项目 Release 下载两卷压缩包，自动校验、解压并导入；0.6B 和 1.7B ASR 共用此对齐模型。
+                强制对齐打轴还需要 Qwen3 ForcedAligner 模型。点击其旁的蓝色下载按钮，可从项目 Release 下载两卷压缩包，自动校验并导入 Download 模型目录；0.6B 和 1.7B ASR 共用此对齐模型。重置仅清除选择，不删除模型文件。
 
                 手动导入强制对齐模型时，请同时选择 forced_aligner.onnx 与 forced_aligner.onnx.data 两个文件并保留原名。
             """.trimIndent()
@@ -1230,6 +1254,7 @@ class AsrModelImportController(
                 if (selectedType != modelType) {
                     modelType = selectedType
                     settingsManager.setAsrModelType(selectedType)
+                    restoreAvailableModelPathsIfMissing()
                     loadModelPaths()
                     updateAsrModelUi()
                 }
@@ -1255,6 +1280,7 @@ class AsrModelImportController(
         }
         if (provider == settingsManager.getSenseVoiceProvider()) return
         settingsManager.setSenseVoiceProvider(provider)
+        restoreAvailableModelPathsIfMissing()
         loadModelPaths()
         updateAsrModelUi()
     }
@@ -1427,10 +1453,17 @@ class AsrModelImportController(
         if (qwen3Asr) {
             val alignerPath = settingsManager.getQwen3ForcedAlignerPath()
             val alignerFile = localFile(alignerPath)
-            val complete = Qwen3ForcedAlignerModelFiles.isComplete(alignerFile)
+            val complete = Qwen3ForcedAlignerModelFiles.isConfigured(
+                alignerFile, host.filesDir
+            )
+            val downloadedGraph = if (hasModelStorageAccess()) Qwen3ForcedAlignerModelFiles.findCompleteGraph(
+                qwen3ForcedAlignerDirectory()
+            ) else null
             binding.btnDownloadQwen3ForcedAligner.visibility = if (complete) View.GONE else View.VISIBLE
+            binding.btnResetQwen3ForcedAligner.visibility = if (complete) View.VISIBLE else View.GONE
             binding.tvQwen3ForcedAlignerPath.text = when {
                 complete -> "已配置：${alignerFile!!.name} + ${Qwen3ForcedAlignerModelFiles.dataFile(alignerFile).name}"
+                downloadedGraph != null -> "检测到本地模型，点击选择模型即可导入"
                 alignerPath.isNotBlank() -> "模型或权重文件缺失/不可读，请重新导入两个文件"
                 else -> "尚未配置 ForcedAligner 模型及权重"
             }
@@ -1484,8 +1517,76 @@ class AsrModelImportController(
         }
     }
 
+    private fun restoreAvailableModelPathsIfMissing(
+        includeQwen: Boolean = true,
+        includeNpu: Boolean = true
+    ): Boolean {
+        val modelsRoot = modelRepository.modelsDirectory()
+        var restored = false
+        if (includeQwen) {
+            refreshForcedAlignerStatus()
+        }
+        if (includeNpu && modelType == SettingsManager.ASR_MODEL_SENSEVOICE &&
+            settingsManager.getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU
+        ) {
+            val currentBinary = localFile(settingsManager.getSenseVoiceModelPath())
+            val currentTokens = localFile(settingsManager.getSenseVoiceTokensPath())
+            if (currentBinary?.isFile != true || currentBinary.length() == 0L ||
+                currentTokens?.isFile != true || currentTokens.length() == 0L
+            ) {
+                val selectedDuration = settingsManager.getSenseVoiceNpuDurationSeconds()
+                val durations = listOf(selectedDuration, if (selectedDuration == 5) 10 else 5)
+                val importer = SenseVoiceNpuModelImporter(host, host.contentResolver)
+                val internalModel = durations.firstNotNullOfOrNull { seconds ->
+                    importer.findInstalledModel(seconds)?.let { seconds to (it.contextBinary to it.tokens) }
+                }
+                val exportedModel = if (internalModel == null) durations.firstNotNullOfOrNull { seconds ->
+                    val kind = if (seconds == 5) InternalModelExport.Kind.SENSEVOICE_NPU_5
+                    else InternalModelExport.Kind.SENSEVOICE_NPU_10
+                    InternalModelExport.completeSenseVoiceFiles(InternalModelExport.directory(modelsRoot, kind))
+                        ?.let { seconds to it }
+                } else null
+                (internalModel ?: exportedModel)?.let { (seconds, files) ->
+                    settingsManager.setSenseVoiceNpuDurationSeconds(seconds)
+                    settingsManager.setSenseVoiceModelPath(Uri.fromFile(files.first).toString())
+                    settingsManager.setSenseVoiceTokensPath(Uri.fromFile(files.second).toString())
+                    restored = true
+                }
+            }
+        }
+        return restored
+    }
+
+    private fun adoptAvailableQwenForcedAligner(): Boolean {
+        val graph = (if (hasModelStorageAccess()) {
+            Qwen3ForcedAlignerModelFiles.findCompleteGraph(qwen3ForcedAlignerDirectory())
+        } else null) ?: return false
+        val path = Uri.fromFile(graph).toString()
+        if (settingsManager.getQwen3ForcedAlignerPath() != path) {
+            settingsManager.setQwen3ForcedAlignerPath(path)
+        }
+        updateAsrModelUi()
+        return true
+    }
+
+    private fun qwen3ForcedAlignerDirectory(): File =
+        File(modelRepository.modelsDirectory(), Qwen3ForcedAlignerModelFiles.DIRECTORY_NAME)
+
+    fun refreshForcedAlignerStatus() {
+        val selected = Qwen3ForcedAlignerModelFiles.configuredGraph(
+            localFile(settingsManager.getQwen3ForcedAlignerPath()), host.filesDir
+        )
+        val detectedPath = selected?.let { Uri.fromFile(it).toString() }.orEmpty()
+        if (settingsManager.getQwen3ForcedAlignerPath() != detectedPath) {
+            settingsManager.setQwen3ForcedAlignerPath(detectedPath)
+        }
+        if (isQwen3Asr()) updateAsrModelUi()
+    }
+
     private fun hasConfiguredQwen3ForcedAligner(): Boolean =
-        Qwen3ForcedAlignerModelFiles.isComplete(localFile(settingsManager.getQwen3ForcedAlignerPath()))
+        Qwen3ForcedAlignerModelFiles.isConfigured(
+            localFile(settingsManager.getQwen3ForcedAlignerPath()), host.filesDir
+        )
 
     private fun isSingleFileModel(): Boolean =
         modelType == SettingsManager.ASR_MODEL_SENSEVOICE ||
