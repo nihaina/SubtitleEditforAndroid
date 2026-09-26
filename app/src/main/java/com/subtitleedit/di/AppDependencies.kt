@@ -22,6 +22,9 @@ import com.subtitleedit.task.TaskStateStore
 import com.subtitleedit.usecase.DownloadGeneralModelUseCase
 import com.subtitleedit.usecase.DownloadAsrModelUseCase
 import com.subtitleedit.util.AsrModelDownloadInstaller
+import com.subtitleedit.util.ModelDownloader
+import com.subtitleedit.util.Qwen3ForcedAlignerOnnx
+import com.subtitleedit.util.Qwen3ForcedAlignerReleaseDownloader
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.work.TaskWorkScheduler
 import java.io.File
@@ -64,6 +67,15 @@ internal class AppDependencies(application: Application) {
             SettingsManager.getInstance(appContext)
                 .selectDownloadedDemixModel(Uri.fromFile(file).toString())
         }
+    }
+    suspend fun downloadQwen3ForcedAligner(onProgress: (ModelDownloader.Progress) -> Unit): File {
+        val settings = SettingsManager.getInstance(appContext)
+        return Qwen3ForcedAlignerReleaseDownloader.downloadAndInstall(
+            modelDirectory = File(appContext.filesDir, "models/qwen3-asr/forced-aligner"),
+            validate = { graph -> Qwen3ForcedAlignerOnnx(graph).use { } },
+            publish = { graph -> settings.setQwen3ForcedAlignerPath(Uri.fromFile(graph).toString()) },
+            onProgress = onProgress,
+        )
     }
     val taskWorkScheduler: TaskWorkScheduler by lazy {
         TaskWorkScheduler(appContext, taskStateStore)

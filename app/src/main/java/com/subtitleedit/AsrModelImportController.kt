@@ -10,8 +10,13 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import android.graphics.Typeface
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.method.LinkMovementMethod
+import android.text.style.URLSpan
 import android.view.View
 import android.widget.ArrayAdapter
+import android.widget.TextView
 import android.widget.Toast
 import androidx.documentfile.provider.DocumentFile
 import androidx.activity.result.contract.ActivityResultContracts
@@ -30,9 +35,11 @@ import com.subtitleedit.util.QnnRuntimeAvailability
 import com.subtitleedit.util.Qwen3ForcedAlignerOnnx
 import com.subtitleedit.util.Qwen3ForcedAlignerImporter
 import com.subtitleedit.util.Qwen3ForcedAlignerModelFiles
+import com.subtitleedit.util.Qwen3ForcedAlignerReleaseDownloader
 import com.subtitleedit.util.SenseVoiceNpuModelImporter
 import com.subtitleedit.util.SenseVoiceNpuModelPathPolicy
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.work.ModelDownloadWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -172,6 +179,7 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             if (modelDownloadJob?.isActive == true) return@setOnClickListener
             qwen3ForcedAlignerPickerLauncher.launch(arrayOf("*/*"))
         }
+        binding.btnDownloadQwen3ForcedAligner.setOnClickListener { confirmQwen3ForcedAlignerDownload() }
 
         binding.btnVadConfig.setOnClickListener {
             host.startActivity(Intent(host, VadModelSettingsActivity::class.java))
@@ -316,6 +324,24 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             .show()
     }
 
+    private fun confirmQwen3ForcedAlignerDownload() {
+        if (modelDownloadJob?.isActive == true) return
+        AlertDialog.Builder(host)
+            .setTitle("一键下载导入 Qwen3 ForcedAligner")
+            .setMessage(
+                "从项目 Release 下载两卷压缩模型，约 1.38 GB；解压后模型约 3.67 GB。" +
+                    "\n\n下载、解压和校验完成后，会自动替换现有 ForcedAligner 模型。解压时还需约 5.2 GB 可用空间。" +
+                    "\n\n离开页面后任务会继续运行，可从通知中取消。"
+            )
+            .setPositiveButton("下载并导入") { _, _ -> startQwen3ForcedAlignerDownload() }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun startQwen3ForcedAlignerDownload() {
+        startAsrModelDownload(ModelDownloadWorker.KIND_QWEN3_FORCED_ALIGNER)
+    }
+
     private fun showQwen3AsrDownloadModelPicker() {
         val options = modelRepository.qwen3AsrModels
         val labels = options.map { "${it.displayName}（${it.sizeLabel}）" }.toTypedArray()
@@ -353,7 +379,7 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         startAsrModelDownload(DownloadAsrModelUseCase.KIND_QWEN3_ASR, option.id)
     }
 
-    private fun startAsrModelDownload(kind: String, optionId: String) {
+    private fun startAsrModelDownload(kind: String, optionId: String? = null) {
         if (modelDownloadJob?.isActive == true || pendingNotificationAction != null) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(host, Manifest.permission.POST_NOTIFICATIONS) !=
@@ -391,13 +417,15 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
                 val scheduler = (host.application as SubtitleEditApplication).dependencies.taskWorkScheduler
                 val workId = if (retryWorkId != null) {
                     scheduler.retryModelDownload(retryWorkId)
+                } else if (kind == ModelDownloadWorker.KIND_QWEN3_FORCED_ALIGNER) {
+                    scheduler.enqueueQwen3ForcedAlignerDownload()
                 } else if (kind != null) {
                     scheduler.enqueueAsrModelDownload(kind, requireNotNull(optionId))
                 } else {
                     scheduler.findActiveAsrModelDownload(modelDownloadWorkId) ?: return@launch
                 }
                 modelDownloadWorkId = workId
-                progressDialog = ModelDownloadProgressDialog(host, "下载语音识别模型") {
+                progressDialog = ModelDownloadProgressDialog(host, "下载模型") {
                     host.lifecycleScope.launch {
                         try {
                             scheduler.cancel(workId)
@@ -424,8 +452,11 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
                         TaskStatus.SUCCEEDED -> {
                             modelDownloadWorkId = null
                             loadSavedSettings()
+                            val successMessage = if (taskState.type == ModelDownloadWorker.KIND_QWEN3_FORCED_ALIGNER) {
+                                "Qwen3 ForcedAligner 已下载并导入"
+                            } else "语音识别模型已下载、导入并自动选择"
                             OverwritingToast.makeText(
-                                host, "语音识别模型已下载、导入并自动选择", Toast.LENGTH_LONG
+                                host, successMessage, Toast.LENGTH_LONG
                             ).show()
                             false
                         }
@@ -504,6 +535,7 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
         binding.btnSelectDecoder.isEnabled = enabled
         binding.btnSelectJoiner.isEnabled = enabled
         binding.btnSelectQwen3ForcedAligner.isEnabled = enabled
+        binding.btnDownloadQwen3ForcedAligner.isEnabled = enabled
         binding.tvSenseVoiceCpuOption.isEnabled = enabled
         binding.tvSenseVoiceNpuOption.isEnabled = enabled
         binding.tvParakeetTdtOption.isEnabled = enabled
@@ -1107,11 +1139,13 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             SettingsManager.ASR_MODEL_QWEN3_ASR -> """
                 Qwen3-ASR 模型说明：
 
-                一键下载会自动获取 sherpa-onnx 所需的 conv_frontend、encoder、decoder 和 tokenizer 文件。
+                点击 ASR 模型旁的蓝色下载按钮，可从魔塔一键获取 conv_frontend、encoder、decoder 和 tokenizer 文件。
 
-                手动导入需要选择 conv_frontend.onnx、encoder.int8.onnx、decoder.int8.onnx 和包含六个 tokenizer 配置文件的文件夹。
+                ASR 模型手动导入需要选择 conv_frontend.onnx、encoder.int8.onnx、decoder.int8.onnx 和包含六个 tokenizer 配置文件的文件夹。
 
-                当前按语音段生成字幕时间，暂不使用 Qwen3-ASR 的 token 时间戳。
+                强制对齐打轴还需要 Qwen3 ForcedAligner 模型。点击其旁的蓝色下载按钮，可从项目 Release 下载两卷压缩包，自动校验、解压并导入；0.6B 和 1.7B ASR 共用此对齐模型。
+
+                手动导入强制对齐模型时，请同时选择 forced_aligner.onnx 与 forced_aligner.onnx.data 两个文件并保留原名。
             """.trimIndent()
             else -> """
                 Whisper 模型下载指引：
@@ -1126,26 +1160,36 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             """.trimIndent()
         }
 
-        AlertDialog.Builder(host)
+        val isQwenGuide = modelType == SettingsManager.ASR_MODEL_QWEN3_ASR
+        val guideMessage = if (isQwenGuide) {
+            val url = Qwen3ForcedAlignerReleaseDownloader.PROJECT_URL
+            SpannableString("$message\n\n强制对齐模型项目地址：$url").apply {
+                val start = indexOf(url)
+                setSpan(URLSpan(url), start, start + url.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        } else message
+        val dialog = AlertDialog.Builder(host)
             .setTitle("模型下载指引")
-            .setMessage(message)
+            .setMessage(guideMessage)
             .setPositiveButton("确定", null)
-            .setNeutralButton("打开 GitHub") { _, _ ->
-                val releaseTag = if (
+            .setNeutralButton(if (isQwenGuide) "打开魔塔" else "打开 GitHub") { _, _ ->
+                val url = if (isQwenGuide) {
+                    ModelDownloader.QWEN3_ASR_MODELSCOPE_URL
+                } else if (
                     modelType == SettingsManager.ASR_MODEL_SENSEVOICE &&
                     settingsManager.getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU
                 ) {
-                    "asr-models-qnn"
+                    "https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models-qnn"
                 } else {
-                    "asr-models"
+                    "https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models"
                 }
-                val intent = Intent(
-                    Intent.ACTION_VIEW,
-                    Uri.parse("https://github.com/k2-fsa/sherpa-onnx/releases/tag/$releaseTag")
-                )
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                 host.startActivity(intent)
             }
             .show()
+        if (isQwenGuide) {
+            dialog.findViewById<TextView>(android.R.id.message)?.movementMethod = LinkMovementMethod.getInstance()
+        }
     }
 
     private fun showAsrModelPicker() {

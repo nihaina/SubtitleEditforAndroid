@@ -106,6 +106,62 @@ internal class Qwen3ForcedAlignerImporter(private val directory: File) {
         }
     }
 
+    /** Installs a downloaded pair already extracted beside the managed directory, without copying 3.7 GB again. */
+    suspend fun installPrepared(
+        staging: File,
+        validate: (File) -> Unit,
+        publish: (File) -> Unit,
+        onProgress: suspend (Progress) -> Unit = {},
+    ): File = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val parent = requireNotNull(directory.parentFile)
+            check(parent.isDirectory || parent.mkdirs()) { "无法创建 ForcedAligner 模型目录" }
+            val backup = File(parent, ".${directory.name}_backup")
+            require(staging.isDirectory && staging.canonicalFile.parentFile == parent.canonicalFile &&
+                staging.canonicalFile != directory.canonicalFile && staging.canonicalFile != backup.canonicalFile
+            ) { "ForcedAligner 解压目录无效" }
+            val children = staging.listFiles()?.toList() ?: emptyList()
+            val graphName = Qwen3ForcedAlignerModelFiles.graphName(children.map { it.name })
+            check(children.all { it.isFile && it.length() > 0L }) { "解压后的模型文件不完整" }
+            if (backup.exists()) {
+                if (!directory.exists()) {
+                    check(backup.renameTo(directory)) { "无法恢复原 ForcedAligner 模型" }
+                } else {
+                    check(backup.deleteRecursively()) { "无法清理上次导入的模型备份" }
+                }
+            }
+            try {
+                currentCoroutineContext().ensureActive()
+                onProgress(Progress("正在校验模型和外部权重"))
+                validate(File(staging, graphName))
+                currentCoroutineContext().ensureActive()
+                withContext(NonCancellable) {
+                    if (directory.exists()) {
+                        check(directory.renameTo(backup)) { "无法备份现有 ForcedAligner 模型" }
+                    }
+                    var installed = false
+                    try {
+                        check(staging.renameTo(directory)) { "无法安装 ForcedAligner 模型" }
+                        installed = true
+                        publish(File(directory, graphName))
+                    } catch (error: Exception) {
+                        if (installed && !directory.deleteRecursively()) {
+                            error.addSuppressed(IllegalStateException("无法清理失败的模型，旧模型保留在 $backup"))
+                        }
+                        if (backup.exists() && !backup.renameTo(directory)) {
+                            error.addSuppressed(IllegalStateException("无法恢复旧模型，备份保留在 $backup"))
+                        }
+                        throw error
+                    }
+                    backup.deleteRecursively()
+                }
+                File(directory, graphName)
+            } finally {
+                withContext(NonCancellable) { staging.deleteRecursively() }
+            }
+        }
+    }
+
     companion object {
         // Also prevents overlapping imports across activity recreation.
         private val mutex = Mutex()

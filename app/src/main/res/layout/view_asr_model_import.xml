@@ -364,14 +364,44 @@
                             android:textColor="@color/on_surface_variant"
                             android:textSize="12sp" />
 
-                        <Button
-                            android:id="@+id/btnSelectQwen3ForcedAligner"
-                            style="@style/Widget.Material3.Button.OutlinedButton"
-                            android:layout_width="wrap_content"
+                        <LinearLayout
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="6dp"
-                            android:minHeight="40dp"
-                            android:text="@string/activity_model_management_qwen_aligner_select" />
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <Button
+                                android:id="@+id/btnSelectQwen3ForcedAligner"
+                                style="@style/Widget.Material3.Button.OutlinedButton"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:minWidth="0dp"
+                                android:minHeight="40dp"
+                                android:singleLine="true"
+                                android:text="@string/activity_model_management_qwen_aligner_select" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnDownloadQwen3ForcedAligner"
+                                style="@style/Widget.MaterialComponents.Button"
+                                android:layout_width="28dp"
+                                android:layout_height="28dp"
+                                android:layout_marginStart="8dp"
+                                android:backgroundTint="@color/primary"
+                                android:contentDescription="@string/activity_model_management_qwen_aligner_download"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:minWidth="0dp"
+                                android:minHeight="0dp"
+                                android:padding="5dp"
+                                app:cornerRadius="14dp"
+                                app:icon="@drawable/ic_download"
+                                app:iconGravity="textStart"
+                                app:iconPadding="0dp"
+                                app:iconSize="18dp"
+                                app:iconTint="@color/white" />
+                        </LinearLayout>
 
                         <TextView
                             android:id="@+id/tvQwen3ForcedAlignerPath"

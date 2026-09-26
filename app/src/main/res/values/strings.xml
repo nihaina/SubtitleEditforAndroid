@@ -339,8 +339,9 @@
     <string name="qwen3_asr_forced_alignment_missing">Qwen3-ASR 或 ForcedAligner 模型文件配置不完整，请先在模型导入中完成配置</string>
     <string name="qwen3_asr_merge_hint">开启后，合并强制对齐结果中间隔不超过指定时间的相邻字幕段，并按顺序拼接文本</string>
     <string name="activity_model_management_qwen_aligner_title">Qwen3 ForcedAligner 模型</string>
-    <string name="activity_model_management_qwen_aligner_hint">在文件选择器中长按并多选同次导出的 .onnx 和 .onnx.data 两个文件（如 forced_aligner.onnx 与 forced_aligner.onnx.data），请保留原文件名。0.6B / 1.7B 共用，供 Qwen3-ASR 强制对齐打轴使用。</string>
+    <string name="activity_model_management_qwen_aligner_hint">点击蓝色按钮一键下载导入，或长按多选同次导出的 .onnx 和 .onnx.data 两个文件（如 forced_aligner.onnx 与 forced_aligner.onnx.data）。请保留原文件名；0.6B / 1.7B 共用。</string>
     <string name="activity_model_management_qwen_aligner_select">导入 ONNX + DATA（两个文件）</string>
+    <string name="activity_model_management_qwen_aligner_download">一键下载并导入 ForcedAligner 模型</string>
     <string name="qwen_aligner_select_pair">请同时选择 .onnx 和配套的同名 .onnx.data 两个文件</string>
     <string name="activity_speech_to_subtitle_settings_text_56">VAD 参数设置</string>
     <string name="activity_speech_to_subtitle_settings_text_57">检测阈值</string>

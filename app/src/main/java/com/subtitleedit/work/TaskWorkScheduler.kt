@@ -40,6 +40,10 @@ internal class TaskWorkScheduler(
         return enqueueModelDownload(ASR_MODEL_WORK, kind, optionId)
     }
 
+    suspend fun enqueueQwen3ForcedAlignerDownload(): UUID = enqueueModelDownload(
+        ASR_MODEL_WORK, ModelDownloadWorker.KIND_QWEN3_FORCED_ALIGNER
+    )
+
     suspend fun retryModelDownload(workId: UUID): UUID {
         val previous = withContext(Dispatchers.IO) { workManager.getWorkInfoById(workId).get() }
         requireNotNull(previous) { "下载任务不存在，请重新选择模型下载" }
@@ -52,6 +56,7 @@ internal class TaskWorkScheduler(
             ?: previous.tags.firstOrNull { it.startsWith(MODEL_KIND_TAG_PREFIX) }?.removePrefix(MODEL_KIND_TAG_PREFIX)
             ?: ModelDownloadWorker.KIND_DEMIX_GENERAL
         if (kind == ModelDownloadWorker.KIND_DEMIX_GENERAL) return enqueueGeneralModelDownload()
+        if (kind == ModelDownloadWorker.KIND_QWEN3_FORCED_ALIGNER) return enqueueQwen3ForcedAlignerDownload()
         val optionId = previous.outputData.getString(ModelDownloadWorker.KEY_MODEL_OPTION)
             ?: previous.tags.firstOrNull { it.startsWith(MODEL_OPTION_TAG_PREFIX) }?.removePrefix(MODEL_OPTION_TAG_PREFIX)
         requireNotNull(optionId) { "下载任务缺少模型版本，请重新选择模型下载" }

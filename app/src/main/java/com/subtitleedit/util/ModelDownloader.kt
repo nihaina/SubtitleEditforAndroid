@@ -17,6 +17,7 @@ import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 
 object ModelDownloader {
+    const val QWEN3_ASR_MODELSCOPE_URL = "https://modelscope.cn/models/zengshuishui/Qwen3-ASR-onnx"
     const val SENSEVOICE_MODEL_URL =
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2"
     const val DEMIX_GENERAL_MODEL_URL =
@@ -455,7 +456,7 @@ object ModelDownloader {
             }
 
             try {
-                val baseUrl = "https://modelscope.cn/models/zengshuishui/Qwen3-ASR-onnx/resolve/master"
+                val baseUrl = "$QWEN3_ASR_MODELSCOPE_URL/resolve/master"
                 val modelDir = File(stagingDir, option.remoteModelDirectory)
                 val tokenizerDir = File(stagingDir, "tokenizer")
                 if ((!modelDir.exists() && !modelDir.mkdirs()) ||

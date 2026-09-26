@@ -40,7 +40,8 @@ internal class ModelDownloadWorker(
         var lastProgress = TaskProgress()
         try {
             val kind = inputData.getString(KEY_MODEL_KIND)
-            require(kind == KIND_DEMIX_GENERAL || kind in DownloadAsrModelUseCase.KINDS) { "不支持的模型任务" }
+            require(kind == KIND_DEMIX_GENERAL || kind == KIND_QWEN3_FORCED_ALIGNER ||
+                kind in DownloadAsrModelUseCase.KINDS) { "不支持的模型任务" }
             setForeground(getForegroundInfo())
             setProgress(TaskWorkScheduler.progressData("正在准备模型下载", 0L, -1L))
             val workerContext = currentCoroutineContext()
@@ -60,10 +61,10 @@ internal class ModelDownloadWorker(
                     setForegroundAsync(createForegroundInfo(lastProgress.message, lastProgress))
                 }
             }
-            val modelFile = if (kind == KIND_DEMIX_GENERAL) {
-                application.dependencies.downloadGeneralModel(onProgress)
-            } else {
-                application.dependencies.downloadAsrModel(
+            val modelFile = when (kind) {
+                KIND_DEMIX_GENERAL -> application.dependencies.downloadGeneralModel(onProgress)
+                KIND_QWEN3_FORCED_ALIGNER -> application.dependencies.downloadQwen3ForcedAligner(onProgress)
+                else -> application.dependencies.downloadAsrModel(
                     requireNotNull(kind),
                     requireNotNull(inputData.getString(KEY_MODEL_OPTION)) { "未指定模型版本" },
                     onProgress
@@ -143,6 +144,7 @@ internal class ModelDownloadWorker(
         private const val CHANNEL_ID = "model-tasks"
         const val TAG_MODEL_DOWNLOAD = "model-download"
         const val KIND_DEMIX_GENERAL = "demix-general"
+        const val KIND_QWEN3_FORCED_ALIGNER = "qwen3-forced-aligner"
         const val KEY_MODEL_KIND = "model_kind"
         const val KEY_MODEL_OPTION = "model_option"
         const val KEY_MESSAGE = "message"

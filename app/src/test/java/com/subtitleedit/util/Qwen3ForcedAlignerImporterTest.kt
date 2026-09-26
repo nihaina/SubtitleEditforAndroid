@@ -135,6 +135,61 @@ class Qwen3ForcedAlignerImporterTest {
         }
     }
 
+    @Test fun preparedDownloadInstallsWithoutCopyingAndPreservesPublishedPath() = runBlocking {
+        val directory = oldModel()
+        val staging = temporary.newFolder("release-extract")
+        staging.resolve(graphName).writeText("release graph")
+        staging.resolve("$graphName.data").writeText("release weights")
+        val installed = Qwen3ForcedAlignerImporter(directory).installPrepared(
+            staging,
+            validate = { graph ->
+                assertEquals("release weights", Qwen3ForcedAlignerModelFiles.dataFile(graph).readText())
+                assertOldModelContents(directory)
+            },
+            publish = { assertEquals(directory.resolve(graphName), it) },
+        )
+        assertEquals("release graph", installed.readText())
+        assertEquals("release weights", Qwen3ForcedAlignerModelFiles.dataFile(installed).readText())
+        assertFalse(staging.exists())
+    }
+
+    @Test fun preparedDownloadValidationFailureRetainsOldModel() = runBlocking {
+        val directory = oldModel()
+        val staging = temporary.newFolder("release-extract")
+        staging.resolve(graphName).writeText("invalid graph")
+        staging.resolve("$graphName.data").writeText("invalid weights")
+        try {
+            Qwen3ForcedAlignerImporter(directory).installPrepared(
+                staging,
+                validate = { throw IllegalArgumentException("bad release") },
+                publish = { fail("Do not publish invalid release") },
+            )
+            fail("Invalid release must not be installed")
+        } catch (_: IllegalArgumentException) {
+            // The previous pair must remain selected after validation fails.
+        }
+        assertOldModel(directory)
+        assertFalse(staging.exists())
+    }
+
+    @Test fun preparedDownloadPreferenceFailureRestoresOldModel() = runBlocking {
+        val directory = oldModel()
+        val staging = temporary.newFolder("release-extract")
+        staging.resolve(graphName).writeText("release graph")
+        staging.resolve("$graphName.data").writeText("release weights")
+        try {
+            Qwen3ForcedAlignerImporter(directory).installPrepared(
+                staging,
+                validate = {},
+                publish = { throw IOException("cannot save preference") },
+            )
+            fail("Import must fail")
+        } catch (_: IOException) {
+            assertOldModel(directory)
+            assertFalse(staging.exists())
+        }
+    }
+
     @Test fun recoversInterruptedSwapBeforeNextImport() = runBlocking {
         val directory = oldModel()
         val backup = File(temporary.root, ".forced-aligner_backup")
