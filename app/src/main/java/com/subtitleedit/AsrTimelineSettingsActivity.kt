@@ -1,5 +1,6 @@
 package com.subtitleedit
 
+import android.content.Intent
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
@@ -49,6 +50,9 @@ abstract class AsrTimelineSettingsActivity : AppCompatActivity() {
     }
 
     private fun setupListeners() {
+        binding.btnVadSettings.setOnClickListener {
+            startActivity(Intent(this, VadModelSettingsActivity::class.java))
+        }
         binding.switchUseVadTimestamp.setOnCheckedChangeListener { _, checked ->
             if (!loading) settingsManager.setAsrVadTimestampEnabled(modelType, checked)
             if (!checked && !loading) {
@@ -134,6 +138,7 @@ abstract class AsrTimelineSettingsActivity : AppCompatActivity() {
 
     private fun updateTimelineSections() {
         val useVad = binding.switchUseVadTimestamp.isChecked
+        binding.btnVadSettings.visibility = if (useVad) View.VISIBLE else View.GONE
         binding.cardSenseVoiceTimestampExperiment.visibility = if (useVad) View.GONE else View.VISIBLE
     }
 

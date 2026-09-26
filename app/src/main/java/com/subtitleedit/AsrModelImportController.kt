@@ -57,7 +57,11 @@ import java.util.UUID
 /**
  * 模型设置页面
  */
-class AsrModelImportController(private val host: AppCompatActivity, private val binding: ViewAsrModelImportBinding) {
+class AsrModelImportController(
+    private val host: AppCompatActivity,
+    private val binding: ViewAsrModelImportBinding,
+    private val onModelsChanged: () -> Unit = {}
+) {
 
     private lateinit var settingsManager: SettingsManager
     private val modelRepository: ModelRepository
@@ -326,6 +330,10 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
 
     private fun confirmQwen3ForcedAlignerDownload() {
         if (modelDownloadJob?.isActive == true) return
+        if (hasConfiguredQwen3ForcedAligner()) {
+            OverwritingToast.makeText(host, "ForcedAligner 已导入，可在模型管理中查看或删除", Toast.LENGTH_SHORT).show()
+            return
+        }
         AlertDialog.Builder(host)
             .setTitle("一键下载导入 Qwen3 ForcedAligner")
             .setMessage(
@@ -339,6 +347,7 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
     }
 
     private fun startQwen3ForcedAlignerDownload() {
+        if (hasConfiguredQwen3ForcedAligner()) return
         startAsrModelDownload(ModelDownloadWorker.KIND_QWEN3_FORCED_ALIGNER)
     }
 
@@ -452,6 +461,7 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
                         TaskStatus.SUCCEEDED -> {
                             modelDownloadWorkId = null
                             loadSavedSettings()
+                            onModelsChanged()
                             val successMessage = if (taskState.type == ModelDownloadWorker.KIND_QWEN3_FORCED_ALIGNER) {
                                 "Qwen3 ForcedAligner 已下载并导入"
                             } else "语音识别模型已下载、导入并自动选择"
@@ -1019,6 +1029,7 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
                     }
                 )
                 updateAsrModelUi()
+                onModelsChanged()
                 OverwritingToast.makeText(host, "Qwen3 ForcedAligner 模型及权重已导入", Toast.LENGTH_SHORT).show()
             } catch (error: CancellationException) {
                 throw error
@@ -1417,6 +1428,7 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             val alignerPath = settingsManager.getQwen3ForcedAlignerPath()
             val alignerFile = localFile(alignerPath)
             val complete = Qwen3ForcedAlignerModelFiles.isComplete(alignerFile)
+            binding.btnDownloadQwen3ForcedAligner.visibility = if (complete) View.GONE else View.VISIBLE
             binding.tvQwen3ForcedAlignerPath.text = when {
                 complete -> "已配置：${alignerFile!!.name} + ${Qwen3ForcedAlignerModelFiles.dataFile(alignerFile).name}"
                 alignerPath.isNotBlank() -> "模型或权重文件缺失/不可读，请重新导入两个文件"
@@ -1471,6 +1483,9 @@ class AsrModelImportController(private val host: AppCompatActivity, private val 
             null
         }
     }
+
+    private fun hasConfiguredQwen3ForcedAligner(): Boolean =
+        Qwen3ForcedAlignerModelFiles.isComplete(localFile(settingsManager.getQwen3ForcedAlignerPath()))
 
     private fun isSingleFileModel(): Boolean =
         modelType == SettingsManager.ASR_MODEL_SENSEVOICE ||

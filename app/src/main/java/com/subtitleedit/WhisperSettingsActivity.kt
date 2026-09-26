@@ -1,5 +1,6 @@
 package com.subtitleedit
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import com.subtitleedit.databinding.ActivityWhisperSettingsBinding
@@ -22,6 +23,9 @@ class WhisperSettingsActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = getString(R.string.activity_whisper_settings_title)
         binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
+        binding.btnVadSettings.setOnClickListener {
+            startActivity(Intent(this, VadModelSettingsActivity::class.java))
+        }
 
         binding.sliderWhisperThreads.addOnChangeListener { _, value, _ ->
             binding.tvWhisperThreads.text = String.format(Locale.getDefault(), "%d", value.toInt())

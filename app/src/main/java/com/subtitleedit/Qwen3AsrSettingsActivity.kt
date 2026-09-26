@@ -1,5 +1,6 @@
 package com.subtitleedit
 
+import android.content.Intent
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
@@ -33,6 +34,9 @@ class Qwen3AsrSettingsActivity : AppCompatActivity() {
     }
 
     private fun setupListeners() {
+        binding.btnVadSettings.setOnClickListener {
+            startActivity(Intent(this, VadModelSettingsActivity::class.java))
+        }
         binding.switchUseVadTimestamp.setOnCheckedChangeListener { _, enabled ->
             if (loading) return@setOnCheckedChangeListener
             settingsManager.setAsrVadTimestampEnabled(SettingsManager.ASR_MODEL_QWEN3_ASR, enabled)
@@ -103,6 +107,8 @@ class Qwen3AsrSettingsActivity : AppCompatActivity() {
     }
 
     private fun updateControls() {
+        binding.btnVadSettings.visibility =
+            if (binding.switchUseVadTimestamp.isChecked) View.VISIBLE else View.GONE
         binding.cardAsrTranscription.visibility =
             if (binding.switchUseVadTimestamp.isChecked) View.GONE else View.VISIBLE
         val alignerEnabled = binding.switchForcedAlignment.isEnabled &&

@@ -42,6 +42,7 @@ class ModelManagementActivity : AppCompatActivity() {
     private val modelRepository: ModelRepository
         get() = (application as SubtitleEditApplication).dependencies.modelRepository
     private var requestedStorageAccess = false
+    private var modelScanVersion = 0
 
     private lateinit var asrImportController: AsrModelImportController
     private lateinit var demucsImportController: DemucsModelImportController
@@ -71,14 +72,16 @@ class ModelManagementActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = "模型导入"
         binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
-        asrImportController = AsrModelImportController(this, binding.asrModelImport)
+        asrImportController = AsrModelImportController(this, binding.asrModelImport) {
+            if (binding.pagePager.currentItem == 1) loadModels()
+        }
         demucsImportController = DemucsModelImportController(this, binding.demucsModelImport)
         setupPageNavigation()
         binding.tvModelsDirectory.text =
             "下载模型目录：${modelRepository.modelsDirectory().absolutePath}\n" +
-                "NPU BIN 模型保存在应用内部目录"
+                "NPU BIN、强制对齐模型保存在应用内部目录"
 
-        if (hasStorageAccess()) loadModels() else showStorageAccessRequired()
+        loadModels()
     }
 
     override fun onResume() {
@@ -87,6 +90,7 @@ class ModelManagementActivity : AppCompatActivity() {
             asrImportController.refresh()
             demucsImportController.refresh()
         }
+        if (binding.pagePager.currentItem == 1) loadModels()
     }
 
     private fun setupPageNavigation() {
@@ -113,8 +117,9 @@ class ModelManagementActivity : AppCompatActivity() {
         binding.pagePager.addOnPageChangeListener(object : ViewPager.SimpleOnPageChangeListener() {
             override fun onPageSelected(position: Int) {
                 supportActionBar?.title = titles[position]
-                if (position == 1 && !hasStorageAccess() && !requestedStorageAccess) {
-                    requestStorageAccess()
+                if (position == 1) {
+                    loadModels()
+                    if (!hasStorageAccess() && !requestedStorageAccess) requestStorageAccess()
                 }
             }
         })
@@ -133,7 +138,7 @@ class ModelManagementActivity : AppCompatActivity() {
                 }.isSuccess
             if (!opened) {
                 requestedStorageAccess = false
-                showStorageAccessRequired()
+                loadModels()
             }
         } else {
             writeStoragePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
@@ -142,7 +147,7 @@ class ModelManagementActivity : AppCompatActivity() {
 
     private fun handleStorageAccessResult() {
         requestedStorageAccess = false
-        if (hasStorageAccess()) loadModels() else showStorageAccessRequired()
+        loadModels()
     }
 
     private fun hasStorageAccess(): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -152,18 +157,13 @@ class ModelManagementActivity : AppCompatActivity() {
             PackageManager.PERMISSION_GRANTED
     }
 
-    private fun showStorageAccessRequired() {
-        binding.progressBar.visibility = View.GONE
-        binding.modelContainer.removeAllViews()
-        binding.tvEmpty.text = "需要存储权限才能扫描和删除模型"
-        binding.tvEmpty.visibility = View.VISIBLE
-    }
-
     private fun loadModels() {
+        val scanVersion = ++modelScanVersion
         binding.progressBar.visibility = View.VISIBLE
         binding.tvEmpty.visibility = View.GONE
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) { runCatching { scanModels() } }
+            if (scanVersion != modelScanVersion) return@launch
             binding.progressBar.visibility = View.GONE
             result.onSuccess(::renderModels).onFailure {
                 binding.modelContainer.removeAllViews()
@@ -176,7 +176,7 @@ class ModelManagementActivity : AppCompatActivity() {
     private fun scanModels(): List<ModelItem> {
         val items = mutableListOf<ModelItem>()
         val root = modelRepository.modelsDirectory()
-        if (root.isDirectory) {
+        if (hasStorageAccess() && root.isDirectory) {
             root.listFiles().orEmpty()
                 .filterNot { it.name.startsWith(".") || it.name.contains(".part.") || it.name.endsWith(".backup") }
                 .forEach { file ->
@@ -240,6 +240,15 @@ class ModelManagementActivity : AppCompatActivity() {
                     }
                 }
         }
+        val forcedAlignerDirectory = File(filesDir, "models/qwen3-asr/forced-aligner")
+        if (forcedAlignerDirectory.isDirectory) {
+            items += ModelItem(
+                "Qwen3 强制对齐模型",
+                "Qwen3 ForcedAligner",
+                forcedAlignerDirectory,
+                calculateSize(forcedAlignerDirectory)
+            )
+        }
         val npuImporter = SenseVoiceNpuModelImporter(this, contentResolver)
         listOf(5, 10).mapNotNull(npuImporter::findInstalledModel).forEach { model ->
             val directory = requireNotNull(model.contextBinary.parentFile)
@@ -255,8 +264,9 @@ class ModelManagementActivity : AppCompatActivity() {
             "Whisper 模型" to 1,
             "Parakeet 模型" to 2,
             "Qwen3-ASR 模型" to 3,
-            "人声分离模型" to 4,
-            "其他模型文件" to 5
+            "Qwen3 强制对齐模型" to 4,
+            "人声分离模型" to 5,
+            "其他模型文件" to 6
         )
         return items.sortedWith(
             compareBy<ModelItem> { categoryOrder[it.category] ?: Int.MAX_VALUE }
@@ -267,7 +277,11 @@ class ModelManagementActivity : AppCompatActivity() {
     private fun renderModels(items: List<ModelItem>) {
         binding.modelContainer.removeAllViews()
         if (items.isEmpty()) {
-            binding.tvEmpty.text = "未发现模型"
+            binding.tvEmpty.text = if (hasStorageAccess()) {
+                "未发现模型"
+            } else {
+                "需要存储权限才能扫描下载模型"
+            }
             binding.tvEmpty.visibility = View.VISIBLE
             return
         }
@@ -435,6 +449,9 @@ class ModelManagementActivity : AppCompatActivity() {
             if (qwen3Paths.any { pointsInsideTarget(it, target) }) {
                 settingsManager.clearQwen3AsrModelPaths(option.id)
             }
+        }
+        if (pointsInsideTarget(settingsManager.getQwen3ForcedAlignerPath(), target)) {
+            settingsManager.clearQwen3ForcedAlignerPath()
         }
         if (pointsInsideTarget(settingsManager.getVadModelPath(), target)) {
             settingsManager.setVadModelPath("")
