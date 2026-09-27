@@ -30,9 +30,7 @@ class Qwen3AsrBudgetNativeTest {
                 Qwen3AsrModelBudget.readCacheLength(File("/proc/self/fd/${it.fd}"))
             }
         } else Qwen3AsrModelBudget.readCacheLength(File(requireNotNull(decoder.path)))
-        val chunker = Qwen3AsrChunker(
-            Qwen3AsrBudget.fromCacheLength(cacheLength), settings.getSpeechFixedSegmentSeconds()
-        )
+        val chunker = Qwen3AsrChunker(Qwen3AsrBudget.fromCacheLength(cacheLength))
         val durationMs = Pcm16WavReader(audio).use { it.totalSamples * 1000L / it.sampleRate }
         assertTrue("Use speech longer than the legacy context limit", durationMs > 40_000)
         val recognizer = WhisperRecognizer(
@@ -49,7 +47,7 @@ class Qwen3AsrBudgetNativeTest {
         val segments = recognizer.recognize(audio, { _, status, _ ->
             Log.i("QwenBudgetTest", status)
         }).getOrThrow()
-        assertTrue(segments.size >= 3)
+        assertTrue(segments.isNotEmpty())
         var end = 0L
         segments.forEach {
             assertTrue(it.text.isNotBlank())

@@ -873,7 +873,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         ) {
             "NPU 模型固定分段 ${settingsManager.getSenseVoiceNpuDurationSeconds()} 秒"
         } else if (modelType == SettingsManager.ASR_MODEL_QWEN3_ASR) {
-            "分段上限 ${settingsManager.getSpeechFixedSegmentSeconds()} 秒（实际长度受模型预算限制）"
+            "按模型 cache 容量限制分段长度，并选择低能量切点"
         } else {
             "固定分段 ${settingsManager.getSpeechFixedSegmentSeconds()} 秒"
         }

@@ -68,27 +68,44 @@ class WhisperRecognizer(
     ): Result<List<QwenChunkResult>> = runCatching {
         require(isQwen3Asr()) { "Qwen 专用识别接口只能用于 Qwen3-ASR" }
         initRecognizer().getOrThrow()
-        val chunker = requireNotNull(qwenChunker) { "Qwen 分块预算未初始化" }
         val chunks = mutableListOf<QwenChunkResult>()
         Pcm16WavReader(audioFile).use { reader ->
             require(reader.sampleRate == SAMPLE_RATE) { "Qwen 音频必须是 16kHz" }
             val total = reader.totalSamples
-            var cursor = 0L
-            var index = 0
-            while (cursor < total) {
+            progressCallback(0, "正在计算 Qwen 分段数...")
+            val ranges = planQwenChunks(reader, isCancelled)
+            ranges.forEachIndexed { index, range ->
                 if (isCancelled()) throw CancellationException("用户取消")
-                val window = reader.readRange(cursor, minOf(chunker.maxSamples.toLong(), total - cursor).toInt())
-                val cut = chunker.nextEnd(window, hasMoreAudio = cursor + window.size < total)
-                val audio = if (cut == window.size) window else window.copyOf(cut)
-                val start = cursor * 1000L / SAMPLE_RATE
-                val end = (cursor + cut) * 1000L / SAMPLE_RATE
-                progressCallback((cursor * 100L / total).toInt(), "Qwen 官方流程识别第 ${++index} 段")
+                val audio = reader.readRange(range.startSample, (range.endSample - range.startSample).toInt())
+                val start = range.startSample * 1000L / SAMPLE_RATE
+                val end = range.endSample * 1000L / SAMPLE_RATE
+                progressCallback((range.startSample * 100L / total).toInt(),
+                    "Qwen 官方流程识别第 ${index + 1}/${ranges.size} 段")
                 val text = decodeQwenText(audio).trim()
                 if (text.isNotEmpty()) chunks += QwenChunkResult(start, end, audio, text)
-                cursor += cut
             }
         }
         chunks
+    }
+
+    /** Scan bounded WAV windows once so progress can show the exact low-energy chunk count. */
+    private fun planQwenChunks(
+        reader: Pcm16WavReader,
+        isCancelled: () -> Boolean,
+    ): List<SampleRange> {
+        val chunker = requireNotNull(qwenChunker) { "Qwen 分块预算未初始化" }
+        val ranges = mutableListOf<SampleRange>()
+        var cursor = 0L
+        while (cursor < reader.totalSamples) {
+            if (isCancelled()) throw CancellationException("用户取消")
+            val count = minOf(chunker.maxSamples.toLong(), reader.totalSamples - cursor).toInt()
+            val window = reader.readRange(cursor, count)
+            check(window.isNotEmpty()) { "Qwen 无法读取音频分块" }
+            val cut = chunker.nextEnd(window, hasMoreAudio = cursor + window.size < reader.totalSamples)
+            ranges += SampleRange(cursor, cursor + cut)
+            cursor += cut
+        }
+        return ranges
     }
 
     /**
@@ -208,10 +225,7 @@ class WhisperRecognizer(
             }
             qwenChunker = if (isQwen3Asr()) {
                 val cacheLength = Qwen3AsrModelBudget.readCacheLength(File(requireNotNull(decoderFile)))
-                Qwen3AsrChunker(
-                    Qwen3AsrBudget.fromCacheLength(cacheLength),
-                    settingsManager().getSpeechFixedSegmentSeconds(),
-                ).also {
+                Qwen3AsrChunker(Qwen3AsrBudget.fromCacheLength(cacheLength)).also {
                     Log.i(TAG, "Qwen 分块预算：KV=${cacheLength ?: "dynamic"}, " +
                         "总量=${it.budget.totalTokens}, 提示词预留=${it.budget.promptTokens}, " +
                         "生成预留=${it.budget.outputTokens}, 音频=${it.budget.audioTokens}, " +
@@ -762,30 +776,22 @@ class WhisperRecognizer(
                         }
                     }
                 } else if (isQwen3Asr()) {
-                    // Read only one budget-sized window. Advance to its low-energy cut rather
-                    // than first cutting at the user's fixed boundary through a spoken word.
-                    val chunker = requireNotNull(qwenChunker)
-                    var cursor = 0L
-                    var index = 0
-                    while (cursor < totalSamples) {
+                    progressCallback(0, "正在计算 Qwen 分段数...", null)
+                    val ranges = planQwenChunks(reader, isCancelled)
+                    ranges.forEachIndexed { index, range ->
                         if (isCancelled()) throw CancellationException("用户取消")
-                        val count = minOf(chunker.maxSamples.toLong(), totalSamples - cursor).toInt()
-                        val window = reader.readRange(cursor, count)
-                        check(window.isNotEmpty()) { "Qwen 无法读取音频分块" }
-                        val cut = chunker.nextEnd(window, hasMoreAudio = cursor + window.size < totalSamples)
-                        val end = cursor + cut
-                        val progress = (cursor * 100L / totalSamples).toInt()
-                        val status = "正在识别 Qwen 第 ${++index} 段（${cursor * 1000L / SAMPLE_RATE}–${end * 1000L / SAMPLE_RATE}ms）"
+                        val progress = (range.startSample * 100L / totalSamples).toInt()
+                        val status = "正在识别 Qwen 第 ${index + 1}/${ranges.size} 段（${range.startSample * 1000L / SAMPLE_RATE}–${range.endSample * 1000L / SAMPLE_RATE}ms）"
                         progressCallback(progress, status, null)
                         val segments = recognizeSegment(
-                            if (cut == window.size) window else window.copyOf(cut),
-                            cursor * 1000L / SAMPLE_RATE,
-                            SegmentTimeRange(cursor * 1000L / SAMPLE_RATE, end * 1000L / SAMPLE_RATE),
+                            reader.readRange(range.startSample, (range.endSample - range.startSample).toInt()),
+                            range.startSample * 1000L / SAMPLE_RATE,
+                            SegmentTimeRange(range.startSample * 1000L / SAMPLE_RATE,
+                                range.endSample * 1000L / SAMPLE_RATE),
                             isCancelled = isCancelled,
                         )
                         allSegments.addAll(segments)
                         segments.forEach { progressCallback(progress, status, it) }
-                        cursor = end
                     }
                 } else {
                     // 没有 VAD 时逐段读取，SenseVoice NPU 使用模型自身的固定输入时长。

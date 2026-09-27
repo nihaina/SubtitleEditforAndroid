@@ -281,7 +281,7 @@
     <string name="activity_speech_to_subtitle_settings_text_01">VAD相关</string>
     <string name="activity_speech_to_subtitle_settings_text_02">固定分段时长</string>
     <string name="activity_speech_to_subtitle_settings_text_03">关闭 VAD 时用于模型识别分段，实验打轴也会使用；模型自身限制可能缩短单段时长</string>
-    <string name="activity_speech_to_subtitle_settings_text_04" translatable="false">120</string>
+    <string name="activity_speech_to_subtitle_settings_text_04" translatable="false">10</string>
     <string name="activity_whisper_settings_title">Whisper 配置</string>
     <string name="activity_whisper_settings_vad_title">VAD 打轴</string>
     <string name="activity_whisper_settings_threads_title">Whisper 线程数</string>

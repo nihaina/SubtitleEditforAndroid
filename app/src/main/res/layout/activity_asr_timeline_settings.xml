@@ -271,7 +271,7 @@
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
                             android:stepSize="5"
-                            android:value="120"
+                            android:value="10"
                             android:valueFrom="5"
                             android:valueTo="120" />
 

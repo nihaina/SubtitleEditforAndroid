@@ -859,7 +859,7 @@ class SettingsManager private constructor(context: Context) {
         val key = timelineKey("fixed_segment_seconds")
         val fallback = when {
             getAsrModelType() == ASR_MODEL_QWEN3_ASR -> 30
-            key != null -> 120
+            key != null -> 10
             getAsrModelType() == ASR_MODEL_WHISPER ->
                 prefs.getInt(KEY_STT_FIXED_SEGMENT_SECONDS, 30)
             else -> 30
@@ -880,7 +880,7 @@ class SettingsManager private constructor(context: Context) {
             type != ASR_MODEL_PARAKEET_CTC_JA
         ) return false
         val key = timelineKey("fixed_vad_segmentation", type) ?: return false
-        return prefs.getBoolean(key, false)
+        return prefs.getBoolean(key, true)
     }
 
     fun setSpeechFixedVadSegmentationEnabled(type: String, enabled: Boolean) {

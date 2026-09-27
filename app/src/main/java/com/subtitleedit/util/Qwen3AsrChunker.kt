@@ -55,10 +55,8 @@ internal class Qwen3AsrBudget private constructor(
  * Uses an O(n) running sum of absolute amplitude, then a quiet sample in the best 100 ms
  * window. Search backwards up to 5 s; never look beyond the maximum allowed input.
  */
-internal class Qwen3AsrChunker(val budget: Qwen3AsrBudget, requestedSeconds: Int) {
-    val maxSamples: Int = min(
-        budget.maxSamples.toLong(), requestedSeconds.toLong() * Qwen3AsrBudget.SAMPLE_RATE
-    ).toInt().also { require(it >= Qwen3AsrBudget.MIN_SAMPLES) }
+internal class Qwen3AsrChunker(val budget: Qwen3AsrBudget) {
+    val maxSamples: Int = budget.maxSamples.also { require(it >= Qwen3AsrBudget.MIN_SAMPLES) }
 
     data class Chunk(val startSample: Int, val endSample: Int) {
         val sampleCount: Int get() = endSample - startSample
