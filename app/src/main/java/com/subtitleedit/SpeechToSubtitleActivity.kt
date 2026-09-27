@@ -838,6 +838,9 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             val qwenForcedAlignment = modelType == SettingsManager.ASR_MODEL_QWEN3_ASR
             val timelineName = if (qwenForcedAlignment) "强制对齐" else "实验打轴"
             appendRuntimeLog("  VAD：禁用，由$timelineName 划分语音段")
+            if (settingsManager.isSpeechFixedVadSegmentationEnabled(modelType)) {
+                appendRuntimeLog("  固定分段 VAD 切点：启用（当前 VAD 模型，阈值 0.01）")
+            }
             appendRuntimeLog(
                 "  $timelineName 模型：${TokenTimestampGenerator.modelDisplayName(settingsManager)} " +
                     "(${displayModelPath(tokenTimestampModelPath())})"
@@ -875,6 +878,9 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             "固定分段 ${settingsManager.getSpeechFixedSegmentSeconds()} 秒"
         }
         appendRuntimeLog("  VAD：${if (useVad) "启用" else "禁用，$fixedSegmentText"}")
+        if (!useVad && settingsManager.isSpeechFixedVadSegmentationEnabled(modelType)) {
+            appendRuntimeLog("  固定分段 VAD 切点：启用（当前 VAD 模型，阈值 0.01）")
+        }
         if (useVad) {
             appendRuntimeLog("  VAD 模型：${if (settingsManager.isVadUseBuiltInModel()) "内置 silero_vad.onnx" else displayModelPath(vadModelPath)}")
             appendRuntimeLog("  VAD 阈值：${settingsManager.getVadThreshold()}，最小静音：${settingsManager.getVadMinSilenceDuration()}s，最小语音：${settingsManager.getVadMinSpeechDuration()}s，最大语音：${settingsManager.getVadMaxSpeechDuration()}s")

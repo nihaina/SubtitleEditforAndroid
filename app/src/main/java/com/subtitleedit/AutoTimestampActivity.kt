@@ -1018,6 +1018,9 @@ class AutoTimestampActivity : AppCompatActivity() {
                     settingsManager.getSpeechFixedSegmentSeconds()
                 }
                 appendOperationLog("  固定分段：${segmentSeconds}s")
+                if (settingsManager.isSpeechFixedVadSegmentationEnabled(model.modelType)) {
+                    appendOperationLog("  固定分段 VAD 切点：启用（阈值 0.01）")
+                }
             }
             return
         }
@@ -1043,7 +1046,13 @@ class AutoTimestampActivity : AppCompatActivity() {
                     "关闭"
                 }}"
             )
-            appendOperationLog("  VAD 检测与分段设置：不使用")
+            appendOperationLog(
+                if (settingsManager.isSpeechFixedVadSegmentationEnabled()) {
+                    "  固定分段 VAD 切点：启用（阈值 0.01）"
+                } else {
+                    "  VAD 检测与分段设置：不使用"
+                }
+            )
             if (secondaryProcessing) {
                 appendOperationLog("  二次处理：排除已有字幕覆盖范围")
             }

@@ -1104,6 +1104,13 @@ class AsrModelImportController(
     }
 
     private fun updateVadModelUi() {
+        binding.tvVadFile.text = if (settingsManager.isVadUseBuiltInModel()) {
+            "silero_vad.onnx（内置）"
+        } else if (vadModelPath.isBlank()) {
+            "尚未选择 VAD 模型"
+        } else {
+            getFileNameFromUri(Uri.parse(vadModelPath))
+        }
     }
 
     private fun getFileNameFromUri(uri: Uri): String {

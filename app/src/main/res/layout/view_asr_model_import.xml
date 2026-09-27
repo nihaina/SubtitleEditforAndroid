@@ -470,13 +470,12 @@
                         <Button android:id="@+id/btnVadConfig" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="36dp" android:minWidth="0dp" android:minHeight="0dp" android:text="配置" />
                     </LinearLayout>
 
-                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="请在配置页面选择 VAD 模型并调整参数" android:textColor="@color/on_surface_variant" android:textSize="12sp" />
-
                     <TextView
                         android:id="@+id/tvVadFile"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
+                        android:text="silero_vad.onnx（内置）"
                         android:textColor="@color/on_surface_variant"
                         android:textSize="12sp" />
 

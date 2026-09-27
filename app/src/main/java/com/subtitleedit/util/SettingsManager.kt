@@ -875,6 +875,23 @@ class SettingsManager private constructor(context: Context) {
         }
     }
 
+    fun isSpeechFixedVadSegmentationEnabled(type: String = getAsrModelType()): Boolean {
+        if (type != ASR_MODEL_SENSEVOICE && type != ASR_MODEL_PARAKEET_TDT &&
+            type != ASR_MODEL_PARAKEET_CTC_JA
+        ) return false
+        val key = timelineKey("fixed_vad_segmentation", type) ?: return false
+        return prefs.getBoolean(key, false)
+    }
+
+    fun setSpeechFixedVadSegmentationEnabled(type: String, enabled: Boolean) {
+        if (type != ASR_MODEL_SENSEVOICE && type != ASR_MODEL_PARAKEET_TDT &&
+            type != ASR_MODEL_PARAKEET_CTC_JA
+        ) return
+        timelineKey("fixed_vad_segmentation", type)?.let {
+            prefs.edit().putBoolean(it, enabled).apply()
+        }
+    }
+
     fun isSpeechVadDynamicPaddingEnabled(): Boolean {
         return prefs.getBoolean(KEY_STT_VAD_DYNAMIC_PADDING_ENABLED, true)
     }

@@ -222,11 +222,29 @@
 
                     </LinearLayout>
 
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchFixedVadSegmentation"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:minHeight="40dp"
+                        android:text="VAD 分段：在固定时长附近的静音处切分"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="使用当前 VAD 模型，以最低阈值 0.01 检测静音；在固定切点前后半个分段时长内找最近静音，没有则按固定时长切分"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="12sp" />
+
                     <TextView
                         android:id="@+id/tvFixedSegmentTitle"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
+                        android:layout_marginTop="12dp"
                         android:text="@string/activity_speech_to_subtitle_settings_text_02"
                         android:textColor="@color/on_surface"
                         android:textSize="14sp" />

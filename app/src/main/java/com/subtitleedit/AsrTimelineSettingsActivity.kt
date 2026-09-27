@@ -79,6 +79,9 @@ abstract class AsrTimelineSettingsActivity : AppCompatActivity() {
             }
             if (!loading) settingsManager.setSpeechFixedSegmentSeconds(clamped)
         })
+        binding.switchFixedVadSegmentation.setOnCheckedChangeListener { _, checked ->
+            if (!loading) settingsManager.setSpeechFixedVadSegmentationEnabled(modelType, checked)
+        }
 
         binding.switchSenseVoiceTimestampExperiment.setOnCheckedChangeListener { _, checked ->
             if (loading) return@setOnCheckedChangeListener
@@ -116,6 +119,8 @@ abstract class AsrTimelineSettingsActivity : AppCompatActivity() {
         val segmentSeconds = settingsManager.getSpeechFixedSegmentSeconds()
         binding.sliderFixedSegmentSeconds.value = segmentSeconds.toFloat()
         binding.etFixedSegmentSeconds.setText(String.format(Locale.US, "%d", segmentSeconds))
+        binding.switchFixedVadSegmentation.isChecked =
+            settingsManager.isSpeechFixedVadSegmentationEnabled(modelType)
         val tokenTimestampModelAvailable = hasUsableTokenTimestampModel()
         binding.switchSenseVoiceTimestampExperiment.isEnabled = tokenTimestampModelAvailable
         binding.switchSenseVoiceTimestampExperiment.isChecked =
@@ -140,6 +145,8 @@ abstract class AsrTimelineSettingsActivity : AppCompatActivity() {
         val useVad = binding.switchUseVadTimestamp.isChecked
         binding.btnVadSettings.visibility = if (useVad) View.VISIBLE else View.GONE
         binding.cardSenseVoiceTimestampExperiment.visibility = if (useVad) View.GONE else View.VISIBLE
+        binding.switchFixedVadSegmentation.isEnabled = !useVad
+        binding.switchFixedVadSegmentation.alpha = if (useVad) 0.5f else 1f
     }
 
     private fun updateSenseVoiceTimestampControls() {
