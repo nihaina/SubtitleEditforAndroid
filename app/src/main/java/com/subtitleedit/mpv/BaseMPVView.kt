@@ -8,12 +8,12 @@ import android.view.SurfaceView
 internal abstract class BaseMPVView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
-) : SurfaceView(context, attrs), SurfaceHolder.Callback {
+) : SurfaceView(context, attrs), SurfaceHolder.Callback, MpvPlayerHost {
     private var pendingFilePath: String? = null
     private var voInUse = "gpu-next"
     private var initialized = false
 
-    fun initialize(configDir: String, cacheDir: String) {
+    override fun initialize(configDir: String, cacheDir: String) {
         if (initialized) return
         check(MPVLib.create(context.applicationContext)) { "无法创建 libmpv 上下文" }
         try {
@@ -24,27 +24,29 @@ internal abstract class BaseMPVView @JvmOverloads constructor(
             initOptions()
             val initResult = MPVLib.init()
             if (initResult < 0) error("libmpv 初始化失败：$initResult")
+            postInitOptions()
+            MPVLib.setOptionString("force-window", "no")
+            MPVLib.setOptionString("idle", "once")
+            holder.addCallback(this)
+            observeProperties()
+            initialized = true
         } catch (error: Throwable) {
+            holder.removeCallback(this)
             MPVLib.destroy()
             throw error
         }
-        postInitOptions()
-        MPVLib.setOptionString("force-window", "no")
-        MPVLib.setOptionString("idle", "once")
-        holder.addCallback(this)
-        observeProperties()
-        initialized = true
     }
 
-    fun destroyPlayer() {
+    override fun destroyPlayer() {
         if (!initialized) return
         holder.removeCallback(this)
         if (holder.surface?.isValid == true) runCatching { MPVLib.detachSurface() }
         MPVLib.destroy()
+        pendingFilePath = null
         initialized = false
     }
 
-    fun playFile(filePath: String) {
+    override fun playFile(filePath: String) {
         if (holder.surface?.isValid == true) {
             MPVLib.command(arrayOf("loadfile", filePath, "replace"))
         } else {

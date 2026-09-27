@@ -3,15 +3,18 @@ package com.subtitleedit.editor
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
-import com.subtitleedit.mpv.EditorMpvView
 import com.subtitleedit.mpv.MPVLib
+import com.subtitleedit.mpv.MpvPlayerHost
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
-internal class MpvVideoPlaybackEngine(
-    private val view: EditorMpvView,
+internal class MpvPlaybackEngine(
+    private val playerHost: MpvPlayerHost,
+    private val mediaLabel: String,
+    private val interpolateAudioPosition: Boolean,
     private val configDir: File,
     private val cacheDir: File
 ) : EditorPlaybackEngine, MPVLib.EventObserver, MPVLib.LogObserver {
@@ -24,6 +27,7 @@ internal class MpvVideoPlaybackEngine(
     private val positionReadGeneration = AtomicLong(0L)
     private val mpvAccessLock = Any()
     private val seekStateLock = Any()
+    private val audioClock = if (interpolateAudioPosition) AudioPlaybackClock() else null
     @Volatile private var playbackPhase = PlaybackPhase.IDLE
     @Volatile private var initialized = false
     @Volatile private var cachedPositionMs = 0L
@@ -43,7 +47,9 @@ internal class MpvVideoPlaybackEngine(
     override val currentPositionMs: Long
         get() {
             requestPositionRead()
-            val position = cachedPositionMs
+            val position = if (seekInProgress) cachedPositionMs else {
+                audioClock?.position(SystemClock.elapsedRealtimeNanos()) ?: cachedPositionMs
+            }
             return if (cachedDurationMs > 0L) {
                 position.coerceIn(0L, cachedDurationMs)
             } else {
@@ -63,22 +69,24 @@ internal class MpvVideoPlaybackEngine(
             if (!initialized) {
                 MPVLib.addObserver(this)
                 MPVLib.addLogObserver(this)
-                view.initialize(configDir.absolutePath, cacheDir.absolutePath)
+                playerHost.initialize(configDir.absolutePath, cacheDir.absolutePath)
                 initialized = true
             }
             cachedPositionMs = 0L
+            audioClock?.reset(0L, SystemClock.elapsedRealtimeNanos())
             cachedDurationMs = 0L
             paused = true
             eofReached = false
             resetSeekState()
             readyNotified = false
-            view.playFile(file.absolutePath)
+            playerHost.playFile(file.absolutePath)
         } catch (error: Throwable) {
             runCatching { MPVLib.removeLogObserver(this) }
             runCatching { MPVLib.removeObserver(this) }
+            if (initialized) runCatching { playerHost.destroyPlayer() }
             initialized = false
             playbackPhase = PlaybackPhase.ERROR
-            listener?.onError("加载视频播放器失败：${error.message ?: error.javaClass.simpleName}")
+            listener?.onError("加载${mediaLabel}播放器失败：${error.message ?: error.javaClass.simpleName}")
         }
     }
 
@@ -86,12 +94,14 @@ internal class MpvVideoPlaybackEngine(
         if (!phase.canAccessPlayer) return
         eofReached = false
         paused = false
+        audioClock?.setPlaying(true, SystemClock.elapsedRealtimeNanos())
         postMpvAccess { MPVLib.setPropertyBoolean("pause", false) }
     }
 
     override fun pause() {
         if (!phase.canAccessPlayer) return
         paused = true
+        audioClock?.setPlaying(false, SystemClock.elapsedRealtimeNanos())
         postMpvAccess { MPVLib.setPropertyBoolean("pause", true) }
     }
 
@@ -102,12 +112,13 @@ internal class MpvVideoPlaybackEngine(
         } else {
             positionMs.coerceAtLeast(0L)
         }
-        positionReadGeneration.incrementAndGet()
-        cachedPositionMs = targetPositionMs
-        eofReached = false
         val shouldPostDispatch = synchronized(seekStateLock) {
+            positionReadGeneration.incrementAndGet()
             pendingSeek = SeekRequest(targetPositionMs)
             seekInProgress = true
+            cachedPositionMs = targetPositionMs
+            audioClock?.reset(targetPositionMs, SystemClock.elapsedRealtimeNanos())
+            eofReached = false
             if (!seekCommandInFlight && !seekDispatchPosted) {
                 seekDispatchPosted = true
                 true
@@ -119,6 +130,7 @@ internal class MpvVideoPlaybackEngine(
     }
 
     override fun setSpeed(speed: Float) {
+        audioClock?.setSpeed(speed, SystemClock.elapsedRealtimeNanos())
         postMpvAccess { MPVLib.setPropertyDouble("speed", speed.toDouble()) }
     }
 
@@ -144,7 +156,7 @@ internal class MpvVideoPlaybackEngine(
             MPVLib.removeLogObserver(this)
             MPVLib.removeObserver(this)
             synchronized(mpvAccessLock) {
-                view.destroyPlayer()
+                playerHost.destroyPlayer()
             }
         }
         mpvAccessThread.quitSafely()
@@ -167,8 +179,12 @@ internal class MpvVideoPlaybackEngine(
                     MPVLib.getPropertyDouble("time-pos")
                         ?.takeIf { it.isFinite() }
                         ?.let { seconds ->
-                            if (!seekInProgress && generation == positionReadGeneration.get()) {
-                                cachedPositionMs = (seconds * 1000.0).toLong().coerceAtLeast(0L)
+                            synchronized(seekStateLock) {
+                                if (!seekInProgress && generation == positionReadGeneration.get()) {
+                                    val positionMs = (seconds * 1000.0).toLong().coerceAtLeast(0L)
+                                    cachedPositionMs = positionMs
+                                    audioClock?.acceptSample(positionMs, SystemClock.elapsedRealtimeNanos())
+                                }
                             }
                         }
                 }
@@ -281,8 +297,12 @@ internal class MpvVideoPlaybackEngine(
     override fun eventProperty(property: String, value: Double) {
         when (property) {
             "time-pos" -> {
-                if (!seekInProgress) {
-                    cachedPositionMs = (value * 1000.0).toLong().coerceAtLeast(0L)
+                synchronized(seekStateLock) {
+                    if (!seekInProgress) {
+                        val positionMs = (value * 1000.0).toLong().coerceAtLeast(0L)
+                        cachedPositionMs = positionMs
+                        audioClock?.acceptSample(positionMs, SystemClock.elapsedRealtimeNanos())
+                    }
                 }
             }
             "duration/full" -> {
@@ -296,6 +316,7 @@ internal class MpvVideoPlaybackEngine(
             "pause" -> paused = value
             "eof-reached" -> eofReached = value
         }
+        audioClock?.setPlaying(!paused && !eofReached, SystemClock.elapsedRealtimeNanos())
         mainHandler.post {
             listener?.onPlaybackStateChanged()
         }
@@ -313,6 +334,8 @@ internal class MpvVideoPlaybackEngine(
                     cachedDurationMs = ((MPVLib.getPropertyDouble("duration/full") ?: 0.0) * 1000.0)
                         .toLong()
                     paused = MPVLib.getPropertyBoolean("pause") ?: true
+                    audioClock?.reset(0L, SystemClock.elapsedRealtimeNanos())
+                    audioClock?.setPlaying(!paused, SystemClock.elapsedRealtimeNanos())
                     notifyReadyState()
                 }
                 MPVLib.MpvEvent.SEEK -> {
@@ -330,12 +353,13 @@ internal class MpvVideoPlaybackEngine(
                 }
                 MPVLib.MpvEvent.END_FILE -> {
                     paused = true
+                    audioClock?.setPlaying(false, SystemClock.elapsedRealtimeNanos())
                     listener?.onCompleted()
                 }
                 MPVLib.MpvEvent.SHUTDOWN -> {
                     if (playbackPhase != PlaybackPhase.RELEASED) {
                         playbackPhase = PlaybackPhase.ERROR
-                        listener?.onError("视频播放器已停止")
+                        listener?.onError("${mediaLabel}播放器已停止")
                     }
                 }
             }
@@ -347,7 +371,7 @@ internal class MpvVideoPlaybackEngine(
             playbackPhase = PlaybackPhase.ERROR
             paused = true
             eofReached = true
-            listener?.onError("视频加载失败：$message（$error）")
+            listener?.onError("${mediaLabel}加载失败：$message（$error）")
         }
     }
 
@@ -373,7 +397,7 @@ internal class MpvVideoPlaybackEngine(
     }
 
     private companion object {
-        const val TAG = "MpvVideoEngine"
+        const val TAG = "MpvPlaybackEngine"
         const val DEFAULT_AUDIO_STREAM = -1
     }
 

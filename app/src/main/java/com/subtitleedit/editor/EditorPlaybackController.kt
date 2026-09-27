@@ -13,6 +13,7 @@ import android.widget.SeekBar
 import com.subtitleedit.R
 import com.subtitleedit.databinding.ActivityEditorBinding
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.mpv.EditorMpvAudioPlayer
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleHighlightCursor
 import com.subtitleedit.util.TimeUtils
@@ -62,9 +63,17 @@ internal class EditorPlaybackController(
         if (!mediaType.hasPlayableMedia) return
 
         engine = when (mediaType) {
-            EditorMediaType.AUDIO -> MediaPlayerPlaybackEngine()
-            EditorMediaType.VIDEO -> MpvVideoPlaybackEngine(
-                view = binding.mpvView,
+            EditorMediaType.AUDIO -> MpvPlaybackEngine(
+                playerHost = EditorMpvAudioPlayer(context),
+                mediaLabel = "音频",
+                interpolateAudioPosition = true,
+                configDir = context.filesDir,
+                cacheDir = context.cacheDir
+            )
+            EditorMediaType.VIDEO -> MpvPlaybackEngine(
+                playerHost = binding.mpvView,
+                mediaLabel = "视频",
+                interpolateAudioPosition = false,
                 configDir = context.filesDir,
                 cacheDir = context.cacheDir
             )
@@ -79,7 +88,12 @@ internal class EditorPlaybackController(
                         binding.tvVideoStatus.visibility = View.GONE
                         showVideoControls(scheduleAutoHide = isPlaying)
                     }
-                    onMediaReady(durationMs, audioStreamIndex)
+                    // Audio playback can use a different file or track than waveform analysis.
+                    // Keep the analysis stream index supplied by media preparation.
+                    onMediaReady(
+                        durationMs,
+                        if (mediaType == EditorMediaType.VIDEO) audioStreamIndex else null
+                    )
                 }
 
                 override fun onPlaybackStateChanged() {
@@ -137,12 +151,6 @@ internal class EditorPlaybackController(
         isLimitedRangePlaybackActive = false
         val clampedTime = timeMs.coerceIn(0L, durationMs)
         playbackEngine.seekTo(clampedTime)
-        if (mediaType == EditorMediaType.AUDIO) {
-            // MediaPlayer seeks asynchronously. Keep the head on its last actual position
-            // until OnSeekComplete supplies the new media-clock position.
-            stopProgressUpdate()
-            return
-        }
         currentPositionMs = clampedTime
         updatePlayerUiAtKnownPosition(clampedTime)
         if (isPlaying) startProgressUpdate()
@@ -157,7 +165,9 @@ internal class EditorPlaybackController(
     }
 
     fun replaceVideoSubtitleTrack(file: File?) {
-        (engine as? MpvVideoPlaybackEngine)?.replaceSubtitleTrack(file)
+        if (mediaType == EditorMediaType.VIDEO) {
+            (engine as? MpvPlaybackEngine)?.replaceSubtitleTrack(file)
+        }
     }
 
     fun release() {
