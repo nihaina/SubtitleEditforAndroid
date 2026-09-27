@@ -18,6 +18,7 @@ class ToolsActivity : AppCompatActivity() {
         setContentView(binding.root)
         ToolCardShadow.remove(
             binding.cardBatchConvert,
+            binding.cardTranscriptMatch,
             binding.cardSubtitleFormat,
             binding.cardAutoTranslate,
             binding.cardVocalSeparation,
@@ -44,6 +45,10 @@ class ToolsActivity : AppCompatActivity() {
     private fun setupButtons() {
         binding.cardBatchConvert.setOnClickListener {
             startActivity(Intent(this, BatchConvertActivity::class.java))
+        }
+
+        binding.cardTranscriptMatch.setOnClickListener {
+            startActivity(Intent(this, TranscriptMatchActivity::class.java))
         }
 
         binding.cardSubtitleFormat.setOnClickListener {

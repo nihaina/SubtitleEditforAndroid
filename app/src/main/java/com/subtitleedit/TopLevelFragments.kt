@@ -139,6 +139,7 @@ class ToolsFragment : Fragment() {
         )
         ToolCardShadow.remove(
             viewBinding.cardBatchConvert,
+            viewBinding.cardTranscriptMatch,
             viewBinding.cardSubtitleFormat,
             viewBinding.cardAutoTranslate,
             viewBinding.cardVocalSeparation,
@@ -147,6 +148,7 @@ class ToolsFragment : Fragment() {
             viewBinding.cardAutoTimestamp
         )
         viewBinding.cardBatchConvert.setOnClickListener { open(BatchConvertActivity::class.java) }
+        viewBinding.cardTranscriptMatch.setOnClickListener { open(TranscriptMatchActivity::class.java) }
         viewBinding.cardSubtitleFormat.setOnClickListener { open(SubtitleFormatSelectActivity::class.java) }
         viewBinding.cardAutoTranslate.setOnClickListener { open(AutoTranslateActivity::class.java) }
         viewBinding.cardMediaConvert.setOnClickListener { open(MediaConvertActivity::class.java) }

@@ -96,6 +96,42 @@ class VadTimestampGenerator(private val context: Context) {
         }
     }
 
+    /** Reuses this VAD detector and the project's fixed cutter for bounded speech windows. */
+    internal fun generateFixedSpeechWindows(pcmFile: File, seconds: Int): List<FixedSpeechWindow> {
+        require(seconds > 0) { "VAD 分段时长必须大于 0" }
+        val totalSamples = Pcm16WavReader(pcmFile).use { reader ->
+            require(reader.sampleRate == SAMPLE_RATE) { "VAD 音频必须是 16kHz PCM" }
+            reader.totalSamples
+        }
+        require(totalSamples > 0L) { "音频没有可对齐的样本" }
+        val speech = generateSegments(pcmFile)
+        check(speech.isNotEmpty()) { "VAD 未检测到语音，请检查音频或 VAD 模型配置" }
+        val speechRanges = speech.map { segment ->
+            FixedVadSegmenter.Range(
+                segment.startSample.toLong(),
+                segment.startSample.toLong() + segment.sampleCount,
+            )
+        }
+        val periodSamples = seconds.toLong() * SAMPLE_RATE
+        val silences = FixedVadSegmenter.silencesFromSpeech(totalSamples, speechRanges)
+        return FixedVadSegmenter.split(
+            totalSamples, periodSamples, silences, maxSegmentSamples = periodSamples,
+        ).mapNotNull { range ->
+            val voiced = speechRanges.sumOf { detected ->
+                (minOf(range.endSample, detected.endSample) -
+                    maxOf(range.startSample, detected.startSample)).coerceAtLeast(0L)
+            }
+            if (voiced > 0L) FixedSpeechWindow(range.startSample, range.endSample, voiced)
+            else null
+        }
+    }
+
+    internal data class FixedSpeechWindow(
+        val startSample: Long,
+        val endSample: Long,
+        val voicedSamples: Long,
+    )
+
     /**
      * 初始化 VAD
      */

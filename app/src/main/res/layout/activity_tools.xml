@@ -104,6 +104,7 @@
 
                 </com.google.android.material.card.MaterialCardView>
 
+
                 <!-- 字幕文本格式化卡片 -->
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardSubtitleFormat"
@@ -343,6 +344,32 @@
 
                 </com.google.android.material.card.MaterialCardView>
 
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardTranscriptMatch"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp" android:clickable="true" android:focusable="true"
+                    app:cardCornerRadius="12dp" app:cardElevation="4dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:gravity="center_vertical" android:padding="16dp">
+                        <ImageView android:layout_width="48dp" android:layout_height="48dp"
+                            android:background="@drawable/bg_icon_circle" android:padding="8dp"
+                            android:src="@drawable/ic_transcript_match"
+                            android:contentDescription="@string/transcript_match_title" />
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:layout_marginStart="16dp"
+                            android:orientation="vertical">
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:text="@string/transcript_match_title" android:textSize="16sp"
+                                android:textStyle="bold" android:textColor="@color/on_surface" />
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp" android:text="@string/transcript_match_description"
+                                android:textSize="14sp" android:textColor="@color/on_surface_variant" />
+                        </LinearLayout>
+                        <ImageView android:layout_width="24dp" android:layout_height="24dp"
+                            android:src="@drawable/ic_arrow_right"
+                            android:contentDescription="@string/activity_tools_contentdescription_01" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
                 <!-- 音视频转换卡片 -->
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardMediaConvert"

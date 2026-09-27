@@ -75,6 +75,9 @@ internal class QwenHuggingFaceTokenizer private constructor(
             return available
         }
 
+        fun hasRequiredFiles(directory: File?): Boolean = directory?.isDirectory == true &&
+            REQUIRED_FILES.all { File(directory, it).let { file -> file.isFile && file.length() > 0L } }
+
         private fun ensureLoaded() {
             if (loadAttempted) return
             synchronized(this) {
