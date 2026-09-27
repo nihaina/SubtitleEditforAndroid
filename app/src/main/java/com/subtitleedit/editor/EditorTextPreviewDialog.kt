@@ -20,7 +20,7 @@ import com.subtitleedit.adapter.TranslationPreviewAdapter
 import com.subtitleedit.adapter.TranslationPreviewItem
 import com.subtitleedit.view.DraggableRecyclerView
 
-/** AI 翻译与快速转录共用的结果预览对话框。 */
+/** AI 翻译、快速转录与字幕合并共用的结果预览对话框。 */
 internal class EditorTextPreviewDialog(private val activity: Activity) {
 
     /**

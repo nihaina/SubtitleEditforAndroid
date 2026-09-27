@@ -119,6 +119,7 @@ class EditorActivity : AppCompatActivity() {
 
     private lateinit var translationController: EditorTranslationController
     private lateinit var transcribeController: EditorTranscribeController
+    private lateinit var textPreviewDialog: EditorTextPreviewDialog
     private lateinit var ttsController: EditorTtsController
     private lateinit var searchController: EditorSearchController
     private lateinit var editorCoordinator: EditorCoordinator
@@ -767,11 +768,11 @@ class EditorActivity : AppCompatActivity() {
         scheduleSubtitlePreview()
     }
     private fun setupAiControllers() {
-        val previewDialog = EditorTextPreviewDialog(this)
+        textPreviewDialog = EditorTextPreviewDialog(this)
         translationController = EditorTranslationController(
             activity = this,
             scope = lifecycleScope,
-            previewDialog = previewDialog,
+            previewDialog = textPreviewDialog,
             applyTexts = { appliedItems -> applyPreviewTexts(appliedItems, "翻译") },
             saveDraft = ::saveTranslationDraft,
             showMessage = ::showShortToast,
@@ -782,7 +783,7 @@ class EditorActivity : AppCompatActivity() {
             activity = this,
             scope = lifecycleScope,
             cacheDir = cacheDir,
-            previewDialog = previewDialog,
+            previewDialog = textPreviewDialog,
             applyTexts = { appliedItems -> applyPreviewTexts(appliedItems, "转录") },
             showMessage = ::showShortToast,
             speechRecognitionService = (application as SubtitleEditApplication).dependencies.speechRecognitionService
@@ -2247,12 +2248,98 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun mergeSubtitles(maxGapMs: Long) {
-        val mergedEntries = SubtitleEntryOps.mergeAdjacent(stateModel.subtitleEntries, maxGapMs)
-        val removedCount = stateModel.subtitleEntries.size - mergedEntries.size
-        if (removedCount == 0) {
+        val groups = buildMergeGroups(stateModel.subtitleEntries, maxGapMs)
+        val mergeGroups = groups.filter { it.entries.size > 1 }
+        if (mergeGroups.isEmpty()) {
             showShortToast(getString(R.string.merge_subtitles_no_match))
             return
         }
+
+        val previewItems = mergeGroups.map { group ->
+            TranslationPreviewItem(
+                entryPosition = group.startPosition,
+                originalText = group.entries.joinToString("\n") { it.text },
+                translatedText = group.mergedEntry.text
+            )
+        }
+        textPreviewDialog.show(
+            title = "字幕合并预览",
+            editTitle = "编辑合并文本",
+            previewItems = previewItems,
+            onApply = { appliedItems ->
+                applyMergedPreview(groups, appliedItems)
+            }
+        )
+    }
+
+    private data class MergeGroup(
+        val startPosition: Int,
+        val entries: List<SubtitleEntry>,
+        val mergedEntry: SubtitleEntry
+    )
+
+    /** 按实际合并规则保留每个连续分组，供预览和应用阶段共享。 */
+    private fun buildMergeGroups(
+        entries: List<SubtitleEntry>,
+        maxGapMs: Long
+    ): List<MergeGroup> {
+        if (entries.isEmpty()) return emptyList()
+
+        val groups = mutableListOf<MergeGroup>()
+        var startPosition = 0
+        var currentEntries = mutableListOf(entries.first())
+        var previousEntry = entries.first()
+
+        entries.drop(1).forEachIndexed { offset, entry ->
+            val position = offset + 1
+            val shouldMerge = entry.startTime <= previousEntry.endTime ||
+                entry.startTime - previousEntry.endTime <= maxGapMs
+            if (shouldMerge) {
+                currentEntries += entry
+            } else {
+                groups += createMergeGroup(startPosition, currentEntries)
+                startPosition = position
+                currentEntries = mutableListOf(entry)
+            }
+            previousEntry = entry
+        }
+        groups += createMergeGroup(startPosition, currentEntries)
+        return groups
+    }
+
+    private fun createMergeGroup(
+        startPosition: Int,
+        entries: List<SubtitleEntry>
+    ): MergeGroup {
+        val mergedEntry = entries.first().copy()
+        entries.drop(1).forEach { entry ->
+            mergedEntry.startTime = minOf(mergedEntry.startTime, entry.startTime)
+            mergedEntry.endTime = maxOf(mergedEntry.endTime, entry.endTime)
+            mergedEntry.text = "${mergedEntry.text}；${entry.text}"
+            mergedEntry.endTimeModified = mergedEntry.endTimeModified || entry.endTimeModified
+        }
+        return MergeGroup(startPosition, entries.toList(), mergedEntry)
+    }
+
+    private fun applyMergedPreview(
+        groups: List<MergeGroup>,
+        appliedItems: List<TranslationPreviewItem>
+    ) {
+        if (appliedItems.isEmpty()) {
+            showShortToast("未应用任何字幕合并")
+            return
+        }
+
+        val appliedByStart = appliedItems.associateBy { it.entryPosition }
+        val mergedEntries = groups.flatMap { group ->
+            val appliedItem = appliedByStart[group.startPosition]
+            if (group.entries.size > 1 && appliedItem != null) {
+                listOf(group.mergedEntry.copy(text = appliedItem.translatedText))
+            } else {
+                group.entries.map { it.copy() }
+            }
+        }
+        val removedCount = stateModel.subtitleEntries.size - mergedEntries.size
 
         cutPasteController.clear()
         val historyBefore = currentHistoryListState()
