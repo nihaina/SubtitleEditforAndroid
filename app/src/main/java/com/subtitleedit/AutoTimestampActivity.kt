@@ -1019,7 +1019,7 @@ class AutoTimestampActivity : AppCompatActivity() {
                 }
                 appendOperationLog("  固定分段：${segmentSeconds}s")
                 if (settingsManager.isSpeechFixedVadSegmentationEnabled(model.modelType)) {
-                    appendOperationLog("  固定分段 VAD 切点：启用（阈值 0.01）")
+                    appendOperationLog("  固定分段 VAD 相对静音切点：启用（窗口内最低语音概率）")
                 }
             }
             return
@@ -1048,7 +1048,7 @@ class AutoTimestampActivity : AppCompatActivity() {
             )
             appendOperationLog(
                 if (settingsManager.isSpeechFixedVadSegmentationEnabled()) {
-                    "  固定分段 VAD 切点：启用（阈值 0.01）"
+                    "  固定分段 VAD 相对静音切点：启用（窗口内最低语音概率）"
                 } else {
                     "  VAD 检测与分段设置：不使用"
                 }

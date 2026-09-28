@@ -329,7 +329,7 @@
     <string name="activity_speech_to_subtitle_settings_text_53">设为 0 时仅合并重叠或首尾相接的字幕段</string>
     <string name="activity_speech_to_subtitle_settings_text_54" translatable="false">150</string>
     <string name="speech_merge_smart">智能合并</string>
-    <string name="speech_merge_smart_hint">按 150、200、230、250、300、350、400 毫秒逐轮合并，优先合并字数较少的相邻段</string>
+    <string name="speech_merge_smart_hint">自动进行多轮合并</string>
     <string name="speech_merge_filter_long">过滤较长段</string>
     <string name="speech_merge_max_characters">最大字数</string>
     <string name="activity_speech_to_subtitle_settings_text_55">ASR转录</string>

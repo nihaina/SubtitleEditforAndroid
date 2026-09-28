@@ -33,6 +33,7 @@ class WhisperRecognizer(
     companion object {
         private const val TAG = "WhisperRecognizer"
         private const val SAMPLE_RATE = 16000 // Whisper 需要 16kHz
+        private const val FIXED_CUT_VAD_FRAME_SAMPLES = 512
         private const val VAD_CONTEXT_PADDING_MS = 500L
     }
 
@@ -257,7 +258,7 @@ class WhisperRecognizer(
                 Log.d(
                     TAG,
                     if (useFixedVadSegmentation) {
-                        "固定分段将使用 VAD 静音切点，基准时长 ${fixedSegmentSeconds}s"
+                        "固定分段将使用 VAD 相对静音切点，基准时长 ${fixedSegmentSeconds}s"
                     } else if (isSenseVoiceNpu()) {
                         "已禁用 VAD 分段，将使用 SenseVoice NPU 模型固定时长 ${fixedSegmentSeconds}s"
                     } else {
@@ -542,10 +543,10 @@ class WhisperRecognizer(
         )
     }
 
-    private fun detectFixedSegmentationSilences(
+    private fun detectFixedSegmentationVadProbabilities(
         reader: Pcm16WavReader,
         isCancelled: () -> Boolean,
-    ): List<FixedVadSegmenter.Range> {
+    ): FloatArray {
         val settings = settingsManager()
         val externalPath = if (settings.isVadUseBuiltInModel()) null else settings.getVadModelPath()
         val resolvedModel = externalPath?.let { path ->
@@ -556,25 +557,32 @@ class WhisperRecognizer(
             assetManager = if (resolvedModel == null) context.assets else null,
             config = createVadConfig(
                 modelPath = resolvedModel ?: "silero_vad.onnx",
-                threshold = 0.01f,
+                threshold = settings.getVadThreshold(),
                 minSilenceDuration = settings.getVadMinSilenceDuration(),
                 minSpeechDuration = settings.getVadMinSpeechDuration(),
                 maxSpeechDuration = 60f,
             ),
         )
         return try {
-            val speech = detectSpeechSegments(
-                reader, vadOverride = fixedVad, isCancelled = isCancelled, failOnError = true
-            )
-            FixedVadSegmenter.silencesFromSpeech(
-                reader.totalSamples,
-                speech.map { segment ->
-                    FixedVadSegmenter.Range(
-                        segment.startSample.toLong(),
-                        segment.startSample.toLong() + segment.sampleCount
+            val frameCount = reader.totalSamples / FIXED_CUT_VAD_FRAME_SAMPLES
+            require(frameCount <= Int.MAX_VALUE) { "音频过长，无法计算 VAD 切点" }
+            val probabilities = FloatArray(frameCount.toInt())
+            var frameIndex = 0
+            reader.forEachChunk(chunkSamples = FIXED_CUT_VAD_FRAME_SAMPLES * 16) { chunk, _ ->
+                if (isCancelled()) throw CancellationException("用户取消")
+                for (offset in 0..chunk.size - FIXED_CUT_VAD_FRAME_SAMPLES
+                    step FIXED_CUT_VAD_FRAME_SAMPLES) {
+                    val probability = fixedVad.compute(
+                        chunk.copyOfRange(offset, offset + FIXED_CUT_VAD_FRAME_SAMPLES)
                     )
-                },
-            )
+                    require(probability.isFinite() && probability in 0f..1f) {
+                        "VAD 返回无效语音概率"
+                    }
+                    probabilities[frameIndex++] = probability
+                }
+            }
+            check(frameIndex == probabilities.size) { "VAD 语音概率计算不完整" }
+            probabilities
         } finally {
             fixedVad.release()
         }
@@ -801,17 +809,21 @@ class WhisperRecognizer(
                         (isSenseVoice() || isParakeet()) &&
                         settingsManager().isSpeechFixedVadSegmentationEnabled(modelType)
                     val segmentRanges = if (useFixedVadSegmentation) {
-                        progressCallback(0, "正在用 VAD 查找静音切点...", null)
-                        val silences = detectFixedSegmentationSilences(reader, isCancelled)
-                        FixedVadSegmenter.split(
+                        progressCallback(0, "正在用 VAD 查找相对静音切点...", null)
+                        val probabilities = detectFixedSegmentationVadProbabilities(reader, isCancelled)
+                        FixedVadSegmenter.splitByLowestVadProbability(
                             totalSamples = totalSamples,
                             periodSamples = segmentDurationSamples,
-                            silences = silences,
+                            probabilities = probabilities,
+                            frameSamples = FIXED_CUT_VAD_FRAME_SAMPLES,
                             maxSegmentSamples = if (isSenseVoiceNpu()) {
                                 segmentDurationSamples
                             } else {
                                 segmentDurationSamples + segmentDurationSamples / 2L
-                            }
+                            },
+                            checkCancelled = {
+                                if (isCancelled()) throw CancellationException("用户取消")
+                            },
                         )
                     } else {
                         FixedVadSegmenter.split(totalSamples, segmentDurationSamples, emptyList())
@@ -819,7 +831,7 @@ class WhisperRecognizer(
                     Log.d(
                         TAG,
                         if (useFixedVadSegmentation) {
-                            "按 ${segmentDurationSeconds}s 基准和 VAD 静音切点分段"
+                            "按 ${segmentDurationSeconds}s 基准和 VAD 相对静音切点分段"
                         } else if (isSenseVoiceNpu()) {
                             "未使用 VAD，按 SenseVoice NPU 模型固定时长 ${segmentDurationSeconds}s 分段"
                         } else {

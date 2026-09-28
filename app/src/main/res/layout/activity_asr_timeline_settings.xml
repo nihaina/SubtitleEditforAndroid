@@ -289,7 +289,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="16dp"
                         android:minHeight="40dp"
-                        android:text="VAD 分段：在固定时长附近的静音处切分"
+                        android:text="VAD 分段：在固定时长附近的相对静音处切分"
                         android:textColor="@color/on_surface"
                         android:textSize="14sp" />
 
@@ -297,7 +297,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
-                        android:text="使用当前 VAD 模型，以最低阈值 0.01 检测静音；在固定切点前后半个分段时长内找最近静音，没有则按固定时长切分"
+                        android:text="使用当前 VAD 模型，在固定切点前后半个分段时长内寻找语音概率最低的连续区间；无需达到固定静音阈值（模型最大时长仍会限制搜索范围）"
                         android:textColor="@color/on_surface_variant"
                         android:textSize="12sp" />
 

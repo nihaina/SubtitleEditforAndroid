@@ -839,7 +839,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             val timelineName = if (qwenForcedAlignment) "强制对齐" else "实验打轴"
             appendRuntimeLog("  VAD：禁用，由$timelineName 划分语音段")
             if (settingsManager.isSpeechFixedVadSegmentationEnabled(modelType)) {
-                appendRuntimeLog("  固定分段 VAD 切点：启用（当前 VAD 模型，阈值 0.01）")
+                appendRuntimeLog("  固定分段 VAD 相对静音切点：启用（窗口内最低语音概率）")
             }
             appendRuntimeLog(
                 "  $timelineName 模型：${TokenTimestampGenerator.modelDisplayName(settingsManager)} " +
@@ -879,7 +879,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         }
         appendRuntimeLog("  VAD：${if (useVad) "启用" else "禁用，$fixedSegmentText"}")
         if (!useVad && settingsManager.isSpeechFixedVadSegmentationEnabled(modelType)) {
-            appendRuntimeLog("  固定分段 VAD 切点：启用（当前 VAD 模型，阈值 0.01）")
+            appendRuntimeLog("  固定分段 VAD 相对静音切点：启用（窗口内最低语音概率）")
         }
         if (useVad) {
             appendRuntimeLog("  VAD 模型：${if (settingsManager.isVadUseBuiltInModel()) "内置 silero_vad.onnx" else displayModelPath(vadModelPath)}")
