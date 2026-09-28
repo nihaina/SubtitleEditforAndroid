@@ -79,7 +79,7 @@ internal class EditorTranslationController(
             .setTitle("AI 翻译")
             .setMessage(
                 "将使用 $providerName / $model 翻译选中的 ${selectedEntries.size} 条字幕\n" +
-                    "目标语言：$targetLanguage\n\n每 300 条字幕会作为一条对话消息发送，并按原时间轴格式处理。"
+                    "目标语言：$targetLanguage\n\n每 150 条字幕会作为一条对话消息发送，并按原时间轴格式处理。"
             )
             .setPositiveButton("开始翻译") { _, _ ->
                 startTranslation(

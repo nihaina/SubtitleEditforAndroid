@@ -7,7 +7,7 @@ internal const val PUNCTUATION_PREDICTION_PROMPT =
     "以下为换行分离的字幕文本，帮我逐行添加标点符号，不修改原文，不做额外说明，以原格式输出"
 
 object SubtitlePunctuationPredictor {
-    private const val ENTRIES_PER_BATCH = 300
+    private const val ENTRIES_PER_BATCH = 150
     private val matchingIgnoredCharacters = Regex("""[\p{P}\p{Z}\p{Cc}\p{Cf}\s]""")
     private val punctuationOnlyText = Regex("""[\p{P}\p{Z}\p{Cc}\p{Cf}\s]*""")
 
@@ -53,7 +53,7 @@ object SubtitlePunctuationPredictor {
         }
     }
 
-    /** Each batch contains only the next 300 prepared cues, without carrying any previous cue. */
+    /** Each batch contains only the next 150 prepared cues, without carrying any previous cue. */
     suspend fun predictSubtitleEntriesInBatches(
         entries: List<SubtitleEntry>,
         requestPrediction: suspend (String) -> String

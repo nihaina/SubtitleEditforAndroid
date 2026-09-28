@@ -12,12 +12,12 @@ import java.io.IOException
 class AiTranslationProtocolTest {
 
     @Test
-    fun batches_areAlwaysSplitAtThreeHundredSubtitles() {
+    fun batches_areAlwaysSplitAtOneHundredFiftySubtitles() {
         val batches = splitSubtitleTranslationBatches(
-            List(601) { index -> testSubtitle(index + 1, "字幕${index + 1}") }
+            List(301) { index -> testSubtitle(index + 1, "字幕${index + 1}") }
         )
 
-        assertEquals(listOf(300, 300, 1), batches.map { it.size })
+        assertEquals(listOf(150, 150, 1), batches.map { it.size })
     }
 
     @Test

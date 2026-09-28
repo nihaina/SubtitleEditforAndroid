@@ -5,7 +5,7 @@ import com.subtitleedit.util.SubtitleParser.SubtitleFormat
 import java.io.IOException
 import java.util.Locale
 
-private const val MAX_SUBTITLES_PER_TRANSLATION_REQUEST = 300
+private const val MAX_SUBTITLES_PER_TRANSLATION_REQUEST = 150
 private const val TRANSLATION_BLOCK_START = "start"
 private const val TRANSLATION_BLOCK_END = "end"
 const val DEFAULT_AI_CONTEXT_WINDOW_TOKENS = 256 * 1024
