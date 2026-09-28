@@ -850,7 +850,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             )
             appendRuntimeLog(
                 "  合并语音段：${if (settingsManager.isSpeechTokenTimestampMergeEnabled()) {
-                    "启用，最大间隔 ${settingsManager.getSpeechTokenTimestampMergeGapMs()}ms"
+                    "启用，${settingsManager.speechTokenTimestampMergeSummary()}"
                 } else {
                     "关闭"
                 }}"

@@ -9,6 +9,21 @@ internal const val PUNCTUATION_PREDICTION_PROMPT =
 object SubtitlePunctuationPredictor {
     private const val ENTRIES_PER_BATCH = 300
     private val matchingIgnoredCharacters = Regex("""[\p{P}\p{Z}\p{Cc}\p{Cf}\s]""")
+    private val punctuationOnlyText = Regex("""[\p{P}\p{Z}\p{Cc}\p{Cf}\s]*""")
+
+    fun prepareEntries(entries: List<SubtitleEntry>): List<SubtitleEntry> {
+        val punctuation = "，,、。．.？?！!：:；;…".toSet()
+        val options = SubtitleFormattingOptions(
+            removeSpaces = false,
+            startPunctuation = punctuation,
+            endPunctuation = punctuation
+        )
+        return entries.mapNotNull { entry ->
+            SubtitleTextFormatter.format(entry.text, options)
+                .takeUnless { punctuationOnlyText.matches(it) }
+                ?.let { entry.copy(text = it) }
+        }
+    }
 
     class Session(private val entries: List<SubtitleEntry>) {
         val totalCount: Int get() = entries.size
@@ -49,7 +64,7 @@ object SubtitlePunctuationPredictor {
         response: String,
         startPosition: Int = 1
     ): List<SubtitleEntry> {
-        val content = extractSemanticMergeResponse(response)
+        val content = extractSubtitleAiResponse(response)
             .replace("\r\n", "\n").replace('\r', '\n')
         val sequences = entries.mapIndexed { offset, entry ->
             entry.index.takeIf { it > 0 } ?: (startPosition + offset)

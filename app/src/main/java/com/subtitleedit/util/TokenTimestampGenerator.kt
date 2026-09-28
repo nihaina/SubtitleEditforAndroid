@@ -39,7 +39,10 @@ class TokenTimestampGenerator(context: Context) {
         val segments = if (settingsManager.isSpeechTokenTimestampMergeEnabled()) {
             ForcedAlignmentSegmenter.mergeSegments(
                 segments = aligned,
-                maxGapMs = settingsManager.getSpeechTokenTimestampMergeGapMs()
+                maxGapMs = settingsManager.getSpeechTokenTimestampMergeGapMs(),
+                smart = settingsManager.isSpeechTokenTimestampSmartMergeEnabled(),
+                maxCharacters = settingsManager.getSpeechTokenTimestampMergeMaxCharacters()
+                    .takeIf { settingsManager.isSpeechTokenTimestampLongSegmentFilterEnabled() }
             ).map { Segment(it.startTimeMs, it.endTimeMs, it.text) }
         } else {
             aligned.map { Segment(it.startTimeMs, it.endTimeMs, it.text) }

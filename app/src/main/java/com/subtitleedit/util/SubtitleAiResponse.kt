@@ -1,7 +1,7 @@
 package com.subtitleedit.util
 
 /** Keep every returned block; a long response can contain several fenced sections. */
-internal fun extractSemanticMergeResponse(response: String): String {
+internal fun extractSubtitleAiResponse(response: String): String {
     val marked = Regex("(?is)\\[\\[PUNCTUATED_TEXT\\]\\](.*?)\\[\\[/PUNCTUATED_TEXT\\]\\]")
         .findAll(response).map { it.groupValues[1].trim() }.filter { it.isNotBlank() }.toList()
     if (marked.isNotEmpty()) return marked.joinToString("\n")

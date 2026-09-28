@@ -35,11 +35,6 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_AI_CONTEXT_WINDOW_TOKENS = "ai_context_window_tokens"
         private const val KEY_AI_REASONING_LEVEL = "ai_reasoning_level"
         private const val KEY_AI_TRANSLATION_PROVIDER = "ai_translation_provider"
-        private const val KEY_AI_SEMANTIC_PROVIDER = "ai_semantic_provider"
-        private const val KEY_AI_SEMANTIC_MODEL = "ai_semantic_model"
-        private const val KEY_AI_SEMANTIC_CONTEXT_WINDOW_TOKENS = "ai_semantic_context_window_tokens"
-        private const val KEY_AI_SEMANTIC_REASONING_LEVEL = "ai_semantic_reasoning_level"
-        private const val KEY_AI_SEMANTIC_CUSTOM_PROMPT = "ai_semantic_custom_prompt"
         private const val KEY_AI_PUNCTUATION_PROVIDER = "ai_punctuation_provider"
         private const val KEY_AI_PUNCTUATION_MODEL = "ai_punctuation_model"
         private const val KEY_AI_PUNCTUATION_CONTEXT_WINDOW_TOKENS = "ai_punctuation_context_window_tokens"
@@ -225,14 +220,6 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putString(KEY_AI_TRANSLATION_PROVIDER, provider).apply()
     }
 
-    fun getAiSemanticProvider(): String =
-        prefs.getString(KEY_AI_SEMANTIC_PROVIDER, null)?.takeIf { AiProviderConfig.providers.any { p -> p.id == it } }
-            ?: getAiProvider()
-
-    fun setAiSemanticProvider(provider: String) {
-        prefs.edit().putString(KEY_AI_SEMANTIC_PROVIDER, provider).apply()
-    }
-
     fun getAiPunctuationProvider(): String =
         prefs.getString(KEY_AI_PUNCTUATION_PROVIDER, null)?.takeIf { AiProviderConfig.providers.any { p -> p.id == it } }
             ?: getAiProvider()
@@ -329,16 +316,6 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putString(KEY_AI_CUSTOM_PROMPT, prompt).apply()
     }
 
-    /** 获取语义合并自定义提示词 */
-    fun getAiSemanticCustomPrompt(): String {
-        return prefs.getString(KEY_AI_SEMANTIC_CUSTOM_PROMPT, "") ?: ""
-    }
-
-    /** 设置语义合并自定义提示词 */
-    fun setAiSemanticCustomPrompt(prompt: String) {
-        prefs.edit().putString(KEY_AI_SEMANTIC_CUSTOM_PROMPT, prompt).apply()
-    }
-
     /** 获取标点预测自定义提示词 */
     fun getAiPunctuationCustomPrompt(): String {
         return prefs.getString(KEY_AI_PUNCTUATION_CUSTOM_PROMPT, "") ?: ""
@@ -389,35 +366,6 @@ class SettingsManager private constructor(context: Context) {
         provider: String = getAiProvider()
     ) {
         prefs.edit().putString(providerKey(KEY_AI_REASONING_LEVEL, provider), level.name).apply()
-    }
-
-    fun getAiSemanticModel(provider: String = getAiSemanticProvider()): String {
-        val defaultModel = AiProviderConfig.getProvider(provider).defaultModel
-        return prefs.getString(providerKey(KEY_AI_SEMANTIC_MODEL, provider), null)
-            ?.takeIf { it.isNotBlank() } ?: defaultModel
-    }
-
-    fun setAiSemanticModel(provider: String, model: String) {
-        prefs.edit().putString(providerKey(KEY_AI_SEMANTIC_MODEL, provider), model).apply()
-    }
-
-    fun getAiSemanticContextWindowTokens(provider: String = getAiSemanticProvider()): Int {
-        val key = providerKey(KEY_AI_SEMANTIC_CONTEXT_WINDOW_TOKENS, provider)
-        return prefs.getInt(key, AiProviderConfig.defaultContextWindowTokens(provider))
-            .coerceIn(MIN_AI_CONTEXT_WINDOW_TOKENS, MAX_AI_CONTEXT_WINDOW_TOKENS)
-    }
-
-    fun setAiSemanticContextWindowTokens(tokens: Int, provider: String = getAiSemanticProvider()) {
-        prefs.edit().putInt(providerKey(KEY_AI_SEMANTIC_CONTEXT_WINDOW_TOKENS, provider), tokens.coerceIn(MIN_AI_CONTEXT_WINDOW_TOKENS, MAX_AI_CONTEXT_WINDOW_TOKENS)).apply()
-    }
-
-    fun getAiSemanticReasoningLevel(provider: String = getAiSemanticProvider()): AiProviderConfig.ReasoningLevel =
-        prefs.getString(providerKey(KEY_AI_SEMANTIC_REASONING_LEVEL, provider), null)
-            ?.let { runCatching { AiProviderConfig.ReasoningLevel.valueOf(it) }.getOrNull() }
-            ?: AiProviderConfig.defaultReasoningLevel(provider)
-
-    fun setAiSemanticReasoningLevel(level: AiProviderConfig.ReasoningLevel, provider: String = getAiSemanticProvider()) {
-        prefs.edit().putString(providerKey(KEY_AI_SEMANTIC_REASONING_LEVEL, provider), level.name).apply()
     }
 
     fun getAiPunctuationModel(provider: String = getAiPunctuationProvider()): String {
@@ -1067,6 +1015,40 @@ class SettingsManager private constructor(context: Context) {
     fun setSpeechTokenTimestampMergeGapMs(gapMs: Int) {
         timelineKey("token_merge_gap_ms")?.let {
             prefs.edit().putInt(it, gapMs.coerceIn(0, 5000)).apply()
+        }
+    }
+
+    fun isSpeechTokenTimestampSmartMergeEnabled(): Boolean =
+        timelineKey("token_smart_merge_enabled")?.let { prefs.getBoolean(it, true) } ?: true
+
+    fun setSpeechTokenTimestampSmartMergeEnabled(enabled: Boolean) {
+        timelineKey("token_smart_merge_enabled")?.let { prefs.edit().putBoolean(it, enabled).apply() }
+    }
+
+    fun isSpeechTokenTimestampLongSegmentFilterEnabled(): Boolean =
+        timelineKey("token_merge_length_filter_enabled")?.let { prefs.getBoolean(it, true) } ?: true
+
+    fun setSpeechTokenTimestampLongSegmentFilterEnabled(enabled: Boolean) {
+        timelineKey("token_merge_length_filter_enabled")?.let { prefs.edit().putBoolean(it, enabled).apply() }
+    }
+
+    fun getSpeechTokenTimestampMergeMaxCharacters(): Int =
+        timelineKey("token_merge_max_characters")?.let { prefs.getInt(it, 25).coerceIn(15, 50) } ?: 25
+
+    fun setSpeechTokenTimestampMergeMaxCharacters(count: Int) {
+        timelineKey("token_merge_max_characters")?.let {
+            prefs.edit().putInt(it, count.coerceIn(15, 50)).apply()
+        }
+    }
+
+    fun speechTokenTimestampMergeSummary(): String = buildString {
+        if (isSpeechTokenTimestampSmartMergeEnabled()) {
+            append("智能合并 150/200/230/250/300/350/400ms")
+        } else {
+            append("最大间隔 ${getSpeechTokenTimestampMergeGapMs()}ms")
+        }
+        if (isSpeechTokenTimestampLongSegmentFilterEnabled()) {
+            append("，最多 ${getSpeechTokenTimestampMergeMaxCharacters()} 字")
         }
     }
 

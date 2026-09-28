@@ -3,12 +3,12 @@ package com.subtitleedit.util
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-class AiSemanticMergeProtocolTest {
+class SubtitleAiResponseTest {
     @Test
     fun readsAllFencedSubtitleBlocks() {
         val response = "合并结果：\n```text\n123 4\n```\n\n```text\n56\n78\n```"
 
-        assertEquals("123 4\n56\n78", extractSemanticMergeResponse(response))
+        assertEquals("123 4\n56\n78", extractSubtitleAiResponse(response))
     }
 
     @Test
@@ -16,11 +16,11 @@ class AiSemanticMergeProtocolTest {
         val response = "[[PUNCTUATED_TEXT]]123 4[[/PUNCTUATED_TEXT]]\n" +
             "[[PUNCTUATED_TEXT]]56\n78[[/PUNCTUATED_TEXT]]"
 
-        assertEquals("123 4\n56\n78", extractSemanticMergeResponse(response))
+        assertEquals("123 4\n56\n78", extractSubtitleAiResponse(response))
     }
 
     @Test
     fun plainResponsePreservesLineBreaksAndInternalSpaces() {
-        assertEquals("123 4\n56", extractSemanticMergeResponse("\n 123 4\n56\n"))
+        assertEquals("123 4\n56", extractSubtitleAiResponse("\n 123 4\n56\n"))
     }
 }

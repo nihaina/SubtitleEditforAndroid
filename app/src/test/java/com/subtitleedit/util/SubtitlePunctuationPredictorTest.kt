@@ -42,11 +42,11 @@ class SubtitlePunctuationPredictorTest {
     }
 
     @Test
-    fun formattingAndResponseExtractionMatchSemanticMerge() = runBlocking {
+    fun formattingAndResponseExtractionKeepPunctuationPredictionIndependent() = runBlocking {
         val source = subtitleEntries(301).flatMap { entry ->
             listOf(entry.copy(text = "，${entry.text}！"), entry.copy(text = "。”"))
         }
-        val prepared = SemanticSubtitleMerger.prepareSubtitleEntriesForAi(source)
+        val prepared = SubtitlePunctuationPredictor.prepareEntries(source)
         val requests = mutableListOf<String>()
 
         val result = SubtitlePunctuationPredictor.predictSubtitleEntriesInBatches(prepared) { text ->
@@ -56,7 +56,7 @@ class SubtitlePunctuationPredictorTest {
             val reply = blocks.chunked(150).joinToString("\n\n") { chunk ->
                 "```text\n" + chunk.joinToString("\n\n") + "\n```"
             }
-            extractSemanticMergeResponse(reply)
+            extractSubtitleAiResponse(reply)
         }
 
         assertEquals(listOf(300, 1), requests.map { text -> text.lines().count { it.startsWith("第") } })
@@ -89,7 +89,7 @@ class SubtitlePunctuationPredictorTest {
         }
         val result = SubtitlePunctuationPredictor.predictSubtitleEntriesInBatches(source) { text ->
             assertEquals("start\n1001\n你好\n\n世界\n\n1002\nHello  world\nend", text)
-            extractSemanticMergeResponse(
+            extractSubtitleAiResponse(
                 "[[PUNCTUATED_TEXT]]\r\n1001\r\n你好，\r\n\r\n世界！\r\n\r\n1002\r\nHello,  world!\r\n[[/PUNCTUATED_TEXT]]"
             )
         }
@@ -119,7 +119,7 @@ class SubtitlePunctuationPredictorTest {
 
     @Test
     fun punctuationOnlyDocumentDoesNotSendRequests() = runBlocking {
-        val prepared = SemanticSubtitleMerger.prepareSubtitleEntriesForAi(listOf(
+        val prepared = SubtitlePunctuationPredictor.prepareEntries(listOf(
             SubtitleEntry(text = "。”"), SubtitleEntry(text = "—\u200B")
         ))
         val result = SubtitlePunctuationPredictor.predictSubtitleEntriesInBatches(prepared) {

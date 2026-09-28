@@ -167,7 +167,25 @@
                         android:layout_height="wrap_content"
                         android:orientation="vertical">
 
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switchSenseVoiceSmartMerge"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:minHeight="40dp"
+                            android:text="@string/speech_merge_smart"
+                            android:textColor="@color/on_surface"
+                            android:textSize="14sp" />
+
                         <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/speech_merge_smart_hint"
+                            android:textColor="@color/on_surface_variant"
+                            android:textSize="12sp" />
+
+                        <TextView
+                            android:id="@+id/tvSenseVoiceMergeGapTitle"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="12dp"
@@ -176,6 +194,7 @@
                             android:textSize="14sp" />
 
                         <TextView
+                            android:id="@+id/tvSenseVoiceMergeGapHint"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
@@ -184,6 +203,7 @@
                             android:textSize="12sp" />
 
                         <LinearLayout
+                            android:id="@+id/rowSenseVoiceMergeGap"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:gravity="center_vertical"
@@ -200,6 +220,7 @@
                                 android:valueTo="5000" />
 
                             <com.google.android.material.textfield.TextInputLayout
+                                android:id="@+id/tilSenseVoiceTimestampMergeGap"
                                 style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
                                 android:layout_width="104dp"
                                 android:layout_height="wrap_content"
@@ -218,6 +239,46 @@
 
                             </com.google.android.material.textfield.TextInputLayout>
 
+                        </LinearLayout>
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switchSenseVoiceFilterLongMerge"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="12dp"
+                            android:checked="true"
+                            android:minHeight="40dp"
+                            android:text="@string/speech_merge_filter_long"
+                            android:textColor="@color/on_surface"
+                            android:textSize="14sp" />
+
+                        <LinearLayout
+                            android:id="@+id/layoutSenseVoiceMergeMaxCharacters"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/speech_merge_max_characters"
+                                android:textSize="14sp" />
+                            <com.google.android.material.slider.Slider
+                                android:id="@+id/sliderSenseVoiceMergeMaxCharacters"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:stepSize="1"
+                                android:value="25"
+                                android:valueFrom="15"
+                                android:valueTo="50" />
+                            <TextView
+                                android:id="@+id/tvSenseVoiceMergeMaxCharacters"
+                                android:layout_width="40dp"
+                                android:layout_height="wrap_content"
+                                android:gravity="center"
+                                android:text="25"
+                                android:textSize="14sp" />
                         </LinearLayout>
 
                     </LinearLayout>

@@ -102,6 +102,20 @@ abstract class AsrTimelineSettingsActivity : AppCompatActivity() {
             if (!loading) settingsManager.setSpeechTokenTimestampMergeEnabled(checked)
             updateSenseVoiceTimestampControls()
         }
+        binding.switchSenseVoiceSmartMerge.setOnCheckedChangeListener { _, checked ->
+            if (!loading) settingsManager.setSpeechTokenTimestampSmartMergeEnabled(checked)
+            updateSenseVoiceTimestampControls()
+        }
+        binding.switchSenseVoiceFilterLongMerge.setOnCheckedChangeListener { _, checked ->
+            if (!loading) settingsManager.setSpeechTokenTimestampLongSegmentFilterEnabled(checked)
+            updateSenseVoiceTimestampControls()
+        }
+        binding.sliderSenseVoiceMergeMaxCharacters.addOnChangeListener { _, value, fromUser ->
+            if (loading || !fromUser) return@addOnChangeListener
+            val count = value.toInt().coerceIn(15, 50)
+            binding.tvSenseVoiceMergeMaxCharacters.text = count.toString()
+            settingsManager.setSpeechTokenTimestampMergeMaxCharacters(count)
+        }
         bindSecondaryVadValue(
             slider = binding.sliderSenseVoiceTimestampMergeGap,
             input = binding.etSenseVoiceTimestampMergeGap,
@@ -130,6 +144,11 @@ abstract class AsrTimelineSettingsActivity : AppCompatActivity() {
             if (tokenTimestampModelAvailable) View.GONE else View.VISIBLE
         binding.switchSenseVoiceTimestampMerge.isChecked =
             settingsManager.isSpeechTokenTimestampMergeEnabled()
+        binding.switchSenseVoiceSmartMerge.isChecked = settingsManager.isSpeechTokenTimestampSmartMergeEnabled()
+        binding.switchSenseVoiceFilterLongMerge.isChecked = settingsManager.isSpeechTokenTimestampLongSegmentFilterEnabled()
+        val maxCharacters = settingsManager.getSpeechTokenTimestampMergeMaxCharacters()
+        binding.sliderSenseVoiceMergeMaxCharacters.value = maxCharacters.toFloat()
+        binding.tvSenseVoiceMergeMaxCharacters.text = maxCharacters.toString()
         loadSecondaryVadValue(
             binding.sliderSenseVoiceTimestampMergeGap,
             binding.etSenseVoiceTimestampMergeGap,
@@ -157,8 +176,17 @@ abstract class AsrTimelineSettingsActivity : AppCompatActivity() {
         binding.switchSenseVoiceTimestampMerge.alpha = if (enabled) 1f else 0.5f
         binding.tvSenseVoiceTimestampMergeHint.alpha = if (enabled) 1f else 0.5f
         binding.layoutSenseVoiceTimestampMergeGap.alpha = if (mergeEnabled) 1f else 0.5f
-        binding.sliderSenseVoiceTimestampMergeGap.isEnabled = mergeEnabled
-        binding.etSenseVoiceTimestampMergeGap.isEnabled = mergeEnabled
+        val fixedGapEnabled = mergeEnabled && !binding.switchSenseVoiceSmartMerge.isChecked
+        binding.tvSenseVoiceMergeGapTitle.alpha = if (fixedGapEnabled) 1f else 0.5f
+        binding.tvSenseVoiceMergeGapHint.alpha = if (fixedGapEnabled) 1f else 0.5f
+        binding.rowSenseVoiceMergeGap.alpha = if (fixedGapEnabled) 1f else 0.5f
+        binding.sliderSenseVoiceTimestampMergeGap.isEnabled = fixedGapEnabled
+        binding.tilSenseVoiceTimestampMergeGap.isEnabled = fixedGapEnabled
+        binding.etSenseVoiceTimestampMergeGap.isEnabled = fixedGapEnabled
+        binding.switchSenseVoiceSmartMerge.isEnabled = mergeEnabled
+        binding.switchSenseVoiceFilterLongMerge.isEnabled = mergeEnabled
+        binding.layoutSenseVoiceMergeMaxCharacters.alpha = if (mergeEnabled && binding.switchSenseVoiceFilterLongMerge.isChecked) 1f else 0.5f
+        binding.sliderSenseVoiceMergeMaxCharacters.isEnabled = mergeEnabled && binding.switchSenseVoiceFilterLongMerge.isChecked
     }
 
     private fun hasUsableTokenTimestampModel(): Boolean {

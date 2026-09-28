@@ -42,7 +42,6 @@ class AiSettingsActivity : AppCompatActivity() {
         get() = (application as SubtitleEditApplication).dependencies.aiTranslationService
     private var selectedProvider: String = AiProviderConfig.SILICONFLOW
     private var selectedTranslationProvider: String = AiProviderConfig.SILICONFLOW
-    private var selectedSemanticProvider: String = AiProviderConfig.SILICONFLOW
     private var selectedPunctuationProvider: String = AiProviderConfig.SILICONFLOW
     private var suppressTextSave = false
     private var isApiKeyVisible = false
@@ -83,7 +82,6 @@ class AiSettingsActivity : AppCompatActivity() {
         ToolCardShadow.remove(
             binding.cardAiSettings,
             binding.cardAiTranslationSettings,
-            binding.cardAiSemanticSettings,
             binding.cardAiPunctuationSettings
         )
 
@@ -207,7 +205,6 @@ class AiSettingsActivity : AppCompatActivity() {
     private fun setupDedicatedSettings() {
         val names = providerNames()
         selectedTranslationProvider = settingsManager.getAiTranslationProvider()
-        selectedSemanticProvider = settingsManager.getAiSemanticProvider()
         selectedPunctuationProvider = settingsManager.getAiPunctuationProvider()
         suppressTextSave = true
         fun setupProviderSpinner(spinner: android.widget.Spinner, initial: String, onChanged: (String) -> Unit) {
@@ -228,12 +225,6 @@ class AiSettingsActivity : AppCompatActivity() {
             settingsManager.setAiTranslationProvider(it)
             loadTranslationFields(it)
         }
-        setupProviderSpinner(binding.spinnerAiSemanticProvider, settingsManager.getAiSemanticProvider()) {
-            saveSemanticFields()
-            selectedSemanticProvider = it
-            settingsManager.setAiSemanticProvider(it)
-            loadSemanticFields(it)
-        }
         setupProviderSpinner(binding.spinnerAiPunctuationProvider, selectedPunctuationProvider) {
             saveDedicatedEdits()
             selectedPunctuationProvider = it
@@ -241,13 +232,9 @@ class AiSettingsActivity : AppCompatActivity() {
             loadPunctuationFields(it)
         }
         setupReasoningSpinner(binding.spinnerTranslationReasoningLevel) { settingsManager.setAiReasoningLevel(it, selectedTranslationProvider) }
-        setupReasoningSpinner(binding.spinnerSemanticReasoningLevel) { settingsManager.setAiSemanticReasoningLevel(it, selectedSemanticProvider) }
         setupReasoningSpinner(binding.spinnerPunctuationReasoningLevel) { settingsManager.setAiPunctuationReasoningLevel(it, selectedPunctuationProvider) }
         binding.btnFetchTranslationModels.setOnClickListener {
             fetchModelsFor(selectedTranslationProvider, binding.btnFetchTranslationModels, binding.etTranslationModel)
-        }
-        binding.btnFetchSemanticModels.setOnClickListener {
-            fetchModelsFor(selectedSemanticProvider, binding.btnFetchSemanticModels, binding.etSemanticModel)
         }
         binding.btnFetchPunctuationModels.setOnClickListener {
             fetchModelsFor(selectedPunctuationProvider, binding.btnFetchPunctuationModels, binding.etPunctuationModel)
@@ -256,14 +243,6 @@ class AiSettingsActivity : AppCompatActivity() {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 if (!suppressTextSave && AiProviderConfig.getProvider(selectedTranslationProvider).models.isNotEmpty()) {
                     settingsManager.setAiModel(selectedTranslationProvider, parent?.getItemAtPosition(position)?.toString().orEmpty())
-                }
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-        }
-        binding.spinnerSemanticModel.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (!suppressTextSave && AiProviderConfig.getProvider(selectedSemanticProvider).models.isNotEmpty()) {
-                    settingsManager.setAiSemanticModel(selectedSemanticProvider, parent?.getItemAtPosition(position)?.toString().orEmpty())
                 }
             }
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
@@ -277,7 +256,6 @@ class AiSettingsActivity : AppCompatActivity() {
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
         listOf(binding.etTranslationModel, binding.etTranslationContextWindow, binding.etTranslationTargetLanguage, binding.etTranslationCustomPrompt,
-            binding.etSemanticModel, binding.etSemanticContextWindow, binding.etSemanticCustomPrompt,
             binding.etPunctuationModel, binding.etPunctuationContextWindow, binding.etPunctuationCustomPrompt).forEach { edit ->
             edit.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -287,7 +265,6 @@ class AiSettingsActivity : AppCompatActivity() {
         }
         suppressTextSave = false
         loadTranslationFields(selectedTranslationProvider)
-        loadSemanticFields(selectedSemanticProvider)
         loadPunctuationFields(selectedPunctuationProvider)
     }
 
@@ -310,17 +287,6 @@ class AiSettingsActivity : AppCompatActivity() {
         binding.spinnerTranslationReasoningLevel.setSelection(AiProviderConfig.ReasoningLevel.entries.indexOf(settingsManager.getAiReasoningLevel(provider)))
         binding.etTranslationCustomPrompt.setText(settingsManager.getAiCustomPrompt())
         updateModelControls(config, binding.tilTranslationModel, binding.etTranslationModel, binding.tvTranslationModelLabel, binding.spinnerTranslationModel, binding.btnFetchTranslationModels, settingsManager.getAiModel(provider))
-        suppressTextSave = false
-    }
-
-    private fun loadSemanticFields(provider: String) {
-        suppressTextSave = true
-        val config = AiProviderConfig.getProvider(provider)
-        binding.etSemanticModel.setText(settingsManager.getAiSemanticModel(provider))
-        binding.etSemanticContextWindow.setText(settingsManager.getAiSemanticContextWindowTokens(provider).toString())
-        binding.etSemanticCustomPrompt.setText(settingsManager.getAiSemanticCustomPrompt())
-        binding.spinnerSemanticReasoningLevel.setSelection(AiProviderConfig.ReasoningLevel.entries.indexOf(settingsManager.getAiSemanticReasoningLevel(provider)))
-        updateModelControls(config, binding.tilSemanticModel, binding.etSemanticModel, binding.tvSemanticModelLabel, binding.spinnerSemanticModel, binding.btnFetchSemanticModels, settingsManager.getAiSemanticModel(provider))
         suppressTextSave = false
     }
 
@@ -355,11 +321,6 @@ class AiSettingsActivity : AppCompatActivity() {
         binding.etTranslationContextWindow.text?.toString()?.toIntOrNull()?.let { settingsManager.setAiContextWindowTokens(it, selectedTranslationProvider) }
         settingsManager.setAiTargetLanguage(binding.etTranslationTargetLanguage.text?.toString()?.trim().orEmpty())
         settingsManager.setAiCustomPrompt(binding.etTranslationCustomPrompt.text?.toString().orEmpty())
-        if (AiProviderConfig.getProvider(selectedSemanticProvider).models.isEmpty()) {
-            settingsManager.setAiSemanticModel(selectedSemanticProvider, binding.etSemanticModel.text?.toString()?.trim().orEmpty())
-        }
-        binding.etSemanticContextWindow.text?.toString()?.toIntOrNull()?.let { settingsManager.setAiSemanticContextWindowTokens(it, selectedSemanticProvider) }
-        settingsManager.setAiSemanticCustomPrompt(binding.etSemanticCustomPrompt.text?.toString().orEmpty())
         if (AiProviderConfig.getProvider(selectedPunctuationProvider).models.isEmpty()) {
             settingsManager.setAiPunctuationModel(selectedPunctuationProvider, binding.etPunctuationModel.text?.toString()?.trim().orEmpty())
         }
@@ -368,7 +329,6 @@ class AiSettingsActivity : AppCompatActivity() {
     }
 
     private fun saveTranslationFields() = saveDedicatedEdits()
-    private fun saveSemanticFields() = saveDedicatedEdits()
 
     private fun fetchModelsFor(
         provider: String,

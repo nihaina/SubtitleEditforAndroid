@@ -64,6 +64,20 @@ class Qwen3AsrSettingsActivity : AppCompatActivity() {
             settingsManager.setSpeechTokenTimestampMergeEnabled(enabled)
             updateControls()
         }
+        binding.switchSmartMerge.setOnCheckedChangeListener { _, enabled ->
+            if (!loading) settingsManager.setSpeechTokenTimestampSmartMergeEnabled(enabled)
+            updateControls()
+        }
+        binding.switchFilterLongMerge.setOnCheckedChangeListener { _, enabled ->
+            if (!loading) settingsManager.setSpeechTokenTimestampLongSegmentFilterEnabled(enabled)
+            updateControls()
+        }
+        binding.sliderMergeMaxCharacters.addOnChangeListener { _, value, fromUser ->
+            if (loading || !fromUser) return@addOnChangeListener
+            val count = value.toInt().coerceIn(15, 50)
+            binding.tvMergeMaxCharacters.text = count.toString()
+            settingsManager.setSpeechTokenTimestampMergeMaxCharacters(count)
+        }
         binding.sliderMergeGap.addOnChangeListener { _, value, fromUser ->
             if (loading || updatingGap || !fromUser) return@addOnChangeListener
             updatingGap = true
@@ -103,6 +117,11 @@ class Qwen3AsrSettingsActivity : AppCompatActivity() {
         binding.tvForcedAlignmentModelMissing.visibility =
             if (alignerAvailable) View.GONE else View.VISIBLE
         binding.switchMergeSegments.isChecked = settingsManager.isSpeechTokenTimestampMergeEnabled()
+        binding.switchSmartMerge.isChecked = settingsManager.isSpeechTokenTimestampSmartMergeEnabled()
+        binding.switchFilterLongMerge.isChecked = settingsManager.isSpeechTokenTimestampLongSegmentFilterEnabled()
+        val maxCharacters = settingsManager.getSpeechTokenTimestampMergeMaxCharacters()
+        binding.sliderMergeMaxCharacters.value = maxCharacters.toFloat()
+        binding.tvMergeMaxCharacters.text = maxCharacters.toString()
         val gap = settingsManager.getSpeechTokenTimestampMergeGapMs()
         val snappedGap = ((gap + 25) / 50) * 50
         binding.sliderMergeGap.value = snappedGap.toFloat()
@@ -123,7 +142,16 @@ class Qwen3AsrSettingsActivity : AppCompatActivity() {
         binding.tvMergeSegmentsHint.alpha = if (alignerEnabled) 1f else 0.5f
         val gapEnabled = alignerEnabled && binding.switchMergeSegments.isChecked
         binding.layoutMergeGap.alpha = if (gapEnabled) 1f else 0.5f
-        binding.sliderMergeGap.isEnabled = gapEnabled
-        binding.etMergeGap.isEnabled = gapEnabled
+        val fixedGapEnabled = gapEnabled && !binding.switchSmartMerge.isChecked
+        binding.tvMergeGapTitle.alpha = if (fixedGapEnabled) 1f else 0.5f
+        binding.tvMergeGapHint.alpha = if (fixedGapEnabled) 1f else 0.5f
+        binding.rowMergeGap.alpha = if (fixedGapEnabled) 1f else 0.5f
+        binding.sliderMergeGap.isEnabled = fixedGapEnabled
+        binding.tilMergeGap.isEnabled = fixedGapEnabled
+        binding.etMergeGap.isEnabled = fixedGapEnabled
+        binding.switchSmartMerge.isEnabled = gapEnabled
+        binding.switchFilterLongMerge.isEnabled = gapEnabled
+        binding.layoutMergeMaxCharacters.alpha = if (gapEnabled && binding.switchFilterLongMerge.isChecked) 1f else 0.5f
+        binding.sliderMergeMaxCharacters.isEnabled = gapEnabled && binding.switchFilterLongMerge.isChecked
     }
 }

@@ -893,12 +893,15 @@ class WhisperRecognizer(
                 val mergedSegments = if (settings.isSpeechTokenTimestampMergeEnabled()) {
                     TokenTimestampSegmenter.mergeSegments(
                         segments = tokenSegments,
-                        maxGapMs = settings.getSpeechTokenTimestampMergeGapMs()
+                        maxGapMs = settings.getSpeechTokenTimestampMergeGapMs(),
+                        smart = settings.isSpeechTokenTimestampSmartMergeEnabled(),
+                        maxCharacters = settings.getSpeechTokenTimestampMergeMaxCharacters()
+                            .takeIf { settings.isSpeechTokenTimestampLongSegmentFilterEnabled() }
                     ).also {
                         Log.d(
                             TAG,
                             "实验打轴合并语音段：${tokenSegments.size} -> ${it.size}，" +
-                                "最大间隔 ${settings.getSpeechTokenTimestampMergeGapMs()}ms"
+                                settings.speechTokenTimestampMergeSummary()
                         )
                     }
                 } else {

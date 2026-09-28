@@ -104,14 +104,6 @@
                     android:paddingBottom="8dp">
 
                     <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchSemanticMerge"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="@string/activity_auto_translate_text_07"
-                        android:textSize="12sp" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
                         android:id="@+id/switchPunctuationPrediction"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"

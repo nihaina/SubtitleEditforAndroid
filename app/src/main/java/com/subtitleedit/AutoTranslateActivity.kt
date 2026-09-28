@@ -29,7 +29,6 @@ import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SettingsManager
-import com.subtitleedit.util.SemanticSubtitleMerger
 import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.SubtitlePunctuationPredictor
@@ -79,7 +78,6 @@ class AutoTranslateActivity : AppCompatActivity() {
 
     private enum class ProcessingStage(val displayName: String, val progressLabel: String? = null) {
         READING("读取字幕中"),
-        SEMANTIC_MERGE("语义合并处理中", "语义合并"),
         PUNCTUATION_PREDICTION("标点预测处理中", "标点预测"),
         TRANSLATION("翻译中", "翻译"),
         SAVING("保存中")
@@ -98,9 +96,7 @@ class AutoTranslateActivity : AppCompatActivity() {
         var progressStage: ProcessingStage? = null
         var message = ""
         var document: SubtitleDocument? = null
-        var semanticMergeCompleted = false
         var punctuationPredictionCompleted = false
-        var semanticSession: SemanticSubtitleMerger.Session? = null
         var punctuationSession: SubtitlePunctuationPredictor.Session? = null
         @Volatile var cancellationRequested = false
         @Volatile var activeConversation: AiTranslationConversation? = null
@@ -324,11 +320,6 @@ class AutoTranslateActivity : AppCompatActivity() {
             postFileUpdate(file) { }
             if (entries.isEmpty()) throw IllegalArgumentException("未检测到可翻译的字幕行")
 
-            if (isFeatureEnabled(Feature.SEMANTIC_MERGE) && !file.semanticMergeCompleted) {
-                document = applySemanticMerge(file, document)
-                file.document = document
-                file.semanticMergeCompleted = true
-            }
             if (isFeatureEnabled(Feature.PUNCTUATION_PREDICTION) && !file.punctuationPredictionCompleted) {
                 document = applyPunctuationPrediction(file, document)
                 file.document = document
@@ -375,59 +366,13 @@ class AutoTranslateActivity : AppCompatActivity() {
         }
     }
 
-    private enum class Feature { SEMANTIC_MERGE, PUNCTUATION_PREDICTION, TRANSLATION }
+    private enum class Feature { PUNCTUATION_PREDICTION, TRANSLATION }
 
     private suspend fun isFeatureEnabled(feature: Feature): Boolean = withContext(kotlinx.coroutines.Dispatchers.Main) {
         when (feature) {
-            Feature.SEMANTIC_MERGE -> binding.switchSemanticMerge.isChecked
             Feature.PUNCTUATION_PREDICTION -> binding.switchPunctuationPrediction.isChecked
             Feature.TRANSLATION -> binding.switchOneClickTranslation.isChecked
         }
-    }
-
-    private suspend fun applySemanticMerge(
-        file: AutoTranslateFile,
-        document: SubtitleDocument
-    ): SubtitleDocument {
-        val session = file.semanticSession ?: SemanticSubtitleMerger.Session(
-            SemanticSubtitleMerger.prepareSubtitleEntriesForAi(document.entries)
-        ).also { file.semanticSession = it }
-        updateProcessingStage(file, ProcessingStage.SEMANTIC_MERGE, session.processedCount, session.totalCount)
-        if (session.totalCount == 0) return document
-        val provider = settingsManager.getAiSemanticProvider()
-        val apiKey = settingsManager.getAiApiKey(provider)
-        val model = settingsManager.getAiSemanticModel(provider)
-        val baseUrl = settingsManager.getAiBaseUrl(provider)
-        if (apiKey.isBlank() || model.isBlank() || baseUrl.isBlank()) {
-            throw IllegalArgumentException(getString(R.string.ai_processing_configuration_required))
-        }
-        val conversation = aiTranslationService.createConversation(
-            context = this,
-            provider = provider,
-            apiKey = apiKey,
-            model = model,
-            targetLanguage = "",
-            customPrompt = settingsManager.getAiSemanticCustomPrompt(),
-            baseUrl = baseUrl,
-            contextWindowTokens = settingsManager.getAiSemanticContextWindowTokens(provider),
-            subtitleFormat = document.format,
-            reasoningLevel = settingsManager.getAiSemanticReasoningLevel(provider),
-            historySessionId = "semantic_${file.sessionId}",
-            historyTitle = "语义合并 · ${file.fileName}"
-        )
-        file.activeConversation = conversation
-        val mergedEntries = session.run(onProgress = { processed, total ->
-            postFileUpdate(file) {
-                file.processedLines = processed
-                file.totalLines = total
-            }
-        }) { text ->
-            currentCoroutineContext().ensureActive()
-            if (file.cancellationRequested) throw CancellationException("语义合并已取消")
-            conversation.restorePunctuation(text) { file.cancellationRequested }
-                .getOrElse { throw it }
-        }
-        return document.copy(entries = mergedEntries)
     }
 
     private suspend fun applyPunctuationPrediction(
@@ -435,7 +380,7 @@ class AutoTranslateActivity : AppCompatActivity() {
         document: SubtitleDocument
     ): SubtitleDocument {
         val session = file.punctuationSession ?: SubtitlePunctuationPredictor.Session(
-            SemanticSubtitleMerger.prepareSubtitleEntriesForAi(document.entries)
+            SubtitlePunctuationPredictor.prepareEntries(document.entries)
         ).also { file.punctuationSession = it }
         updateProcessingStage(file, ProcessingStage.PUNCTUATION_PREDICTION, session.processedCount, session.totalCount)
         if (session.totalCount == 0) return document
@@ -548,15 +493,13 @@ class AutoTranslateActivity : AppCompatActivity() {
     }
 
     private fun validateSelectedFeatures(translationConfig: TranslationConfig?): Boolean {
-        val semanticMergeSelected = binding.switchSemanticMerge.isChecked
         val punctuationPredictionSelected = binding.switchPunctuationPrediction.isChecked
         val translationSelected = binding.switchOneClickTranslation.isChecked
-        if (!semanticMergeSelected && !punctuationPredictionSelected && !translationSelected) {
+        if (!punctuationPredictionSelected && !translationSelected) {
             OverwritingToast.makeText(this, "请至少选择一项处理功能", Toast.LENGTH_SHORT).show()
             return false
         }
-        if ((semanticMergeSelected && !isSemanticAiConfigured()) ||
-            (punctuationPredictionSelected && !isPunctuationAiConfigured()) ||
+        if ((punctuationPredictionSelected && !isPunctuationAiConfigured()) ||
             (translationSelected && translationConfig == null)
         ) {
             OverwritingToast.makeText(
@@ -588,13 +531,6 @@ class AutoTranslateActivity : AppCompatActivity() {
             contextWindowTokens = settingsManager.getAiContextWindowTokens(provider),
             reasoningLevel = settingsManager.getAiReasoningLevel(provider)
         )
-    }
-
-    private fun isSemanticAiConfigured(): Boolean {
-        val provider = settingsManager.getAiSemanticProvider()
-        return settingsManager.getAiApiKey(provider).isNotBlank() &&
-            settingsManager.getAiSemanticModel(provider).isNotBlank() &&
-            settingsManager.getAiBaseUrl(provider).isNotBlank()
     }
 
     private fun isPunctuationAiConfigured(): Boolean {

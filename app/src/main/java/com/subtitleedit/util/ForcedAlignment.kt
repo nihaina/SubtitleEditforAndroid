@@ -90,26 +90,22 @@ internal object ForcedAlignmentSegmenter {
         return output
     }
 
-    fun mergeSegments(segments: List<Segment>, maxGapMs: Int): List<Segment> {
-        if (segments.size < 2) return segments
-        val threshold = maxGapMs.coerceIn(0, 5000).toLong()
-        val merged = mutableListOf<Segment>()
-        var current = segments.first()
-        for (next in segments.drop(1)) {
-            if (next.alignedStartTimeMs - current.alignedEndTimeMs <= threshold) {
-                current = current.copy(
-                    endTimeMs = max(current.endTimeMs, next.endTimeMs),
-                    alignedEndTimeMs = max(current.alignedEndTimeMs, next.alignedEndTimeMs),
-                    text = current.text + mergeJoiner(current.text.last(), next.text.first()) + next.text,
-                )
-            } else {
-                merged += current
-                current = next
-            }
-        }
-        merged += current
-        return merged
-    }
+    fun mergeSegments(
+        segments: List<Segment>,
+        maxGapMs: Int,
+        smart: Boolean = false,
+        maxCharacters: Int? = null
+    ): List<Segment> = TimedTextMergePolicy.merge(
+        segments, maxGapMs, smart, maxCharacters,
+        start = { it.alignedStartTimeMs },
+        end = { it.alignedEndTimeMs },
+        text = { it.text },
+        combine = { current, next -> current.copy(
+            endTimeMs = max(current.endTimeMs, next.endTimeMs),
+            alignedEndTimeMs = max(current.alignedEndTimeMs, next.alignedEndTimeMs),
+            text = current.text + mergeJoiner(current.text.last(), next.text.first()) + next.text,
+        ) }
+    )
 
     private fun addSegment(
         output: MutableList<Segment>,
