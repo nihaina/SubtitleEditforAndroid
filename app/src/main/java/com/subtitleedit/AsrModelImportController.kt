@@ -1242,7 +1242,7 @@ class AsrModelImportController(
             SettingsManager.ASR_MODEL_WHISPER
         )
         val labels = arrayOf(
-            "SenseVoice",
+            "SenseVoice（推荐）",
             "Qwen3-ASR",
             "Parakeet",
             "Whisper"

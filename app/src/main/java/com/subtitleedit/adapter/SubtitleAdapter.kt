@@ -370,8 +370,8 @@ class SubtitleAdapter(
             btnJumpToTime.visibility = if (hasPlayableMedia) View.VISIBLE else View.GONE
             btnSetTime.visibility = if (hasPlayableMedia) View.VISIBLE else View.GONE
 
-            // 设置字幕文本（只显示第一行）
-            val displayText = entry.text.split("\n").firstOrNull() ?: entry.text
+            // 保留字幕中的换行，由 TextView 的 maxLines 限制列表预览高度。
+            val displayText = entry.text
             
             // 检查是否需要高亮搜索
             if (position == searchHighlightPosition && searchQuery.isNotEmpty()) {

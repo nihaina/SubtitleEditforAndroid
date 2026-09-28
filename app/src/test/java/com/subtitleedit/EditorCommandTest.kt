@@ -74,4 +74,40 @@ class EditorCommandTest {
         assertEquals(listOf("第一", "更新"), viewModel.subtitleDocument.entries.map { it.text })
         assertEquals(listOf(1, 2), viewModel.subtitleDocument.entries.map { it.index })
     }
+
+    @Test
+    fun mergeCommandJoinsTextWithLineBreakAndKeepsWholeTimeRange() {
+        val viewModel = EditorViewModel()
+        viewModel.subtitleEntries = mutableListOf(
+            SubtitleEntry(index = 1, startTime = 100L, endTime = 500L, text = "第一"),
+            SubtitleEntry(index = 2, startTime = 600L, endTime = 900L, text = "第二"),
+            SubtitleEntry(index = 3, startTime = 1_000L, endTime = 1_200L, text = "第三")
+        )
+
+        val result = viewModel.execute(EditorCommand.Merge(listOf(0, 1)))
+
+        assertTrue(result.structureChanged)
+        assertEquals(1, result.removedCount)
+        assertEquals(listOf("第一\n第二", "第三"),
+            viewModel.subtitleDocument.entries.map { it.text })
+        assertEquals(100L, viewModel.subtitleDocument.entries[0].startTime)
+        assertEquals(900L, viewModel.subtitleDocument.entries[0].endTime)
+        assertEquals(listOf(1, 2), viewModel.subtitleDocument.entries.map { it.index })
+    }
+
+    @Test
+    fun mergeCommandRejectsNonConsecutiveRows() {
+        val viewModel = EditorViewModel()
+        viewModel.subtitleEntries = mutableListOf(
+            SubtitleEntry(text = "第一"),
+            SubtitleEntry(text = "第二"),
+            SubtitleEntry(text = "第三")
+        )
+
+        val result = viewModel.execute(EditorCommand.Merge(listOf(0, 2)))
+
+        assertTrue(!result.structureChanged)
+        assertEquals(listOf("第一", "第二", "第三"),
+            viewModel.subtitleDocument.entries.map { it.text })
+    }
 }

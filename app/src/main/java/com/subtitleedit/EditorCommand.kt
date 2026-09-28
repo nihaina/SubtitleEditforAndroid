@@ -108,6 +108,35 @@ internal sealed interface EditorCommand {
             )
         }
     }
+
+    data class Merge(
+        val positions: List<Int>
+    ) : EditorCommand {
+        override fun execute(state: EditorDocumentState): EditorCommandResult {
+            val validPositions = positions.distinct().sorted()
+                .filter { it in state.subtitleEntries.indices }
+            if (validPositions.size < 2 ||
+                validPositions.zipWithNext().any { (left, right) -> right != left + 1 }
+            ) return EditorCommandResult()
+
+            val sourceEntries = validPositions.map { state.subtitleEntries[it] }
+            val merged = sourceEntries.first()
+            merged.startTime = sourceEntries.minOf { it.startTime }
+            merged.endTime = sourceEntries.maxOf { it.endTime }
+            merged.text = sourceEntries.joinToString("\n") { it.text }
+            merged.endTimeModified = sourceEntries.any { it.endTimeModified }
+
+            validPositions.drop(1).sortedDescending().forEach { position ->
+                state.subtitleEntries.removeAt(position)
+            }
+            state.subtitleEntries.forEachIndexed { index, entry -> entry.index = index + 1 }
+            return EditorCommandResult(
+                changedPositions = validPositions.toSet(),
+                structureChanged = true,
+                removedCount = validPositions.size - 1
+            )
+        }
+    }
 }
 
 internal data class EditorCommandResult(

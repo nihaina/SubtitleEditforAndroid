@@ -1305,6 +1305,12 @@ class EditorActivity : AppCompatActivity() {
             })
         }
         regularActions.add("向后插入" to { insertSubtitle(true, position) })
+        if (position > 0) {
+            regularActions.add("与前行合并" to { mergeSubtitlePositions(listOf(position - 1, position)) })
+        }
+        if (position + 1 < stateModel.subtitleEntries.size) {
+            regularActions.add("与后行合并" to { mergeSubtitlePositions(listOf(position, position + 1)) })
+        }
         regularActions.add("复制" to { copySingle(position) })
         regularActions.add("剪切 (粘贴后删除)" to { cutSingle(position) })
         regularActions.add(
@@ -1341,6 +1347,9 @@ class EditorActivity : AppCompatActivity() {
     private fun showSelectionContextMenu(hasClipboard: Boolean) {
         if (!ensureListMode()) return
         
+        val selectedPositions = subtitleAdapter.getSelectedPositions().sorted()
+        val canMergeSelected = selectedPositions.size > 1 &&
+            selectedPositions.zipWithNext().all { (left, right) -> right == left + 1 }
         val itemsList = mutableListOf<String>()
         itemsList.add("时间偏移")
         itemsList.add("AI 翻译")
@@ -1350,6 +1359,9 @@ class EditorActivity : AppCompatActivity() {
             itemsList.add("粘贴 (${stateModel.clipboardTexts.size}项)")
         } else {
             itemsList.add("粘贴")
+        }
+        if (canMergeSelected) {
+            itemsList.add("合并所选行")
         }
         itemsList.add("删除选中")
         
@@ -1366,10 +1378,42 @@ class EditorActivity : AppCompatActivity() {
                     4 -> if (hasClipboard) pasteToSelected() else {
                         ensureClipboardNotEmpty()
                     }
-                    5 -> deleteSelectedSubtitles()
+                    5 -> if (canMergeSelected) {
+                        mergeSubtitlePositions(selectedPositions)
+                    } else {
+                        deleteSelectedSubtitles()
+                    }
+                    6 -> if (canMergeSelected) deleteSelectedSubtitles()
                 }
             }
             .show()
+    }
+
+    private fun mergeSubtitlePositions(positions: List<Int>) {
+        if (!ensureListMode()) return
+        val sortedPositions = positions.distinct().sorted()
+        if (sortedPositions.size < 2 ||
+            sortedPositions.zipWithNext().any { (left, right) -> right != left + 1 }
+        ) {
+            showShortToast("只能合并连续字幕")
+            return
+        }
+
+        val historyBefore = currentHistoryListState()
+        val result = stateModel.execute(EditorCommand.Merge(sortedPositions))
+        if (!result.structureChanged) {
+            showShortToast("没有可合并的字幕")
+            return
+        }
+        stateModel.historyEntriesSnapshot = historyBefore.entries
+        stateModel.historySelectionSnapshot = historyBefore.selectedIds
+        cutPasteController.clear()
+        submitSubtitleList(
+            refreshAll = true,
+            clearSelection = true,
+            markChanged = true
+        )
+        showShortToast("已合并 ${sortedPositions.size} 行字幕")
     }
     
     /**
@@ -1804,7 +1848,10 @@ class EditorActivity : AppCompatActivity() {
         applySourceViewEntries(effectiveTargetEntries.map { it.copy() })
         if (previousCount != stateModel.subtitleEntries.size || subtitleAdapter.itemCount != stateModel.subtitleEntries.size) {
             submitSubtitleList(
-                refreshAll = false,
+                // A structural history restore can update retained entries in place before
+                // ListAdapter receives the new list.  Force a full bind so those rows do not
+                // keep displaying the pre-undo contents.
+                refreshAll = true,
                 syncWaveform = false,
                 markChanged = false
             ) {
