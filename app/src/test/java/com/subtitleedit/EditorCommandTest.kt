@@ -110,4 +110,31 @@ class EditorCommandTest {
         assertEquals(listOf("第一", "第二", "第三"),
             viewModel.subtitleDocument.entries.map { it.text })
     }
+
+    @Test
+    fun splitCommandKeepsLeftIdentityAndCreatesRightEntry() {
+        val viewModel = EditorViewModel()
+        val original = SubtitleEntry(
+            index = 1,
+            startTime = 100L,
+            endTime = 900L,
+            text = "你好世界"
+        )
+        viewModel.subtitleEntries = mutableListOf(original)
+
+        val result = viewModel.execute(
+            EditorCommand.Split(0, 400L, "你好", "世界")
+        )
+
+        assertTrue(result.structureChanged)
+        assertEquals(listOf("你好", "世界"),
+            viewModel.subtitleDocument.entries.map { it.text })
+        assertEquals(listOf(100L, 400L),
+            viewModel.subtitleDocument.entries.map { it.startTime })
+        assertEquals(listOf(400L, 900L),
+            viewModel.subtitleDocument.entries.map { it.endTime })
+        assertEquals(original.stableId, viewModel.subtitleDocument.entries[0].stableId)
+        assertTrue(original.stableId != viewModel.subtitleDocument.entries[1].stableId)
+        assertEquals(listOf(1, 2), viewModel.subtitleDocument.entries.map { it.index })
+    }
 }

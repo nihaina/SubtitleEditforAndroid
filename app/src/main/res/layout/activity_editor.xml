@@ -464,6 +464,17 @@
                             android:padding="3dp"
                             android:src="@drawable/ic_tts" />
 
+                        <!-- 按播放头位置快速拆分当前字幕 -->
+                        <ImageButton
+                            android:id="@+id/btnQuickSplit"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            android:layout_marginStart="4dp"
+                            android:background="@drawable/bg_waveform_btn"
+                            android:contentDescription="@string/quick_split_subtitle"
+                            android:padding="3dp"
+                            android:src="@drawable/ic_quick_split" />
+
                         <Space
                             android:layout_width="0dp"
                             android:layout_height="1dp"

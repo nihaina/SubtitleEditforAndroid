@@ -121,6 +121,7 @@
     <string name="tts_engine">朗读引擎</string>
     <string name="tts_engine_description">选择快速 TTS 朗读字幕时使用的系统语音合成引擎。</string>
     <string name="quick_tts_selected_subtitles">朗读选中的字幕</string>
+    <string name="quick_split_subtitle">快速拆分当前字幕</string>
     <string name="tts_language">朗读语言</string>
     <string name="tts_language_description">指定语言可避免日语被中文语音规则朗读；自动判断对纯汉字可能不准确。</string>
     <string name="tts_system_settings">打开系统 TTS 设置</string>

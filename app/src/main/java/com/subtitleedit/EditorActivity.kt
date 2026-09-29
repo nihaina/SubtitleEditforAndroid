@@ -63,6 +63,7 @@ import com.subtitleedit.util.CutPasteController
 import com.subtitleedit.util.SubtitlePasteOps
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleEntryOps
+import com.subtitleedit.util.SubtitleTextSplitOps
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.SubtitleSourceSynchronizer
@@ -3056,6 +3057,51 @@ class EditorActivity : AppCompatActivity() {
             startActivity(Intent(this, TtsSettingsActivity::class.java))
             true
         }
+
+        binding.btnQuickSplit.setOnClickListener {
+            splitSubtitleAtPlaybackHead()
+        }
+    }
+
+    private fun splitSubtitleAtPlaybackHead() {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size) { splitSubtitleAtPlaybackHead() }) return
+        if (!ensureListMode()) return
+        val playhead = playbackController.currentPositionMs
+        val position = stateModel.subtitleEntries.indexOfFirst { entry ->
+            playhead > entry.startTime && playhead < entry.endTime
+        }
+        if (position < 0) {
+            showShortToast("播放头不在字幕范围内")
+            return
+        }
+        val entry = stateModel.subtitleEntries[position]
+        val duration = entry.endTime - entry.startTime
+        if (duration <= 1L) return
+        val split = SubtitleTextSplitOps.split(
+            this,
+            entry.text,
+            (playhead - entry.startTime).toFloat() / duration.toFloat()
+        )
+        val historyBefore = currentHistoryListState()
+        val selectedIds = historyBefore.selectedIds - entry.stableId
+        val result = stateModel.execute(
+            EditorCommand.Split(position, playhead, split.left, split.right)
+        )
+        if (!result.structureChanged) return
+        stateModel.historyEntriesSnapshot = historyBefore.entries
+        stateModel.historySelectionSnapshot = historyBefore.selectedIds
+        submitSubtitleList(
+            refreshAll = true,
+            selectedStableIds = selectedIds,
+            syncWaveform = false,
+            markChanged = true
+        )
+        syncWaveformSubtitleRange(
+            position,
+            removedCount = 1,
+            inserted = stateModel.subtitleEntries.subList(position, position + 2).toList()
+        )
+        showShortToast("已拆分字幕")
     }
 
     /** 使用设置中选定的系统 TTS 引擎，按字幕顺序朗读当前勾选项。 */

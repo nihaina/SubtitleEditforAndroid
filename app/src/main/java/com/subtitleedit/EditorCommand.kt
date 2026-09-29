@@ -137,6 +137,39 @@ internal sealed interface EditorCommand {
             )
         }
     }
+
+    /** Split one cue at a playback position while keeping the left cue's stable identity. */
+    data class Split(
+        val position: Int,
+        val splitTime: Long,
+        val leftText: String,
+        val rightText: String
+    ) : EditorCommand {
+        override fun execute(state: EditorDocumentState): EditorCommandResult {
+            val entry = state.subtitleEntries.getOrNull(position) ?: return EditorCommandResult()
+            if (splitTime <= entry.startTime || splitTime >= entry.endTime) {
+                return EditorCommandResult()
+            }
+            val originalEnd = entry.endTime
+            val originalEndModified = entry.endTimeModified
+            entry.endTime = splitTime
+            entry.endTimeModified = true
+            entry.text = leftText
+            val right = SubtitleEntry(
+                index = position + 2,
+                startTime = splitTime,
+                endTime = originalEnd,
+                text = rightText,
+                endTimeModified = originalEndModified
+            )
+            state.subtitleEntries.add(position + 1, right)
+            state.subtitleEntries.forEachIndexed { index, subtitle -> subtitle.index = index + 1 }
+            return EditorCommandResult(
+                changedPositions = setOf(position, position + 1),
+                structureChanged = true
+            )
+        }
+    }
 }
 
 internal data class EditorCommandResult(
