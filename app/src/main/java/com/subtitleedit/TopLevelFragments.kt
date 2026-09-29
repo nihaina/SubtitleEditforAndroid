@@ -16,7 +16,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.app.AppCompatDelegate
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -26,6 +25,7 @@ import com.subtitleedit.databinding.ActivitySettingsBinding
 import com.subtitleedit.databinding.ActivityToolsBinding
 import com.subtitleedit.databinding.FragmentFavoritesBinding
 import com.subtitleedit.util.DirectoryDisplayPath
+import com.subtitleedit.util.AppThemeMode
 import com.subtitleedit.util.DraftManager
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
@@ -226,11 +226,7 @@ class SettingsFragment : Fragment() {
                 else -> SettingsManager.THEME_SYSTEM
             }
             settings.setThemeMode(mode)
-            AppCompatDelegate.setDefaultNightMode(when (mode) {
-                SettingsManager.THEME_LIGHT -> AppCompatDelegate.MODE_NIGHT_NO
-                SettingsManager.THEME_DARK -> AppCompatDelegate.MODE_NIGHT_YES
-                else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
-            })
+            AppThemeMode.apply(requireContext(), mode)
             updateThemeLabel()
             dialog.dismiss()
         }.show()

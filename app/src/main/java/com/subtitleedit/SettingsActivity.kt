@@ -5,9 +5,9 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.app.AppCompatDelegate
 import com.subtitleedit.databinding.ActivitySettingsBinding
 import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.AppThemeMode
 import com.subtitleedit.util.SettingsManager
 import java.io.File
 import java.util.Locale
@@ -312,13 +312,7 @@ class SettingsActivity : AppCompatActivity() {
                     else -> SettingsManager.THEME_SYSTEM
                 }
                 settingsManager.setThemeMode(mode)
-                AppCompatDelegate.setDefaultNightMode(
-                    when (mode) {
-                        SettingsManager.THEME_LIGHT -> AppCompatDelegate.MODE_NIGHT_NO
-                        SettingsManager.THEME_DARK -> AppCompatDelegate.MODE_NIGHT_YES
-                        else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
-                    }
-                )
+                AppThemeMode.apply(this, mode)
                 updateThemeLabel()
                 dialog.dismiss()
             }
