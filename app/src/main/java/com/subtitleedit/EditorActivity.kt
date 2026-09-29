@@ -1337,12 +1337,6 @@ class EditorActivity : AppCompatActivity() {
             })
         }
         regularActions.add("向后插入" to { insertSubtitle(true, position) })
-        if (position > 0) {
-            regularActions.add("与前行合并" to { mergeSubtitlePositions(listOf(position - 1, position)) })
-        }
-        if (position + 1 < stateModel.subtitleEntries.size) {
-            regularActions.add("与后行合并" to { mergeSubtitlePositions(listOf(position, position + 1)) })
-        }
         regularActions.add("复制" to { copySingle(position) })
         regularActions.add("剪切 (粘贴后删除)" to { cutSingle(position) })
         regularActions.add(
@@ -1350,6 +1344,22 @@ class EditorActivity : AppCompatActivity() {
                 if (hasClipboard) pasteToPosition(position) else ensureClipboardNotEmpty()
             }
         )
+        if (position > 0) {
+            regularActions.add("与前行合并" to { mergeSubtitlePositions(listOf(position - 1, position)) })
+        }
+        if (position + 1 < stateModel.subtitleEntries.size) {
+            regularActions.add("与后行合并" to { mergeSubtitlePositions(listOf(position, position + 1)) })
+        }
+        if (position > 0) {
+            regularActions.add("向前延伸至上一行" to {
+                extendSubtitleToAdjacent(setOf(position), towardPrevious = true)
+            })
+        }
+        if (position + 1 < stateModel.subtitleEntries.size) {
+            regularActions.add("向后延伸至下一行" to {
+                extendSubtitleToAdjacent(setOf(position), towardPrevious = false)
+            })
+        }
         regularActions.add("删除" to { deleteSingleSubtitle(position) })
 
         val itemsList = mutableListOf<String>()
@@ -1392,9 +1402,26 @@ class EditorActivity : AppCompatActivity() {
         } else {
             itemsList.add("粘贴")
         }
+        var mergeIndex = -1
         if (canMergeSelected) {
+            mergeIndex = itemsList.size
             itemsList.add("合并所选行")
         }
+        val canExtendSelectedToPrevious = selectedPositions.any { it > 0 }
+        val canExtendSelectedToNext = selectedPositions.any {
+            it + 1 < stateModel.subtitleEntries.size
+        }
+        var extendPreviousIndex = -1
+        var extendNextIndex = -1
+        if (canExtendSelectedToPrevious) {
+            extendPreviousIndex = itemsList.size
+            itemsList.add("向前延伸至上一行")
+        }
+        if (canExtendSelectedToNext) {
+            extendNextIndex = itemsList.size
+            itemsList.add("向后延伸至下一行")
+        }
+        val deleteIndex = itemsList.size
         itemsList.add("删除选中")
         
         val items = itemsList.toTypedArray()
@@ -1410,15 +1437,38 @@ class EditorActivity : AppCompatActivity() {
                     4 -> if (hasClipboard) pasteToSelected() else {
                         ensureClipboardNotEmpty()
                     }
-                    5 -> if (canMergeSelected) {
-                        mergeSubtitlePositions(selectedPositions)
-                    } else {
-                        deleteSelectedSubtitles()
+                    else -> when {
+                        which == mergeIndex -> mergeSubtitlePositions(selectedPositions)
+                        which == extendPreviousIndex -> extendSubtitleToAdjacent(
+                            selectedPositions.toSet(), towardPrevious = true
+                        )
+                        which == extendNextIndex -> extendSubtitleToAdjacent(
+                            selectedPositions.toSet(), towardPrevious = false
+                        )
+                        which == deleteIndex -> deleteSelectedSubtitles()
                     }
-                    6 -> if (canMergeSelected) deleteSelectedSubtitles()
                 }
             }
             .show()
+    }
+
+    private fun extendSubtitleToAdjacent(positions: Set<Int>, towardPrevious: Boolean) {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size) {
+                extendSubtitleToAdjacent(positions, towardPrevious)
+            }) return
+        if (!ensureListMode()) return
+        val result = stateModel.execute(
+            EditorCommand.ExtendToAdjacent(positions, towardPrevious)
+        )
+        if (result.changedPositions.isEmpty()) {
+            showShortToast("没有可延伸的字幕")
+            return
+        }
+        notifyEntriesChanged(result.changedPositions)
+        showShortToast(
+            if (positions.size > 1) "已延伸 ${result.changedPositions.size} 行字幕"
+            else if (towardPrevious) "已向前延伸至上一行" else "已向后延伸至下一行"
+        )
     }
 
     private fun mergeSubtitlePositions(positions: List<Int>) {

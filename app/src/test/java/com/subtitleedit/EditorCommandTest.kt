@@ -137,4 +137,34 @@ class EditorCommandTest {
         assertTrue(original.stableId != viewModel.subtitleDocument.entries[1].stableId)
         assertEquals(listOf(1, 2), viewModel.subtitleDocument.entries.map { it.index })
     }
+
+    @Test
+    fun extendCommandUsesAdjacentTimesForAllSelectedRows() {
+        val viewModel = EditorViewModel()
+        viewModel.subtitleEntries = mutableListOf(
+            SubtitleEntry(startTime = 100L, endTime = 500L, text = "第一"),
+            SubtitleEntry(startTime = 600L, endTime = 900L, text = "第二"),
+            SubtitleEntry(startTime = 1_000L, endTime = 1_200L, text = "第三")
+        )
+
+        val previousResult = viewModel.execute(
+            EditorCommand.ExtendToAdjacent(setOf(1, 2), towardPrevious = true)
+        )
+        assertEquals(setOf(1, 2), previousResult.changedPositions)
+        assertEquals(listOf(100L, 500L, 900L),
+            viewModel.subtitleDocument.entries.map { it.startTime })
+
+        val nextViewModel = EditorViewModel()
+        nextViewModel.subtitleEntries = mutableListOf(
+            SubtitleEntry(startTime = 100L, endTime = 500L, text = "第一"),
+            SubtitleEntry(startTime = 600L, endTime = 900L, text = "第二"),
+            SubtitleEntry(startTime = 1_000L, endTime = 1_200L, text = "第三")
+        )
+        val nextResult = nextViewModel.execute(
+            EditorCommand.ExtendToAdjacent(setOf(0, 1), towardPrevious = false)
+        )
+        assertEquals(setOf(0, 1), nextResult.changedPositions)
+        assertEquals(listOf(600L, 1_000L, 1_200L),
+            nextViewModel.subtitleDocument.entries.map { it.endTime })
+    }
 }

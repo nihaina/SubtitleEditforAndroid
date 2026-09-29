@@ -36,6 +36,41 @@ internal sealed interface EditorCommand {
         }
     }
 
+    /** Extend selected cues to the end of the previous cue or the start of the next cue. */
+    data class ExtendToAdjacent(
+        val positions: Set<Int>,
+        val towardPrevious: Boolean
+    ) : EditorCommand {
+        override fun execute(state: EditorDocumentState): EditorCommandResult {
+            val validPositions = positions.filter { it in state.subtitleEntries.indices }.distinct()
+            val updates = validPositions.mapNotNull { position ->
+                val entry = state.subtitleEntries[position]
+                if (towardPrevious) {
+                    if (position == 0) null
+                    else position to state.subtitleEntries[position - 1].endTime
+                } else {
+                    if (position + 1 >= state.subtitleEntries.size) null
+                    else position to state.subtitleEntries[position + 1].startTime
+                }
+            }
+            val changedPositions = updates.filter { (position, targetTime) ->
+                val entry = state.subtitleEntries[position]
+                if (towardPrevious) entry.startTime != targetTime else entry.endTime != targetTime
+            }
+            if (changedPositions.isEmpty()) return EditorCommandResult()
+            changedPositions.forEach { (position, targetTime) ->
+                val entry = state.subtitleEntries[position]
+                if (towardPrevious) {
+                    entry.startTime = targetTime
+                } else {
+                    entry.endTime = targetTime
+                    entry.endTimeModified = true
+                }
+            }
+            return EditorCommandResult(changedPositions = changedPositions.map { it.first }.toSet())
+        }
+    }
+
     data class ApplyOffset(
         val positions: Set<Int>,
         val offsetMs: Long

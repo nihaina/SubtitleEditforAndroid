@@ -140,8 +140,6 @@
 
 ## 权限说明
 
-只需要存储权限，没有其他权限要求
-
 欢迎提交 Issue 和 Pull Request！
 
 本项目采用 **[GPL-3.0 License](https://www.gnu.org/licenses/gpl-3.0.html)** 授权
@@ -163,7 +161,5 @@
 视频字幕的相关工作流程适配
 
 更多字幕格式适配
-
-字幕合并
 
 ......
