@@ -23,7 +23,7 @@ import java.util.Locale
 internal class EditorPlaybackController(
     private val context: Context,
     private val binding: ActivityEditorBinding,
-    private val mediaType: EditorMediaType,
+    private var mediaType: EditorMediaType,
     private val subtitles: () -> List<SubtitleEntry>,
     private val isSourceViewMode: () -> Boolean,
     private val onPlayingSubtitleChanged: (Int?) -> Unit,
@@ -60,7 +60,43 @@ internal class EditorPlaybackController(
     }
 
     fun bind() {
-        if (!mediaType.hasPlayableMedia) return
+        bindTimelinePlaybackCallbacks()
+        bindPlayerControls()
+        createEngine()
+        renderPlayPauseIcon()
+        renderTotalTime()
+        renderProgress(currentPositionMs)
+        renderControlAvailability()
+        if (mediaType == EditorMediaType.VIDEO) {
+            showVideoControls(scheduleAutoHide = false)
+        }
+    }
+
+    /** Switch the active editor media type without recreating the activity. */
+    fun setMediaType(newMediaType: EditorMediaType) {
+        if (mediaType == newMediaType) return
+        release()
+        mediaType = newMediaType
+        currentPositionMs = 0L
+        durationMs = 0L
+        lastPlayPauseShowsPause = null
+        lastTotalTimeText = null
+        lastCurrentTimeText = null
+        lastVideoTimeText = null
+        lastSeekBarProgress = null
+        bindPlayerControls()
+        createEngine()
+        renderPlayPauseIcon()
+        renderTotalTime()
+        renderProgress(currentPositionMs)
+        renderControlAvailability()
+    }
+
+    private fun createEngine() {
+        if (!mediaType.hasPlayableMedia) {
+            engine = null
+            return
+        }
 
         engine = when (mediaType) {
             EditorMediaType.AUDIO -> MpvPlaybackEngine(
@@ -123,19 +159,11 @@ internal class EditorPlaybackController(
                 }
             }
         }
-
-        bindTimelinePlaybackCallbacks()
-        bindPlayerControls()
-        renderPlayPauseIcon()
-        renderTotalTime()
-        renderProgress(currentPositionMs)
-        renderControlAvailability()
-        if (mediaType == EditorMediaType.VIDEO) {
-            showVideoControls(scheduleAutoHide = false)
-        }
     }
 
     fun prepare(mediaFile: File) {
+        if (!mediaType.hasPlayableMedia) return
+        if (engine == null) createEngine()
         currentPositionMs = 0L
         durationMs = 0L
         if (mediaType == EditorMediaType.VIDEO) {

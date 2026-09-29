@@ -37,9 +37,15 @@ class SubtitleAdapter(
     private val onTextClick: (SubtitleEntry, Int) -> Unit,
     private val onJumpToTimeClick: (SubtitleEntry, Int) -> Unit, // 跳转到字幕时间
     private val onSetTimeClick: (SubtitleEntry, Int) -> Unit, // 设置字幕时间为当前进度
-    private val hasPlayableMedia: Boolean = false,
+    private var hasPlayableMedia: Boolean = false,
     private val onSelectionChanged: (() -> Unit)? = null // 选中状态变化回调
 ) : ListAdapter<SubtitleEntry, SubtitleAdapter.SubtitleViewHolder>(SubtitleDiffCallback()) {
+
+    fun setHasPlayableMedia(value: Boolean) {
+        if (hasPlayableMedia == value) return
+        hasPlayableMedia = value
+        if (itemCount > 0) notifyItemRangeChanged(0, itemCount)
+    }
 
     // 使用对象引用跟踪选中状态，而非 data class 的可变字段哈希值。
     // 翻译、转录或编辑文本后，条目仍保持原有选中状态。

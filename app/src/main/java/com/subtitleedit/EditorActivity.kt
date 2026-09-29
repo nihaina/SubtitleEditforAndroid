@@ -59,6 +59,7 @@ import com.subtitleedit.editor.EditorNavigationCoordinator
 import com.subtitleedit.editor.EditorStateCoordinator
 import com.subtitleedit.util.DraftManager
 import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.CutPasteController
 import com.subtitleedit.util.SubtitlePasteOps
 import com.subtitleedit.util.SettingsManager
@@ -70,6 +71,7 @@ import com.subtitleedit.util.SubtitleSourceSynchronizer
 import com.subtitleedit.util.TimeUtils
 import com.subtitleedit.util.subtitle.SubtitleDocument
 import java.io.File
+import java.io.FileOutputStream
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.CancellationException
@@ -629,8 +631,7 @@ class EditorActivity : AppCompatActivity() {
 
     private fun setupVideoPanel() {
         val isVideo = stateModel.mediaType == EditorMediaType.VIDEO
-        binding.videoSection.visibility = if (isVideo) View.VISIBLE else View.GONE
-        binding.audioPlaybackControls.visibility = if (isVideo) View.GONE else View.VISIBLE
+        updateMediaTypeViews()
         if (stateModel.mediaType != EditorMediaType.VIDEO) return
 
         stateModel.videoViewportInlineIndex = binding.videoSection.indexOfChild(binding.videoViewportContainer)
@@ -647,6 +648,30 @@ class EditorActivity : AppCompatActivity() {
         )
         videoFullscreenController.bind {
             playbackController.showVideoControlsForInteraction()
+        }
+    }
+
+    private fun updateMediaTypeViews() {
+        val isVideo = stateModel.mediaType == EditorMediaType.VIDEO
+        binding.videoSection.visibility = if (isVideo) View.VISIBLE else View.GONE
+        binding.audioPlaybackControls.visibility = if (isVideo) View.GONE else View.VISIBLE
+        binding.mediaPlayerContainer.visibility =
+            if (stateModel.mediaType.hasPlayableMedia) View.VISIBLE else View.GONE
+    }
+
+    private fun switchMediaType(type: EditorMediaType) {
+        if (stateModel.mediaType == type) {
+            updateMediaTypeViews()
+            return
+        }
+        stateModel.mediaType = type
+        playbackController.setMediaType(type)
+        waveformController.setMediaAvailable(type.hasPlayableMedia)
+        subtitleAdapter.setHasPlayableMedia(type.hasPlayableMedia)
+        updateMediaTypeViews()
+        setupMediaActions()
+        if (type == EditorMediaType.VIDEO && !::videoFullscreenController.isInitialized) {
+            setupVideoPanel()
         }
     }
 
@@ -904,21 +929,100 @@ class EditorActivity : AppCompatActivity() {
         }
     }
 
+    private enum class OpenedUriKind { SUBTITLE, AUDIO, VIDEO, UNSUPPORTED }
+
+    private val subtitleOpenExtensions = FileUtils.SUBTITLE_EXTENSIONS - "txt"
+    private val subtitleOpenMimeTypes = setOf(
+        "text/vtt",
+        "text/srt",
+        "text/ass",
+        "text/ssa",
+        "application/x-subrip",
+        "application/srt",
+        "application/ttml+xml"
+    )
+
+    private fun classifyOpenedUri(uri: Uri, fileName: String): OpenedUriKind {
+        val extension = fileName.substringAfterLast('.', "").lowercase()
+        val mime = contentResolver.getType(uri)?.lowercase().orEmpty()
+        return when {
+            mime.startsWith("audio/") || extension in FileUtils.AUDIO_EXTENSIONS ->
+                OpenedUriKind.AUDIO
+            mime.startsWith("video/") || extension in FileTypePolicy.videoExtensions ->
+                OpenedUriKind.VIDEO
+            extension in subtitleOpenExtensions || mime in subtitleOpenMimeTypes ->
+                OpenedUriKind.SUBTITLE
+            else -> OpenedUriKind.UNSUPPORTED
+        }
+    }
+
+    private suspend fun copyOpenedUriToCache(uri: Uri, fileName: String): File =
+        withContext(Dispatchers.IO) {
+            val mediaDir = File(cacheDir, "editor_open_media").apply { mkdirs() }
+            val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+                .ifBlank { "media" }
+            val target = File(mediaDir, "${System.currentTimeMillis()}_$safeName")
+            val input = contentResolver.openInputStream(uri)
+                ?: throw IllegalStateException("无法读取文件")
+            input.use { source ->
+                FileOutputStream(target).use { output -> source.copyTo(output) }
+            }
+            target
+        }
+
     private fun openFileFromUri(uri: Uri) {
         lifecycleScope.launch {
             try {
-                val (content, fileName) = withContext(Dispatchers.IO) {
-                    val loadedContent = fileSessionController.readUri(uri)
-                    loadedContent to fileSessionController.fileName(uri)
+                val fileName = withContext(Dispatchers.IO) { fileSessionController.fileName(uri) }
+                val kind = classifyOpenedUri(uri, fileName)
+                when (kind) {
+                    OpenedUriKind.SUBTITLE -> {
+                        val content = withContext(Dispatchers.IO) { fileSessionController.readUri(uri) }
+                        val mediaTitle = stateModel.documentTitle.takeIf {
+                            stateModel.mediaType.hasPlayableMedia
+                        }
+                        stateModel.openUriSubtitleDocument(uri.toString(), fileName)
+                        setDocumentTitle(mediaTitle ?: stateModel.documentTitle)
+                        takePersistableWritePermission(uri)
+                        parseContent(content, fileName)
+                        stateModel.hasUnsavedChanges = false
+                        stateModel.documentLoaded = true
+                        showShortToast("文件已打开：$fileName")
+                    }
+
+                    OpenedUriKind.AUDIO, OpenedUriKind.VIDEO -> {
+                        val openedType = if (kind == OpenedUriKind.AUDIO) {
+                            EditorMediaType.AUDIO
+                        } else {
+                            EditorMediaType.VIDEO
+                        }
+                        val mediaFile = copyOpenedUriToCache(uri, fileName)
+                        // A subtitle-only document keeps its local file as the subtitle sidecar
+                        // when media is added, so saving still updates the original subtitle.
+                        if (!stateModel.mediaType.hasPlayableMedia && stateModel.documentUri == null) {
+                            stateModel.currentFile?.let { subtitle ->
+                                stateModel.subtitleFilePath = subtitle.absolutePath
+                                stateModel.subtitleFile = subtitle
+                            }
+                        }
+                        stateModel.filePath = mediaFile.absolutePath
+                        stateModel.currentFile = mediaFile
+                        stateModel.isAudioOnlyFromVideo = false
+                        switchMediaType(openedType)
+                        // Keep the current subtitle document and entries while replacing/adding media.
+                        loadMediaFile(stateModel.subtitleFilePath, restoreDocument = true)
+                        setDocumentTitle(fileName)
+                        stateModel.documentLoaded = true
+                        showShortToast("文件已打开：$fileName")
+                    }
+
+                    OpenedUriKind.UNSUPPORTED -> {
+                        showShortToast("请选择字幕或音视频文件")
+                        if (intent.action == Intent.ACTION_VIEW) finish()
+                    }
                 }
-                stateModel.openUriSubtitleDocument(uri.toString(), fileName)
-                setDocumentTitle(stateModel.documentTitle)
-                takePersistableWritePermission(uri)
-                parseContent(content, fileName)
-                stateModel.hasUnsavedChanges = false
-                com.subtitleedit.util.OverwritingToast.makeText(this@EditorActivity, "文件已打开：$fileName", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
-                com.subtitleedit.util.OverwritingToast.makeText(this@EditorActivity, "打开文件失败：${e.message}", Toast.LENGTH_SHORT).show()
+                showShortToast("打开文件失败：${e.message ?: "未知错误"}")
             }
         }
     }
@@ -3090,8 +3194,6 @@ class EditorActivity : AppCompatActivity() {
     // ==================== 媒体播放器相关方法 ====================
     
     private fun setupMediaActions() {
-        if (!stateModel.mediaType.hasPlayableMedia) return
-
         binding.btnQuickTranscribe.setOnClickListener {
             showQuickTranscribe()
         }

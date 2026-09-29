@@ -39,7 +39,7 @@ internal class EditorWaveformController(
     private val context: Context,
     private val binding: ActivityEditorBinding,
     private val scope: CoroutineScope,
-    private val hasPlayableMedia: Boolean,
+    private var hasPlayableMedia: Boolean,
     private val appCacheDir: File,
     private val mediaRepository: MediaRepository,
     private val currentPlaybackPositionMs: () -> Long,
@@ -80,12 +80,8 @@ internal class EditorWaveformController(
     )
 
     fun bind() {
-        if (!hasPlayableMedia) {
-            binding.mediaPlayerContainer.visibility = View.GONE
-            return
-        }
-
-        binding.mediaPlayerContainer.visibility = View.VISIBLE
+        binding.mediaPlayerContainer.visibility =
+            if (hasPlayableMedia) View.VISIBLE else View.GONE
         binding.waveformTimelineView.onSubtitleChangeListener = onSubtitleChanged
         binding.waveformTimelineView.onSelectedIndicesChangeListener = { indices ->
             indices.firstOrNull()?.let(onSelectedIndexChanged)
@@ -172,6 +168,15 @@ internal class EditorWaveformController(
                 onTimestampInserted(timestampStartMs, endMs)
             }
             false
+        }
+    }
+
+    /** Makes the waveform/media panel available after opening media in subtitle-only mode. */
+    fun setMediaAvailable(available: Boolean) {
+        hasPlayableMedia = available
+        binding.mediaPlayerContainer.visibility = if (available) View.VISIBLE else View.GONE
+        if (!available) {
+            release()
         }
     }
 
