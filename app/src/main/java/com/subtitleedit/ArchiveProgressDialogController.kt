@@ -1,9 +1,11 @@
 package com.subtitleedit
 
-import android.view.View
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import com.subtitleedit.databinding.DialogArchiveProgressBinding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.mutableStateOf
 import com.subtitleedit.util.ArchiveManager
 import com.subtitleedit.util.ArchiveProgressPolicy
 import com.subtitleedit.util.FileUtils
@@ -12,25 +14,56 @@ import com.subtitleedit.util.FileUtils
 internal class ArchiveProgressDialogController(
     private val activity: AppCompatActivity
 ) {
-    data class ProgressUi(
-        val dialog: AlertDialog,
-        val binding: DialogArchiveProgressBinding
-    )
+    class ProgressUi internal constructor(
+        val state: MutableState<ArchiveProgressDialogState>
+    ) {
+        lateinit var dialog: ComposeDialogHandle
+            internal set
+
+        private var cancelAction: (() -> Unit)? = null
+
+        fun setCancelAction(action: () -> Unit) {
+            cancelAction = action
+        }
+
+        fun requestCancel() {
+            if (state.value.cancelEnabled) cancelAction?.invoke()
+        }
+
+        fun setCancelEnabled(enabled: Boolean) {
+            state.value = state.value.copy(cancelEnabled = enabled)
+        }
+
+        fun setMessage(message: String) {
+            state.value = state.value.copy(message = message)
+        }
+
+        fun showCancelling(message: String = "正在取消...") {
+            state.value = state.value.copy(
+                message = message,
+                indeterminate = true,
+                progress = null,
+                percentLabel = null,
+                leadingLabel = null,
+                processedLabel = null,
+                cancelEnabled = false
+            )
+        }
+    }
 
     fun show(title: String, message: String, showCancel: Boolean = false): ProgressUi {
-        val binding = DialogArchiveProgressBinding.inflate(activity.layoutInflater)
-        binding.tvProgressMessage.text = message
-        binding.tvProgressLeading.visibility = View.GONE
-        binding.tvProgressProcessed.visibility = View.GONE
-        binding.progressBar.isIndeterminate = true
-        binding.tvProgressPercent.visibility = View.GONE
-        val builder = AlertDialog.Builder(activity)
-            .setTitle(title)
-            .setView(binding.root)
-            .setCancelable(false)
-        if (showCancel) builder.setNegativeButton("取消", null)
-        val dialog = builder.create().also(AlertDialog::show)
-        return ProgressUi(dialog, binding)
+        val state = mutableStateOf(
+            ArchiveProgressDialogState(
+                title = title,
+                message = message,
+                showCancel = showCancel
+            )
+        )
+        val progress = ProgressUi(state)
+        progress.dialog = ComposeDialogHost.show(activity) { _ ->
+            ArchiveProgressDialog(state.value, onCancel = progress::requestCancel)
+        }
+        return progress
     }
 
     fun updateArchive(
@@ -41,31 +74,33 @@ internal class ArchiveProgressDialogController(
     ) {
         activity.runOnUiThread {
             if (!progress.dialog.isShowing) return@runOnUiThread
-            progress.binding.tvProgressMessage.text = ArchiveProgressPolicy.phaseLabel(phase)
+            val message = ArchiveProgressPolicy.phaseLabel(phase)
             if (total > 0L) {
                 val ratio = completed.coerceIn(0L, total).toDouble() / total.toDouble()
                 val percent = (ratio * 100.0).toInt().coerceIn(0, 100)
-                progress.binding.progressBar.isIndeterminate = false
-                progress.binding.progressBar.max = 1000
-                progress.binding.progressBar.progress = (ratio * 1000.0).toInt().coerceIn(0, 1000)
-                progress.binding.tvProgressPercent.text = if (phase == ArchiveManager.ProgressPhase.SCANNING) {
+                val label = if (phase == ArchiveManager.ProgressPhase.SCANNING) {
                     "$percent% · 已检查 $completed / $total 项"
                 } else {
                     "$percent% · 已处理 ${FileUtils.formatFileSize(completed)} / ${FileUtils.formatFileSize(total)}"
                 }
-                progress.binding.tvProgressPercent.visibility = View.VISIBLE
+                progress.state.value = progress.state.value.copy(
+                    message = message,
+                    indeterminate = false,
+                    progress = ratio.toFloat(),
+                    percentLabel = label
+                )
             } else {
-                progress.binding.progressBar.isIndeterminate = true
-                if (phase == ArchiveManager.ProgressPhase.EXTRACTING) {
-                    progress.binding.tvProgressPercent.text = if (completed > 0L) {
-                        "已处理 ${FileUtils.formatFileSize(completed)}"
-                    } else {
-                        "正在读取..."
-                    }
-                    progress.binding.tvProgressPercent.visibility = View.VISIBLE
+                val label = if (phase == ArchiveManager.ProgressPhase.EXTRACTING) {
+                    if (completed > 0L) "已处理 ${FileUtils.formatFileSize(completed)}" else "正在读取..."
                 } else {
-                    progress.binding.tvProgressPercent.visibility = View.GONE
+                    null
                 }
+                progress.state.value = progress.state.value.copy(
+                    message = message,
+                    indeterminate = true,
+                    progress = null,
+                    percentLabel = label
+                )
             }
         }
     }
@@ -76,58 +111,71 @@ internal class ArchiveProgressDialogController(
     ) {
         activity.runOnUiThread {
             if (!progress.dialog.isShowing) return@runOnUiThread
-            progress.binding.tvProgressLeading.text =
-                "已生成 ${FileUtils.formatFileSize(compressionProgress.generatedBytes)}"
-            progress.binding.tvProgressLeading.visibility = View.VISIBLE
-            if (compressionProgress.sourceBytes > 0L) {
-                progress.binding.tvProgressProcessed.text =
+            val percent = compressionProgress.percent
+            val oldState = progress.state.value
+            progress.state.value = oldState.copy(
+                leadingLabel = "已生成 ${FileUtils.formatFileSize(compressionProgress.generatedBytes)}",
+                processedLabel = if (compressionProgress.sourceBytes > 0L) {
                     "已处理 ${FileUtils.formatFileSize(compressionProgress.processedBytes)} / " +
                         FileUtils.formatFileSize(compressionProgress.sourceBytes)
-                progress.binding.tvProgressProcessed.visibility = View.VISIBLE
-            } else {
-                progress.binding.tvProgressProcessed.visibility = View.GONE
-            }
-            progress.binding.tvProgressMessage.text = compressionProgress.currentFileName?.let {
-                it
-            } ?: progress.binding.tvProgressMessage.text
-            val percent = compressionProgress.percent
-            if (percent != null) {
-                progress.binding.progressBar.isIndeterminate = false
-                progress.binding.progressBar.max = 100
-                progress.binding.progressBar.progress = percent
-                progress.binding.tvProgressPercent.text = "$percent%"
-                progress.binding.tvProgressPercent.visibility = View.VISIBLE
-            } else {
-                progress.binding.progressBar.isIndeterminate = true
-                progress.binding.tvProgressPercent.visibility = View.GONE
-            }
+                } else {
+                    null
+                },
+                message = compressionProgress.currentFileName ?: oldState.message,
+                indeterminate = percent == null,
+                progress = percent?.coerceIn(0, 100)?.div(100f),
+                percentLabel = percent?.let { "$it%" }
+            )
         }
     }
 
     fun updateFileCopy(progress: ProgressUi, message: String, completed: Long, total: Long) {
         activity.runOnUiThread {
             if (!progress.dialog.isShowing) return@runOnUiThread
-            progress.binding.tvProgressMessage.text = message
             if (total > 0L) {
                 val ratio = completed.coerceIn(0L, total).toDouble() / total.toDouble()
-                progress.binding.progressBar.isIndeterminate = false
-                progress.binding.progressBar.max = 1000
-                progress.binding.progressBar.progress = (ratio * 1000.0).toInt().coerceIn(0, 1000)
-                progress.binding.tvProgressPercent.text =
-                    "${FileUtils.formatFileSize(completed)} / ${FileUtils.formatFileSize(total)}"
-                progress.binding.tvProgressPercent.visibility = View.VISIBLE
+                progress.state.value = progress.state.value.copy(
+                    message = message,
+                    indeterminate = false,
+                    progress = ratio.toFloat(),
+                    percentLabel = "${FileUtils.formatFileSize(completed)} / ${FileUtils.formatFileSize(total)}"
+                )
             } else {
-                progress.binding.progressBar.isIndeterminate = true
-                progress.binding.tvProgressPercent.visibility = View.GONE
+                progress.state.value = progress.state.value.copy(
+                    message = message,
+                    indeterminate = true,
+                    progress = null,
+                    percentLabel = null
+                )
             }
         }
     }
 
     fun showError(title: String, error: Throwable) {
-        AlertDialog.Builder(activity)
-            .setTitle(title)
-            .setMessage(error.message ?: "未知错误")
-            .setPositiveButton("确定", null)
-            .show()
+        val message = error.message ?: "未知错误"
+        ComposeDialogHost.show(activity) { dialog ->
+            AlertDialog(
+                onDismissRequest = dialog::dismiss,
+                title = { Text(title) },
+                text = { Text(message) },
+                confirmButton = {
+                    TextButton(onClick = dialog::dismiss) {
+                        Text("确定")
+                    }
+                }
+            )
+        }
     }
 }
+
+internal data class ArchiveProgressDialogState(
+    val title: String,
+    val message: String,
+    val indeterminate: Boolean = true,
+    val progress: Float? = null,
+    val percentLabel: String? = null,
+    val leadingLabel: String? = null,
+    val processedLabel: String? = null,
+    val showCancel: Boolean = false,
+    val cancelEnabled: Boolean = true
+)

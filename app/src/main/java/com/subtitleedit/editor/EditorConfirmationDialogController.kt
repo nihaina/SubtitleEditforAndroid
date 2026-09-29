@@ -1,20 +1,41 @@
 package com.subtitleedit.editor
 
-import android.app.AlertDialog
-import android.content.Context
+import androidx.activity.ComponentActivity
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import com.subtitleedit.ComposeDialogHost
 
 /** Centralizes confirmation dialogs used by the editor's destructive or replacing actions. */
 internal class EditorConfirmationDialogController(
-    private val context: Context,
+    private val activity: ComponentActivity,
     private val hasUnsavedChanges: () -> Boolean
 ) {
-    fun show(title: String, message: String, positiveText: String = "确定", negativeText: String = "取消", onConfirm: () -> Unit) {
-        AlertDialog.Builder(context)
-            .setTitle(title)
-            .setMessage(message)
-            .setPositiveButton(positiveText) { _, _ -> onConfirm() }
-            .setNegativeButton(negativeText, null)
-            .show()
+    fun show(
+        title: String,
+        message: String,
+        positiveText: String = "确定",
+        negativeText: String = "取消",
+        onConfirm: () -> Unit
+    ) {
+        ComposeDialogHost.show(activity) { dialog ->
+            AlertDialog(
+                onDismissRequest = dialog::dismiss,
+                title = { Text(title) },
+                text = { Text(message) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            dialog.dismiss()
+                            onConfirm()
+                        }
+                    ) { Text(positiveText) }
+                },
+                dismissButton = {
+                    TextButton(onClick = dialog::dismiss) { Text(negativeText) }
+                }
+            )
+        }
     }
 
     fun runAfterUnsavedChangesConfirmed(message: String, action: () -> Unit) {

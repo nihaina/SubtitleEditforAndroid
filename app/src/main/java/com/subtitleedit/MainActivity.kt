@@ -8,30 +8,35 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
-import android.view.Menu
-import android.view.MenuItem
-import android.view.View
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
-import android.widget.EditText
-import android.widget.PopupMenu
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.widget.SearchView
 import androidx.core.content.ContextCompat
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.SimpleItemAnimator
-import com.subtitleedit.adapter.FileListAdapter
-import com.subtitleedit.databinding.ActivityMainBinding
-import com.subtitleedit.databinding.DialogCreateArchiveBinding
-import com.subtitleedit.databinding.DialogSubtitleConvertBinding
 import com.subtitleedit.editor.EditorMediaType
+import com.subtitleedit.feature.ui.ArchiveCreateSubmission
+import com.subtitleedit.feature.ui.ArchiveCreationDialogUi
+import com.subtitleedit.feature.ui.ArchiveFormatOptionUi
+import com.subtitleedit.feature.ui.ArchiveSplitOptionUi
+import com.subtitleedit.feature.ui.MainCreateItemError
+import com.subtitleedit.feature.ui.MainCreateItemField
+import com.subtitleedit.feature.ui.MainCreateItemKind
+import com.subtitleedit.feature.ui.MainActivityDialogUi
+import com.subtitleedit.feature.ui.MainActivityScreen
+import com.subtitleedit.feature.ui.MainActivityScreenState
+import com.subtitleedit.feature.ui.MainFileOperationDialogs
+import com.subtitleedit.feature.ui.SubtitleConversionDialogUi
+import com.subtitleedit.feature.ui.SubtitleConversionResultUi
 import com.subtitleedit.repository.ArchiveRepository
+import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.ArchiveManager
 import com.subtitleedit.util.ArchivePreviewCache
 import com.subtitleedit.model.FileBrowserOrder
@@ -53,6 +58,7 @@ import com.subtitleedit.util.FileSelectionPolicy
 import com.subtitleedit.util.FileOperationUiPolicy
 import com.subtitleedit.util.ArchiveActionUiPolicy
 import com.subtitleedit.util.ArchiveActionUiPolicy.ArchiveAction
+import com.subtitleedit.util.ArchivePasswordVault
 import com.subtitleedit.util.DirectoryWatcher
 import com.subtitleedit.util.DirectorySearchController
 import com.subtitleedit.util.SettingsManager
@@ -78,18 +84,12 @@ class MainActivity : AppCompatActivity() {
         get() = (application as SubtitleEditApplication).dependencies.archiveRepository
 
     private companion object {
-        const val MENU_CREATE = 0x10004
-        const val MENU_MORE = 0x10005
         const val CONFLICT_WAIT_INTERVAL_MS = 250L
     }
 
-    private lateinit var binding: ActivityMainBinding
-    private lateinit var fileAdapter: FileListAdapter
     private lateinit var filePropertiesDialogController: FilePropertiesDialogController
-    private lateinit var mainMenuController: MainMenuController
     private lateinit var topLevelNavigationCoordinator: MainTopLevelNavigationCoordinator
     private lateinit var mediaOpenController: MediaOpenController
-    private lateinit var fileBrowserDialogController: FileBrowserDialogController
     private lateinit var archivePasswordDialogController: ArchivePasswordDialogController
     private lateinit var archiveConflictDialogController: ArchiveConflictDialogController
     private lateinit var archiveProgressDialogController: ArchiveProgressDialogController
@@ -100,16 +100,35 @@ class MainActivity : AppCompatActivity() {
 
     private val visibleFiles = mutableListOf<File>()
     private val directoryFiles = mutableListOf<File>()
+    private var displayedFiles = emptyList<File>()
     private var showAllFileTypes = false
     private var showHiddenFiles = false
+    private var directoryLoading = false
+    private var searchInProgress = false
+    private var relativePathRoot: File? = null
+    private var customToolbarTitle: String? = null
+    private var customToolbarBack: (() -> Unit)? = null
+    private var customToolbarHasBack = false
+    private var topLevelPageRefreshVersion by mutableIntStateOf(0)
+    private var searchExpanded = false
+    private var directoryListState: LazyListState? = null
+    private var screenState by mutableStateOf(MainActivityScreenState())
+    private var subtitleConversionDialog by mutableStateOf<SubtitleConversionDialogUi?>(null)
+    private var subtitleConversionResult by mutableStateOf<SubtitleConversionResultUi?>(null)
+    private var archiveCreationDialog by mutableStateOf<ArchiveCreationDialogUi?>(null)
+    private var mainDialog by mutableStateOf<MainActivityDialogUi?>(null)
+    private var pendingSubtitleConversionSources: List<SubtitleConversionSource>? = null
+    private var pendingArchiveDraft: PendingArchiveDraft? = null
+    private var pendingRenameFile: File? = null
+    private var pendingDeleteFiles: List<File>? = null
+    private var nextSubtitleConversionDialogId = 0
     private val directoryWatcher = DirectoryWatcher(::refreshWatchedDirectory)
     private lateinit var directorySearchController: DirectorySearchController
     private lateinit var backNavigationCallback: OnBackPressedCallback
     private lateinit var lifecycleCoordinator: MainLifecycleCoordinator
     private var directoryLoadJob: Job? = null
     private var fileCopyJob: Job? = null
-    private var activeFileSearchView: SearchView? = null
-    private data class SplitOption(val label: String, val bytes: Long?)
+    private data class PendingArchiveDraft(val sources: List<File>, val outputDirectory: File)
 
     // 权限请求
     private val permissionLauncher = registerForActivityResult(
@@ -139,55 +158,13 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val settingsManager = com.subtitleedit.util.SettingsManager.getInstance(this)
         super.onCreate(savedInstanceState)
-        binding = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(binding.root)
+        screenState = MainActivityScreenState(
+            selectedTopLevelItem = stateModel.documentState.selectedTopLevelItem
+        )
+        searchExpanded = stateModel.documentState.isFileSearchActive &&
+            stateModel.documentState.searchQuery.isNotEmpty()
         filePropertiesDialogController = FilePropertiesDialogController(this, ::showShortToast)
-        mainMenuController = MainMenuController(
-            configureSearch = ::configureSearchItem,
-            selectAll = ::selectAllVisibleFiles,
-            selectRange = ::selectRangeBetweenSelectedFiles,
-            showCreate = ::showCreateMenu,
-            showMore = ::showDirectoryMoreMenu
-        )
-        topLevelNavigationCoordinator = MainTopLevelNavigationCoordinator(
-            activity = this,
-            binding = binding,
-            state = stateModel.documentState,
-            saveDirectoryScroll = ::saveCurrentDirectoryScrollPosition,
-            loadDirectory = { directory, restore -> loadDirectory(directory, restore) },
-            cancelDirectorySearch = { directorySearchController.cancel() },
-            stopDirectoryWatcher = { directoryWatcher.stop() },
-            invalidateMenu = ::invalidateOptionsMenu,
-            clearDirectorySelection = {
-                stateModel.documentState.directoryHistory.clear()
-                stateModel.documentState.selectedPaths.clear()
-                stateModel.documentState.pendingFileOperation = null
-                stateModel.documentState.pendingArchiveFile = null
-                stateModel.documentState.searchQuery = ""
-                stateModel.documentState.isFileSearchActive = false
-            }
-        )
         mediaOpenController = MediaOpenController(this, ::openMediaWithSubtitle)
-        fileBrowserDialogController = FileBrowserDialogController(
-            activity = this,
-            dp = ::dp,
-            currentDirectory = { stateModel.documentState.currentDirectory },
-            onCreated = { stateModel.documentState.currentDirectory?.let(::loadDirectory) },
-            onSortChanged = { field, direction ->
-                field?.let {
-                    stateModel.documentState.sortField = it
-                    SettingsManager.getInstance(this).setFileSortField(it)
-                }
-                direction?.let {
-                    stateModel.documentState.sortDirection = it
-                    SettingsManager.getInstance(this).setFileSortDirection(it)
-                }
-                displayDirectoryFiles()
-            },
-            onOpenSettings = {
-                startActivity(Intent(this, FileManagementSettingsActivity::class.java))
-            }
-        )
         archivePasswordDialogController = ArchivePasswordDialogController(this, ::showShortToast)
         archiveConflictDialogController = ArchiveConflictDialogController(this)
         archiveProgressDialogController = ArchiveProgressDialogController(this)
@@ -202,11 +179,10 @@ class MainActivity : AppCompatActivity() {
             onToast = ::showShortToast,
             onError = ::showOperationError,
             onDeleteFailures = { output, count ->
-                AlertDialog.Builder(this)
-                    .setTitle("压缩已完成")
-                    .setMessage("${output.name} 已创建，但有 $count 个源文件无法删除。")
-                    .setPositiveButton("确定", null)
-                    .show()
+                mainDialog = MainActivityDialogUi.Message(
+                    title = "压缩已完成",
+                    message = "${output.name} 已创建，但有 $count 个源文件无法删除。"
+                )
             }
         )
         archiveExtractionRunner = ArchiveExtractionRunner(
@@ -224,7 +200,10 @@ class MainActivity : AppCompatActivity() {
             onCompleted = { files ->
                 showDirectoryFiles(files, showParent = false, relativePathRoot = stateModel.documentState.currentDirectory, searching = false)
             },
-            onFinished = { binding.searchProgress.visibility = View.INVISIBLE }
+            onFinished = {
+                searchInProgress = false
+                publishScreenState()
+            }
         )
         showAllFileTypes = settingsManager.isShowAllFileTypesEnabled()
         showHiddenFiles = settingsManager.isShowHiddenFilesEnabled()
@@ -235,11 +214,93 @@ class MainActivity : AppCompatActivity() {
             stateModel.documentState.sortDirection = settingsManager.getFileSortDirection()
         }
         
-        setupToolbar()
-        setupRecyclerView()
-        setupButtons()
-        setupBottomNavigation()
+        topLevelNavigationCoordinator = MainTopLevelNavigationCoordinator(
+            activity = this,
+            state = stateModel.documentState,
+            saveDirectoryScroll = ::saveCurrentDirectoryScrollPosition,
+            loadDirectory = { directory, restore -> loadDirectory(directory, restore) },
+            cancelDirectorySearch = { directorySearchController.cancel() },
+            stopDirectoryWatcher = { directoryWatcher.stop() },
+            clearDirectorySelection = {
+                stateModel.documentState.directoryHistory.clear()
+                stateModel.documentState.selectedPaths.clear()
+                stateModel.documentState.pendingFileOperation = null
+                stateModel.documentState.pendingArchiveFile = null
+                stateModel.documentState.searchQuery = ""
+                stateModel.documentState.isFileSearchActive = false
+                searchExpanded = false
+            },
+            onPageChanged = { selectedPage ->
+                stateModel.documentState.selectedTopLevelItem = selectedPage
+                if (selectedPage != R.id.nav_directory && stateModel.documentState.searchQuery.isBlank()) {
+                    searchExpanded = false
+                } else if (selectedPage == R.id.nav_directory &&
+                    stateModel.documentState.isFileSearchActive &&
+                    stateModel.documentState.searchQuery.isNotEmpty()
+                ) {
+                    searchExpanded = true
+                }
+                publishScreenState()
+            },
+            onToolbarChanged = { title, showBack, onBack ->
+                customToolbarTitle = title
+                customToolbarHasBack = showBack
+                customToolbarBack = onBack
+                publishScreenState()
+            }
+        )
+        setContent {
+            SubtitleEditComposeTheme {
+                MainActivityScreen(
+                        state = screenState,
+                        topLevelPageRefreshVersion = topLevelPageRefreshVersion,
+                        onDirectoryListState = { directoryListState = it },
+                        onTopLevelPageSelected = ::showTopLevelPage,
+                        onOpenDirectoryFromFavorites = ::openDirectoryFromFavorites,
+                        onUpdateTopLevelToolbar = ::updateTopLevelToolbar,
+                        onSearchRequested = ::openFileSearch,
+                        onSearchChanged = ::changeFileSearch,
+                        onCreateItem = ::createBrowserItem,
+                        onSortFieldChanged = ::changeFileSortField,
+                        onSortDirectionChanged = ::changeFileSortDirection,
+                        onOpenFileManagementSettings = {
+                            startActivity(Intent(this@MainActivity, FileManagementSettingsActivity::class.java))
+                        },
+                        onSelectAll = ::selectAllVisibleFiles,
+                        onSelectRange = ::selectRangeBetweenSelectedFiles,
+                        onToolbarBack = ::onToolbarBack,
+                        onFileClick = ::onFileClicked,
+                        onFileLongClick = ::enterSelectionMode,
+                        onCopy = { startDestinationSelection(FileOperation.COPY) },
+                        onMove = { startDestinationSelection(FileOperation.MOVE) },
+                        onRename = ::renameSelectedFile,
+                        onDelete = ::confirmDeleteSelectedFiles,
+                        onConvertSelection = ::showSubtitleFormatConvertDialog,
+                        onCompressSelection = ::showCreateArchiveDialog,
+                        onShowSelectionProperties = ::showSelectedProperties,
+                        onConfirmDestination = ::completeDestinationOperation,
+                        onCancelDestination = ::cancelDestinationSelection,
+                        subtitleConversion = subtitleConversionDialog,
+                        subtitleConversionResult = subtitleConversionResult,
+                        archiveCreation = archiveCreationDialog,
+                        onDismissSubtitleConversion = ::dismissSubtitleConversion,
+                        onConvertSubtitle = ::convertSelectedSubtitles,
+                        onDismissConversionResult = { subtitleConversionResult = null },
+                        onDismissArchiveCreation = ::dismissCreateArchiveDialog,
+                        onCreateArchive = ::submitArchiveCreation,
+                        onLoadArchivePasswords = ::loadArchivePasswords,
+                        onSaveArchivePassword = ::saveArchivePassword,
+                        onClearArchivePasswordBook = ::clearArchivePasswordBook,
+                        mainDialog = mainDialog,
+                        onDismissMainDialog = ::dismissMainDialog,
+                        onPermissionDialogConfirm = ::confirmPermissionDialog,
+                        onRenameConfirm = ::confirmRename,
+                        onDeleteConfirm = ::deleteConfirmedSelection
+                )
+            }
+        }
         setupBackNavigation()
+        topLevelNavigationCoordinator.bind()
         lifecycleCoordinator = MainLifecycleCoordinator(
             activity = this,
             lifecycleOwner = this,
@@ -276,6 +337,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         lifecycleCoordinator.onResume()
+        topLevelPageRefreshVersion++
     }
 
     override fun onPause() {
@@ -293,62 +355,76 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
     
-    private fun setupToolbar() {
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.title = getString(R.string.nav_directory)
-    }
-    
-    override fun onCreateOptionsMenu(menu: Menu): Boolean = true
-
-    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
-        return mainMenuController.prepare(
-            menu = menu,
-            isDirectorySelected = stateModel.documentState.selectedTopLevelItem == R.id.nav_directory,
-            hasSelection = stateModel.documentState.selectedPaths.isNotEmpty(),
-            hasPendingOperation = stateModel.documentState.pendingFileOperation != null
-        )
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean =
-        mainMenuController.handle(item).takeIf { it } ?: super.onOptionsItemSelected(item)
-    
-    private fun setupRecyclerView() {
-        fileAdapter = FileListAdapter(
-            onItemClick = ::onFileClicked,
-            onItemLongClick = ::enterSelectionMode,
-            isItemRestricted = ::isRestrictedAndroidDirectory
-        )
-        
-        binding.rvFileList.apply {
-            layoutManager = LinearLayoutManager(this@MainActivity)
-            adapter = fileAdapter
-            // Selection updates are represented by item alpha/stroke. The default
-            // change animation restores alpha to 1f at animation end, which makes
-            // only currently visible rows become bright again after navigation or
-            // a directory refresh. Disable change animations so bound selection
-            // visuals remain authoritative.
-            (itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false
-        }
-    }
-    
-    private fun setupButtons() {
-        binding.btnCopySelected.setOnClickListener { startDestinationSelection(FileOperation.COPY) }
-        binding.btnMoveSelected.setOnClickListener { startDestinationSelection(FileOperation.MOVE) }
-        binding.btnRenameSelected.setOnClickListener { renameSelectedFile() }
-        binding.btnDeleteSelected.setOnClickListener { confirmDeleteSelectedFiles() }
-        binding.btnMoreSelected.setOnClickListener { showMoreActions() }
-        binding.btnConfirmDestination.setOnClickListener { completeDestinationOperation() }
-        binding.btnCancelDestination.setOnClickListener {
-            cancelDestinationSelection()
-        }
-    }
-
-    private fun setupBottomNavigation() {
-        topLevelNavigationCoordinator.bind(topLevelNavigationCoordinator::showPage)
-    }
-
     private fun showTopLevelPage(itemId: Int) {
         topLevelNavigationCoordinator.showPage(itemId)
+    }
+
+    private fun publishScreenState() {
+        val document = stateModel.documentState
+        val isSelectionActive = document.selectedPaths.isNotEmpty() || document.pendingFileOperation != null
+        val selectionTitle = FileOperationUiPolicy.selectionTitle(
+            document.pendingFileOperation,
+            document.selectedPaths.size
+        )
+        val selectedFiles = selectedFiles()
+        val canConvertSelected = selectedFiles.isNotEmpty() && selectedFiles.all {
+            it.isFile && FileUtils.isSubtitleFile(it)
+        }
+        screenState = MainActivityScreenState(
+            selectedTopLevelItem = document.selectedTopLevelItem,
+            toolbarTitle = if (isSelectionActive) selectionTitle else customToolbarTitle.orEmpty(),
+            toolbarHasBack = customToolbarHasBack,
+            isDirectoryLoading = directoryLoading,
+            isSearchInProgress = searchInProgress,
+            currentDirectory = document.currentDirectory,
+            files = displayedFiles,
+            relativePathRoot = relativePathRoot,
+            selectedPaths = document.selectedPaths.toSet(),
+            pendingOperation = document.pendingFileOperation,
+            isSearchExpanded = searchExpanded && !isSelectionActive,
+            searchQuery = document.searchQuery,
+            sortField = document.sortField ?: FileSortField.NAME,
+            sortDirection = document.sortDirection ?: FileSortDirection.ASCENDING,
+            canConvertSelected = canConvertSelected,
+            canCompressSelected = !isFileSearchQueryActive()
+        )
+    }
+
+    private fun openFileSearch() {
+        if (stateModel.documentState.selectedPaths.isNotEmpty() ||
+            stateModel.documentState.pendingFileOperation != null
+        ) return
+        stateModel.documentState.isFileSearchActive = true
+        searchExpanded = true
+        publishScreenState()
+    }
+
+    private fun changeFileSearch(query: String) {
+        if (stateModel.documentState.selectedPaths.isNotEmpty() ||
+            stateModel.documentState.pendingFileOperation != null
+        ) return
+        if (query == stateModel.documentState.searchQuery) return
+        stateModel.documentState.isFileSearchActive = true
+        stateModel.documentState.searchQuery = query
+        displayDirectoryFiles()
+    }
+
+    private fun closeFileSearch() {
+        if (stateModel.documentState.selectedPaths.isNotEmpty() ||
+            stateModel.documentState.pendingFileOperation != null
+        ) return
+        searchExpanded = false
+        clearFileSearch(refreshDirectory = true)
+        publishScreenState()
+    }
+
+    private fun onToolbarBack() {
+        when {
+            stateModel.documentState.selectedPaths.isNotEmpty() ||
+                stateModel.documentState.pendingFileOperation != null -> exitSelectionMode()
+            searchExpanded -> closeFileSearch()
+            customToolbarHasBack -> customToolbarBack?.invoke()
+        }
     }
 
     fun updateTopLevelToolbar(title: String, showBack: Boolean = false, onBack: (() -> Unit)? = null) {
@@ -359,82 +435,46 @@ class MainActivity : AppCompatActivity() {
         topLevelNavigationCoordinator.openDirectoryFromFavorites(directory)
     }
 
-    private fun configureSearchItem(item: MenuItem) {
-        var suppressSearchCallbacks = true
-        val searchView = SearchView(this)
-        activeFileSearchView = searchView
-        searchView.apply {
-            queryHint = getString(R.string.file_search_hint)
-            maxWidth = Int.MAX_VALUE
-            setQuery(stateModel.documentState.searchQuery, false)
-            setOnQueryTextListener(object : SearchView.OnQueryTextListener {
-                override fun onQueryTextSubmit(query: String?): Boolean = true
-                override fun onQueryTextChange(newText: String?): Boolean {
-                    if (activeFileSearchView !== searchView || suppressSearchCallbacks) return true
-                    val updatedQuery = newText.orEmpty()
-                    val selectionUiActive = stateModel.documentState.selectedPaths.isNotEmpty() || stateModel.documentState.pendingFileOperation != null
-                    if (selectionUiActive) return true
-                    if (updatedQuery == stateModel.documentState.searchQuery) return true
-                    stateModel.documentState.isFileSearchActive = true
-                    stateModel.documentState.searchQuery = updatedQuery
-                    displayDirectoryFiles()
-                    return true
-                }
-            })
+    private fun createBrowserItem(
+        kind: MainCreateItemKind,
+        nameInput: String,
+        extensionInput: String
+    ): MainCreateItemError? {
+        FileBrowserOrder.validateName(nameInput)?.let {
+            return MainCreateItemError(MainCreateItemField.NAME, it)
         }
-        item.actionView = searchView
-        item.setOnActionExpandListener(object : MenuItem.OnActionExpandListener {
-            override fun onMenuItemActionExpand(item: MenuItem): Boolean {
-                if (activeFileSearchView !== searchView) return true
-                stateModel.documentState.isFileSearchActive = true
-                return true
+        if (kind == MainCreateItemKind.FILE) {
+            FileBrowserOrder.validateExtension(extensionInput)?.let {
+                return MainCreateItemError(MainCreateItemField.EXTENSION, it)
             }
-
-            override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
-                if (activeFileSearchView !== searchView || suppressSearchCallbacks) return true
-                val enteringSelectionMode = stateModel.documentState.selectedPaths.isNotEmpty() || stateModel.documentState.pendingFileOperation != null
-                if (!enteringSelectionMode) {
-                    clearFileSearch(refreshDirectory = true)
-                }
-                return true
-            }
-        })
-        if (stateModel.documentState.isFileSearchActive && stateModel.documentState.searchQuery.isNotEmpty()) {
-            item.expandActionView()
-            searchView.setQuery(stateModel.documentState.searchQuery, false)
-            searchView.post {
-                if (activeFileSearchView !== searchView) return@post
-                val retainedQuery = stateModel.documentState.searchQuery
-                if (stateModel.documentState.isFileSearchActive && retainedQuery.isNotEmpty() &&
-                    searchView.query.toString() != retainedQuery
-                ) {
-                    searchView.setQuery(retainedQuery, false)
-                }
-                suppressSearchCallbacks = false
-            }
-        } else {
-            suppressSearchCallbacks = false
         }
+        val directory = stateModel.documentState.currentDirectory
+            ?: return MainCreateItemError(MainCreateItemField.NAME, "当前目录不可用")
+        val name = if (kind == MainCreateItemKind.FOLDER) nameInput.trim()
+        else FileBrowserOrder.composeFileName(nameInput, extensionInput)
+        val target = File(directory, name)
+        if (target.exists()) return MainCreateItemError(MainCreateItemField.NAME, "同名项目已存在")
+        val created = runCatching {
+            if (kind == MainCreateItemKind.FOLDER) target.mkdir() else target.createNewFile()
+        }.getOrDefault(false)
+        if (!created) {
+            return MainCreateItemError(MainCreateItemField.NAME, "创建失败，请检查目录写入权限")
+        }
+        loadDirectory(directory)
+        return null
     }
 
-    private fun showCreateMenu() {
-        val anchor = binding.toolbar.findViewById<View>(MENU_CREATE) ?: binding.toolbar
-        fileBrowserDialogController.showCreateMenu(anchor)
+    private fun changeFileSortField(field: FileSortField) {
+        stateModel.documentState.sortField = field
+        SettingsManager.getInstance(this).setFileSortField(field)
+        displayDirectoryFiles()
     }
 
-    private fun showDirectoryMoreMenu() {
-        val anchor = binding.toolbar.findViewById<View>(MENU_MORE) ?: binding.toolbar
-        fileBrowserDialogController.showMoreMenu(anchor, ::showSortDialog)
+    private fun changeFileSortDirection(direction: FileSortDirection) {
+        stateModel.documentState.sortDirection = direction
+        SettingsManager.getInstance(this).setFileSortDirection(direction)
+        displayDirectoryFiles()
     }
-
-    private fun showSortDialog() {
-        fileBrowserDialogController.showSortDialog(
-            { stateModel.documentState.sortField ?: FileSortField.NAME },
-            { stateModel.documentState.sortDirection ?: FileSortDirection.ASCENDING }
-        )
-    }
-
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
     
     private fun checkPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -478,14 +518,18 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun showPermissionDeniedDialog() {
-        AlertDialog.Builder(this)
-            .setTitle(R.string.error)
-            .setMessage("需要存储权限才能访问字幕文件。请在设置中授予权限。")
-            .setPositiveButton(R.string.confirm) { _, _ ->
-                checkPermissions()
-            }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
+        mainDialog = MainActivityDialogUi.PermissionDenied
+    }
+
+    private fun dismissMainDialog() {
+        mainDialog = null
+        pendingRenameFile = null
+        pendingDeleteFiles = null
+    }
+
+    private fun confirmPermissionDialog() {
+        dismissMainDialog()
+        checkPermissions()
     }
     
     private fun getDefaultDirectory(): File {
@@ -512,6 +556,8 @@ class MainActivity : AppCompatActivity() {
         
         stateModel.documentState.currentDirectory = directory
         updatePathDisplay()
+        directoryLoading = true
+        publishScreenState()
         directoryLoadJob?.cancel()
         val requestedPath = directory.absolutePath
         directoryLoadJob = lifecycleScope.launch {
@@ -529,6 +575,7 @@ class MainActivity : AppCompatActivity() {
             if (stateModel.documentState.currentDirectory?.absolutePath != requestedPath) return@launch
             directoryFiles.clear()
             directoryFiles.addAll(files)
+            directoryLoading = false
             displayDirectoryFiles(restoreScrollPosition = restoreScrollPosition)
         }
         directoryWatcher.watch(directory)
@@ -537,9 +584,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun displayDirectoryFiles(restoreScrollPosition: Boolean = false) {
         directorySearchController.cancel()
-        binding.searchProgress.visibility = View.INVISIBLE
+        searchInProgress = false
 
-        val directory = stateModel.documentState.currentDirectory ?: return
+        val directory = stateModel.documentState.currentDirectory ?: run {
+            publishScreenState()
+            return
+        }
         val query = if (stateModel.documentState.isFileSearchActive) {
             stateModel.documentState.searchQuery.trim()
         } else {
@@ -561,7 +611,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        binding.searchProgress.visibility = View.VISIBLE
+        searchInProgress = true
         showDirectoryFiles(
             directMatches,
             showParent = false,
@@ -599,35 +649,24 @@ class MainActivity : AppCompatActivity() {
             adapterItems.add(File(directory.absolutePath + "/.."))
         }
         adapterItems.addAll(displayed)
-        fileAdapter.setRelativePathRoot(relativePathRoot)
+        this.relativePathRoot = relativePathRoot
+        displayedFiles = adapterItems
         val directoryPath = stateModel.documentState.currentDirectory?.let(::directoryPath)
         val savedScrollPosition = if (restoreScrollPosition && directoryPath != null) {
             stateModel.documentState.directoryScrollPositions[directoryPath]
         } else {
             null
         }
-        fileAdapter.submitList(adapterItems) {
-            // AsyncListDiffer may finish after the selection update below. Reapply the
-            // latest selection state once the new list is installed so visible holders
-            // cannot retain the pre-refresh alpha/stroke values.
-            fileAdapter.updateSelection(
-                stateModel.documentState.selectedPaths.isNotEmpty() && stateModel.documentState.pendingFileOperation == null,
-                stateModel.documentState.selectedPaths.toSet()
-            )
-            fileAdapter.refreshSelectionVisuals()
-            if (restoreScrollPosition && directoryPath != null) {
-                binding.rvFileList.post {
-                    if (stateModel.documentState.currentDirectory?.let(::directoryPath) != directoryPath) return@post
-                    restoreDirectoryScrollPosition(savedScrollPosition)
-                }
+        searchInProgress = searching
+        updateSelectionUi()
+        publishScreenState()
+        if (restoreScrollPosition && directoryPath != null) {
+            lifecycleScope.launch {
+                val currentListState = directoryListState ?: return@launch
+                if (stateModel.documentState.currentDirectory?.let(::directoryPath) != directoryPath) return@launch
+                restoreDirectoryScrollPosition(savedScrollPosition, currentListState)
             }
         }
-        updateSelectionUi(invalidateMenu = false)
-        binding.tvEmptyStateMessage.setText(
-            if (searching) R.string.file_searching else R.string.no_files
-        )
-        binding.emptyState.visibility = if (adapterItems.isEmpty()) View.VISIBLE else View.GONE
-        binding.rvFileList.visibility = if (adapterItems.isEmpty()) View.GONE else View.VISIBLE
     }
 
     private fun directoryPath(directory: File): String =
@@ -635,31 +674,26 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveCurrentDirectoryScrollPosition() {
         val directory = stateModel.documentState.currentDirectory ?: return
-        val layoutManager = binding.rvFileList.layoutManager as? LinearLayoutManager ?: return
-        val firstVisibleIndex = layoutManager.findFirstVisibleItemPosition()
-        if (firstVisibleIndex < 0) return
-
-        val firstVisibleView = layoutManager.findViewByPosition(firstVisibleIndex)
-        val offset = firstVisibleView?.let {
-            layoutManager.getDecoratedTop(it) - binding.rvFileList.paddingTop
-        } ?: 0
-        val firstVisiblePath = fileAdapter.currentList.getOrNull(firstVisibleIndex)?.absolutePath
+        val listState = directoryListState ?: return
+        val firstVisibleIndex = listState.firstVisibleItemIndex
+        val firstVisiblePath = displayedFiles.getOrNull(firstVisibleIndex)?.absolutePath
         stateModel.documentState.directoryScrollPositions[directoryPath(directory)] = DirectoryScrollPosition(
             firstVisiblePath = firstVisiblePath,
             firstVisibleIndex = firstVisibleIndex,
-            offset = offset
+            offset = listState.firstVisibleItemScrollOffset
         )
     }
 
-    private fun restoreDirectoryScrollPosition(savedPosition: DirectoryScrollPosition?) {
-        val layoutManager = binding.rvFileList.layoutManager as? LinearLayoutManager ?: return
-        if (fileAdapter.itemCount == 0) return
-
+    private suspend fun restoreDirectoryScrollPosition(
+        savedPosition: DirectoryScrollPosition?,
+        listState: LazyListState
+    ) {
+        if (displayedFiles.isEmpty()) return
         val position = savedPosition?.firstVisiblePath?.let { path ->
-            fileAdapter.currentList.indexOfFirst { it.absolutePath == path }
+            displayedFiles.indexOfFirst { it.absolutePath == path }
         }?.takeIf { it >= 0 } ?: savedPosition?.firstVisibleIndex ?: 0
-        layoutManager.scrollToPositionWithOffset(
-            position.coerceIn(0, fileAdapter.itemCount - 1),
+        listState.scrollToItem(
+            position.coerceIn(0, displayedFiles.lastIndex),
             savedPosition?.offset ?: 0
         )
     }
@@ -670,9 +704,7 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun updatePathDisplay() {
-        stateModel.documentState.currentDirectory?.let {
-            binding.tvCurrentPath.text = it.absolutePath
-        }
+        publishScreenState()
     }
     
     private fun onFileClicked(file: File) {
@@ -742,7 +774,6 @@ class MainActivity : AppCompatActivity() {
 
         if (loadDirectory(directory, restoreScrollPosition = true)) {
             stateModel.documentState.directoryHistory.addAll(historyEntries)
-            if (wasSearching) invalidateOptionsMenu()
         }
     }
 
@@ -752,9 +783,11 @@ class MainActivity : AppCompatActivity() {
     private fun clearFileSearch(refreshDirectory: Boolean) {
         stateModel.documentState.isFileSearchActive = false
         stateModel.documentState.searchQuery = ""
+        searchExpanded = false
+        searchInProgress = false
         directorySearchController.cancel()
-        binding.searchProgress.visibility = View.INVISIBLE
         if (refreshDirectory) displayDirectoryFiles()
+        else publishScreenState()
     }
 
     private fun isRestrictedAndroidDirectory(file: File): Boolean =
@@ -801,47 +834,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun selectedFiles(): List<File> = FileSelectionPolicy.existingFiles(stateModel.documentState.selectedPaths)
 
-    private fun updateSelectionUi(invalidateMenu: Boolean = true) {
-        val operation = stateModel.documentState.pendingFileOperation
-        val isSelectionUiActive = stateModel.documentState.selectedPaths.isNotEmpty() || operation != null
-        binding.selectionBottomActions.visibility = if (isSelectionUiActive) View.VISIBLE else View.GONE
-        val showTopLevelNavigation = !isSelectionUiActive
-        binding.bottomNavigation.visibility = if (showTopLevelNavigation) View.VISIBLE else View.GONE
-        binding.bottomDivider.visibility = if (showTopLevelNavigation) View.VISIBLE else View.GONE
-
-        val choosingDestination = operation != null
-        binding.selectionActionItems.visibility = if (choosingDestination) View.GONE else View.VISIBLE
-        binding.destinationActionItems.visibility = if (choosingDestination) View.VISIBLE else View.GONE
-        listOf(
-            binding.btnCopySelected,
-            binding.btnMoveSelected,
-            binding.btnRenameSelected,
-            binding.btnDeleteSelected,
-            binding.btnMoreSelected
-        ).forEach { it.isEnabled = !choosingDestination }
-        binding.btnConfirmDestination.text = FileOperationUiPolicy.destinationButtonLabel(operation)
-        supportActionBar?.title = if (isSelectionUiActive) {
-            FileOperationUiPolicy.selectionTitle(operation, stateModel.documentState.selectedPaths.size)
-        } else {
-            getString(R.string.nav_directory)
-        }
-        binding.toolbar.navigationIcon = if (isSelectionUiActive) {
-            ContextCompat.getDrawable(this, R.drawable.ic_close)
-        } else {
-            null
-        }
-        binding.toolbar.navigationContentDescription = if (isSelectionUiActive) "退出选择模式" else null
-        binding.toolbar.setNavigationOnClickListener(if (isSelectionUiActive) {
-            View.OnClickListener { exitSelectionMode() }
-        } else {
-            null
-        })
-        if (invalidateMenu) {
-            if (isSelectionUiActive) activeFileSearchView = null
-            invalidateOptionsMenu()
-        }
-        fileAdapter.updateSelection(stateModel.documentState.selectedPaths.isNotEmpty() && operation == null, stateModel.documentState.selectedPaths)
-    }
+    private fun updateSelectionUi() = publishScreenState()
 
     private fun exitSelectionMode() {
         stateModel.documentState.selectedPaths.clear()
@@ -929,11 +922,9 @@ class MainActivity : AppCompatActivity() {
                 fileCopyJob = null
             }
         }
-        progress.dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { button ->
-            button.isEnabled = false
-            progress.binding.tvProgressMessage.text = "正在取消..."
-            progress.binding.progressBar.isIndeterminate = true
-            progress.binding.tvProgressPercent.visibility = View.GONE
+        progress.setCancelAction {
+            progress.setCancelEnabled(false)
+            progress.showCancelling()
             cancelledByUser.set(true)
             fileCopyJob?.cancel(CancellationException("用户取消复制"))
         }
@@ -965,82 +956,52 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showRenameDialog(file: File) {
-        val input = android.widget.EditText(this).apply {
-            setText(file.name)
-            setSelection(text.length)
-            setSingleLine(true)
-        }
-        AlertDialog.Builder(this)
-            .setTitle("重命名")
-            .setView(input)
-            .setPositiveButton("确定") { _, _ ->
-                val newName = input.text?.toString()?.trim().orEmpty()
-                when {
-                    newName.isEmpty() || newName == "." || newName == ".." || newName.contains('/') || newName.contains('\\') ->
-                        showShortToast("文件名无效")
-                    newName == file.name -> Unit
-                    else -> {
-                        val target = File(file.parentFile, newName)
-                        if (target.exists()) {
-                            showShortToast("目标名称已存在")
-                        } else if (file.renameTo(target)) {
-                            exitSelectionMode()
-                            stateModel.documentState.currentDirectory?.let(::loadDirectory)
-                            showShortToast("已重命名")
-                        } else {
-                            showShortToast("重命名失败")
-                        }
-                    }
+        pendingRenameFile = file
+        mainDialog = MainActivityDialogUi.Rename(file.name)
+    }
+
+    private fun confirmRename(rawName: String) {
+        val file = pendingRenameFile ?: return
+        dismissMainDialog()
+        val newName = rawName.trim()
+        when {
+            newName.isEmpty() || newName == "." || newName == ".." || newName.contains('/') || newName.contains('\\') ->
+                showShortToast("文件名无效")
+            newName == file.name -> Unit
+            else -> {
+                val target = File(file.parentFile, newName)
+                if (target.exists()) {
+                    showShortToast("目标名称已存在")
+                } else if (file.renameTo(target)) {
+                    exitSelectionMode()
+                    stateModel.documentState.currentDirectory?.let(::loadDirectory)
+                    showShortToast("已重命名")
+                } else {
+                    showShortToast("重命名失败")
                 }
             }
-            .setNegativeButton("取消", null)
-            .show()
+        }
     }
 
     private fun confirmDeleteSelectedFiles() {
         val files = selectedFiles()
         if (files.isEmpty()) return
-        AlertDialog.Builder(this)
-            .setTitle("删除")
-            .setMessage("确定要删除选中的 ${files.size} 项吗？此操作无法撤销。")
-            .setPositiveButton("删除") { _, _ ->
-                lifecycleScope.launch {
-                    val deleted = withContext(Dispatchers.IO) { files.all { it.deleteRecursively() } }
-                    if (deleted) {
-                        exitSelectionMode()
-                        stateModel.documentState.currentDirectory?.let(::loadDirectory)
-                        showShortToast("已删除")
-                    } else {
-                        showShortToast("删除失败")
-                    }
-                }
-            }
-            .setNegativeButton("取消", null)
-            .show()
+        pendingDeleteFiles = files
+        mainDialog = MainActivityDialogUi.DeleteConfirmation(files.size)
     }
 
-    private fun showMoreActions() {
-        PopupMenu(this, binding.btnMoreSelected).apply {
-            val selected = selectedFiles()
-            val canConvert = selected.isNotEmpty() && selected.all {
-                it.isFile && FileUtils.isSubtitleFile(it)
-            }
-            val convertItem = if (canConvert) {
-                menu.add(getString(R.string.convert_format))
+    private fun deleteConfirmedSelection() {
+        val files = pendingDeleteFiles ?: return
+        dismissMainDialog()
+        lifecycleScope.launch {
+            val deleted = withContext(Dispatchers.IO) { files.all { it.deleteRecursively() } }
+            if (deleted) {
+                exitSelectionMode()
+                stateModel.documentState.currentDirectory?.let(::loadDirectory)
+                showShortToast("已删除")
             } else {
-                null
+                showShortToast("删除失败")
             }
-            val compressItem = if (!isFileSearchQueryActive()) menu.add("压缩") else null
-            val propertiesItem = menu.add("详情")
-            setOnMenuItemClickListener { item ->
-                when {
-                    item === convertItem -> showSubtitleFormatConvertDialog()
-                    item === compressItem -> showCreateArchiveDialog()
-                    item === propertiesItem -> showSelectedProperties()
-                }
-                true
-            }
-            show()
         }
     }
 
@@ -1076,22 +1037,21 @@ class MainActivity : AppCompatActivity() {
                     return@onSuccess
                 }
 
-                val dialogBinding = DialogSubtitleConvertBinding.inflate(layoutInflater)
-                if (conversionSources.size == 1) {
-                    dialogBinding.tvSourceFile.text = getString(
+                val sourceFileText = if (conversionSources.size == 1) {
+                    getString(
                         R.string.dialog_subtitle_convert_source_file,
                         conversionSources.first().file.name
                     )
-                    dialogBinding.tvSourceFormat.text = getString(
+                } else {
+                    getString(R.string.dialog_subtitle_convert_source_files, conversionSources.size)
+                }
+                val sourceFormatText = if (conversionSources.size == 1) {
+                    getString(
                         R.string.dialog_subtitle_convert_source_format,
                         SubtitleFormatConverter.displayName(conversionSources.first().source.format)
                     )
                 } else {
-                    dialogBinding.tvSourceFile.text = getString(
-                        R.string.dialog_subtitle_convert_source_files,
-                        conversionSources.size
-                    )
-                    dialogBinding.tvSourceFormat.text = getString(
+                    getString(
                         R.string.dialog_subtitle_convert_source_formats,
                         conversionSources
                             .groupingBy { it.source.format }
@@ -1102,127 +1062,131 @@ class MainActivity : AppCompatActivity() {
                             }
                     )
                 }
-                dialogBinding.spinnerTargetFormat.adapter = ArrayAdapter(
-                    this@MainActivity,
-                    android.R.layout.simple_spinner_item,
-                    targetFormats.map(SubtitleFormatConverter::displayName)
-                ).apply {
-                    setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-                }
                 val sourceFormats = conversionSources.map { it.source.format }.toSet()
                 val defaultTargetIndex = targetFormats.indexOfFirst { it !in sourceFormats }
                     .takeIf { it >= 0 } ?: 0
-                dialogBinding.spinnerTargetFormat.setSelection(defaultTargetIndex)
+                nextSubtitleConversionDialogId += 1
+                pendingSubtitleConversionSources = conversionSources
+                subtitleConversionResult = null
+                subtitleConversionDialog = SubtitleConversionDialogUi(
+                    id = nextSubtitleConversionDialogId,
+                    sourceFileText = sourceFileText,
+                    sourceFormatText = sourceFormatText,
+                    targetFormats = targetFormats.map(SubtitleFormatConverter::displayName),
+                    initialTargetIndex = defaultTargetIndex
+                )
+            }
+        }
+    }
 
-                val dialog = AlertDialog.Builder(this@MainActivity)
-                    .setTitle(R.string.dialog_subtitle_convert_title)
-                    .setView(dialogBinding.root)
-                    .setPositiveButton(R.string.start_convert, null)
-                    .setNegativeButton(R.string.cancel, null)
-                    .create()
-                dialog.setOnShowListener {
-                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                        val targetFormat = targetFormats[dialogBinding.spinnerTargetFormat.selectedItemPosition]
-                        val filesToConvert = conversionSources.filter { it.source.format != targetFormat }
-                        if (filesToConvert.isEmpty()) {
-                            showShortToast(getString(R.string.dialog_subtitle_convert_same_format))
-                            return@setOnClickListener
-                        }
+    private fun dismissSubtitleConversion(dialogId: Int) {
+        if (subtitleConversionDialog?.id != dialogId) return
+        subtitleConversionDialog = null
+        pendingSubtitleConversionSources = null
+    }
 
-                        val keepOriginal = dialogBinding.cbKeepOriginal.isChecked
-                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
-                        lifecycleScope.launch {
-                            val conversionResult = withContext(Dispatchers.IO) {
-                                runCatching {
-                                    val successFiles = mutableListOf<String>()
-                                    val skippedFiles = conversionSources
-                                        .filter { it.source.format == targetFormat }
-                                        .map { it.file.name }
-                                    val failedFiles = mutableListOf<String>()
-                                    filesToConvert.forEach { conversionSource ->
-                                        runCatching {
-                                            val targetFile = File(
-                                                conversionSource.file.parentFile,
-                                                "${conversionSource.file.nameWithoutExtension}.${SubtitleFormatConverter.extension(targetFormat)}"
-                                            )
-                                            if (targetFile.exists()) {
-                                                error(
-                                                    getString(
-                                                        R.string.dialog_subtitle_convert_target_exists,
-                                                        targetFile.name
-                                                    )
-                                                )
-                                            }
-                                            val convertedContent = SubtitleFormatConverter.convert(
-                                                conversionSource.source,
-                                                targetFormat
-                                            )
-                                            FileUtils.writeFile(targetFile, convertedContent)
-                                            if (!keepOriginal && !conversionSource.file.delete()) {
-                                                targetFile.delete()
-                                                error("无法删除原文件")
-                                            }
-                                            successFiles += targetFile.name
-                                        }.onFailure {
-                                            failedFiles += "${conversionSource.file.name}: ${it.message ?: "未知错误"}"
-                                        }
-                                    }
-                                    SubtitleConversionResult(successFiles, skippedFiles, failedFiles)
-                                }
-                            }
-                            dialog.dismiss()
-                            conversionResult.onSuccess { batchResult ->
-                                exitSelectionMode()
-                                stateModel.documentState.currentDirectory?.let(::loadDirectory)
-                                val message = buildString {
-                                    append(
-                                        getString(
-                                            R.string.dialog_subtitle_convert_batch_success,
-                                            batchResult.successFiles.size
-                                        )
-                                    )
-                                    if (batchResult.skippedFiles.isNotEmpty()) {
-                                        append(
-                                            getString(
-                                                R.string.dialog_subtitle_convert_batch_skipped,
-                                                batchResult.skippedFiles.size
-                                            )
-                                        )
-                                    }
-                                    if (batchResult.failedFiles.isNotEmpty()) {
-                                        append(
-                                            getString(
-                                                R.string.dialog_subtitle_convert_batch_failed,
-                                                batchResult.failedFiles.size
-                                            )
-                                        )
-                                    }
-                                }
-                                if (batchResult.failedFiles.isEmpty()) {
-                                    showShortToast(message)
-                                } else {
-                                    AlertDialog.Builder(this@MainActivity)
-                                        .setTitle(R.string.dialog_subtitle_convert_title)
-                                        .setMessage(
-                                            message + "\n\n" + batchResult.failedFiles.joinToString("\n")
-                                        )
-                                        .setPositiveButton(R.string.confirm, null)
-                                        .show()
-                                }
-                            }.onFailure { error ->
-                                showShortToast(
+    private fun convertSelectedSubtitles(
+        dialogId: Int,
+        targetIndex: Int,
+        keepOriginal: Boolean
+    ): Boolean {
+        val dialog = subtitleConversionDialog?.takeIf { it.id == dialogId } ?: return false
+        val conversionSources = pendingSubtitleConversionSources ?: return false
+        val targetFormats = SubtitleFormatConverter.supportedTargetFormats
+        if (targetFormats.isEmpty()) return false
+        val targetFormat = targetFormats[targetIndex.coerceIn(targetFormats.indices)]
+        val filesToConvert = conversionSources.filter { it.source.format != targetFormat }
+        if (filesToConvert.isEmpty()) {
+            showShortToast(getString(R.string.dialog_subtitle_convert_same_format))
+            return false
+        }
+
+        lifecycleScope.launch {
+            val conversionResult = withContext(Dispatchers.IO) {
+                runCatching {
+                    val successFiles = mutableListOf<String>()
+                    val skippedFiles = conversionSources
+                        .filter { it.source.format == targetFormat }
+                        .map { it.file.name }
+                    val failedFiles = mutableListOf<String>()
+                    filesToConvert.forEach { conversionSource ->
+                        runCatching {
+                            val targetFile = File(
+                                conversionSource.file.parentFile,
+                                "${conversionSource.file.nameWithoutExtension}.${SubtitleFormatConverter.extension(targetFormat)}"
+                            )
+                            if (targetFile.exists()) {
+                                error(
                                     getString(
-                                        R.string.dialog_subtitle_convert_failed,
-                                        error.message ?: "未知错误"
+                                        R.string.dialog_subtitle_convert_target_exists,
+                                        targetFile.name
                                     )
                                 )
                             }
+                            val convertedContent = SubtitleFormatConverter.convert(
+                                conversionSource.source,
+                                targetFormat
+                            )
+                            FileUtils.writeFile(targetFile, convertedContent)
+                            if (!keepOriginal && !conversionSource.file.delete()) {
+                                targetFile.delete()
+                                error("无法删除原文件")
+                            }
+                            successFiles += targetFile.name
+                        }.onFailure {
+                            failedFiles += "${conversionSource.file.name}: ${it.message ?: "未知错误"}"
                         }
                     }
+                    SubtitleConversionResult(successFiles, skippedFiles, failedFiles)
                 }
-                dialog.show()
+            }
+            conversionResult.onSuccess { batchResult ->
+                dismissSubtitleConversion(dialog.id)
+                exitSelectionMode()
+                stateModel.documentState.currentDirectory?.let(::loadDirectory)
+                val message = buildString {
+                    append(
+                        getString(
+                            R.string.dialog_subtitle_convert_batch_success,
+                            batchResult.successFiles.size
+                        )
+                    )
+                    if (batchResult.skippedFiles.isNotEmpty()) {
+                        append(
+                            getString(
+                                R.string.dialog_subtitle_convert_batch_skipped,
+                                batchResult.skippedFiles.size
+                            )
+                        )
+                    }
+                    if (batchResult.failedFiles.isNotEmpty()) {
+                        append(
+                            getString(
+                                R.string.dialog_subtitle_convert_batch_failed,
+                                batchResult.failedFiles.size
+                            )
+                        )
+                    }
+                }
+                if (batchResult.failedFiles.isEmpty()) {
+                    showShortToast(message)
+                } else {
+                    subtitleConversionResult = SubtitleConversionResultUi(
+                        title = getString(R.string.dialog_subtitle_convert_title),
+                        message = message + "\n\n" + batchResult.failedFiles.joinToString("\n")
+                    )
+                }
+            }.onFailure { error ->
+                dismissSubtitleConversion(dialog.id)
+                showShortToast(
+                    getString(
+                        R.string.dialog_subtitle_convert_failed,
+                        error.message ?: "未知错误"
+                    )
+                )
             }
         }
+        return true
     }
 
     private data class SubtitleConversionSource(
@@ -1241,132 +1205,80 @@ class MainActivity : AppCompatActivity() {
         val outputDirectory = stateModel.documentState.currentDirectory ?: return
         if (sources.isEmpty()) return
 
-        val dialogBinding = DialogCreateArchiveBinding.inflate(layoutInflater)
         val formats = listOf(
             ArchiveManager.CreateFormat.ZIP,
             ArchiveManager.CreateFormat.SEVEN_Z,
             ArchiveManager.CreateFormat.TAR
         )
         val splitOptions = listOf(
-            SplitOption("不分卷", null),
-            SplitOption("10 MB", 10L * 1024 * 1024),
-            SplitOption("50 MB", 50L * 1024 * 1024),
-            SplitOption("100 MB", 100L * 1024 * 1024),
-            SplitOption("500 MB", 500L * 1024 * 1024)
+            ArchiveSplitOptionUi("不分卷", null),
+            ArchiveSplitOptionUi("10 MB", 10L * 1024 * 1024),
+            ArchiveSplitOptionUi("50 MB", 50L * 1024 * 1024),
+            ArchiveSplitOptionUi("100 MB", 100L * 1024 * 1024),
+            ArchiveSplitOptionUi("500 MB", 500L * 1024 * 1024)
         )
-        dialogBinding.etArchiveName.setText(ArchiveNamePolicy.defaultName(sources))
-        dialogBinding.etArchiveName.setSelection(dialogBinding.etArchiveName.text?.length ?: 0)
-        dialogBinding.spinnerArchiveFormat.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_item,
-            formats.map { it.displayName }
-        ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-        dialogBinding.spinnerSplitSize.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_item,
-            splitOptions.map { it.label }
-        ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        pendingArchiveDraft = PendingArchiveDraft(sources, outputDirectory)
+        archiveCreationDialog = ArchiveCreationDialogUi(
+            initialName = ArchiveNamePolicy.defaultName(sources),
+            formats = formats.map { format ->
+                ArchiveFormatOptionUi(
+                    format = format,
+                    compressionMethods = archiveRepository.compressionMethods(format),
+                    encryptionMethods = archiveRepository.encryptionMethods(format)
+                )
+            },
+            splitOptions = splitOptions
+        )
+    }
 
-        var methods = archiveRepository.compressionMethods(formats.first())
-        var encryptionMethods = archiveRepository.encryptionMethods(formats.first())
-        fun refreshFormatControls(position: Int) {
-            val format = formats[position.coerceIn(formats.indices)]
-            methods = archiveRepository.compressionMethods(format)
-            dialogBinding.spinnerCompressionMethod.adapter = ArrayAdapter(
-                this,
-                android.R.layout.simple_spinner_item,
-                methods.map { it.displayName }
-            ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-            dialogBinding.spinnerCompressionMethod.setSelection(0, false)
-            encryptionMethods = archiveRepository.encryptionMethods(format)
-            dialogBinding.spinnerEncryptionMethod.adapter = ArrayAdapter(
-                this,
-                android.R.layout.simple_spinner_item,
-                encryptionMethods.map { it.displayName }
-            ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-            if (encryptionMethods.isNotEmpty()) {
-                dialogBinding.spinnerEncryptionMethod.setSelection(0, false)
-            }
-            val passwordEnabled = encryptionMethods.isNotEmpty()
-            dialogBinding.layoutArchivePassword.isEnabled = passwordEnabled
-            dialogBinding.btnPasswordBook.isEnabled = passwordEnabled
-            val zipEncryptionOptions = format == ArchiveManager.CreateFormat.ZIP
-            dialogBinding.layoutArchiveEncryption.visibility =
-                if (zipEncryptionOptions) View.VISIBLE else View.GONE
-            dialogBinding.spinnerEncryptionMethod.isEnabled = zipEncryptionOptions
-            val splitEnabled = format == ArchiveManager.CreateFormat.ZIP ||
-                format == ArchiveManager.CreateFormat.SEVEN_Z
-            dialogBinding.spinnerSplitSize.isEnabled = splitEnabled
-            if (!splitEnabled) dialogBinding.spinnerSplitSize.setSelection(0)
-            dialogBinding.tvPasswordHint.text = when (format) {
-                ArchiveManager.CreateFormat.ZIP -> "留空则不加密；ZipCrypto 兼容性更好，AES-256 更安全"
-                ArchiveManager.CreateFormat.SEVEN_Z -> "使用 7Z AES-256 加密；留空则不加密"
-                ArchiveManager.CreateFormat.TAR -> "密码仅适用于 ZIP 和 7Z 格式"
-            }
-        }
-        dialogBinding.spinnerArchiveFormat.onItemSelectedListener =
-            object : AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                    refreshFormatControls(position)
-                }
+    private fun dismissCreateArchiveDialog() {
+        archiveCreationDialog = null
+        pendingArchiveDraft = null
+    }
 
-                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-            }
-        refreshFormatControls(0)
-        dialogBinding.btnPasswordBook.setOnClickListener {
-            archivePasswordDialogController.showPasswordBook(dialogBinding.etArchivePassword)
-        }
+    private fun submitArchiveCreation(submission: ArchiveCreateSubmission): String? {
+        val draft = pendingArchiveDraft ?: return "压缩文件信息已失效"
+        val baseName = ArchiveNamePolicy.stripExtension(submission.name.trim())
+        if (!ArchiveNamePolicy.isValidName(baseName)) return "请输入有效名称"
+        val extension = archiveRepository.outputExtension(submission.format, submission.method)
+        val output = File(draft.outputDirectory, "$baseName.$extension")
+        if (output.exists()) return "同名压缩包已存在"
 
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("创建压缩文件")
-            .setView(dialogBinding.root)
-            .setPositiveButton("确定", null)
-            .setNegativeButton("取消", null)
-            .create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val format = formats[dialogBinding.spinnerArchiveFormat.selectedItemPosition]
-                val method = methods[dialogBinding.spinnerCompressionMethod.selectedItemPosition]
-                val splitSizeBytes = splitOptions[dialogBinding.spinnerSplitSize.selectedItemPosition].bytes
-                val extension = archiveRepository.outputExtension(format, method)
-                val rawName = dialogBinding.etArchiveName.text?.toString()?.trim().orEmpty()
-                val baseName = ArchiveNamePolicy.stripExtension(rawName)
-                when {
-                    !ArchiveNamePolicy.isValidName(baseName) -> {
-                        dialogBinding.etArchiveName.error = "请输入有效名称"
-                    }
-                    File(outputDirectory, "$baseName.$extension").exists() -> {
-                        dialogBinding.etArchiveName.error = "同名压缩包已存在"
-                    }
-                    else -> {
-                        val password = if (encryptionMethods.isNotEmpty()) {
-                            dialogBinding.etArchivePassword.text?.toString().orEmpty()
-                        } else {
-                            ""
-                        }
-                        val encryptionMethod = when (format) {
-                            ArchiveManager.CreateFormat.ZIP -> encryptionMethods[
-                                dialogBinding.spinnerEncryptionMethod.selectedItemPosition
-                            ]
-                            ArchiveManager.CreateFormat.SEVEN_Z -> encryptionMethods.first()
-                            ArchiveManager.CreateFormat.TAR -> null
-                        }
-                        dialog.dismiss()
-                        createArchive(
-                            sources = sources,
-                            output = File(outputDirectory, "$baseName.$extension"),
-                            format = format,
-                            method = method,
-                            password = password,
-                            encryptionMethod = encryptionMethod,
-                            splitSizeBytes = splitSizeBytes,
-                            deleteSources = dialogBinding.cbDeleteSources.isChecked
-                        )
-                    }
-                }
-            }
+        pendingArchiveDraft = null
+        archiveCreationDialog = null
+        createArchive(
+            sources = draft.sources,
+            output = output,
+            format = submission.format,
+            method = submission.method,
+            password = submission.password,
+            encryptionMethod = submission.encryptionMethod,
+            splitSizeBytes = submission.splitSizeBytes,
+            deleteSources = submission.deleteSources
+        )
+        return null
+    }
+
+    private fun loadArchivePasswords(): List<String>? = runCatching {
+        ArchivePasswordVault(this).getPasswords()
+    }.onFailure {
+        showShortToast("无法读取密码本")
+    }.getOrNull()
+
+    private fun saveArchivePassword(password: String) {
+        if (password.isEmpty()) {
+            showShortToast("请先输入密码")
+            return
         }
-        dialog.show()
+        runCatching { ArchivePasswordVault(this).savePassword(password) }
+            .onSuccess { showShortToast("密码已保存") }
+            .onFailure { showShortToast("密码保存失败") }
+    }
+
+    private fun clearArchivePasswordBook() {
+        runCatching { ArchivePasswordVault(this).clear() }
+            .onSuccess { showShortToast("密码本已清空") }
+            .onFailure { showShortToast("密码本清空失败") }
     }
 
     private fun createArchive(
@@ -1425,13 +1337,10 @@ class MainActivity : AppCompatActivity() {
                     ArchiveAction.EXTRACT_CURRENT -> Unit
                     ArchiveAction.TEST -> {
                         val tested = value as ArchiveManager.TestResult
-                        AlertDialog.Builder(this@MainActivity)
-                            .setTitle("解压测试通过")
-                            .setMessage(
-                                "压缩包完整可读。\n\n条目：${tested.entryCount}\n解压大小：${FileUtils.formatFileSize(tested.totalBytes)}"
-                            )
-                            .setPositiveButton("确定", null)
-                            .show()
+                        mainDialog = MainActivityDialogUi.Message(
+                            title = "解压测试通过",
+                            message = "压缩包完整可读。\n\n条目：${tested.entryCount}\n解压大小：${FileUtils.formatFileSize(tested.totalBytes)}"
+                        )
                     }
                 }
             }.onFailure { error ->
@@ -1681,7 +1590,7 @@ class MainActivity : AppCompatActivity() {
         onCancelled: () -> Unit = {}
     ) = archivePasswordDialogController.showPasswordDialog(archive, onPassword, onCancelled)
 
-    private fun showBlockingProgress(title: String, message: String): AlertDialog =
+    private fun showBlockingProgress(title: String, message: String): ComposeDialogHandle =
         archiveActionDialogController.showBlockingProgress(title, message)
 
     private fun showArchiveProgress(
@@ -1805,6 +1714,13 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun handleBackNavigation() {
+        if (stateModel.documentState.selectedTopLevelItem == R.id.nav_directory &&
+            stateModel.documentState.selectedPaths.isEmpty() &&
+            stateModel.documentState.pendingFileOperation == null && searchExpanded
+        ) {
+            closeFileSearch()
+            return
+        }
         when (MainBackNavigationPolicy.decide(
             isDirectorySelected = stateModel.documentState.selectedTopLevelItem == R.id.nav_directory,
             hasPendingFileOperation = stateModel.documentState.pendingFileOperation != null,
@@ -1812,9 +1728,7 @@ class MainActivity : AppCompatActivity() {
             hasDirectoryHistory = stateModel.documentState.directoryHistory.isNotEmpty()
         )) {
             MainBackNavigationPolicy.Decision.DELEGATE_TO_TOP_LEVEL -> {
-                val handled = (supportFragmentManager.findFragmentById(R.id.fragmentContainer)
-                    as? TopLevelBackHandler)?.handleTopLevelBack() == true
-                if (!handled) finishFromBackNavigation()
+                finishFromBackNavigation()
             }
             MainBackNavigationPolicy.Decision.NAVIGATE_DESTINATION -> {
                 if (!navigateDestinationUp()) cancelDestinationSelection()

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Stable identifiers used by the Compose top-level navigation state. -->
+    <item name="nav_directory" type="id" />
+    <item name="nav_favorites" type="id" />
+    <item name="nav_drafts" type="id" />
+    <item name="nav_tools" type="id" />
+    <item name="nav_settings" type="id" />
+</resources>

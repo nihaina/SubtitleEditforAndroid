@@ -1,12 +1,9 @@
 package com.subtitleedit.editor
 
-import androidx.recyclerview.widget.LinearLayoutManager
-import com.subtitleedit.databinding.ActivityEditorBinding
 import com.subtitleedit.adapter.SubtitleAdapter
 
 /** Coordinates editor controller cleanup and state preservation across lifecycle changes. */
 internal class EditorLifecycleCoordinator(
-    private val binding: ActivityEditorBinding,
     private val subtitleAdapter: SubtitleAdapter,
     private val sourcePreview: EditorSourcePreviewController,
     private val sourceWaveformSync: EditorSourceWaveformSyncController,
@@ -16,7 +13,6 @@ internal class EditorLifecycleCoordinator(
     private val tts: EditorTtsController,
     private val translation: EditorTranslationController,
     private val transcribe: EditorTranscribeController,
-    private val videoFullscreen: EditorVideoFullscreenController?,
     private val mediaRelease: () -> Unit,
     private val isDocumentLoaded: () -> Boolean,
     private val isSourceMode: () -> Boolean,
@@ -28,6 +24,8 @@ internal class EditorLifecycleCoordinator(
     private val savePlaybackState: (Long, Float) -> Unit,
     private val saveSelectedIndices: (Set<Int>) -> Unit,
     private val saveSourceScroll: (Int) -> Unit,
+    private val readSourceScroll: () -> Int,
+    private val readListScroll: () -> Pair<Int, Int>,
     private val saveListScroll: (Int, Int) -> Unit
 ) {
     fun onStop() {
@@ -38,11 +36,10 @@ internal class EditorLifecycleCoordinator(
         if (isSourceMode() && hasPendingSourceEdits()) snapshotSource()
         saveSelectedIndices(subtitleAdapter.getSelectedPositions())
         if (isSourceMode()) {
-            saveSourceScroll(binding.etSourceView.getDocumentScrollOffset())
+            saveSourceScroll(readSourceScroll())
         } else {
-            val manager = binding.rvSubtitles.layoutManager as? LinearLayoutManager
-            val position = manager?.findFirstVisibleItemPosition() ?: -1
-            if (position >= 0) saveListScroll(position, manager?.findViewByPosition(position)?.top ?: 0)
+            val (position, offset) = readListScroll()
+            if (position >= 0) saveListScroll(position, offset)
         }
         savePlaybackState(playback.currentPositionMs, playback.playbackSpeed)
         playback.pauseForLifecycle()
@@ -67,10 +64,10 @@ internal class EditorLifecycleCoordinator(
     }
 
     fun onWindowFocusChanged(hasFocus: Boolean) {
-        videoFullscreen?.onWindowFocusChanged(hasFocus)
+        // The Compose video surface owns its visibility and system-bar state.
     }
 
     fun onConfigurationChanged() {
-        videoFullscreen?.onConfigurationChanged()
+        // Compose recomposes the media panel for configuration changes.
     }
 }

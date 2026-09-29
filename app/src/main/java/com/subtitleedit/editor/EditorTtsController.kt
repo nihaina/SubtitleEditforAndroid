@@ -3,17 +3,18 @@ package com.subtitleedit.editor
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Handler
+import android.os.Looper
 import android.speech.tts.TextToSpeech
-import android.view.View
 import com.subtitleedit.util.SettingsManager
 import java.util.Locale
 
 /** 使用设置中选定的系统 TTS 引擎，按字幕顺序朗读传入文本。 */
 internal class EditorTtsController(
     private val activity: Activity,
-    private val rootView: View,
     private val showMessage: (String) -> Unit
 ) {
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var textToSpeech: TextToSpeech? = null
     private var ttsReady = false
     private var ttsInitializing = false
@@ -74,7 +75,7 @@ internal class EditorTtsController(
 
         val listener = TextToSpeech.OnInitListener { status ->
             // post 确保构造函数已返回且 textToSpeech 字段已经完成赋值。
-            rootView.post {
+            mainHandler.post {
                 if (currentGeneration != generation || activity.isDestroyed) return@post
                 ttsInitializing = false
                 // defaultEngine 表示系统默认引擎，并不表示构造函数指定的当前引擎。

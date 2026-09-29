@@ -5,17 +5,17 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.util.Log
-import android.view.Menu
-import android.view.MenuItem
-import android.view.MotionEvent
-import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.subtitleedit.databinding.ActivityAutoTimestampBinding
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.activity.compose.setContent
+import com.subtitleedit.feature.ui.AutoTimestampDialog
+import com.subtitleedit.feature.ui.AutoTimestampScreen
 import com.subtitleedit.nativebridge.NativeMediaOperation
 import com.subtitleedit.nativebridge.PcmFormat
 import com.subtitleedit.task.LongTaskController
@@ -28,6 +28,7 @@ import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.TokenTimestampGenerator
 import com.subtitleedit.util.VadTimestampGenerator
+import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -64,12 +65,23 @@ class AutoTimestampActivity : AppCompatActivity() {
         const val OUTPUT_DIRECTORY_KEY = "auto_timestamp"
     }
 
-    private lateinit var binding: ActivityAutoTimestampBinding
     private val selectedMediaFiles = mutableListOf<SelectedMediaFile>()
     private var selectedSubtitleFile: SelectedMediaFile? = null
     private var outputDirUri: Uri? = null
     private var generationJob: Job? = null
-    private var isGenerating = false
+    private var isGenerating by mutableStateOf(false)
+    private var audioFilesText by mutableStateOf("尚未选择文件")
+    private var subtitleFileText by mutableStateOf("未选择字幕文件")
+    private var outputDirectoryText by mutableStateOf("请选择输出目录")
+    private var secondaryProcessingEnabled by mutableStateOf(false)
+    private var secondaryProcessingAvailable by mutableStateOf(true)
+    private var secondaryProcessingHint by mutableStateOf("")
+    private var outputFormat by mutableStateOf("SRT")
+    private var canGenerate by mutableStateOf(false)
+    private var statusText by mutableStateOf("")
+    private var previewText by mutableStateOf("日志和结果将在这里显示")
+    private var dialog by mutableStateOf(AutoTimestampDialog.NONE)
+    private lateinit var backNavigationCallback: OnBackPressedCallback
     private val taskController by lazy {
         LongTaskController(
             (application as SubtitleEditApplication).dependencies.taskStateStore,
@@ -84,8 +96,6 @@ class AutoTimestampActivity : AppCompatActivity() {
         get() = (application as SubtitleEditApplication).dependencies.nativeMediaEngine
     private var mediaOperation: NativeMediaOperation? = null
     private val operationLog = StringBuilder()
-
-    private val formatOptions = arrayOf("SRT", "LRC")
 
     private data class SelectedMediaFile(
         val uri: Uri,
@@ -119,36 +129,63 @@ class AutoTimestampActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityAutoTimestampBinding.inflate(layoutInflater)
-        setContentView(binding.root)
         settingsManager = SettingsManager.getInstance(this)
-
-        setupToolbar()
-        setupSpinners()
-        setupButtons()
-        setupScrollableLogs()
+        setContent {
+            SubtitleEditComposeTheme {
+                AutoTimestampScreen(
+                    audioFilesText = audioFilesText,
+                    subtitleFileText = subtitleFileText,
+                    outputDirectory = outputDirectoryText,
+                    secondaryProcessingEnabled = secondaryProcessingEnabled,
+                    secondaryProcessingAvailable = secondaryProcessingAvailable,
+                    secondaryProcessingHint = secondaryProcessingHint,
+                    outputFormat = outputFormat,
+                    isGenerating = isGenerating,
+                    canGenerate = canGenerate,
+                    status = statusText,
+                    preview = previewText,
+                    dialog = dialog,
+                    onBack = { onBackPressedDispatcher.onBackPressed() },
+                    onSettings = ::openTimestampSettings,
+                    onSelectAudio = {
+                        audioPickerLauncher.launch(arrayOf("audio/*", "video/*"))
+                    },
+                    onSecondaryProcessingChange = {
+                        secondaryProcessingEnabled = it
+                        updateGenerateButtonState()
+                    },
+                    onSelectSubtitle = { subtitlePickerLauncher.launch(arrayOf("*/*")) },
+                    onFormatChange = { outputFormat = it },
+                    onSelectOutputDirectory = { outputDirLauncher.launch(outputDirUri) },
+                    onGenerate = ::generateTimestamps,
+                    onRequestCancel = { dialog = AutoTimestampDialog.CANCEL_GENERATION },
+                    onConfirmCancel = ::confirmCancelGeneration,
+                    onOverwrite = {
+                        dialog = AutoTimestampDialog.NONE
+                        generateTimestamps(overwriteOutput = true)
+                    },
+                    onRename = {
+                        dialog = AutoTimestampDialog.NONE
+                        generateTimestamps(overwriteOutput = false)
+                    },
+                    onDismissDialog = { dialog = AutoTimestampDialog.NONE }
+                )
+            }
+        }
         setupDefaultOutputDir()
         updateSecondaryProcessingAvailability()
 
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+        backNavigationCallback = object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (isGenerating) {
-                    AlertDialog.Builder(this@AutoTimestampActivity)
-                        .setTitle("正在处理中")
-                        .setMessage("自动打轴正在进行，确定要返回吗？返回后处理将被取消。")
-                        .setPositiveButton("返回并取消") { _, _ ->
-                            cancelGeneration(showToast = false)
-                            isEnabled = false
-                            onBackPressedDispatcher.onBackPressed()
-                        }
-                        .setNegativeButton("继续处理", null)
-                        .show()
+                    dialog = AutoTimestampDialog.BACK_WHILE_GENERATING
                 } else {
                     isEnabled = false
                     onBackPressedDispatcher.onBackPressed()
                 }
             }
-        })
+        }
+        onBackPressedDispatcher.addCallback(this, backNavigationCallback)
     }
 
     override fun onResume() {
@@ -156,82 +193,11 @@ class AutoTimestampActivity : AppCompatActivity() {
         updateSecondaryProcessingAvailability()
     }
 
-    private fun setupToolbar() {
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.setDisplayShowHomeEnabled(true)
-        supportActionBar?.title = "自动打轴"
-
-        binding.toolbar.setNavigationOnClickListener {
-            onBackPressedDispatcher.onBackPressed()
-        }
-    }
-
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.menu_auto_timestamp, menu)
-        return true
-    }
-
-    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
-        menu.findItem(R.id.action_auto_timestamp_settings)?.isEnabled = !isGenerating
-        return super.onPrepareOptionsMenu(menu)
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
-        R.id.action_auto_timestamp_settings -> {
-            if (!isGenerating) {
-                if (settingsManager.isAsrVadTimestampEnabled()) {
-                    startActivity(Intent(this, VadModelSettingsActivity::class.java))
-                } else {
-                    AsrSettingsNavigation.open(this, settingsManager)
-                }
-            }
-            true
-        }
-        else -> super.onOptionsItemSelected(item)
-    }
-
-    private fun setupSpinners() {
-        // 输出格式选择器
-        val formatAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, formatOptions)
-        formatAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerOutputFormat.adapter = formatAdapter
-    }
-
-    private fun setupButtons() {
-        binding.btnSelectAudio.setOnClickListener {
-            audioPickerLauncher.launch(arrayOf("audio/*", "video/*"))
-        }
-
-        binding.switchSecondaryProcessing.setOnCheckedChangeListener { _, checked ->
-            updateSecondaryProcessingState(checked)
-            updateGenerateButtonState()
-        }
-
-        binding.btnSelectSubtitle.setOnClickListener {
-            subtitlePickerLauncher.launch(arrayOf("*/*"))
-        }
-
-        binding.btnSelectOutputDir.setOnClickListener {
-            outputDirLauncher.launch(outputDirUri)
-        }
-
-        binding.btnGenerate.setOnClickListener {
-            generateTimestamps()
-        }
-
-        binding.btnCancel.setOnClickListener {
-            confirmCancelGeneration()
-        }
-    }
-
-    private fun setupScrollableLogs() {
-        binding.previewScroll.setOnTouchListener { view, event ->
-            view.parent.requestDisallowInterceptTouchEvent(true)
-            if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
-                view.parent.requestDisallowInterceptTouchEvent(false)
-            }
-            false
+    private fun openTimestampSettings() {
+        if (settingsManager.isAsrVadTimestampEnabled()) {
+            startActivity(Intent(this, VadModelSettingsActivity::class.java))
+        } else {
+            AsrSettingsNavigation.open(this, settingsManager)
         }
     }
 
@@ -240,7 +206,7 @@ class AutoTimestampActivity : AppCompatActivity() {
             ?.let(Uri::parse)
         if (savedUri != null) {
             outputDirUri = savedUri
-            binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, savedUri)
+            outputDirectoryText = DirectoryDisplayPath.fromUri(this, savedUri)
             return
         }
 
@@ -255,7 +221,7 @@ class AutoTimestampActivity : AppCompatActivity() {
             }
 
             outputDirUri = Uri.fromFile(defaultPath)
-            binding.tvOutputDir.text = defaultPath.absolutePath
+            outputDirectoryText = defaultPath.absolutePath
         } catch (e: Exception) {
             Log.e("AutoTimestamp", "设置默认输出目录失败", e)
         }
@@ -268,7 +234,7 @@ class AutoTimestampActivity : AppCompatActivity() {
                 contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 SelectedMediaFile(uri, getFileNameFromUri(uri))
             })
-            binding.tvAudioFile.text = buildString {
+            audioFilesText = buildString {
                 append("已选择 ${selectedMediaFiles.size} 个文件：")
                 selectedMediaFiles.forEachIndexed { index, file ->
                     append("\n${index + 1}. ${file.fileName}")
@@ -295,7 +261,7 @@ class AutoTimestampActivity : AppCompatActivity() {
                 return
             }
             selectedSubtitleFile = SelectedMediaFile(uri, fileName)
-            binding.tvSubtitleFile.text = fileName
+            subtitleFileText = fileName
             updateGenerateButtonState()
         } catch (e: Exception) {
             com.subtitleedit.util.OverwritingToast.makeText(
@@ -306,38 +272,26 @@ class AutoTimestampActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateSecondaryProcessingState(enabled: Boolean) {
-        binding.btnSelectSubtitle.isEnabled = enabled
-        binding.tvSubtitleFileTitle.alpha = if (enabled) 1f else 0.55f
-        binding.btnSelectSubtitle.alpha = if (enabled) 1f else 0.55f
-        binding.tvSubtitleFile.alpha = if (enabled) 1f else 0.55f
-    }
-
     private fun updateSecondaryProcessingAvailability() {
         val asrTimelineEnabled = !settingsManager.isAsrVadTimestampEnabled()
-        if (asrTimelineEnabled && binding.switchSecondaryProcessing.isChecked) {
-            binding.switchSecondaryProcessing.isChecked = false
+        if (asrTimelineEnabled && secondaryProcessingEnabled) {
+            secondaryProcessingEnabled = false
         }
-        binding.switchSecondaryProcessing.isEnabled = !asrTimelineEnabled
-        binding.switchSecondaryProcessing.alpha =
-            if (asrTimelineEnabled) 0.55f else 1f
-        binding.tvSecondaryProcessingHint.text = getString(
+        secondaryProcessingAvailable = !asrTimelineEnabled
+        secondaryProcessingHint = getString(
             if (asrTimelineEnabled) {
                 R.string.activity_auto_timestamp_text_17
             } else {
                 R.string.activity_auto_timestamp_text_13
             }
         )
-        updateSecondaryProcessingState(
-            !asrTimelineEnabled && binding.switchSecondaryProcessing.isChecked
-        )
         updateGenerateButtonState()
     }
 
     private fun updateGenerateButtonState() {
-        val subtitleReady = !binding.switchSecondaryProcessing.isChecked ||
+        val subtitleReady = !secondaryProcessingEnabled ||
             selectedSubtitleFile != null
-        binding.btnGenerate.isEnabled = selectedMediaFiles.isNotEmpty() && subtitleReady && !isGenerating
+        canGenerate = selectedMediaFiles.isNotEmpty() && subtitleReady && !isGenerating
     }
 
     private fun handleSelectedOutputDir(uri: Uri) {
@@ -348,7 +302,7 @@ class AutoTimestampActivity : AppCompatActivity() {
             )
 
             outputDirUri = uri
-            binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, uri)
+            outputDirectoryText = DirectoryDisplayPath.fromUri(this, uri)
             settingsManager.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
 
         } catch (e: Exception) {
@@ -358,7 +312,7 @@ class AutoTimestampActivity : AppCompatActivity() {
 
     private fun generateTimestamps() {
         if (selectedMediaFiles.isEmpty()) return
-        if (binding.switchSecondaryProcessing.isChecked) {
+        if (secondaryProcessingEnabled) {
             if (selectedMediaFiles.size != 1) {
                 com.subtitleedit.util.OverwritingToast.makeText(
                     this,
@@ -412,7 +366,7 @@ class AutoTimestampActivity : AppCompatActivity() {
             com.subtitleedit.util.OverwritingToast.makeText(this, "请选择输出目录", Toast.LENGTH_SHORT).show()
             return
         }
-        val format = formatOptions[binding.spinnerOutputFormat.selectedItemPosition]
+        val format = outputFormat
         val extension = format.lowercase()
 
         if (selectedMediaFiles.any { file ->
@@ -423,17 +377,7 @@ class AutoTimestampActivity : AppCompatActivity() {
                     extension
                 )
             }) {
-            AlertDialog.Builder(this)
-                .setTitle("文件名冲突")
-                .setMessage("输出目录中已存在同名字幕文件。请选择处理方式。")
-                .setPositiveButton("覆盖") { _, _ ->
-                    generateTimestamps(overwriteOutput = true)
-                }
-                .setNeutralButton("自动重命名") { _, _ ->
-                    generateTimestamps(overwriteOutput = false)
-                }
-                .setNegativeButton("取消", null)
-                .show()
+            dialog = AutoTimestampDialog.OUTPUT_CONFLICT
             return
         }
 
@@ -447,19 +391,18 @@ class AutoTimestampActivity : AppCompatActivity() {
             return
         }
         val refinementSubtitle = selectedSubtitleFile.takeIf {
-            binding.switchSecondaryProcessing.isChecked
+            secondaryProcessingEnabled
         }
 
-        binding.btnGenerate.isEnabled = false
-        binding.progressBar.visibility = android.view.View.VISIBLE
-        binding.btnCancel.visibility = android.view.View.VISIBLE
-        binding.tvStatus.text = "正在处理..."
+        isGenerating = true
+        canGenerate = false
+        statusText = "正在处理..."
         operationLog.clear()
-        binding.tvPreview.text = ""
+        previewText = ""
         appendOperationLog("开始自动打轴")
         appendOperationLog("待处理文件：${selectedMediaFiles.size} 个")
-        appendOperationLog("输出格式：${formatOptions[binding.spinnerOutputFormat.selectedItemPosition]}")
-        appendOperationLog("输出目录：${binding.tvOutputDir.text}")
+        appendOperationLog("输出格式：$outputFormat")
+        appendOperationLog("输出目录：$outputDirectoryText")
         appendOperationLog("预处理配置：FFmpeg 提取 16kHz 单声道 PCM WAV")
         if (refinementSubtitle != null) {
             appendOperationLog("二次处理：启用，方案一")
@@ -470,9 +413,6 @@ class AutoTimestampActivity : AppCompatActivity() {
         appendTimelineConfig(refinementSubtitle != null)
         mediaOperation?.cancel()
         mediaOperation = nativeMediaEngine.openOperation()
-        isGenerating = true
-        invalidateOptionsMenu()
-
         generationJob = taskController.launch(lifecycleScope) { task ->
             task.onCancel { mediaOperation?.cancel() }
             try {
@@ -507,24 +447,21 @@ class AutoTimestampActivity : AppCompatActivity() {
                 if (!isCancelled) {
                     val summary = "自动打轴完成：成功 $successCount/${selectedMediaFiles.size}" +
                         if (failedFiles.isEmpty()) "" else "，失败 ${failedFiles.size}"
-                    binding.tvStatus.text = summary
+                    statusText = summary
                     appendOperationLog(summary)
                     com.subtitleedit.util.OverwritingToast.makeText(this@AutoTimestampActivity, summary, Toast.LENGTH_LONG).show()
                 }
 
             } catch (e: Exception) {
                 if (!isCancelled) task.recordFailure(e)
-                binding.tvStatus.text = if (isGenerating) "处理失败" else "已取消"
+                statusText = if (isGenerating) "处理失败" else "已取消"
                 if (isGenerating) {
                     com.subtitleedit.util.OverwritingToast.makeText(this@AutoTimestampActivity, "处理失败：${e.message}", Toast.LENGTH_LONG).show()
                 }
             } finally {
                 mediaOperation?.cancel()
                 mediaOperation = null
-                binding.progressBar.visibility = android.view.View.GONE
-                binding.btnCancel.visibility = android.view.View.GONE
                 isGenerating = false
-                invalidateOptionsMenu()
                 updateGenerateButtonState()
                 generationJob = null
             }
@@ -532,20 +469,20 @@ class AutoTimestampActivity : AppCompatActivity() {
     }
 
     private fun confirmCancelGeneration() {
-        if (!isGenerating) return
-        AlertDialog.Builder(this)
-            .setTitle("确认取消")
-            .setMessage("自动打轴正在进行，确定要取消吗？")
-            .setPositiveButton("取消处理") { _, _ -> cancelGeneration() }
-            .setNegativeButton("继续处理", null)
-            .show()
+        val shouldLeave = dialog == AutoTimestampDialog.BACK_WHILE_GENERATING
+        dialog = AutoTimestampDialog.NONE
+        cancelGeneration(showToast = !shouldLeave)
+        if (shouldLeave) {
+            backNavigationCallback.isEnabled = false
+            onBackPressedDispatcher.onBackPressed()
+        }
     }
 
     private fun cancelGeneration(showToast: Boolean = true) {
         if (!isGenerating) return
         taskController.cancel()
         mediaOperation?.cancel()
-        binding.tvStatus.text = "正在取消..."
+        statusText = "正在取消..."
         if (showToast) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "已取消", Toast.LENGTH_SHORT).show()
         }
@@ -566,7 +503,7 @@ class AutoTimestampActivity : AppCompatActivity() {
         val progressPrefix = "[$fileIndex/$fileCount]"
 
         return try {
-            binding.tvStatus.text = "$progressPrefix 正在复制文件..."
+            statusText = "$progressPrefix 正在复制文件..."
             appendOperationLog("开始处理 $progressPrefix：${file.fileName}")
             appendOperationLog("预处理：复制输入文件到缓存目录")
             val cachedFile = withContext(Dispatchers.IO) {
@@ -576,7 +513,7 @@ class AutoTimestampActivity : AppCompatActivity() {
 
             if (isCancelled) return Result.failure(Exception("用户取消"))
 
-            binding.tvStatus.text = "$progressPrefix 正在提取音频..."
+            statusText = "$progressPrefix 正在提取音频..."
             appendOperationLog("预处理：使用 FFmpeg 转换音频")
             val pcmFile = withContext(Dispatchers.IO) {
                 convertToPcm(cachedFile, taskCacheDir)
@@ -586,7 +523,7 @@ class AutoTimestampActivity : AppCompatActivity() {
             if (isCancelled) return Result.failure(Exception("用户取消"))
 
             val timelineSource = timelineSource()
-            binding.tvStatus.text = if (timelineSource == TimelineSource.VAD) {
+            statusText = if (timelineSource == TimelineSource.VAD) {
                 "$progressPrefix 正在检测语音段..."
             } else {
                 "$progressPrefix 正在识别语音..."
@@ -612,7 +549,7 @@ class AutoTimestampActivity : AppCompatActivity() {
                             },
                             progressCallback = { progress, status ->
                                 runOnUiThread {
-                                    binding.tvStatus.text =
+                                    statusText =
                                         "$progressPrefix $modelName 打轴：$status ($progress%)"
                                 }
                             },
@@ -623,7 +560,7 @@ class AutoTimestampActivity : AppCompatActivity() {
                             pcmFile = pcmFile,
                             progressCallback = { progress, status ->
                                 runOnUiThread {
-                                    binding.tvStatus.text =
+                                    statusText =
                                         "$progressPrefix $modelName 打轴：$status ($progress%)"
                                 }
                             },
@@ -680,7 +617,7 @@ class AutoTimestampActivity : AppCompatActivity() {
             )
             appendVadSegments(segments)
 
-            val format = formatOptions[binding.spinnerOutputFormat.selectedItemPosition]
+            val format = outputFormat
             appendOperationLog("生成字幕：$format 格式")
             val outputEntries = if (refinementSubtitle != null) {
                 buildRefinedSubtitleEntries(originalEntries, segments)
@@ -689,7 +626,7 @@ class AutoTimestampActivity : AppCompatActivity() {
             }
             val subtitleContent = generateSubtitle(outputEntries, format)
 
-            binding.tvStatus.text = "$progressPrefix 正在保存..."
+            statusText = "$progressPrefix 正在保存..."
             appendOperationLog("保存：写入输出目录")
             val outputFileName = withContext(Dispatchers.IO) {
                 saveToOutputDir(
@@ -705,7 +642,7 @@ class AutoTimestampActivity : AppCompatActivity() {
                 "\n===== ${outputSourceFileName(file, refinementSubtitle)} 生成结果 =====\n"
             )
             operationLog.append(subtitleContent)
-            binding.tvPreview.text = operationLog.toString()
+            previewText = operationLog.toString()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -740,7 +677,7 @@ class AutoTimestampActivity : AppCompatActivity() {
             audioFile = pcmFile,
             progressCallback = { progress, status, _ ->
                 runOnUiThread {
-                    binding.tvStatus.text = "$progressPrefix ASR 打轴：$status ($progress%)"
+                    statusText = "$progressPrefix ASR 打轴：$status ($progress%)"
                 }
             },
             isCancelled = { isCancelled }
@@ -920,7 +857,7 @@ class AutoTimestampActivity : AppCompatActivity() {
     private fun outputSourceFileName(
         mediaFile: SelectedMediaFile,
         subtitleFile: SelectedMediaFile? = selectedSubtitleFile.takeIf {
-            binding.switchSecondaryProcessing.isChecked
+            secondaryProcessingEnabled
         }
     ): String {
         return subtitleFile?.fileName ?: mediaFile.fileName
@@ -985,10 +922,7 @@ class AutoTimestampActivity : AppCompatActivity() {
 
     private fun appendOperationLog(message: String) {
         operationLog.append("[${formatClockTime()}] ").append(message).append("\n")
-        binding.tvPreview.text = operationLog.toString()
-        binding.previewScroll.post {
-            binding.previewScroll.fullScroll(android.view.View.FOCUS_DOWN)
-        }
+        previewText = operationLog.toString()
     }
 
     private fun isTokenTimestampExperimentEnabled(): Boolean =
@@ -1139,10 +1073,7 @@ class AutoTimestampActivity : AppCompatActivity() {
                 )
             )
         }
-        binding.tvPreview.text = operationLog.toString()
-        binding.previewScroll.post {
-            binding.previewScroll.fullScroll(android.view.View.FOCUS_DOWN)
-        }
+        previewText = operationLog.toString()
     }
 
     private fun formatClockTime(): String {

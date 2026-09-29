@@ -3,165 +3,113 @@ package com.subtitleedit
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.view.LayoutInflater
-import android.view.View
-import android.widget.ArrayAdapter
-import android.widget.ImageButton
+import android.provider.OpenableColumns
 import android.widget.Toast
+import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import com.subtitleedit.databinding.ActivityBatchConvertBinding
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.subtitleedit.feature.ui.BatchConvertDialogUi
+import com.subtitleedit.feature.ui.BatchConvertFileUi
+import com.subtitleedit.feature.ui.BatchConvertScreen
+import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SettingsManager
-import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleFormatConverter
+import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleParser
 import java.io.File
 
-/**
- * 批量转换界面
- */
+/** 批量转换界面 */
 class BatchConvertActivity : AppCompatActivity() {
 
     private companion object {
         const val OUTPUT_DIRECTORY_KEY = "batch_convert"
     }
 
-    private lateinit var binding: ActivityBatchConvertBinding
-    private lateinit var settingsManager: SettingsManager
-    // 存储 URI 和文件名的数据类
     data class ConvertFile(val uri: Uri, val fileName: String, val fileSize: Long)
-    private val convertFiles = mutableListOf<ConvertFile>()
-    private var outputDirectoryUri: Uri? = null
-    
-    private var targetFormat: SubtitleParser.SubtitleFormat = SubtitleParser.SubtitleFormat.LRC
 
-    // 文件选择器
+    private lateinit var settingsManager: SettingsManager
+    private var convertFiles by mutableStateOf<List<ConvertFile>>(emptyList())
+    private var outputDirectoryUri: Uri? = null
+    private var outputDirectoryLabel by mutableStateOf<String?>(null)
+    private var targetFormat by mutableStateOf(SubtitleParser.SubtitleFormat.LRC)
+    private var dialogState by mutableStateOf<BatchConvertDialogUi?>(null)
+    private var pendingOutputUri: Uri? = null
+
     private val filePickerLauncher = registerForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         uris.forEach { uri ->
-            val fileName = getFileNameFromUri(uri) ?: "未知文件"
-            val fileSize = getFileSizeFromUri(uri)
-            val file = ConvertFile(uri, fileName, fileSize)
-            if (!convertFiles.any { it.uri == uri }) {
-                convertFiles.add(file)
-                adapter.notifyItemInserted(convertFiles.size - 1)
+            if (convertFiles.none { it.uri == uri }) {
+                val fileName = getFileNameFromUri(uri) ?: "未知文件"
+                convertFiles = convertFiles + ConvertFile(uri, fileName, getFileSizeFromUri(uri))
             }
         }
-        updateFileList()
     }
-    
-    // 目录选择器
+
     private val directoryPickerLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         if (uri != null) {
-            // 保存 URI 用于后续访问
             contentResolver.takePersistableUriPermission(
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
-            // 保存用户选择的输出目录 URI
             outputDirectoryUri = uri
-            binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, uri)
+            outputDirectoryLabel = DirectoryDisplayPath.fromUri(this, uri)
             settingsManager.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
         }
     }
 
-    private lateinit var adapter: ConvertFileAdapter
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityBatchConvertBinding.inflate(layoutInflater)
-        setContentView(binding.root)
         settingsManager = SettingsManager.getInstance(this)
-        
-        setupToolbar()
-        setupFormatSpinners()
-        setupRecyclerView()
-        setupButtons()
         restoreOutputDirectory()
-    }
-    
-    private fun setupToolbar() {
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.setDisplayShowHomeEnabled(true)
-        
-        binding.toolbar.setNavigationOnClickListener {
-            finish()
-        }
-    }
-    
-    private fun setupFormatSpinners() {
-        // 目标格式
-        val formats = SubtitleFormatConverter.supportedTargetFormats
-        val targetAdapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_item,
-            formats.map(SubtitleFormatConverter::displayName)
-        )
-        targetAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerTargetFormat.adapter = targetAdapter
-        
-        // 监听目标格式选择变化
-        binding.spinnerTargetFormat.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
-                targetFormat = formats.getOrElse(position) {
-                    SubtitleParser.SubtitleFormat.LRC
-                }
+
+        setContent {
+            SubtitleEditComposeTheme {
+                BatchConvertScreen(
+                    files = convertFiles.map {
+                        BatchConvertFileUi(
+                            key = it.uri.toString(),
+                            fileName = it.fileName,
+                            fileSizeLabel = formatFileSize(it.fileSize)
+                        )
+                    },
+                    formats = SubtitleFormatConverter.supportedTargetFormats.map(
+                        SubtitleFormatConverter::displayName
+                    ),
+                    selectedFormatIndex = SubtitleFormatConverter.supportedTargetFormats
+                        .indexOf(targetFormat).coerceAtLeast(0),
+                    outputDirectoryLabel = outputDirectoryLabel,
+                    dialog = dialogState,
+                    onNavigateBack = { finish() },
+                    onSelectFiles = {
+                        filePickerLauncher.launch(arrayOf("text/*", "application/*"))
+                    },
+                    onRemoveFile = { key ->
+                        convertFiles = convertFiles.filterNot { it.uri.toString() == key }
+                    },
+                    onSelectFormat = { index ->
+                        targetFormat = SubtitleFormatConverter.supportedTargetFormats.getOrElse(index) {
+                            SubtitleParser.SubtitleFormat.LRC
+                        }
+                    },
+                    onSelectOutputDirectory = {
+                        directoryPickerLauncher.launch(outputDirectoryUri)
+                    },
+                    onStartConversion = ::startConversion,
+                    onDismissDialog = ::dismissDialog,
+                    onOverwriteConflicts = ::overwriteConflicts,
+                    onRenameConflicts = ::renameConflicts
+                )
             }
-            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
-        
-        // 设置默认值为 LRC
-        binding.spinnerTargetFormat.setSelection(1)
-    }
-    
-    private fun setupRecyclerView() {
-        adapter = ConvertFileAdapter(
-            onItemClick = { _ -> },
-            onRemoveClick = { file ->
-                val index = convertFiles.indexOf(file)
-                if (index >= 0) {
-                    convertFiles.removeAt(index)
-                    adapter.notifyItemRemoved(index)
-                    updateFileList()
-                }
-            }
-        )
-        
-        binding.rvFileList.apply {
-            layoutManager = LinearLayoutManager(this@BatchConvertActivity)
-            adapter = this@BatchConvertActivity.adapter
-        }
-        updateFileList()
-    }
-    
-    private fun setupButtons() {
-        binding.btnSelectFile.setOnClickListener {
-            openFilePicker()
-        }
-        
-        binding.btnSelectOutputDir.setOnClickListener {
-            openDirectoryPicker()
-        }
-        
-        binding.btnStartConvert.setOnClickListener {
-            startConversion()
-        }
-    }
-    
-    private fun openFilePicker() {
-        filePickerLauncher.launch(arrayOf("text/*", "application/*"))
-    }
-    
-    private fun openDirectoryPicker() {
-        directoryPickerLauncher.launch(outputDirectoryUri)
     }
 
     private fun restoreOutputDirectory() {
@@ -169,15 +117,15 @@ class BatchConvertActivity : AppCompatActivity() {
             ?.let(Uri::parse)
             ?: return
         outputDirectoryUri = savedUri
-        binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, savedUri)
+        outputDirectoryLabel = DirectoryDisplayPath.fromUri(this, savedUri)
     }
-    
+
     private fun getFileNameFromUri(uri: Uri): String? {
         return try {
-            val projection = arrayOf(android.provider.OpenableColumns.DISPLAY_NAME)
+            val projection = arrayOf(OpenableColumns.DISPLAY_NAME)
             contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
-                    cursor.getString(cursor.getColumnIndexOrThrow(android.provider.OpenableColumns.DISPLAY_NAME))
+                    cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME))
                 } else null
             }
         } catch (e: Exception) {
@@ -185,17 +133,15 @@ class BatchConvertActivity : AppCompatActivity() {
             null
         }
     }
-    
+
     private fun getFileSizeFromUri(uri: Uri): Long {
         var size = 0L
         try {
-            val projection = arrayOf(android.provider.OpenableColumns.SIZE)
+            val projection = arrayOf(OpenableColumns.SIZE)
             contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
-                    val sizeIndex = cursor.getColumnIndexOrThrow(android.provider.OpenableColumns.SIZE)
-                    if (!cursor.isNull(sizeIndex)) {
-                        size = cursor.getLong(sizeIndex)
-                    }
+                    val sizeIndex = cursor.getColumnIndexOrThrow(OpenableColumns.SIZE)
+                    if (!cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
                 }
             }
         } catch (e: Exception) {
@@ -203,54 +149,28 @@ class BatchConvertActivity : AppCompatActivity() {
         }
         return size
     }
-    
-    
-    private fun updateFileList() {
-        binding.tvSelectedFile.text = if (convertFiles.isEmpty()) {
-            getString(R.string.activity_media_convert_text_03)
-        } else {
-            getString(R.string.batch_convert_selected_file_count, convertFiles.size)
-        }
-        if (convertFiles.isEmpty()) {
-            binding.rvFileList.visibility = View.GONE
-        } else {
-            binding.rvFileList.visibility = View.VISIBLE
-        }
-    }
-    
-    /**
-     * 执行实际的转换逻辑
-     */
+
     private fun executeConversionLogic(finalOutputUri: Uri, overwriteOutput: Boolean = false) {
-        // 处理文件
         var successCount = 0
         var failCount = 0
         var skippedCount = 0
         val successFiles = mutableListOf<String>()
         val failFiles = mutableListOf<String>()
         val skippedFiles = mutableListOf<String>()
-        
+
         convertFiles.forEach { convertFile ->
             try {
                 val source = SubtitleFormatConverter.readUri(this, convertFile.uri, convertFile.fileName)
-                
-                // 如果检测到的格式与目标格式相同，跳过转换（直接计入成功）
                 if (source.format == targetFormat) {
                     skippedCount++
                     skippedFiles.add(convertFile.fileName)
                     return@forEach
                 }
-                
-                val convertedContent = SubtitleFormatConverter.convert(source, targetFormat)
-                
-                // 确定输出文件名
-                val targetExtension = SubtitleFormatConverter.extension(targetFormat)
-                
-                // 从 URI 获取文件名，去掉原扩展名
-                val originalName = convertFile.fileName
-                val nameWithoutExt = originalName.substringBeforeLast(".")
 
-                // 在用户选择的目录中创建文件
+                val convertedContent = SubtitleFormatConverter.convert(source, targetFormat)
+                val targetExtension = SubtitleFormatConverter.extension(targetFormat)
+                val nameWithoutExt = convertFile.fileName.substringBeforeLast(".")
+
                 SubtitleOutputWriter.writeText(
                     this,
                     finalOutputUri,
@@ -267,8 +187,7 @@ class BatchConvertActivity : AppCompatActivity() {
                 e.printStackTrace()
             }
         }
-        
-        // 显示详细结果
+
         val message = buildString {
             appendLine("转换完成！")
             appendLine("成功：$successCount")
@@ -286,108 +205,64 @@ class BatchConvertActivity : AppCompatActivity() {
                 appendLine("\n失败文件:")
                 failFiles.forEach { appendLine("  - $it") }
             }
-            val outputPath = outputDirectoryUri?.let { DirectoryDisplayPath.fromUri(this@BatchConvertActivity, it) }
-                ?: getConvertOutputDirectory().absolutePath
+            val outputPath = outputDirectoryUri?.let {
+                DirectoryDisplayPath.fromUri(this@BatchConvertActivity, it)
+            } ?: getConvertOutputDirectory().absolutePath
             appendLine("\n输出目录：$outputPath")
         }
-        
-        android.app.AlertDialog.Builder(this)
-            .setTitle("批量转换结果")
-            .setMessage(message)
-            .setPositiveButton("确定", null)
-            .show()
+        dialogState = BatchConvertDialogUi.Result(message)
     }
-    
+
     private fun startConversion() {
         if (convertFiles.isEmpty()) {
-            com.subtitleedit.util.OverwritingToast.makeText(this, "请先添加要转换的文件", Toast.LENGTH_SHORT).show()
+            OverwritingToast.makeText(this, "请先添加要转换的文件", Toast.LENGTH_SHORT).show()
             return
         }
-        
-        // 不需要检查源格式和目标格式是否相同，因为源格式是自动检测的
-        
-        // 确保有输出目录 - 默认使用 Download/SubtitleEdit/Convert 目录
-        val finalOutputUri = outputDirectoryUri ?: run {
-            // 默认使用 Download/SubtitleEdit/Convert 目录
-            val convertDir = getConvertOutputDirectory()
-            android.net.Uri.fromFile(convertDir)
-        }
-        
-        // 检查是否有潜在冲突
+
+        val finalOutputUri = outputDirectoryUri ?: Uri.fromFile(getConvertOutputDirectory())
         val hasConflict = convertFiles.any { convertFile ->
             val targetExtension = SubtitleFormatConverter.extension(targetFormat)
             val nameWithoutExt = convertFile.fileName.substringBeforeLast(".")
             SubtitleOutputWriter.exists(this, finalOutputUri, nameWithoutExt, targetExtension)
         }
-        
+
         if (hasConflict) {
-            android.app.AlertDialog.Builder(this)
-                .setTitle("文件名冲突")
-                .setMessage("输出目录中已存在同名字幕文件。请选择处理方式。")
-                .setPositiveButton("覆盖") { _, _ ->
-                    executeConversionLogic(finalOutputUri, overwriteOutput = true)
-                }
-                .setNeutralButton("自动重命名") { _, _ ->
-                    executeConversionLogic(finalOutputUri, overwriteOutput = false)
-                }
-                .setNegativeButton("取消", null)
-                .show()
+            pendingOutputUri = finalOutputUri
+            dialogState = BatchConvertDialogUi.Conflict
         } else {
             executeConversionLogic(finalOutputUri)
         }
     }
-    
-    inner class ConvertFileAdapter(
-        private val onItemClick: (ConvertFile) -> Unit,
-        private val onRemoveClick: (ConvertFile) -> Unit
-    ) : RecyclerView.Adapter<ConvertFileAdapter.ViewHolder>() {
-        
-        inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-            private val tvFileName: android.widget.TextView = itemView.findViewById(R.id.tvFileName)
-            private val tvFilePath: android.widget.TextView = itemView.findViewById(R.id.tvFilePath)
-            private val btnRemove: ImageButton = itemView.findViewById(R.id.btnRemove)
-            
-            fun bind(file: ConvertFile) {
-                tvFileName.text = file.fileName
-                tvFilePath.text = formatFileSize(file.fileSize)
-                
-                itemView.setOnClickListener { onItemClick(file) }
-                btnRemove.setOnClickListener { onRemoveClick(file) }
-            }
-        }
-        
-        override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): ViewHolder {
-            val view = LayoutInflater.from(parent.context)
-                .inflate(R.layout.item_convert_file, parent, false)
-            return ViewHolder(view)
-        }
-        
-        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            holder.bind(convertFiles[position])
-        }
-        
-        override fun getItemCount(): Int = convertFiles.size
+
+    private fun dismissDialog() {
+        dialogState = null
+        pendingOutputUri = null
     }
-    
-    private fun formatFileSize(size: Long): String {
-        return when {
-            size < 1024 -> "$size B"
-            size < 1024 * 1024 -> "${size / 1024} KB"
-            size < 1024 * 1024 * 1024 -> "${size / (1024 * 1024)} MB"
-            else -> "${size / (1024 * 1024 * 1024)} GB"
-        }
+
+    private fun overwriteConflicts() {
+        val outputUri = pendingOutputUri ?: return dismissDialog()
+        dismissDialog()
+        executeConversionLogic(outputUri, overwriteOutput = true)
     }
-    
-    /**
-     * 获取转换输出目录：Download/SubtitleEdit/Convert
-     * 如果目录不存在则创建
-     */
+
+    private fun renameConflicts() {
+        val outputUri = pendingOutputUri ?: return dismissDialog()
+        dismissDialog()
+        executeConversionLogic(outputUri, overwriteOutput = false)
+    }
+
+    private fun formatFileSize(size: Long): String = when {
+        size < 1024 -> "$size B"
+        size < 1024 * 1024 -> "${size / 1024} KB"
+        size < 1024 * 1024 * 1024 -> "${size / (1024 * 1024)} MB"
+        else -> "${size / (1024 * 1024 * 1024)} GB"
+    }
+
+    /** 获取转换输出目录：Download/SubtitleEdit/Convert，如果目录不存在则创建。 */
     private fun getConvertOutputDirectory(): File {
         val subtitleEditDir = File(FileUtils.getDownloadDirectory(), "SubtitleEdit")
         val convertDir = File(subtitleEditDir, "Convert")
-        if (!convertDir.exists()) {
-            convertDir.mkdirs()
-        }
+        if (!convertDir.exists()) convertDir.mkdirs()
         return convertDir
     }
 }

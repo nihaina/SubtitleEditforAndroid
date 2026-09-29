@@ -4,17 +4,19 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
-import android.view.Menu
-import android.view.MenuItem
-import android.view.MotionEvent
-import android.view.View
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.subtitleedit.databinding.ActivityVocalSeparationBinding
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.subtitleedit.feature.ui.VocalSeparationDialog
+import com.subtitleedit.feature.ui.VocalSeparationScreen
+import com.subtitleedit.feature.ui.VocalSeparationUiState
+import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.demix.DemixOutputWriter
 import com.subtitleedit.demix.VocalSeparationEngine
 import com.subtitleedit.util.DirectoryDisplayPath
@@ -38,7 +40,7 @@ class VocalSeparationActivity : AppCompatActivity() {
         const val OUTPUT_DIRECTORY_KEY = "vocal_separation"
     }
 
-    private lateinit var binding: ActivityVocalSeparationBinding
+    private var uiState by mutableStateOf(VocalSeparationUiState())
     private lateinit var settings: SettingsManager
     private val nativeMediaEngine: com.subtitleedit.nativebridge.NativeMediaEngine
         get() = (application as SubtitleEditApplication).dependencies.nativeMediaEngine
@@ -69,31 +71,44 @@ class VocalSeparationActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityVocalSeparationBinding.inflate(layoutInflater)
-        setContentView(binding.root)
         settings = SettingsManager.getInstance(this)
-        setupToolbar()
-        setupButtons()
-        setupLogScroll()
         loadState()
+
+        setContent {
+            SubtitleEditComposeTheme {
+                VocalSeparationScreen(
+                    state = uiState,
+                    onBack = ::requestBack,
+                    onConfirmBack = ::confirmBack,
+                    onSettings = { startActivity(Intent(this, VocalSeparationSettingsActivity::class.java)) },
+                    onSelectFiles = { filePickerLauncher.launch(arrayOf("audio/*", "video/*")) },
+                    onSelectOutputDirectory = { outputDirLauncher.launch(outputDirUri) },
+                    onStemChange = ::updateSelectedStem,
+                    onStart = ::startSeparation,
+                    onCancel = {
+                        if (uiState.dialog == VocalSeparationDialog.CANCEL) {
+                            uiState = uiState.copy(dialog = VocalSeparationDialog.NONE)
+                            cancelSeparation()
+                        } else {
+                            confirmCancel()
+                        }
+                    },
+                    onOverwrite = {
+                        uiState = uiState.copy(dialog = VocalSeparationDialog.NONE)
+                        outputDirUri?.let { runSeparation(it, selectedStems(), true) }
+                    },
+                    onAutoRename = {
+                        uiState = uiState.copy(dialog = VocalSeparationDialog.NONE)
+                        outputDirUri?.let { runSeparation(it, selectedStems(), false) }
+                    },
+                    onDismissDialog = { uiState = uiState.copy(dialog = VocalSeparationDialog.NONE) }
+                )
+            }
+        }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (isRunning) {
-                    AlertDialog.Builder(this@VocalSeparationActivity)
-                        .setTitle("正在分离中")
-                        .setMessage("人声分离正在进行，确定要返回吗？返回后任务将被取消。")
-                        .setPositiveButton("返回并取消") { _, _ ->
-                            cancelSeparation()
-                            isEnabled = false
-                            onBackPressedDispatcher.onBackPressed()
-                        }
-                        .setNegativeButton("继续分离", null)
-                        .show()
-                } else {
-                    isEnabled = false
-                    onBackPressedDispatcher.onBackPressed()
-                }
+                requestBack()
             }
         })
     }
@@ -103,73 +118,30 @@ class VocalSeparationActivity : AppCompatActivity() {
         if (!isRunning) loadState()
     }
 
-    private fun setupToolbar() {
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "人声分离"
-        binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
-    }
-
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.menu_vocal_separation, menu)
-        return true
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
-        R.id.action_vocal_separation_settings -> {
-            startActivity(Intent(this, VocalSeparationSettingsActivity::class.java))
-            true
-        }
-        else -> super.onOptionsItemSelected(item)
-    }
-
-    private fun setupButtons() {
-        binding.btnSelectFile.setOnClickListener {
-            filePickerLauncher.launch(arrayOf("audio/*", "video/*"))
-        }
-        binding.btnSelectOutputDir.setOnClickListener { outputDirLauncher.launch(outputDirUri) }
-        binding.btnStart.setOnClickListener { startSeparation() }
-        binding.btnCancel.setOnClickListener { confirmCancel() }
-        listOf(binding.checkVocals, binding.checkDrums, binding.checkBass, binding.checkOther).forEach {
-            it.setOnCheckedChangeListener { button, checked ->
-                if (checked && selectedStems().size > 1 && !isModelConfigured("general")) {
-                    button.isChecked = false
-                    OverwritingToast.makeText(this, "选择两个及以上音轨必须先选择通用四轨模型", Toast.LENGTH_LONG).show()
-                }
-                updateStartButton()
-            }
+    private fun requestBack() {
+        if (isRunning) {
+            uiState = uiState.copy(dialog = VocalSeparationDialog.BACK)
+        } else {
+            finish()
         }
     }
 
-    private fun setupLogScroll() {
-        binding.realtimeResultScroll.setOnTouchListener { view, event ->
-            view.parent.requestDisallowInterceptTouchEvent(true)
-            if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
-                view.parent.requestDisallowInterceptTouchEvent(false)
-            }
-            false
-        }
+    private fun confirmBack() {
+        uiState = uiState.copy(dialog = VocalSeparationDialog.NONE)
+        cancelSeparation()
+        finish()
     }
 
     private fun loadState() {
         discardInaccessibleModelUris()
         val hasGeneral = isModelConfigured("general")
         val useFtModels = settings.getDemixModelType() == SettingsManager.DEMIX_MODEL_FT
-        binding.checkVocals.isEnabled = hasGeneral || useFtModels && isModelConfigured(VocalSeparationEngine.Stem.VOCALS)
-        binding.checkDrums.isEnabled = hasGeneral || useFtModels && isModelConfigured(VocalSeparationEngine.Stem.DRUMS)
-        binding.checkBass.isEnabled = hasGeneral || useFtModels && isModelConfigured(VocalSeparationEngine.Stem.BASS)
-        binding.checkOther.isEnabled = hasGeneral || useFtModels && isModelConfigured(VocalSeparationEngine.Stem.OTHER)
-        if (!binding.checkVocals.isEnabled) binding.checkVocals.isChecked = false
-        if (!binding.checkDrums.isEnabled) binding.checkDrums.isChecked = false
-        if (!binding.checkBass.isEnabled) binding.checkBass.isChecked = false
-        if (!binding.checkOther.isEnabled) binding.checkOther.isChecked = false
-        if (!hasGeneral && selectedStems().size > 1) {
-            var keptOne = false
-            listOf(binding.checkVocals, binding.checkDrums, binding.checkBass, binding.checkOther).forEach { checkbox ->
-                if (checkbox.isChecked && !keptOne) keptOne = true
-                else if (checkbox.isChecked) checkbox.isChecked = false
-            }
+        val enabled = VocalSeparationEngine.Stem.entries.filterTo(linkedSetOf()) { stem ->
+            hasGeneral || useFtModels && isModelConfigured(stem)
         }
+        var selected = uiState.selectedStems.intersect(enabled)
+        if (!hasGeneral && selected.size > 1) selected = setOf(selected.first())
+        uiState = uiState.copy(enabledStems = enabled, selectedStems = selected)
         if (outputDirUri == null) setupDefaultOutputDir()
         updateStartButton()
     }
@@ -177,10 +149,11 @@ class VocalSeparationActivity : AppCompatActivity() {
     private fun handleSelectedFiles(uris: List<Uri>) {
         selectedFiles.clear()
         selectedFiles += uris.map { SelectedMediaFile(it, getFileName(it)) }
-        binding.tvSelectedFile.text = buildString {
+        val text = buildString {
             append("已选择 ${selectedFiles.size} 个文件：")
             selectedFiles.forEachIndexed { index, item -> append("\n${index + 1}. ${item.fileName}") }
         }
+        uiState = uiState.copy(selectedFilesText = text, hasSelectedFiles = selectedFiles.isNotEmpty())
         updateStartButton()
     }
 
@@ -192,7 +165,7 @@ class VocalSeparationActivity : AppCompatActivity() {
             )
         }.onFailure { OverwritingToast.makeText(this, "目录权限保存失败：${it.message}", Toast.LENGTH_LONG).show() }
         outputDirUri = uri
-        binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, uri)
+        uiState = uiState.copy(outputDirectory = DirectoryDisplayPath.fromUri(this, uri))
         if (permissionSaved.isSuccess) {
             settings.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
         }
@@ -203,7 +176,7 @@ class VocalSeparationActivity : AppCompatActivity() {
             ?.let(Uri::parse)
         if (savedUri != null) {
             outputDirUri = savedUri
-            binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, savedUri)
+            uiState = uiState.copy(outputDirectory = DirectoryDisplayPath.fromUri(this, savedUri))
             return
         }
 
@@ -213,11 +186,22 @@ class VocalSeparationActivity : AppCompatActivity() {
         )
         path.mkdirs()
         outputDirUri = Uri.fromFile(path)
-        binding.tvOutputDir.text = path.absolutePath
+        uiState = uiState.copy(outputDirectory = path.absolutePath)
     }
 
     private fun updateStartButton() {
-        binding.btnStart.isEnabled = !isRunning && selectedFiles.isNotEmpty() && selectedStems().isNotEmpty()
+        uiState = uiState.copy(hasSelectedFiles = selectedFiles.isNotEmpty(), isRunning = isRunning)
+    }
+
+    private fun updateSelectedStem(stem: VocalSeparationEngine.Stem, checked: Boolean) {
+        val updated = uiState.selectedStems.toMutableSet().apply {
+            if (checked) add(stem) else remove(stem)
+        }
+        if (checked && updated.size > 1 && !isModelConfigured("general")) {
+            OverwritingToast.makeText(this, "选择两个及以上音轨必须先选择通用四轨模型", Toast.LENGTH_LONG).show()
+            return
+        }
+        uiState = uiState.copy(selectedStems = updated)
     }
 
     private fun startSeparation() {
@@ -240,13 +224,7 @@ class VocalSeparationActivity : AppCompatActivity() {
         }
         val conflicts = expected.filter { DemixOutputWriter.exists(this, output, it) }
         if (conflicts.isNotEmpty()) {
-            AlertDialog.Builder(this)
-                .setTitle("文件名冲突")
-                .setMessage("输出目录中已有同名音频文件。请选择处理方式。")
-                .setPositiveButton("覆盖") { _, _ -> runSeparation(output, stems, true) }
-                .setNeutralButton("自动重命名") { _, _ -> runSeparation(output, stems, false) }
-                .setNegativeButton("取消", null)
-                .show()
+            uiState = uiState.copy(dialog = VocalSeparationDialog.OUTPUT_CONFLICT)
         } else {
             runSeparation(output, stems, false)
         }
@@ -263,10 +241,14 @@ class VocalSeparationActivity : AppCompatActivity() {
         mediaOperation = nativeMediaEngine.openOperation()
         isRunning = true
         runtimeText.clear()
-        binding.tvRealtimeResult.text = ""
-        binding.btnStart.isEnabled = false
-        binding.layoutProgress.visibility = View.VISIBLE
-        binding.btnCancel.visibility = View.VISIBLE
+        uiState = uiState.copy(
+            isRunning = true,
+            progressVisible = true,
+            progressStatus = "正在准备...",
+            progress = 0,
+            log = "",
+            dialog = VocalSeparationDialog.NONE
+        )
 
         separationJob = taskController.launch(lifecycleScope) { task ->
             task.onCancel { mediaOperation?.cancel() }
@@ -275,7 +257,7 @@ class VocalSeparationActivity : AppCompatActivity() {
                 appendRuntimeLog("开始人声分离")
                 appendRuntimeLog("待处理文件：${selectedFiles.size} 个")
                 appendRuntimeLog("输出音轨：${stems.joinToString { it.displayName }}")
-                appendRuntimeLog("输出目录：${binding.tvOutputDir.text}")
+                appendRuntimeLog("输出目录：${uiState.outputDirectory}")
                 if (stems.size > 1) {
                     appendRuntimeLog("推理路线：通用四轨模型，一次推理输出 ${stems.size} 条音轨")
                     appendRuntimeLog("通用模型：${getFileName(Uri.parse(settings.getDemixModelUri("general")))}")
@@ -318,8 +300,7 @@ class VocalSeparationActivity : AppCompatActivity() {
                 mediaOperation?.cancel()
                 mediaOperation = null
                 isRunning = false
-                binding.layoutProgress.visibility = View.GONE
-                binding.btnCancel.visibility = View.GONE
+                uiState = uiState.copy(isRunning = false, progressVisible = false)
                 updateStartButton()
             }
         }
@@ -421,12 +402,8 @@ class VocalSeparationActivity : AppCompatActivity() {
         output
     }.getOrNull()
 
-    private fun selectedStems(): LinkedHashSet<VocalSeparationEngine.Stem> = linkedSetOf<VocalSeparationEngine.Stem>().apply {
-        if (binding.checkVocals.isChecked) add(VocalSeparationEngine.Stem.VOCALS)
-        if (binding.checkDrums.isChecked) add(VocalSeparationEngine.Stem.DRUMS)
-        if (binding.checkBass.isChecked) add(VocalSeparationEngine.Stem.BASS)
-        if (binding.checkOther.isChecked) add(VocalSeparationEngine.Stem.OTHER)
-    }
+    private fun selectedStems(): LinkedHashSet<VocalSeparationEngine.Stem> =
+        uiState.selectedStems.toCollection(linkedSetOf())
 
     private fun isModelConfigured(stem: VocalSeparationEngine.Stem): Boolean {
         return isModelConfigured(stem.fileSuffix)
@@ -491,12 +468,7 @@ class VocalSeparationActivity : AppCompatActivity() {
 
     private fun confirmCancel() {
         if (!isRunning) return
-        AlertDialog.Builder(this)
-            .setTitle("确认取消")
-            .setMessage("人声分离正在进行，确定要取消吗？")
-            .setPositiveButton("取消分离") { _, _ -> cancelSeparation() }
-            .setNegativeButton("继续分离", null)
-            .show()
+        uiState = uiState.copy(dialog = VocalSeparationDialog.CANCEL)
     }
 
     private fun cancelSeparation() {
@@ -508,8 +480,8 @@ class VocalSeparationActivity : AppCompatActivity() {
     }
 
     private fun showProgress(status: String, progress: Int) {
-        binding.tvProgressStatus.text = status
-        binding.progressIndicator.progress = progress.coerceIn(0, 100)
+        val update = { uiState = uiState.copy(progressStatus = status, progress = progress.coerceIn(0, 100)) }
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) update() else runOnUiThread(update)
     }
 
     private fun appendRuntimeLog(message: String) {
@@ -518,14 +490,13 @@ class VocalSeparationActivity : AppCompatActivity() {
             val line = "[${java.text.SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(java.util.Date())}] $message"
             runtimeText.appendLine(line)
             if (runtimeText.length > 16000) runtimeText.delete(0, runtimeText.length - 16000)
-            binding.tvRealtimeResult.text = runtimeText.toString()
-            binding.realtimeResultScroll.post { binding.realtimeResultScroll.fullScroll(View.FOCUS_DOWN) }
+            uiState = uiState.copy(log = runtimeText.toString())
         }
         if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) render() else runOnUiThread(render)
     }
 
     private fun showError(message: String) {
-        AlertDialog.Builder(this).setTitle("人声分离失败").setMessage(message).setPositiveButton("确定", null).show()
+        uiState = uiState.copy(dialog = VocalSeparationDialog.ERROR, errorMessage = message)
     }
 
     private fun getFileName(uri: Uri): String {

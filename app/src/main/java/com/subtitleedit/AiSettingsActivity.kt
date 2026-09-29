@@ -1,50 +1,41 @@
 package com.subtitleedit
 
-import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.os.Build
 import android.os.Bundle
 import android.os.PersistableBundle
-import android.text.Editable
-import android.text.TextWatcher
-import android.text.method.LinkMovementMethod
-import android.text.method.PasswordTransformationMethod
-import android.view.View
-import android.view.Menu
-import android.view.MenuItem
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
 import android.widget.Toast
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
-import androidx.core.text.HtmlCompat
 import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.launch
 import com.subtitleedit.chat.ChatActivity
 import com.subtitleedit.chat.ChatBackendConfig
 import com.subtitleedit.chat.ChatLaunchConfiguration
 import com.subtitleedit.chat.ChatReasoningLevel
-import com.subtitleedit.databinding.ActivityAiSettingsBinding
+import com.subtitleedit.feature.ui.AiModelChooserUi
+import com.subtitleedit.feature.ui.AiModelTarget
+import com.subtitleedit.feature.ui.AiSettingsScreen
+import com.subtitleedit.feature.ui.AiSettingsScreenState
 import com.subtitleedit.repository.AiTranslationService
-import com.subtitleedit.repository.DefaultAiTranslationService
 import com.subtitleedit.util.AiKeyAccessSession
 import com.subtitleedit.util.AiProviderConfig
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SettingsManager
+import kotlinx.coroutines.launch
 
 class AiSettingsActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityAiSettingsBinding
     private lateinit var settingsManager: SettingsManager
     private val aiTranslationService: AiTranslationService
         get() = (application as SubtitleEditApplication).dependencies.aiTranslationService
-    private var selectedProvider: String = AiProviderConfig.SILICONFLOW
-    private var selectedTranslationProvider: String = AiProviderConfig.SILICONFLOW
-    private var selectedPunctuationProvider: String = AiProviderConfig.SILICONFLOW
-    private var suppressTextSave = false
-    private var isApiKeyVisible = false
+    private var screenState by mutableStateOf<AiSettingsScreenState?>(null)
     private var authenticationInProgress = false
     private var pendingSensitiveAction: (() -> Unit)? = null
 
@@ -77,358 +68,304 @@ class AiSettingsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityAiSettingsBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-        ToolCardShadow.remove(
-            binding.cardAiSettings,
-            binding.cardAiTranslationSettings,
-            binding.cardAiPunctuationSettings
-        )
-
         settingsManager = SettingsManager.getInstance(this)
-
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "AI 设置"
-        binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
-
-        setupApiKeyActions()
-        setupProviderSpinner()
-        setupReasoningSettings()
-        setupModelListAction()
-        setupDedicatedSettings()
-        hideLegacyFeatureControls()
-        loadSettings()
-        setupSave()
-    }
-
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.menu_ai_settings, menu)
-        return true
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
-        R.id.action_open_ai_chat -> { openAiChat(); true }
-        else -> super.onOptionsItemSelected(item)
+        screenState = AiSettingsScreenState.from(settingsManager)
+        setContent {
+            com.subtitleedit.ui.theme.SubtitleEditComposeTheme {
+                screenState?.let { state ->
+                    AiSettingsScreen(
+                        state = state,
+                        onStateChange = ::updateScreenState,
+                        onSelectProvider = ::selectProvider,
+                        onSelectTranslationProvider = ::selectTranslationProvider,
+                        onSelectPunctuationProvider = ::selectPunctuationProvider,
+                        onRevealApiKey = { requestSensitiveAccess { updateScreenState { it.copy(apiKeyVisible = true) } } },
+                        onCopyApiKey = ::requestCopyApiKey,
+                        onFetchModels = ::fetchModels,
+                        onChooseModel = ::chooseModel,
+                        onDismissModelChooser = { updateScreenState { it.copy(modelChooser = null) } },
+                        onOpenChat = ::openAiChat,
+                        onNavigateBack = { onBackPressedDispatcher.onBackPressed() }
+                    )
+                }
+            }
+        }
     }
 
     override fun onStop() {
-        setApiKeyVisible(false)
+        updateScreenState { it.copy(apiKeyVisible = false) }
         AiKeyAccessSession.reset()
         super.onStop()
     }
 
-    private fun setupProviderSpinner() {
-        val providerNames = AiProviderConfig.providers.map { it.displayName }
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, providerNames)
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerAiProvider.adapter = adapter
-        binding.spinnerAiProvider.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val provider = AiProviderConfig.providers[position].id
-                if (provider == selectedProvider) return
-                saveCurrentProviderFields()
-                selectedProvider = provider
-                settingsManager.setAiProvider(provider)
-                loadProviderFields(provider)
+    private fun updateScreenState(transform: (AiSettingsScreenState) -> AiSettingsScreenState) {
+        val current = screenState ?: return
+        val next = transform(current)
+        persistChangedFields(current, next)
+        screenState = next
+    }
+
+    private fun persistChangedFields(current: AiSettingsScreenState, next: AiSettingsScreenState) {
+        if (current.provider == next.provider) {
+            if (current.apiKey != next.apiKey) {
+                settingsManager.setAiApiKey(current.provider, next.apiKey.trim())
             }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-    }
-
-    private fun loadSettings() {
-        selectedProvider = settingsManager.getAiProvider()
-        binding.spinnerAiProvider.setSelection(AiProviderConfig.indexOf(selectedProvider))
-        loadProviderFields(selectedProvider)
-        binding.etTargetLanguage.setText(settingsManager.getAiTargetLanguage())
-    }
-
-    private fun loadProviderFields(provider: String) {
-        val config = AiProviderConfig.getProvider(provider)
-        suppressTextSave = true
-        binding.tvProviderTitle.text = "AI 平台设置（${config.displayName}）"
-        binding.tilApiKey.hint = "${config.displayName} API Key"
-        binding.tvProviderWebsite.text = HtmlCompat.fromHtml(
-            "官网：<a href=\"${config.websiteUrl}\">${config.websiteUrl}</a>",
-            HtmlCompat.FROM_HTML_MODE_LEGACY
-        )
-        binding.tvProviderWebsite.movementMethod = LinkMovementMethod.getInstance()
-        binding.etApiKey.setText(settingsManager.getAiApiKey(provider))
-        setApiKeyVisible(false)
-        binding.tilApiBaseUrl.visibility = if (config.customEndpoint) View.VISIBLE else View.GONE
-        binding.btnFetchModels.visibility = if (config.customEndpoint) View.VISIBLE else View.GONE
-        binding.etApiBaseUrl.setText(if (config.customEndpoint) settingsManager.getAiBaseUrl(provider) else "")
-        binding.etContextWindowTokens.setText(
-            settingsManager.getAiContextWindowTokens(provider).toString()
-        )
-        binding.spinnerReasoningLevel.setSelection(
-            AiProviderConfig.ReasoningLevel.entries.indexOf(
-                settingsManager.getAiReasoningLevel(provider)
-            )
-        )
-        binding.etCustomPrompt.setText(settingsManager.getAiCustomPrompt())
-        val savedModel = settingsManager.getAiModel(provider)
-        if (config.models.isNotEmpty()) {
-            binding.tilModel.visibility = View.GONE
-            binding.tvModelLabel.visibility = View.VISIBLE
-            binding.spinnerModel.visibility = View.VISIBLE
-            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, config.models)
-            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-            binding.spinnerModel.adapter = adapter
-            val index = config.models.indexOf(savedModel).takeIf { it >= 0 } ?: 0
-            binding.spinnerModel.setSelection(index)
-        } else {
-            binding.tilModel.visibility = View.VISIBLE
-            binding.tvModelLabel.visibility = View.GONE
-            binding.spinnerModel.visibility = View.GONE
-            binding.tilModel.hint = "模型名称（默认 ${config.defaultModel}）"
-            binding.etModel.setText(savedModel)
-        }
-        suppressTextSave = false
-        hideLegacyFeatureControls()
-    }
-
-    private fun hideLegacyFeatureControls() {
-        listOf(
-            binding.tilModel, binding.btnFetchModels, binding.tvModelLabel,
-            binding.spinnerModel, binding.etContextWindowTokens,
-            binding.etTargetLanguage, binding.spinnerReasoningLevel,
-            binding.etCustomPrompt, binding.btnOpenAiChat,
-            binding.tilLegacyContextWindow, binding.tilLegacyTargetLanguage,
-            binding.tvLegacyReasoningLabel, binding.tilLegacyCustomPrompt
-        ).forEach { it.visibility = View.GONE }
-    }
-
-    private fun providerNames() = AiProviderConfig.providers.map { it.displayName }
-
-    private fun setupDedicatedSettings() {
-        val names = providerNames()
-        selectedTranslationProvider = settingsManager.getAiTranslationProvider()
-        selectedPunctuationProvider = settingsManager.getAiPunctuationProvider()
-        suppressTextSave = true
-        fun setupProviderSpinner(spinner: android.widget.Spinner, initial: String, onChanged: (String) -> Unit) {
-            spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, names).apply {
-                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            if (current.baseUrl != next.baseUrl) {
+                settingsManager.setAiBaseUrl(current.provider, next.baseUrl.trim())
             }
-            spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                    if (!suppressTextSave) onChanged(AiProviderConfig.providers[position].id)
-                }
-                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+
+        if (current.translationProvider == next.translationProvider) {
+            val provider = current.translationProvider
+            if (current.translationModel != next.translationModel &&
+                AiProviderConfig.getProvider(provider).models.isEmpty()
+            ) {
+                settingsManager.setAiModel(provider, next.translationModel.trim())
             }
-            spinner.setSelection(AiProviderConfig.indexOf(initial))
-        }
-        setupProviderSpinner(binding.spinnerAiTranslationProvider, settingsManager.getAiTranslationProvider()) {
-            saveTranslationFields()
-            selectedTranslationProvider = it
-            settingsManager.setAiTranslationProvider(it)
-            loadTranslationFields(it)
-        }
-        setupProviderSpinner(binding.spinnerAiPunctuationProvider, selectedPunctuationProvider) {
-            saveDedicatedEdits()
-            selectedPunctuationProvider = it
-            settingsManager.setAiPunctuationProvider(it)
-            loadPunctuationFields(it)
-        }
-        setupReasoningSpinner(binding.spinnerTranslationReasoningLevel) { settingsManager.setAiReasoningLevel(it, selectedTranslationProvider) }
-        setupReasoningSpinner(binding.spinnerPunctuationReasoningLevel) { settingsManager.setAiPunctuationReasoningLevel(it, selectedPunctuationProvider) }
-        binding.btnFetchTranslationModels.setOnClickListener {
-            fetchModelsFor(selectedTranslationProvider, binding.btnFetchTranslationModels, binding.etTranslationModel)
-        }
-        binding.btnFetchPunctuationModels.setOnClickListener {
-            fetchModelsFor(selectedPunctuationProvider, binding.btnFetchPunctuationModels, binding.etPunctuationModel)
-        }
-        binding.spinnerTranslationModel.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (!suppressTextSave && AiProviderConfig.getProvider(selectedTranslationProvider).models.isNotEmpty()) {
-                    settingsManager.setAiModel(selectedTranslationProvider, parent?.getItemAtPosition(position)?.toString().orEmpty())
+            if (current.translationContextWindow != next.translationContextWindow) {
+                next.translationContextWindow.toIntOrNull()?.let {
+                    settingsManager.setAiContextWindowTokens(it, provider)
                 }
             }
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            if (current.targetLanguage != next.targetLanguage) {
+                settingsManager.setAiTargetLanguage(next.targetLanguage.trim())
+            }
+            if (current.translationReasoning != next.translationReasoning) {
+                settingsManager.setAiReasoningLevel(next.translationReasoning, provider)
+            }
+            if (current.translationPrompt != next.translationPrompt) {
+                settingsManager.setAiCustomPrompt(next.translationPrompt)
+            }
         }
-        binding.spinnerPunctuationModel.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (!suppressTextSave && AiProviderConfig.getProvider(selectedPunctuationProvider).models.isNotEmpty()) {
-                    settingsManager.setAiPunctuationModel(selectedPunctuationProvider, parent?.getItemAtPosition(position)?.toString().orEmpty())
+
+        if (current.punctuationProvider == next.punctuationProvider) {
+            val provider = current.punctuationProvider
+            if (current.punctuationModel != next.punctuationModel &&
+                AiProviderConfig.getProvider(provider).models.isEmpty()
+            ) {
+                settingsManager.setAiPunctuationModel(provider, next.punctuationModel.trim())
+            }
+            if (current.punctuationContextWindow != next.punctuationContextWindow) {
+                next.punctuationContextWindow.toIntOrNull()?.let {
+                    settingsManager.setAiPunctuationContextWindowTokens(it, provider)
                 }
             }
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-        }
-        listOf(binding.etTranslationModel, binding.etTranslationContextWindow, binding.etTranslationTargetLanguage, binding.etTranslationCustomPrompt,
-            binding.etPunctuationModel, binding.etPunctuationContextWindow, binding.etPunctuationCustomPrompt).forEach { edit ->
-            edit.addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
-                override fun afterTextChanged(s: Editable?) { if (!suppressTextSave) saveDedicatedEdits() }
-            })
-        }
-        suppressTextSave = false
-        loadTranslationFields(selectedTranslationProvider)
-        loadPunctuationFields(selectedPunctuationProvider)
-    }
-
-    private fun setupReasoningSpinner(spinner: android.widget.Spinner, onChanged: (AiProviderConfig.ReasoningLevel) -> Unit) {
-        spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, AiProviderConfig.ReasoningLevel.entries.map { it.displayName }).apply {
-            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        }
-        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) { if (!suppressTextSave) onChanged(AiProviderConfig.ReasoningLevel.entries[position]) }
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            if (current.punctuationReasoning != next.punctuationReasoning) {
+                settingsManager.setAiPunctuationReasoningLevel(next.punctuationReasoning, provider)
+            }
+            if (current.punctuationPrompt != next.punctuationPrompt) {
+                settingsManager.setAiPunctuationCustomPrompt(next.punctuationPrompt)
+            }
         }
     }
 
-    private fun loadTranslationFields(provider: String) {
-        suppressTextSave = true
-        val config = AiProviderConfig.getProvider(provider)
-        binding.etTranslationModel.setText(settingsManager.getAiModel(provider))
-        binding.etTranslationContextWindow.setText(settingsManager.getAiContextWindowTokens(provider).toString())
-        binding.etTranslationTargetLanguage.setText(settingsManager.getAiTargetLanguage())
-        binding.spinnerTranslationReasoningLevel.setSelection(AiProviderConfig.ReasoningLevel.entries.indexOf(settingsManager.getAiReasoningLevel(provider)))
-        binding.etTranslationCustomPrompt.setText(settingsManager.getAiCustomPrompt())
-        updateModelControls(config, binding.tilTranslationModel, binding.etTranslationModel, binding.tvTranslationModelLabel, binding.spinnerTranslationModel, binding.btnFetchTranslationModels, settingsManager.getAiModel(provider))
-        suppressTextSave = false
+    private fun selectProvider(provider: String) {
+        val current = screenState ?: return
+        if (provider == current.provider) return
+        settingsManager.setAiApiKey(current.provider, current.apiKey.trim())
+        settingsManager.setAiBaseUrl(current.provider, current.baseUrl.trim())
+        settingsManager.setAiProvider(provider)
+        screenState = current.copy(
+            provider = provider,
+            apiKey = settingsManager.getAiApiKey(provider),
+            baseUrl = if (AiProviderConfig.getProvider(provider).customEndpoint) {
+                settingsManager.getAiBaseUrl(provider)
+            } else {
+                ""
+            },
+            apiKeyVisible = false
+        )
     }
 
-    private fun loadPunctuationFields(provider: String) {
-        suppressTextSave = true
-        val config = AiProviderConfig.getProvider(provider)
-        binding.etPunctuationModel.setText(settingsManager.getAiPunctuationModel(provider))
-        binding.etPunctuationContextWindow.setText(settingsManager.getAiPunctuationContextWindowTokens(provider).toString())
-        binding.etPunctuationCustomPrompt.setText(settingsManager.getAiPunctuationCustomPrompt())
-        binding.spinnerPunctuationReasoningLevel.setSelection(AiProviderConfig.ReasoningLevel.entries.indexOf(settingsManager.getAiPunctuationReasoningLevel(provider)))
-        updateModelControls(config, binding.tilPunctuationModel, binding.etPunctuationModel, binding.tvPunctuationModelLabel, binding.spinnerPunctuationModel, binding.btnFetchPunctuationModels, settingsManager.getAiPunctuationModel(provider))
-        suppressTextSave = false
+    private fun selectTranslationProvider(provider: String) {
+        val current = screenState ?: return
+        if (provider == current.translationProvider) return
+        persistDedicatedFields(current)
+        settingsManager.setAiTranslationProvider(provider)
+        screenState = current.copy(
+            translationProvider = provider,
+            translationModel = settingsManager.getAiModel(provider),
+            translationContextWindow = settingsManager.getAiContextWindowTokens(provider).toString(),
+            translationReasoning = settingsManager.getAiReasoningLevel(provider),
+            targetLanguage = settingsManager.getAiTargetLanguage(),
+            translationPrompt = settingsManager.getAiCustomPrompt(),
+            modelChooser = null
+        )
     }
 
-    private fun updateModelControls(config: AiProviderConfig.Provider, til: com.google.android.material.textfield.TextInputLayout?, edit: com.google.android.material.textfield.TextInputEditText, label: android.widget.TextView, spinner: android.widget.Spinner, fetch: android.view.View, saved: String) {
-        val fixed = config.models.isNotEmpty()
-        til?.visibility = if (fixed) View.GONE else View.VISIBLE
-        edit.visibility = if (fixed) View.GONE else View.VISIBLE
-        label.visibility = if (fixed) View.VISIBLE else View.GONE
-        spinner.visibility = if (fixed) View.VISIBLE else View.GONE
-        fetch.visibility = if (config.customEndpoint) View.VISIBLE else View.GONE
-        if (fixed) {
-            spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, config.models).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-            spinner.setSelection(config.models.indexOf(saved).coerceAtLeast(0))
+    private fun selectPunctuationProvider(provider: String) {
+        val current = screenState ?: return
+        if (provider == current.punctuationProvider) return
+        persistDedicatedFields(current)
+        settingsManager.setAiPunctuationProvider(provider)
+        screenState = current.copy(
+            punctuationProvider = provider,
+            punctuationModel = settingsManager.getAiPunctuationModel(provider),
+            punctuationContextWindow = settingsManager.getAiPunctuationContextWindowTokens(provider).toString(),
+            punctuationReasoning = settingsManager.getAiPunctuationReasoningLevel(provider),
+            punctuationPrompt = settingsManager.getAiPunctuationCustomPrompt(),
+            modelChooser = null
+        )
+    }
+
+    private fun persistDedicatedFields(state: AiSettingsScreenState) {
+        val translationProvider = state.translationProvider
+        if (AiProviderConfig.getProvider(translationProvider).models.isEmpty()) {
+            settingsManager.setAiModel(translationProvider, state.translationModel.trim())
         }
+        state.translationContextWindow.toIntOrNull()?.let {
+            settingsManager.setAiContextWindowTokens(it, translationProvider)
+        }
+        settingsManager.setAiTargetLanguage(state.targetLanguage.trim())
+        settingsManager.setAiReasoningLevel(state.translationReasoning, translationProvider)
+        settingsManager.setAiCustomPrompt(state.translationPrompt)
+
+        val punctuationProvider = state.punctuationProvider
+        if (AiProviderConfig.getProvider(punctuationProvider).models.isEmpty()) {
+            settingsManager.setAiPunctuationModel(punctuationProvider, state.punctuationModel.trim())
+        }
+        state.punctuationContextWindow.toIntOrNull()?.let {
+            settingsManager.setAiPunctuationContextWindowTokens(it, punctuationProvider)
+        }
+        settingsManager.setAiPunctuationReasoningLevel(state.punctuationReasoning, punctuationProvider)
+        settingsManager.setAiPunctuationCustomPrompt(state.punctuationPrompt)
     }
 
-    private fun saveDedicatedEdits() {
-        if (AiProviderConfig.getProvider(selectedTranslationProvider).models.isEmpty()) {
-            settingsManager.setAiModel(selectedTranslationProvider, binding.etTranslationModel.text?.toString()?.trim().orEmpty())
+    private fun fetchModels(target: AiModelTarget) {
+        val state = screenState ?: return
+        val provider = when (target) {
+            AiModelTarget.TRANSLATION -> state.translationProvider
+            AiModelTarget.PUNCTUATION -> state.punctuationProvider
         }
-        binding.etTranslationContextWindow.text?.toString()?.toIntOrNull()?.let { settingsManager.setAiContextWindowTokens(it, selectedTranslationProvider) }
-        settingsManager.setAiTargetLanguage(binding.etTranslationTargetLanguage.text?.toString()?.trim().orEmpty())
-        settingsManager.setAiCustomPrompt(binding.etTranslationCustomPrompt.text?.toString().orEmpty())
-        if (AiProviderConfig.getProvider(selectedPunctuationProvider).models.isEmpty()) {
-            settingsManager.setAiPunctuationModel(selectedPunctuationProvider, binding.etPunctuationModel.text?.toString()?.trim().orEmpty())
+        if (!AiProviderConfig.getProvider(provider).customEndpoint) return
+
+        val baseUrl = settingsManager.getAiBaseUrl(provider)
+        if (baseUrl.isBlank()) {
+            showToast("请先在 AI 平台设置中填写 API 请求地址")
+            return
         }
-        binding.etPunctuationContextWindow.text?.toString()?.toIntOrNull()?.let { settingsManager.setAiPunctuationContextWindowTokens(it, selectedPunctuationProvider) }
-        settingsManager.setAiPunctuationCustomPrompt(binding.etPunctuationCustomPrompt.text?.toString().orEmpty())
-    }
 
-    private fun saveTranslationFields() = saveDedicatedEdits()
-
-    private fun fetchModelsFor(
-        provider: String,
-        button: View,
-        modelEdit: com.google.android.material.textfield.TextInputEditText
-    ) {
-        val config = AiProviderConfig.getProvider(provider)
-        if (!config.customEndpoint) return
-        val apiUrl = settingsManager.getAiBaseUrl(provider)
-        if (apiUrl.isBlank()) { showToast("请先在 AI 平台设置中填写 API 请求地址"); return }
-        button.isEnabled = false
+        updateScreenState {
+            when (target) {
+                AiModelTarget.TRANSLATION -> it.copy(fetchingTranslationModels = true)
+                AiModelTarget.PUNCTUATION -> it.copy(fetchingPunctuationModels = true)
+            }
+        }
         lifecycleScope.launch {
             try {
-                val models = aiTranslationService.fetchModels(apiUrl, settingsManager.getAiApiKey(provider))
-                if (models.isEmpty()) showToast("模型列表为空") else AlertDialog.Builder(this@AiSettingsActivity).setTitle("选择模型（${models.size}）").setItems(models.toTypedArray()) { _, which -> modelEdit.setText(models[which]) }.show()
-            } catch (e: Exception) { showToast(e.message ?: "获取模型列表失败") } finally { button.isEnabled = true }
+                val models = aiTranslationService.fetchModels(baseUrl, settingsManager.getAiApiKey(provider))
+                if (models.isEmpty()) {
+                    showToast("模型列表为空")
+                } else {
+                    updateScreenState {
+                        it.copy(modelChooser = AiModelChooserUi(provider, target, models))
+                    }
+                }
+            } catch (error: Exception) {
+                showToast(error.message ?: "获取模型列表失败")
+            } finally {
+                updateScreenState {
+                    when (target) {
+                        AiModelTarget.TRANSLATION -> it.copy(fetchingTranslationModels = false)
+                        AiModelTarget.PUNCTUATION -> it.copy(fetchingPunctuationModels = false)
+                    }
+                }
+            }
         }
     }
 
-    private fun setupApiKeyActions() {
-        binding.tilApiKey.setEndIconOnClickListener {
-            if (isApiKeyVisible) {
-                setApiKeyVisible(false)
-            } else {
-                requestSensitiveAccess { setApiKeyVisible(true) }
-            }
-        }
-        binding.btnCopyApiKey.setOnClickListener {
-            if (binding.etApiKey.text.isNullOrEmpty()) {
-                showToast(getString(R.string.ai_api_key_empty))
-                return@setOnClickListener
-            }
-            requestSensitiveAccess(::copyApiKey)
-        }
-    }
-
-    private fun setupReasoningSettings() {
-        val adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_item,
-            AiProviderConfig.ReasoningLevel.entries.map { it.displayName }
-        )
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerReasoningLevel.adapter = adapter
-        binding.spinnerReasoningLevel.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (!suppressTextSave) {
-                    settingsManager.setAiReasoningLevel(
-                        AiProviderConfig.ReasoningLevel.entries[position]
+    private fun chooseModel(model: String) {
+        val chooser = screenState?.modelChooser ?: return
+        when (chooser.target) {
+            AiModelTarget.TRANSLATION -> {
+                settingsManager.setAiModel(chooser.provider, model)
+                updateScreenState {
+                    it.copy(
+                        modelChooser = null,
+                        translationModel = if (it.translationProvider == chooser.provider) model else it.translationModel
                     )
                 }
             }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-        }
-    }
-
-    private fun setupModelListAction() {
-        binding.btnFetchModels.setOnClickListener {
-            val baseUrl = binding.etApiBaseUrl.text?.toString()?.trim().orEmpty()
-            if (baseUrl.isBlank()) {
-                showToast("请先填写 API 请求地址")
-                return@setOnClickListener
-            }
-            val apiKey = binding.etApiKey.text?.toString()?.trim().orEmpty()
-            binding.btnFetchModels.isEnabled = false
-            lifecycleScope.launch {
-                try {
-                    val models = aiTranslationService.fetchModels(baseUrl, apiKey)
-                    if (models.isEmpty()) {
-                        showToast("模型列表为空")
-                    } else {
-                        showModelChooser(models)
-                    }
-                } catch (error: Exception) {
-                    showToast(error.message ?: "获取模型列表失败")
-                } finally {
-                    binding.btnFetchModels.isEnabled = true
+            AiModelTarget.PUNCTUATION -> {
+                settingsManager.setAiPunctuationModel(chooser.provider, model)
+                updateScreenState {
+                    it.copy(
+                        modelChooser = null,
+                        punctuationModel = if (it.punctuationProvider == chooser.provider) model else it.punctuationModel
+                    )
                 }
             }
         }
     }
 
-    private fun showModelChooser(models: List<String>) {
-        val current = binding.etModel.text?.toString().orEmpty()
-        val checked = models.indexOf(current).takeIf { it >= 0 } ?: -1
-        var selected = checked
-        AlertDialog.Builder(this)
-            .setTitle("选择模型（${models.size}）")
-            .setSingleChoiceItems(models.toTypedArray(), checked) { _, which -> selected = which }
-            .setPositiveButton("使用模型") { _, _ ->
-                if (selected >= 0) binding.etModel.setText(models[selected])
+    private fun requestCopyApiKey() {
+        val apiKey = screenState?.apiKey.orEmpty()
+        if (apiKey.isEmpty()) {
+            showToast(getString(R.string.ai_api_key_empty))
+            return
+        }
+        requestSensitiveAccess(::copyApiKey)
+    }
+
+    private fun copyApiKey() {
+        val apiKey = screenState?.apiKey.orEmpty()
+        if (apiKey.isEmpty()) {
+            showToast(getString(R.string.ai_api_key_empty))
+            return
+        }
+        val clip = ClipData.newPlainText("API Key", apiKey).apply {
+            description.extras = PersistableBundle().apply {
+                putBoolean("android.content.extra.IS_SENSITIVE", true)
             }
-            .setNegativeButton("取消", null)
-            .show()
+        }
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
+        showToast(getString(R.string.ai_api_key_copied))
+    }
+
+    private fun requestSensitiveAccess(action: () -> Unit) {
+        if (AiKeyAccessSession.isAuthorized) {
+            action()
+            return
+        }
+        if (authenticationInProgress) return
+
+        authenticationInProgress = true
+        pendingSensitiveAction = action
+        runCatching {
+            biometricPrompt.authenticate(createPromptInfo())
+        }.onFailure { error ->
+            authenticationInProgress = false
+            pendingSensitiveAction = null
+            showToast(
+                error.message?.takeIf { it.isNotBlank() }
+                    ?: getString(R.string.ai_api_key_auth_error)
+            )
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun createPromptInfo(): BiometricPrompt.PromptInfo {
+        val builder = BiometricPrompt.PromptInfo.Builder()
+            .setTitle(getString(R.string.ai_api_key_auth_title))
+            .setSubtitle(getString(R.string.ai_api_key_auth_subtitle))
+            .setConfirmationRequired(false)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            builder.setAllowedAuthenticators(
+                BiometricManager.Authenticators.BIOMETRIC_WEAK or
+                    BiometricManager.Authenticators.DEVICE_CREDENTIAL
+            )
+        } else {
+            builder.setDeviceCredentialAllowed(true)
+        }
+        return builder.build()
     }
 
     private fun openAiChat() {
-        saveCurrentProviderFields()
-        saveDedicatedEdits()
+        val state = screenState ?: return
+        settingsManager.setAiApiKey(state.provider, state.apiKey.trim())
+        settingsManager.setAiBaseUrl(state.provider, state.baseUrl.trim())
+        persistDedicatedFields(state)
+
         val chatProvider = settingsManager.getAiTranslationProvider()
         val config = AiProviderConfig.getProvider(chatProvider)
         val apiKey = settingsManager.getAiApiKey(chatProvider)
@@ -469,143 +406,7 @@ class AiSettingsActivity : AppCompatActivity() {
         )
     }
 
-    private fun setApiKeyVisible(visible: Boolean) {
-        isApiKeyVisible = visible
-        val selection = binding.etApiKey.selectionStart.coerceAtLeast(0)
-        binding.etApiKey.transformationMethod = if (visible) {
-            null
-        } else {
-            PasswordTransformationMethod.getInstance()
-        }
-        binding.tilApiKey.setEndIconDrawable(
-            if (visible) R.drawable.ic_visibility_off else R.drawable.ic_visibility
-        )
-        binding.tilApiKey.setEndIconContentDescription(
-            if (visible) R.string.ai_api_key_hide else R.string.ai_api_key_show
-        )
-        binding.etApiKey.setSelection(selection.coerceAtMost(binding.etApiKey.length()))
-    }
-
-    private fun requestSensitiveAccess(action: () -> Unit) {
-        if (AiKeyAccessSession.isAuthorized) {
-            action()
-            return
-        }
-        if (authenticationInProgress) return
-
-        authenticationInProgress = true
-        pendingSensitiveAction = action
-        runCatching {
-            biometricPrompt.authenticate(createPromptInfo())
-        }.onFailure { error ->
-            authenticationInProgress = false
-            pendingSensitiveAction = null
-            showToast(
-                error.message?.takeIf { it.isNotBlank() }
-                    ?: getString(R.string.ai_api_key_auth_error)
-            )
-        }
-    }
-
-    @Suppress("DEPRECATION")
-    private fun createPromptInfo(): BiometricPrompt.PromptInfo {
-        val builder = BiometricPrompt.PromptInfo.Builder()
-            .setTitle(getString(R.string.ai_api_key_auth_title))
-            .setSubtitle(getString(R.string.ai_api_key_auth_subtitle))
-            .setConfirmationRequired(false)
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            builder.setAllowedAuthenticators(
-                BiometricManager.Authenticators.BIOMETRIC_WEAK or
-                    BiometricManager.Authenticators.DEVICE_CREDENTIAL
-            )
-        } else {
-            builder.setDeviceCredentialAllowed(true)
-        }
-        return builder.build()
-    }
-
-    private fun copyApiKey() {
-        val apiKey = binding.etApiKey.text?.toString().orEmpty()
-        if (apiKey.isEmpty()) {
-            showToast(getString(R.string.ai_api_key_empty))
-            return
-        }
-        val clip = ClipData.newPlainText("API Key", apiKey).apply {
-            description.extras = PersistableBundle().apply {
-                putBoolean("android.content.extra.IS_SENSITIVE", true)
-            }
-        }
-        getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
-        showToast(getString(R.string.ai_api_key_copied))
-    }
-
     private fun showToast(message: String) {
         OverwritingToast.makeText(this, message, Toast.LENGTH_SHORT).show()
-    }
-
-    private fun saveCurrentProviderFields() {
-        settingsManager.setAiApiKey(selectedProvider, binding.etApiKey.text?.toString()?.trim().orEmpty())
-        settingsManager.setAiBaseUrl(selectedProvider, binding.etApiBaseUrl.text?.toString()?.trim().orEmpty())
-    }
-
-    private fun setupSave() {
-        binding.etApiKey.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                if (!suppressTextSave) settingsManager.setAiApiKey(selectedProvider, s.toString().trim())
-            }
-        })
-        binding.etModel.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                if (!suppressTextSave) settingsManager.setAiModel(selectedProvider, s.toString().trim())
-            }
-        })
-        binding.etApiBaseUrl.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                if (!suppressTextSave) settingsManager.setAiBaseUrl(selectedProvider, s.toString().trim())
-            }
-        })
-        binding.spinnerModel.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (!suppressTextSave) {
-                    val model = parent?.getItemAtPosition(position)?.toString().orEmpty()
-                    settingsManager.setAiModel(selectedProvider, model)
-                }
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-        binding.etTargetLanguage.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                settingsManager.setAiTargetLanguage(s.toString().trim())
-            }
-        })
-        binding.etCustomPrompt.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                if (!suppressTextSave) settingsManager.setAiCustomPrompt(s.toString())
-            }
-        })
-        binding.etContextWindowTokens.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                s?.toString()?.toIntOrNull()?.let(settingsManager::setAiContextWindowTokens)
-            }
-        })
-        binding.etContextWindowTokens.setOnFocusChangeListener { _, hasFocus ->
-            if (!hasFocus) {
-                binding.etContextWindowTokens.setText(
-                    settingsManager.getAiContextWindowTokens().toString()
-                )
-            }
-        }
     }
 }

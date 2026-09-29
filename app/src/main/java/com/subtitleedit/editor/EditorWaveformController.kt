@@ -3,19 +3,14 @@ package com.subtitleedit.editor
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Color
 import android.util.Log
-import android.view.MotionEvent
-import android.view.View
-import android.widget.TextView
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegSession
 import com.subtitleedit.audio.FfmpegWaveformChunkLoader
-import com.subtitleedit.databinding.ActivityEditorBinding
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.repository.MediaRepository
 import com.subtitleedit.util.SettingsManager
-import com.subtitleedit.view.WaveformTimelineView
+import com.subtitleedit.util.SubtitleEntryOps
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.file.AtomicMoveNotSupportedException
@@ -34,10 +29,12 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 internal class EditorWaveformController(
     private val context: Context,
-    private val binding: ActivityEditorBinding,
     private val scope: CoroutineScope,
     private var hasPlayableMedia: Boolean,
     private val appCacheDir: File,
@@ -48,6 +45,26 @@ internal class EditorWaveformController(
     private val onTimestampInserted: (Long, Long) -> Unit,
     private val showMessage: (String) -> Unit
 ) {
+    private val _composeState = MutableStateFlow(EditorWaveformState())
+
+    /** Observable timeline snapshot consumed by the Compose editor surface. */
+    val composeState: StateFlow<EditorWaveformState> = _composeState.asStateFlow()
+
+    private val composeChunkData = mutableListOf<FloatArray?>()
+    private val composeSpectrogramChunks = mutableMapOf<Int, Bitmap>()
+    private var composeVisibleStartMs = 0L
+    private var composeVisibleDurationMs = EditorWaveformState.DEFAULT_VISIBLE_DURATION_MS
+    private var composeCurrentPosition = 0f
+    private var composeSelectedIndices: Set<Int> = emptySet()
+    private var composeLimitedPlaybackIndex: Int? = null
+    private var composeIsTimestamping = false
+    private var composeTimestampStartMs = 0L
+    private var composeTimestampAnchorMs = 0L
+    private var composeViewportWidthPx = 0
+    private var composeViewportHeightPx = 0
+    private var composeDragSessionKey = 0L
+    private val composeDragBases = mutableMapOf<Int, SubtitleEntry>()
+
     private var chunkLoader: FfmpegWaveformChunkLoader? = null
     private var cacheIndexJob: Job? = null
     private var cacheIndexGeneration = 0L
@@ -57,7 +74,7 @@ internal class EditorWaveformController(
     private var audioStreamIndex: Int? = null
     private var hasAudioTrack = true
     private var isWaveformExpanded = true
-    private var currentDisplayMode = WaveformTimelineView.DisplayMode.WAVEFORM
+    private var currentDisplayMode = EditorWaveformDisplayMode.WAVEFORM
     private var spectrogramTotalChunks = 0
     private var spectrogramDoneChunks = 0
     private var spectrogramIsGenerating = false
@@ -73,108 +90,324 @@ internal class EditorWaveformController(
     private var spectrogramGenerationVersion = 0L
     private var spectrogramCacheDimensions: Pair<Int, Int>? = null
 
+    private fun publishComposeState() {
+        _composeState.value = EditorWaveformState(
+            durationMs = durationMs,
+            subtitles = _composeState.value.subtitles,
+            visibleStartMs = composeVisibleStartMs,
+            visibleDurationMs = composeVisibleDurationMs,
+            currentPosition = composeCurrentPosition,
+            chunkData = composeChunkData.toList(),
+            spectrogramChunks = composeSpectrogramChunks.toMap(),
+            selectedIndices = composeSelectedIndices,
+            limitedPlaybackIndex = composeLimitedPlaybackIndex,
+            amplitudeScale = _composeState.value.amplitudeScale,
+            displayMode = currentDisplayMode,
+            initialized = durationMs > 0L,
+            isExpanded = isWaveformExpanded,
+            isTimestamping = composeIsTimestamping,
+            timestampStartMs = composeTimestampStartMs,
+            timestampAnchorMs = composeTimestampAnchorMs,
+            hasPlayableMedia = hasPlayableMedia,
+            hasAudioTrack = hasAudioTrack,
+            isPreparingCacheIndex = isPreparingCacheIndex,
+            cacheIndexFailure = cacheIndexFailure,
+            isWaveformGenerated = isWaveformGenerated,
+            isWaveformGenerating = isWaveformGenerating,
+            isSpectrogramGenerationStarted = isSpectrogramGenerationStarted,
+            spectrogramTotalChunks = spectrogramTotalChunks,
+            spectrogramDoneChunks = spectrogramDoneChunks,
+            spectrogramIsGenerating = spectrogramIsGenerating,
+            viewportWidthPx = composeViewportWidthPx,
+            viewportHeightPx = composeViewportHeightPx
+        )
+    }
+
+    /** Updates the Compose surface size used to select spectrogram cache dimensions. */
+    fun updateComposeViewport(widthPx: Int, heightPx: Int) {
+        composeViewportWidthPx = widthPx.coerceAtLeast(0)
+        composeViewportHeightPx = heightPx.coerceAtLeast(0)
+        if (composeViewportWidthPx > 0 && composeViewportHeightPx > 0 && audioFile != null) {
+            val dimensions = SPECTROGRAM_WIDTH to
+                (composeViewportHeightPx * WAVE_HEIGHT_FRACTION).toInt().coerceAtLeast(64)
+            if (spectrogramCacheDimensions != dimensions) {
+                restoreSpectrogramCacheState(audioFile!!)
+            }
+        }
+        publishComposeState()
+    }
+
+    /** Updates the playhead without touching an Android View. */
+    fun setComposeCurrentPosition(position: Float) {
+        composeCurrentPosition = position.coerceIn(0f, 1f)
+        if (durationMs > 0L) {
+            val positionMs = (durationMs * composeCurrentPosition).toLong()
+            val visibleEnd = composeVisibleStartMs + composeVisibleDurationMs
+            if (positionMs < composeVisibleStartMs || positionMs > visibleEnd) {
+                composeVisibleStartMs = positionMs.coerceIn(
+                    0L,
+                    (durationMs - composeVisibleDurationMs).coerceAtLeast(0L)
+                )
+                requestComposeChunksAroundTime(positionMs)
+            }
+        }
+        publishComposeState()
+    }
+
+    /** Seeks the Compose viewport and asks the owner to seek playback. */
+    fun seekComposeToTime(timeMs: Long) {
+        composeVisibleStartMs = timeMs.coerceIn(
+            0L,
+            (durationMs - composeVisibleDurationMs).coerceAtLeast(0L)
+        )
+        requestComposeChunksAroundTime(timeMs)
+        publishComposeState()
+        onTimelineClickFromCompose(timeMs)
+    }
+
+    /** Applies a horizontal viewport drag expressed in milliseconds. */
+    fun panComposeViewport(deltaMs: Long) {
+        composeVisibleStartMs = (composeVisibleStartMs + deltaMs).coerceIn(
+            0L,
+            (durationMs - composeVisibleDurationMs).coerceAtLeast(0L)
+        )
+        publishComposeState()
+    }
+
+    /** Applies pinch zoom around an anchor time. scale > 1 zooms in. */
+    fun zoomComposeViewport(scale: Float, anchorMs: Long) {
+        if (durationMs <= 0L || scale <= 0f) return
+        val newDuration = (composeVisibleDurationMs / scale).toLong().coerceIn(
+            EditorWaveformState.MIN_VISIBLE_DURATION_MS,
+            minOf(EditorWaveformState.MAX_VISIBLE_DURATION_MS, durationMs.coerceAtLeast(1L))
+        )
+        val anchorFraction = if (composeVisibleDurationMs <= 0L) 0.5f else
+            ((anchorMs - composeVisibleStartMs).toFloat() / composeVisibleDurationMs).coerceIn(0f, 1f)
+        composeVisibleDurationMs = newDuration
+        composeVisibleStartMs = (anchorMs - (newDuration * anchorFraction).toLong()).coerceIn(
+            0L,
+            (durationMs - newDuration).coerceAtLeast(0L)
+        )
+        publishComposeState()
+    }
+
+    fun toggleComposeExpanded() {
+        isWaveformExpanded = !isWaveformExpanded
+        publishComposeState()
+    }
+
+    fun toggleComposeDisplayMode() {
+        currentDisplayMode = if (currentDisplayMode == EditorWaveformDisplayMode.WAVEFORM) {
+            EditorWaveformDisplayMode.SPECTROGRAM
+        } else {
+            EditorWaveformDisplayMode.WAVEFORM
+        }
+        if (currentDisplayMode == EditorWaveformDisplayMode.SPECTROGRAM) {
+            spectrogramTotalChunks = calcTotalChunks()
+            spectrogramIsGenerating = isSpectrogramGenerationStarted &&
+                spectrogramDoneChunks < spectrogramTotalChunks
+        }
+        publishComposeState()
+    }
+
+    fun zoomComposeAmplitudeIn() {
+        val value = (_composeState.value.amplitudeScale * 1.25f).coerceAtMost(10f)
+        _composeState.value = _composeState.value.copy(amplitudeScale = value)
+    }
+
+    fun zoomComposeAmplitudeOut() {
+        val value = (_composeState.value.amplitudeScale * 0.8f).coerceAtLeast(0.2f)
+        _composeState.value = _composeState.value.copy(amplitudeScale = value)
+    }
+
+    fun resetComposeAmplitude() {
+        _composeState.value = _composeState.value.copy(amplitudeScale = 1f)
+    }
+
+    fun selectComposeSubtitle(index: Int?) {
+        composeSelectedIndices = index?.takeIf { it in _composeState.value.subtitles.indices }
+            ?.let(::setOf) ?: emptySet()
+        composeSelectedIndices.firstOrNull()?.let(onSelectedIndexChanged)
+        publishComposeState()
+    }
+
+    fun updateComposeSubtitleDrag(
+        index: Int,
+        mode: EditorWaveformDragMode,
+        deltaMs: Long,
+        isFinal: Boolean
+    ) {
+        val original = _composeState.value.subtitles.getOrNull(index) ?: return
+        if (!isFinal && index !in composeDragBases) {
+            composeDragSessionKey++
+            composeDragBases[index] = original.copy()
+        }
+        val base = composeDragBases[index] ?: original
+        val updated = base.copy()
+        val entries = _composeState.value.subtitles
+        val bounds = SubtitleEntryOps.dragNeighborBounds(
+            currentStartTime = base.startTime,
+            currentEndTime = base.endTime,
+            entries = entries,
+            currentIndex = index
+        )
+        when (mode) {
+            EditorWaveformDragMode.MOVE -> {
+                val range = SubtitleEntryOps.clampMoveToNeighbors(
+                    originalStartTime = base.startTime,
+                    originalEndTime = base.endTime,
+                    desiredStartTime = base.startTime + deltaMs,
+                    previousEndTime = bounds.previousEndTime,
+                    nextStartTime = bounds.nextStartTime
+                )
+                updated.startTime = range.startTime
+                updated.endTime = range.endTime
+            }
+            EditorWaveformDragMode.RESIZE_START -> {
+                updated.startTime = SubtitleEntryOps.clampStartToNeighbors(
+                    originalStartTime = base.startTime,
+                    currentEndTime = base.endTime,
+                    desiredStartTime = base.startTime + deltaMs,
+                    previousEndTime = bounds.previousEndTime,
+                    minimumDurationMs = MIN_SUBTITLE_DURATION_MS
+                )
+            }
+            EditorWaveformDragMode.RESIZE_END -> {
+                updated.endTime = SubtitleEntryOps.clampEndToNeighbors(
+                    originalEndTime = base.endTime,
+                    currentStartTime = base.startTime,
+                    desiredEndTime = base.endTime + deltaMs,
+                    nextStartTime = bounds.nextStartTime,
+                    minimumDurationMs = MIN_SUBTITLE_DURATION_MS
+                )
+            }
+            EditorWaveformDragMode.NONE -> return
+        }
+        updated.startTime = updated.startTime.coerceIn(0L, durationMs)
+        updated.endTime = updated.endTime.coerceIn(
+            updated.startTime + MIN_SUBTITLE_DURATION_MS,
+            durationMs.coerceAtLeast(updated.startTime + MIN_SUBTITLE_DURATION_MS)
+        )
+        onSubtitleChanged(index, updated, composeDragSessionKey, isFinal)
+        val updatedSubtitles = _composeState.value.subtitles.toMutableList()
+        if (index in updatedSubtitles.indices) updatedSubtitles[index] = updated
+        _composeState.value = _composeState.value.copy(subtitles = updatedSubtitles)
+        if (isFinal) composeDragBases.remove(index)
+    }
+
+    fun startComposeTimestamping() {
+        composeIsTimestamping = true
+        composeTimestampStartMs = currentPlaybackPositionMs().coerceIn(0L, durationMs)
+        composeTimestampAnchorMs = composeTimestampStartMs
+        publishComposeState()
+    }
+
+    fun updateComposeTimestampAnchor(timeMs: Long) {
+        if (!composeIsTimestamping) return
+        composeTimestampAnchorMs = timeMs.coerceIn(0L, durationMs)
+        publishComposeState()
+    }
+
+    fun finishComposeTimestamping() {
+        if (!composeIsTimestamping) return
+        composeIsTimestamping = false
+        val end = composeTimestampAnchorMs
+        val start = composeTimestampStartMs
+        if (end > start) onTimestampInserted(start, end)
+        publishComposeState()
+    }
+
+    private fun onTimelineClickFromCompose(timeMs: Long) {
+        // The playback controller owns actual media seeking. The state update above keeps the
+        // Compose playhead responsive while the controller catches up asynchronously.
+        composeCurrentPosition = if (durationMs <= 0L) 0f else timeMs.toFloat() / durationMs
+        publishComposeState()
+    }
+
+    private fun requestComposeChunksAroundTime(timeMs: Long) {
+        val total = composeChunkData.size
+        if (total == 0) return
+        val center = (timeMs / EditorWaveformState.CHUNK_DURATION_MS).toInt()
+        val target = targetComposeSamples()
+        for (offset in 0..4) {
+            val deltas = if (offset == 0) intArrayOf(0) else intArrayOf(-offset, offset)
+            deltas.forEach { delta ->
+                val index = center + delta
+                if (index in 0 until total && composeChunkData[index] == null) {
+                    requestComposeChunk(index, target)
+                }
+            }
+        }
+    }
+
+    private fun targetComposeSamples(): Int =
+        (composeViewportWidthPx.toFloat() / composeVisibleDurationMs.coerceAtLeast(1L) *
+            EditorWaveformState.CHUNK_DURATION_MS * 4f).toInt().coerceIn(150, 30_000)
+
+    private fun requestComposeChunk(index: Int, targetSamples: Int) {
+        val start = index * EditorWaveformState.CHUNK_DURATION_MS
+        val end = minOf(start + EditorWaveformState.CHUNK_DURATION_MS, durationMs)
+        chunkLoader?.requestChunk(index, start, end, targetSamples) { chunkIndex, data ->
+            if (chunkIndex in composeChunkData.indices) {
+                composeChunkData[chunkIndex] = data
+                publishComposeState()
+            }
+        }
+    }
+
+    /** Requests a waveform chunk for the Compose surface. */
+    fun requestComposeChunk(
+        chunkIndex: Int,
+        startMs: Long,
+        endMs: Long,
+        targetSamples: Int
+    ) {
+        val loader = chunkLoader ?: return
+        if (chunkIndex !in composeChunkData.indices) return
+        loader.requestChunk(chunkIndex, startMs, endMs, targetSamples) { index, data ->
+            if (index in composeChunkData.indices) {
+                composeChunkData[index] = data
+                publishComposeState()
+            }
+        }
+    }
+
+    /** Requests a spectrogram chunk for the Compose surface. */
+    fun requestComposeSpectrogramChunk(
+        chunkIndex: Int,
+        startMs: Long,
+        endMs: Long,
+        widthPx: Int,
+        heightPx: Int
+    ) {
+        if (!isSpectrogramGenerationStarted) return
+        generateSpectrogramChunkAsync(chunkIndex, startMs, endMs, widthPx, heightPx)
+    }
+
+    fun startComposeGeneration() {
+        if (currentDisplayMode == EditorWaveformDisplayMode.WAVEFORM) {
+            startWaveformGeneration()
+        } else {
+            startSpectrogramGeneration()
+        }
+        publishComposeState()
+    }
+
     private data class SpectrogramChunkKey(
         val chunkIndex: Int,
         val width: Int,
         val height: Int
     )
 
+    /** The Compose surface owns gestures and controls; binding is no longer required. */
     fun bind() {
-        binding.mediaPlayerContainer.visibility =
-            if (hasPlayableMedia) View.VISIBLE else View.GONE
-        binding.waveformTimelineView.onSubtitleChangeListener = onSubtitleChanged
-        binding.waveformTimelineView.onSelectedIndicesChangeListener = { indices ->
-            indices.firstOrNull()?.let(onSelectedIndexChanged)
-        }
-
-        binding.btnToggleWaveform.setOnClickListener {
-            isWaveformExpanded = !isWaveformExpanded
-            binding.timelineContainer.visibility =
-                if (isWaveformExpanded) View.VISIBLE else View.GONE
-            binding.btnToggleWaveform.text = if (isWaveformExpanded) "▼" else "▶"
-            updateGenerateButton()
-            refreshWaveformToolbarState()
-        }
-
-        binding.btnToggleDisplayMode.setOnClickListener {
-            currentDisplayMode =
-                if (currentDisplayMode == WaveformTimelineView.DisplayMode.WAVEFORM) {
-                    WaveformTimelineView.DisplayMode.SPECTROGRAM
-                } else {
-                    WaveformTimelineView.DisplayMode.WAVEFORM
-                }
-            binding.waveformTimelineView.setDisplayMode(currentDisplayMode)
-
-            if (currentDisplayMode == WaveformTimelineView.DisplayMode.SPECTROGRAM) {
-                if (isSpectrogramGenerationStarted) {
-                    spectrogramIsGenerating = spectrogramDoneChunks < spectrogramTotalChunks
-                    binding.waveformTimelineView.refreshVisibleChunks()
-                } else {
-                    binding.waveformTimelineView.resetSpectrogramCache()
-                    spectrogramTotalChunks = calcTotalChunks()
-                    spectrogramDoneChunks = 0
-                    spectrogramIsGenerating = false
-                }
-            }
-
-            updateGenerateButton()
-            refreshWaveformToolbarState()
-        }
-
-        binding.waveformTimelineView.onSpectrogramChunkRequest =
-            { chunkIndex, startMs, endMs, widthPx, heightPx ->
-                if (isSpectrogramGenerationStarted) {
-                    generateSpectrogramChunkAsync(
-                        chunkIndex,
-                        startMs,
-                        endMs,
-                        widthPx,
-                        heightPx
-                    )
-                }
-            }
-
-        binding.btnAmplitudeZoomIn.setOnClickListener {
-            binding.waveformTimelineView.zoomInAmplitude()
-        }
-        binding.btnAmplitudeZoomIn.setOnLongClickListener {
-            binding.waveformTimelineView.resetAmplitudeScale()
-            showMessage("振幅已重置")
-            true
-        }
-        binding.btnAmplitudeZoomOut.setOnClickListener {
-            binding.waveformTimelineView.zoomOutAmplitude()
-        }
-
-        binding.btnGenerateCache.setOnClickListener {
-            if (currentDisplayMode == WaveformTimelineView.DisplayMode.WAVEFORM) {
-                startWaveformGeneration()
-            } else {
-                startSpectrogramGeneration()
-            }
-        }
-
-        var timestampStartMs = 0L
-        binding.btnInsertSubtitle.setOnLongClickListener {
-            timestampStartMs = currentPlaybackPositionMs()
-            binding.waveformTimelineView.startTimestamping(timestampStartMs)
-            true
-        }
-        binding.btnInsertSubtitle.setOnTouchListener { _, event ->
-            if ((event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) &&
-                binding.waveformTimelineView.isInTimestampingMode()
-            ) {
-                val endMs = binding.waveformTimelineView.stopTimestamping()
-                onTimestampInserted(timestampStartMs, endMs)
-            }
-            false
-        }
+        publishComposeState()
     }
 
     /** Makes the waveform/media panel available after opening media in subtitle-only mode. */
     fun setMediaAvailable(available: Boolean) {
         hasPlayableMedia = available
-        binding.mediaPlayerContainer.visibility = if (available) View.VISIBLE else View.GONE
+        publishComposeState()
         if (!available) {
             release()
         }
@@ -201,10 +434,17 @@ internal class EditorWaveformController(
         isWaveformGenerated = false
         isSpectrogramGenerationStarted = false
         spectrogramIsGenerating = false
+        composeVisibleStartMs = 0L
+        composeVisibleDurationMs = minOf(EditorWaveformState.DEFAULT_VISIBLE_DURATION_MS, durationMs)
+        composeChunkData.clear()
+        repeat(calcTotalChunks()) { composeChunkData += null }
+        composeSpectrogramChunks.clear()
+        composeSelectedIndices = emptySet()
+        _composeState.value = _composeState.value.copy(subtitles = subtitles.toList())
+        publishComposeState()
         chunkLoader?.release()
         chunkLoader = null
-        binding.waveformTimelineView.initialize(durationMs, subtitles)
-        updateGenerateButton()
+        publishComposeState()
 
         cacheIndexJob = scope.launch(Dispatchers.IO) {
             val cacheKey = runCatching { mediaRepository.getCacheKey(audioFile) }
@@ -249,30 +489,56 @@ internal class EditorWaveformController(
         chunkLoader = null
         isWaveformGenerated = false
         isSpectrogramGenerationStarted = false
-        binding.waveformTimelineView.initialize(durationMs, subtitles)
-        binding.btnGenerateCache.visibility = View.VISIBLE
-        binding.btnGenerateCache.isEnabled = false
-        binding.btnGenerateCache.text = context.getString(com.subtitleedit.R.string.editor_video_no_audio)
+        composeVisibleStartMs = 0L
+        composeVisibleDurationMs = minOf(EditorWaveformState.DEFAULT_VISIBLE_DURATION_MS, durationMs)
+        composeChunkData.clear()
+        repeat(calcTotalChunks()) { composeChunkData += null }
+        composeSpectrogramChunks.clear()
+        composeSelectedIndices = emptySet()
+        _composeState.value = _composeState.value.copy(subtitles = subtitles.toList())
+        publishComposeState()
+        publishComposeState()
     }
 
     fun setSubtitles(subtitles: List<SubtitleEntry>) {
         if (!hasPlayableMedia) return
-        binding.waveformTimelineView.setSubtitles(subtitles)
+        _composeState.value = _composeState.value.copy(
+            subtitles = subtitles.toList(),
+            selectedIndices = emptySet()
+        )
+        composeSelectedIndices = emptySet()
+        publishComposeState()
     }
 
     fun updateSubtitleEntries(changes: Map<Int, SubtitleEntry>, totalCount: Int): Boolean {
         if (!hasPlayableMedia) return true
-        return binding.waveformTimelineView.updateSubtitleEntries(changes, totalCount)
+        val entries = _composeState.value.subtitles.toMutableList()
+        if (entries.size == totalCount && changes.keys.all { it in entries.indices }) {
+            changes.forEach { (index, entry) -> entries[index] = entry.copy() }
+            _composeState.value = _composeState.value.copy(subtitles = entries)
+            publishComposeState()
+        }
+        return entries.size == totalCount
     }
 
     fun setSubtitlesPreserveSelection(subtitles: List<SubtitleEntry>) {
         if (!hasPlayableMedia) return
-        binding.waveformTimelineView.setSubtitlesPreserveSelection(subtitles)
+        _composeState.value = _composeState.value.copy(
+            subtitles = subtitles.toList(),
+            selectedIndices = composeSelectedIndices.filter { it in subtitles.indices }.toSet()
+        )
+        composeSelectedIndices = _composeState.value.selectedIndices
+        publishComposeState()
     }
 
     fun setSubtitlesKeepSelection(subtitles: List<SubtitleEntry>, selectedIndex: Int) {
         if (!hasPlayableMedia) return
-        binding.waveformTimelineView.setSubtitlesKeepSelection(subtitles, selectedIndex)
+        composeSelectedIndices = composeSelectedIndices.map { if (it >= selectedIndex) it + 1 else it }.toSet()
+        _composeState.value = _composeState.value.copy(
+            subtitles = subtitles.toList(),
+            selectedIndices = composeSelectedIndices
+        )
+        publishComposeState()
     }
 
     fun getAudioCacheKey(file: File): String? =
@@ -280,17 +546,36 @@ internal class EditorWaveformController(
 
     fun replaceSubtitleRange(startIndex: Int, removedCount: Int, inserted: List<SubtitleEntry>): Boolean {
         if (!hasPlayableMedia) return true
-        return binding.waveformTimelineView.replaceSubtitleRange(startIndex, removedCount, inserted)
+        val entries = _composeState.value.subtitles.toMutableList()
+        if (startIndex !in 0..entries.size || removedCount !in 0..(entries.size - startIndex)) return false
+        repeat(removedCount) { entries.removeAt(startIndex) }
+        entries.addAll(startIndex, inserted.map { it.copy() })
+        _composeState.value = _composeState.value.copy(subtitles = entries)
+        composeSelectedIndices = composeSelectedIndices.filter { it in entries.indices }.toSet()
+        publishComposeState()
+        return true
     }
 
     fun setSubtitlesAfterDelete(subtitles: List<SubtitleEntry>, deletedIndices: Set<Int>) {
         if (!hasPlayableMedia) return
-        binding.waveformTimelineView.setSubtitlesAfterDelete(subtitles, deletedIndices)
+        val sorted = deletedIndices.sorted()
+        composeSelectedIndices = composeSelectedIndices.mapNotNull { index ->
+            if (index in deletedIndices) null else index - sorted.count { it < index }
+        }.toSet()
+        _composeState.value = _composeState.value.copy(
+            subtitles = subtitles.toList(),
+            selectedIndices = composeSelectedIndices
+        )
+        publishComposeState()
     }
 
     fun removeSubtitleIndices(deletedIndices: Set<Int>): Boolean {
         if (!hasPlayableMedia) return true
-        return binding.waveformTimelineView.removeSubtitleIndices(deletedIndices)
+        val entries = _composeState.value.subtitles
+        if (deletedIndices.any { it !in entries.indices }) return false
+        val remaining = entries.filterIndexed { index, _ -> index !in deletedIndices }
+        setSubtitlesAfterDelete(remaining, deletedIndices)
+        return true
     }
 
     fun release() {
@@ -301,8 +586,21 @@ internal class EditorWaveformController(
         chunkLoader?.release()
         chunkLoader = null
         audioCacheKey = null
+        durationMs = 0L
+        audioFile = null
+        hasAudioTrack = false
         isPreparingCacheIndex = false
         cacheIndexFailure = null
+        composeChunkData.clear()
+        composeSpectrogramChunks.values.forEach { bitmap ->
+            if (!bitmap.isRecycled) bitmap.recycle()
+        }
+        composeSpectrogramChunks.clear()
+        composeVisibleStartMs = 0L
+        composeVisibleDurationMs = EditorWaveformState.DEFAULT_VISIBLE_DURATION_MS
+        composeCurrentPosition = 0f
+        composeSelectedIndices = emptySet()
+        publishComposeState()
     }
 
     private fun initializeMediaCache(
@@ -315,16 +613,6 @@ internal class EditorWaveformController(
         if (cacheIndexRequest != cacheIndexGeneration) return
 
         restoreSpectrogramCacheState(audioFile)
-        binding.waveformTimelineView.post {
-            if (cacheIndexRequest != cacheIndexGeneration) return@post
-            restoreSpectrogramCacheState(audioFile)
-            if (isSpectrogramGenerationStarted &&
-                currentDisplayMode == WaveformTimelineView.DisplayMode.SPECTROGRAM
-            ) {
-                binding.waveformTimelineView.resetSpectrogramCache()
-            }
-            updateGenerateButton()
-        }
 
         val cacheDir = when (SettingsManager.getInstance(context).getWaveformCacheLocation()) {
             SettingsManager.WAVEFORM_CACHE_APP -> File(appCacheDir, "waveform")
@@ -341,27 +629,16 @@ internal class EditorWaveformController(
         } else {
             isWaveformGenerated = false
         }
-        updateGenerateButton()
+        publishComposeState()
     }
 
     private fun calcTotalChunks(): Int {
         if (durationMs <= 0) return 0
-        val chunkMs = WaveformTimelineView.CHUNK_DURATION_MS
+        val chunkMs = EditorWaveformState.CHUNK_DURATION_MS
         return ((durationMs + chunkMs - 1) / chunkMs).toInt()
     }
 
-    private fun refreshWaveformToolbarState() {
-        val isSpectrogram = currentDisplayMode == WaveformTimelineView.DisplayMode.SPECTROGRAM
-        (binding.btnToggleDisplayMode as? TextView)?.text =
-            if (isSpectrogram) "频谱" else "波形"
-
-        val amplitudeEnabled = isWaveformExpanded && !isSpectrogram
-        binding.btnAmplitudeZoomIn.isEnabled = amplitudeEnabled
-        binding.btnAmplitudeZoomOut.isEnabled = amplitudeEnabled
-        val color = if (amplitudeEnabled) "#CCCCCC" else "#555555"
-        (binding.btnAmplitudeZoomIn as? TextView)?.setTextColor(Color.parseColor(color))
-        (binding.btnAmplitudeZoomOut as? TextView)?.setTextColor(Color.parseColor(color))
-    }
+    private fun refreshWaveformToolbarState() = publishComposeState()
 
     private fun generateSpectrogramChunkAsync(
         chunkIndex: Int,
@@ -455,17 +732,15 @@ internal class EditorWaveformController(
                 return@withContext
             }
 
-            if (bitmap == null) {
-                binding.waveformTimelineView.markSpectrogramChunkFailed(key.chunkIndex)
-                return@withContext
+            if (bitmap == null) return@withContext
+            composeSpectrogramChunks.put(key.chunkIndex, bitmap)?.let { previous ->
+                if (previous !== bitmap && !previous.isRecycled) previous.recycle()
             }
-
-            val accepted = binding.waveformTimelineView.updateSpectrogramChunk(key.chunkIndex, bitmap!!)
-            if (!accepted) return@withContext
             if (spectrogramReadyChunks.add(key.chunkIndex)) {
                 spectrogramDoneChunks = spectrogramReadyChunks.size
             }
             spectrogramIsGenerating = spectrogramDoneChunks < spectrogramTotalChunks
+            publishComposeState()
             if (!spectrogramIsGenerating && spectrogramTotalChunks > 0) {
                 showMessage("频谱图缓存生成完成")
             }
@@ -656,9 +931,10 @@ internal class EditorWaveformController(
 
     private fun restoreSpectrogramCacheState(audioFile: File) {
         spectrogramTotalChunks = calcTotalChunks()
-        val dimensions = binding.waveformTimelineView.getSpectrogramCacheDimensions() ?: return
-        val (width, height) = dimensions
-        spectrogramCacheDimensions = dimensions
+        val width = SPECTROGRAM_WIDTH
+        val height = (composeViewportHeightPx * WAVE_HEIGHT_FRACTION).toInt().coerceAtLeast(64)
+        if (width <= 0 || height <= 0) return
+        spectrogramCacheDimensions = width to height
         val cacheBaseDir = spectrogramCacheBaseDir(audioFile) ?: return
         val streamSuffix = audioStreamIndex?.let { ".a$it" }.orEmpty()
         val prefix = "${audioFile.nameWithoutExtension}$streamSuffix.spec_"
@@ -677,6 +953,7 @@ internal class EditorWaveformController(
         isSpectrogramGenerationStarted = spectrogramDoneChunks > 0
         spectrogramIsGenerating =
             isSpectrogramGenerationStarted && spectrogramDoneChunks < spectrogramTotalChunks
+        publishComposeState()
     }
 
     private fun cleanupStaleSpectrogramParts(cacheDir: File) {
@@ -702,49 +979,12 @@ internal class EditorWaveformController(
         return File(cacheRootDir, cacheKey).apply { mkdirs() }
     }
 
-    private fun updateGenerateButton() {
-        if (!hasAudioTrack) {
-            binding.btnGenerateCache.visibility = if (isWaveformExpanded) View.VISIBLE else View.GONE
-            binding.btnGenerateCache.isEnabled = false
-            binding.btnGenerateCache.text = context.getString(com.subtitleedit.R.string.editor_video_no_audio)
-            return
-        }
-        if (isPreparingCacheIndex) {
-            binding.btnGenerateCache.visibility = if (isWaveformExpanded) View.VISIBLE else View.GONE
-            binding.btnGenerateCache.isEnabled = false
-            binding.btnGenerateCache.text = "正在准备缓存..."
-            return
-        }
-        if (cacheIndexFailure != null) {
-            binding.btnGenerateCache.visibility = if (isWaveformExpanded) View.VISIBLE else View.GONE
-            binding.btnGenerateCache.isEnabled = false
-            binding.btnGenerateCache.text = "缓存准备失败"
-            return
-        }
-        val needsGenerate = when (currentDisplayMode) {
-            WaveformTimelineView.DisplayMode.WAVEFORM -> !isWaveformGenerated
-            WaveformTimelineView.DisplayMode.SPECTROGRAM -> !isSpectrogramGenerationStarted
-        }
-        binding.btnGenerateCache.visibility =
-            if (needsGenerate && isWaveformExpanded) View.VISIBLE else View.GONE
-
-        if (currentDisplayMode == WaveformTimelineView.DisplayMode.WAVEFORM) {
-            if (isWaveformGenerating) {
-                binding.btnGenerateCache.text = "生成中..."
-                binding.btnGenerateCache.isEnabled = false
-            } else {
-                binding.btnGenerateCache.text = "生成波形图"
-                binding.btnGenerateCache.isEnabled = true
-            }
-        } else {
-            binding.btnGenerateCache.text = "生成频谱图"
-            binding.btnGenerateCache.isEnabled = true
-        }
-    }
+    private fun updateGenerateButton() = publishComposeState()
 
     private fun startWaveformGeneration() {
         if (chunkLoader == null) return
         isWaveformGenerating = true
+        publishComposeState()
         updateGenerateButton()
         showMessage("已启用波形图按需生成")
         chunkLoader?.generateCache { success ->
@@ -756,6 +996,7 @@ internal class EditorWaveformController(
             } else {
                 showMessage("波形缓存生成失败")
             }
+            publishComposeState()
             updateGenerateButton()
         }
     }
@@ -766,9 +1007,10 @@ internal class EditorWaveformController(
         spectrogramTotalChunks = calcTotalChunks()
         spectrogramDoneChunks = spectrogramReadyChunks.size
         spectrogramIsGenerating = spectrogramDoneChunks < spectrogramTotalChunks
+        publishComposeState()
         updateGenerateButton()
         showMessage("频谱图将在浏览时按需生成")
-        binding.waveformTimelineView.resetSpectrogramCache()
+        publishComposeState()
     }
 
     private fun cancelSpectrogramJobs() {
@@ -782,24 +1024,15 @@ internal class EditorWaveformController(
     }
 
     private fun connectWaveformLoader() {
-        binding.waveformTimelineView.onChunkLoadRequest =
-            { chunkIndex, startMs, endMs, targetSamples ->
-                chunkLoader?.requestChunk(
-                    chunkIndex,
-                    startMs,
-                    endMs,
-                    targetSamples
-                ) { index, data ->
-                    binding.waveformTimelineView.post {
-                        binding.waveformTimelineView.updateChunk(index, data)
-                    }
-                }
-            }
-        binding.waveformTimelineView.refreshVisibleChunks()
+        // Compose requests chunks through requestComposeChunk when they enter the viewport.
+        publishComposeState()
     }
 
     private companion object {
         const val TAG = "EditorWaveformController"
+        const val MIN_SUBTITLE_DURATION_MS = 100L
+        const val SPECTROGRAM_WIDTH = 2048
+        const val WAVE_HEIGHT_FRACTION = 0.67f
         const val MAX_CONCURRENT_SPECTROGRAM_GENERATIONS = 2
         const val STALE_SPECTROGRAM_PART_MAX_AGE_MS = 24L * 60L * 60L * 1000L
     }

@@ -3,14 +3,17 @@ package com.subtitleedit
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.view.View
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.LinearLayoutManager
-import com.subtitleedit.adapter.ArchivePreviewAdapter
-import com.subtitleedit.databinding.ActivityArchivePreviewBinding
+import com.subtitleedit.feature.ui.ArchivePreviewScreen
 import com.subtitleedit.model.ArchivePreviewBrowser
+import com.subtitleedit.model.ArchivePreviewItem
+import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.ArchivePreviewCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -18,26 +21,37 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 class ArchivePreviewActivity : AppCompatActivity() {
-    private lateinit var binding: ActivityArchivePreviewBinding
-    private lateinit var adapter: ArchivePreviewAdapter
-    private lateinit var browser: ArchivePreviewBrowser
+    private var archiveName by mutableStateOf("")
+    private var currentDirectory by mutableStateOf("")
+    private var items by mutableStateOf(emptyList<ArchivePreviewItem>())
+    private var entryCount by mutableStateOf<Int?>(null)
+    private var isLoading by mutableStateOf(true)
+    private var errorMessage by mutableStateOf<String?>(null)
+    private var browser: ArchivePreviewBrowser? = null
     private lateinit var previewFile: File
-    private var archiveName = ""
-    private var currentDirectory = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityArchivePreviewBinding.inflate(layoutInflater)
-        setContentView(binding.root)
 
         archiveName = intent.getStringExtra(EXTRA_ARCHIVE_NAME).orEmpty()
         previewFile = File(intent.getStringExtra(EXTRA_PREVIEW_PATH).orEmpty())
         currentDirectory = savedInstanceState?.getString(STATE_DIRECTORY).orEmpty()
 
-        setupToolbar()
-        adapter = ArchivePreviewAdapter { directory -> showDirectory(directory.path) }
-        binding.rvFileList.layoutManager = LinearLayoutManager(this)
-        binding.rvFileList.adapter = adapter
+        setContent {
+            SubtitleEditComposeTheme {
+                ArchivePreviewScreen(
+                    archiveName = archiveName,
+                    currentDirectory = currentDirectory,
+                    entryCount = entryCount,
+                    items = items,
+                    isLoading = isLoading,
+                    errorMessage = errorMessage,
+                    onNavigateBack = { onBackPressedDispatcher.onBackPressed() },
+                    onOpenDirectory = ::showDirectory
+                )
+            }
+        }
+
         loadPreview()
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -51,42 +65,27 @@ class ArchivePreviewActivity : AppCompatActivity() {
         })
     }
 
-    private fun setupToolbar() {
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = archiveName
-        binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
-    }
-
     private fun loadPreview() {
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching { ArchivePreviewCache.read(previewFile) }
             }
-            binding.loadingIndicator.visibility = View.GONE
+            isLoading = false
             result.onSuccess { entries ->
                 browser = ArchivePreviewBrowser(entries)
-                supportActionBar?.subtitle = "${entries.size} 项"
+                entryCount = entries.size
+                errorMessage = null
                 showDirectory(currentDirectory)
             }.onFailure { error ->
-                binding.tvEmptyState.text = "无法读取预览：${error.message ?: "未知错误"}"
-                binding.tvEmptyState.visibility = View.VISIBLE
+                items = emptyList()
+                errorMessage = "无法读取预览：${error.message ?: "未知错误"}"
             }
         }
     }
 
     private fun showDirectory(directory: String) {
-        if (!::browser.isInitialized) return
         currentDirectory = directory.trim('/')
-        val items = browser.itemsAt(currentDirectory)
-        adapter.submitList(items)
-        binding.tvCurrentPath.text = buildString {
-            append(archiveName)
-            if (currentDirectory.isNotEmpty()) append(" / ").append(currentDirectory)
-        }
-        binding.pathNavigation.post { binding.pathNavigation.fullScroll(View.FOCUS_RIGHT) }
-        binding.tvEmptyState.text = "此文件夹为空"
-        binding.tvEmptyState.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+        items = browser?.itemsAt(currentDirectory).orEmpty()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

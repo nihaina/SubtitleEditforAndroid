@@ -1,7 +1,5 @@
 package com.subtitleedit
 
-import android.view.View
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.LifecycleCoroutineScope
 import com.subtitleedit.repository.ArchiveRepository
@@ -64,11 +62,8 @@ internal class ArchiveExtractionRunner(
                 if (cancelledByUser.get()) onCancelled() else throw error
             }
         }
-        progress.dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { button ->
-            button.isEnabled = false
-            progress.binding.tvProgressMessage.text = "正在取消..."
-            progress.binding.progressBar.isIndeterminate = true
-            progress.binding.tvProgressPercent.visibility = View.GONE
+        progress.setCancelAction {
+            progress.showCancelling()
             cancelledByUser.set(true)
             job.cancel(CancellationException("用户取消解压"))
         }

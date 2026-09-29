@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.22.1)
 
+# Some Windows NDK installations include a Unix shell script named `ld.lld`
+# next to the actual `ld.lld.exe`. Point Clang at the executable explicitly.
+if (WIN32 AND ANDROID_NDK)
+    set(SEVENZIP_LLD "${ANDROID_NDK}/toolchains/llvm/prebuilt/windows-x86_64/bin/ld.lld.exe")
+endif()
+
 project(subtitleedit_archive LANGUAGES C CXX)
 
 set(SEVENZIP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/7zip")
@@ -68,5 +74,8 @@ target_include_directories(subtitleedit_7zip PRIVATE
     "${SEVENZIP_DIR}/CPP/include_windows")
 target_compile_definitions(subtitleedit_7zip PRIVATE ENV_UNIX NDEBUG _FILE_OFFSET_BITS=64 Z7_PROG_VARIANT_Z)
 target_compile_options(subtitleedit_7zip PRIVATE -O2 -fexceptions -fvisibility=hidden -Wno-error=c++11-narrowing)
+if (SEVENZIP_LLD AND EXISTS "${SEVENZIP_LLD}")
+    target_link_options(subtitleedit_7zip PRIVATE "-fuse-ld=${SEVENZIP_LLD}")
+endif()
 target_link_options(subtitleedit_7zip PRIVATE "-Wl,-z,max-page-size=16384")
 target_link_libraries(subtitleedit_7zip PRIVATE log)

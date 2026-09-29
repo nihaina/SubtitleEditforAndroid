@@ -384,6 +384,7 @@
     <string name="activity_tools_text_01">字幕格式转换</string>
     <string name="activity_tools_text_02">批量转换字幕格式（SRT/LRC/VTT）</string>
     <string name="activity_tools_contentdescription_01">进入</string>
+    <string name="tools_navigate_back">返回</string>
     <string name="activity_tools_contentdescription_02">字幕格式化</string>
     <string name="activity_tools_text_03">格式化工具</string>
     <string name="activity_tools_text_04">清除标点和字间空格、替换标点</string>
@@ -477,12 +478,10 @@
     <string name="dialog_create_archive_text_05">分卷</string>
     <string name="dialog_create_archive_text_06">压缩成功后删除源文件</string>
     <string name="item_log_section_text_01" translatable="false">▶</string>
-    <string name="item_subtitle_format_preview_contentdescription_01">格式化此行</string>
     <string name="item_subtitle_text_01" translatable="false">→</string>
     <string name="item_subtitle_contentdescription_01" translatable="false">selected</string>
     <string name="item_subtitle_contentdescription_02">跳转到字幕时间</string>
     <string name="item_subtitle_contentdescription_03">设置字幕时间</string>
-    <string name="item_translation_preview_contentdescription_01">应用此行翻译</string>
     <string name="translation_preview_suspect_warning">部分翻译结果疑似有误</string>
     <string name="translation_preview_suspect_dialog_title">疑似有误的字幕</string>
     <string name="translation_preview_suspect_row">第 %1$d 条字幕</string>

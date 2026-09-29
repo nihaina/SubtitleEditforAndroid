@@ -5,16 +5,17 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.Menu
-import android.view.MenuItem
-import android.view.inputmethod.EditorInfo
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.LinearLayoutManager
-import com.subtitleedit.R
-import com.subtitleedit.databinding.ActivityChatBinding
+import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
@@ -23,10 +24,14 @@ import kotlinx.coroutines.launch
 
 /** A standalone chat screen backed entirely by [ChatConversation]. */
 class ChatActivity : AppCompatActivity() {
-    private lateinit var binding: ActivityChatBinding
     private lateinit var conversation: ChatConversation
-    private val messages = mutableListOf<ChatUiMessage>()
-    private val adapter = ChatMessageAdapter(messages)
+    private val messages = mutableStateListOf<ChatUiMessage>()
+    private val chatListState = LazyListState()
+    private var messageText by mutableStateOf("")
+    private var isSendingState by mutableStateOf(false)
+    private var historySessions by mutableStateOf(emptyList<ChatHistoryStore.SessionSummary>())
+    private var showHistoryDialog by mutableStateOf(false)
+    private var scrollRevision by mutableIntStateOf(0)
     private var sendJob: Job? = null
     private lateinit var configuration: ChatLaunchConfiguration
     private lateinit var historyStore: ChatHistoryStore
@@ -46,8 +51,6 @@ class ChatActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityChatBinding.inflate(layoutInflater)
-        setContentView(binding.root)
         configuration = launchConfiguration(intent) ?: run {
             Toast.makeText(this, "对话配置已失效，请从 AI 设置重新打开", Toast.LENGTH_LONG).show()
             finish()
@@ -56,22 +59,35 @@ class ChatActivity : AppCompatActivity() {
         historyStore = ChatHistoryStore(this)
         conversation = newConversation()
 
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "AI 对话"
-        binding.toolbar.subtitle = "${configuration.providerName} · ${configuration.backendConfig.model}"
-        binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
-
-        binding.chatList.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
-        binding.chatList.itemAnimator = null
-        binding.chatList.adapter = adapter
-        binding.btnSend.setOnClickListener { sendOrCancel() }
-        binding.etMessage.setOnEditorActionListener { _, action, _ ->
-            if (action == EditorInfo.IME_ACTION_SEND) {
-                sendOrCancel()
-                true
-            } else {
-                false
+        setContent {
+            SubtitleEditComposeTheme {
+                ChatScreen(
+                    providerSubtitle = "${configuration.providerName} · ${configuration.backendConfig.model}",
+                    messages = messages,
+                    listState = chatListState,
+                    inputText = messageText,
+                    isSending = isSendingState,
+                    historySessions = historySessions,
+                    showHistoryDialog = showHistoryDialog,
+                    scrollRevision = scrollRevision,
+                    onInputTextChange = { messageText = it },
+                    onSendOrStop = ::sendOrCancel,
+                    onNavigateBack = { onBackPressedDispatcher.onBackPressed() },
+                    onShowHistory = ::showHistory,
+                    onClearConversation = ::startNewConversation,
+                    onCloseHistory = { showHistoryDialog = false },
+                    onOpenHistory = { sessionId ->
+                        showHistoryDialog = false
+                        openHistory(sessionId)
+                    },
+                    onClearHistory = {
+                        lifecycleScope.launch {
+                            historyStore.clear()
+                            showHistoryDialog = false
+                            startNewConversation()
+                        }
+                    }
+                )
             }
         }
     }
@@ -81,23 +97,6 @@ class ChatActivity : AppCompatActivity() {
         if (::conversation.isInitialized) conversation.cancel()
         if (isFinishing) ChatLaunchRegistry.remove(intent.getStringExtra(EXTRA_CONFIGURATION_ID))
         super.onDestroy()
-    }
-
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.menu_chat, menu)
-        return true
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
-        R.id.action_chat_history -> {
-            showHistory()
-            true
-        }
-        R.id.action_clear_chat -> {
-            startNewConversation()
-            true
-        }
-        else -> super.onOptionsItemSelected(item)
     }
 
     private fun sendOrCancel() {
@@ -110,10 +109,10 @@ class ChatActivity : AppCompatActivity() {
             stopVisualStream()
             return
         }
-        val content = binding.etMessage.text?.toString()?.trim().orEmpty()
+        val content = messageText.trim()
         if (content.isBlank()) return
         append(ChatUiMessage.User(content))
-        binding.etMessage.setText("")
+        messageText = ""
         val assistantIndex = messages.size
         append(ChatUiMessage.Assistant())
         setSending(true)
@@ -129,12 +128,10 @@ class ChatActivity : AppCompatActivity() {
                 val assistant = messages.getOrNull(assistantIndex) as? ChatUiMessage.Assistant
                 if (assistant != null) {
                     assistant.streaming = false
-                    adapter.notifyItemChanged(assistantIndex)
                 }
             } catch (error: Exception) {
                 clearPendingStreamUpdates()
                 messages.removeAt(assistantIndex)
-                adapter.notifyItemRemoved(assistantIndex)
                 append(ChatUiMessage.Status(error.message ?: "对话失败"))
             } finally {
                 sendJob = null
@@ -193,7 +190,6 @@ class ChatActivity : AppCompatActivity() {
             if (assistant != null) {
                 assistant.text += text
                 assistant.reasoning += reasoning
-                adapter.notifyItemChanged(index)
                 if (isAtBottom()) scrollToBottom()
             }
         }
@@ -246,10 +242,8 @@ class ChatActivity : AppCompatActivity() {
         } ?: return
         val assistant = messages.getOrNull(completion.assistantIndex) as? ChatUiMessage.Assistant
         if (assistant != null) {
-            val changed = assistant.text != completion.finalText || assistant.streaming
             assistant.text = completion.finalText
             assistant.streaming = false
-            if (changed) adapter.notifyItemChanged(completion.assistantIndex)
         }
         completion.onFinished()
     }
@@ -263,7 +257,6 @@ class ChatActivity : AppCompatActivity() {
         val index = messages.indexOfLast { it is ChatUiMessage.Assistant }
         (messages.getOrNull(index) as? ChatUiMessage.Assistant)?.let { assistant ->
             assistant.streaming = false
-            adapter.notifyItemChanged(index)
         }
         setSending(false)
     }
@@ -275,7 +268,6 @@ class ChatActivity : AppCompatActivity() {
         conversation = newConversation()
         currentSessionId = null
         messages.clear()
-        adapter.notifyDataSetChanged()
     }
 
     private fun showHistory() {
@@ -285,21 +277,8 @@ class ChatActivity : AppCompatActivity() {
                 Toast.makeText(this@ChatActivity, "暂无会话记录", Toast.LENGTH_SHORT).show()
                 return@launch
             }
-            val labels = sessions.map { session ->
-                val type = if (session.type == ChatHistoryStore.TYPE_TRANSLATION) "AI 翻译" else "AI 对话"
-                "$type · ${session.title}"
-            }.toTypedArray()
-            AlertDialog.Builder(this@ChatActivity)
-                .setTitle("会话记录")
-                .setItems(labels) { _, which -> openHistory(sessions[which].id) }
-                .setNegativeButton("取消", null)
-                .setNeutralButton("清空记录") { _, _ ->
-                    lifecycleScope.launch {
-                        historyStore.clear()
-                        startNewConversation()
-                    }
-                }
-                .show()
+            historySessions = sessions
+            showHistoryDialog = true
         }
     }
 
@@ -333,7 +312,6 @@ class ChatActivity : AppCompatActivity() {
                 )
             }
         }
-        adapter.notifyDataSetChanged()
         scrollToBottom()
     }
 
@@ -356,21 +334,21 @@ class ChatActivity : AppCompatActivity() {
 
     private fun append(message: ChatUiMessage) {
         messages += message
-        adapter.notifyItemInserted(messages.lastIndex)
         scrollToBottom()
     }
 
     private fun scrollToBottom() {
-        if (adapter.itemCount <= 0) return
-        binding.chatList.post { binding.chatList.scrollToPosition(adapter.itemCount - 1) }
+        if (messages.isNotEmpty()) scrollRevision++
     }
 
-    private fun isAtBottom(): Boolean = !binding.chatList.canScrollVertically(1)
+    private fun isAtBottom(): Boolean {
+        val layoutInfo = chatListState.layoutInfo
+        return layoutInfo.totalItemsCount == 0 ||
+            (layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1) >= layoutInfo.totalItemsCount - 1
+    }
 
     private fun setSending(sending: Boolean) {
-        binding.btnSend.setImageResource(if (sending) R.drawable.ic_stop else R.drawable.ic_send)
-        binding.btnSend.contentDescription = if (sending) "停止生成" else "发送消息"
-        binding.etMessage.isEnabled = !sending
+        isSendingState = sending
     }
 
     companion object {

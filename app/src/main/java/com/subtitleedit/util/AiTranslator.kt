@@ -590,7 +590,7 @@ private fun formatVttTimestamp(timeMs: Long): String {
 private fun String.removeTrailingMarkdownFence(): String {
     val lines = lines().toMutableList()
     while (lines.lastOrNull()?.trim() == "```") {
-        lines.removeLast()
+        lines.removeAt(lines.lastIndex)
     }
     return lines.joinToString("\n").trimEnd('\n')
 }

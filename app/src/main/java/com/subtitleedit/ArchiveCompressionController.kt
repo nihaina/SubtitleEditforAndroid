@@ -1,6 +1,5 @@
 package com.subtitleedit
 
-import android.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.LifecycleCoroutineScope
 import com.subtitleedit.repository.ArchiveRepository
@@ -60,8 +59,8 @@ internal class ArchiveCompressionController(
                             committed.set(true)
                             activity.runOnUiThread {
                                 if (progress.dialog.isShowing) {
-                                    progress.dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.isEnabled = false
-                                    if (deleteSources) progress.binding.tvProgressMessage.text = "正在删除源文件..."
+                                    progress.setCancelEnabled(false)
+                                    if (deleteSources) progress.setMessage("正在删除源文件...")
                                 }
                             }
                         }
@@ -84,17 +83,12 @@ internal class ArchiveCompressionController(
                 progress.dialog.dismiss()
             }
         }
-        progress.dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { button ->
+        progress.setCancelAction {
             if (committed.get()) {
-                button.isEnabled = false
-                return@setOnClickListener
+                progress.setCancelEnabled(false)
+                return@setCancelAction
             }
-            button.isEnabled = false
-            progress.binding.tvProgressMessage.text = "正在取消..."
-            progress.binding.progressBar.isIndeterminate = true
-            progress.binding.tvProgressPercent.visibility = android.view.View.GONE
-            progress.binding.tvProgressLeading.visibility = android.view.View.GONE
-            progress.binding.tvProgressProcessed.visibility = android.view.View.GONE
+            progress.showCancelling()
             job.cancel(CancellationException("用户取消压缩"))
         }
     }

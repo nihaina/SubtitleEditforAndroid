@@ -1,19 +1,31 @@
 package com.subtitleedit.editor
 
-import android.app.AlertDialog
+import android.app.Activity
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.text.InputType
 import android.view.Choreographer
-import android.view.View
-import android.view.inputmethod.InputMethodManager
-import android.widget.EditText
-import android.widget.SeekBar
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import com.subtitleedit.ComposeDialogHost
 import com.subtitleedit.R
-import com.subtitleedit.databinding.ActivityEditorBinding
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.mpv.EditorMpvAudioPlayer
+import com.subtitleedit.mpv.MpvPlayerHost
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleHighlightCursor
 import com.subtitleedit.util.TimeUtils
@@ -22,14 +34,17 @@ import java.util.Locale
 
 internal class EditorPlaybackController(
     private val context: Context,
-    private val binding: ActivityEditorBinding,
     private var mediaType: EditorMediaType,
     private val subtitles: () -> List<SubtitleEntry>,
     private val isSourceViewMode: () -> Boolean,
     private val onPlayingSubtitleChanged: (Int?) -> Unit,
     private val onMediaReady: (Long, Int?) -> Unit,
-    private val showMessage: (String) -> Unit
+    private val showMessage: (String) -> Unit,
+    private val videoPlayerHost: MpvPlayerHost? = null
 ) {
+    var uiState by mutableStateOf(EditorPlaybackUiState(mediaType = mediaType))
+        private set
+
     var currentPositionMs: Long = 0L
         private set
 
@@ -38,6 +53,9 @@ internal class EditorPlaybackController(
 
     var playbackSpeed: Float = 1.0f
         private set
+
+    /** Optional observer used by the Compose waveform to render the live playhead. */
+    var onPositionChanged: ((positionMs: Long, durationMs: Long) -> Unit)? = null
 
     private var isPlaying = false
     private var isUserSeeking = false
@@ -60,13 +78,8 @@ internal class EditorPlaybackController(
     }
 
     fun bind() {
-        bindTimelinePlaybackCallbacks()
-        bindPlayerControls()
         createEngine()
-        renderPlayPauseIcon()
-        renderTotalTime()
-        renderProgress(currentPositionMs)
-        renderControlAvailability()
+        publishUiState()
         if (mediaType == EditorMediaType.VIDEO) {
             showVideoControls(scheduleAutoHide = false)
         }
@@ -84,12 +97,9 @@ internal class EditorPlaybackController(
         lastCurrentTimeText = null
         lastVideoTimeText = null
         lastSeekBarProgress = null
-        bindPlayerControls()
+        uiState = uiState.copy(mediaType = newMediaType)
         createEngine()
-        renderPlayPauseIcon()
-        renderTotalTime()
-        renderProgress(currentPositionMs)
-        renderControlAvailability()
+        publishUiState()
     }
 
     private fun createEngine() {
@@ -106,13 +116,15 @@ internal class EditorPlaybackController(
                 configDir = context.filesDir,
                 cacheDir = context.cacheDir
             )
-            EditorMediaType.VIDEO -> MpvPlaybackEngine(
-                playerHost = binding.mpvView,
-                mediaLabel = "视频",
-                interpolateAudioPosition = false,
-                configDir = context.filesDir,
-                cacheDir = context.cacheDir
-            )
+            EditorMediaType.VIDEO -> videoPlayerHost?.let { host ->
+                MpvPlaybackEngine(
+                    playerHost = host,
+                    mediaLabel = "视频",
+                    interpolateAudioPosition = false,
+                    configDir = context.filesDir,
+                    cacheDir = context.cacheDir
+                )
+            }
             EditorMediaType.SUBTITLE_ONLY -> null
         }?.also { playbackEngine ->
             playbackEngine.listener = object : EditorPlaybackEngine.Listener {
@@ -121,7 +133,7 @@ internal class EditorPlaybackController(
                     updatePlayerUi()
                     renderControlAvailability()
                     if (mediaType == EditorMediaType.VIDEO) {
-                        binding.tvVideoStatus.visibility = View.GONE
+                        uiState = uiState.copy(videoStatus = null)
                         showVideoControls(scheduleAutoHide = isPlaying)
                     }
                     // Audio playback can use a different file or track than waveform analysis.
@@ -151,8 +163,7 @@ internal class EditorPlaybackController(
                     renderControlAvailability()
                     renderPlayPauseIcon()
                     if (mediaType == EditorMediaType.VIDEO) {
-                        binding.tvVideoStatus.text = message
-                        binding.tvVideoStatus.visibility = View.VISIBLE
+                        uiState = uiState.copy(videoStatus = message)
                         showVideoControls(scheduleAutoHide = false)
                     }
                     showMessage(message)
@@ -167,7 +178,7 @@ internal class EditorPlaybackController(
         currentPositionMs = 0L
         durationMs = 0L
         if (mediaType == EditorMediaType.VIDEO) {
-            binding.tvVideoStatus.visibility = View.VISIBLE
+            uiState = uiState.copy(videoStatus = "正在加载视频…")
             showVideoControls(scheduleAutoHide = false)
         }
         engine?.prepare(mediaFile)
@@ -256,88 +267,45 @@ internal class EditorPlaybackController(
         startProgressUpdate()
     }
 
-    private fun bindTimelinePlaybackCallbacks() {
-        binding.waveformTimelineView.onTimelineClickListener = { position ->
-            seekTo((durationMs * position).toLong())
-        }
-        binding.waveformTimelineView.onDraggedViewportPlayheadCorrection = { positionMs ->
-            correctPlaybackAfterViewportDrag(positionMs)
-        }
-        binding.waveformTimelineView.onLimitedPlaybackRangeChange = { subtitleIndex ->
-            limitedPlaybackEntry = subtitleIndex?.let { subtitles().getOrNull(it) }
-            isLimitedRangePlaybackActive = false
-        }
-        binding.waveformTimelineView.onLimitedPlaybackStartRequest = { subtitleIndex ->
-            startLimitedRangePlayback(subtitleIndex)
-        }
-        binding.waveformTimelineView.onSubtitleStartSeekRequest = ::seekTo
-        binding.waveformTimelineView.onLimitedPlaybackRangeOutOfView = {
-            if (isLimitedRangePlaybackActive) {
-                isLimitedRangePlaybackActive = false
-                engine?.pause()
-                isPlaying = false
-                stopProgressUpdate()
-                updatePlayerUi()
-            }
-        }
+    /** Timeline callbacks consumed by the Compose waveform surface. */
+    fun onTimelineClick(position: Float) = seekTo((durationMs * position).toLong())
+
+    fun onViewportPlayheadCorrection(positionMs: Long) = correctPlaybackAfterViewportDrag(positionMs)
+
+    fun onLimitedPlaybackRangeChanged(subtitleIndex: Int?) {
+        limitedPlaybackEntry = subtitleIndex?.let { subtitles().getOrNull(it) }
+        isLimitedRangePlaybackActive = false
+        publishUiState()
     }
 
-    private fun bindPlayerControls() {
-        when (mediaType) {
-            EditorMediaType.AUDIO -> {
-                binding.btnPlayPause.setOnClickListener { togglePlayPause() }
-                binding.tvPlaybackSpeed.setOnClickListener { showSpeedInputDialog() }
-                bindSeekBar(binding.seekBar)
-            }
-            EditorMediaType.VIDEO -> {
-                binding.btnVideoPlayPause.setOnClickListener {
-                    togglePlayPause()
-                    showVideoControls(scheduleAutoHide = isPlaying)
-                }
-                binding.tvVideoPlaybackSpeed.setOnClickListener {
-                    showVideoControls(scheduleAutoHide = false)
-                    showSpeedInputDialog()
-                }
-                bindSeekBar(binding.videoSeekBar)
-                binding.mpvView.setOnClickListener {
-                    showVideoControls(scheduleAutoHide = isPlaying)
-                }
-                binding.videoControlsOverlay.setOnClickListener {
-                    setVideoControlsVisible(visible = false, animate = true)
-                }
-            }
-            EditorMediaType.SUBTITLE_ONLY -> Unit
-        }
+    fun onLimitedPlaybackStartRequest(subtitleIndex: Int) = startLimitedRangePlayback(subtitleIndex)
+
+    fun onLimitedPlaybackRangeOutOfView() {
+        if (!isLimitedRangePlaybackActive) return
+        isLimitedRangePlaybackActive = false
+        engine?.pause()
+        isPlaying = false
+        stopProgressUpdate()
+        updatePlayerUi()
     }
 
-    private fun bindSeekBar(seekBar: SeekBar) {
-        seekBar.max = 1000
-        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (!fromUser) return
-                val targetTime = durationMs * progress / 1000L
-                currentPositionMs = targetTime
-                renderProgress(targetTime)
-            }
-
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {
-                isUserSeeking = true
-                if (mediaType == EditorMediaType.VIDEO) {
-                    showVideoControls(scheduleAutoHide = false)
-                }
-            }
-
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                isUserSeeking = false
-                seekTo(currentPositionMs)
-                if (mediaType == EditorMediaType.VIDEO && isPlaying) {
-                    scheduleVideoControlsAutoHide()
-                }
-            }
-        })
+    fun onSeekStarted() {
+        isUserSeeking = true
+        if (mediaType == EditorMediaType.VIDEO) showVideoControls(scheduleAutoHide = false)
     }
 
-    private fun togglePlayPause() {
+    fun onSeekProgress(fraction: Float) {
+        currentPositionMs = (durationMs * fraction.coerceIn(0f, 1f)).toLong()
+        renderProgress(currentPositionMs)
+    }
+
+    fun onSeekFinished() {
+        isUserSeeking = false
+        seekTo(currentPositionMs)
+        if (mediaType == EditorMediaType.VIDEO && isPlaying) scheduleVideoControlsAutoHide()
+    }
+
+    fun togglePlayPause() {
         val playbackEngine = engine?.takeIf { it.phase.canAccessPlayer } ?: return
         if (playbackEngine.isPlaying) {
             playbackEngine.pause()
@@ -382,11 +350,6 @@ internal class EditorPlaybackController(
         isUserSeeking = true
         updatePlayerUi()
         isUserSeeking = previousUserSeeking
-        activeSeekBar().progress = if (durationMs > 0L) {
-            (clampedPositionMs * 1000L / durationMs).toInt().coerceIn(0, 1000)
-        } else {
-            0
-        }
     }
 
     private fun highlightSubtitleAtTime(timeMs: Long) {
@@ -396,83 +359,39 @@ internal class EditorPlaybackController(
     }
 
     private fun renderProgress(positionMs: Long) {
-        if (mediaType == EditorMediaType.AUDIO) {
-            val currentTimeText = TimeUtils.formatForDisplay(positionMs)
-            if (lastCurrentTimeText != currentTimeText) {
-                lastCurrentTimeText = currentTimeText
-                binding.tvCurrentTime.text = currentTimeText
-            }
-        } else if (mediaType == EditorMediaType.VIDEO) {
-            renderVideoTime(positionMs)
-        }
-        if (!isUserSeeking) {
-            val seekBarProgress = if (durationMs > 0L) {
-                (positionMs * 1000L / durationMs).toInt().coerceIn(0, 1000)
-            } else {
-                0
-            }
-            if (lastSeekBarProgress != seekBarProgress) {
-                lastSeekBarProgress = seekBarProgress
-                activeSeekBar().progress = seekBarProgress
-            }
-        }
-        val wavePosition = if (durationMs > 0L) positionMs.toFloat() / durationMs else 0f
-        binding.waveformTimelineView.setCurrentPosition(wavePosition)
+        val currentTimeText = TimeUtils.formatForDisplay(positionMs)
+        val videoTimeText = "${currentTimeText} / ${TimeUtils.formatForDisplay(durationMs)}"
+        val progress = if (durationMs > 0L) {
+            (positionMs.toFloat() / durationMs).coerceIn(0f, 1f)
+        } else 0f
+        lastCurrentTimeText = currentTimeText
+        lastVideoTimeText = videoTimeText
+        lastSeekBarProgress = (progress * 1000f).toInt()
+        uiState = uiState.copy(
+            currentPositionMs = positionMs,
+            durationMs = durationMs,
+            progress = progress,
+            currentTimeText = currentTimeText,
+            videoTimeText = videoTimeText
+        )
+        onPositionChanged?.invoke(positionMs, durationMs)
         highlightSubtitleAtTime(positionMs)
     }
 
     private fun renderPlayPauseIcon() {
-        if (lastPlayPauseShowsPause == isPlaying) return
         lastPlayPauseShowsPause = isPlaying
-        when (mediaType) {
-            EditorMediaType.AUDIO -> binding.btnPlayPause.setImageResource(
-                if (isPlaying) android.R.drawable.ic_media_pause
-                else android.R.drawable.ic_media_play
-            )
-            EditorMediaType.VIDEO -> {
-                binding.btnVideoPlayPause.setImageResource(
-                    if (isPlaying) R.drawable.ic_video_pause else R.drawable.ic_video_play
-                )
-                binding.btnVideoPlayPause.contentDescription = context.getString(
-                    if (isPlaying) R.string.editor_video_pause else R.string.editor_video_play
-                )
-            }
-            EditorMediaType.SUBTITLE_ONLY -> Unit
-        }
+        uiState = uiState.copy(isPlaying = isPlaying)
     }
 
     private fun renderTotalTime() {
-        if (mediaType != EditorMediaType.AUDIO) return
         val text = TimeUtils.formatForDisplay(durationMs)
-        if (lastTotalTimeText == text) return
         lastTotalTimeText = text
-        binding.tvTotalTime.text = text
-    }
-
-    private fun renderVideoTime(positionMs: Long) {
-        val text = "${TimeUtils.formatForDisplay(positionMs)} / " +
-            TimeUtils.formatForDisplay(durationMs)
-        if (lastVideoTimeText == text) return
-        lastVideoTimeText = text
-        binding.tvVideoTime.text = text
+        uiState = uiState.copy(totalTimeText = text)
     }
 
     private fun renderControlAvailability() {
         val enabled = engine?.phase?.canAccessPlayer == true
-        when (mediaType) {
-            EditorMediaType.AUDIO -> {
-                binding.btnPlayPause.isEnabled = enabled
-                binding.seekBar.isEnabled = enabled
-                binding.tvPlaybackSpeed.isEnabled = enabled
-            }
-            EditorMediaType.VIDEO -> {
-                binding.btnVideoPlayPause.isEnabled = enabled
-                binding.btnVideoPlayPause.visibility = if (enabled) View.VISIBLE else View.INVISIBLE
-                binding.videoSeekBar.isEnabled = enabled
-                binding.tvVideoPlaybackSpeed.isEnabled = enabled
-            }
-            EditorMediaType.SUBTITLE_ONLY -> Unit
-        }
+        uiState = uiState.copy(enabled = enabled)
     }
 
     private fun updatePlayerUi() {
@@ -486,9 +405,9 @@ internal class EditorPlaybackController(
             durationMs = playbackEngine.durationMs.takeIf { it > 0L } ?: durationMs
             isPlaying = playbackEngine.isPlaying
         }
+        renderProgress(currentPositionMs)
         renderPlayPauseIcon()
         renderTotalTime()
-        renderProgress(currentPositionMs)
         renderControlAvailability()
     }
 
@@ -504,41 +423,55 @@ internal class EditorPlaybackController(
         Choreographer.getInstance().removeFrameCallback(frameCallback)
     }
 
-    private fun showSpeedInputDialog() {
-        val input = EditText(context).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-            setText(formatPlaybackSpeedValue(playbackSpeed))
-            hint = "例如：0.5、1.0、1.5、2.0"
-            selectAll()
-            setPadding(48, 32, 48, 16)
-        }
-
-        val dialog = AlertDialog.Builder(context)
-            .setTitle("设置播放速率")
-            .setMessage("请输入倍数（0.25 ~ 4.0）")
-            .setView(input)
-            .setPositiveButton("确定") { _, _ ->
-                val speed = input.text?.toString()?.trim()?.toFloatOrNull()
-                when {
-                    speed == null -> showMessage("请输入有效数字")
-                    speed < 0.25f || speed > 4.0f -> showMessage("速率范围：0.25 ~ 4.0")
-                    else -> applyPlaybackSpeed(speed)
-                }
+    fun showSpeedInputDialog() {
+        val activity = context as? Activity ?: return
+        val input = mutableStateOf(formatPlaybackSpeedValue(playbackSpeed))
+        val handle = ComposeDialogHost.show(activity) { dialog ->
+            val focusRequester = androidx.compose.runtime.remember { FocusRequester() }
+            val keyboardController = LocalSoftwareKeyboardController.current
+            LaunchedEffect(Unit) {
+                focusRequester.requestFocus()
+                keyboardController?.show()
             }
-            .setNegativeButton("取消", null)
-            .create()
-        dialog.setOnDismissListener {
+            AlertDialog(
+                onDismissRequest = dialog::dismiss,
+                title = { Text("设置播放速率") },
+                text = {
+                    Column {
+                        Text("请输入倍数（0.25 ~ 4.0）")
+                        OutlinedTextField(
+                            value = input.value,
+                            onValueChange = { input.value = it },
+                            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                            singleLine = true,
+                            placeholder = { Text("例如：0.5、1.0、1.5、2.0") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            dialog.dismiss()
+                            val speed = input.value.trim().toFloatOrNull()
+                            when {
+                                speed == null -> showMessage("请输入有效数字")
+                                speed < 0.25f || speed > 4.0f -> showMessage("速率范围：0.25 ~ 4.0")
+                                else -> applyPlaybackSpeed(speed)
+                            }
+                        }
+                    ) { Text("确定") }
+                },
+                dismissButton = {
+                    TextButton(onClick = dialog::dismiss) { Text("取消") }
+                }
+            )
+        }
+        handle.addOnDismissListener {
             if (mediaType == EditorMediaType.VIDEO && isPlaying) {
                 scheduleVideoControlsAutoHide()
             }
         }
-        dialog.show()
-
-        input.postDelayed({
-            val inputMethodManager = context.getSystemService(Context.INPUT_METHOD_SERVICE)
-                as InputMethodManager
-            inputMethodManager.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
-        }, 100L)
     }
 
     fun applyPlaybackSpeed(speed: Float, showConfirmation: Boolean = true) {
@@ -548,11 +481,7 @@ internal class EditorPlaybackController(
         } else {
             formatPlaybackSpeedValue(speed) + "×"
         }
-        when (mediaType) {
-            EditorMediaType.AUDIO -> binding.tvPlaybackSpeed.text = label
-            EditorMediaType.VIDEO -> binding.tvVideoPlaybackSpeed.text = label
-            EditorMediaType.SUBTITLE_ONLY -> Unit
-        }
+        uiState = uiState.copy(playbackSpeed = speed, playbackSpeedLabel = label)
         try {
             engine?.setSpeed(speed)
         } catch (error: Exception) {
@@ -564,11 +493,6 @@ internal class EditorPlaybackController(
 
     private fun formatPlaybackSpeedValue(speed: Float): String =
         String.format(Locale.US, "%.2f", speed).trimEnd('0').trimEnd('.')
-
-    private fun activeSeekBar(): SeekBar = when (mediaType) {
-        EditorMediaType.VIDEO -> binding.videoSeekBar
-        EditorMediaType.AUDIO, EditorMediaType.SUBTITLE_ONLY -> binding.seekBar
-    }
 
     private fun syncVideoControlsWithPlayback() {
         if (mediaType != EditorMediaType.VIDEO) return
@@ -595,34 +519,43 @@ internal class EditorPlaybackController(
         if (mediaType != EditorMediaType.VIDEO) return
         videoControlsHandler.removeCallbacks(hideVideoControlsRunnable)
         videoControlsVisible = visible
-        binding.videoControlsOverlay.animate().cancel()
+        uiState = uiState.copy(videoControlsVisible = visible)
+    }
 
-        if (visible) {
-            binding.videoControlsOverlay.visibility = View.VISIBLE
-            if (animate && binding.videoControlsOverlay.alpha < 1f) {
-                binding.videoControlsOverlay.animate()
-                    .alpha(1f)
-                    .setDuration(VIDEO_CONTROLS_ANIMATION_MS)
-                    .start()
-            } else {
-                binding.videoControlsOverlay.alpha = 1f
-            }
-        } else if (animate) {
-            binding.videoControlsOverlay.animate()
-                .alpha(0f)
-                .setDuration(VIDEO_CONTROLS_ANIMATION_MS)
-                .withEndAction {
-                    if (!videoControlsVisible) binding.videoControlsOverlay.visibility = View.GONE
-                }
-                .start()
-        } else {
-            binding.videoControlsOverlay.alpha = 0f
-            binding.videoControlsOverlay.visibility = View.GONE
-        }
+    private fun publishUiState() {
+        val progress = if (durationMs > 0L) {
+            (currentPositionMs.toFloat() / durationMs).coerceIn(0f, 1f)
+        } else 0f
+        uiState = uiState.copy(
+            mediaType = mediaType,
+            currentPositionMs = currentPositionMs,
+            durationMs = durationMs,
+            progress = progress,
+            isPlaying = isPlaying,
+            enabled = engine?.phase?.canAccessPlayer == true,
+            playbackSpeed = playbackSpeed,
+            playbackSpeedLabel = formatPlaybackSpeedValue(playbackSpeed) + "×",
+            videoControlsVisible = videoControlsVisible
+        )
     }
 
     private companion object {
         const val VIDEO_CONTROLS_HIDE_DELAY_MS = 3_000L
-        const val VIDEO_CONTROLS_ANIMATION_MS = 180L
     }
 }
+
+internal data class EditorPlaybackUiState(
+    val mediaType: EditorMediaType,
+    val enabled: Boolean = false,
+    val isPlaying: Boolean = false,
+    val currentPositionMs: Long = 0L,
+    val durationMs: Long = 0L,
+    val progress: Float = 0f,
+    val playbackSpeed: Float = 1f,
+    val playbackSpeedLabel: String = "1×",
+    val currentTimeText: String = "00:00:00.000",
+    val totalTimeText: String = "00:00:00.000",
+    val videoTimeText: String = "00:00:00.000 / 00:00:00.000",
+    val videoStatus: String? = null,
+    val videoControlsVisible: Boolean = true
+)

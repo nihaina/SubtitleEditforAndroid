@@ -3,8 +3,8 @@ package com.subtitleedit.util
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
-import androidx.appcompat.app.AlertDialog
 import androidx.core.content.pm.PackageInfoCompat
+import com.subtitleedit.ComposeDialogHost
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -81,20 +81,17 @@ object UpdateChecker {
     }
 
     fun showUpdateDialog(activity: Activity, update: UpdateInfo) {
-        val dialog = AlertDialog.Builder(activity)
-            .setTitle("发现新版本 ${update.versionName}")
-            .setMessage(update.releaseNotes)
-            .setPositiveButton("前往下载") { _, _ ->
-                runCatching {
-                    activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.downloadUrl)))
+        ComposeDialogHost.show(activity) { dialog ->
+            UpdateAvailableDialog(
+                update = update,
+                onDismiss = dialog::dismiss,
+                onDownload = {
+                    dialog.dismiss()
+                    runCatching {
+                        activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.downloadUrl)))
+                    }
                 }
-            }
-            .apply {
-                if (!update.forceUpdate) setNegativeButton("稍后", null)
-            }
-            .create()
-        dialog.setCancelable(!update.forceUpdate)
-        dialog.setCanceledOnTouchOutside(!update.forceUpdate)
-        dialog.show()
+            )
+        }
     }
 }

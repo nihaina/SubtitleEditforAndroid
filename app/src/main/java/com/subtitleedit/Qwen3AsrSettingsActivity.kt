@@ -2,156 +2,54 @@ package com.subtitleedit
 
 import android.content.Intent
 import android.os.Bundle
-import android.text.Editable
-import android.text.TextWatcher
-import android.view.View
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
-import com.subtitleedit.databinding.ActivityQwen3AsrSettingsBinding
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.subtitleedit.feature.ui.Qwen3AsrSettingsScreen
+import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.TokenTimestampGenerator
 
 class Qwen3AsrSettingsActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityQwen3AsrSettingsBinding
     private lateinit var settingsManager: SettingsManager
-    private var loading = false
-    private var updatingGap = false
+    private var refreshKey by mutableIntStateOf(0)
+    private var forcedAlignmentAvailable by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityQwen3AsrSettingsBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-        ToolCardShadow.removeFrom(binding.root)
         settingsManager = SettingsManager.getInstance(this)
+        updateForcedAlignmentAvailability()
 
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.setDisplayShowHomeEnabled(true)
-        binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
-
-        setupListeners()
-        loadSettings()
+        setContent {
+            SubtitleEditComposeTheme {
+                Qwen3AsrSettingsScreen(
+                    settingsManager = settingsManager,
+                    forcedAlignmentAvailable = forcedAlignmentAvailable,
+                    refreshKey = refreshKey,
+                    onNavigateBack = { onBackPressedDispatcher.onBackPressed() },
+                    onOpenVadSettings = {
+                        startActivity(Intent(this, VadModelSettingsActivity::class.java))
+                    }
+                )
+            }
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        if (::settingsManager.isInitialized) loadSettings()
+        if (::settingsManager.isInitialized) {
+            updateForcedAlignmentAvailability()
+            refreshKey++
+        }
     }
 
-    private fun setupListeners() {
-        binding.btnVadSettings.setOnClickListener {
-            startActivity(Intent(this, VadModelSettingsActivity::class.java))
-        }
-        binding.switchUseVadTimestamp.setOnCheckedChangeListener { _, enabled ->
-            if (loading) return@setOnCheckedChangeListener
-            settingsManager.setAsrVadTimestampEnabled(SettingsManager.ASR_MODEL_QWEN3_ASR, enabled)
-            if (!enabled) {
-                loading = true
-                binding.switchForcedAlignment.isChecked =
-                    binding.switchForcedAlignment.isEnabled &&
-                        settingsManager.isSpeechTokenTimestampEnabled()
-                loading = false
-            }
-            updateControls()
-        }
-        binding.switchForcedAlignment.setOnCheckedChangeListener { _, enabled ->
-            if (loading) return@setOnCheckedChangeListener
-            settingsManager.setSpeechTokenTimestampEnabled(enabled)
-            updateControls()
-        }
-        binding.switchMergeSegments.setOnCheckedChangeListener { _, enabled ->
-            if (loading) return@setOnCheckedChangeListener
-            settingsManager.setSpeechTokenTimestampMergeEnabled(enabled)
-            updateControls()
-        }
-        binding.switchSmartMerge.setOnCheckedChangeListener { _, enabled ->
-            if (!loading) settingsManager.setSpeechTokenTimestampSmartMergeEnabled(enabled)
-            updateControls()
-        }
-        binding.switchFilterLongMerge.setOnCheckedChangeListener { _, enabled ->
-            if (!loading) settingsManager.setSpeechTokenTimestampLongSegmentFilterEnabled(enabled)
-            updateControls()
-        }
-        binding.sliderMergeMaxCharacters.addOnChangeListener { _, value, fromUser ->
-            if (loading || !fromUser) return@addOnChangeListener
-            val count = value.toInt().coerceIn(15, 50)
-            binding.tvMergeMaxCharacters.text = count.toString()
-            settingsManager.setSpeechTokenTimestampMergeMaxCharacters(count)
-        }
-        binding.sliderMergeGap.addOnChangeListener { _, value, fromUser ->
-            if (loading || updatingGap || !fromUser) return@addOnChangeListener
-            updatingGap = true
-            binding.etMergeGap.setText(value.toInt().toString())
-            binding.etMergeGap.setSelection(binding.etMergeGap.text?.length ?: 0)
-            updatingGap = false
-            settingsManager.setSpeechTokenTimestampMergeGapMs(value.toInt())
-        }
-        binding.etMergeGap.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
-            override fun afterTextChanged(s: Editable?) {
-                if (loading || updatingGap) return
-                val value = s?.toString()?.toIntOrNull() ?: return
-                val snapped = ((value.coerceIn(0, 5000) + 25) / 50) * 50
-                updatingGap = true
-                binding.sliderMergeGap.value = snapped.toFloat()
-                if (s.toString() != snapped.toString()) {
-                    binding.etMergeGap.setText(snapped.toString())
-                    binding.etMergeGap.setSelection(binding.etMergeGap.text?.length ?: 0)
-                }
-                updatingGap = false
-                settingsManager.setSpeechTokenTimestampMergeGapMs(snapped)
-            }
-        })
-    }
-
-    private fun loadSettings() {
-        loading = true
-        binding.switchUseVadTimestamp.isChecked =
-            settingsManager.isAsrVadTimestampEnabled(SettingsManager.ASR_MODEL_QWEN3_ASR)
-        val alignerAvailable = settingsManager.getAsrModelType() == SettingsManager.ASR_MODEL_QWEN3_ASR &&
-            TokenTimestampGenerator.isConfigured(this)
-        binding.switchForcedAlignment.isEnabled = alignerAvailable
-        binding.switchForcedAlignment.isChecked =
-            alignerAvailable && settingsManager.isSpeechTokenTimestampEnabled()
-        binding.tvForcedAlignmentModelMissing.visibility =
-            if (alignerAvailable) View.GONE else View.VISIBLE
-        binding.switchMergeSegments.isChecked = settingsManager.isSpeechTokenTimestampMergeEnabled()
-        binding.switchSmartMerge.isChecked = settingsManager.isSpeechTokenTimestampSmartMergeEnabled()
-        binding.switchFilterLongMerge.isChecked = settingsManager.isSpeechTokenTimestampLongSegmentFilterEnabled()
-        val maxCharacters = settingsManager.getSpeechTokenTimestampMergeMaxCharacters()
-        binding.sliderMergeMaxCharacters.value = maxCharacters.toFloat()
-        binding.tvMergeMaxCharacters.text = maxCharacters.toString()
-        val gap = settingsManager.getSpeechTokenTimestampMergeGapMs()
-        val snappedGap = ((gap + 25) / 50) * 50
-        binding.sliderMergeGap.value = snappedGap.toFloat()
-        binding.etMergeGap.setText(snappedGap.toString())
-        loading = false
-        updateControls()
-    }
-
-    private fun updateControls() {
-        binding.btnVadSettings.visibility =
-            if (binding.switchUseVadTimestamp.isChecked) View.VISIBLE else View.GONE
-        binding.cardAsrTranscription.visibility =
-            if (binding.switchUseVadTimestamp.isChecked) View.GONE else View.VISIBLE
-        val alignerEnabled = binding.switchForcedAlignment.isEnabled &&
-            binding.switchForcedAlignment.isChecked
-        binding.switchMergeSegments.isEnabled = alignerEnabled
-        binding.switchMergeSegments.alpha = if (alignerEnabled) 1f else 0.5f
-        binding.tvMergeSegmentsHint.alpha = if (alignerEnabled) 1f else 0.5f
-        val gapEnabled = alignerEnabled && binding.switchMergeSegments.isChecked
-        binding.layoutMergeGap.alpha = if (gapEnabled) 1f else 0.5f
-        val fixedGapEnabled = gapEnabled && !binding.switchSmartMerge.isChecked
-        binding.tvMergeGapTitle.alpha = if (fixedGapEnabled) 1f else 0.5f
-        binding.tvMergeGapHint.alpha = if (fixedGapEnabled) 1f else 0.5f
-        binding.rowMergeGap.alpha = if (fixedGapEnabled) 1f else 0.5f
-        binding.sliderMergeGap.isEnabled = fixedGapEnabled
-        binding.tilMergeGap.isEnabled = fixedGapEnabled
-        binding.etMergeGap.isEnabled = fixedGapEnabled
-        binding.switchSmartMerge.isEnabled = gapEnabled
-        binding.switchFilterLongMerge.isEnabled = gapEnabled
-        binding.layoutMergeMaxCharacters.alpha = if (gapEnabled && binding.switchFilterLongMerge.isChecked) 1f else 0.5f
-        binding.sliderMergeMaxCharacters.isEnabled = gapEnabled && binding.switchFilterLongMerge.isChecked
+    private fun updateForcedAlignmentAvailability() {
+        forcedAlignmentAvailable =
+            settingsManager.getAsrModelType() == SettingsManager.ASR_MODEL_QWEN3_ASR &&
+                TokenTimestampGenerator.isConfigured(this)
     }
 }

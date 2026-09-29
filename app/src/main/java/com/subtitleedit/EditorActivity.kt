@@ -1,29 +1,55 @@
 package com.subtitleedit
 
-import android.app.AlertDialog
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
-import android.view.Menu
-import android.view.MenuItem
-import android.view.View
-import android.view.inputmethod.EditorInfo
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import androidx.core.view.doOnPreDraw
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import androidx.recyclerview.widget.SimpleItemAnimator
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.subtitleedit.adapter.SubtitleAdapter
 import com.subtitleedit.adapter.TranslationPreviewItem
-import com.subtitleedit.databinding.ActivityEditorBinding
+import com.subtitleedit.ComposeDialogHost
 import com.subtitleedit.repository.MediaRepository
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.editor.EditorMediaDocumentController
@@ -32,6 +58,7 @@ import com.subtitleedit.util.SubtitleStableRange
 import com.subtitleedit.util.SubtitleSerialization
 import com.subtitleedit.util.SelectionRangePolicy
 import com.subtitleedit.editor.EditorPlaybackController
+import com.subtitleedit.editor.EditorPlaybackUiState
 import com.subtitleedit.editor.EditorSearchController
 import com.subtitleedit.editor.EditorSourcePreviewController
 import com.subtitleedit.editor.EditorSourceLineEditController
@@ -50,13 +77,24 @@ import com.subtitleedit.editor.EditorTextPreviewDialog
 import com.subtitleedit.editor.EditorTranscribeController
 import com.subtitleedit.editor.EditorTranslationController
 import com.subtitleedit.editor.EditorTtsController
-import com.subtitleedit.editor.EditorVideoFullscreenController
 import com.subtitleedit.editor.EditorWaveformController
 import com.subtitleedit.editor.EditorMenuController
 import com.subtitleedit.editor.EditorLifecycleCoordinator
 import com.subtitleedit.editor.EditorCoordinator
 import com.subtitleedit.editor.EditorNavigationCoordinator
 import com.subtitleedit.editor.EditorStateCoordinator
+import com.subtitleedit.ui.EditorScreen
+import com.subtitleedit.ui.EditorPlaybackPanel
+import com.subtitleedit.ui.EditorSourceEditor
+import com.subtitleedit.ui.EditorSourceEditorState
+import com.subtitleedit.ui.EditorSourceDocumentChange
+import com.subtitleedit.ui.EditorToolbar
+import com.subtitleedit.ui.EditorToolbarMenuAction
+import com.subtitleedit.ui.EditorToolbarMenuGroup
+import com.subtitleedit.ui.EditorWaveformActions
+import com.subtitleedit.ui.EditorWaveformPanel
+import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
+import com.subtitleedit.mpv.EditorMpvView
 import com.subtitleedit.util.DraftManager
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.FileTypePolicy
@@ -75,15 +113,12 @@ import java.io.FileOutputStream
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.repeatOnLifecycle
 
 /**
  * 字幕编辑界面
@@ -93,7 +128,17 @@ import androidx.lifecycle.repeatOnLifecycle
  */
 class EditorActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityEditorBinding
+    /** The only native view retained by the editor: libmpv needs a SurfaceView for video output. */
+    private lateinit var videoPlayerView: EditorMpvView
+    private val subtitleListState = LazyListState()
+    private var composeSubtitleEntries by mutableStateOf<List<SubtitleEntry>>(emptyList())
+    private var composeSubtitleRevision by mutableIntStateOf(0)
+    private var composeSourceViewMode by mutableStateOf(false)
+    private var composeListLoading by mutableStateOf(false)
+    private val sourceEditorState = EditorSourceEditorState()
+    private var toolbarTitle by mutableStateOf("未命名")
+    private var toolbarSubtitle by mutableStateOf("")
+    private var toolbarSelectionActive by mutableStateOf(false)
     private lateinit var subtitleAdapter: SubtitleAdapter
     private val stateModel: EditorViewModel by viewModels {
         EditorViewModelFactory(
@@ -136,7 +181,6 @@ class EditorActivity : AppCompatActivity() {
     private lateinit var sourcePreviewController: EditorSourcePreviewController
     private lateinit var mediaRepository: MediaRepository
     private lateinit var playbackController: EditorPlaybackController
-    private lateinit var videoFullscreenController: EditorVideoFullscreenController
     private lateinit var waveformController: EditorWaveformController
     private lateinit var subtitlePreviewController: EditorSubtitlePreviewController
     private var longClickPosition: Int = -1
@@ -186,8 +230,7 @@ class EditorActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityEditorBinding.inflate(layoutInflater)
-        setContentView(binding.root)
+        videoPlayerView = EditorMpvView(this)
         mediaRepository = (application as SubtitleEditApplication).dependencies.mediaRepository(cacheDir)
         
         if (!stateModel.initialized) {
@@ -214,9 +257,9 @@ class EditorActivity : AppCompatActivity() {
             }
             stateModel.initialized = true
         }
+        composeSourceViewMode = stateModel.isSourceViewMode
         
-        setupToolbar()
-        setupRecyclerView()
+        setupSubtitleAdapter()
         listPresentationController = EditorListPresentationController(
             adapter = { subtitleAdapter },
             entries = { stateModel.subtitleEntries },
@@ -246,10 +289,7 @@ class EditorActivity : AppCompatActivity() {
         setupWaveformController()
         setupSubtitlePreviewController()
         setupAiControllers()
-        setupMediaActions()
-        setupVideoPanel()
         val lifecycleCoordinator = EditorLifecycleCoordinator(
-            binding = binding,
             subtitleAdapter = subtitleAdapter,
             sourcePreview = sourcePreviewController,
             sourceWaveformSync = sourceWaveformSyncController,
@@ -259,7 +299,6 @@ class EditorActivity : AppCompatActivity() {
             tts = ttsController,
             translation = translationController,
             transcribe = transcribeController,
-            videoFullscreen = if (::videoFullscreenController.isInitialized) videoFullscreenController else null,
             mediaRelease = { mediaRepository.release() },
             isDocumentLoaded = { stateModel.documentLoaded },
             isSourceMode = { stateModel.isSourceViewMode },
@@ -277,6 +316,10 @@ class EditorActivity : AppCompatActivity() {
             },
             saveSelectedIndices = { indices -> stateModel.selectedIndices = indices },
             saveSourceScroll = { offset -> stateModel.savedScrollPosition = offset },
+            readSourceScroll = { sourceEditorState.getDocumentScrollOffset() },
+            readListScroll = {
+                subtitleListState.firstVisibleItemIndex to subtitleListState.firstVisibleItemScrollOffset
+            },
             saveListScroll = { position, offset ->
                 stateModel.savedFirstVisibleItemPosition = position
                 stateModel.savedScrollPosition = offset
@@ -307,12 +350,13 @@ class EditorActivity : AppCompatActivity() {
                         previous.documentLoaded != state.documentLoaded
                     ) stateModel.onEvent(EditorEvent.RequestOptionsMenuRefresh)
                 },
-                invalidateMenu = ::invalidateOptionsMenu,
+                invalidateMenu = {},
                 showMessage = ::showShortToast
             )
         )
         editorCoordinator.bindNavigation()
         editorCoordinator.bindState()
+        setupToolbar()
         
         if (stateModel.documentLoaded) {
             restoreDocumentState()
@@ -331,32 +375,142 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun setupToolbar() {
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.setDisplayShowHomeEnabled(true)
-        supportActionBar?.title = "未命名"
-        
-        binding.toolbar.setNavigationOnClickListener {
-            editorCoordinator.onNavigateUp()
-        }
-        
-        binding.toolbar.setOnMenuItemClickListener { menuItem ->
-            handleMenuClick(menuItem)
+        setContent {
+            SubtitleEditComposeTheme {
+                val editorUiState by stateModel.uiState.collectAsState()
+                DisposableEffect(editorUiState.isVideoFullscreen) {
+                    applyVideoFullscreenWindow(editorUiState.isVideoFullscreen)
+                    onDispose { }
+                }
+                if (editorUiState.isVideoFullscreen && stateModel.mediaType == EditorMediaType.VIDEO) {
+                    EditorFullscreenVideo(
+                        playbackState = playbackController.uiState,
+                        videoPlayerView = videoPlayerView,
+                        onTogglePlayPause = playbackController::togglePlayPause,
+                        onSeekStarted = playbackController::onSeekStarted,
+                        onSeekProgress = playbackController::onSeekProgress,
+                        onSeekFinished = playbackController::onSeekFinished,
+                        onSpeedClick = { playbackController.showSpeedInputDialog() },
+                        onToggleFullscreen = ::exitVideoFullscreen
+                    )
+                } else EditorScreen(
+                    title = toolbarTitle,
+                    subtitle = toolbarSubtitle,
+                    isSelectionActive = toolbarSelectionActive,
+                    onNavigateUp = { editorCoordinator.onNavigateUp() },
+                    prepareMenu = ::buildComposeMenu,
+                    searchState = searchController.uiState,
+                    onQueryChange = searchController::onQueryChanged,
+                    onReplacementChange = searchController::onReplacementChanged,
+                    onPrevious = searchController::searchPrevious,
+                    onNext = searchController::searchNext,
+                    onReplace = searchController::replaceOneFromUi,
+                    onReplaceAll = searchController::replaceAllFromUi,
+                    onToggleMatchCase = searchController::toggleMatchCase,
+                    onToggleWholeWord = searchController::toggleWholeWord,
+                    onCloseSearch = searchController::hide,
+                    isSourceViewMode = composeSourceViewMode,
+                    listLoading = composeListLoading,
+                    entries = composeSubtitleEntries,
+                    contentRevision = composeSubtitleRevision,
+                    listState = subtitleListState,
+                    adapter = subtitleAdapter,
+                    hasPlayableMedia = subtitleAdapter.hasPlayableMedia(),
+                    onLongClick = { _, position -> showContextMenu(position) },
+                    onTimeClick = { entry, position, isStart -> showTimeEditDialog(entry, position, isStart) },
+                    onTextClick = { entry, position -> showTextEditDialog(entry, position) },
+                    onJumpToTime = { entry, _ -> jumpToSubtitleTime(entry) },
+                    onSetTime = { entry, position -> setSubtitleTimeToCurrentPosition(entry, position) },
+                    mediaContent = {
+                        val playbackState = playbackController.uiState
+                        EditorPlaybackPanel(
+                            state = playbackState,
+                            onTogglePlayPause = playbackController::togglePlayPause,
+                            onSeekStarted = playbackController::onSeekStarted,
+                            onSeekProgress = playbackController::onSeekProgress,
+                            onSeekFinished = playbackController::onSeekFinished,
+                            onSpeedClick = { playbackController.showSpeedInputDialog() },
+                            onToggleFullscreen = ::toggleVideoFullscreen,
+                            isFullscreen = editorUiState.isVideoFullscreen
+                        )
+                        if (playbackState.mediaType == EditorMediaType.VIDEO) {
+                            AndroidView(
+                                factory = { videoPlayerView },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(220.dp)
+                            )
+                        }
+                        if (playbackState.mediaType.hasPlayableMedia) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                TextButton(onClick = ::showQuickTranscribe) { Text("转录") }
+                                TextButton(onClick = ::showQuickTts) { Text("朗读") }
+                                TextButton(onClick = ::splitSubtitleAtPlaybackHead) { Text("切分") }
+                            }
+                        }
+                        val waveformState by waveformController.composeState.collectAsState()
+                        EditorWaveformPanel(
+                            state = waveformState,
+                            actions = EditorWaveformActions(
+                                onViewportSizeChanged = waveformController::updateComposeViewport,
+                                onViewportPan = waveformController::panComposeViewport,
+                                onZoom = waveformController::zoomComposeViewport,
+                                onSeek = { positionMs ->
+                                    waveformController.seekComposeToTime(positionMs)
+                                    playbackController.seekTo(positionMs)
+                                },
+                                onSelectSubtitle = waveformController::selectComposeSubtitle,
+                                onSubtitleDrag = waveformController::updateComposeSubtitleDrag,
+                                onTimestampDrag = waveformController::updateComposeTimestampAnchor,
+                                onTimestampFinished = waveformController::finishComposeTimestamping,
+                                onToggleExpanded = waveformController::toggleComposeExpanded,
+                                onToggleDisplayMode = waveformController::toggleComposeDisplayMode,
+                                onAmplitudeZoomIn = waveformController::zoomComposeAmplitudeIn,
+                                onAmplitudeZoomOut = waveformController::zoomComposeAmplitudeOut,
+                                onAmplitudeReset = waveformController::resetComposeAmplitude,
+                                onGenerate = waveformController::startComposeGeneration,
+                                onStartTimestamping = waveformController::startComposeTimestamping,
+                                onQuickTranscribe = ::showQuickTranscribe,
+                                onQuickTts = ::showQuickTts,
+                                onQuickSplit = ::splitSubtitleAtPlaybackHead,
+                                onChunkRequested = waveformController::requestComposeChunk,
+                                onSpectrogramChunkRequested = waveformController::requestComposeSpectrogramChunk
+                            )
+                        )
+                    },
+                    sourceContent = {
+                        EditorSourceEditor(state = sourceEditorState)
+                    }
+                )
+            }
         }
     }
-    
-    override fun onCreateOptionsMenu(menu: Menu): Boolean = true
 
-    override fun onPrepareOptionsMenu(menu: Menu): Boolean = editorCoordinator.prepareMenu(
-        menuView = menu,
-        sourceMode = stateModel.isSourceViewMode,
-        selectedCount = if (::subtitleAdapter.isInitialized) subtitleAdapter.getSelectedCount() else 0,
-        undo = if (stateModel.isSourceViewMode) stateModel.peekUndoWithoutSelection() else stateModel.peekUndo(),
-        redo = if (stateModel.isSourceViewMode) stateModel.peekRedoWithoutSelection() else stateModel.peekRedo(),
-        sourceTransitioning = stateModel.isSourceViewTransitioning || sourceViewTransitionJob?.isActive == true
-    )
-
-    private fun handleMenuClick(item: MenuItem): Boolean = editorCoordinator.handleMenu(item)
+    private fun buildComposeMenu(): List<EditorToolbarMenuGroup> {
+        return editorCoordinator.prepareMenu(
+            sourceMode = stateModel.isSourceViewMode,
+            selectedCount = if (::subtitleAdapter.isInitialized) subtitleAdapter.getSelectedCount() else 0,
+            undo = if (stateModel.isSourceViewMode) stateModel.peekUndoWithoutSelection() else stateModel.peekUndo(),
+            redo = if (stateModel.isSourceViewMode) stateModel.peekRedoWithoutSelection() else stateModel.peekRedo(),
+            sourceTransitioning = stateModel.isSourceViewTransitioning || sourceViewTransitionJob?.isActive == true
+        ).map { group ->
+            EditorToolbarMenuGroup(
+                title = group.title,
+                actions = group.actions.map { action ->
+                    EditorToolbarMenuAction(
+                        title = action.title,
+                        enabled = action.enabled,
+                        onClick = { editorCoordinator.handleMenu(action.action) }
+                    )
+                }
+            )
+        }
+    }
 
     private fun handleEditorMenuAction(action: EditorMenuController.Action) {
         when (action) {
@@ -377,7 +531,7 @@ class EditorActivity : AppCompatActivity() {
         }
     }
 
-    private fun setupRecyclerView() {
+    private fun setupSubtitleAdapter() {
         subtitleAdapter = SubtitleAdapter(
             onItemClick = { _, _ -> },
             onItemLongClick = { _, position ->
@@ -402,31 +556,25 @@ class EditorActivity : AppCompatActivity() {
             }
         )
         
-        binding.rvSubtitles.apply {
-            layoutManager = LinearLayoutManager(this@EditorActivity)
-            adapter = subtitleAdapter
-            (itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false
-            // 滑块大跨度定位时复用更多已绑定行，减少文本测量和 ViewHolder 重绑。
-            setItemViewCacheSize(12)
-        }
+    }
+
+    private fun publishComposeSubtitleEntries() {
+        composeSubtitleEntries = stateModel.subtitleEntries.toList()
+        composeSubtitleRevision++
+    }
+
+    private fun scrollToSubtitle(position: Int, offset: Int = 0) {
+        if (stateModel.subtitleEntries.isEmpty()) return
+        val target = position.coerceIn(stateModel.subtitleEntries.indices)
         lifecycleScope.launch {
-            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                while (isActive) {
-                    delay(400)
-                    if (!stateModel.isSourceViewMode && binding.rvSubtitles.visibility == View.VISIBLE) {
-                        subtitleAdapter.refreshVisibleTimeConflicts(
-                            binding.rvSubtitles, stateModel.subtitleEntries
-                        )
-                    }
-                }
-            }
+            subtitleListState.scrollToItem(target, offset.coerceAtLeast(0))
         }
     }
     
     private fun setupSourceView() {
         sourceLineEditController = EditorSourceLineEditController(
-            lineCount = binding.etSourceView::getDocumentLineCount,
-            lineText = binding.etSourceView::getDocumentLineText,
+            lineCount = sourceEditorState::getDocumentLineCount,
+            lineText = sourceEditorState::getDocumentLineText,
             currentFormat = { stateModel.currentFormat },
             entries = { stateModel.subtitleEntries }
         )
@@ -439,25 +587,41 @@ class EditorActivity : AppCompatActivity() {
             snapshotContent = ::snapshotSourceViewContentIfNeeded,
             onParsed = ::applySourcePreview
         )
-        binding.etSourceView.addOnDocumentChangedListener {
-            if (stateModel.isSourceViewMode && !suppressSourceViewChanges) {
-                val updatedText = binding.etSourceView.getDocumentText()
-                recordSourceTextChange(stateModel.sourceHistoryTextSnapshot, updatedText)
-                stateModel.sourceHistoryTextSnapshot = updatedText
-                stateModel.setSourceDocumentContent(updatedText)
-                sourceViewHasPendingEdits = true
-                stateModel.documentState.sourceViewEditGeneration++
-                // SourceEditorView keeps one editable block per physical line. The debounced
-                // preview performs the full-text snapshot only when parsing is needed.
-                updateFormatInfo()
-                scheduleSourceViewPreview()
-            }
+        sourceEditorState.addOnDocumentChangedListener {
+            onComposeSourceDocumentChanged()
         }
-        binding.etSourceView.addOnDocumentChangeListener { change ->
-            if (stateModel.isSourceViewMode && !suppressSourceViewChanges) {
-                if (change.oldLineCount != change.newLineCount) sourceLineEditController.invalidateLineIndex()
-                applySimpleSourceLineChange(change.startLine, change.oldLineCount, change.newLineCount)
-            }
+        sourceEditorState.addOnDocumentChangeListener { change ->
+            onComposeSourceDocumentChange(change)
+        }
+    }
+
+    private fun onComposeSourceDocumentChanged() {
+        if (stateModel.isSourceViewMode && !suppressSourceViewChanges) {
+            val updatedText = sourceEditorState.getDocumentText()
+            recordSourceTextChange(stateModel.sourceHistoryTextSnapshot, updatedText)
+            stateModel.sourceHistoryTextSnapshot = updatedText
+            stateModel.setSourceDocumentContent(updatedText)
+            sourceViewHasPendingEdits = true
+            stateModel.documentState.sourceViewEditGeneration++
+            updateFormatInfo()
+            scheduleSourceViewPreview()
+        }
+    }
+
+    private fun onComposeSourceDocumentChange(change: EditorSourceDocumentChange) {
+        if (stateModel.isSourceViewMode && !suppressSourceViewChanges) {
+            if (change.oldLineCount != change.newLineCount) sourceLineEditController.invalidateLineIndex()
+            applySimpleSourceLineChange(change.startLine, change.oldLineCount, change.newLineCount)
+        }
+    }
+
+    /* Kept as a small forwarding hook for callers that publish a full state replacement. */
+    private fun setComposeSourceDocumentText(value: String, preserveScroll: Boolean = false) {
+        suppressSourceViewChanges = true
+        try {
+            sourceEditorState.setDocumentText(value, preserveScroll)
+        } finally {
+            suppressSourceViewChanges = false
         }
     }
     
@@ -502,15 +666,16 @@ class EditorActivity : AppCompatActivity() {
             sourceMode = { stateModel.isSourceViewMode },
             sourceEntriesReady = { stateModel.documentState.sourceViewEntriesGeneration == stateModel.documentState.sourceViewEditGeneration },
             applyOperation = ::applyHistoryOperation,
-            invalidateMenu = ::invalidateOptionsMenu
+            invalidateMenu = {}
         )
     }
 
     private fun setupSearchController() {
         searchController = EditorSearchController(
             context = this,
-            binding = binding,
+            sourceEditorState = sourceEditorState,
             subtitleAdapter = subtitleAdapter,
+            scrollListToPosition = ::scrollToSubtitle,
             isSourceViewMode = { stateModel.isSourceViewMode },
             ignoreSourceChanges = { suppressSourceViewChanges },
             entries = { stateModel.subtitleEntries },
@@ -536,7 +701,6 @@ class EditorActivity : AppCompatActivity() {
     private fun setupPlaybackController() {
         playbackController = EditorPlaybackController(
             context = this,
-            binding = binding,
             mediaType = stateModel.mediaType,
             subtitles = { stateModel.subtitleEntries },
             isSourceViewMode = { stateModel.isSourceViewMode },
@@ -548,7 +712,8 @@ class EditorActivity : AppCompatActivity() {
                 }
             },
             onMediaReady = ::onMediaReady,
-            showMessage = ::showShortToast
+            showMessage = ::showShortToast,
+            videoPlayerHost = videoPlayerView
         )
         playbackController.bind()
     }
@@ -571,7 +736,6 @@ class EditorActivity : AppCompatActivity() {
         )
         waveformController = EditorWaveformController(
             context = this,
-            binding = binding,
             scope = lifecycleScope,
             hasPlayableMedia = stateModel.mediaType.hasPlayableMedia,
             appCacheDir = cacheDir,
@@ -610,14 +774,17 @@ class EditorActivity : AppCompatActivity() {
             },
             onSelectedIndexChanged = { index ->
                 if (index in stateModel.subtitleEntries.indices) {
-                    (binding.rvSubtitles.layoutManager as? LinearLayoutManager)?.let { manager ->
-                        manager.scrollToPositionWithOffset(index, 0)
-                    }
+                    scrollToSubtitle(index)
                 }
             },
             onTimestampInserted = ::insertSubtitleFromTimestamp,
             showMessage = ::showShortToast
         )
+        playbackController.onPositionChanged = { positionMs, duration ->
+            waveformController.setComposeCurrentPosition(
+                if (duration <= 0L) 0f else positionMs.toFloat() / duration.toFloat()
+            )
+        }
         waveformController.bind()
     }
 
@@ -629,54 +796,47 @@ class EditorActivity : AppCompatActivity() {
         )
     }
 
-    private fun setupVideoPanel() {
-        val isVideo = stateModel.mediaType == EditorMediaType.VIDEO
-        updateMediaTypeViews()
-        if (stateModel.mediaType != EditorMediaType.VIDEO) return
-
-        stateModel.videoViewportInlineIndex = binding.videoSection.indexOfChild(binding.videoViewportContainer)
-            .coerceAtLeast(0)
-        videoFullscreenController = EditorVideoFullscreenController(
-            activity = this,
-            binding = binding,
-            isVideo = isVideo,
-            isFullscreen = { stateModel.isVideoFullscreen },
-            setFullscreen = { stateModel.isVideoFullscreen = it },
-            inlineViewportIndex = { stateModel.videoViewportInlineIndex },
-            previousOrientation = { stateModel.previousRequestedOrientation },
-            setPreviousOrientation = { stateModel.previousRequestedOrientation = it }
-        )
-        videoFullscreenController.bind {
-            playbackController.showVideoControlsForInteraction()
-        }
-    }
-
-    private fun updateMediaTypeViews() {
-        val isVideo = stateModel.mediaType == EditorMediaType.VIDEO
-        binding.videoSection.visibility = if (isVideo) View.VISIBLE else View.GONE
-        binding.audioPlaybackControls.visibility = if (isVideo) View.GONE else View.VISIBLE
-        binding.mediaPlayerContainer.visibility =
-            if (stateModel.mediaType.hasPlayableMedia) View.VISIBLE else View.GONE
-    }
-
     private fun switchMediaType(type: EditorMediaType) {
         if (stateModel.mediaType == type) {
-            updateMediaTypeViews()
             return
         }
         stateModel.mediaType = type
         playbackController.setMediaType(type)
         waveformController.setMediaAvailable(type.hasPlayableMedia)
         subtitleAdapter.setHasPlayableMedia(type.hasPlayableMedia)
-        updateMediaTypeViews()
-        setupMediaActions()
-        if (type == EditorMediaType.VIDEO && !::videoFullscreenController.isInitialized) {
-            setupVideoPanel()
-        }
     }
 
     private fun exitVideoFullscreen() {
-        if (::videoFullscreenController.isInitialized) videoFullscreenController.exitIfActive()
+        if (stateModel.isVideoFullscreen) {
+            val previousOrientation = stateModel.previousRequestedOrientation
+            if (previousOrientation != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
+                requestedOrientation = previousOrientation
+            }
+        }
+        stateModel.isVideoFullscreen = false
+    }
+
+    private fun toggleVideoFullscreen() {
+        if (stateModel.isVideoFullscreen) {
+            exitVideoFullscreen()
+        } else {
+            stateModel.previousRequestedOrientation = requestedOrientation
+            stateModel.isVideoFullscreen = true
+        }
+    }
+
+    private fun applyVideoFullscreenWindow(fullscreen: Boolean) {
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        if (fullscreen) {
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+            WindowCompat.setDecorFitsSystemWindows(window, true)
+        }
     }
 
     private fun onMediaReady(durationMs: Long, audioStreamIndex: Int?) {
@@ -836,55 +996,45 @@ class EditorActivity : AppCompatActivity() {
         )
         ttsController = EditorTtsController(
             activity = this,
-            rootView = binding.root,
             showMessage = ::showShortToast
         )
     }
 
     private fun updateSelectedCountDisplay() {
         val count = subtitleAdapter.getSelectedCount()
+        toolbarSelectionActive = count > 0
         if (count > 0) {
             val formatName = SubtitleFormatPolicy.displayName(stateModel.currentFormat)
-            supportActionBar?.subtitle = "$formatName | ${stateModel.subtitleEntries.size} 条 | 选中：$count"
+            toolbarSubtitle = "$formatName | ${stateModel.subtitleEntries.size} 条 | 选中：$count"
         } else {
-            supportActionBar?.subtitle = stateModel.currentFormatInfo
+            toolbarSubtitle = stateModel.currentFormatInfo
         }
-        binding.toolbar.navigationIcon = ContextCompat.getDrawable(
-            this,
-            if (count > 0) R.drawable.ic_close else R.drawable.ic_back
-        )
-        binding.toolbar.navigationContentDescription =
-            if (count > 0) "取消选择" else "返回"
-        invalidateOptionsMenu()
     }
 
     private fun setDocumentTitle(title: String) {
         stateModel.documentTitle = title
-        supportActionBar?.title = title
+        toolbarTitle = title
     }
 
     private fun restoreDocumentState() {
         setDocumentTitle(stateModel.documentTitle)
         if (stateModel.isSourceViewMode) {
-            binding.rvSubtitles.visibility = View.GONE
-            binding.sourceViewContainer.visibility = View.VISIBLE
+            composeSourceViewMode = true
             val wasUnsaved = stateModel.hasUnsavedChanges
             configureSourceViewEditor(stateModel.sourceViewContent)
             stateModel.hasUnsavedChanges = wasUnsaved
-            binding.etSourceView.post { binding.etSourceView.scrollToDocumentY(stateModel.savedScrollPosition) }
+            sourceEditorState.scrollToDocumentY(stateModel.savedScrollPosition)
         } else {
-            binding.sourceViewContainer.visibility = View.GONE
-            binding.rvSubtitles.visibility = View.VISIBLE
+            composeSourceViewMode = false
             submitSubtitleList(
                 refreshAll = true,
                 selectedIndices = stateModel.selectedIndices,
                 updateFormat = false,
                 syncWaveform = false
             ) {
-                val layoutManager = binding.rvSubtitles.layoutManager as LinearLayoutManager
                 val position = stateModel.savedFirstVisibleItemPosition
                 if (position in stateModel.subtitleEntries.indices) {
-                    layoutManager.scrollToPositionWithOffset(position, stateModel.savedScrollPosition)
+                    scrollToSubtitle(position, stateModel.savedScrollPosition)
                 }
             }
         }
@@ -1086,11 +1236,12 @@ class EditorActivity : AppCompatActivity() {
     /**
      * 进入源码视图。
      *
-     * 大型字幕不使用淡入淡出：动画期间 RecyclerView、TextView 布局和 mpv 预览会短暂
+     * 大型字幕不使用淡入淡出：动画期间 Compose 列表和 mpv 预览会短暂
      * 并存，正是日志中 native heap 峰值与 ANR 的高风险窗口。
      */
     private fun enterSourceViewMode(onFinished: (() -> Unit)? = null) {
         stateModel.isSourceViewMode = true
+        composeSourceViewMode = true
         sourceListParseJob?.cancel()
         sourceListParseJob = null
         sourceWaveformSyncController.cancel()
@@ -1099,47 +1250,32 @@ class EditorActivity : AppCompatActivity() {
         stateModel.documentState.sourceViewEntriesGeneration = stateModel.documentState.sourceViewEditGeneration
         if (::searchController.isInitialized) searchController.clearSourceWorkForTransition()
         
-        // 保存 RecyclerView 的滚动位置
-        val layoutManager = binding.rvSubtitles.layoutManager as LinearLayoutManager
-        stateModel.savedFirstVisibleItemPosition = layoutManager.findFirstVisibleItemPosition()
-        val firstView = layoutManager.findViewByPosition(stateModel.savedFirstVisibleItemPosition)
-        stateModel.savedScrollPosition = firstView?.top ?: 0
+        stateModel.savedFirstVisibleItemPosition = subtitleListState.firstVisibleItemIndex
+        stateModel.savedScrollPosition = subtitleListState.firstVisibleItemScrollOffset
         stateModel.sourceViewEntryCount = stateModel.subtitleEntries.size
 
-        binding.rvSubtitles.visibility = View.GONE
-        binding.sourceViewContainer.visibility = View.GONE
-
         configureSourceViewEditor(stateModel.sourceViewContent)
-
-        binding.rvSubtitles.animate().cancel()
-        binding.sourceViewContainer.animate().cancel()
-        binding.rvSubtitles.alpha = 1f
-        binding.sourceViewContainer.alpha = 1f
-        binding.sourceViewContainer.visibility = View.VISIBLE
-        binding.etSourceView.post {
-            if (stateModel.savedFirstVisibleItemPosition >= 0 &&
-                stateModel.savedFirstVisibleItemPosition < stateModel.sourceViewEntryCount
-            ) {
-                val estimatedScroll = stateModel.savedFirstVisibleItemPosition * 80 - stateModel.savedScrollPosition
-                binding.etSourceView.scrollToDocumentY(estimatedScroll.coerceAtLeast(0))
-            }
-            onFinished?.invoke()
+        if (stateModel.savedFirstVisibleItemPosition >= 0 &&
+            stateModel.savedFirstVisibleItemPosition < stateModel.sourceViewEntryCount
+        ) {
+            val estimatedScroll = stateModel.savedFirstVisibleItemPosition * 80 + stateModel.savedScrollPosition
+            sourceEditorState.scrollToDocumentY(estimatedScroll.coerceAtLeast(0))
         }
+        onFinished?.invoke()
         
-        updateSourceViewMenuTitle()
-        invalidateOptionsMenu()
     }
     
-    /** 退出源码视图。源行 RecyclerView 已由调用方先禁用，避免它与列表同时编辑。 */
+    /** 退出源码视图。源码编辑器已由调用方先禁用，避免它与列表同时编辑。 */
     private fun exitSourceViewMode(
         sourceScrollPosition: Int? = null,
         onFinished: (() -> Unit)? = null
     ) {
         stateModel.isSourceViewMode = false
+        composeSourceViewMode = false
         if (::searchController.isInitialized) searchController.clearSourceWorkForTransition()
         
-        // 保存 ScrollView 的滚动位置
-        stateModel.savedScrollPosition = sourceScrollPosition ?: binding.etSourceView.getDocumentScrollOffset()
+        // 保存 Compose 源码编辑器的滚动位置
+        stateModel.savedScrollPosition = sourceScrollPosition ?: sourceEditorState.getDocumentScrollOffset()
         
         submitSubtitleList(
             // Source-view waveform drags update the existing SubtitleEntry objects in place.
@@ -1151,28 +1287,14 @@ class EditorActivity : AppCompatActivity() {
             syncWaveform = false,
             schedulePreview = false,
             afterSubmit = {
-                binding.rvSubtitles.animate().cancel()
-                binding.sourceViewContainer.animate().cancel()
-                binding.sourceViewContainer.alpha = 1f
-                binding.sourceViewContainer.visibility = View.GONE
-                binding.rvSubtitles.alpha = 1f
-                binding.rvSubtitles.visibility = View.VISIBLE
-                binding.rvSubtitles.post {
-                    val layoutManager = binding.rvSubtitles.layoutManager as LinearLayoutManager
-                    if (stateModel.subtitleEntries.isNotEmpty()) {
-                        val estimatedPosition = stateModel.savedScrollPosition / 80
-                        layoutManager.scrollToPositionWithOffset(
-                            estimatedPosition.coerceIn(0, stateModel.subtitleEntries.lastIndex),
-                            0
-                        )
-                    }
-                    onFinished?.invoke()
+                if (stateModel.subtitleEntries.isNotEmpty()) {
+                    val estimatedPosition = stateModel.savedScrollPosition / 80
+                    scrollToSubtitle(estimatedPosition)
                 }
+                onFinished?.invoke()
             }
         )
         
-        updateSourceViewMenuTitle()
-        invalidateOptionsMenu()
     }
     
     /**
@@ -1189,7 +1311,6 @@ class EditorActivity : AppCompatActivity() {
         }
 
         stateModel.isSourceViewTransitioning = true
-        invalidateOptionsMenu()
         if (stateModel.isSourceViewMode) {
             // 源视图 → 列表视图：直接切换，解析源视图当前内容
             doExitSourceView()
@@ -1237,7 +1358,6 @@ class EditorActivity : AppCompatActivity() {
                 enterSourceViewMode {
                     sourceViewTransitionJob = null
                     stateModel.isSourceViewTransitioning = false
-                    invalidateOptionsMenu()
                     // 用完整源码内容重新建立 mpv 字幕轨。
                     scheduleSubtitlePreview()
                     showShortToast("已切换到源视图")
@@ -1247,7 +1367,6 @@ class EditorActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 sourceViewTransitionJob = null
                 stateModel.isSourceViewTransitioning = false
-                invalidateOptionsMenu()
                 showShortToast("切换到源视图失败：${e.message}")
             }
         }
@@ -1258,10 +1377,10 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun doExitSourceView() {
         if (sourceViewTransitionJob?.isActive == true) return
-        val sourceScrollPosition = binding.etSourceView.getDocumentScrollOffset()
+        val sourceScrollPosition = sourceEditorState.getDocumentScrollOffset()
         var editedContent = stateModel.sourceViewContent
         // 先禁用源行编辑，再在后台构建字幕条目列表，避免切换期间两套编辑状态并存。
-        binding.etSourceView.setDocumentEnabled(false)
+        sourceEditorState.setDocumentEnabled(false)
         showShortToast("正在切换到列表视图…")
         sourceViewTransitionJob = lifecycleScope.launch {
             var needsBackgroundParse = false
@@ -1284,10 +1403,9 @@ class EditorActivity : AppCompatActivity() {
                 stateModel.sourceViewNeedsListSync = false
                 syncEditHistoryBaseline()
                 exitSourceViewMode(sourceScrollPosition) {
-                    binding.etSourceView.setDocumentEnabled(true)
+                    sourceEditorState.setDocumentEnabled(true)
                     sourceViewTransitionJob = null
                     stateModel.isSourceViewTransitioning = false
-                    invalidateOptionsMenu()
                     updateFormatInfo()
                     // 等源码 Editable、解析临时对象和列表提交完成一个帧周期后，
                     // 再重建 mpv 字幕轨，避免切换瞬间额外复制所有条目。
@@ -1302,10 +1420,9 @@ class EditorActivity : AppCompatActivity() {
                 throw e
             } catch (e: Exception) {
                 configureSourceViewEditor(editedContent)
-                binding.etSourceView.setDocumentEnabled(true)
+                sourceEditorState.setDocumentEnabled(true)
                 sourceViewTransitionJob = null
                 stateModel.isSourceViewTransitioning = false
-                invalidateOptionsMenu()
                 showShortToast("解析失败：${e.message}")
             }
         }
@@ -1353,7 +1470,7 @@ class EditorActivity : AppCompatActivity() {
         if (::sourceLineEditController.isInitialized) sourceLineEditController.invalidateLineIndex()
         suppressSourceViewChanges = true
         try {
-            binding.etSourceView.setDocumentText(content, preserveScroll)
+            sourceEditorState.setDocumentText(content, preserveScroll)
         } finally {
             suppressSourceViewChanges = false
         }
@@ -1362,7 +1479,7 @@ class EditorActivity : AppCompatActivity() {
     private fun configureSourceViewEditor(content: String) {
         setSourceViewEditorText(content)
         stateModel.sourceHistoryTextSnapshot = content
-        binding.etSourceView.setDocumentEnabled(true)
+        sourceEditorState.setDocumentEnabled(true)
     }
 
     /** 搜索替换直接重写完整源码内容。 */
@@ -1382,7 +1499,7 @@ class EditorActivity : AppCompatActivity() {
 
     private fun snapshotSourceViewContentIfNeeded(): String {
         if (!stateModel.isSourceViewMode || !sourceViewHasPendingEdits) return stateModel.sourceViewContent
-        val visibleContent = binding.etSourceView.getDocumentText()
+        val visibleContent = sourceEditorState.getDocumentText()
         val snapshot = visibleContent
         stateModel.originalFileContent = snapshot
         stateModel.sourceViewContent = snapshot
@@ -1392,26 +1509,33 @@ class EditorActivity : AppCompatActivity() {
     }
 
     /**
-     * 更新源视图菜单项标题
-     */
-    private fun updateSourceViewMenuTitle() {
-        // 菜单项标题在 strings.xml 中定义，这里不需要动态更新
-    }
-    
-    /**
      * 加载草稿内容（覆盖当前内容）
      */
     private fun loadDraftContent(content: String, draftFileName: String) {
-        AlertDialog.Builder(this)
-            .setTitle("加载草稿")
-            .setMessage("确定要用草稿内容覆盖当前编辑内容吗？（只覆盖内容，不更改文件名）")
-            .setPositiveButton("确定") { _, _ ->
-                parseContent(content)
-                stateModel.hasUnsavedChanges = true
-                com.subtitleedit.util.OverwritingToast.makeText(this, "已加载草稿：$draftFileName", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("取消", null)
-            .show()
+        ComposeDialogHost.show(this) { dialog ->
+            AlertDialog(
+                onDismissRequest = dialog::dismiss,
+                title = { Text("加载草稿") },
+                text = { Text("确定要用草稿内容覆盖当前编辑内容吗？（只覆盖内容，不更改文件名）") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            dialog.dismiss()
+                            parseContent(content)
+                            stateModel.hasUnsavedChanges = true
+                            com.subtitleedit.util.OverwritingToast.makeText(
+                                this,
+                                "已加载草稿：$draftFileName",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    ) { Text("确定") }
+                },
+                dismissButton = {
+                    TextButton(onClick = dialog::dismiss) { Text("取消") }
+                }
+            )
+        }
     }
     
     private fun showContextMenu(position: Int) {
@@ -1466,25 +1590,32 @@ class EditorActivity : AppCompatActivity() {
         }
         regularActions.add("删除" to { deleteSingleSubtitle(position) })
 
-        val itemsList = mutableListOf<String>()
-        if (hasSelection) {
-            itemsList.add("对勾选字幕操作 (${selectedCount}项)")
-        }
-        itemsList.addAll(regularActions.map { it.first })
-        
-        val items = itemsList.toTypedArray()
-        
-        AlertDialog.Builder(this)
-            .setItems(items) { _, which ->
-                if (hasSelection && which == 0) {
-                    // 用户选择了"只对勾选字幕生效"，显示针对选中项的操作菜单
+        val menuActions = buildList {
+            if (hasSelection) {
+                add("对勾选字幕操作 (${selectedCount}项)" to {
                     showSelectionContextMenu(hasClipboard)
-                } else {
-                    val actualWhich = if (hasSelection) which - 1 else which
-                    regularActions.getOrNull(actualWhich)?.second?.invoke()
-                }
+                })
             }
-            .show()
+            addAll(regularActions)
+        }
+        showEditorActionDialog(actions = menuActions)
+    }
+
+    private fun showEditorActionDialog(
+        actions: List<Pair<String, () -> Unit>>,
+        title: String? = null
+    ) {
+        ComposeDialogHost.show(this) { dialog ->
+            EditorActionListDialog(
+                title = title,
+                actions = actions,
+                onDismiss = dialog::dismiss,
+                onAction = { action ->
+                    dialog.dismiss()
+                    action()
+                }
+            )
+        }
     }
     
     /**
@@ -1528,32 +1659,29 @@ class EditorActivity : AppCompatActivity() {
         val deleteIndex = itemsList.size
         itemsList.add("删除选中")
         
-        val items = itemsList.toTypedArray()
-        
-        AlertDialog.Builder(this)
-            .setTitle("对勾选字幕操作")
-            .setItems(items) { _, which ->
-                when (which) {
+        val actions: List<Pair<String, () -> Unit>> = itemsList.mapIndexed { index, title ->
+            title to {
+                when (index) {
                     0 -> showOffsetDialogForSelection()
                     1 -> showAiTranslate()
                     2 -> copySelected()
                     3 -> cutSelected()
-                    4 -> if (hasClipboard) pasteToSelected() else {
-                        ensureClipboardNotEmpty()
-                    }
+                    4 -> if (hasClipboard) pasteToSelected() else ensureClipboardNotEmpty()
                     else -> when {
-                        which == mergeIndex -> mergeSubtitlePositions(selectedPositions)
-                        which == extendPreviousIndex -> extendSubtitleToAdjacent(
+                        index == mergeIndex -> mergeSubtitlePositions(selectedPositions)
+                        index == extendPreviousIndex -> extendSubtitleToAdjacent(
                             selectedPositions.toSet(), towardPrevious = true
                         )
-                        which == extendNextIndex -> extendSubtitleToAdjacent(
+                        index == extendNextIndex -> extendSubtitleToAdjacent(
                             selectedPositions.toSet(), towardPrevious = false
                         )
-                        which == deleteIndex -> deleteSelectedSubtitles()
+                        index == deleteIndex -> deleteSelectedSubtitles()
                     }
                 }
+                Unit
             }
-            .show()
+        }
+        showEditorActionDialog(title = "对勾选字幕操作", actions = actions)
     }
 
     private fun extendSubtitleToAdjacent(positions: Set<Int>, towardPrevious: Boolean) {
@@ -1940,12 +2068,10 @@ class EditorActivity : AppCompatActivity() {
         suppressHistoryRecording = true
         val applied = try { historyCoordinator.undo() } finally { suppressHistoryRecording = false }
         if (!applied) {
-            invalidateOptionsMenu()
             return
         }
         syncEditHistoryBaseline()
         stateModel.hasUnsavedChanges = true
-        invalidateOptionsMenu()
     }
 
     private fun redoEdit() {
@@ -1953,12 +2079,10 @@ class EditorActivity : AppCompatActivity() {
         suppressHistoryRecording = true
         val applied = try { historyCoordinator.redo() } finally { suppressHistoryRecording = false }
         if (!applied) {
-            invalidateOptionsMenu()
             return
         }
         syncEditHistoryBaseline()
         stateModel.hasUnsavedChanges = true
-        invalidateOptionsMenu()
     }
 
     private fun applyHistoryOperation(
@@ -2192,6 +2316,7 @@ class EditorActivity : AppCompatActivity() {
             recordListStateChange()
             markAsChanged()
         }
+        publishComposeSubtitleEntries()
         if (::playbackController.isInitialized) playbackController.invalidateHighlightCache()
         if (::searchController.isInitialized) searchController.onDocumentChanged()
         scheduleSubtitlePreview()
@@ -2231,23 +2356,18 @@ class EditorActivity : AppCompatActivity() {
 
     private fun showListLoading() {
         listLoadingActive = true
-        binding.editorListLoadingOverlay.visibility = View.VISIBLE
+        composeListLoading = true
     }
 
     private fun hideListLoadingAfterRender(version: Long) {
         if (!listLoadingActive || version != listRenderVersion) return
-        val renderView = if (binding.rvSubtitles.visibility == View.VISIBLE) {
-            binding.rvSubtitles
-        } else {
-            binding.editorListLoadingOverlay
-        }
-        renderView.doOnPreDraw {
+        window.decorView.doOnPreDraw {
             if (version == listRenderVersion) {
-                binding.editorListLoadingOverlay.visibility = View.GONE
                 listLoadingActive = false
+                composeListLoading = false
             }
         }
-        renderView.invalidate()
+        window.decorView.invalidate()
     }
 
     /** Let the loading overlay draw before a large synchronous model update starts. */
@@ -2256,8 +2376,8 @@ class EditorActivity : AppCompatActivity() {
             return false
         }
         showListLoading()
-        binding.editorListLoadingOverlay.doOnPreDraw {
-            binding.editorListLoadingOverlay.post {
+        window.decorView.doOnPreDraw {
+            window.decorView.post {
                 if (isFinishing || isDestroyed) return@post
                 val initialVersion = listRenderVersion
                 runningDeferredListEdit = true
@@ -2301,6 +2421,7 @@ class EditorActivity : AppCompatActivity() {
             // ListAdapter replaces row objects asynchronously. Rebind selection by stable ID
             // after the new list is installed so selected rows survive source parsing and undo.
             listPresentationController.bindSelection(targetSelectedIds, clearSelection)
+            publishComposeSubtitleEntries()
             if (refreshAll) {
                 subtitleAdapter.refreshAllItems()
                 pendingListIndexRefreshStart = null
@@ -2348,12 +2469,11 @@ class EditorActivity : AppCompatActivity() {
         stateModel.currentCharset = StandardCharsets.UTF_8
         stateModel.currentFormat = SubtitleParser.SubtitleFormat.SRT
         stateModel.isSourceViewMode = false
-        binding.rvSubtitles.visibility = android.view.View.VISIBLE
-        binding.sourceViewContainer.visibility = android.view.View.GONE
+        composeSourceViewMode = false
         submitSubtitleList(refreshAll = true, clearSelection = true, syncWaveform = true)
         setDocumentTitle(stateModel.documentTitle)
         stateModel.currentFormatInfo = "格式：SRT | 条目数：${stateModel.subtitleEntries.size}"
-        supportActionBar?.subtitle = stateModel.currentFormatInfo
+        toolbarSubtitle = stateModel.currentFormatInfo
         stateModel.hasUnsavedChanges = false
         initializeEditHistoryBaseline(clearHistory = true)
         stateModel.documentLoaded = true
@@ -2471,32 +2591,72 @@ class EditorActivity : AppCompatActivity() {
     private fun showEncodingDialog() {
         val encodings = FileUtils.SUPPORTED_ENCODINGS.map { it.displayName }
         val currentIndex = FileUtils.SUPPORTED_ENCODINGS.indexOfFirst { it.charset == stateModel.currentCharset }
-        
-        AlertDialog.Builder(this)
-            .setTitle("选择编码")
-            .setSingleChoiceItems(encodings.toTypedArray(), currentIndex) { dialog, which ->
-                val newCharset = FileUtils.SUPPORTED_ENCODINGS[which].charset
-                if (newCharset != stateModel.currentCharset) {
-                    dialog.dismiss()
-                    AlertDialog.Builder(this)
-                        .setTitle("切换编码")
-                        .setMessage("请选择使用指定编码重新加载文件，或以该编码保存当前内容。")
-                        .setPositiveButton("重载") { _, _ ->
+        ComposeDialogHost.show(this) { dialog ->
+            AlertDialog(
+                onDismissRequest = dialog::dismiss,
+                title = { Text("选择编码") },
+                text = {
+                    LazyColumn(modifier = Modifier.heightIn(max = 480.dp)) {
+                        itemsIndexed(encodings) { index, encoding ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        dialog.dismiss()
+                                        val newCharset = FileUtils.SUPPORTED_ENCODINGS[index].charset
+                                        if (newCharset != stateModel.currentCharset) {
+                                            showEncodingChangeDialog(newCharset)
+                                        }
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = index == currentIndex,
+                                    onClick = null
+                                )
+                                Text(encoding)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = dialog::dismiss) { Text("取消") }
+                }
+            )
+        }
+    }
+
+    private fun showEncodingChangeDialog(newCharset: Charset) {
+        ComposeDialogHost.show(this) { dialog ->
+            AlertDialog(
+                onDismissRequest = dialog::dismiss,
+                title = { Text("切换编码") },
+                text = { Text("请选择使用指定编码重新加载文件，或以该编码保存当前内容。") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            dialog.dismiss()
                             stateModel.currentCharset = newCharset
                             reloadFile()
                         }
-                        .setNegativeButton("保存") { _, _ ->
-                            stateModel.currentCharset = newCharset
-                            saveFile()
-                        }
-                        .setNeutralButton("取消", null)
-                        .show()
-                } else {
-                    dialog.dismiss()
+                    ) { Text("重载") }
+                },
+                dismissButton = {
+                    Row(horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = dialog::dismiss) { Text("取消") }
+                        TextButton(
+                            onClick = {
+                                dialog.dismiss()
+                                stateModel.currentCharset = newCharset
+                                saveFile()
+                            }
+                        ) { Text("保存") }
+                    }
                 }
-            }
-            .setNegativeButton("取消", null)
-            .show()
+            )
+        }
     }
     
     /**
@@ -2533,34 +2693,47 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
-        val layout = createDialogInputContainer()
-        val (gapRow, gapInput) = createLabeledNumberInputRow(
-            hint = getString(R.string.merge_subtitles_gap_hint),
-            label = getString(R.string.merge_subtitles_gap_unit),
-            defaultValue = "",
-            allowSigned = false
-        )
-        layout.addView(gapRow)
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(R.string.menu_merge_subtitles)
-            .setView(layout)
-            .setPositiveButton(R.string.confirm, null)
-            .setNegativeButton(R.string.cancel, null)
-            .create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val maxGapMs = gapInput.text.toString().trim().toLongOrNull()
-                if (maxGapMs == null || maxGapMs < 0L) {
-                    gapInput.error = getString(R.string.merge_subtitles_invalid_gap)
-                    return@setOnClickListener
+        val gapValue = mutableStateOf("")
+        val gapError = mutableStateOf<String?>(null)
+        ComposeDialogHost.show(this) { dialog ->
+            AlertDialog(
+                onDismissRequest = dialog::dismiss,
+                title = { Text(getString(R.string.menu_merge_subtitles)) },
+                text = {
+                    OutlinedTextField(
+                        value = gapValue.value,
+                        onValueChange = {
+                            gapValue.value = it
+                            gapError.value = null
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text(getString(R.string.merge_subtitles_gap_hint)) },
+                        suffix = { Text(getString(R.string.merge_subtitles_gap_unit)) },
+                        supportingText = gapError.value?.let { message ->
+                            { Text(message, color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val maxGapMs = gapValue.value.trim().toLongOrNull()
+                            if (maxGapMs == null || maxGapMs < 0L) {
+                                gapError.value = getString(R.string.merge_subtitles_invalid_gap)
+                                return@TextButton
+                            }
+                            dialog.dismiss()
+                            mergeSubtitles(maxGapMs)
+                        }
+                    ) { Text(getString(R.string.confirm)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = dialog::dismiss) { Text(getString(R.string.cancel)) }
                 }
-                mergeSubtitles(maxGapMs)
-                dialog.dismiss()
-            }
+            )
         }
-        dialog.show()
-        gapInput.requestFocus()
     }
 
     private fun mergeSubtitles(maxGapMs: Long) {
@@ -2677,66 +2850,46 @@ class EditorActivity : AppCompatActivity() {
         title: String,
         onConfirm: (offsetMs: Long) -> Unit
     ) {
-        val layout = createDialogInputContainer()
-        val (msRow, etMs) = createLabeledNumberInputRow("毫秒", "毫秒", "0", allowSigned = true)
-        val (secRow, etSec) = createLabeledNumberInputRow("秒", "秒", "0", allowSigned = true)
-        val (minRow, etMin) = createLabeledNumberInputRow("分", "分", "0", allowSigned = true)
-        val (hourRow, etHour) = createLabeledNumberInputRow("小时", "小时", "0", allowSigned = true)
-
-        layout.addView(msRow)
-        layout.addView(secRow)
-        layout.addView(minRow)
-        layout.addView(hourRow)
-
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setMessage("输入偏移量，正数延迟，负数提前")
-            .setView(layout)
-            .setPositiveButton("确定") { _, _ ->
-                val ms = etMs.text.toString().toLongOrNull() ?: 0L
-                val sec = etSec.text.toString().toLongOrNull() ?: 0L
-                val min = etMin.text.toString().toLongOrNull() ?: 0L
-                val hour = etHour.text.toString().toLongOrNull() ?: 0L
-                onConfirm(ms + sec * 1000 + min * 60000 + hour * 3600000)
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
-    private fun createDialogInputContainer(): LinearLayout {
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(50, 40, 50, 10)
+        val labels = listOf("毫秒", "秒", "分", "小时")
+        val values = labels.map { mutableStateOf("0") }
+        ComposeDialogHost.show(this) { dialog ->
+            AlertDialog(
+                onDismissRequest = dialog::dismiss,
+                title = { Text(title) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("输入偏移量，正数延迟，负数提前")
+                        values.forEachIndexed { index, value ->
+                            OutlinedTextField(
+                                value = value.value,
+                                onValueChange = { value.value = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                label = { Text(labels[index]) },
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.NumberSigned
+                                )
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val ms = values[0].value.toLongOrNull() ?: 0L
+                            val sec = values[1].value.toLongOrNull() ?: 0L
+                            val min = values[2].value.toLongOrNull() ?: 0L
+                            val hour = values[3].value.toLongOrNull() ?: 0L
+                            dialog.dismiss()
+                            onConfirm(ms + sec * 1000 + min * 60000 + hour * 3600000)
+                        }
+                    ) { Text("确定") }
+                },
+                dismissButton = {
+                    TextButton(onClick = dialog::dismiss) { Text("取消") }
+                }
+            )
         }
-    }
-
-    private fun createLabeledNumberInputRow(
-        hint: String,
-        label: String,
-        defaultValue: String,
-        allowSigned: Boolean,
-        labelPaddingStart: Int = 20
-    ): Pair<LinearLayout, EditText> {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        val input = EditText(this).apply {
-            this.hint = hint
-            inputType = if (allowSigned) {
-                EditorInfo.TYPE_CLASS_NUMBER or EditorInfo.TYPE_NUMBER_FLAG_SIGNED
-            } else {
-                EditorInfo.TYPE_CLASS_NUMBER
-            }
-            setText(defaultValue)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val text = TextView(this).apply {
-            this.text = label
-            setPadding(labelPaddingStart, 0, 0, 0)
-        }
-        row.addView(input)
-        row.addView(text)
-        return row to input
     }
     
     private fun applyOffset(offsetMs: Long, longClickPos: Int = -1) {
@@ -3010,7 +3163,7 @@ class EditorActivity : AppCompatActivity() {
             syncWaveformSubtitles(preserveSelection = true, changedPositions = changedPositions)
         } else if (::subtitleAdapter.isInitialized && subtitleAdapter.itemCount == stateModel.subtitleEntries.size) {
             // Reuse the same payload/neighbour refresh path as list-view edits.  The
-            // RecyclerView is hidden in source mode, but retaining its row references keeps
+            // The Compose list is hidden in source mode, but retaining its row references keeps
             // the two editing modes consistent when the user switches back.
             notifyEntriesChanged(
                 changedPositions,
@@ -3041,19 +3194,17 @@ class EditorActivity : AppCompatActivity() {
     private fun updateFormatInfo() {
         val formatName = SubtitleFormatPolicy.displayName(stateModel.currentFormat)
         val countInfo = if (stateModel.isSourceViewMode) {
-            val lines = if (::binding.isInitialized) {
-                binding.etSourceView.getDocumentLineCount()
-            } else if (stateModel.sourceViewContent.isEmpty()) {
+            val lines = if (stateModel.sourceViewContent.isEmpty()) {
                 0
             } else {
-                stateModel.sourceViewContent.count { it == '\n' } + 1
+                sourceEditorState.getDocumentLineCount()
             }
             "行数：$lines"
         } else {
             "条目数：${stateModel.subtitleEntries.size}"
         }
         stateModel.currentFormatInfo = "格式：$formatName | $countInfo"
-        supportActionBar?.subtitle = stateModel.currentFormatInfo
+        toolbarSubtitle = stateModel.currentFormatInfo
     }
 
     private fun getFormatExtension(format: SubtitleParser.SubtitleFormat): String =
@@ -3193,28 +3344,6 @@ class EditorActivity : AppCompatActivity() {
 
     // ==================== 媒体播放器相关方法 ====================
     
-    private fun setupMediaActions() {
-        binding.btnQuickTranscribe.setOnClickListener {
-            showQuickTranscribe()
-        }
-        binding.btnQuickTranscribe.setOnLongClickListener {
-            AsrSettingsNavigation.open(this)
-            true
-        }
-
-        binding.btnQuickTts.setOnClickListener {
-            showQuickTts()
-        }
-        binding.btnQuickTts.setOnLongClickListener {
-            startActivity(Intent(this, TtsSettingsActivity::class.java))
-            true
-        }
-
-        binding.btnQuickSplit.setOnClickListener {
-            splitSubtitleAtPlaybackHead()
-        }
-    }
-
     private fun splitSubtitleAtPlaybackHead() {
         if (deferLargeListEdit(stateModel.subtitleEntries.size) { splitSubtitleAtPlaybackHead() }) return
         if (!ensureListMode()) return
@@ -3294,13 +3423,21 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
-        val checkingDialog = android.app.AlertDialog.Builder(this)
-            .setMessage(
-                if (stateModel.isAudioOnlyFromVideo) "正在检测视频音轨..." else "正在准备音频文件..."
+        val checkingDialog = ComposeDialogHost.show(this) { _ ->
+            AlertDialog(
+                onDismissRequest = {},
+                text = {
+                    Text(
+                        if (stateModel.isAudioOnlyFromVideo) {
+                            "正在检测视频音轨..."
+                        } else {
+                            "正在准备音频文件..."
+                        }
+                    )
+                },
+                confirmButton = {}
             )
-            .setCancelable(false)
-            .create()
-        checkingDialog.show()
+        }
 
         lifecycleScope.launch {
             val preparedAudio = try {
@@ -3309,6 +3446,7 @@ class EditorActivity : AppCompatActivity() {
                     inspectVideoAudioTrack = stateModel.isAudioOnlyFromVideo
                 )
             } catch (error: CancellationException) {
+                checkingDialog.dismiss()
                 throw error
             } catch (error: Exception) {
                 checkingDialog.dismiss()
@@ -3339,11 +3477,18 @@ class EditorActivity : AppCompatActivity() {
                         add(getString(R.string.mp3_file_issue_high_data_rate))
                     }
                 }.joinToString("\n") { "• $it" }
-                AlertDialog.Builder(this@EditorActivity)
-                    .setTitle(R.string.mp3_file_warning_title)
-                    .setMessage(getString(R.string.mp3_file_warning_message, details))
-                    .setPositiveButton(android.R.string.ok, null)
-                    .show()
+                ComposeDialogHost.show(this@EditorActivity) { dialog ->
+                    AlertDialog(
+                        onDismissRequest = dialog::dismiss,
+                        title = { Text(getString(R.string.mp3_file_warning_title)) },
+                        text = { Text(getString(R.string.mp3_file_warning_message, details)) },
+                        confirmButton = {
+                            TextButton(onClick = dialog::dismiss) {
+                                Text(getString(android.R.string.ok))
+                            }
+                        }
+                    )
+                }
             }
         }
     }
@@ -3383,11 +3528,10 @@ class EditorActivity : AppCompatActivity() {
         clearSubtitleEntries()
         stateModel.currentFormat = SubtitleParser.SubtitleFormat.SRT
         stateModel.isSourceViewMode = false
+        composeSourceViewMode = false
         stateModel.sourceViewContent = ""
         stateModel.originalFileContent = ""
         stateModel.sourceViewNeedsListSync = false
-        binding.sourceViewContainer.visibility = View.GONE
-        binding.rvSubtitles.visibility = View.VISIBLE
         submitSubtitleList(refreshAll = true, syncWaveform = false)
         initializeEditHistoryBaseline(clearHistory = true)
     }
@@ -3451,4 +3595,68 @@ class EditorActivity : AppCompatActivity() {
         }
     }
     
+}
+
+@Composable
+private fun EditorFullscreenVideo(
+    playbackState: EditorPlaybackUiState,
+    videoPlayerView: EditorMpvView,
+    onTogglePlayPause: () -> Unit,
+    onSeekStarted: () -> Unit,
+    onSeekProgress: (Float) -> Unit,
+    onSeekFinished: () -> Unit,
+    onSpeedClick: () -> Unit,
+    onToggleFullscreen: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        AndroidView(
+            factory = { videoPlayerView },
+            modifier = Modifier.fillMaxSize()
+        )
+        EditorPlaybackPanel(
+            state = playbackState,
+            onTogglePlayPause = onTogglePlayPause,
+            onSeekStarted = onSeekStarted,
+            onSeekProgress = onSeekProgress,
+            onSeekFinished = onSeekFinished,
+            onSpeedClick = onSpeedClick,
+            onToggleFullscreen = onToggleFullscreen,
+            isFullscreen = true,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
+    }
+}
+
+@Composable
+private fun EditorActionListDialog(
+    title: String?,
+    actions: List<Pair<String, () -> Unit>>,
+    onDismiss: () -> Unit,
+    onAction: (() -> Unit) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = title?.let { currentTitle -> ({ Text(currentTitle) }) },
+        text = {
+            LazyColumn(modifier = Modifier.heightIn(max = 480.dp)) {
+                itemsIndexed(actions) { _, (label, action) ->
+                    TextButton(
+                        onClick = { onAction(action) },
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            horizontal = 16.dp,
+                            vertical = 10.dp
+                        )
+                    ) {
+                        Text(label, modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            }
+        },
+        confirmButton = {}
+    )
 }

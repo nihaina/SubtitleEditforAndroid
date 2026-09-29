@@ -1,16 +1,17 @@
 package com.subtitleedit
 
-import android.app.AlertDialog
 import android.content.Intent
-import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.OpenableColumns
-import android.view.View
-import android.widget.*
+import android.widget.Toast
+import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import com.arthenica.ffmpegkit.FFmpegKit
@@ -18,7 +19,10 @@ import com.arthenica.ffmpegkit.FFmpegKitConfig
 import com.arthenica.ffmpegkit.FFmpegSession
 import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
-import com.subtitleedit.databinding.ActivityMediaConvertBinding
+import com.subtitleedit.feature.ui.MediaConvertDialog
+import com.subtitleedit.feature.ui.MediaConvertScreen
+import com.subtitleedit.feature.ui.MediaFormatOption
+import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
@@ -47,8 +51,6 @@ class MediaConvertActivity : AppCompatActivity() {
         const val OUTPUT_DIRECTORY_KEY = "media_convert"
     }
 
-    private lateinit var binding: ActivityMediaConvertBinding
-
     data class FormatInfo(
         val extension: String,
         val displayName: String,
@@ -61,7 +63,7 @@ class MediaConvertActivity : AppCompatActivity() {
     private data class SelectedMediaFile(
         val uri: Uri,
         val fileName: String,
-        var mediaInfo: String = "正在读取媒体信息..."
+        val mediaInfo: String = "正在读取媒体信息..."
     )
 
     private data class SourceProbe(
@@ -107,17 +109,30 @@ class MediaConvertActivity : AppCompatActivity() {
         "amr", "aif", "aiff", "ape", "mka", "alac", "tta", "wv", "mid", "midi", "3ga"
     )
 
-    private val selectedMediaFiles = mutableListOf<SelectedMediaFile>()
-    private var selectedFormat: FormatInfo? = null
-    private var selectedFormatButton: TextView? = null
-    private val allFormatButtons = mutableListOf<TextView>()
+    private var selectedMediaFiles by mutableStateOf<List<SelectedMediaFile>>(emptyList())
+    private var selectedFormat by mutableStateOf<FormatInfo?>(null)
+    private var selectedVideoCodec by mutableStateOf("（请先选择视频格式）")
+    private var selectedAudioCodec by mutableStateOf("（请先选择格式）")
+    private var resolutionIndex by mutableStateOf(0)
+    private var videoBitrate by mutableStateOf("")
+    private var qualityIndex by mutableStateOf(0)
+    private var customQuality by mutableStateOf("")
+    private var audioBitrate by mutableStateOf("")
+    private var sampleRateIndex by mutableStateOf(0)
+    private var channelIndex by mutableStateOf(0)
+    private var advancedExpanded by mutableStateOf(false)
+    private var outputDirectoryLabel by mutableStateOf("")
+    private var sourceInfoText by mutableStateOf("")
+    private var conversionProgress by mutableStateOf(0)
+    private var logText by mutableStateOf("")
+    private var dialogState by mutableStateOf(MediaConvertDialog.NONE)
     private var outputDirectoryUri: Uri? = null
     private lateinit var settingsManager: SettingsManager
     private var outputUris = mutableListOf<Uri>()
     private var conversionJob: Job? = null
     private var probeJob: Job? = null
     private var currentSession: FFmpegSession? = null
-    private var isConverting = false
+    private var isConverting by mutableStateOf(false)
     private val taskController by lazy {
         LongTaskController(
             (application as SubtitleEditApplication).dependencies.taskStateStore,
@@ -137,16 +152,72 @@ class MediaConvertActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityMediaConvertBinding.inflate(layoutInflater)
-        setContentView(binding.root)
         settingsManager = SettingsManager.getInstance(this)
-        setupToolbar()
-        setupFormatGroup()
-        setupAdvancedOptions()
-        setupOutputDirectory()
-        setupButtons()
         setupInitialOutputDirectory()
-        updateUi()
+        setContent {
+            SubtitleEditComposeTheme {
+                MediaConvertScreen(
+                    sourceSummary = if (selectedMediaFiles.isEmpty()) "" else "已选择 ${selectedMediaFiles.size} 个文件",
+                    sourceInfo = sourceInfoText,
+                    outputDirectory = outputDirectoryLabel,
+                    videoFormats = formatList.filterNot { it.isAudioOnly }.map {
+                        MediaFormatOption(it.extension, it.displayName, it.isAudioOnly)
+                    },
+                    audioFormats = formatList.filter { it.isAudioOnly }.map {
+                        MediaFormatOption(it.extension, it.displayName, it.isAudioOnly)
+                    },
+                    selectedFormat = selectedFormat?.extension,
+                    videoCodecs = selectedFormat?.videoCodecs.orEmpty(),
+                    selectedVideoCodec = selectedVideoCodec,
+                    audioCodecs = selectedFormat?.audioCodecs.orEmpty(),
+                    selectedAudioCodec = selectedAudioCodec,
+                    resolutions = resolutions,
+                    resolutionIndex = resolutionIndex,
+                    videoBitrate = videoBitrate,
+                    qualityLabels = qualityLabels,
+                    qualityIndex = qualityIndex,
+                    customQuality = customQuality,
+                    audioBitrate = audioBitrate,
+                    sampleRates = sampleRates,
+                    sampleRateIndex = sampleRateIndex,
+                    channels = channels,
+                    channelIndex = channelIndex,
+                    advancedExpanded = advancedExpanded,
+                    isConverting = isConverting,
+                    canConvert = selectedMediaFiles.isNotEmpty() && selectedFormat != null,
+                    canShare = outputUris.isNotEmpty(),
+                    progress = conversionProgress,
+                    log = logText,
+                    dialog = dialogState,
+                    onBack = { onBackPressedDispatcher.onBackPressed() },
+                    onPickFiles = { pickFileLauncher.launch(arrayOf("video/*", "audio/*")) },
+                    onSelectOutputDirectory = { directoryPickerLauncher.launch(outputDirectoryUri) },
+                    onFormatSelected = ::selectFormat,
+                    onVideoCodecSelected = { selectedVideoCodec = it },
+                    onAudioCodecSelected = { selectedAudioCodec = it },
+                    onResolutionSelected = { resolutionIndex = it },
+                    onVideoBitrateChange = { videoBitrate = it },
+                    onQualitySelected = { qualityIndex = it },
+                    onCustomQualityChange = { customQuality = it },
+                    onAudioBitrateChange = { audioBitrate = it },
+                    onSampleRateSelected = { sampleRateIndex = it },
+                    onChannelSelected = { channelIndex = it },
+                    onToggleAdvanced = { advancedExpanded = !advancedExpanded },
+                    onConvert = ::startConversionRequest,
+                    onCancel = ::cancelConversion,
+                    onShare = ::shareOutputs,
+                    onOverwrite = {
+                        dialogState = MediaConvertDialog.NONE
+                        beginConversion(true)
+                    },
+                    onAutoRename = {
+                        dialogState = MediaConvertDialog.NONE
+                        beginConversion(false)
+                    },
+                    onDismissDialog = { dialogState = MediaConvertDialog.NONE }
+                )
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -156,137 +227,22 @@ class MediaConvertActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    private fun setupToolbar() {
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "格式转换"
-        binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
-    }
-
-    private fun setupFormatGroup() {
-        buildFormatGrid(binding.rgVideoFormats, formatList.filterNot { it.isAudioOnly }, 5)
-        buildFormatGrid(binding.rgAudioFormats, formatList.filter { it.isAudioOnly }, 5)
-    }
-
-    private fun buildFormatGrid(container: RadioGroup, formats: List<FormatInfo>, columns: Int) {
-        container.removeAllViews()
-        container.orientation = RadioGroup.VERTICAL
-        formats.chunked(columns).forEach { row ->
-            val rowLayout = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutParams = RadioGroup.LayoutParams(-1, -2)
-            }
-            row.forEach { format ->
-                val button = makeFormatButton(format)
-                allFormatButtons += button
-                rowLayout.addView(button)
-            }
-            repeat(columns - row.size) {
-                rowLayout.addView(Space(this).apply {
-                    layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
-                })
-            }
-            container.addView(rowLayout)
-        }
-    }
-
-    private fun makeFormatButton(format: FormatInfo): TextView = TextView(this).apply {
-        text = format.displayName
-        textSize = 12f
-        isSingleLine = true
-        gravity = android.view.Gravity.CENTER
-        setTextColor(android.graphics.Color.parseColor("#CCCCCC"))
-        background = makeButtonBackground(false)
-        layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(3, 3, 3, 3) }
-        setPadding(0, 14, 0, 14)
-        setOnClickListener { selectFormat(this, format) }
-    }
-
-    private fun makeButtonBackground(selected: Boolean) = GradientDrawable().apply {
-        shape = GradientDrawable.RECTANGLE
-        cornerRadius = 6f
-        if (selected) setColor(android.graphics.Color.parseColor("#1976D2"))
-        else {
-            setColor(android.graphics.Color.parseColor("#2C2C2C"))
-            setStroke(1, android.graphics.Color.parseColor("#555555"))
-        }
-    }
-
-    private fun selectFormat(button: TextView, format: FormatInfo) {
-        selectedFormatButton?.apply {
-            background = makeButtonBackground(false)
-            setTextColor(android.graphics.Color.parseColor("#CCCCCC"))
-        }
-        if (selectedFormatButton === button) {
-            selectedFormatButton = null
-            selectedFormat = null
+    private fun selectFormat(extension: String) {
+        val format = if (selectedFormat?.extension == extension) {
+            null
         } else {
-            button.background = makeButtonBackground(true)
-            button.setTextColor(android.graphics.Color.WHITE)
-            selectedFormatButton = button
-            selectedFormat = format
+            formatList.firstOrNull { it.extension == extension }
         }
-        updateCodecSpinners()
-        updateUi()
-    }
-
-    private fun setupAdvancedOptions() {
-        binding.spinnerVideoCodec.adapter = spinnerAdapter(listOf("（请先选择视频格式）"))
-        binding.spinnerAudioCodec.adapter = spinnerAdapter(listOf("（请先选择格式）"))
-        binding.spinnerResolution.adapter = spinnerAdapter(resolutions)
-        binding.spinnerSampleRate.adapter = spinnerAdapter(sampleRates)
-        binding.spinnerChannels.adapter = spinnerAdapter(channels)
-        binding.spinnerCrf.adapter = spinnerAdapter(qualityLabels)
-        binding.spinnerCrf.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                binding.etCustomCrf.visibility = if (qualityValues.getOrNull(position) == "custom") View.VISIBLE else View.GONE
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-        }
-        binding.btnToggleAdvanced.setOnClickListener {
-            val expanded = binding.layoutAdvanced.visibility == View.VISIBLE
-            binding.layoutAdvanced.visibility = if (expanded) View.GONE else View.VISIBLE
-            binding.btnToggleAdvanced.text = if (expanded) "▶ 高级选项" else "▼ 高级选项"
-        }
-    }
-
-    private fun spinnerAdapter(values: List<String>) = ArrayAdapter(
-        this, android.R.layout.simple_spinner_item, values
-    ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-
-    private fun updateCodecSpinners() {
-        val format = selectedFormat
-        if (format == null) {
-            binding.spinnerVideoCodec.adapter = spinnerAdapter(listOf("（请先选择视频格式）"))
-            binding.spinnerAudioCodec.adapter = spinnerAdapter(listOf("（请先选择格式）"))
-            binding.layoutVideoCodec.visibility = View.GONE
-            binding.layoutResolution.visibility = View.GONE
-            binding.layoutCrf.visibility = View.GONE
-            return
-        }
-        binding.layoutVideoCodec.visibility = if (format.isAudioOnly) View.GONE else View.VISIBLE
-        binding.layoutResolution.visibility = if (format.isAudioOnly) View.GONE else View.VISIBLE
-        binding.layoutCrf.visibility = if (format.isAudioOnly) View.GONE else View.VISIBLE
-        if (!format.isAudioOnly) binding.spinnerVideoCodec.adapter = spinnerAdapter(format.videoCodecs)
-        binding.spinnerAudioCodec.adapter = spinnerAdapter(format.audioCodecs)
-    }
-
-    private fun setupOutputDirectory() {
-        binding.btnSelectOutputDir.setOnClickListener { directoryPickerLauncher.launch(outputDirectoryUri) }
-    }
-
-    private fun setupButtons() {
-        binding.btnPickFile.setOnClickListener { pickFileLauncher.launch(arrayOf("video/*", "audio/*")) }
-        binding.btnConvert.setOnClickListener { startConversionRequest() }
-        binding.btnCancel.setOnClickListener { cancelConversion() }
-        binding.btnShareOutput.setOnClickListener { shareOutputs() }
+        selectedFormat = format
+        selectedVideoCodec = format?.videoCodecs?.firstOrNull() ?: "（请先选择视频格式）"
+        selectedAudioCodec = format?.audioCodecs?.firstOrNull() ?: "（请先选择格式）"
     }
 
     private fun setupDefaultOutputDirectory() {
         val directory = File(FileUtils.getDownloadDirectory(), "SubtitleEdit/Convert")
         if (!directory.exists()) directory.mkdirs()
         outputDirectoryUri = Uri.fromFile(directory)
-        binding.tvOutputDir.text = "输出目录：${directory.absolutePath}"
+        outputDirectoryLabel = "输出目录：${directory.absolutePath}"
     }
 
     private fun setupInitialOutputDirectory() {
@@ -294,7 +250,7 @@ class MediaConvertActivity : AppCompatActivity() {
             ?.let(Uri::parse)
         if (savedUri != null) {
             outputDirectoryUri = savedUri
-            binding.tvOutputDir.text = "输出目录：${DirectoryDisplayPath.fromUri(this, savedUri)}"
+            outputDirectoryLabel = "输出目录：${DirectoryDisplayPath.fromUri(this, savedUri)}"
         } else {
             setupDefaultOutputDirectory()
         }
@@ -306,7 +262,7 @@ class MediaConvertActivity : AppCompatActivity() {
                 uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
             outputDirectoryUri = uri
-            binding.tvOutputDir.text = "输出目录：${DirectoryDisplayPath.fromUri(this, uri)}"
+            outputDirectoryLabel = "输出目录：${DirectoryDisplayPath.fromUri(this, uri)}"
             settingsManager.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
         } catch (error: Exception) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "选择目录失败：${error.message}", Toast.LENGTH_LONG).show()
@@ -315,24 +271,18 @@ class MediaConvertActivity : AppCompatActivity() {
 
     private fun handleSelectedFiles(uris: List<Uri>) {
         probeJob?.cancel()
-        selectedMediaFiles.clear()
-        uris.distinct().forEach { uri ->
+        selectedMediaFiles = uris.distinct().map { uri ->
             try {
                 contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             } catch (_: Exception) {
                 // 某些 provider 不允许持久化权限，当前任务仍可使用临时授权。
             }
-            selectedMediaFiles += SelectedMediaFile(uri, getFileName(uri))
+            SelectedMediaFile(uri, getFileName(uri))
         }
         selectedFormat = null
-        selectedFormatButton?.apply {
-            background = makeButtonBackground(false)
-            setTextColor(android.graphics.Color.parseColor("#CCCCCC"))
-        }
-        selectedFormatButton = null
-        updateCodecSpinners()
-        renderSelectedFiles()
-        updateUi()
+        selectedVideoCodec = "（请先选择视频格式）"
+        selectedAudioCodec = "（请先选择格式）"
+        sourceInfoText = sourceInfoForSelectedFiles()
         probeSelectedFiles()
     }
 
@@ -343,9 +293,12 @@ class MediaConvertActivity : AppCompatActivity() {
                 if (selectedMediaFiles.none { it.uri == uri }) return@forEachIndexed
                 val file = selectedMediaFiles.first { it.uri == uri }
                 val info = withContext(Dispatchers.IO) { probeUri(file.uri) }
-                val current = selectedMediaFiles.firstOrNull { it.uri == uri } ?: return@forEachIndexed
-                current.mediaInfo = info
-                renderSelectedFiles()
+                val currentIndex = selectedMediaFiles.indexOfFirst { it.uri == uri }
+                if (currentIndex < 0) return@forEachIndexed
+                selectedMediaFiles = selectedMediaFiles.toMutableList().also { files ->
+                    files[currentIndex] = files[currentIndex].copy(mediaInfo = info)
+                }
+                sourceInfoText = sourceInfoForSelectedFiles()
                 appendLog("媒体信息 ${index + 1}/${snapshotUris.size}：${file.fileName}\n")
             }
         }
@@ -364,23 +317,9 @@ class MediaConvertActivity : AppCompatActivity() {
         }
     }
 
-    private fun renderSelectedFiles() {
-        if (selectedMediaFiles.isEmpty()) {
-            binding.tvSourceFile.text = ""
-            binding.tvSourceInfo.text = ""
-            binding.tvNoSource.visibility = View.VISIBLE
-            binding.tvSourceFile.visibility = View.GONE
-            binding.tvSourceInfo.visibility = View.GONE
-            return
-        }
-        binding.tvNoSource.visibility = View.GONE
-        binding.tvSourceFile.visibility = View.VISIBLE
-        binding.tvSourceInfo.visibility = View.VISIBLE
-        binding.tvSourceFile.text = "已选择 ${selectedMediaFiles.size} 个文件"
-        binding.tvSourceInfo.text = selectedMediaFiles.mapIndexed { index, file ->
+    private fun sourceInfoForSelectedFiles(): String = selectedMediaFiles.mapIndexed { index, file ->
             "${index + 1}. ${file.fileName}\n${file.mediaInfo}"
         }.joinToString("\n\n")
-    }
 
     private fun getFileName(uri: Uri): String {
         contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
@@ -408,13 +347,7 @@ class MediaConvertActivity : AppCompatActivity() {
         val duplicateNames = desiredNames.groupingBy { it.lowercase(Locale.ROOT) }.eachCount().any { it.value > 1 }
         val existingNames = desiredNames.any { outputFileExists(outputDir, it) }
         if (duplicateNames || existingNames) {
-            AlertDialog.Builder(this)
-                .setTitle("文件名冲突")
-                .setMessage("输出目录中已有同名文件，或所选文件会生成同名输出。请选择处理方式。")
-                .setPositiveButton("覆盖") { _, _ -> beginConversion(true) }
-                .setNeutralButton("自动重命名") { _, _ -> beginConversion(false) }
-                .setNegativeButton("取消", null)
-                .show()
+            dialogState = MediaConvertDialog.OUTPUT_CONFLICT
         } else {
             beginConversion(false)
         }
@@ -422,13 +355,13 @@ class MediaConvertActivity : AppCompatActivity() {
 
     private fun beginConversion(overwriteOutput: Boolean) {
         if (isConverting || taskController.isRunning) return
+        val format = selectedFormat ?: return
         isConverting = true
         outputUris.clear()
-        binding.tvLog.text = ""
-        setConvertingState(true)
+        conversionProgress = 0
+        logText = ""
         conversionJob = taskController.launch(lifecycleScope) { task ->
             task.onCancel { currentSession?.cancel() }
-            val format = selectedFormat ?: return@launch
             val reservedNames = mutableSetOf<String>()
             val failures = mutableListOf<String>()
             var successCount = 0
@@ -447,7 +380,7 @@ class MediaConvertActivity : AppCompatActivity() {
                     }
                 }
                 if (isConverting) {
-                    binding.progressBar.progress = 100
+                    conversionProgress = 100
                     appendLog("\n处理完成：成功 $successCount，失败 ${failures.size}\n")
                     if (failures.isNotEmpty()) appendLog("失败文件：${failures.joinToString("、")}\n")
                 }
@@ -456,7 +389,6 @@ class MediaConvertActivity : AppCompatActivity() {
             } finally {
                 currentSession = null
                 isConverting = false
-                setConvertingState(false)
             }
         }
     }
@@ -498,7 +430,7 @@ class MediaConvertActivity : AppCompatActivity() {
             val output = File(cache, "output.${format.extension}")
             val session = executeConversion(input, output, format, sourceProbe) { local ->
                 val overall = ((index * 100L + local) / total).toInt().coerceIn(0, 99)
-                if (!isDestroyed) runOnUiThread { binding.progressBar.progress = overall }
+                if (!isDestroyed) runOnUiThread { conversionProgress = overall }
             }
             if (!ReturnCode.isSuccess(session.getReturnCode()) || !output.isFile || output.length() <= 0L) {
                 val detail = session.getAllLogsAsString().takeLast(800).ifBlank { "FFmpeg 未返回有效输出" }
@@ -568,7 +500,7 @@ class MediaConvertActivity : AppCompatActivity() {
     ): String {
         val syntheticVideo = !format.isAudioOnly && sourceProbe?.hasVideo == false
         val selectedVideoCodec = if (!format.isAudioOnly) {
-            binding.spinnerVideoCodec.selectedItem?.toString() ?: "mpeg4"
+            this.selectedVideoCodec.ifBlank { "mpeg4" }
         } else {
             ""
         }
@@ -577,8 +509,8 @@ class MediaConvertActivity : AppCompatActivity() {
         } else {
             selectedVideoCodec
         }
-        val audioCodec = binding.spinnerAudioCodec.selectedItem?.toString() ?: format.audioCodecs.firstOrNull() ?: "aac"
-        val resolutionPosition = binding.spinnerResolution.selectedItemPosition
+        val audioCodec = selectedAudioCodec.ifBlank { format.audioCodecs.firstOrNull() ?: "aac" }
+        val resolutionPosition = resolutionIndex
         val command = StringBuilder("-y -hide_banner")
         if (syntheticVideo) {
             val size = if (resolutionPosition > 0) {
@@ -615,15 +547,15 @@ class MediaConvertActivity : AppCompatActivity() {
                 if (!syntheticVideo && resolutionPosition > 0) {
                     command.append(" -vf scale=${resolutions[resolutionPosition].substringBefore(' ')}")
                 }
-                binding.etVideoBitrate.text.toString().trim().toIntOrNull()?.takeIf { it > 0 }?.let { command.append(" -b:v ${it}k") }
+                videoBitrate.trim().toIntOrNull()?.takeIf { it > 0 }?.let { command.append(" -b:v ${it}k") }
             }
         }
         if (audioCodec != "copy") {
             if (audioCodec == "opus" || audioCodec == "vorbis") command.append(" -strict -2")
-            binding.etAudioBitrate.text.toString().trim().toIntOrNull()?.takeIf { it > 0 }?.let { command.append(" -b:a ${it}k") }
-            val sampleRate = binding.spinnerSampleRate.selectedItemPosition
+            audioBitrate.trim().toIntOrNull()?.takeIf { it > 0 }?.let { command.append(" -b:a ${it}k") }
+            val sampleRate = sampleRateIndex
             if (sampleRate > 0) command.append(" -ar ${sampleRates[sampleRate].substringBefore(' ')}")
-            val channel = binding.spinnerChannels.selectedItemPosition
+            val channel = channelIndex
             if (channel > 0) command.append(" -ac ${if (channel == 1) 2 else 1}")
         }
         command.append(" -f ${format.formatName} \"$output\"")
@@ -660,8 +592,8 @@ class MediaConvertActivity : AppCompatActivity() {
     }
 
     private fun selectedQuality(): Int? {
-        val value = qualityValues.getOrNull(binding.spinnerCrf.selectedItemPosition) ?: return null
-        val number = if (value == "custom") binding.etCustomCrf.text.toString().toIntOrNull() else value.toIntOrNull()
+        val value = qualityValues.getOrNull(qualityIndex) ?: return null
+        val number = if (value == "custom") customQuality.toIntOrNull() else value.toIntOrNull()
         return number?.coerceIn(1, 31)?.takeIf { value != "-1" }
     }
 
@@ -797,27 +729,10 @@ class MediaConvertActivity : AppCompatActivity() {
         startActivity(Intent.createChooser(intent, "分享转换结果"))
     }
 
-    private fun setConvertingState(converting: Boolean) {
-        binding.btnConvert.isEnabled = !converting && selectedMediaFiles.isNotEmpty() && selectedFormat != null
-        binding.btnPickFile.isEnabled = !converting
-        binding.btnSelectOutputDir.isEnabled = !converting
-        binding.btnCancel.visibility = if (converting) View.VISIBLE else View.GONE
-        binding.btnShareOutput.visibility = if (!converting && outputUris.isNotEmpty()) View.VISIBLE else View.GONE
-        binding.progressBar.visibility = View.VISIBLE
-    }
-
-    private fun updateUi() {
-        binding.btnConvert.isEnabled = !isConverting && selectedMediaFiles.isNotEmpty() && selectedFormat != null
-        binding.groupFormatSelect.visibility = if (selectedMediaFiles.isEmpty()) View.GONE else View.VISIBLE
-        renderSelectedFiles()
-    }
-
     private fun appendLog(message: String) {
         if (message.isBlank() || isDestroyed) return
         runOnUiThread {
-            val current = binding.tvLog.text.toString()
-            binding.tvLog.text = (current + message).takeLast(16000)
-            binding.scrollLog.post { binding.scrollLog.fullScroll(View.FOCUS_DOWN) }
+            logText = (logText + message).takeLast(16000)
         }
     }
 }

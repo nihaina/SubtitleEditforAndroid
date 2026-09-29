@@ -4,437 +4,387 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.content.SharedPreferences
 import android.net.Uri
-import android.os.Bundle
-import android.view.LayoutInflater
-import android.view.View
-import android.view.ViewGroup
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
-import androidx.fragment.app.Fragment
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import com.subtitleedit.adapter.FileListAdapter
-import com.subtitleedit.databinding.ActivityDraftsBinding
-import com.subtitleedit.databinding.ActivitySettingsBinding
-import com.subtitleedit.databinding.ActivityToolsBinding
-import com.subtitleedit.databinding.FragmentFavoritesBinding
-import com.subtitleedit.util.DirectoryDisplayPath
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
+import com.subtitleedit.ui.FavoritesScreen
+import com.subtitleedit.ui.ToolDestination
+import com.subtitleedit.ui.ToolsScreen
+import com.subtitleedit.ui.settings.SettingsCacheItem
+import com.subtitleedit.ui.settings.SettingsPageState
+import com.subtitleedit.ui.settings.SettingsScreen
 import com.subtitleedit.util.AppThemeMode
+import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.DraftManager
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
 import java.io.File
 import java.util.Locale
 
-interface TopLevelBackHandler {
-    fun handleTopLevelBack(): Boolean
+/** State retained by the main Compose navigation while a top-level page is hidden. */
+internal class MainTopLevelPagesState {
+    var favoriteDirectories by mutableStateOf(emptyList<File>())
+    var pendingFavoriteRemoval by mutableStateOf<File?>(null)
+    var currentDraftFolder by mutableStateOf("")
+    var drafts by mutableStateOf(emptyList<DraftsActivity.DraftItem>())
+    var draftDialog by mutableStateOf<DraftsDialogState?>(null)
+    var draftToExport by mutableStateOf<DraftsActivity.DraftItem?>(null)
+    var settingsPage by mutableStateOf(SettingsPageState())
 }
 
-class FavoritesFragment : Fragment() {
-    private var binding: FragmentFavoritesBinding? = null
-    private lateinit var adapter: FileListAdapter
-    private val preferences: SharedPreferences by lazy {
-        requireContext().getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+@Composable
+internal fun MainTopLevelPages(
+    selectedPage: Int,
+    refreshVersion: Int,
+    state: MainTopLevelPagesState,
+    onOpenDirectory: (File) -> Unit,
+    onToolbarChanged: (String, Boolean, (() -> Unit)?) -> Unit
+) {
+    val context = LocalContext.current
+    val resources = LocalResources.current
+    val preferences = context.getSharedPreferences(FAVORITES_PREFERENCES_NAME, Context.MODE_PRIVATE)
+    val settings = SettingsManager.getInstance(context)
+
+    val directoryPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) addFavoriteDirectory(context, preferences, state, uri)
     }
-    private val directoryPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) addDirectory(uri)
+    val draftExporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
+        exportDraft(context, state, uri)
     }
 
-    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, state: Bundle?): View {
-        val viewBinding = FragmentFavoritesBinding.inflate(inflater, container, false)
-        binding = viewBinding
-        adapter = FileListAdapter(
-            onItemClick = { directory ->
-                (activity as? MainActivity)?.openDirectoryFromFavorites(directory)
-            },
-            onItemLongClick = ::confirmRemoveDirectory
+    fun loadFavoriteDirectories() {
+        state.favoriteDirectories = preferences.getStringSet(FAVORITES_PATHS_KEY, emptySet())
+            ?.toSet()
+            .orEmpty()
+            .map(::File)
+            .sortedBy { it.name.lowercase(Locale.getDefault()) }
+    }
+
+    fun loadDrafts() {
+        state.drafts = if (state.currentDraftFolder.isEmpty()) {
+            DraftManager.getAllDraftFolders(context).map {
+                DraftsActivity.DraftItem(it.name, "", it.name, "", true)
+            }
+        } else {
+            DraftManager.getDraftsInFolder(context, state.currentDraftFolder).map {
+                DraftsActivity.DraftItem(
+                    state.currentDraftFolder,
+                    it.name,
+                    it.name,
+                    DraftManager.getFormattedDate(it),
+                    false
+                )
+            }
+        }
+    }
+
+    fun updateDraftToolbar() {
+        onToolbarChanged(
+            if (state.currentDraftFolder.isEmpty()) resources.getString(R.string.drafts)
+            else state.currentDraftFolder,
+            state.currentDraftFolder.isNotEmpty(),
+            if (state.currentDraftFolder.isNotEmpty()) {
+                { state.currentDraftFolder = ""; state.draftDialog = null; loadDrafts(); updateDraftToolbar() }
+            } else null
         )
-        viewBinding.rvFavoriteDirectories.layoutManager = LinearLayoutManager(requireContext())
-        viewBinding.rvFavoriteDirectories.adapter = adapter
-        viewBinding.btnAddFavoriteDirectory.setOnClickListener { directoryPicker.launch(null) }
-        loadDirectories()
-        return viewBinding.root
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (::adapter.isInitialized) loadDirectories()
+    fun goToDraftFolder(folder: String) {
+        state.currentDraftFolder = folder
+        loadDrafts()
+        updateDraftToolbar()
     }
 
-    private fun addDirectory(uri: Uri) {
-        runCatching {
-            requireContext().contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
+    LaunchedEffect(selectedPage, refreshVersion, resources) {
+        when (selectedPage) {
+            R.id.nav_favorites -> loadFavoriteDirectories()
+            R.id.nav_drafts -> {
+                loadDrafts()
+                updateDraftToolbar()
+            }
+            R.id.nav_settings -> state.settingsPage = loadSettingsPage(context, settings)
         }
-
-        val directory = File(DirectoryDisplayPath.fromUri(requireContext(), uri))
-        if (!directory.isDirectory || !directory.canRead()) {
-            Toast.makeText(requireContext(), R.string.favorite_directory_access_failed, Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val paths = savedPaths().toMutableSet()
-        if (!paths.add(directory.absolutePath)) {
-            Toast.makeText(requireContext(), R.string.favorite_directory_already_added, Toast.LENGTH_SHORT).show()
-            return
-        }
-        preferences.edit().putStringSet(KEY_PATHS, paths).apply()
-        loadDirectories()
     }
 
-    private fun confirmRemoveDirectory(directory: File) {
-        AlertDialog.Builder(requireContext())
-            .setTitle(R.string.remove_favorite_directory)
-            .setMessage(getString(R.string.remove_favorite_directory_confirm, directory.name))
-            .setPositiveButton(R.string.confirm) { _, _ ->
-                val paths = savedPaths().toMutableSet()
+    BackHandler(
+        enabled = selectedPage == R.id.nav_drafts && state.currentDraftFolder.isNotEmpty()
+    ) {
+        goToDraftFolder("")
+    }
+
+    when (selectedPage) {
+        R.id.nav_favorites -> FavoritesScreen(
+            directories = state.favoriteDirectories,
+            pendingRemoval = state.pendingFavoriteRemoval,
+            onAddDirectory = { directoryPicker.launch(null) },
+            onOpenDirectory = onOpenDirectory,
+            onRequestRemoval = { state.pendingFavoriteRemoval = it },
+            onConfirmRemoval = {
+                val directory = state.pendingFavoriteRemoval ?: return@FavoritesScreen
+                val paths = preferences.getStringSet(FAVORITES_PATHS_KEY, emptySet())
+                    ?.toMutableSet() ?: mutableSetOf()
                 paths.remove(directory.absolutePath)
-                preferences.edit().putStringSet(KEY_PATHS, paths).apply()
-                loadDirectories()
+                preferences.edit().putStringSet(FAVORITES_PATHS_KEY, paths).apply()
+                state.pendingFavoriteRemoval = null
+                loadFavoriteDirectories()
+            },
+            onDismissRemoval = { state.pendingFavoriteRemoval = null }
+        )
+
+        R.id.nav_drafts -> DraftsPage(
+            currentFolder = state.currentDraftFolder,
+            drafts = state.drafts,
+            fromEditor = false,
+            dialogState = state.draftDialog,
+            showTopBar = false,
+            onBack = { goToDraftFolder("") },
+            onBackToRoot = { goToDraftFolder("") },
+            onItemClick = { item ->
+                if (item.isFolder) {
+                    goToDraftFolder(item.folderName)
+                } else {
+                    state.draftDialog = DraftsDialogState.Preview(
+                        item,
+                        DraftManager.readDraft(context, item.folderName, item.fileName)
+                    )
+                }
+            },
+            onLongPress = { item -> state.draftDialog = DraftsDialogState.Actions(item) },
+            onDeleteClick = { item ->
+                state.draftDialog = if (item.isFolder) DraftsDialogState.DeleteFolder(item)
+                else DraftsDialogState.DeleteDraft(item)
+            },
+            onRequestDelete = { item ->
+                state.draftDialog = if (item.isFolder) DraftsDialogState.DeleteFolder(item)
+                else DraftsDialogState.DeleteDraft(item)
+            },
+            onDismissDialog = { state.draftDialog = null },
+            onCopyDraft = { item -> copyDraft(context, item) },
+            onExportDraft = { item ->
+                state.draftToExport = item
+                draftExporter.launch(item.fileName)
+            },
+            onLoadDraft = {},
+            onDeleteDraft = { item ->
+                state.draftDialog = null
+                if (DraftManager.deleteDraft(context, item.folderName, item.fileName)) {
+                    showTopLevelToast(context, resources.getString(R.string.draft_deleted))
+                    loadDrafts()
+                }
+            },
+            onDeleteFolder = { item ->
+                state.draftDialog = null
+                if (DraftManager.deleteDraftFolder(context, item.folderName)) {
+                    showTopLevelToast(context, resources.getString(R.string.draft_deleted))
+                    if (state.currentDraftFolder == item.folderName) goToDraftFolder("")
+                    else loadDrafts()
+                }
             }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
-    }
+        )
 
-    private fun savedPaths(): Set<String> = preferences.getStringSet(KEY_PATHS, emptySet())?.toSet().orEmpty()
+        R.id.nav_tools -> ToolsScreen(onOpen = { destination -> openTool(context, destination) })
 
-    private fun loadDirectories() {
-        val directories = savedPaths().map(::File).sortedBy { it.name.lowercase(Locale.getDefault()) }
-        adapter.submitList(directories)
-        binding?.emptyFavoriteDirectories?.visibility = if (directories.isEmpty()) View.VISIBLE else View.GONE
-        binding?.rvFavoriteDirectories?.visibility = if (directories.isEmpty()) View.GONE else View.VISIBLE
-    }
-
-    override fun onDestroyView() {
-        binding?.rvFavoriteDirectories?.adapter = null
-        binding = null
-        super.onDestroyView()
-    }
-
-    private companion object {
-        const val PREFERENCES_NAME = "favorite_directories"
-        const val KEY_PATHS = "paths"
+        R.id.nav_settings -> SettingsScreen(
+            state = state.settingsPage,
+            encodings = FileUtils.SUPPORTED_ENCODINGS,
+            showTopBar = false,
+            onBack = {},
+            onEncodingSelected = { encoding ->
+                settings.setDefaultEncoding(encoding.charset)
+                state.settingsPage = loadSettingsPage(context, settings)
+            },
+            onThemeSelected = { mode ->
+                settings.setThemeMode(mode)
+                AppThemeMode.apply(context, mode)
+                state.settingsPage = loadSettingsPage(context, settings)
+            },
+            onCheckUpdatesChanged = { enabled ->
+                state.settingsPage = state.settingsPage.copy(checkUpdatesOnStartup = enabled)
+                settings.setCheckUpdatesOnStartup(enabled)
+            },
+            onPreserveDirectoriesChanged = { enabled ->
+                state.settingsPage = state.settingsPage.copy(preserveOutputDirectories = enabled)
+                settings.setOutputDirectoryPersistenceEnabled(enabled)
+            },
+            onLoopSelectedChanged = { enabled ->
+                state.settingsPage = state.settingsPage.copy(loopSelectedSubtitle = enabled)
+                settings.setLoopSelectedSubtitleEnabled(enabled)
+            },
+            onOpenAiSettings = { context.openActivity(AiSettingsActivity::class.java) },
+            onOpenModelManagement = { context.openActivity(ModelManagementActivity::class.java) },
+            onOpenTtsSettings = { context.openActivity(TtsSettingsActivity::class.java) },
+            onOpenLogs = { context.openActivity(LogActivity::class.java) },
+            onOpenAbout = { context.openActivity(AboutActivity::class.java) },
+            onCacheClear = { item -> clearSettingsCache(context, settings, state, item) },
+            onEmptyCacheClear = { showTopLevelToast(context, it.emptyMessage) }
+        )
     }
 }
 
-class ToolsFragment : Fragment() {
-    private var binding: ActivityToolsBinding? = null
-
-    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, state: Bundle?): View {
-        val viewBinding = ActivityToolsBinding.inflate(inflater, container, false)
-        binding = viewBinding
-        val content = viewBinding.toolsContent
-        (content.parent as ViewGroup).removeView(content)
-        content.layoutParams = ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
+private fun addFavoriteDirectory(
+    context: Context,
+    preferences: android.content.SharedPreferences,
+    state: MainTopLevelPagesState,
+    uri: Uri
+) {
+    runCatching {
+        context.contentResolver.takePersistableUriPermission(
+            uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         )
-        ToolCardShadow.remove(
-            viewBinding.cardBatchConvert,
-            viewBinding.cardTranscriptMatch,
-            viewBinding.cardSubtitleFormat,
-            viewBinding.cardAutoTranslate,
-            viewBinding.cardVocalSeparation,
-            viewBinding.cardSpeechToSubtitle,
-            viewBinding.cardMediaConvert,
-            viewBinding.cardAutoTimestamp
-        )
-        viewBinding.cardBatchConvert.setOnClickListener { open(BatchConvertActivity::class.java) }
-        viewBinding.cardTranscriptMatch.setOnClickListener { open(TranscriptMatchActivity::class.java) }
-        viewBinding.cardSubtitleFormat.setOnClickListener { open(SubtitleFormatSelectActivity::class.java) }
-        viewBinding.cardAutoTranslate.setOnClickListener { open(AutoTranslateActivity::class.java) }
-        viewBinding.cardMediaConvert.setOnClickListener { open(MediaConvertActivity::class.java) }
-        viewBinding.cardSpeechToSubtitle.setOnClickListener { open(SpeechToSubtitleActivity::class.java) }
-        viewBinding.cardVocalSeparation.setOnClickListener { open(VocalSeparationActivity::class.java) }
-        viewBinding.cardAutoTimestamp.setOnClickListener { open(AutoTimestampActivity::class.java) }
-        return content
     }
 
-    private fun open(type: Class<*>) = startActivity(Intent(requireContext(), type))
-    override fun onDestroyView() { binding = null; super.onDestroyView() }
+    val directory = File(DirectoryDisplayPath.fromUri(context, uri))
+    if (!directory.isDirectory || !directory.canRead()) {
+        showTopLevelToast(context, context.getString(R.string.favorite_directory_access_failed))
+        return
+    }
+
+    val paths = preferences.getStringSet(FAVORITES_PATHS_KEY, emptySet())?.toMutableSet() ?: mutableSetOf()
+    if (!paths.add(directory.absolutePath)) {
+        showTopLevelToast(context, context.getString(R.string.favorite_directory_already_added))
+        return
+    }
+    preferences.edit().putStringSet(FAVORITES_PATHS_KEY, paths).apply()
+    state.favoriteDirectories = paths.map(::File).sortedBy { it.name.lowercase(Locale.getDefault()) }
 }
 
-class SettingsFragment : Fragment() {
-    private var binding: ActivitySettingsBinding? = null
-    private val settings by lazy { SettingsManager.getInstance(requireContext()) }
-    private var loadingSettings = false
-
-    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, state: Bundle?): View {
-        val viewBinding = ActivitySettingsBinding.inflate(inflater, container, false)
-        binding = viewBinding
-        viewBinding.toolbar.visibility = View.GONE
-        setup(viewBinding)
-        load(viewBinding)
-        return viewBinding.root
-    }
-
-    override fun onResume() {
-        super.onResume()
-        binding?.let(::load)
-    }
-
-    private fun setup(b: ActivitySettingsBinding) {
-        b.layoutEncoding.setOnClickListener { showEncodingDialog() }
-        b.layoutTheme.setOnClickListener { showThemeDialog() }
-        b.layoutAiSettings.setOnClickListener { open(AiSettingsActivity::class.java) }
-        b.layoutTtsSettings.setOnClickListener { open(TtsSettingsActivity::class.java) }
-        b.layoutModelManagement.setOnClickListener { open(ModelManagementActivity::class.java) }
-        b.layoutLog.setOnClickListener { open(LogActivity::class.java) }
-        b.layoutAbout.setOnClickListener { open(AboutActivity::class.java) }
-        b.layoutClearCache.setOnClickListener { showClearCacheDialog() }
-        b.switchLoopSelectedSubtitle.setOnCheckedChangeListener { _, checked ->
-            if (!loadingSettings) settings.setLoopSelectedSubtitleEnabled(checked)
+private fun exportDraft(context: Context, state: MainTopLevelPagesState, uri: Uri?) {
+    val draft = state.draftToExport
+    if (uri != null && draft != null) runCatching {
+        context.contentResolver.openOutputStream(uri)?.use {
+            it.write(DraftManager.readDraft(context, draft.folderName, draft.fileName).toByteArray())
         }
-        b.switchCheckUpdatesOnStartup.setOnCheckedChangeListener { _, checked ->
-            if (!loadingSettings) settings.setCheckUpdatesOnStartup(checked)
-        }
-        b.switchPreserveOutputDirectories.setOnCheckedChangeListener { _, checked ->
-            if (!loadingSettings) settings.setOutputDirectoryPersistenceEnabled(checked)
-        }
+    }.onSuccess {
+        showTopLevelToast(context, "导出成功")
+    }.onFailure {
+        showTopLevelToast(context, "导出失败：${it.message}")
     }
+    state.draftToExport = null
+}
 
-    private fun load(b: ActivitySettingsBinding) {
-        loadingSettings = true
-        updateEncodingLabel()
-        b.switchLoopSelectedSubtitle.isChecked = settings.isLoopSelectedSubtitleEnabled()
-        b.switchCheckUpdatesOnStartup.isChecked = settings.shouldCheckUpdatesOnStartup()
-        b.switchPreserveOutputDirectories.isChecked = settings.isOutputDirectoryPersistenceEnabled()
-        updateThemeLabel()
-        refreshCacheSize()
-        loadingSettings = false
+private fun copyDraft(context: Context, item: DraftsActivity.DraftItem) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(
+        ClipData.newPlainText("draft", DraftManager.readDraft(context, item.folderName, item.fileName))
+    )
+    showTopLevelToast(context, "已复制到剪贴板")
+}
+
+private fun openTool(context: Context, destination: ToolDestination) {
+    val activity = when (destination) {
+        ToolDestination.BATCH_CONVERT -> BatchConvertActivity::class.java
+        ToolDestination.SUBTITLE_FORMAT -> SubtitleFormatSelectActivity::class.java
+        ToolDestination.AUTO_TRANSLATE -> AutoTranslateActivity::class.java
+        ToolDestination.VOCAL_SEPARATION -> VocalSeparationActivity::class.java
+        ToolDestination.SPEECH_TO_SUBTITLE -> SpeechToSubtitleActivity::class.java
+        ToolDestination.TRANSCRIPT_MATCH -> TranscriptMatchActivity::class.java
+        ToolDestination.MEDIA_CONVERT -> MediaConvertActivity::class.java
+        ToolDestination.AUTO_TIMESTAMP -> AutoTimestampActivity::class.java
     }
+    context.openActivity(activity)
+}
 
-    private fun showThemeDialog() {
-        val modes = arrayOf("亮色主题", "深色主题", "跟随系统")
-        val selected = when (settings.getThemeMode()) {
-            SettingsManager.THEME_LIGHT -> 0
-            SettingsManager.THEME_DARK -> 1
-            else -> 2
-        }
-        AlertDialog.Builder(requireContext()).setTitle("主题").setSingleChoiceItems(modes, selected) { dialog, which ->
-            val mode = when (which) {
-                0 -> SettingsManager.THEME_LIGHT
-                1 -> SettingsManager.THEME_DARK
-                else -> SettingsManager.THEME_SYSTEM
-            }
-            settings.setThemeMode(mode)
-            AppThemeMode.apply(requireContext(), mode)
-            updateThemeLabel()
-            dialog.dismiss()
-        }.show()
-    }
+private fun Context.openActivity(activity: Class<*>) {
+    startActivity(Intent(this, activity))
+}
 
-    private fun showEncodingDialog() {
-        val current = FileUtils.SUPPORTED_ENCODINGS.indexOfFirst {
-            it.charset == settings.getDefaultEncoding()
-        }.coerceAtLeast(0)
-        AlertDialog.Builder(requireContext())
-            .setTitle(R.string.activity_settings_text_01)
-            .setSingleChoiceItems(
-                FileUtils.SUPPORTED_ENCODINGS.map { it.displayName }.toTypedArray(),
-                current
-            ) { dialog, which ->
-                settings.setDefaultEncoding(FileUtils.SUPPORTED_ENCODINGS[which].charset)
-                updateEncodingLabel()
-                dialog.dismiss()
-            }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
-    }
-
-    private fun updateEncodingLabel() {
-        binding?.tvEncoding?.text = FileUtils.SUPPORTED_ENCODINGS
-            .firstOrNull { it.charset == settings.getDefaultEncoding() }
-            ?.displayName
-            ?: settings.getDefaultEncoding().displayName()
-    }
-
-    private fun updateThemeLabel() {
-        binding?.tvThemeMode?.text = when (settings.getThemeMode()) {
+private fun loadSettingsPage(context: Context, settings: SettingsManager): SettingsPageState {
+    val encodings = FileUtils.SUPPORTED_ENCODINGS
+    val currentEncoding = settings.getDefaultEncoding()
+    val encoding = encodings.firstOrNull { it.charset == currentEncoding }
+        ?.displayName ?: currentEncoding.displayName()
+    val themeMode = settings.getThemeMode()
+    val cacheItems = settingsCacheItems(context)
+    val cacheSize = cacheItems.sumOf(SettingsCacheItem::sizeBytes)
+    return SettingsPageState(
+        encoding = encoding,
+        themeMode = themeMode,
+        themeLabel = when (themeMode) {
             SettingsManager.THEME_LIGHT -> "亮色"
             SettingsManager.THEME_DARK -> "深色"
             else -> "跟随系统"
-        }
-    }
-
-    private fun cacheGroups(): List<Pair<String, List<File>>> {
-        val waveform = File(requireContext().cacheDir, "waveform").walkTopDown().filter { it.isFile }.toList()
-        val quick = requireContext().cacheDir.walkTopDown().filter {
-            it.isFile && it.name.startsWith("quick_transcribe_") && it.name.endsWith("_16k.wav")
-        }.toList()
-        return listOf(
-            "波形图缓存" to waveform.filter { it.extension == "wave" },
-            "频谱图缓存" to waveform.filter { it.extension == "png" && it.name.contains(".spec_") },
-            "快速转录音频缓存" to quick
-        )
-    }
-
-    private fun showClearCacheDialog() {
-        val groups = cacheGroups()
-        AlertDialog.Builder(requireContext()).setTitle("清除缓存")
-            .setItems(groups.map { "${it.first}（${formatSize(it.second.sumOf(File::length))}）" }.toTypedArray()) { _, which ->
-                val count = groups[which].second.count { it.delete() }
-                Toast.makeText(requireContext(), "已清除 $count 个缓存文件", Toast.LENGTH_SHORT).show()
-                refreshCacheSize()
-            }.setNegativeButton(R.string.cancel, null).show()
-    }
-
-    private fun refreshCacheSize() {
-        val total = cacheGroups().sumOf { group -> group.second.sumOf(File::length) }
-        binding?.tvTotalCacheSize?.text = if (total > 0) formatSize(total) else ""
-    }
-
-    private fun formatSize(bytes: Long): String = when {
-        bytes < 1024 -> "$bytes B"
-        bytes < 1024 * 1024 -> "${"%.1f".format(Locale.getDefault(), bytes / 1024.0)} KB"
-        else -> "${"%.2f".format(Locale.getDefault(), bytes / 1024.0 / 1024.0)} MB"
-    }
-
-    private fun open(type: Class<*>) = startActivity(Intent(requireContext(), type))
-    override fun onDestroyView() { binding = null; super.onDestroyView() }
+        },
+        cacheSize = if (cacheSize > 0) formatTopLevelSize(cacheSize) else "",
+        checkUpdatesOnStartup = settings.shouldCheckUpdatesOnStartup(),
+        preserveOutputDirectories = settings.isOutputDirectoryPersistenceEnabled(),
+        loopSelectedSubtitle = settings.isLoopSelectedSubtitleEnabled(),
+        cacheItems = cacheItems
+    )
 }
 
-class DraftsFragment : Fragment(), TopLevelBackHandler {
-    private var binding: ActivityDraftsBinding? = null
-    private lateinit var adapter: DraftAdapter
-    private var currentFolder = ""
-    private var draftToExport: DraftItem? = null
-    private val exporter = registerForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
-        val draft = draftToExport
-        if (uri != null && draft != null) runCatching {
-            requireContext().contentResolver.openOutputStream(uri)?.use {
-                it.write(DraftManager.readDraft(requireContext(), draft.folder, draft.file).toByteArray())
-            }
-        }.onSuccess { toast("导出成功") }.onFailure { toast("导出失败：${it.message}") }
-        draftToExport = null
+private fun settingsCacheItems(context: Context): List<SettingsCacheItem> {
+    val waveform = cacheFilesInWaveformDirectory(context) { it.extension == "wave" }
+    val spectrogram = cacheFilesInWaveformDirectory(context) {
+        it.extension == "png" && it.name.contains(".spec_")
     }
-
-    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, state: Bundle?): View {
-        val b = ActivityDraftsBinding.inflate(inflater, container, false)
-        binding = b
-        b.toolbar.visibility = View.GONE
-        adapter = DraftAdapter(::onClick, ::showLongMenu, ::confirmDelete)
-        b.rvDrafts.layoutManager = LinearLayoutManager(requireContext())
-        b.rvDrafts.adapter = adapter
-        loadDrafts()
-        return b.root
-    }
-
-    override fun onResume() { super.onResume(); updateToolbar(); loadDrafts() }
-
-    private fun onClick(item: DraftItem) {
-        if (item.folderItem) {
-            currentFolder = item.folder
-            loadDrafts()
-            updateToolbar()
-        } else showPreview(item)
-    }
-
-    private fun loadDrafts() {
-        val items = if (currentFolder.isEmpty()) {
-            DraftManager.getAllDraftFolders(requireContext()).map { DraftItem(it.name, "", it.name, "文件夹", true) }
-        } else {
-            DraftManager.getDraftsInFolder(requireContext(), currentFolder).map {
-                DraftItem(currentFolder, it.name, it.name, DraftManager.getFormattedDate(it), false)
-            }
-        }
-        adapter.submit(items)
-        binding?.tvEmpty?.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
-    }
-
-    private fun updateToolbar() {
-        (activity as? MainActivity)?.updateTopLevelToolbar(
-            if (currentFolder.isEmpty()) getString(R.string.drafts) else currentFolder,
-            currentFolder.isNotEmpty()
-        ) {
-            currentFolder = ""
-            loadDrafts()
-            updateToolbar()
-        }
-    }
-
-    override fun handleTopLevelBack(): Boolean {
-        if (currentFolder.isEmpty()) return false
-        currentFolder = ""
-        loadDrafts()
-        updateToolbar()
-        return true
-    }
-
-    private fun showPreview(item: DraftItem) {
-        val content = DraftManager.readDraft(requireContext(), item.folder, item.file)
-        val scroll = android.widget.ScrollView(requireContext()).apply {
-            setPadding(50, 40, 50, 40)
-            addView(TextView(requireContext()).apply { text = content; textSize = 14f; setLineSpacing(0f, 1.3f) })
-        }
-        AlertDialog.Builder(requireContext()).setTitle("预览：${item.name}").setView(scroll)
-            .setNeutralButton("复制全文") { _, _ -> copy(content) }
-            .setPositiveButton(R.string.confirm, null).show()
-    }
-
-    private fun showLongMenu(item: DraftItem) {
-        AlertDialog.Builder(requireContext()).setTitle(item.name)
-            .setItems(arrayOf("导出草稿", "复制全文", "删除草稿")) { _, which ->
-                when (which) {
-                    0 -> { draftToExport = item; exporter.launch(item.file) }
-                    1 -> copy(DraftManager.readDraft(requireContext(), item.folder, item.file))
-                    2 -> confirmDelete(item)
-                }
-            }.show()
-    }
-
-    private fun confirmDelete(item: DraftItem) {
-        AlertDialog.Builder(requireContext()).setTitle(R.string.delete)
-            .setMessage(if (item.folderItem) "确定要删除此文件夹及其所有内容吗？" else getString(R.string.delete_draft_confirm))
-            .setPositiveButton(R.string.confirm) { _, _ ->
-                if (item.folderItem) DraftManager.deleteDraftFolder(requireContext(), item.folder)
-                else DraftManager.deleteDraft(requireContext(), item.folder, item.file)
-                loadDrafts()
-            }.setNegativeButton(R.string.cancel, null).show()
-    }
-
-    private fun copy(content: String) {
-        val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("draft", content))
-        toast("已复制到剪贴板")
-    }
-
-    private fun toast(text: String) = Toast.makeText(requireContext(), text, Toast.LENGTH_SHORT).show()
-    override fun onDestroyView() { binding = null; super.onDestroyView() }
-
-    private data class DraftItem(val folder: String, val file: String, val name: String, val date: String, val folderItem: Boolean)
-
-    private class DraftAdapter(
-        val click: (DraftItem) -> Unit,
-        val longClick: (DraftItem) -> Unit,
-        val delete: (DraftItem) -> Unit
-    ) : RecyclerView.Adapter<DraftAdapter.Holder>() {
-        private var items = emptyList<DraftItem>()
-        fun submit(value: List<DraftItem>) { items = value; notifyDataSetChanged() }
-        override fun getItemCount() = items.size
-        override fun onCreateViewHolder(parent: ViewGroup, type: Int) = Holder(
-            LayoutInflater.from(parent.context).inflate(R.layout.item_draft, parent, false)
+    val audio = context.cacheDir.walkTopDown().filter {
+        it.isFile && it.name.startsWith("quick_transcribe_") && it.name.endsWith("_16k.wav")
+    }.toList()
+    return listOf(
+        SettingsCacheItem(
+            "waveform", "波形图缓存", waveform.sumOf(File::length), "暂无波形图缓存可清除",
+            "将删除 ${formatTopLevelSize(waveform.sumOf(File::length))} 的波形图缓存，下次打开音频时会重新生成。\n确定继续？"
+        ),
+        SettingsCacheItem(
+            "spectrogram", "频谱图缓存", spectrogram.sumOf(File::length), "暂无频谱图缓存可清除",
+            "将删除 ${formatTopLevelSize(spectrogram.sumOf(File::length))} 的频谱图缓存，下次查看频谱图时会重新生成。\n确定继续？"
+        ),
+        SettingsCacheItem(
+            "quick_transcribe", "快速转录音频缓存", audio.sumOf(File::length), "暂无快速转录音频缓存可清除",
+            "将删除 ${formatTopLevelSize(audio.sumOf(File::length))} 的快速转录音频缓存，下次快速转录时会重新生成。\n确定继续？"
         )
-        override fun onBindViewHolder(holder: Holder, position: Int) = holder.bind(items[position])
-        inner class Holder(view: View) : RecyclerView.ViewHolder(view) {
-            private val name: TextView = view.findViewById(R.id.tvDraftName)
-            private val date: TextView = view.findViewById(R.id.tvDraftDate)
-            private val remove: ImageView = view.findViewById(R.id.btnDelete)
-            fun bind(item: DraftItem) {
-                name.text = item.name
-                date.text = item.date
-                itemView.setOnClickListener { click(item) }
-                itemView.setOnLongClickListener { if (!item.folderItem) longClick(item); true }
-                remove.setOnClickListener { delete(item) }
-            }
-        }
-    }
+    )
 }
+
+private fun clearSettingsCache(
+    context: Context,
+    settings: SettingsManager,
+    state: MainTopLevelPagesState,
+    item: SettingsCacheItem
+) {
+    val matches: (File) -> Boolean = when (item.key) {
+        "waveform" -> { file -> file.extension == "wave" }
+        "spectrogram" -> { file -> file.extension == "png" && file.name.contains(".spec_") }
+        "quick_transcribe" -> { file ->
+            file.name.startsWith("quick_transcribe_") && file.name.endsWith("_16k.wav")
+        }
+        else -> return
+    }
+    val files = if (item.key == "quick_transcribe") {
+        context.cacheDir.walkTopDown().filter { it.isFile && matches(it) }.toList()
+    } else {
+        cacheFilesInWaveformDirectory(context, matches)
+    }
+    val count = files.count(File::delete)
+    showTopLevelToast(context, "已清除 $count 个${item.label.removeSuffix("缓存")}缓存文件")
+    state.settingsPage = loadSettingsPage(context, settings)
+}
+
+private fun cacheFilesInWaveformDirectory(context: Context, matches: (File) -> Boolean): List<File> {
+    val directory = File(context.cacheDir, "waveform")
+    if (!directory.exists()) return emptyList()
+    return directory.walkTopDown().filter { it.isFile && matches(it) }.toList()
+}
+
+private fun formatTopLevelSize(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes B"
+    bytes < 1024 * 1024 -> "${"%.1f".format(Locale.getDefault(), bytes / 1024.0)} KB"
+    else -> "${"%.2f".format(Locale.getDefault(), bytes / 1024.0 / 1024.0)} MB"
+}
+
+private fun showTopLevelToast(context: Context, message: String) {
+    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+}
+
+private const val FAVORITES_PREFERENCES_NAME = "favorite_directories"
+private const val FAVORITES_PATHS_KEY = "paths"

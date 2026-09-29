@@ -4,27 +4,28 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
-import android.view.Menu
-import android.view.MenuItem
-import android.view.MotionEvent
-import android.view.View
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
-import com.subtitleedit.databinding.ActivitySpeechToSubtitleBinding
+import com.subtitleedit.feature.ui.SpeechToSubtitleDialogUi
+import com.subtitleedit.feature.ui.SpeechToSubtitleScreen
+import com.subtitleedit.feature.ui.SpeechToSubtitleUiState
 import com.subtitleedit.nativebridge.NativeMediaOperation
 import com.subtitleedit.nativebridge.PcmFormat
 import com.subtitleedit.task.LongTaskController
 import com.subtitleedit.model.SubtitleEntry
-import com.subtitleedit.repository.DefaultSpeechRecognitionService
 import com.subtitleedit.repository.SpeechRecognitionService
+import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleParser
@@ -35,9 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.resume
 import java.io.File
 
 /**
@@ -47,7 +46,6 @@ import java.io.File
  */
 class SpeechToSubtitleActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivitySpeechToSubtitleBinding
     private lateinit var settingsManager: SettingsManager
     private val speechRecognitionService: SpeechRecognitionService
         get() = (application as SubtitleEditApplication).dependencies.speechRecognitionService
@@ -64,6 +62,8 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     private var outputDirUri: Uri? = null
     private var conversionJob: Job? = null
     private var isConverting = false
+    private var uiState by mutableStateOf(SpeechToSubtitleUiState())
+    private var backPressedCallback: OnBackPressedCallback? = null
     private val taskController by lazy {
         LongTaskController(
             (application as SubtitleEditApplication).dependencies.taskStateStore,
@@ -76,6 +76,11 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     private var logRenderScheduled = false
     private var lastProgressLog = ""
     private var mediaOperation: NativeMediaOperation? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val logRenderRunnable = Runnable {
+        uiState = uiState.copy(logText = realtimeResults.toString())
+        logRenderScheduled = false
+    }
 
     private companion object {
         const val OUTPUT_DIRECTORY_KEY = "speech_to_subtitle"
@@ -114,130 +119,72 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivitySpeechToSubtitleBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-
         settingsManager = SettingsManager.getInstance(this)
-
-        setupToolbar()
-        setupSpinners()
-        setupButtons()
-        setupScrollableLogs()
+        uiState = uiState.copy(
+            languageOptions = languageOptions,
+            formatOptions = formatOptions
+        )
+        setContent {
+            SubtitleEditComposeTheme {
+                SpeechToSubtitleScreen(
+                    state = uiState,
+                    onNavigateBack = { onBackPressedDispatcher.onBackPressed() },
+                    onSettings = {
+                        if (!isConverting) AsrSettingsNavigation.open(this, settingsManager)
+                    },
+                    onSelectFiles = { filePickerLauncher.launch(arrayOf("audio/*", "video/*")) },
+                    onLanguageSelected = { index ->
+                        uiState = uiState.copy(selectedLanguageIndex = index)
+                    },
+                    onFormatSelected = { index ->
+                        uiState = uiState.copy(selectedFormatIndex = index)
+                        updateVadOptionState()
+                    },
+                    onAddToAutoTranslateChange = { enabled ->
+                        uiState = uiState.copy(addToAutoTranslate = enabled)
+                    },
+                    onDisableVadForTxtChange = { enabled ->
+                        uiState = uiState.copy(disableVadForTxt = enabled)
+                    },
+                    onSelectOutputDirectory = { outputDirLauncher.launch(outputDirUri) },
+                    onStart = ::startConversion,
+                    onCancel = ::confirmCancelConversion,
+                    onDismissDialog = { uiState = uiState.copy(dialog = null) },
+                    onOverwriteOutput = { resolveOutputConflict(overwriteOutput = true) },
+                    onRenameOutput = { resolveOutputConflict(overwriteOutput = false) },
+                    onConfirmCancel = {
+                        uiState = uiState.copy(dialog = null)
+                        cancelConversion()
+                    },
+                    onConfirmBack = { navigateBack(cancelRunning = true) }
+                )
+            }
+        }
         loadSavedModel()
 
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+        val callback = object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (isConverting) {
-                    AlertDialog.Builder(this@SpeechToSubtitleActivity)
-                        .setTitle("正在识别中")
-                        .setMessage("语音识别正在进行，确定要返回吗？返回后识别将被取消。")
-                        .setPositiveButton("返回并取消") { _, _ ->
-                            cancelConversion()
-                            isEnabled = false
-                            onBackPressedDispatcher.onBackPressed()
-                        }
-                        .setNegativeButton("继续识别", null)
-                        .show()
+                    uiState = uiState.copy(dialog = SpeechToSubtitleDialogUi.BackConfirmation)
                 } else {
-                    isEnabled = false
-                    onBackPressedDispatcher.onBackPressed()
+                    navigateBack(cancelRunning = false)
                 }
             }
-        })
+        }
+        backPressedCallback = callback
+        onBackPressedDispatcher.addCallback(this, callback)
     }
 
-    private fun setupToolbar() {
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.setDisplayShowHomeEnabled(true)
-        supportActionBar?.title = "语音转字幕"
-
-        binding.toolbar.setNavigationOnClickListener {
-            onBackPressedDispatcher.onBackPressed()
-        }
-    }
-
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.menu_speech_to_subtitle, menu)
-        return true
-    }
-
-    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
-        menu.findItem(R.id.action_speech_to_subtitle_settings)?.isEnabled = !isConverting
-        return super.onPrepareOptionsMenu(menu)
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
-        R.id.action_speech_to_subtitle_settings -> {
-            if (!isConverting) AsrSettingsNavigation.open(this, settingsManager)
-            true
-        }
-        else -> super.onOptionsItemSelected(item)
-    }
-
-    private fun setupSpinners() {
-        // 语言选择器
-        val languageAdapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_item,
-            languageOptions
-        )
-        languageAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerSourceLanguage.adapter = languageAdapter
-
-        // 输出格式选择器
-        val formatAdapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_item,
-            formatOptions
-        )
-        formatAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerOutputFormat.adapter = formatAdapter
-        binding.spinnerOutputFormat.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                updateVadOptionState()
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-        updateVadOptionState()
-    }
-
-    private fun setupButtons() {
-        // 选择文件按钮
-        binding.btnSelectFile.setOnClickListener {
-            filePickerLauncher.launch(arrayOf("audio/*", "video/*"))
-        }
-
-        // 选择输出目录按钮
-        binding.btnSelectOutputDir.setOnClickListener {
-            outputDirLauncher.launch(outputDirUri)
-        }
-
-        // 开始转换按钮
-        binding.btnStart.setOnClickListener {
-            startConversion()
-        }
-
-        // 取消按钮
-        binding.btnCancel.setOnClickListener {
-            confirmCancelConversion()
-        }
+    private fun navigateBack(cancelRunning: Boolean) {
+        uiState = uiState.copy(dialog = null)
+        if (cancelRunning) cancelConversion()
+        backPressedCallback?.isEnabled = false
+        onBackPressedDispatcher.onBackPressed()
     }
 
     override fun onResume() {
         super.onResume()
         if (!isConverting) loadSavedModel(resetOutputDirectory = false)
-    }
-
-    private fun setupScrollableLogs() {
-        binding.realtimeResultScroll.setOnTouchListener { view, event ->
-            view.parent.requestDisallowInterceptTouchEvent(true)
-            if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
-                view.parent.requestDisallowInterceptTouchEvent(false)
-            }
-            false
-        }
     }
 
     /**
@@ -295,12 +242,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         selectedMediaFiles.addAll(uris.map { uri ->
             SelectedMediaFile(uri, getFileNameFromUri(uri))
         })
-        binding.tvSelectedFile.text = buildString {
-            append("已选择 ${selectedMediaFiles.size} 个文件：")
-            selectedMediaFiles.forEachIndexed { index, file ->
-                append("\n${index + 1}. ${file.fileName}")
-            }
-        }
+        uiState = uiState.copy(selectedFiles = selectedMediaFiles.map(SelectedMediaFile::fileName))
         updateStartButtonState()
     }
 
@@ -315,7 +257,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             )
 
             outputDirUri = uri
-            binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, uri)
+            uiState = uiState.copy(outputDirectory = DirectoryDisplayPath.fromUri(this, uri))
             settingsManager.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
 
         } catch (e: Exception) {
@@ -331,7 +273,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             ?.let(Uri::parse)
         if (savedUri != null) {
             outputDirUri = savedUri
-            binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, savedUri)
+            uiState = uiState.copy(outputDirectory = DirectoryDisplayPath.fromUri(this, savedUri))
             return
         }
 
@@ -346,7 +288,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             }
 
             outputDirUri = Uri.fromFile(defaultPath)
-            binding.tvOutputDir.text = defaultPath.absolutePath
+            uiState = uiState.copy(outputDirectory = defaultPath.absolutePath)
         } catch (e: Exception) {
             Log.e("SpeechToSubtitle", "设置默认输出目录失败", e)
         }
@@ -372,9 +314,17 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
      */
     private fun updateStartButtonState() {
         val hasAsrModel = isCurrentAsrModelComplete()
-        binding.tvAsrModelHint.visibility = if (hasAsrModel) View.GONE else View.VISIBLE
-        binding.btnStart.isEnabled = selectedMediaFiles.isNotEmpty() && hasAsrModel
+        uiState = uiState.copy(
+            asrModelReady = hasAsrModel,
+            startEnabled = selectedMediaFiles.isNotEmpty() && hasAsrModel
+        )
     }
+
+    private val selectedFormat: String
+        get() = formatOptions.getOrElse(uiState.selectedFormatIndex) { formatOptions.first() }
+
+    private val selectedLanguage: String
+        get() = languageOptions.getOrElse(uiState.selectedLanguageIndex) { languageOptions.first() }
 
     /**
      * 开始转换
@@ -407,7 +357,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             com.subtitleedit.util.OverwritingToast.makeText(this, "输出目录未设置", Toast.LENGTH_SHORT).show()
             return
         }
-        val format = formatOptions[binding.spinnerOutputFormat.selectedItemPosition]
+        val format = selectedFormat
         val extension = format.lowercase()
 
         if (selectedMediaFiles.any { file ->
@@ -418,21 +368,16 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                     extension
                 )
             }) {
-            AlertDialog.Builder(this)
-                .setTitle("文件名冲突")
-                .setMessage("输出目录中已存在同名字幕文件。请选择处理方式。")
-                .setPositiveButton("覆盖") { _, _ ->
-                    startConversion(overwriteOutput = true)
-                }
-                .setNeutralButton("自动重命名") { _, _ ->
-                    startConversion(overwriteOutput = false)
-                }
-                .setNegativeButton("取消", null)
-                .show()
+            uiState = uiState.copy(dialog = SpeechToSubtitleDialogUi.OutputConflict)
             return
         }
 
         startConversion(overwriteOutput = false)
+    }
+
+    private fun resolveOutputConflict(overwriteOutput: Boolean) {
+        uiState = uiState.copy(dialog = null)
+        startConversion(overwriteOutput)
     }
 
     private fun startConversion(overwriteOutput: Boolean) {
@@ -440,21 +385,29 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         mediaOperation?.cancel()
         mediaOperation = nativeMediaEngine.openOperation()
         isConverting = true
-        invalidateOptionsMenu()
         realtimeResults.clear()
         lastProgressLog = ""
+        mainHandler.removeCallbacks(logRenderRunnable)
+        logRenderScheduled = false
+        uiState = uiState.copy(
+            isConverting = true,
+            showProcessingPanel = true,
+            progressVisible = true,
+            progress = 0,
+            progressStatus = "正在准备...",
+            logText = "",
+            startEnabled = false
+        )
         conversionJob = taskController.launch(lifecycleScope) { task ->
             task.onCancel { mediaOperation?.cancel() }
             try {
                 showProgress("正在准备...", 0)
-                binding.tvRealtimeResult.text = ""
                 appendRuntimeLog("开始语音转字幕")
                 appendRuntimeLog("待处理文件：${selectedMediaFiles.size} 个")
-                appendRuntimeLog("输出格式：${formatOptions[binding.spinnerOutputFormat.selectedItemPosition]}")
-                appendRuntimeLog("源语言：${languageOptions[binding.spinnerSourceLanguage.selectedItemPosition]}")
-                appendRuntimeLog("输出目录：${binding.tvOutputDir.text}")
+                appendRuntimeLog("输出格式：$selectedFormat")
+                appendRuntimeLog("源语言：$selectedLanguage")
+                appendRuntimeLog("输出目录：${uiState.outputDirectory ?: getString(R.string.activity_auto_timestamp_text_07)}")
                 appendSpeechModelConfig()
-                binding.btnStart.isEnabled = false
 
                 var successCount = 0
                 val failedFiles = mutableListOf<String>()
@@ -485,7 +438,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                         if (failedFiles.isEmpty()) "" else "，失败 ${failedFiles.size}"
                     appendRuntimeLog(summary)
                     com.subtitleedit.util.OverwritingToast.makeText(this@SpeechToSubtitleActivity, summary, Toast.LENGTH_LONG).show()
-                    if (binding.switchAddToAutoTranslate.isChecked && autoTranslateFiles.isNotEmpty()) {
+                    if (uiState.addToAutoTranslate && autoTranslateFiles.isNotEmpty()) {
                         openAutoTranslate(autoTranslateFiles)
                     }
                 }
@@ -499,7 +452,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                 mediaOperation?.cancel()
                 mediaOperation = null
                 isConverting = false
-                invalidateOptionsMenu()
+                uiState = uiState.copy(isConverting = false)
                 hideProgress()
                 updateStartButtonState()
             }
@@ -511,12 +464,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
      */
     private fun confirmCancelConversion() {
         if (!isConverting) return
-        AlertDialog.Builder(this)
-            .setTitle("确认取消")
-            .setMessage("语音识别正在进行，确定要取消吗？")
-            .setPositiveButton("取消识别") { _, _ -> cancelConversion() }
-            .setNegativeButton("继续识别", null)
-            .show()
+        uiState = uiState.copy(dialog = SpeechToSubtitleDialogUi.CancelConfirmation)
     }
 
     private fun cancelConversion() {
@@ -567,7 +515,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
      * 生成字幕内容
      */
     private fun generateSubtitle(segments: List<WhisperRecognizer.SubtitleSegment>): String {
-        val format = formatOptions[binding.spinnerOutputFormat.selectedItemPosition]
+        val format = selectedFormat
 
         // 转换为 SubtitleEntry
         val entries = segments.mapIndexed { index, segment ->
@@ -594,17 +542,15 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     }
 
     private fun shouldPrepareTimeline(): Boolean {
-        val format = formatOptions[binding.spinnerOutputFormat.selectedItemPosition]
+        val format = selectedFormat
         if (format != "TXT") {
             return true
         }
-        return !binding.switchDisableVadForTxt.isChecked
+        return !uiState.disableVadForTxt
     }
 
     private fun updateVadOptionState() {
-        val isTxt = formatOptions[binding.spinnerOutputFormat.selectedItemPosition] == "TXT"
-        binding.switchDisableVadForTxt.isEnabled = isTxt
-        binding.tvDisableVadHint.alpha = if (isTxt) 1f else 0.6f
+        uiState = uiState.copy(isTxtSelected = selectedFormat == "TXT")
     }
 
     /**
@@ -617,7 +563,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         segmentCount: Int
     ): String {
         val outputDir = outputDirUri ?: throw IllegalStateException("输出目录未设置")
-        val format = formatOptions[binding.spinnerOutputFormat.selectedItemPosition]
+        val format = selectedFormat
         val baseFileName = sourceFileName.substringBeforeLast(".")
         val extension = format.lowercase()
         val fileName = SubtitleOutputWriter.writeText(this, outputDir, baseFileName, extension, content, overwrite)
@@ -658,7 +604,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
             if (isCancelled) return Result.failure(Exception("用户取消"))
 
             showProgress("$progressPrefix 正在识别语音...", 10)
-            val selectedLanguage = languageOptions[binding.spinnerSourceLanguage.selectedItemPosition]
+            val selectedLanguage = this@SpeechToSubtitleActivity.selectedLanguage
             val timestampExperiment = isTokenTimestampExperimentConfigured()
             val recognitionResult = if (timestampExperiment) {
                 recognizeWithTokenTimestampTimeline(
@@ -772,11 +718,16 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
      * 显示进度
      */
     private fun showProgress(status: String, progress: Int) {
-        binding.layoutProgress.visibility = View.VISIBLE
-        binding.progressIndicator.visibility = View.VISIBLE
-        binding.btnCancel.visibility = View.VISIBLE
-        binding.progressIndicator.progress = progress
-        binding.tvProgressStatus.text = status
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { showProgress(status, progress) }
+            return
+        }
+        uiState = uiState.copy(
+            showProcessingPanel = true,
+            progressVisible = true,
+            progress = progress.coerceIn(0, 100),
+            progressStatus = status
+        )
         if (status != lastProgressLog) {
             lastProgressLog = status
             appendRuntimeLog(status)
@@ -787,28 +738,39 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
      * 隐藏进度
      */
     private fun hideProgress() {
-        binding.progressIndicator.visibility = View.GONE
-        binding.btnCancel.visibility = View.GONE
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { hideProgress() }
+            return
+        }
+        uiState = uiState.copy(progressVisible = false)
     }
 
     /**
      * 显示错误
      */
     private fun showError(message: String?) {
-        AlertDialog.Builder(this)
-            .setTitle("错误")
-            .setMessage(message ?: "未知错误")
-            .setPositiveButton("确定", null)
-            .show()
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { showError(message) }
+            return
+        }
+        uiState = uiState.copy(dialog = SpeechToSubtitleDialogUi.Error(message ?: "未知错误"))
     }
 
     private fun appendRuntimeLog(message: String) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { appendRuntimeLog(message) }
+            return
+        }
         realtimeResults.append("[${formatClockTime()}] $message\n")
         trimVisibleLog()
         scheduleLogRender()
     }
 
     private fun appendRecognizedSegment(segment: WhisperRecognizer.SubtitleSegment) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { appendRecognizedSegment(segment) }
+            return
+        }
         realtimeResults.append("\n")
         realtimeResults.append("[${formatSubtitleTime(segment.startTime)} --> ${formatSubtitleTime(segment.endTime)}]\n")
         realtimeResults.append(segment.text).append("\n")
@@ -1003,13 +965,13 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     }
 
     private fun scheduleLogRender() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { scheduleLogRender() }
+            return
+        }
         if (logRenderScheduled) return
         logRenderScheduled = true
-        binding.tvRealtimeResult.postDelayed({
-            binding.tvRealtimeResult.text = realtimeResults.toString()
-            binding.realtimeResultScroll.fullScroll(View.FOCUS_DOWN)
-            logRenderScheduled = false
-        }, LOG_RENDER_INTERVAL_MS)
+        mainHandler.postDelayed(logRenderRunnable, LOG_RENDER_INTERVAL_MS)
     }
 
     private fun formatClockTime(): String {
@@ -1037,6 +999,7 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     override fun onDestroy() {
         taskController.cancel()
         mediaOperation?.cancel()
+        mainHandler.removeCallbacks(logRenderRunnable)
         super.onDestroy()
         conversionJob?.cancel()
     }

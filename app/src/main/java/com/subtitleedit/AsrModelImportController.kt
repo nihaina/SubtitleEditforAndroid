@@ -9,26 +9,21 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
-import android.graphics.Typeface
-import android.text.SpannableString
-import android.text.Spanned
-import android.text.method.LinkMovementMethod
-import android.text.style.URLSpan
-import android.view.View
-import android.widget.ArrayAdapter
-import android.widget.TextView
 import android.widget.Toast
 import androidx.documentfile.provider.DocumentFile
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import com.subtitleedit.databinding.ViewAsrModelImportBinding
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.subtitleedit.feature.ui.AsrModelImportAction
+import com.subtitleedit.feature.ui.AsrModelImportUiState
+import com.subtitleedit.feature.ui.ModelImportDialogUi
 import com.subtitleedit.repository.ModelRepository
 import com.subtitleedit.task.TaskStatus
 import com.subtitleedit.usecase.DownloadAsrModelUseCase
-import com.subtitleedit.util.ModelDownloadProgressDialog
 import com.subtitleedit.util.ModelDownloader
 import com.subtitleedit.util.InternalModelExport
 import com.subtitleedit.util.OverwritingToast
@@ -59,9 +54,13 @@ import java.util.UUID
  */
 class AsrModelImportController(
     private val host: AppCompatActivity,
-    private val binding: ViewAsrModelImportBinding,
     private val onModelsChanged: () -> Unit = {}
 ) {
+
+    var uiState by mutableStateOf(AsrModelImportUiState())
+        private set
+    var dialog by mutableStateOf<ModelImportDialogUi?>(null)
+        private set
 
     private lateinit var settingsManager: SettingsManager
     private val modelRepository: ModelRepository
@@ -80,8 +79,7 @@ class AsrModelImportController(
     private val notificationPermissionPreferences by lazy {
         host.getSharedPreferences("task_notifications", Context.MODE_PRIVATE)
     }
-    private var modelDownloadDialog: ModelDownloadProgressDialog? = null
-    private var modelDownloadErrorDialog: AlertDialog? = null
+    private var nextProgressToken = 0L
     private var pendingStorageAction: (() -> Unit)? = null
 
     // Encoder 文件选择器
@@ -152,80 +150,144 @@ class AsrModelImportController(
 
     init {
         settingsManager = SettingsManager.getInstance(host)
-        setupButtons()
         restoreModelDownloadState()
         observeAsrModelDownload()
         loadSavedSettings()
     }
 
-    private fun setupButtons() {
-        binding.btnSelectEncoder.setOnClickListener {
-            if (isSenseVoiceNpu() && !ensureQnnRuntimeAvailable()) return@setOnClickListener
-            if (isSenseVoiceNpu() && restoreAvailableModelPathsIfMissing(includeQwen = false)) {
-                loadModelPaths()
-                updateAsrModelUi()
-                OverwritingToast.makeText(host, "已找到 SenseVoice NPU BIN 模型", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
+    fun onAction(action: AsrModelImportAction) {
+        when (action) {
+            AsrModelImportAction.SelectModelType -> showAsrModelPicker()
+            AsrModelImportAction.SelectEncoder -> {
+                if (isSenseVoiceNpu() && !ensureQnnRuntimeAvailable()) return
+                if (isSenseVoiceNpu() && restoreAvailableModelPathsIfMissing(includeQwen = false)) {
+                    loadModelPaths()
+                    updateAsrModelUi()
+                    OverwritingToast.makeText(host, "已找到 SenseVoice NPU BIN 模型", Toast.LENGTH_SHORT).show()
+                    return
+                }
+                encoderPickerLauncher.launch(arrayOf("*/*"))
             }
-            encoderPickerLauncher.launch(arrayOf("*/*"))
-        }
-        binding.btnDownloadAsrModel.setOnClickListener { showAsrDownloadOptions() }
-        binding.btnResetAsrModel.setOnClickListener { confirmResetCurrentAsrModel() }
-
-        binding.btnSelectDecoder.setOnClickListener {
-            decoderPickerLauncher.launch(arrayOf("*/*"))
-        }
-
-        binding.btnSelectJoiner.setOnClickListener {
-            joinerPickerLauncher.launch(arrayOf("*/*"))
-        }
-
-        binding.btnSelectTokens.setOnClickListener {
-            if (isSenseVoiceNpu() && !ensureQnnRuntimeAvailable()) return@setOnClickListener
-            if (isQwen3Asr()) qwen3TokenizerPickerLauncher.launch(null)
-            else tokensPickerLauncher.launch(arrayOf("*/*"))
-        }
-        binding.btnSelectQwen3ForcedAligner.setOnClickListener {
-            if (modelDownloadJob?.isActive == true) return@setOnClickListener
-            runWithModelStorageAccess {
-                qwen3ForcedAlignerPickerLauncher.launch(arrayOf("*/*"))
+            AsrModelImportAction.DownloadModel -> showAsrDownloadOptions()
+            AsrModelImportAction.ResetModel -> confirmResetCurrentAsrModel()
+            AsrModelImportAction.ConfigureWhisper -> AsrSettingsNavigation.open(host, settingsManager)
+            AsrModelImportAction.SelectDecoder -> decoderPickerLauncher.launch(arrayOf("*/*"))
+            AsrModelImportAction.SelectJoiner -> joinerPickerLauncher.launch(arrayOf("*/*"))
+            AsrModelImportAction.SelectTokens -> {
+                if (isSenseVoiceNpu() && !ensureQnnRuntimeAvailable()) return
+                if (isQwen3Asr()) qwen3TokenizerPickerLauncher.launch(null)
+                else tokensPickerLauncher.launch(arrayOf("*/*"))
             }
+            AsrModelImportAction.SelectForcedAligner -> {
+                if (modelDownloadJob?.isActive == true) return
+                runWithModelStorageAccess {
+                    qwen3ForcedAlignerPickerLauncher.launch(arrayOf("*/*"))
+                }
+            }
+            AsrModelImportAction.DownloadForcedAligner -> runWithModelStorageAccess {
+                confirmQwen3ForcedAlignerDownload()
+            }
+            AsrModelImportAction.ResetForcedAligner -> confirmResetQwen3ForcedAligner()
+            AsrModelImportAction.ConfigureVad -> host.startActivity(
+                Intent(host, VadModelSettingsActivity::class.java)
+            )
+            AsrModelImportAction.SelectVad -> vadPickerLauncher.launch(arrayOf("*/*"))
+            AsrModelImportAction.SelectSenseVoiceCpu -> selectSenseVoiceProvider(
+                SettingsManager.SENSEVOICE_PROVIDER_CPU
+            )
+            AsrModelImportAction.SelectSenseVoiceNpu -> selectSenseVoiceProvider(
+                SettingsManager.SENSEVOICE_PROVIDER_NPU
+            )
+            AsrModelImportAction.SelectParakeetTdt -> selectParakeetVariant(
+                SettingsManager.ASR_MODEL_PARAKEET_TDT
+            )
+            AsrModelImportAction.SelectParakeetCtc -> selectParakeetVariant(
+                SettingsManager.ASR_MODEL_PARAKEET_CTC_JA
+            )
+            AsrModelImportAction.ShowGuide -> showModelGuide()
         }
-        binding.btnDownloadQwen3ForcedAligner.setOnClickListener {
-            runWithModelStorageAccess { confirmQwen3ForcedAlignerDownload() }
-        }
-        binding.btnResetQwen3ForcedAligner.setOnClickListener { confirmResetQwen3ForcedAligner() }
+    }
 
-        binding.btnVadConfig.setOnClickListener {
-            host.startActivity(Intent(host, VadModelSettingsActivity::class.java))
-        }
-        binding.btnSelectVad.setOnClickListener { vadPickerLauncher.launch(arrayOf("*/*")) }
-        binding.cbUseBuiltInVad.setOnCheckedChangeListener { _, checked ->
-            settingsManager.setVadUseBuiltInModel(checked)
-            updateVadModelUi()
-        }
+    fun onBuiltInVadChanged(checked: Boolean) {
+        settingsManager.setVadUseBuiltInModel(checked)
+        updateVadModelUi()
+    }
 
-        binding.btnSwitchAsrModel.setOnClickListener { showAsrModelPicker() }
-        binding.tvSenseVoiceCpuOption.setOnClickListener {
-            selectSenseVoiceProvider(SettingsManager.SENSEVOICE_PROVIDER_CPU)
-        }
-        binding.tvSenseVoiceNpuOption.setOnClickListener {
-            selectSenseVoiceProvider(SettingsManager.SENSEVOICE_PROVIDER_NPU)
-        }
-        binding.tvParakeetTdtOption.setOnClickListener {
-            selectParakeetVariant(SettingsManager.ASR_MODEL_PARAKEET_TDT)
-        }
-        binding.tvParakeetCtcOption.setOnClickListener {
-            selectParakeetVariant(SettingsManager.ASR_MODEL_PARAKEET_CTC_JA)
-        }
-        binding.btnWhisperConfig.setOnClickListener {
-            AsrSettingsNavigation.open(host, settingsManager)
-        }
+    private fun showMessageDialog(
+        title: String,
+        message: String,
+        confirmLabel: String? = "确定",
+        dismissLabel: String? = null,
+        auxiliaryLabel: String? = null,
+        destructiveConfirm: Boolean = false,
+        onConfirm: () -> Unit = {},
+        onDismiss: () -> Unit = {},
+        onAuxiliary: () -> Unit = {}
+    ) {
+        dialog = ModelImportDialogUi.Message(
+            title = title,
+            message = message,
+            confirmLabel = confirmLabel,
+            dismissLabel = dismissLabel,
+            auxiliaryLabel = auxiliaryLabel,
+            destructiveConfirm = destructiveConfirm,
+            onConfirm = { dialog = null; onConfirm() },
+            onDismiss = { dialog = null; onDismiss() },
+            onAuxiliary = { dialog = null; onAuxiliary() }
+        )
+    }
 
-        binding.tvModelGuide.setOnClickListener {
-            showModelGuide()
-        }
+    private fun showOptionsDialog(
+        title: String,
+        options: List<String>,
+        selectedIndex: Int? = null,
+        onSelect: (Int) -> Unit
+    ) {
+        dialog = ModelImportDialogUi.Options(
+            title = title,
+            options = options,
+            selectedIndex = selectedIndex,
+            onSelect = { index -> dialog = null; onSelect(index) },
+            onDismiss = { dialog = null }
+        )
+    }
 
+    private fun showProgressDialog(title: String, onCancel: () -> Unit): Long {
+        val token = ++nextProgressToken
+        dialog = ModelImportDialogUi.Progress(
+            token = token,
+            title = title,
+            message = "正在准备下载",
+            onCancel = onCancel
+        )
+        return token
+    }
+
+    private fun updateProgressDialog(token: Long, progress: ModelDownloader.Progress) {
+        val current = dialog as? ModelImportDialogUi.Progress ?: return
+        if (current.token != token) return
+        val total = progress.totalBytes
+        val message = if (total > 0L) {
+            val percent = ((progress.downloadedBytes * 100L) / total).coerceIn(0L, 100L)
+            "${progress.message}：$percent%（${formatBytes(progress.downloadedBytes)} / ${formatBytes(total)}）"
+        } else {
+            "${progress.message}：已处理 ${formatBytes(progress.downloadedBytes.coerceAtLeast(0L))}"
+        }
+        dialog = current.copy(
+            message = message,
+            progress = if (total > 0L) progress.downloadedBytes.toFloat() / total else null
+        )
+    }
+
+    private fun dismissProgressDialog(token: Long) {
+        if ((dialog as? ModelImportDialogUi.Progress)?.token == token) dialog = null
+    }
+
+    private fun formatBytes(bytes: Long): String = when {
+        bytes >= 1024L * 1024L * 1024L -> String.format(Locale.getDefault(), "%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0))
+        bytes >= 1024L * 1024L -> String.format(Locale.getDefault(), "%.1f MB", bytes / (1024.0 * 1024.0))
+        bytes >= 1024L -> String.format(Locale.getDefault(), "%.1f KB", bytes / 1024.0)
+        else -> "$bytes B"
     }
 
     private fun showAsrDownloadOptions() {
@@ -250,12 +312,10 @@ class AsrModelImportController(
         if (settingsManager.getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU) {
             if (!ensureQnnRuntimeAvailable()) return
             val options = modelRepository.senseVoiceNpuModels
-            val labels = options.map { "${it.displayName}（${it.sizeLabel}）" }.toTypedArray()
-            AlertDialog.Builder(host)
-                .setTitle("选择 SenseVoice NPU 模型")
-                .setItems(labels) { _, which -> confirmSenseVoiceDownload(options[which]) }
-                .setNegativeButton("取消", null)
-                .show()
+            showOptionsDialog(
+                title = "选择 SenseVoice NPU 模型",
+                options = options.map { "${it.displayName}（${it.sizeLabel}）" }
+            ) { confirmSenseVoiceDownload(options[it]) }
         } else {
             confirmSenseVoiceDownload(modelRepository.senseVoiceCpuModel)
         }
@@ -270,73 +330,71 @@ class AsrModelImportController(
         } else {
             ""
         }
-        AlertDialog.Builder(host)
-            .setTitle("一键下载导入 SenseVoice ${option.displayName}")
-            .setMessage(
+        showMessageDialog(
+            title = "一键下载导入 SenseVoice ${option.displayName}",
+            message =
                 "是否一键下载导入该模型？\n\n" +
                     "文件存放至：\n$location\n\n" +
-                    "${option.sizeLabel} 存储空间。$compatibility"
-            )
-            .setPositiveButton("下载并导入") { _, _ ->
+                    "${option.sizeLabel} 存储空间。$compatibility",
+            confirmLabel = "下载并导入",
+            dismissLabel = "取消",
+            onConfirm = {
                 runWithModelStorageAccess { startSenseVoiceDownload(option) }
             }
-            .setNegativeButton("取消", null)
-            .show()
+        )
     }
 
     private fun confirmParakeetDownload(option: ModelDownloader.ParakeetModelOption) {
-        AlertDialog.Builder(host)
-            .setTitle("一键下载导入 ${option.displayName}")
-            .setMessage(
+        showMessageDialog(
+            title = "一键下载导入 ${option.displayName}",
+            message =
                 "${option.description}\n\n" +
                     "文件存放至：\n/Download/SubtitleEdit/models/${option.directoryName}\n\n" +
-                    "${option.sizeLabel} 存储空间。"
-            )
-            .setPositiveButton("下载并导入") { _, _ ->
+                    "${option.sizeLabel} 存储空间。",
+            confirmLabel = "下载并导入",
+            dismissLabel = "取消",
+            onConfirm = {
                 runWithModelStorageAccess { startParakeetDownload(option) }
             }
-            .setNegativeButton("取消", null)
-            .show()
+        )
     }
 
     private fun showWhisperDownloadModelPicker() {
         val options = modelRepository.whisperModels
-        val labels = options.map { "${it.displayName}（${it.sizeLabel}）" }.toTypedArray()
-        AlertDialog.Builder(host)
-            .setTitle("选择 Whisper 模型")
-            .setItems(labels) { _, which -> confirmWhisperDownload(options[which]) }
-            .setNegativeButton("取消", null)
-            .show()
+        showOptionsDialog(
+            title = "选择 Whisper 模型",
+            options = options.map { "${it.displayName}（${it.sizeLabel}）" }
+        ) { confirmWhisperDownload(options[it]) }
     }
 
     private fun confirmWhisperDownload(option: ModelDownloader.WhisperModelOption) {
-        AlertDialog.Builder(host)
-            .setTitle("一键下载导入 Whisper ${option.displayName}")
-            .setMessage(
+        showMessageDialog(
+            title = "一键下载导入 Whisper ${option.displayName}",
+            message =
                 "是否一键下载导入该模型？\n\n" +
                     "文件存放至：\n/Download/SubtitleEdit/models/${option.directoryName}\n\n" +
-                    "${option.sizeLabel} 存储空间。"
-            )
-            .setPositiveButton("下载并导入") { _, _ ->
+                    "${option.sizeLabel} 存储空间。",
+            confirmLabel = "下载并导入",
+            dismissLabel = "取消",
+            onConfirm = {
                 runWithModelStorageAccess { startWhisperDownload(option) }
             }
-            .setNegativeButton("取消", null)
-            .show()
+        )
     }
 
     private fun confirmQwen3AsrDownload(option: ModelDownloader.Qwen3AsrModelOption) {
-        AlertDialog.Builder(host)
-            .setTitle("一键下载导入 Qwen3-ASR ${option.displayName}")
-            .setMessage(
+        showMessageDialog(
+            title = "一键下载导入 Qwen3-ASR ${option.displayName}",
+            message =
                 "从 ModelScope 下载 int8 模型文件与 tokenizer。\n\n" +
                     "文件存放至：\n/Download/SubtitleEdit/models/${option.directoryName}\n\n" +
-                    "模型文件约 ${option.sizeLabel}。"
-            )
-            .setPositiveButton("下载并导入") { _, _ ->
+                    "模型文件约 ${option.sizeLabel}。",
+            confirmLabel = "下载并导入",
+            dismissLabel = "取消",
+            onConfirm = {
                 runWithModelStorageAccess { startQwen3AsrDownload(option) }
             }
-            .setNegativeButton("取消", null)
-            .show()
+        )
     }
 
     private fun confirmQwen3ForcedAlignerDownload() {
@@ -349,19 +407,19 @@ class AsrModelImportController(
             OverwritingToast.makeText(host, "ForcedAligner 已导入，可在模型管理中查看或删除", Toast.LENGTH_SHORT).show()
             return
         }
-        AlertDialog.Builder(host)
-            .setTitle("一键下载导入 Qwen3 ForcedAligner")
-            .setMessage(
+        showMessageDialog(
+            title = "一键下载导入 Qwen3 ForcedAligner",
+            message =
                 "从项目 Release 下载两卷压缩模型，约 1.38 GB；解压后模型约 3.67 GB。" +
                     "\n\n模型将保存至 Download/SubtitleEdit/models/${Qwen3ForcedAlignerModelFiles.DIRECTORY_NAME}。" +
                     "解压时还需约 5.2 GB 可用空间。" +
-                    "\n\n离开页面后任务会继续运行，可从通知中取消。"
-            )
-            .setPositiveButton("下载并导入") { _, _ ->
+                    "\n\n离开页面后任务会继续运行，可从通知中取消。",
+            confirmLabel = "下载并导入",
+            dismissLabel = "取消",
+            onConfirm = {
                 runWithModelStorageAccess { startQwen3ForcedAlignerDownload() }
             }
-            .setNegativeButton("取消", null)
-            .show()
+        )
     }
 
     private fun startQwen3ForcedAlignerDownload() {
@@ -371,28 +429,24 @@ class AsrModelImportController(
     }
 
     private fun confirmResetQwen3ForcedAligner() {
-        AlertDialog.Builder(host)
-            .setTitle("重置强制对齐模型选择")
-            .setMessage("清除 ForcedAligner 模型选择？模型文件不会被删除，可再次选择使用。")
-            .setPositiveButton("重置") { _, _ ->
+        showMessageDialog(
+            title = "重置强制对齐模型选择",
+            message = "清除 ForcedAligner 模型选择？模型文件不会被删除，可再次选择使用。",
+            confirmLabel = "重置",
+            dismissLabel = "取消",
+            onConfirm = {
                 settingsManager.clearQwen3ForcedAlignerPath()
                 updateAsrModelUi()
             }
-            .setNegativeButton("取消", null)
-            .show()
+        )
     }
 
     private fun showQwen3AsrDownloadModelPicker() {
         val options = modelRepository.qwen3AsrModels
-        val labels = options.map { "${it.displayName}（${it.sizeLabel}）" }.toTypedArray()
-        AlertDialog.Builder(host)
-            .setTitle("选择 Qwen3-ASR 模型")
-            .setItems(labels) { _, which ->
-                val option = options[which]
-                confirmQwen3AsrDownload(option)
-            }
-            .setNegativeButton("取消", null)
-            .show()
+        showOptionsDialog(
+            title = "选择 Qwen3-ASR 模型",
+            options = options.map { "${it.displayName}（${it.sizeLabel}）" }
+        ) { confirmQwen3AsrDownload(options[it]) }
     }
 
     private fun startSenseVoiceDownload(option: ModelDownloader.SenseVoiceModelOption) {
@@ -452,7 +506,7 @@ class AsrModelImportController(
         if (modelDownloadJob?.isActive == true) return
         setAsrModelActionsEnabled(false)
         modelDownloadJob = host.lifecycleScope.launch {
-            var progressDialog: ModelDownloadProgressDialog? = null
+            var progressToken: Long? = null
             try {
                 val scheduler = (host.application as SubtitleEditApplication).dependencies.taskWorkScheduler
                 val workId = if (retryWorkId != null) {
@@ -465,7 +519,7 @@ class AsrModelImportController(
                     scheduler.findActiveAsrModelDownload(modelDownloadWorkId) ?: return@launch
                 }
                 modelDownloadWorkId = workId
-                progressDialog = ModelDownloadProgressDialog(host, "下载模型") {
+                progressToken = showProgressDialog("下载模型") {
                     host.lifecycleScope.launch {
                         try {
                             scheduler.cancel(workId)
@@ -476,17 +530,16 @@ class AsrModelImportController(
                         }
                     }
                 }
-                modelDownloadDialog = progressDialog
-                progressDialog.show()
                 scheduler.observeTask(workId).takeWhile { taskState ->
                     if (taskState == null) {
                         modelDownloadWorkId = null
                         throw IllegalStateException("下载任务不存在")
                     }
                     taskState.progress.message.takeIf(String::isNotBlank)?.let { message ->
-                        progressDialog.update(ModelDownloader.Progress(
-                            message, taskState.progress.current, taskState.progress.total
-                        ))
+                        updateProgressDialog(
+                            requireNotNull(progressToken),
+                            ModelDownloader.Progress(message, taskState.progress.current, taskState.progress.total)
+                        )
                     }
                     when (taskState.status) {
                         TaskStatus.SUCCEEDED -> {
@@ -517,8 +570,7 @@ class AsrModelImportController(
             } catch (error: Exception) {
                 OverwritingToast.makeText(host, "模型任务失败：${error.message}", Toast.LENGTH_LONG).show()
             } finally {
-                progressDialog?.dismiss()
-                if (modelDownloadDialog === progressDialog) modelDownloadDialog = null
+                progressToken?.let(::dismissProgressDialog)
                 modelDownloadJob = null
                 setAsrModelActionsEnabled(true)
                 if (isActive && !host.isDestroyed && modelDownloadWorkId == null) {
@@ -529,29 +581,29 @@ class AsrModelImportController(
     }
 
     private fun showModelDownloadFailure(workId: UUID, error: String) {
-        modelDownloadErrorDialog?.dismiss()
-        modelDownloadErrorDialog = AlertDialog.Builder(host)
-            .setTitle("模型下载或导入失败")
-            .setMessage("$error\n\n重试时会尝试从已保存的下载进度继续。")
-            .setPositiveButton("重试") { _, _ ->
+        showMessageDialog(
+            title = "模型下载或导入失败",
+            message = "$error\n\n重试时会尝试从已保存的下载进度继续。",
+            confirmLabel = "重试",
+            dismissLabel = "关闭",
+            onConfirm = {
                 runWithModelStorageAccess { observeAsrModelDownload(retryWorkId = workId) }
-            }
-            .setNegativeButton("关闭") { _, _ -> modelDownloadWorkId = null }
-            .setOnCancelListener { modelDownloadWorkId = null }
-            .show()
+            },
+            onDismiss = { modelDownloadWorkId = null }
+        )
     }
 
     private fun confirmResetCurrentAsrModel() {
         val modelName = currentModelDisplayName()
-        AlertDialog.Builder(host)
-            .setTitle("重置模型选择")
-            .setMessage(
+        showMessageDialog(
+            title = "重置模型选择",
+            message =
                 "确定清除当前 $modelName 模型选择吗？\n\n" +
-                    "模型文件不会被删除，重置后需要重新选择或导入。"
-            )
-            .setPositiveButton("重置") { _, _ -> resetCurrentAsrModel() }
-            .setNegativeButton("取消", null)
-            .show()
+                    "模型文件不会被删除，重置后需要重新选择或导入。",
+            confirmLabel = "重置",
+            dismissLabel = "取消",
+            onConfirm = ::resetCurrentAsrModel
+        )
     }
 
     private fun resetCurrentAsrModel() {
@@ -568,20 +620,7 @@ class AsrModelImportController(
     }
 
     private fun setAsrModelActionsEnabled(enabled: Boolean) {
-        binding.btnDownloadAsrModel.isEnabled = enabled
-        binding.btnResetAsrModel.isEnabled = enabled
-        binding.btnSwitchAsrModel.isEnabled = enabled
-        binding.btnSelectEncoder.isEnabled = enabled
-        binding.btnSelectTokens.isEnabled = enabled
-        binding.btnSelectDecoder.isEnabled = enabled
-        binding.btnSelectJoiner.isEnabled = enabled
-        binding.btnSelectQwen3ForcedAligner.isEnabled = enabled
-        binding.btnDownloadQwen3ForcedAligner.isEnabled = enabled
-        binding.btnResetQwen3ForcedAligner.isEnabled = enabled
-        binding.tvSenseVoiceCpuOption.isEnabled = enabled
-        binding.tvSenseVoiceNpuOption.isEnabled = enabled
-        binding.tvParakeetTdtOption.isEnabled = enabled
-        binding.tvParakeetCtcOption.isEnabled = enabled
+        uiState = uiState.copy(actionsEnabled = enabled)
     }
 
     private fun runWithModelStorageAccess(action: () -> Unit) {
@@ -634,7 +673,6 @@ class AsrModelImportController(
         updateAsrModelUi()
         vadModelPath = settingsManager.getVadModelPath()
         discardInaccessibleVadModel()
-        binding.cbUseBuiltInVad.isChecked = settingsManager.isVadUseBuiltInModel()
         updateVadModelUi()
 
         migrateLegacySenseVoiceNpuSelectionIfNeeded()
@@ -708,7 +746,6 @@ class AsrModelImportController(
             SettingsManager.ASR_MODEL_QWEN3_ASR -> settingsManager.setQwen3AsrEncoderPath(encoderPath)
             else -> settingsManager.setWhisperEncoderPath(encoderPath)
         }
-        binding.tvEncoderFile.text = fileName
         updateAsrModelUi()
     }
 
@@ -725,14 +762,9 @@ class AsrModelImportController(
 
     private fun showSenseVoiceNpuDurationPicker(uri: Uri) {
         val durations = intArrayOf(5, 10)
-        val labels = durations.map { "$it 秒模型" }.toTypedArray()
-        AlertDialog.Builder(host)
-            .setTitle("选择 SenseVoice NPU 模型时长")
-            .setItems(labels) { _, which ->
-                startSenseVoiceNpuImport(uri, durations[which])
-            }
-            .setNegativeButton("取消", null)
-            .show()
+        showOptionsDialog("选择 SenseVoice NPU 模型时长", durations.map { "$it 秒模型" }) {
+            startSenseVoiceNpuImport(uri, durations[it])
+        }
     }
 
     private fun startSenseVoiceNpuImport(modelUri: Uri, durationSeconds: Int) {
@@ -758,12 +790,9 @@ class AsrModelImportController(
             return
         }
 
-        val progressDialog = ModelDownloadProgressDialog(
-            host,
-            "导入 SenseVoice NPU 模型"
-        ) { modelDownloadJob?.cancel() }
-        modelDownloadDialog = progressDialog
-        progressDialog.show()
+        val progressToken = showProgressDialog("导入 SenseVoice NPU 模型") {
+            modelDownloadJob?.cancel()
+        }
         setAsrModelActionsEnabled(false)
 
         modelDownloadJob = host.lifecycleScope.launch {
@@ -782,7 +811,7 @@ class AsrModelImportController(
                         durationSeconds = durationSeconds
                     ) { message ->
                         host.runOnUiThread {
-                            modelDownloadDialog?.update(ModelDownloader.Progress(message))
+                            updateProgressDialog(progressToken, ModelDownloader.Progress(message))
                         }
                     }
                 }
@@ -805,25 +834,22 @@ class AsrModelImportController(
                 releasePersistedReadPermission(selectedTokensPath)
                 loadModelPaths()
                 updateAsrModelUi()
-                progressDialog.dismiss()
                 OverwritingToast.makeText(
                     host,
                     "SenseVoice NPU BIN 模型已生成并自动选择",
                     Toast.LENGTH_LONG
                 ).show()
             } catch (e: CancellationException) {
-                progressDialog.dismiss()
                 throw e
             } catch (e: Exception) {
-                progressDialog.dismiss()
                 OverwritingToast.makeText(
                     host,
                     "SenseVoice NPU 模型导入失败：${e.message}",
                     Toast.LENGTH_LONG
                 ).show()
             } finally {
+                dismissProgressDialog(progressToken)
                 setAsrModelActionsEnabled(true)
-                if (modelDownloadDialog === progressDialog) modelDownloadDialog = null
                 modelDownloadJob = null
             }
         }
@@ -864,7 +890,6 @@ class AsrModelImportController(
                 SettingsManager.ASR_MODEL_QWEN3_ASR -> settingsManager.setQwen3AsrDecoderPath(decoderPath)
                 else -> settingsManager.setWhisperDecoderPath(decoderPath)
             }
-            binding.tvDecoderFile.text = fileName
             updateAsrModelUi()
 
         } catch (e: Exception) {
@@ -890,7 +915,6 @@ class AsrModelImportController(
             joinerPath = uri.toString()
             if (isQwen3Asr()) settingsManager.setQwen3AsrConvFrontendPath(joinerPath)
             else settingsManager.setParakeetTdtJoinerPath(joinerPath)
-            binding.tvJoinerFile.text = fileName
             updateAsrModelUi()
         } catch (e: Exception) {
             OverwritingToast.makeText(host, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
@@ -924,7 +948,6 @@ class AsrModelImportController(
                 SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> settingsManager.setParakeetCtcTokensPath(tokensPath)
                 else -> settingsManager.setWhisperTokensPath(tokensPath)
             }
-            binding.tvTokensFile.text = fileName
             updateAsrModelUi()
 
         } catch (e: Exception) {
@@ -957,10 +980,9 @@ class AsrModelImportController(
         val target = File(modelDirectory, "tokenizer")
         val staging = File(modelDirectory, ".tokenizer_importing")
         val backup = File(modelDirectory, ".tokenizer_backup")
-        val progressDialog = ModelDownloadProgressDialog(host, "导入 Qwen3-ASR tokenizer") {
+        val progressToken = showProgressDialog("导入 Qwen3-ASR tokenizer") {
             modelDownloadJob?.cancel(CancellationException("用户取消 Qwen3-ASR tokenizer 导入"))
         }
-        progressDialog.show()
         setAsrModelActionsEnabled(false)
         modelDownloadJob = host.lifecycleScope.launch {
             try {
@@ -1006,7 +1028,6 @@ class AsrModelImportController(
                 }
                 tokensPath = Uri.fromFile(imported).toString()
                 settingsManager.setQwen3AsrTokenizerPath(tokensPath, variant)
-                binding.tvTokensFile.text = "tokenizer/"
                 updateAsrModelUi()
             } catch (e: CancellationException) {
                 throw e
@@ -1017,7 +1038,7 @@ class AsrModelImportController(
                     staging.deleteRecursively()
                     if (backup.exists() && !target.exists()) backup.renameTo(target)
                 }
-                progressDialog.dismiss()
+                dismissProgressDialog(progressToken)
                 setAsrModelActionsEnabled(true)
                 modelDownloadJob = null
             }
@@ -1104,13 +1125,17 @@ class AsrModelImportController(
     }
 
     private fun updateVadModelUi() {
-        binding.tvVadFile.text = if (settingsManager.isVadUseBuiltInModel()) {
-            "silero_vad.onnx（内置）"
-        } else if (vadModelPath.isBlank()) {
-            "尚未选择 VAD 模型"
-        } else {
-            getFileNameFromUri(Uri.parse(vadModelPath))
-        }
+        val useBuiltInModel = settingsManager.isVadUseBuiltInModel()
+        uiState = uiState.copy(
+            vadValue = if (useBuiltInModel) {
+                "silero_vad.onnx（内置）"
+            } else if (vadModelPath.isBlank()) {
+                "尚未选择 VAD 模型"
+            } else {
+                getFileNameFromUri(Uri.parse(vadModelPath))
+            },
+            useBuiltInVad = useBuiltInModel
+        )
     }
 
     private fun getFileNameFromUri(uri: Uri): String {
@@ -1205,16 +1230,14 @@ class AsrModelImportController(
         val isQwenGuide = modelType == SettingsManager.ASR_MODEL_QWEN3_ASR
         val guideMessage = if (isQwenGuide) {
             val url = Qwen3ForcedAlignerReleaseDownloader.PROJECT_URL
-            SpannableString("$message\n\n强制对齐模型项目地址：$url").apply {
-                val start = indexOf(url)
-                setSpan(URLSpan(url), start, start + url.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            }
+            "$message\n\n强制对齐模型项目地址：$url"
         } else message
-        val dialog = AlertDialog.Builder(host)
-            .setTitle("模型下载指引")
-            .setMessage(guideMessage)
-            .setPositiveButton("确定", null)
-            .setNeutralButton(if (isQwenGuide) "打开魔塔" else "打开 GitHub") { _, _ ->
+        showMessageDialog(
+            title = "模型下载指引",
+            message = guideMessage,
+            confirmLabel = "确定",
+            auxiliaryLabel = if (isQwenGuide) "打开魔塔" else "打开 GitHub",
+            onAuxiliary = {
                 val url = if (isQwenGuide) {
                     ModelDownloader.QWEN3_ASR_MODELSCOPE_URL
                 } else if (
@@ -1228,10 +1251,7 @@ class AsrModelImportController(
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                 host.startActivity(intent)
             }
-            .show()
-        if (isQwenGuide) {
-            dialog.findViewById<TextView>(android.R.id.message)?.movementMethod = LinkMovementMethod.getInstance()
-        }
+        )
     }
 
     private fun showAsrModelPicker() {
@@ -1254,9 +1274,7 @@ class AsrModelImportController(
             SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> 2
             else -> 3
         }
-        AlertDialog.Builder(host)
-            .setTitle("选择识别模型")
-            .setSingleChoiceItems(labels, checked) { dialog, which ->
+        showOptionsDialog("选择识别模型", labels.toList(), selectedIndex = checked) { which ->
                 val selectedType = types[which]
                 if (selectedType != modelType) {
                     modelType = selectedType
@@ -1265,10 +1283,7 @@ class AsrModelImportController(
                     loadModelPaths()
                     updateAsrModelUi()
                 }
-                dialog.dismiss()
             }
-            .setNegativeButton("取消", null)
-            .show()
     }
 
     private fun selectParakeetVariant(selectedType: String) {
@@ -1327,21 +1342,6 @@ class AsrModelImportController(
             }
         }
         discardInaccessibleAsrModels()
-        binding.tvEncoderFile.text = encoderPath.takeIf { it.isNotEmpty() }?.let {
-            val fileName = getFileNameFromUri(Uri.parse(it))
-            if (isSenseVoiceNpu()) {
-                "$fileName（${settingsManager.getSenseVoiceNpuDurationSeconds()} 秒）"
-            } else {
-                fileName
-            }
-        } ?: "未选择"
-        binding.tvDecoderFile.text = decoderPath.takeIf { it.isNotEmpty() }?.let { getFileNameFromUri(Uri.parse(it)) } ?: "未选择"
-        binding.tvJoinerFile.text = joinerPath.takeIf { it.isNotEmpty() }?.let { getFileNameFromUri(Uri.parse(it)) } ?: "未选择"
-        binding.tvTokensFile.text = when {
-            tokensPath.isEmpty() -> "未选择"
-            isQwen3Asr() -> "tokenizer/"
-            else -> getFileNameFromUri(Uri.parse(tokensPath))
-        }
     }
 
     private fun discardInaccessibleAsrModels() {
@@ -1436,82 +1436,68 @@ class AsrModelImportController(
         val qwen3Asr = isQwen3Asr()
         val hasSelectedModel = encoderPath.isNotBlank() || decoderPath.isNotBlank() ||
             joinerPath.isNotBlank() || tokensPath.isNotBlank()
-        binding.tvAsrModelTitle.text = if (parakeet) "Parakeet 模型" else "${currentModelDisplayName()} 模型"
-        binding.btnDownloadAsrModel.contentDescription = "一键下载并导入 ${currentModelDisplayName()} 模型"
-        binding.btnDownloadAsrModel.visibility = if (hasSelectedModel) View.GONE else View.VISIBLE
-        binding.btnResetAsrModel.visibility = if (hasSelectedModel) View.VISIBLE else View.GONE
-        binding.tvEncoderLabel.text = when {
+        val alignerUi = if (qwen3Asr) {
+            val alignerPath = settingsManager.getQwen3ForcedAlignerPath()
+            val alignerFile = localFile(alignerPath)
+            val complete = Qwen3ForcedAlignerModelFiles.isConfigured(alignerFile, host.filesDir)
+            val downloadedGraph = if (hasModelStorageAccess()) {
+                Qwen3ForcedAlignerModelFiles.findCompleteGraph(qwen3ForcedAlignerDirectory())
+            } else null
+            val status = when {
+                complete -> "已配置：${alignerFile!!.name} + ${Qwen3ForcedAlignerModelFiles.dataFile(alignerFile).name}"
+                downloadedGraph != null -> "检测到本地模型，点击选择模型即可导入"
+                alignerPath.isNotBlank() -> "模型或权重文件缺失/不可读，请重新导入两个文件"
+                else -> "尚未配置 ForcedAligner 模型及权重"
+            }
+            complete to status
+        } else {
+            false to uiState.forcedAlignerStatus
+        }
+        val encoderLabel = when {
             senseVoiceNpu -> "SenseVoice NPU 模型"
             senseVoice -> "SenseVoice CPU 模型"
             parakeetCtc -> "CTC 模型"
             qwen3Asr -> "Encoder 模型"
             else -> "Encoder 模型"
         }
-        binding.btnSelectEncoder.text = if (senseVoice || parakeetCtc) "选择模型" else "选择 Encoder"
-        binding.btnSelectEncoder.visibility = View.VISIBLE
-        binding.btnSelectTokens.visibility = View.VISIBLE
-        binding.layoutDecoder.visibility = if (senseVoice || parakeetCtc) View.GONE else View.VISIBLE
-        binding.layoutJoiner.visibility = if (parakeetTdt || qwen3Asr) View.VISIBLE else View.GONE
-        binding.tvJoinerLabel.text = if (qwen3Asr) "Conv Frontend 模型" else "Joiner 模型"
-        binding.btnSelectJoiner.text = if (qwen3Asr) "选择 Conv Frontend" else "选择 Joiner"
-        binding.tvTokensLabel.text = if (qwen3Asr) "Tokenizer 文件夹" else "Tokens 文件"
-        binding.btnSelectTokens.text = if (qwen3Asr) "选择 Tokenizer 文件夹" else "选择 Tokens"
-        binding.layoutQwen3ForcedAligner.visibility = if (qwen3Asr) View.VISIBLE else View.GONE
-        if (qwen3Asr) {
-            val alignerPath = settingsManager.getQwen3ForcedAlignerPath()
-            val alignerFile = localFile(alignerPath)
-            val complete = Qwen3ForcedAlignerModelFiles.isConfigured(
-                alignerFile, host.filesDir
-            )
-            val downloadedGraph = if (hasModelStorageAccess()) Qwen3ForcedAlignerModelFiles.findCompleteGraph(
-                qwen3ForcedAlignerDirectory()
-            ) else null
-            binding.btnDownloadQwen3ForcedAligner.visibility = if (complete) View.GONE else View.VISIBLE
-            binding.btnResetQwen3ForcedAligner.visibility = if (complete) View.VISIBLE else View.GONE
-            binding.tvQwen3ForcedAlignerPath.text = when {
-                complete -> "已配置：${alignerFile!!.name} + ${Qwen3ForcedAlignerModelFiles.dataFile(alignerFile).name}"
-                downloadedGraph != null -> "检测到本地模型，点击选择模型即可导入"
-                alignerPath.isNotBlank() -> "模型或权重文件缺失/不可读，请重新导入两个文件"
-                else -> "尚未配置 ForcedAligner 模型及权重"
-            }
-            binding.tvQwen3ForcedAlignerPath.setTextColor(
-                ContextCompat.getColor(
-                    host,
-                    if (complete) R.color.on_surface_variant else R.color.error
-                )
-            )
-        }
-        binding.layoutSenseVoiceProviderOptions.visibility = if (senseVoice) View.VISIBLE else View.GONE
-        binding.layoutParakeetVariantOptions.visibility = if (parakeet) View.VISIBLE else View.GONE
-        binding.tvSenseVoiceCpuOption.setTextColor(
-            ContextCompat.getColor(host, if (!senseVoiceNpu) R.color.primary else R.color.on_surface_variant)
-        )
-        binding.tvSenseVoiceNpuOption.setTextColor(
-            ContextCompat.getColor(host, if (senseVoiceNpu) R.color.primary else R.color.on_surface_variant)
-        )
-        binding.tvSenseVoiceCpuOption.setTypeface(
-            null,
-            if (!senseVoiceNpu) Typeface.BOLD else Typeface.NORMAL
-        )
-        binding.tvSenseVoiceNpuOption.setTypeface(
-            null,
-            if (senseVoiceNpu) Typeface.BOLD else Typeface.NORMAL
-        )
         val qnnRuntimeAvailable = QnnRuntimeAvailability.isAvailable(host)
-        binding.tvSenseVoiceNpuOption.alpha = if (qnnRuntimeAvailable) 1f else 0.55f
-        binding.tvSenseVoiceNpuOption.contentDescription = if (qnnRuntimeAvailable) {
-            "选择 SenseVoice NPU"
-        } else {
-            "SenseVoice NPU，需要安装 QNN 版"
-        }
-        binding.tvParakeetTdtOption.setTextColor(
-            ContextCompat.getColor(host, if (parakeetTdt) R.color.primary else R.color.on_surface_variant)
+        uiState = uiState.copy(
+            modelTitle = if (parakeet) "Parakeet 模型" else "${currentModelDisplayName()} 模型",
+            encoderLabel = encoderLabel,
+            encoderValue = encoderPath.takeIf(String::isNotEmpty)?.let {
+                val fileName = getFileNameFromUri(Uri.parse(it))
+                if (isSenseVoiceNpu()) {
+                    "$fileName（${settingsManager.getSenseVoiceNpuDurationSeconds()} 秒）"
+                } else fileName
+            } ?: "未选择",
+            encoderButtonLabel = if (senseVoice || parakeetCtc) "选择模型" else "选择 Encoder",
+            decoderValue = decoderPath.takeIf(String::isNotEmpty)?.let {
+                getFileNameFromUri(Uri.parse(it))
+            } ?: "未选择",
+            joinerLabel = if (qwen3Asr) "Conv Frontend 模型" else "Joiner 模型",
+            joinerValue = joinerPath.takeIf(String::isNotEmpty)?.let {
+                getFileNameFromUri(Uri.parse(it))
+            } ?: "未选择",
+            joinerButtonLabel = if (qwen3Asr) "选择 Conv Frontend" else "选择 Joiner",
+            tokensLabel = if (qwen3Asr) "Tokenizer 文件夹" else "Tokens 文件",
+            tokensValue = when {
+                tokensPath.isEmpty() -> "未选择"
+                qwen3Asr -> "tokenizer/"
+                else -> getFileNameFromUri(Uri.parse(tokensPath))
+            },
+            showDecoder = !senseVoice && !parakeetCtc,
+            showJoiner = parakeetTdt || qwen3Asr,
+            showForcedAligner = qwen3Asr,
+            forcedAlignerComplete = alignerUi.first,
+            forcedAlignerStatus = alignerUi.second,
+            showModelDownload = !hasSelectedModel,
+            showModelReset = hasSelectedModel,
+            showSenseVoiceProvider = senseVoice,
+            useSenseVoiceNpu = senseVoiceNpu,
+            npuAvailable = qnnRuntimeAvailable,
+            showParakeetVariant = parakeet,
+            parakeetCtcSelected = parakeetCtc
         )
-        binding.tvParakeetCtcOption.setTextColor(
-            ContextCompat.getColor(host, if (parakeetCtc) R.color.primary else R.color.on_surface_variant)
-        )
-        binding.tvParakeetTdtOption.setTypeface(null, if (parakeetTdt) Typeface.BOLD else Typeface.NORMAL)
-        binding.tvParakeetCtcOption.setTypeface(null, if (parakeetCtc) Typeface.BOLD else Typeface.NORMAL)
     }
 
     private fun localFile(path: String): File? {
@@ -1607,15 +1593,15 @@ class AsrModelImportController(
 
     private fun ensureQnnRuntimeAvailable(): Boolean {
         if (QnnRuntimeAvailability.isAvailable(host)) return true
-        AlertDialog.Builder(host)
-            .setTitle("需要安装 QNN 版")
-            .setMessage(
+        showMessageDialog(
+            title = "需要安装 QNN 版",
+            message =
                 "当前安装包不包含 Qualcomm QNN 运行库，无法使用 SenseVoice NPU 模型。\n\n" +
-                    "请前往项目发布页下载相同版本或更新版本的 arm64 QNN 安装包，并直接覆盖安装。已有模型和软件数据不会被清除。"
-            )
-            .setPositiveButton("打开下载页") { _, _ -> openQnnEditionReleases() }
-            .setNegativeButton("取消", null)
-            .show()
+                    "请前往项目发布页下载相同版本或更新版本的 arm64 QNN 安装包，并直接覆盖安装。已有模型和软件数据不会被清除。",
+            confirmLabel = "打开下载页",
+            dismissLabel = "取消",
+            onConfirm = ::openQnnEditionReleases
+        )
         return false
     }
 
@@ -1643,11 +1629,8 @@ class AsrModelImportController(
 
     fun dispose() {
         modelDownloadJob?.cancel()
-        modelDownloadErrorDialog?.dismiss()
-        modelDownloadErrorDialog = null
+        dialog = null
         pendingStorageAction = null
         pendingNotificationAction = null
-        modelDownloadDialog?.dismiss()
-        modelDownloadDialog = null
     }
 }

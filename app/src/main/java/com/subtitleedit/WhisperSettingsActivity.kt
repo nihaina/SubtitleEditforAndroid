@@ -2,57 +2,61 @@ package com.subtitleedit
 
 import android.content.Intent
 import android.os.Bundle
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
-import com.subtitleedit.databinding.ActivityWhisperSettingsBinding
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.subtitleedit.ui.settings.WhisperSettingsScreen
+import com.subtitleedit.ui.settings.WhisperSettingsState
+import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.SettingsManager
-import java.util.Locale
+import kotlin.math.roundToInt
 
 /** Whisper-specific controls. Shared recognition-flow settings are configured globally. */
 class WhisperSettingsActivity : AppCompatActivity() {
-    private lateinit var binding: ActivityWhisperSettingsBinding
     private lateinit var settings: SettingsManager
-    private var loading = false
+    private var settingsState by mutableStateOf(WhisperSettingsState())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityWhisperSettingsBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-        ToolCardShadow.removeFrom(binding.root)
         settings = SettingsManager.getInstance(this)
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = getString(R.string.activity_whisper_settings_title)
-        binding.toolbar.setNavigationOnClickListener { onBackPressedDispatcher.onBackPressed() }
-        binding.btnVadSettings.setOnClickListener {
-            startActivity(Intent(this, VadModelSettingsActivity::class.java))
-        }
-
-        binding.sliderWhisperThreads.addOnChangeListener { _, value, _ ->
-            binding.tvWhisperThreads.text = String.format(Locale.getDefault(), "%d", value.toInt())
-            if (!loading) settings.setSpeechWhisperThreads(value.toInt())
-        }
-        binding.switchHotwords.setOnCheckedChangeListener { _, checked ->
-            if (!loading) settings.setSpeechHotwordsEnabled(checked)
-        }
-        binding.sliderHotwordsScore.addOnChangeListener { _, value, _ ->
-            binding.tvHotwordsScore.text = String.format(Locale.getDefault(), "%.1f", value)
-            if (!loading) settings.setSpeechHotwordsScore(value)
-        }
-        binding.btnSaveHotwords.setOnClickListener {
-            settings.setSpeechHotwords(binding.etHotwords.text?.toString().orEmpty())
-        }
-
-        loading = true
-        binding.sliderWhisperThreads.value = settings.getSpeechWhisperThreads().toFloat()
-        binding.tvWhisperThreads.text = String.format(
-            Locale.getDefault(),
-            "%d",
-            settings.getSpeechWhisperThreads()
+        settingsState = WhisperSettingsState(
+            threads = settings.getSpeechWhisperThreads(),
+            hotwordsEnabled = settings.isSpeechHotwordsEnabled(),
+            hotwords = settings.getSpeechHotwords(),
+            hotwordsScore = settings.getSpeechHotwordsScore()
         )
-        binding.switchHotwords.isChecked = settings.isSpeechHotwordsEnabled()
-        binding.etHotwords.setText(settings.getSpeechHotwords())
-        binding.sliderHotwordsScore.value = settings.getSpeechHotwordsScore()
-        binding.tvHotwordsScore.text = String.format(Locale.getDefault(), "%.1f", settings.getSpeechHotwordsScore())
-        loading = false
+
+        setContent {
+            SubtitleEditComposeTheme {
+                WhisperSettingsScreen(
+                    state = settingsState,
+                    onBack = { onBackPressedDispatcher.onBackPressed() },
+                    onOpenVadSettings = {
+                        startActivity(Intent(this, VadModelSettingsActivity::class.java))
+                    },
+                    onThreadsChanged = { value ->
+                        val threads = value.roundToInt().coerceIn(1, 8)
+                        settingsState = settingsState.copy(threads = threads)
+                        settings.setSpeechWhisperThreads(threads)
+                    },
+                    onHotwordsEnabledChanged = { enabled ->
+                        settingsState = settingsState.copy(hotwordsEnabled = enabled)
+                        settings.setSpeechHotwordsEnabled(enabled)
+                    },
+                    onHotwordsChanged = { hotwords ->
+                        settingsState = settingsState.copy(hotwords = hotwords)
+                    },
+                    onSaveHotwords = {
+                        settings.setSpeechHotwords(settingsState.hotwords)
+                    },
+                    onHotwordsScoreChanged = { score ->
+                        settingsState = settingsState.copy(hotwordsScore = score)
+                        settings.setSpeechHotwordsScore(score)
+                    }
+                )
+            }
+        }
     }
 }

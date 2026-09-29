@@ -1,12 +1,13 @@
 package com.subtitleedit.editor
 
-import android.app.AlertDialog
+import android.app.Activity
 import android.content.Context
-import android.text.InputType
-import android.view.View
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.TextView
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import com.subtitleedit.ComposeDialogHost
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.TimeUtils
@@ -14,7 +15,7 @@ import com.subtitleedit.util.WebVttCuePolicy
 
 /** Owns the small dialogs used to edit one subtitle row. */
 internal class EditorSubtitleDialogController(
-    private val context: Context,
+    context: Context,
     private val ensureListMode: () -> Boolean,
     private val currentFormat: () -> SubtitleParser.SubtitleFormat,
     private val entryAt: (Int) -> SubtitleEntry?,
@@ -24,87 +25,122 @@ internal class EditorSubtitleDialogController(
     private val onUpdated: (Int, String) -> Unit,
     private val showMessage: (String) -> Unit
 ) {
+    private val activity = context as? Activity
+
     fun showTime(position: Int, start: Boolean) {
         if (!ensureListMode()) return
         val entry = entryAt(position) ?: return
         val current = if (start) entry.startTime else entry.endTime
-        val input = EditText(context).apply {
-            setText(TimeUtils.formatForInput(current))
-            inputType = InputType.TYPE_CLASS_TEXT
-            hint = "格式：00:00:01.500"
+        val input = mutableStateOf(TimeUtils.formatForInput(current))
+        val hostActivity = activity ?: return
+        ComposeDialogHost.show(hostActivity) { dialog ->
+            AlertDialog(
+                onDismissRequest = dialog::dismiss,
+                title = { Text(if (start) "编辑开始时间" else "编辑结束时间") },
+                text = {
+                    OutlinedTextField(
+                        value = input.value,
+                        onValueChange = { input.value = it },
+                        singleLine = true,
+                        label = { Text("格式：00:00:01.500") }
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            dialog.dismiss()
+                            val value = TimeUtils.parseFromInput(input.value)
+                            if (value == null) showMessage("时间格式无效")
+                            else if (updateTime(position, start, value)) onUpdated(position, "已更新")
+                        }
+                    ) { Text("确定") }
+                },
+                dismissButton = {
+                    TextButton(onClick = dialog::dismiss) { Text("取消") }
+                }
+            )
         }
-        AlertDialog.Builder(context)
-            .setTitle(if (start) "编辑开始时间" else "编辑结束时间")
-            .setView(input)
-            .setPositiveButton("确定") { _, _ ->
-                val value = TimeUtils.parseFromInput(input.text.toString())
-                if (value == null) showMessage("时间格式无效")
-                else if (updateTime(position, start, value)) onUpdated(position, "已更新")
-            }
-            .setNegativeButton("取消", null)
-            .show()
     }
 
     fun showText(position: Int) {
         if (!ensureListMode()) return
         val entry = entryAt(position) ?: return
-        val input = EditText(context).apply {
-            setText(entry.text)
-            setLines(3)
+        val input = mutableStateOf(entry.text)
+        val hostActivity = activity ?: return
+        ComposeDialogHost.show(hostActivity) { dialog ->
+            AlertDialog(
+                onDismissRequest = dialog::dismiss,
+                title = { Text("编辑字幕文本") },
+                text = {
+                    OutlinedTextField(
+                        value = input.value,
+                        onValueChange = { input.value = it },
+                        minLines = 3
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            dialog.dismiss()
+                            if (updateText(position, input.value)) onUpdated(position, "已更新")
+                        }
+                    ) { Text("确定") }
+                },
+                dismissButton = {
+                    TextButton(onClick = dialog::dismiss) { Text("取消") }
+                }
+            )
         }
-        AlertDialog.Builder(context)
-            .setTitle("编辑字幕文本")
-            .setView(input)
-            .setPositiveButton("确定") { _, _ ->
-                if (updateText(position, input.text.toString())) onUpdated(position, "已更新")
-            }
-            .setNegativeButton("取消", null)
-            .show()
     }
 
     fun showWebVttCue(position: Int) {
         if (!ensureListMode() || currentFormat() != SubtitleParser.SubtitleFormat.VTT) return
         val entry = entryAt(position) ?: return
-        val layout = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(32, 0, 32, 0)
-        }
-        val identifier = EditText(context).apply {
-            hint = "Cue identifier（可选）"
-            setText(entry.cueIdentifier)
-            isSingleLine = true
-        }
-        val settings = EditText(context).apply {
-            hint = "例如：line:90% position:50% align:start"
-            setText(entry.cueSettings)
-            isSingleLine = true
-        }
-        layout.addView(TextView(context).apply { text = "Cue identifier" })
-        layout.addView(identifier)
-        layout.addView(TextView(context).apply {
-            text = "Cue settings（line / position / size / align / vertical / region）"
-        })
-        layout.addView(settings)
-        val dialog = AlertDialog.Builder(context)
-            .setTitle("WebVTT Cue 属性")
-            .setView(layout)
-            .setPositiveButton("确定", null)
-            .setNegativeButton("取消", null)
-            .create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val id = identifier.text.toString().trim()
-                val options = settings.text.toString().trim()
-                val error = WebVttCuePolicy.validate(id, options)
-                if (error != null) {
-                    showMessage(error)
-                    return@setOnClickListener
+        val identifier = mutableStateOf(entry.cueIdentifier)
+        val settings = mutableStateOf(entry.cueSettings)
+        val hostActivity = activity ?: return
+        ComposeDialogHost.show(hostActivity) { dialog ->
+            AlertDialog(
+                onDismissRequest = dialog::dismiss,
+                title = { Text("WebVTT Cue 属性") },
+                text = {
+                    androidx.compose.foundation.layout.Column {
+                        OutlinedTextField(
+                            value = identifier.value,
+                            onValueChange = { identifier.value = it },
+                            singleLine = true,
+                            label = { Text("Cue identifier（可选）") }
+                        )
+                        OutlinedTextField(
+                            value = settings.value,
+                            onValueChange = { settings.value = it },
+                            singleLine = true,
+                            label = { Text("Cue settings") },
+                            placeholder = { Text("line:90% position:50% align:start") }
+                        )
+                        Text("line / position / size / align / vertical / region")
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val id = identifier.value.trim()
+                            val options = settings.value.trim()
+                            val error = WebVttCuePolicy.validate(id, options)
+                            if (error != null) {
+                                showMessage(error)
+                                return@TextButton
+                            }
+                            updateCue(position, id, options)
+                            onUpdated(position, "WebVTT Cue 属性已更新")
+                            dialog.dismiss()
+                        }
+                    ) { Text("确定") }
+                },
+                dismissButton = {
+                    TextButton(onClick = dialog::dismiss) { Text("取消") }
                 }
-                updateCue(position, id, options)
-                onUpdated(position, "WebVTT Cue 属性已更新")
-                dialog.dismiss()
-            }
+            )
         }
-        dialog.show()
     }
 }

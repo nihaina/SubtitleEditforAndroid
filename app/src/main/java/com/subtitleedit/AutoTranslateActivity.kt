@@ -4,25 +4,21 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Build
-import android.view.LayoutInflater
-import android.view.Menu
-import android.view.MenuItem
-import android.view.View
-import android.view.ViewGroup
-import android.widget.ImageButton
-import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.OnBackPressedCallback
-import androidx.appcompat.app.AlertDialog
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import com.subtitleedit.databinding.ActivityAutoTranslateBinding
+import com.subtitleedit.feature.ui.AutoTranslateFileUi
+import com.subtitleedit.feature.ui.AutoTranslateScreen
+import com.subtitleedit.feature.ui.AutoTranslateUiState
 import com.subtitleedit.repository.AiTranslationService
-import com.subtitleedit.repository.DefaultAiTranslationService
+import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.AiProviderConfig
 import com.subtitleedit.util.AiTranslationConversation
 import com.subtitleedit.util.DirectoryDisplayPath
@@ -53,15 +49,18 @@ class AutoTranslateActivity : AppCompatActivity() {
         const val EXTRA_INITIAL_FILE_URIS = "auto_translate_initial_file_uris"
     }
 
-    private lateinit var binding: ActivityAutoTranslateBinding
     private lateinit var settingsManager: SettingsManager
     private val aiTranslationService: AiTranslationService
         get() = (application as SubtitleEditApplication).dependencies.aiTranslationService
-    private lateinit var adapter: AutoTranslateAdapter
     private val files = mutableListOf<AutoTranslateFile>()
     private val activeJobs = mutableMapOf<String, Job>()
     private var queueRunning = false
     private var outputDirectoryUri: Uri? = null
+    private var outputDirectoryLabel: String? = null
+    private var uiState by mutableStateOf(AutoTranslateUiState())
+    private var pendingConfig: TranslationConfig? = null
+    private var pendingOutputUri: Uri? = null
+    private var pendingRemovalKey: String? = null
 
     private data class TranslationConfig(
         val provider: String,
@@ -117,8 +116,7 @@ class AutoTranslateActivity : AppCompatActivity() {
                 fileSize = getFileSizeFromUri(uri)
             )
         }
-        adapter.notifyDataSetChanged()
-        updateFileListVisibility()
+        updateScreenState()
     }
 
     private val directoryPickerLauncher = registerForActivityResult(
@@ -132,24 +130,43 @@ class AutoTranslateActivity : AppCompatActivity() {
             )
         }
         outputDirectoryUri = uri
-        binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, uri)
+        outputDirectoryLabel = DirectoryDisplayPath.fromUri(this, uri)
         settingsManager.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
+        updateScreenState()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityAutoTranslateBinding.inflate(layoutInflater)
-        setContentView(binding.root)
         settingsManager = SettingsManager.getInstance(this)
-        setupToolbar()
-        setupList()
-        binding.btnSelectFile.setOnClickListener {
-            filePickerLauncher.launch(arrayOf("text/*", "application/*"))
+        setContent {
+            SubtitleEditComposeTheme {
+                AutoTranslateScreen(
+                    state = uiState,
+                    onNavigateBack = { onBackPressedDispatcher.onBackPressed() },
+                    onSettings = { startActivity(Intent(this, AiSettingsActivity::class.java)) },
+                    onSelectFiles = { filePickerLauncher.launch(arrayOf("text/*", "application/*")) },
+                    onPunctuationPredictionChange = { enabled ->
+                        uiState = uiState.copy(punctuationPredictionEnabled = enabled)
+                    },
+                    onTranslationChange = { enabled ->
+                        uiState = uiState.copy(translationEnabled = enabled)
+                    },
+                    onSelectOutputDirectory = { directoryPickerLauncher.launch(outputDirectoryUri) },
+                    onStart = ::startQueuedFiles,
+                    onRetry = { key ->
+                        files.firstOrNull { it.sessionId == key }?.let { startFile(it, retry = true) }
+                    },
+                    onRemove = ::requestRemoveFile,
+                    onConfirmRemove = ::confirmPendingRemoval,
+                    onDismissRemove = ::dismissPendingRemoval,
+                    onDismissOutputConflict = ::dismissOutputConflict,
+                    onOverwriteOutput = { resolveOutputConflict(overwrite = true) },
+                    onRenameOutput = { resolveOutputConflict(overwrite = false) },
+                    onConfirmExit = ::stopAndExit,
+                    onDismissExit = { uiState = uiState.copy(showExitConfirmation = false) }
+                )
+            }
         }
-        binding.btnSelectOutputDir.setOnClickListener {
-            directoryPickerLauncher.launch(outputDirectoryUri)
-        }
-        binding.btnStartTranslate.setOnClickListener { startQueuedFiles() }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (!queueRunning) {
@@ -157,44 +174,12 @@ class AutoTranslateActivity : AppCompatActivity() {
                     onBackPressedDispatcher.onBackPressed()
                     return
                 }
-                confirmExitWhileTranslating()
+                uiState = uiState.copy(showExitConfirmation = true)
             }
         })
         restoreOutputDirectory()
         addInitialFiles(initialFileUris())
-    }
-
-    private fun setupToolbar() {
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        binding.toolbar.setNavigationOnClickListener {
-            onBackPressedDispatcher.onBackPressed()
-        }
-    }
-
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.menu_auto_translate, menu)
-        return true
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
-        R.id.action_auto_translate_settings -> {
-            startActivity(Intent(this, AiSettingsActivity::class.java))
-            true
-        }
-        else -> super.onOptionsItemSelected(item)
-    }
-
-    private fun setupList() {
-        adapter = AutoTranslateAdapter(
-            onItemClick = { file ->
-                if (file.status == FileStatus.STOPPED) startFile(file, retry = true)
-            },
-            onRemoveClick = ::confirmRemoveFile
-        )
-        binding.rvFileList.layoutManager = LinearLayoutManager(this)
-        binding.rvFileList.adapter = adapter
-        updateFileListVisibility()
+        updateScreenState()
     }
 
     private fun restoreOutputDirectory() {
@@ -202,7 +187,7 @@ class AutoTranslateActivity : AppCompatActivity() {
             ?.let(Uri::parse)
             ?: return
         outputDirectoryUri = uri
-        binding.tvOutputDir.text = DirectoryDisplayPath.fromUri(this, uri)
+        outputDirectoryLabel = DirectoryDisplayPath.fromUri(this, uri)
     }
 
     private fun addInitialFiles(uris: List<Uri>) {
@@ -215,8 +200,7 @@ class AutoTranslateActivity : AppCompatActivity() {
                 fileSize = getFileSizeFromUri(uri)
             )
         }
-        adapter.notifyDataSetChanged()
-        updateFileListVisibility()
+        updateScreenState()
     }
 
     @Suppress("DEPRECATION")
@@ -231,7 +215,7 @@ class AutoTranslateActivity : AppCompatActivity() {
             OverwritingToast.makeText(this, "请先添加要翻译的文件", Toast.LENGTH_SHORT).show()
             return
         }
-        val config = if (binding.switchOneClickTranslation.isChecked) {
+        val config = if (uiState.translationEnabled) {
             readTranslationConfig()
         } else {
             null
@@ -248,20 +232,25 @@ class AutoTranslateActivity : AppCompatActivity() {
             )
         }
         if (hasConflict) {
-            AlertDialog.Builder(this)
-                .setTitle("文件名冲突")
-                .setMessage("输出目录中已存在同名字幕文件。请选择处理方式。")
-                .setPositiveButton("覆盖") { _, _ ->
-                    beginQueuedFiles(config, outputUri, overwriteOutput = true)
-                }
-                .setNeutralButton("自动重命名") { _, _ ->
-                    beginQueuedFiles(config, outputUri, overwriteOutput = false)
-                }
-                .setNegativeButton("取消", null)
-                .show()
+            pendingConfig = config
+            pendingOutputUri = outputUri
+            uiState = uiState.copy(showOutputConflict = true)
         } else {
             beginQueuedFiles(config, outputUri, overwriteOutput = false)
         }
+    }
+
+    private fun resolveOutputConflict(overwrite: Boolean) {
+        val config = pendingConfig
+        val outputUri = pendingOutputUri
+        dismissOutputConflict()
+        if (outputUri != null) beginQueuedFiles(config, outputUri, overwrite)
+    }
+
+    private fun dismissOutputConflict() {
+        pendingConfig = null
+        pendingOutputUri = null
+        uiState = uiState.copy(showOutputConflict = false)
     }
 
     private fun beginQueuedFiles(
@@ -289,19 +278,18 @@ class AutoTranslateActivity : AppCompatActivity() {
     private fun startFile(
         file: AutoTranslateFile,
         retry: Boolean = false,
-        config: TranslationConfig? = if (binding.switchOneClickTranslation.isChecked) readTranslationConfig() else null,
+        config: TranslationConfig? = if (uiState.translationEnabled) readTranslationConfig() else null,
         outputUri: Uri = outputDirectoryUri ?: Uri.fromFile(getTranslateOutputDirectory()),
         overwriteOutput: Boolean = file.overwriteOutput
     ) {
         if (activeJobs[file.sessionId]?.isActive == true) return
         if (!validateSelectedFeatures(config)) return
         queueRunning = true
-        updateTranslationControls()
         if (retry) file.message = ""
         file.cancellationRequested = false
         file.status = FileStatus.RUNNING
         file.processingStage = ProcessingStage.READING
-        adapter.notifyItemChanged(files.indexOf(file))
+        updateTranslationControls()
         activeJobs[file.sessionId] = lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             processFile(file, config, outputUri, overwriteOutput)
         }
@@ -370,8 +358,8 @@ class AutoTranslateActivity : AppCompatActivity() {
 
     private suspend fun isFeatureEnabled(feature: Feature): Boolean = withContext(kotlinx.coroutines.Dispatchers.Main) {
         when (feature) {
-            Feature.PUNCTUATION_PREDICTION -> binding.switchPunctuationPrediction.isChecked
-            Feature.TRANSLATION -> binding.switchOneClickTranslation.isChecked
+            Feature.PUNCTUATION_PREDICTION -> uiState.punctuationPredictionEnabled
+            Feature.TRANSLATION -> uiState.translationEnabled
         }
     }
 
@@ -493,8 +481,8 @@ class AutoTranslateActivity : AppCompatActivity() {
     }
 
     private fun validateSelectedFeatures(translationConfig: TranslationConfig?): Boolean {
-        val punctuationPredictionSelected = binding.switchPunctuationPrediction.isChecked
-        val translationSelected = binding.switchOneClickTranslation.isChecked
+        val punctuationPredictionSelected = uiState.punctuationPredictionEnabled
+        val translationSelected = uiState.translationEnabled
         if (!punctuationPredictionSelected && !translationSelected) {
             OverwritingToast.makeText(this, "请至少选择一项处理功能", Toast.LENGTH_SHORT).show()
             return false
@@ -561,26 +549,32 @@ class AutoTranslateActivity : AppCompatActivity() {
 
     private fun postFileUpdate(file: AutoTranslateFile, update: () -> Unit) {
         runOnUiThread {
-            val index = files.indexOf(file)
-            if (index < 0) return@runOnUiThread
+            if (file !in files) return@runOnUiThread
             update()
-            adapter.notifyItemChanged(index)
-            updateFileListVisibility()
-            updateTranslationProgress()
+            updateScreenState()
         }
     }
 
-    private fun confirmRemoveFile(file: AutoTranslateFile) {
+    private fun requestRemoveFile(key: String) {
+        val file = files.firstOrNull { it.sessionId == key } ?: return
         if (file.status != FileStatus.RUNNING) {
             removeFile(file)
             return
         }
-        AlertDialog.Builder(this)
-            .setTitle("移除文件")
-            .setMessage("当前文件正在处理，是否移除？")
-            .setPositiveButton("移除") { _, _ -> removeFile(file) }
-            .setNegativeButton("取消", null)
-            .show()
+        pendingRemovalKey = file.sessionId
+        uiState = uiState.copy(removeFileName = file.fileName)
+    }
+
+    private fun confirmPendingRemoval() {
+        val file = files.firstOrNull { it.sessionId == pendingRemovalKey }
+        pendingRemovalKey = null
+        uiState = uiState.copy(removeFileName = null)
+        file?.let(::removeFile)
+    }
+
+    private fun dismissPendingRemoval() {
+        pendingRemovalKey = null
+        uiState = uiState.copy(removeFileName = null)
     }
 
     private fun cancelFile(file: AutoTranslateFile) {
@@ -592,36 +586,40 @@ class AutoTranslateActivity : AppCompatActivity() {
     private fun removeFile(file: AutoTranslateFile) {
         cancelFile(file)
         activeJobs.remove(file.sessionId)
-        val index = files.indexOf(file)
-        if (index >= 0) {
-            files.removeAt(index)
-            adapter.notifyItemRemoved(index)
-            updateFileListVisibility()
-        }
+        files.remove(file)
         queueRunning = activeJobs.values.any { it.isActive }
         updateTranslationControls()
     }
 
-    private fun updateFileListVisibility() {
-        binding.tvSelectedFile.text = if (files.isEmpty()) {
-            getString(R.string.activity_media_convert_text_03)
-        } else {
-            getString(R.string.batch_convert_selected_file_count, files.size)
-        }
-        binding.rvFileList.visibility = if (files.isEmpty()) View.GONE else View.VISIBLE
-    }
-
     private fun updateTranslationControls() {
-        binding.btnStartTranslate.isEnabled = !queueRunning
-        binding.tvTranslationProgress.visibility = if (queueRunning) View.VISIBLE else View.GONE
-        updateTranslationProgress()
+        updateScreenState()
     }
 
-    private fun updateTranslationProgress() {
-        if (!queueRunning) return
-        val activeCount = files.count { it.status == FileStatus.RUNNING }
-        val completedFiles = files.count { it.status == FileStatus.COMPLETED }
-        binding.tvTranslationProgress.text = buildString {
+    private fun updateScreenState() {
+        val fileItems = files.map { file ->
+            val status = when (file.status) {
+                FileStatus.WAITING -> "等待"
+                FileStatus.RUNNING -> file.processingStage.displayName
+                FileStatus.COMPLETED -> "已完成"
+                FileStatus.STOPPED -> "已停止，点击重试"
+            }
+            AutoTranslateFileUi(
+                key = file.sessionId,
+                fileName = file.fileName,
+                fileSizeLabel = FileUtils.formatFileSize(file.fileSize),
+                status = status,
+                statusMessage = file.message,
+                totalLines = file.totalLines,
+                processedLines = file.processedLines,
+                progressLabel = file.progressStage?.progressLabel,
+                showStageProgress = file.status == FileStatus.RUNNING &&
+                    file.processingStage == file.progressStage,
+                canRetry = file.status == FileStatus.STOPPED
+            )
+        }
+        val progressSummary = if (!queueRunning) "" else buildString {
+            val activeCount = files.count { it.status == FileStatus.RUNNING }
+            val completedFiles = files.count { it.status == FileStatus.COMPLETED }
             append("正在处理：$activeCount 个文件 · 已完成 $completedFiles/${files.size} 个文件")
             for (stage in ProcessingStage.entries.filter { it.progressLabel != null }) {
                 val stageFiles = files.filter { it.progressStage == stage }
@@ -631,19 +629,19 @@ class AutoTranslateActivity : AppCompatActivity() {
                 append(" · ${stage.progressLabel} 已处理 $processedLines/$totalLines 条字幕")
             }
         }
+        uiState = uiState.copy(
+            files = fileItems,
+            outputDirectory = outputDirectoryLabel,
+            queueRunning = queueRunning,
+            progressSummary = progressSummary
+        )
     }
 
-    private fun confirmExitWhileTranslating() {
-        AlertDialog.Builder(this)
-            .setTitle("处理进行中")
-            .setMessage("退出将停止正在进行的处理，已完成的文件会保留。确定退出吗？")
-            .setPositiveButton("停止并退出") { _, _ ->
-                files.forEach(::cancelFile)
-                queueRunning = false
-                finish()
-            }
-            .setNegativeButton("继续处理", null)
-            .show()
+    private fun stopAndExit() {
+        uiState = uiState.copy(showExitConfirmation = false)
+        files.forEach(::cancelFile)
+        queueRunning = false
+        finish()
     }
 
     private fun outputExtension(file: AutoTranslateFile): String = when (file.document?.format) {
@@ -698,42 +696,4 @@ class AutoTranslateActivity : AppCompatActivity() {
         return if (uri.scheme == "file") uri.path?.let(::File)?.length() ?: 0L else 0L
     }
 
-    private inner class AutoTranslateAdapter(
-        private val onItemClick: (AutoTranslateFile) -> Unit,
-        private val onRemoveClick: (AutoTranslateFile) -> Unit
-    ) : RecyclerView.Adapter<AutoTranslateAdapter.ViewHolder>() {
-        inner class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-            private val name: TextView = view.findViewById(R.id.tvFileName)
-            private val size: TextView = view.findViewById(R.id.tvFilePath)
-            private val stats: TextView = view.findViewById(R.id.tvFileStats)
-            private val statusText: TextView = view.findViewById(R.id.tvFileStatus)
-            private val remove: ImageButton = view.findViewById(R.id.btnRemove)
-
-            fun bind(file: AutoTranslateFile) {
-                name.text = file.fileName
-                size.text = FileUtils.formatFileSize(file.fileSize)
-                val status = when (file.status) {
-                    FileStatus.WAITING -> "等待"
-                    FileStatus.RUNNING -> file.processingStage.displayName
-                    FileStatus.COMPLETED -> "已完成"
-                    FileStatus.STOPPED -> "已停止，点击重试"
-                }
-                stats.text = if (file.progressStage != null) {
-                    "字幕 ${file.totalLines} · 已处理 ${file.processedLines}"
-                } else {
-                    "字幕 ${file.totalLines}"
-                }
-                statusText.text = if (file.message.isBlank()) status else "$status：${file.message}"
-                itemView.setOnClickListener { onItemClick(file) }
-                remove.setOnClickListener { onRemoveClick(file) }
-            }
-        }
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder = ViewHolder(
-            LayoutInflater.from(parent.context).inflate(R.layout.item_auto_translate, parent, false)
-        )
-
-        override fun onBindViewHolder(holder: ViewHolder, position: Int) = holder.bind(files[position])
-        override fun getItemCount(): Int = files.size
-    }
 }

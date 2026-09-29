@@ -3,19 +3,18 @@ package com.subtitleedit
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.view.Menu
-import android.view.MenuItem
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
 import android.widget.Toast
+import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.LinearLayoutManager
-import com.subtitleedit.adapter.LogSection
-import com.subtitleedit.adapter.LogSectionAdapter
-import com.subtitleedit.databinding.ActivityLogBinding
+import com.subtitleedit.ui.LogScreen
+import com.subtitleedit.ui.LogSection
+import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.RuntimeLogManager
 import kotlinx.coroutines.Dispatchers
@@ -24,132 +23,112 @@ import kotlinx.coroutines.withContext
 
 class LogActivity : AppCompatActivity() {
 
-    private companion object {
-        const val MENU_CLEAR_LOG = 1
-    }
-
-    private lateinit var binding: ActivityLogBinding
-    private var displayMode = RuntimeLogManager.DisplayMode.SIMPLE
+    private var displayMode by mutableStateOf(RuntimeLogManager.DisplayMode.SIMPLE)
     private var hasLoadedLog = false
+    private var isRefreshing by mutableStateOf(false)
+    private var isExportEnabled by mutableStateOf(false)
     private var refreshGeneration = 0
-    private var allSections: List<LogSection> = emptyList()
-    private var pageFilter = "全部页面"
+    private var allSections by mutableStateOf(emptyList<LogSection>())
+    private var pageFilter by mutableStateOf("全部页面")
+    private var pageOptions by mutableStateOf(listOf("全部页面"))
+    private var infoText by mutableStateOf("")
 
     private val exportDirLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
-        uri?.let { exportLogToDirectory(it) }
+        uri?.let(::exportLogToDirectory)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityLogBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-
-        setupToolbar()
-        setupButtons()
-        setupDisplayMode()
-        setupPageFilter()
-        binding.logSectionList.layoutManager = LinearLayoutManager(this)
+        setContent {
+            SubtitleEditComposeTheme {
+                LogScreen(
+                    sections = allSections,
+                    pageOptions = pageOptions,
+                    pageFilter = pageFilter,
+                    displayMode = displayMode,
+                    infoText = infoText,
+                    isRefreshing = isRefreshing,
+                    isExportEnabled = isExportEnabled,
+                    onBack = { onBackPressedDispatcher.onBackPressed() },
+                    onRefresh = { refreshLog() },
+                    onExport = ::requestExport,
+                    onClear = ::clearLog,
+                    onDisplayModeChange = { mode ->
+                        if (displayMode != mode) {
+                            displayMode = mode
+                            refreshLog()
+                        }
+                    },
+                    onPageFilterChange = { pageFilter = it }
+                )
+            }
+        }
         refreshLog()
-    }
-
-    private fun setupToolbar() {
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.setDisplayShowHomeEnabled(true)
-        supportActionBar?.title = "运行日志"
-        binding.toolbar.setNavigationOnClickListener {
-            onBackPressedDispatcher.onBackPressed()
-        }
-    }
-
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menu.add(Menu.NONE, MENU_CLEAR_LOG, Menu.NONE, "清空")
-            .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-        return true
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        return when (item.itemId) {
-            MENU_CLEAR_LOG -> {
-                clearLog()
-                true
-            }
-            else -> super.onOptionsItemSelected(item)
-        }
-    }
-
-    private fun setupButtons() {
-        binding.btnRefresh.setOnClickListener {
-            refreshLog()
-        }
-        binding.btnExport.setOnClickListener {
-            if (!hasLoadedLog) {
-                refreshLog { openExportDirectoryPicker() }
-            } else {
-                openExportDirectoryPicker()
-            }
-        }
-    }
-
-    private fun setupDisplayMode() {
-        binding.logDisplayMode.addOnButtonCheckedListener { _, checkedId, isChecked ->
-            if (!isChecked) return@addOnButtonCheckedListener
-            displayMode = if (checkedId == R.id.btnSimpleLog) {
-                RuntimeLogManager.DisplayMode.SIMPLE
-            } else {
-                RuntimeLogManager.DisplayMode.DETAILED
-            }
-            refreshLog()
-        }
-    }
-
-    private fun setupPageFilter() {
-        binding.spinnerLogPageFilter.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>, view: android.view.View?, position: Int, id: Long) {
-                pageFilter = parent.getItemAtPosition(position) as String
-                renderSections()
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>) = Unit
-        }
     }
 
     private fun refreshLog(onComplete: (() -> Unit)? = null) {
         val generation = ++refreshGeneration
-        binding.btnRefresh.isEnabled = false
-        binding.btnExport.isEnabled = false
-        binding.tvLogInfo.text = "正在读取本应用最近 1 小时日志..."
-        binding.logSectionList.adapter = null
+        val mode = displayMode
+        isRefreshing = true
+        isExportEnabled = false
+        infoText = "正在读取本应用最近 1 小时日志..."
+        allSections = emptyList()
 
         lifecycleScope.launch {
-            val snapshot = withContext(Dispatchers.IO) {
-                RuntimeLogManager.captureRecent(this@LogActivity, displayMode)
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    RuntimeLogManager.captureRecent(this@LogActivity, mode)
+                }
             }
             if (generation != refreshGeneration) return@launch
-            allSections = buildLogSections(snapshot.content)
-            updatePageFilterOptions()
-            hasLoadedLog = true
-            binding.tvLogInfo.text = buildString {
-                append("${snapshot.packageName} 最近 1 小时，显示 ${snapshot.matchedLineCount} 行")
-                if (snapshot.isPreviewTruncated) append("（预览已限制）")
+
+            result.onSuccess { snapshot ->
+                allSections = buildLogSections(snapshot.content)
+                pageOptions = listOf("全部页面") + allSections
+                    .map { it.title.substringBefore(" - ") }
+                    .distinct()
+                if (pageFilter !in pageOptions) pageFilter = "全部页面"
+                hasLoadedLog = true
+                infoText = buildString {
+                    append("${snapshot.packageName} 最近 1 小时，显示 ${snapshot.matchedLineCount} 行")
+                    if (snapshot.isPreviewTruncated) append("（预览已限制）")
+                }
+                isExportEnabled = true
+                onComplete?.invoke()
+            }.onFailure { error ->
+                infoText = "读取日志失败：${error.message ?: "未知错误"}"
+                isExportEnabled = true
+                OverwritingToast.makeText(
+                    this@LogActivity,
+                    infoText,
+                    Toast.LENGTH_LONG
+                ).show()
             }
-            binding.btnRefresh.isEnabled = true
-            binding.btnExport.isEnabled = true
-            onComplete?.invoke()
+            isRefreshing = false
         }
     }
 
     private fun clearLog() {
+        refreshGeneration++
         RuntimeLogManager.clear(this)
         hasLoadedLog = false
-        binding.logSectionList.adapter = LogSectionAdapter(
-            listOf(LogSection("暂无可读取的日志", "", "", 0))
-        )
+        isRefreshing = false
+        isExportEnabled = true
         allSections = emptyList()
-        binding.tvLogInfo.text = "${packageName} 最近 1 小时"
+        pageOptions = listOf("全部页面")
+        pageFilter = "全部页面"
+        infoText = "$packageName 最近 1 小时"
         OverwritingToast.makeText(this, "日志已清空", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun requestExport() {
+        if (!hasLoadedLog) {
+            refreshLog { openExportDirectoryPicker() }
+        } else {
+            openExportDirectoryPicker()
+        }
     }
 
     private fun openExportDirectoryPicker() {
@@ -157,6 +136,7 @@ class LogActivity : AppCompatActivity() {
     }
 
     private fun exportLogToDirectory(uri: Uri) {
+        val mode = displayMode
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
@@ -170,7 +150,7 @@ class LogActivity : AppCompatActivity() {
                     val file = dir.createFile("text/plain", fileName)
                         ?: throw IllegalStateException("无法创建日志文件")
                     contentResolver.openOutputStream(file.uri, "wt")?.use { output ->
-                        RuntimeLogManager.exportRecent(this@LogActivity, displayMode, output)
+                        RuntimeLogManager.exportRecent(this@LogActivity, mode, output)
                     } ?: throw IllegalStateException("无法写入日志文件")
                     fileName
                 }
@@ -178,8 +158,8 @@ class LogActivity : AppCompatActivity() {
 
             result.onSuccess { fileName ->
                 OverwritingToast.makeText(this@LogActivity, "已导出：$fileName", Toast.LENGTH_SHORT).show()
-            }.onFailure { e ->
-                OverwritingToast.makeText(this@LogActivity, "导出失败：${e.message}", Toast.LENGTH_LONG).show()
+            }.onFailure { error ->
+                OverwritingToast.makeText(this@LogActivity, "导出失败：${error.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -232,29 +212,6 @@ class LogActivity : AppCompatActivity() {
             line.contains("WhisperRecognizer") ||
             line.contains("sherpa-onnx") ||
             line.contains("Pcm16Wav")
-
-    private fun updatePageFilterOptions() {
-        val options = listOf("全部页面") + allSections
-            .map { it.title.substringBefore(" - ") }
-            .distinct()
-        if (pageFilter !in options) pageFilter = "全部页面"
-        binding.spinnerLogPageFilter.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_item,
-            options
-        ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-        binding.spinnerLogPageFilter.setSelection(options.indexOf(pageFilter))
-        renderSections()
-    }
-
-    private fun renderSections() {
-        val sections = if (pageFilter == "全部页面") {
-            allSections
-        } else {
-            allSections.filter { it.title.substringBefore(" - ") == pageFilter }
-        }
-        binding.logSectionList.adapter = LogSectionAdapter(sections)
-    }
 
     private fun activitySectionTitle(activity: String): String = when (activity) {
         "SpeechToSubtitleActivity" -> "语音转字幕"

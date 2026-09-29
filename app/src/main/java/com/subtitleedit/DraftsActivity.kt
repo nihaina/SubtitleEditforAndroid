@@ -1,253 +1,160 @@
 package com.subtitleedit
 
-import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.view.LayoutInflater
-import android.view.Menu
-import android.view.MenuItem
-import android.view.View
-import android.view.ViewGroup
-import android.widget.EditText
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import com.subtitleedit.databinding.ActivityDraftsBinding
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.DraftManager
-import java.io.File
 
-/**
- * 草稿箱列表界面
- * 主界面模式：显示文件夹列表，点击文件夹进入查看草稿，支持预览和导出
- * 编辑器模式：直接显示所有草稿文件，点击返回草稿内容
- */
+/** Draft browser host. File access and platform results remain in the Activity. */
 class DraftsActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityDraftsBinding
-    private lateinit var adapter: DraftAdapter
-    private val drafts = mutableListOf<DraftItem>()
-    
-    // 当前文件夹路径（为空表示在根目录）
-    private var currentFolder: String = ""
+    private var currentFolder by mutableStateOf("")
+    private var drafts by mutableStateOf(emptyList<DraftItem>())
+    private var dialogState by mutableStateOf<DraftsDialogState?>(null)
 
-    // 是否从编辑器打开（用于直接加载草稿到编辑器）
+    // Whether the editor launched this page to load a saved draft.
     private var fromEditor = false
 
-    // 文件选择器（用于导出）
+    private var draftToExport: DraftItem? = null
+
     private val exportFileLauncher = registerForActivityResult(
         ActivityResultContracts.CreateDocument("*/*")
     ) { uri ->
-        uri?.let { exportToUri(it) }
+        if (uri != null) {
+            exportToUri(uri)
+        } else {
+            draftToExport = null
+        }
     }
-    
-    // 待导出的草稿
-    private var draftToExport: DraftItem? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityDraftsBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-
         fromEditor = intent.getBooleanExtra(EXTRA_FROM_EDITOR, false)
+        loadDrafts()
 
-        setupToolbar()
-        setupRecyclerView()
+        setContent {
+            SubtitleEditComposeTheme {
+                DraftsPage(
+                    currentFolder = currentFolder,
+                    drafts = drafts,
+                    fromEditor = fromEditor,
+                    dialogState = dialogState,
+                    onBack = ::handleBack,
+                    onBackToRoot = ::goToRoot,
+                    onItemClick = ::openDraft,
+                    onLongPress = ::showActions,
+                    onDeleteClick = ::requestDelete,
+                    onRequestDelete = ::requestDelete,
+                    onDismissDialog = { dialogState = null },
+                    onCopyDraft = { draft ->
+                        copyToClipboard(DraftManager.readDraft(this, draft.folderName, draft.fileName))
+                    },
+                    onExportDraft = ::exportDraft,
+                    onLoadDraft = ::returnDraftToEditor,
+                    onDeleteDraft = ::deleteDraft,
+                    onDeleteFolder = ::deleteFolder
+                )
+            }
+        }
+    }
+
+    private fun handleBack() {
+        if (currentFolder.isNotEmpty()) {
+            goToRoot()
+        } else {
+            onBackPressedDispatcher.onBackPressed()
+        }
+    }
+
+    private fun goToRoot() {
+        currentFolder = ""
+        dialogState = null
         loadDrafts()
     }
-    
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        if (currentFolder.isNotEmpty()) {
-            menuInflater.inflate(R.menu.menu_drafts, menu)
-        }
-        return super.onCreateOptionsMenu(menu)
-    }
-    
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        return when (item.itemId) {
-            R.id.menu_back_to_root -> {
-                currentFolder = ""
-                loadDrafts()
-                invalidateOptionsMenu()
-                true
-            }
-            else -> super.onOptionsItemSelected(item)
-        }
-    }
 
-    private fun setupToolbar() {
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.setDisplayShowHomeEnabled(true)
-        updateToolbarTitle()
-
-        binding.toolbar.setNavigationOnClickListener {
-            if (currentFolder.isNotEmpty()) {
-                // 在非根目录时，返回根目录
-                currentFolder = ""
-                loadDrafts()
-                invalidateOptionsMenu()
-                updateToolbarTitle()
-            } else {
-                // 在根目录时，返回上一个 Activity
-                onBackPressed()
-            }
-        }
-    }
-    
-    private fun updateToolbarTitle() {
-        binding.toolbar.title = if (currentFolder.isEmpty()) {
-            getString(R.string.drafts)
+    private fun openDraft(draft: DraftItem) {
+        if (draft.isFolder) {
+            currentFolder = draft.folderName
+            loadDrafts()
         } else {
-            currentFolder
-        }
-    }
-
-    private fun setupRecyclerView() {
-        adapter = DraftAdapter(
-            onItemClick = { draft ->
-                // 编辑器和主页模式都使用文件夹视图
-                if (draft.isFolder) {
-                    // 点击文件夹，进入查看
-                    currentFolder = draft.folderName
-                    loadDrafts()
-                    invalidateOptionsMenu()
-                    updateToolbarTitle()
-                } else {
-                    // 点击文件，显示预览对话框
-                    showPreviewDialog(draft)
-                }
-            },
-            onItemLongClick = { draft ->
-                if (!draft.isFolder) {
-                    showLongClickMenu(draft)
-                }
-            },
-            onDeleteClick = { draft ->
-                if (draft.isFolder) {
-                    confirmDeleteFolder(draft)
-                } else {
-                    confirmDelete(draft)
-                }
-            }
-        )
-
-        binding.rvDrafts.apply {
-            layoutManager = LinearLayoutManager(this@DraftsActivity)
-            adapter = this@DraftsActivity.adapter
-        }
-    }
-
-    private fun loadDrafts() {
-        drafts.clear()
-        
-        // 编辑器和主页模式都使用文件夹视图
-        if (currentFolder.isEmpty()) {
-            // 根目录：显示文件夹列表
-            val folders = DraftManager.getAllDraftFolders(this)
-            drafts.addAll(folders.map { DraftItem(it.name, "", it.name, "", true) })
-        } else {
-            // 文件夹内：显示草稿文件列表
-            val folderDrafts = DraftManager.getDraftsInFolder(this, currentFolder)
-            drafts.addAll(folderDrafts.map { 
-                DraftItem(currentFolder, it.name, it.name, DraftManager.getFormattedDate(it), false) 
-            })
-        }
-        
-        adapter.submitList(drafts.toList())
-
-        binding.tvEmpty.visibility = if (drafts.isEmpty()) View.VISIBLE else View.GONE
-    }
-    
-    /**
-     * 显示草稿预览对话框
-     */
-    private fun showPreviewDialog(draft: DraftItem) {
-        val content = DraftManager.readDraft(this, draft.folderName, draft.fileName)
-        
-        // 创建可滚动的文本视图
-        val scrollView = android.widget.ScrollView(this).apply {
-            setPadding(50, 40, 50, 40)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.MATCH_PARENT
+            dialogState = DraftsDialogState.Preview(
+                draft = draft,
+                content = DraftManager.readDraft(this, draft.folderName, draft.fileName)
             )
         }
-        
-        val textView = android.widget.TextView(this).apply {
-            text = content
-            textSize = 14f
-            setLineSpacing(0f, 1.3f)
-        }
-        
-        scrollView.addView(textView)
-        
-        val builder = AlertDialog.Builder(this)
-            .setTitle("预览：${draft.displayName}")
-            .setView(scrollView)
-            .setNeutralButton("复制全文") { _, _ ->
-                copyToClipboard(content)
-            }
-        
-        if (fromEditor) {
-            // 编辑器模式：添加"加载此草稿"按钮
-            builder.setPositiveButton("加载此草稿") { _, _ ->
-                returnDraftToEditor(draft)
-            }
-            builder.setNegativeButton(R.string.cancel, null)
+    }
+
+    private fun showActions(draft: DraftItem) {
+        if (!draft.isFolder) dialogState = DraftsDialogState.Actions(draft)
+    }
+
+    private fun requestDelete(draft: DraftItem) {
+        dialogState = if (draft.isFolder) {
+            DraftsDialogState.DeleteFolder(draft)
         } else {
-            // 主页模式：只有确认按钮
-            builder.setPositiveButton(R.string.confirm, null)
+            DraftsDialogState.DeleteDraft(draft)
         }
-        
-        builder.show()
     }
-    
-    /**
-     * 显示长按菜单
-     */
-    private fun showLongClickMenu(draft: DraftItem) {
-        val items = arrayOf("导出草稿", "复制全文", "删除草稿")
-        
-        AlertDialog.Builder(this)
-            .setTitle(draft.displayName)
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> exportDraft(draft)
-                    1 -> copyToClipboard(DraftManager.readDraft(this, draft.folderName, draft.fileName))
-                    2 -> confirmDelete(draft)
-                }
-            }
-            .show()
-    }
-    
-    /**
-     * 复制文本到剪贴板
-     */
+
     private fun copyToClipboard(content: String) {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("draft", content))
-        com.subtitleedit.util.OverwritingToast.makeText(this, "已复制到剪贴板", Toast.LENGTH_SHORT).show()
+        com.subtitleedit.util.OverwritingToast.makeText(
+            this,
+            "已复制到剪贴板",
+            Toast.LENGTH_SHORT
+        ).show()
     }
-    
-    /**
-     * 导出草稿
-     */
+
     private fun exportDraft(draft: DraftItem) {
         draftToExport = draft
         exportFileLauncher.launch(draft.fileName)
     }
-    
-    /**
-     * 导出到指定 URI
-     */
+
     private fun exportToUri(uri: android.net.Uri) {
         draftToExport?.let { draft ->
             try {
@@ -255,9 +162,17 @@ class DraftsActivity : AppCompatActivity() {
                 contentResolver.openOutputStream(uri)?.use { outputStream ->
                     outputStream.write(content.toByteArray())
                 }
-                com.subtitleedit.util.OverwritingToast.makeText(this, "导出成功", Toast.LENGTH_SHORT).show()
+                com.subtitleedit.util.OverwritingToast.makeText(
+                    this,
+                    "导出成功",
+                    Toast.LENGTH_SHORT
+                ).show()
             } catch (e: Exception) {
-                com.subtitleedit.util.OverwritingToast.makeText(this, "导出失败：${e.message}", Toast.LENGTH_SHORT).show()
+                com.subtitleedit.util.OverwritingToast.makeText(
+                    this,
+                    "导出失败：${e.message}",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         }
         draftToExport = null
@@ -273,39 +188,51 @@ class DraftsActivity : AppCompatActivity() {
         finish()
     }
 
-    private fun confirmDelete(draft: DraftItem) {
-        AlertDialog.Builder(this)
-            .setTitle(R.string.delete)
-            .setMessage(getString(R.string.delete_draft_confirm))
-            .setPositiveButton(R.string.confirm) { _, _ ->
-                val success = DraftManager.deleteDraft(this, draft.folderName, draft.fileName)
-                if (success) {
-                    com.subtitleedit.util.OverwritingToast.makeText(this, R.string.draft_deleted, Toast.LENGTH_SHORT).show()
-                    loadDrafts()
-                }
-            }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
+    private fun deleteDraft(draft: DraftItem) {
+        dialogState = null
+        val success = DraftManager.deleteDraft(this, draft.folderName, draft.fileName)
+        if (success) {
+            com.subtitleedit.util.OverwritingToast.makeText(
+                this,
+                R.string.draft_deleted,
+                Toast.LENGTH_SHORT
+            ).show()
+            loadDrafts()
+        }
     }
-    
-    private fun confirmDeleteFolder(draft: DraftItem) {
-        AlertDialog.Builder(this)
-            .setTitle(R.string.delete)
-            .setMessage("确定要删除此文件夹及其所有内容吗？")
-            .setPositiveButton(R.string.confirm) { _, _ ->
-                val success = DraftManager.deleteDraftFolder(this, draft.folderName)
-                if (success) {
-                    com.subtitleedit.util.OverwritingToast.makeText(this, R.string.draft_deleted, Toast.LENGTH_SHORT).show()
-                    if (currentFolder == draft.folderName) {
-                        currentFolder = ""
-                        updateToolbarTitle()
-                        invalidateOptionsMenu()
-                    }
-                    loadDrafts()
-                }
+
+    private fun deleteFolder(draft: DraftItem) {
+        dialogState = null
+        val success = DraftManager.deleteDraftFolder(this, draft.folderName)
+        if (success) {
+            com.subtitleedit.util.OverwritingToast.makeText(
+                this,
+                R.string.draft_deleted,
+                Toast.LENGTH_SHORT
+            ).show()
+            if (currentFolder == draft.folderName) {
+                currentFolder = ""
             }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
+            loadDrafts()
+        }
+    }
+
+    private fun loadDrafts() {
+        drafts = if (currentFolder.isEmpty()) {
+            DraftManager.getAllDraftFolders(this).map { folder ->
+                DraftItem(folder.name, "", folder.name, "", true)
+            }
+        } else {
+            DraftManager.getDraftsInFolder(this, currentFolder).map { file ->
+                DraftItem(
+                    currentFolder,
+                    file.name,
+                    file.name,
+                    DraftManager.getFormattedDate(file),
+                    false
+                )
+            }
+        }
     }
 
     companion object {
@@ -314,7 +241,7 @@ class DraftsActivity : AppCompatActivity() {
         const val EXTRA_DRAFT_FILE_NAME = "extra_draft_file_name"
         const val EXTRA_DRAFT_FOLDER_NAME = "extra_draft_folder_name"
     }
-    
+
     data class DraftItem(
         val folderName: String,
         val fileName: String,
@@ -322,56 +249,337 @@ class DraftsActivity : AppCompatActivity() {
         val formattedDate: String,
         val isFolder: Boolean
     )
+}
 
-    inner class DraftAdapter(
-        private val onItemClick: (DraftItem) -> Unit,
-        private val onItemLongClick: (DraftItem) -> Unit,
-        private val onDeleteClick: (DraftItem) -> Unit
-    ) : RecyclerView.Adapter<DraftAdapter.DraftViewHolder>() {
+internal sealed interface DraftsDialogState {
+    data class Preview(
+        val draft: DraftsActivity.DraftItem,
+        val content: String
+    ) : DraftsDialogState
 
-        private var items: List<DraftItem> = emptyList()
+    data class Actions(val draft: DraftsActivity.DraftItem) : DraftsDialogState
+    data class DeleteDraft(val draft: DraftsActivity.DraftItem) : DraftsDialogState
+    data class DeleteFolder(val draft: DraftsActivity.DraftItem) : DraftsDialogState
+}
 
-        fun submitList(newItems: List<DraftItem>) {
-            items = newItems
-            notifyDataSetChanged()
-        }
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): DraftViewHolder {
-            val view = LayoutInflater.from(parent.context)
-                .inflate(R.layout.item_draft, parent, false)
-            return DraftViewHolder(view)
-        }
-
-        override fun onBindViewHolder(holder: DraftViewHolder, position: Int) {
-            holder.bind(items[position])
-        }
-
-        override fun getItemCount() = items.size
-
-        inner class DraftViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-            private val tvName: TextView = itemView.findViewById(R.id.tvDraftName)
-            private val tvDate: TextView = itemView.findViewById(R.id.tvDraftDate)
-            private val btnDelete: ImageView = itemView.findViewById(R.id.btnDelete)
-
-            fun bind(draft: DraftItem) {
-                tvName.text = draft.displayName
-                tvDate.text = if (draft.isFolder) "文件夹" else draft.formattedDate
-
-                itemView.setOnClickListener {
-                    onItemClick(draft)
-                }
-                
-                itemView.setOnLongClickListener {
-                    if (!draft.isFolder) {
-                        onItemLongClick(draft)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun DraftsPage(
+    currentFolder: String,
+    drafts: List<DraftsActivity.DraftItem>,
+    fromEditor: Boolean,
+    dialogState: DraftsDialogState?,
+    showTopBar: Boolean = true,
+    onBack: () -> Unit,
+    onBackToRoot: () -> Unit,
+    onItemClick: (DraftsActivity.DraftItem) -> Unit,
+    onLongPress: (DraftsActivity.DraftItem) -> Unit,
+    onDeleteClick: (DraftsActivity.DraftItem) -> Unit,
+    onRequestDelete: (DraftsActivity.DraftItem) -> Unit,
+    onDismissDialog: () -> Unit,
+    onCopyDraft: (DraftsActivity.DraftItem) -> Unit,
+    onExportDraft: (DraftsActivity.DraftItem) -> Unit,
+    onLoadDraft: (DraftsActivity.DraftItem) -> Unit,
+    onDeleteDraft: (DraftsActivity.DraftItem) -> Unit,
+    onDeleteFolder: (DraftsActivity.DraftItem) -> Unit
+) {
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        topBar = {
+            if (showTopBar) {
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = if (currentFolder.isEmpty()) {
+                                stringResource(R.string.drafts)
+                            } else {
+                                currentFolder
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_back),
+                                contentDescription = stringResource(R.string.tools_navigate_back),
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    },
+                    actions = {
+                        if (currentFolder.isNotEmpty()) {
+                            TextButton(onClick = onBackToRoot) {
+                                Text(stringResource(R.string.menu_drafts_title_01))
+                            }
+                        }
                     }
-                    true
-                }
-
-                btnDelete.setOnClickListener {
-                    onDeleteClick(draft)
+                )
+            }
+        }
+    ) { innerPadding ->
+        if (drafts.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = stringResource(R.string.no_drafts),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentPadding = PaddingValues(vertical = 4.dp)
+            ) {
+                items(
+                    items = drafts,
+                    key = { "${it.folderName}/${it.fileName}" }
+                ) { draft ->
+                    DraftRow(
+                        draft = draft,
+                        onClick = { onItemClick(draft) },
+                        onLongClick = { onLongPress(draft) },
+                        onDeleteClick = { onDeleteClick(draft) }
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
         }
+    }
+
+    DraftsDialogHost(
+        dialogState = dialogState,
+        fromEditor = fromEditor,
+        onDismiss = onDismissDialog,
+        onCopyDraft = onCopyDraft,
+        onExportDraft = onExportDraft,
+        onRequestDelete = onRequestDelete,
+        onLoadDraft = onLoadDraft,
+        onDeleteDraft = onDeleteDraft,
+        onDeleteFolder = onDeleteFolder
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DraftRow(
+    draft: DraftsActivity.DraftItem,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onDeleteClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    if (!draft.isFolder) onLongClick()
+                }
+            )
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            painter = painterResource(if (draft.isFolder) R.drawable.ic_folder else R.drawable.ic_document),
+            contentDescription = null,
+            modifier = Modifier.size(24.dp),
+            tint = if (draft.isFolder) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
+        )
+        Spacer(Modifier.size(16.dp))
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(vertical = 4.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = draft.displayName,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.size(4.dp))
+            Text(
+                text = if (draft.isFolder) "文件夹" else draft.formattedDate,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        IconButton(
+            onClick = onDeleteClick,
+            modifier = Modifier.size(48.dp)
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_delete_normal),
+                contentDescription = stringResource(R.string.delete),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun DraftsDialogHost(
+    dialogState: DraftsDialogState?,
+    fromEditor: Boolean,
+    onDismiss: () -> Unit,
+    onCopyDraft: (DraftsActivity.DraftItem) -> Unit,
+    onExportDraft: (DraftsActivity.DraftItem) -> Unit,
+    onRequestDelete: (DraftsActivity.DraftItem) -> Unit,
+    onLoadDraft: (DraftsActivity.DraftItem) -> Unit,
+    onDeleteDraft: (DraftsActivity.DraftItem) -> Unit,
+    onDeleteFolder: (DraftsActivity.DraftItem) -> Unit
+) {
+    when (dialogState) {
+        is DraftsDialogState.Preview -> {
+            AlertDialog(
+                onDismissRequest = onDismiss,
+                title = { Text("预览：${dialogState.draft.displayName}") },
+                text = {
+                    Column {
+                        Box(
+                            modifier = Modifier
+                                .heightIn(max = 360.dp)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            Text(
+                                text = dialogState.content,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                onCopyDraft(dialogState.draft)
+                                onDismiss()
+                            }
+                        ) {
+                            Text("复制全文")
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            if (fromEditor) {
+                                onLoadDraft(dialogState.draft)
+                            } else {
+                                onDismiss()
+                            }
+                        }
+                    ) {
+                        Text(if (fromEditor) "加载此草稿" else stringResource(R.string.confirm))
+                    }
+                },
+                dismissButton = if (fromEditor) {
+                    {
+                        TextButton(onClick = onDismiss) {
+                            Text(stringResource(R.string.cancel))
+                        }
+                    }
+                } else {
+                    {}
+                }
+            )
+        }
+
+        is DraftsDialogState.Actions -> {
+            AlertDialog(
+                onDismissRequest = onDismiss,
+                title = { Text(dialogState.draft.displayName) },
+                text = {
+                    Column {
+                        TextButton(
+                            onClick = {
+                                val draft = dialogState.draft
+                                onDismiss()
+                                onExportDraft(draft)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("导出草稿")
+                        }
+                        TextButton(
+                            onClick = {
+                                val draft = dialogState.draft
+                                onDismiss()
+                                onCopyDraft(draft)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("复制全文")
+                        }
+                        TextButton(
+                            onClick = {
+                                onRequestDelete(dialogState.draft)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("删除草稿")
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                }
+            )
+        }
+
+        is DraftsDialogState.DeleteDraft -> {
+            AlertDialog(
+                onDismissRequest = onDismiss,
+                title = { Text(stringResource(R.string.delete)) },
+                text = { Text(stringResource(R.string.delete_draft_confirm)) },
+                confirmButton = {
+                    TextButton(onClick = { onDeleteDraft(dialogState.draft) }) {
+                        Text(stringResource(R.string.confirm))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                }
+            )
+        }
+
+        is DraftsDialogState.DeleteFolder -> {
+            AlertDialog(
+                onDismissRequest = onDismiss,
+                title = { Text(stringResource(R.string.delete)) },
+                text = { Text("确定要删除此文件夹及其所有内容吗？") },
+                confirmButton = {
+                    TextButton(onClick = { onDeleteFolder(dialogState.draft) }) {
+                        Text(stringResource(R.string.confirm))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                }
+            )
+        }
+
+        null -> Unit
     }
 }

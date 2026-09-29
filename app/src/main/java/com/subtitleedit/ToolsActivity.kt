@@ -2,77 +2,81 @@ package com.subtitleedit
 
 import android.content.Intent
 import android.os.Bundle
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
-import com.subtitleedit.databinding.ActivityToolsBinding
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import com.subtitleedit.ui.ToolsScreen
+import com.subtitleedit.ui.ToolDestination
+import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 
-/**
- * 工具页面 - 二级页面，包含各种工具功能入口
- */
+/** Tools page containing shortcuts to the available subtitle utilities. */
 class ToolsActivity : AppCompatActivity() {
-
-    private lateinit var binding: ActivityToolsBinding
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityToolsBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-        ToolCardShadow.remove(
-            binding.cardBatchConvert,
-            binding.cardTranscriptMatch,
-            binding.cardSubtitleFormat,
-            binding.cardAutoTranslate,
-            binding.cardVocalSeparation,
-            binding.cardSpeechToSubtitle,
-            binding.cardMediaConvert,
-            binding.cardAutoTimestamp
+        setContent {
+            SubtitleEditComposeTheme {
+                ToolsPage(
+                    onBack = { onBackPressedDispatcher.onBackPressed() },
+                    onOpen = ::openTool
+                )
+            }
+        }
+    }
+
+    private fun openTool(destination: ToolDestination) {
+        val activity = when (destination) {
+            ToolDestination.BATCH_CONVERT -> BatchConvertActivity::class.java
+            ToolDestination.SUBTITLE_FORMAT -> SubtitleFormatSelectActivity::class.java
+            ToolDestination.AUTO_TRANSLATE -> AutoTranslateActivity::class.java
+            ToolDestination.VOCAL_SEPARATION -> VocalSeparationActivity::class.java
+            ToolDestination.SPEECH_TO_SUBTITLE -> SpeechToSubtitleActivity::class.java
+            ToolDestination.TRANSCRIPT_MATCH -> TranscriptMatchActivity::class.java
+            ToolDestination.MEDIA_CONVERT -> MediaConvertActivity::class.java
+            ToolDestination.AUTO_TIMESTAMP -> AutoTimestampActivity::class.java
+        }
+        startActivity(Intent(this, activity))
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ToolsPage(
+    onBack: () -> Unit,
+    onOpen: (ToolDestination) -> Unit
+) {
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.menu_main_title_01)) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_back),
+                            contentDescription = stringResource(R.string.tools_navigate_back),
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            )
+        }
+    ) { innerPadding ->
+        ToolsScreen(
+            onOpen = onOpen,
+            modifier = Modifier.padding(innerPadding)
         )
-        
-        setupToolbar()
-        setupButtons()
-    }
-    
-    private fun setupToolbar() {
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.setDisplayShowHomeEnabled(true)
-        supportActionBar?.title = "工具"
-        
-        binding.toolbar.setNavigationOnClickListener {
-            onBackPressedDispatcher.onBackPressed()
-        }
-    }
-    
-    private fun setupButtons() {
-        binding.cardBatchConvert.setOnClickListener {
-            startActivity(Intent(this, BatchConvertActivity::class.java))
-        }
-
-        binding.cardTranscriptMatch.setOnClickListener {
-            startActivity(Intent(this, TranscriptMatchActivity::class.java))
-        }
-
-        binding.cardSubtitleFormat.setOnClickListener {
-            startActivity(Intent(this, SubtitleFormatSelectActivity::class.java))
-        }
-
-        binding.cardAutoTranslate.setOnClickListener {
-            startActivity(Intent(this, AutoTranslateActivity::class.java))
-        }
-
-        binding.cardMediaConvert.setOnClickListener {
-            startActivity(Intent(this, MediaConvertActivity::class.java))
-        }
-
-        binding.cardSpeechToSubtitle.setOnClickListener {
-            startActivity(Intent(this, SpeechToSubtitleActivity::class.java))
-        }
-
-        binding.cardVocalSeparation.setOnClickListener {
-            startActivity(Intent(this, VocalSeparationActivity::class.java))
-        }
-
-        binding.cardAutoTimestamp.setOnClickListener {
-            startActivity(Intent(this, AutoTimestampActivity::class.java))
-        }
     }
 }
