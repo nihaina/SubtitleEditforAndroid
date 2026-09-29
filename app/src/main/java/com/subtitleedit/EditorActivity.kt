@@ -17,6 +17,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.doOnPreDraw
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.SimpleItemAnimator
@@ -118,6 +119,9 @@ class EditorActivity : AppCompatActivity() {
     private val listOperationsController = EditorListOperationsController()
     private lateinit var listPresentationController: EditorListPresentationController
     private var pendingListIndexRefreshStart: Int? = null
+    private var listRenderVersion = 0L
+    private var listLoadingActive = false
+    private var runningDeferredListEdit = false
     private lateinit var sourceLineEditController: EditorSourceLineEditController
 
     private lateinit var translationController: EditorTranslationController
@@ -174,6 +178,7 @@ class EditorActivity : AppCompatActivity() {
         const val EXTRA_AUDIO_ONLY_FROM_VIDEO = "extra_audio_only_from_video"
         const val EXTRA_SUBTITLE_FILE_PATH = "extra_subtitle_file_path"
         private const val BULK_NOTIFY_THRESHOLD = 200
+        private const val LARGE_LIST_LOADING_THRESHOLD = 1_000
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -1209,23 +1214,34 @@ class EditorActivity : AppCompatActivity() {
                 val document = withContext(Dispatchers.Default) {
                     SubtitleParser.parseDocument(content, format = stateModel.currentFormat)
                 }
-                if (!isActive || stateModel.isSourceViewMode || stateModel.sourceViewContent != content ||
-                    generation != stateModel.documentState.sourceViewEditGeneration
-                ) return@launch
-                applySourceViewEntries(normalizeSourceViewEntries(document.entries))
-                stateModel.documentState.sourceViewEntriesGeneration = generation
-                stateModel.sourceViewNeedsListSync = false
-                stateModel.updateSourceHistory(content, stateModel.subtitleEntries)
-                syncEditHistoryBaseline()
-                submitSubtitleList(
-                    refreshAll = false,
-                    syncWaveform = false,
-                    markChanged = false
-                )
+                if (isActive) applyParsedListSourceDocument(document, content, generation)
             } finally {
                 if (sourceListParseJob === coroutineContext[Job]) sourceListParseJob = null
             }
         }
+    }
+
+    private fun applyParsedListSourceDocument(
+        document: SubtitleDocument,
+        content: String,
+        generation: Long
+    ) {
+        if (stateModel.isSourceViewMode || stateModel.sourceViewContent != content ||
+            generation != stateModel.documentState.sourceViewEditGeneration
+        ) return
+        if (deferLargeListEdit(document.entries.size) {
+                applyParsedListSourceDocument(document, content, generation)
+            }) return
+        applySourceViewEntries(normalizeSourceViewEntries(document.entries))
+        stateModel.documentState.sourceViewEntriesGeneration = generation
+        stateModel.sourceViewNeedsListSync = false
+        stateModel.updateSourceHistory(content, stateModel.subtitleEntries)
+        syncEditHistoryBaseline()
+        submitSubtitleList(
+            refreshAll = false,
+            syncWaveform = false,
+            markChanged = false
+        )
     }
 
     private fun setSourceViewEditorText(content: String, preserveScroll: Boolean = false) {
@@ -1405,6 +1421,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun mergeSubtitlePositions(positions: List<Int>) {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size) { mergeSubtitlePositions(positions) }) return
         if (!ensureListMode()) return
         val sortedPositions = positions.distinct().sorted()
         if (sortedPositions.size < 2 ||
@@ -1487,6 +1504,7 @@ class EditorActivity : AppCompatActivity() {
      * 粘贴到指定位置（单行替换）
      */
     private fun pasteToPosition(position: Int) {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size) { pasteToPosition(position) }) return
         if (!ensureListMode()) return
         
         if (!ensureClipboardNotEmpty()) return
@@ -1525,12 +1543,19 @@ class EditorActivity : AppCompatActivity() {
         
         if (position >= 0 && position < stateModel.subtitleEntries.size) {
                 showDeleteConfirm("确定要删除此字幕吗？") {
-                    val historyBefore = currentHistoryListState()
-                    stateModel.execute(EditorCommand.Delete(setOf(position)))
-                    syncAfterDelete(setOf(position), historyBefore)
-                    com.subtitleedit.util.OverwritingToast.makeText(this, "已删除", Toast.LENGTH_SHORT).show()
+                    if (deferLargeListEdit(stateModel.subtitleEntries.size) {
+                            deleteSingleSubtitleConfirmed(position)
+                        }) return@showDeleteConfirm
+                    deleteSingleSubtitleConfirmed(position)
             }
         }
+    }
+
+    private fun deleteSingleSubtitleConfirmed(position: Int) {
+        val historyBefore = currentHistoryListState()
+        stateModel.execute(EditorCommand.Delete(setOf(position)))
+        syncAfterDelete(setOf(position), historyBefore)
+        com.subtitleedit.util.OverwritingToast.makeText(this, "已删除", Toast.LENGTH_SHORT).show()
     }
     
     /**
@@ -1541,6 +1566,9 @@ class EditorActivity : AppCompatActivity() {
         refPosition: Int,
         pasteAfterInsert: Boolean = false
     ) {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size) {
+                insertSubtitle(after, refPosition, pasteAfterInsert)
+            }) return
         if (!ensureListMode()) return
         if (refPosition !in stateModel.subtitleEntries.indices) return
         if (pasteAfterInsert && !ensureClipboardNotEmpty()) return
@@ -1619,6 +1647,7 @@ class EditorActivity : AppCompatActivity() {
      * 对选中的字幕应用时间偏移
      */
     private fun applyOffsetToSelection(offsetMs: Long) {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size) { applyOffsetToSelection(offsetMs) }) return
         if (!ensureListMode()) return
         
         val selectedEntries = requireSelectedEntries("没有选中的字幕") ?: return
@@ -1656,6 +1685,7 @@ class EditorActivity : AppCompatActivity() {
      * 粘贴到选中的位置
      */
     private fun pasteToSelected() {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size, ::pasteToSelected)) return
         if (!ensureListMode()) return
         
         if (!ensureClipboardNotEmpty()) return
@@ -1676,9 +1706,14 @@ class EditorActivity : AppCompatActivity() {
                 showShortToast("剪切来源不能同时作为粘贴目标")
                 return
             }
-            selectedPositions = selectedPositionsBeforeCut
-                .map { pos -> pos - deletedIndices.count { it < pos } }
-                .filter { it >= 0 }
+            val sortedDeleted = deletedIndices.sorted()
+            var deletedBefore = 0
+            selectedPositions = selectedPositionsBeforeCut.map { pos ->
+                while (deletedBefore < sortedDeleted.size && sortedDeleted[deletedBefore] < pos) {
+                    deletedBefore++
+                }
+                pos - deletedBefore
+            }.filter { it >= 0 }
             performCutDelete()
         }
 
@@ -1746,6 +1781,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun undoEdit() {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size, ::undoEdit)) return
         suppressHistoryRecording = true
         val applied = try { historyCoordinator.undo() } finally { suppressHistoryRecording = false }
         if (!applied) {
@@ -1758,6 +1794,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun redoEdit() {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size, ::redoEdit)) return
         suppressHistoryRecording = true
         val applied = try { historyCoordinator.redo() } finally { suppressHistoryRecording = false }
         if (!applied) {
@@ -1985,8 +2022,14 @@ class EditorActivity : AppCompatActivity() {
         syncWaveform: Boolean = true,
         markChanged: Boolean = true
     ) {
-        stateModel.refreshDocument()
         val positionList = positions.toList()
+        val renderVersion = if (positionList.size > BULK_NOTIFY_THRESHOLD &&
+            stateModel.subtitleEntries.size >= LARGE_LIST_LOADING_THRESHOLD
+        ) {
+            showListLoading()
+            ++listRenderVersion
+        } else null
+        stateModel.refreshDocument()
         listPresentationController.notifyPositions(positionList, includeNeighbors)
         if (syncWaveform) syncWaveformSubtitles(changedPositions = positionList)
         if (markChanged) {
@@ -1997,6 +2040,7 @@ class EditorActivity : AppCompatActivity() {
         if (::playbackController.isInitialized) playbackController.invalidateHighlightCache()
         if (::searchController.isInitialized) searchController.onDocumentChanged()
         scheduleSubtitlePreview()
+        renderVersion?.let(::hideListLoadingAfterRender)
     }
 
     private fun syncWaveformSubtitles(
@@ -2030,6 +2074,53 @@ class EditorActivity : AppCompatActivity() {
         waveformController.setSubtitlesKeepSelection(stateModel.subtitleEntries.toList(), selectedIndex)
     }
 
+    private fun showListLoading() {
+        listLoadingActive = true
+        binding.editorListLoadingOverlay.visibility = View.VISIBLE
+    }
+
+    private fun hideListLoadingAfterRender(version: Long) {
+        if (!listLoadingActive || version != listRenderVersion) return
+        val renderView = if (binding.rvSubtitles.visibility == View.VISIBLE) {
+            binding.rvSubtitles
+        } else {
+            binding.editorListLoadingOverlay
+        }
+        renderView.doOnPreDraw {
+            if (version == listRenderVersion) {
+                binding.editorListLoadingOverlay.visibility = View.GONE
+                listLoadingActive = false
+            }
+        }
+        renderView.invalidate()
+    }
+
+    /** Let the loading overlay draw before a large synchronous model update starts. */
+    private fun deferLargeListEdit(entryCount: Int, action: () -> Unit): Boolean {
+        if (entryCount < LARGE_LIST_LOADING_THRESHOLD || runningDeferredListEdit || listLoadingActive) {
+            return false
+        }
+        showListLoading()
+        binding.editorListLoadingOverlay.doOnPreDraw {
+            binding.editorListLoadingOverlay.post {
+                if (isFinishing || isDestroyed) return@post
+                val initialVersion = listRenderVersion
+                runningDeferredListEdit = true
+                try {
+                    action()
+                } catch (error: Exception) {
+                    showShortToast("字幕更新失败：${error.message ?: "请稍后重试"}")
+                } finally {
+                    runningDeferredListEdit = false
+                    if (initialVersion == listRenderVersion) {
+                        hideListLoadingAfterRender(initialVersion)
+                    }
+                }
+            }
+        }
+        return true
+    }
+
     private fun submitSubtitleList(
         refreshAll: Boolean = false,
         selectedIndices: Set<Int>? = null,
@@ -2041,6 +2132,10 @@ class EditorActivity : AppCompatActivity() {
         schedulePreview: Boolean = true,
         afterSubmit: (() -> Unit)? = null
     ) {
+        val renderVersion = ++listRenderVersion
+        if (maxOf(stateModel.subtitleEntries.size, subtitleAdapter.itemCount) >= LARGE_LIST_LOADING_THRESHOLD) {
+            showListLoading()
+        }
         renumberEntries(force = refreshAll)
         stateModel.refreshDocument()
         val targetSelectedIds = listPresentationController.targetSelection(
@@ -2065,6 +2160,7 @@ class EditorActivity : AppCompatActivity() {
                 }
             }
             afterSubmit?.invoke()
+            hideListLoadingAfterRender(renderVersion)
         }
         if (updateFormat) updateFormatInfo()
         if (syncWaveform) syncWaveformSubtitles()
@@ -2390,6 +2486,9 @@ class EditorActivity : AppCompatActivity() {
         groups: List<MergeGroup>,
         appliedItems: List<TranslationPreviewItem>
     ) {
+        if (appliedItems.isNotEmpty() && deferLargeListEdit(stateModel.subtitleEntries.size) {
+                applyMergedPreview(groups, appliedItems)
+            }) return
         if (appliedItems.isEmpty()) {
             showShortToast("未应用任何字幕合并")
             return
@@ -2486,6 +2585,7 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun applyOffset(offsetMs: Long, longClickPos: Int = -1) {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size) { applyOffset(offsetMs, longClickPos) }) return
         if (!ensureListMode()) return
 
         when {
@@ -2519,12 +2619,19 @@ class EditorActivity : AppCompatActivity() {
         val selectedEntries = requireSelectedEntries("请先选择要删除的字幕") ?: return
         
         showDeleteConfirm("确定要删除选中的字幕吗？") {
-                val historyBefore = currentHistoryListState()
-                val deletedIndices = selectedEntries.map { it.second }.toSet()
-                stateModel.execute(EditorCommand.Delete(deletedIndices))
-                syncAfterDelete(deletedIndices, historyBefore)
-                com.subtitleedit.util.OverwritingToast.makeText(this, "已删除 ${selectedEntries.size} 条字幕", Toast.LENGTH_SHORT).show()
+                if (deferLargeListEdit(stateModel.subtitleEntries.size) {
+                        deleteSelectedSubtitlesConfirmed(selectedEntries)
+                    }) return@showDeleteConfirm
+                deleteSelectedSubtitlesConfirmed(selectedEntries)
         }
+    }
+
+    private fun deleteSelectedSubtitlesConfirmed(selectedEntries: List<Pair<SubtitleEntry, Int>>) {
+        val historyBefore = currentHistoryListState()
+        val deletedIndices = selectedEntries.map { it.second }.toSet()
+        stateModel.execute(EditorCommand.Delete(deletedIndices))
+        syncAfterDelete(deletedIndices, historyBefore)
+        com.subtitleedit.util.OverwritingToast.makeText(this, "已删除 ${selectedEntries.size} 条字幕", Toast.LENGTH_SHORT).show()
     }
 
     /**
@@ -2537,10 +2644,11 @@ class EditorActivity : AppCompatActivity() {
     ) {
         stateModel.historyEntriesSnapshot = historyBefore.entries
         stateModel.historySelectionSnapshot = historyBefore.selectedIds
+        val remainingIds = stateModel.subtitleEntries.mapTo(mutableSetOf()) { it.stableId }
         submitSubtitleList(
             refreshAll = false,
             selectedStableIds = stateModel.historySelectionSnapshot.filterTo(mutableSetOf()) { selectedId ->
-                stateModel.subtitleEntries.any { it.stableId == selectedId }
+                selectedId in remainingIds
             },
             syncWaveform = false,
             markChanged = true,
@@ -2552,11 +2660,12 @@ class EditorActivity : AppCompatActivity() {
                 if (remainingCount > 0) {
                     subtitleAdapter.notifyItemRangeChanged(firstDeleted, remainingCount)
                 }
-                deletedIndices.forEach { deletedIdx ->
-                    val offset = deletedIndices.count { it < deletedIdx }
-                    val prevIdx = (deletedIdx - offset) - 1
-                    if (prevIdx >= 0 && prevIdx < stateModel.subtitleEntries.size) {
-                        subtitleAdapter.notifyItemChanged(prevIdx)
+                if (deletedIndices.size <= BULK_NOTIFY_THRESHOLD) {
+                    deletedIndices.sorted().forEachIndexed { offset, deletedIdx ->
+                        val prevIdx = (deletedIdx - offset) - 1
+                        if (prevIdx >= 0 && prevIdx < stateModel.subtitleEntries.size) {
+                            subtitleAdapter.notifyItemChanged(prevIdx)
+                        }
                     }
                 }
             }
@@ -2570,6 +2679,7 @@ class EditorActivity : AppCompatActivity() {
      * 取消所有选择的字幕
      */
     private fun cancelSelection() {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size, ::cancelSelection)) return
         if (!ensureListMode()) return
         
         subtitleAdapter.clearSelection()
@@ -2578,6 +2688,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun selectAllSubtitles() {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size, ::selectAllSubtitles)) return
         if (!ensureListMode() || stateModel.subtitleEntries.isEmpty()) return
 
         if (subtitleAdapter.getSelectedCount() == stateModel.subtitleEntries.size) {
@@ -2590,6 +2701,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun selectRangeBetweenSelectedSubtitles() {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size, ::selectRangeBetweenSelectedSubtitles)) return
         if (!ensureListMode()) return
 
         val selectedPositions = subtitleAdapter.getSelectedPositions().sorted()
@@ -2639,8 +2751,11 @@ class EditorActivity : AppCompatActivity() {
 
     /** 把预览对话框中勾选应用的文本写回字幕列表。 */
     private fun applyPreviewTexts(appliedItems: List<TranslationPreviewItem>, actionName: String) {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size) {
+                applyPreviewTexts(appliedItems, actionName)
+            }) return
         appliedItems.forEach { item ->
-            stateModel.execute(EditorCommand.UpdateText(item.entryPosition, item.translatedText))
+            stateModel.subtitleEntries.getOrNull(item.entryPosition)?.text = item.translatedText
         }
         if (appliedItems.isNotEmpty()) {
             notifyEntriesChanged(appliedItems.map { it.entryPosition }, includeNeighbors = false)

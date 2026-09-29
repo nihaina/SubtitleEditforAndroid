@@ -18,9 +18,8 @@ object SubtitleSourceSynchronizer {
         // Parser results are freshly allocated and therefore have fresh IDs. Associate them
         // with the caller's in-memory rows before applying structural edits, enabling raw cue
         // blocks to follow their stable subtitle identity across insertions/deletions.
-        val associatedOldEntries = if (
-            oldEntries.any { old -> newEntries.any { new -> new.stableId == old.stableId } }
-        ) {
+        val newIds = newEntries.mapTo(HashSet(newEntries.size)) { it.stableId }
+        val associatedOldEntries = if (oldEntries.any { it.stableId in newIds }) {
             oldEntries
         } else {
             SubtitleEntryOps.retainStableIds(newEntries, oldEntries)
@@ -150,19 +149,25 @@ object SubtitleSourceSynchronizer {
         if (canUseStableMapping) {
             val insertionsBeforeOld = Array(oldEntries.size) { mutableListOf<SubtitleEntry>() }
             val trailingInsertions = mutableListOf<SubtitleEntry>()
+            val nextOldIndex = arrayOfNulls<Int>(newEntries.size)
+            var followingOldIndex: Int? = null
+            for (index in newEntries.indices.reversed()) {
+                nextOldIndex[index] = followingOldIndex
+                oldIndexById[newEntries[index].stableId]?.let { followingOldIndex = it }
+            }
             newEntries.forEachIndexed { newIndex, entry ->
                 if (entry.stableId in oldIndexById) return@forEachIndexed
-                val nextOldIndex = (newIndex + 1 until newEntries.size)
-                    .firstNotNullOfOrNull { next -> oldIndexById[newEntries[next].stableId] }
-                if (nextOldIndex == null) trailingInsertions += entry
-                else insertionsBeforeOld[nextOldIndex] += entry
+                val insertionPoint = nextOldIndex[newIndex]
+                if (insertionPoint == null) trailingInsertions += entry
+                else insertionsBeforeOld[insertionPoint] += entry
             }
 
             val output = StringBuilder(content.length)
+            val ending = preferredEnding(lines)
             var cursor = 0
             spans.forEachIndexed { oldIndex, span ->
                 output.append(lines.subList(cursor, span.start).joinToString("") { it.serialized })
-                insertionsBeforeOld[oldIndex].forEach { output.append(appendCue(it, preferredEnding(lines))) }
+                insertionsBeforeOld[oldIndex].forEach { output.append(appendCue(it, ending)) }
                 val oldEntry = oldEntries[oldIndex]
                 val newEntry = newIndexById[oldEntry.stableId]?.let { newEntries[it] }
                 if (newEntry != null) {
@@ -178,7 +183,7 @@ object SubtitleSourceSynchronizer {
                 cursor = span.endExclusive
             }
             output.append(lines.drop(cursor).joinToString("") { it.serialized })
-            trailingInsertions.forEach { output.append(appendCue(it, preferredEnding(lines))) }
+            trailingInsertions.forEach { output.append(appendCue(it, ending)) }
             return output.toString()
         }
 
@@ -312,12 +317,15 @@ object SubtitleSourceSynchronizer {
             cue.terminatorLineIndex?.let { it to cue }
         }.toMap()
 
+        val oldIds = oldEntries.map { it.stableId }
+        val newIds = newEntries.map { it.stableId }
+        val oldIdSet = oldIds.toHashSet()
+        val newIdSet = newIds.toHashSet()
         if (
-            oldEntries.any { old -> newEntries.any { new -> new.stableId == old.stableId } } &&
-            oldEntries.map { it.stableId }.distinct().size == oldEntries.size &&
-            newEntries.map { it.stableId }.distinct().size == newEntries.size &&
-            oldEntries.map { it.stableId }.filter { id -> newEntries.any { it.stableId == id } } ==
-                newEntries.map { it.stableId }.filter { id -> oldEntries.any { it.stableId == id } }
+            oldIds.any { it in newIdSet } &&
+            oldIdSet.size == oldIds.size &&
+            newIdSet.size == newIds.size &&
+            oldIds.filter { it in newIdSet } == newIds.filter { it in oldIdSet }
         ) {
             return rebuildLrcStableBlocks(lines, cues, oldEntries, newEntries)
         }
@@ -408,8 +416,10 @@ object SubtitleSourceSynchronizer {
             output.append(text).append(ending)
         }
 
+        var nextAdded = 0
         fun appendAddedBefore(limit: Int) {
-            added.filter { it > lastNewIndex && it < limit }.forEach { index ->
+            while (nextAdded < added.size && added[nextAdded] < limit) {
+                val index = added[nextAdded++]
                 val entry = newEntries[index]
                 appendLrcEntry(entry, newEntries.getOrNull(index + 1), ::appendLine)
                 lastNewIndex = index

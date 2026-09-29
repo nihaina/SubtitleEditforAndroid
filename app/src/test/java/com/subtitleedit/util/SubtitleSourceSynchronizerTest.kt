@@ -7,6 +7,27 @@ import org.junit.Test
 
 class SubtitleSourceSynchronizerTest {
     @Test
+    fun manyInsertedSrtRowsKeepTheirOrderAndOriginalRows() {
+        val source = "1\n00:00:01,000 --> 00:00:02,000\nOriginal\n\n"
+        val original = SubtitleParser.parseSRT(source).single()
+        val inserted = (0 until 1_000).map { index ->
+            SubtitleEntry(index = index + 1, startTime = 0, endTime = 500, text = "New $index")
+        }
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.SRT,
+            listOf(original),
+            inserted + original.copy(index = inserted.size + 1)
+        )
+
+        val result = SubtitleParser.parseSRT(updated)
+        assertEquals(1_001, result.size)
+        assertEquals("New 0", result.first().text)
+        assertEquals("New 999", result[result.lastIndex - 1].text)
+        assertEquals("Original", result.last().text)
+    }
+
+    @Test
     fun unchangedEntriesKeepSourceByteForByte() {
         val source = "7\r\n00:00:01.000   -->   00:00:02.000\r\nText\r\n"
         val entries = SubtitleParser.parseDocument(
