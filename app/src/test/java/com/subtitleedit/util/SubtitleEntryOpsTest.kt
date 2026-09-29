@@ -123,7 +123,7 @@ class SubtitleEntryOpsTest {
             next = null
         )
         assertEquals(2000L, entry.startTime)
-        assertEquals(5000L, entry.endTime)
+        assertEquals(3000L, entry.endTime)
         assertEquals("新字幕", entry.text)
     }
 
@@ -133,10 +133,10 @@ class SubtitleEntryOpsTest {
             after = true,
             reference = SubtitleEntry(startTime = 1000, endTime = 2000),
             previous = null,
-            next = SubtitleEntry(startTime = 3000, endTime = 4000)
+            next = SubtitleEntry(startTime = 2500, endTime = 4000)
         )
         assertEquals(2000L, entry.startTime)
-        assertEquals(3000L, entry.endTime)
+        assertEquals(2500L, entry.endTime)
     }
 
     @Test
@@ -147,7 +147,7 @@ class SubtitleEntryOpsTest {
             previous = null,
             next = SubtitleEntry(startTime = 8000, endTime = 9000)
         )
-        assertEquals(5000L, entry.endTime)
+        assertEquals(3000L, entry.endTime)
     }
 
     @Test
@@ -160,7 +160,7 @@ class SubtitleEntryOpsTest {
             next = SubtitleEntry(startTime = 1500, endTime = 1800)
         )
         assertEquals(2000L, entry.startTime)
-        assertEquals(5000L, entry.endTime)
+        assertEquals(3000L, entry.endTime)
     }
 
     // ==================== createInsertedEntry（向前插入） ====================
@@ -173,7 +173,7 @@ class SubtitleEntryOpsTest {
             previous = null,
             next = null
         )
-        assertEquals(7000L, entry.startTime)
+        assertEquals(9000L, entry.startTime)
         assertEquals(10000L, entry.endTime)
     }
 
@@ -182,10 +182,10 @@ class SubtitleEntryOpsTest {
         val entry = SubtitleEntryOps.createInsertedEntry(
             after = false,
             reference = SubtitleEntry(startTime = 10000, endTime = 12000),
-            previous = SubtitleEntry(startTime = 7500, endTime = 8000),
+            previous = SubtitleEntry(startTime = 8500, endTime = 9500),
             next = null
         )
-        assertEquals(8000L, entry.startTime)
+        assertEquals(9500L, entry.startTime)
         assertEquals(10000L, entry.endTime)
     }
 
@@ -301,6 +301,150 @@ class SubtitleEntryOpsTest {
     }
 
     // ==================== waveform drag bounds ====================
+
+    @Test
+    fun dragNeighborBounds_releasesBothSidesUntilTheBlocksSeparate() {
+        val previous = SubtitleEntry(startTime = 1000, endTime = 2500)
+        val next = SubtitleEntry(startTime = 3500, endTime = 4500)
+        val entries = listOf(previous, SubtitleEntry(startTime = 2000, endTime = 4000), next)
+
+        val overlapping = SubtitleEntryOps.dragNeighborBounds(2000, 4000, entries, 1)
+        assertEquals(null, overlapping.previousEndTime)
+        assertEquals(null, overlapping.nextStartTime)
+        val moved = SubtitleEntryOps.clampMoveToNeighbors(
+            originalStartTime = 2000,
+            originalEndTime = 4000,
+            desiredStartTime = 5000,
+            previousEndTime = overlapping.previousEndTime,
+            nextStartTime = overlapping.nextStartTime
+        )
+        assertEquals(5000L, moved.startTime)
+
+        val separated = SubtitleEntryOps.dragNeighborBounds(
+            moved.startTime, moved.endTime, entries, 1
+        )
+        assertEquals(4500L, separated.previousEndTime)
+        assertEquals(null, separated.nextStartTime)
+        val movedBack = SubtitleEntryOps.clampMoveToNeighbors(
+            originalStartTime = 2000,
+            originalEndTime = 4000,
+            desiredStartTime = 3000,
+            previousEndTime = separated.previousEndTime,
+            nextStartTime = separated.nextStartTime
+        )
+        assertEquals(4500L, movedBack.startTime)
+    }
+
+    @Test
+    fun dragNeighborBounds_previousOverlapCanMovePastTheNextBlock() {
+        val previous = SubtitleEntry(startTime = 1000, endTime = 2500)
+        val next = SubtitleEntry(startTime = 4100, endTime = 5000)
+        val entries = listOf(previous, SubtitleEntry(startTime = 2000, endTime = 4000), next)
+
+        val overlapping = SubtitleEntryOps.dragNeighborBounds(2000, 4000, entries, 1)
+        assertEquals(null, overlapping.previousEndTime)
+        assertEquals(null, overlapping.nextStartTime)
+        val moved = SubtitleEntryOps.clampMoveToNeighbors(
+            originalStartTime = 2000,
+            originalEndTime = 4000,
+            desiredStartTime = 4000,
+            previousEndTime = overlapping.previousEndTime,
+            nextStartTime = overlapping.nextStartTime
+        )
+        assertEquals(4000L, moved.startTime)
+
+        val stillOverlapping = SubtitleEntryOps.dragNeighborBounds(
+            moved.startTime, moved.endTime, entries, 1
+        )
+        assertEquals(null, stillOverlapping.previousEndTime)
+        assertEquals(null, stillOverlapping.nextStartTime)
+
+        val separated = SubtitleEntryOps.clampMoveToNeighbors(
+            originalStartTime = 2000,
+            originalEndTime = 4000,
+            desiredStartTime = 5000,
+            previousEndTime = stillOverlapping.previousEndTime,
+            nextStartTime = stillOverlapping.nextStartTime
+        )
+        assertEquals(5000L, separated.startTime)
+        val restored = SubtitleEntryOps.dragNeighborBounds(
+            separated.startTime, separated.endTime, entries, 1
+        )
+        assertEquals(5000L, restored.previousEndTime)
+        assertEquals(null, restored.nextStartTime)
+        val blockedFromOverlappingAgain = SubtitleEntryOps.clampMoveToNeighbors(
+            originalStartTime = 2000,
+            originalEndTime = 4000,
+            desiredStartTime = 4500,
+            previousEndTime = restored.previousEndTime,
+            nextStartTime = restored.nextStartTime
+        )
+        assertEquals(5000L, blockedFromOverlappingAgain.startTime)
+    }
+
+    @Test
+    fun dragNeighborBounds_nextOverlapCanMovePastThePreviousBlock() {
+        val previous = SubtitleEntry(startTime = 3000, endTime = 3500)
+        val next = SubtitleEntry(startTime = 5500, endTime = 7000)
+        val entries = listOf(previous, SubtitleEntry(startTime = 4000, endTime = 6000), next)
+
+        val overlapping = SubtitleEntryOps.dragNeighborBounds(4000, 6000, entries, 1)
+        assertEquals(null, overlapping.previousEndTime)
+        assertEquals(null, overlapping.nextStartTime)
+        val moved = SubtitleEntryOps.clampMoveToNeighbors(
+            originalStartTime = 4000,
+            originalEndTime = 6000,
+            desiredStartTime = 1500,
+            previousEndTime = overlapping.previousEndTime,
+            nextStartTime = overlapping.nextStartTime
+        )
+        assertEquals(1500L, moved.startTime)
+        val stillOverlapping = SubtitleEntryOps.dragNeighborBounds(
+            moved.startTime, moved.endTime, entries, 1
+        )
+        assertEquals(null, stillOverlapping.previousEndTime)
+        assertEquals(null, stillOverlapping.nextStartTime)
+
+        val separated = SubtitleEntryOps.clampMoveToNeighbors(
+            originalStartTime = 4000,
+            originalEndTime = 6000,
+            desiredStartTime = 1000,
+            previousEndTime = stillOverlapping.previousEndTime,
+            nextStartTime = stillOverlapping.nextStartTime
+        )
+        assertEquals(1000L, separated.startTime)
+        val restored = SubtitleEntryOps.dragNeighborBounds(
+            separated.startTime, separated.endTime, entries, 1
+        )
+        assertEquals(null, restored.previousEndTime)
+        assertEquals(3000L, restored.nextStartTime)
+        val blockedFromOverlappingAgain = SubtitleEntryOps.clampMoveToNeighbors(
+            originalStartTime = 4000,
+            originalEndTime = 6000,
+            desiredStartTime = 2000,
+            previousEndTime = restored.previousEndTime,
+            nextStartTime = restored.nextStartTime
+        )
+        assertEquals(1000L, blockedFromOverlappingAgain.startTime)
+    }
+
+    @Test
+    fun dragNeighborBounds_checksBlocksBeyondImmediateNeighbors() {
+        val entries = listOf(
+            SubtitleEntry(startTime = 1000, endTime = 6000),
+            SubtitleEntry(startTime = 2000, endTime = 2500),
+            SubtitleEntry(startTime = 3000, endTime = 4000),
+            SubtitleEntry(startTime = 5000, endTime = 5500)
+        )
+
+        val overlapping = SubtitleEntryOps.dragNeighborBounds(3000, 4000, entries, 2)
+        assertEquals(null, overlapping.previousEndTime)
+        assertEquals(null, overlapping.nextStartTime)
+
+        val separated = SubtitleEntryOps.dragNeighborBounds(6000, 7000, entries, 2)
+        assertEquals(6000L, separated.previousEndTime)
+        assertEquals(null, separated.nextStartTime)
+    }
 
     @Test
     fun clampMoveToNeighbors_stopsAtPreviousAndNextBoundaries() {

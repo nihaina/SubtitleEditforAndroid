@@ -33,14 +33,17 @@ internal class EditorListPresentationController(
         if (list.size > BULK_NOTIFY_THRESHOLD) {
             adapter().refreshAllItems()
         } else if (includeNeighbors) {
-            val affected = buildSet {
-                list.forEach { position ->
-                    if (position in entries().indices) add(position)
-                    if (position - 1 in entries().indices) add(position - 1)
-                    if (position + 1 in entries().indices) add(position + 1)
+            val changed = list.filterTo(mutableSetOf()) { it in entries().indices }
+            val neighbors = buildSet {
+                changed.forEach { position ->
+                    if (position - 1 in entries().indices && position - 1 !in changed) add(position - 1)
+                    if (position + 1 in entries().indices && position + 1 !in changed) add(position + 1)
                 }
             }
-            affected.sorted().forEach { adapter().notifyItemChanged(it) }
+            changed.sorted().forEach { adapter().notifyItemChanged(it) }
+            neighbors.sorted().forEach {
+                adapter().notifyItemChanged(it, SubtitleAdapter.PAYLOAD_TIME_CONFLICT)
+            }
         } else {
             list.filter { it in entries().indices }.distinct().sorted()
                 .forEach { adapter().notifyItemChanged(it) }

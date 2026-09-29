@@ -39,9 +39,10 @@ internal class EditorListOperationsController {
         previous: SubtitleEntry?,
         next: SubtitleEntry?,
         texts: List<String>,
-        insertPosition: Int
+        insertPosition: Int,
+        durationPerEntryMs: Long
     ): List<SubtitleEntry> = SubtitleEntryOps.createInsertedEntries(
-        after, reference, previous, next, texts
+        after, reference, previous, next, texts, durationPerEntryMs
     ).onEachIndexed { index, entry -> entry.index = insertPosition + index + 1 }
 
     fun applyOffset(entries: List<SubtitleEntry>, positions: List<Int>, offsetMs: Long) {

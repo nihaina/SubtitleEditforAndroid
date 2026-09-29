@@ -1208,8 +1208,12 @@ class WaveformTimelineView @JvmOverloads constructor(
                 if (dragMode == DragMode.NONE || currentSubtitle == null) return true
                 val s = currentSubtitle!!
                 val dt = xToTime(touchX) - xToTime(dragStartX)
-                val previous = subtitles.getOrNull(currentSubtitleIndex - 1)
-                val next = subtitles.getOrNull(currentSubtitleIndex + 1)
+                val bounds = SubtitleEntryOps.dragNeighborBounds(
+                    currentStartTime = s.startTime,
+                    currentEndTime = s.endTime,
+                    entries = subtitles,
+                    currentIndex = currentSubtitleIndex
+                )
 
                 var changed = false
                 when (dragMode) {
@@ -1218,8 +1222,8 @@ class WaveformTimelineView @JvmOverloads constructor(
                             originalStartTime = dragStartStartTime,
                             originalEndTime = dragStartEndTime,
                             desiredStartTime = dragStartStartTime + dt,
-                            previousEndTime = previous?.endTime,
-                            nextStartTime = next?.startTime
+                            previousEndTime = bounds.previousEndTime,
+                            nextStartTime = bounds.nextStartTime
                         )
                         s.startTime = range.startTime
                         s.endTime = range.endTime
@@ -1230,7 +1234,7 @@ class WaveformTimelineView @JvmOverloads constructor(
                             originalStartTime = dragStartStartTime,
                             currentEndTime = s.endTime,
                             desiredStartTime = dragStartStartTime + dt,
-                            previousEndTime = previous?.endTime,
+                            previousEndTime = bounds.previousEndTime,
                             minimumDurationMs = MIN_SUBTITLE_DURATION_MS
                         )
                         changed = true
@@ -1240,7 +1244,7 @@ class WaveformTimelineView @JvmOverloads constructor(
                             originalEndTime = dragStartEndTime,
                             currentStartTime = s.startTime,
                             desiredEndTime = dragStartEndTime + dt,
-                            nextStartTime = next?.startTime,
+                            nextStartTime = bounds.nextStartTime,
                             minimumDurationMs = MIN_SUBTITLE_DURATION_MS
                         )
                         s.endTimeModified = true

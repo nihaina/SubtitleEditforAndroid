@@ -4,12 +4,42 @@ import com.subtitleedit.EditorDocumentOperations
 import com.subtitleedit.model.SubtitleEntry
 
 object SubtitleEntryOps {
-    private const val DEFAULT_INSERT_DURATION_MS = 3_000L
+    const val DEFAULT_NEW_SUBTITLE_DURATION_MS = 1_000L
+    const val DEFAULT_INSERT_DURATION_MS = 3_000L
 
     data class TimingRange(
         val startTime: Long,
         val endTime: Long
     )
+
+    data class DragNeighborBounds(
+        val previousEndTime: Long?,
+        val nextStartTime: Long?
+    )
+
+    /** Release all neighbor bounds while this block overlaps any other block. */
+    fun dragNeighborBounds(
+        currentStartTime: Long,
+        currentEndTime: Long,
+        entries: List<SubtitleEntry>,
+        currentIndex: Int
+    ): DragNeighborBounds {
+        var previousEndTime: Long? = null
+        var nextStartTime: Long? = null
+        entries.forEachIndexed { index, neighbor ->
+            if (index == currentIndex) return@forEachIndexed
+            when {
+                neighbor.endTime <= currentStartTime -> {
+                    previousEndTime = maxOf(previousEndTime ?: 0L, neighbor.endTime)
+                }
+                neighbor.startTime >= currentEndTime -> {
+                    nextStartTime = minOf(nextStartTime ?: Long.MAX_VALUE, neighbor.startTime)
+                }
+                else -> return DragNeighborBounds(null, null)
+            }
+        }
+        return DragNeighborBounds(previousEndTime, nextStartTime)
+    }
 
     fun deepCopy(entry: SubtitleEntry): SubtitleEntry {
         return entry.copy()
@@ -132,7 +162,8 @@ object SubtitleEntryOps {
         reference = reference,
         previous = previous,
         next = next,
-        texts = listOf("新字幕")
+        texts = listOf("新字幕"),
+        durationPerEntryMs = DEFAULT_NEW_SUBTITLE_DURATION_MS
     ).first()
 
     fun createInsertedEntries(
@@ -140,12 +171,13 @@ object SubtitleEntryOps {
         reference: SubtitleEntry,
         previous: SubtitleEntry?,
         next: SubtitleEntry?,
-        texts: List<String>
+        texts: List<String>,
+        durationPerEntryMs: Long = DEFAULT_INSERT_DURATION_MS
     ): List<SubtitleEntry> {
         if (texts.isEmpty()) return emptyList()
 
         val count = texts.size
-        val defaultTotalDuration = DEFAULT_INSERT_DURATION_MS * count
+        val defaultTotalDuration = durationPerEntryMs * count
         val groupStart: Long
         val groupEnd: Long
 

@@ -71,12 +71,15 @@ import java.io.File
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 
 /**
  * 字幕编辑界面
@@ -397,6 +400,18 @@ class EditorActivity : AppCompatActivity() {
             (itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false
             // 滑块大跨度定位时复用更多已绑定行，减少文本测量和 ViewHolder 重绑。
             setItemViewCacheSize(12)
+        }
+        lifecycleScope.launch {
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (isActive) {
+                    delay(400)
+                    if (!stateModel.isSourceViewMode && binding.rvSubtitles.visibility == View.VISIBLE) {
+                        subtitleAdapter.refreshVisibleTimeConflicts(
+                            binding.rvSubtitles, stateModel.subtitleEntries
+                        )
+                    }
+                }
+            }
         }
     }
     
@@ -1539,10 +1554,13 @@ class EditorActivity : AppCompatActivity() {
         }
         insertPosition = insertPosition.coerceIn(0, stateModel.subtitleEntries.size)
 
+        val durationPerEntryMs = if (pasteAfterInsert) SubtitleEntryOps.DEFAULT_INSERT_DURATION_MS
+            else SubtitleEntryOps.DEFAULT_NEW_SUBTITLE_DURATION_MS
         val insertedEntries = listOperationsController.createInserted(
             after, refEntry, stateModel.subtitleEntries.getOrNull(insertPosition - 1),
             stateModel.subtitleEntries.getOrNull(insertPosition),
-            if (pasteAfterInsert) stateModel.clipboardTexts else listOf("新字幕"), insertPosition
+            if (pasteAfterInsert) stateModel.clipboardTexts else listOf("新字幕"), insertPosition,
+            durationPerEntryMs
         )
         stateModel.execute(EditorCommand.Insert(insertPosition, insertedEntries))
         renumberEntries(force = true)

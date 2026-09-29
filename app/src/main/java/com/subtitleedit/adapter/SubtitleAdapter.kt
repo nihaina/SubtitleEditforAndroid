@@ -17,6 +17,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.subtitleedit.R
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SearchTextMatcher
+import com.subtitleedit.util.SubtitleTimeConflict
 import com.subtitleedit.util.TimeUtils
 import java.util.Collections
 import java.util.IdentityHashMap
@@ -56,16 +57,15 @@ class SubtitleAdapter(
     }
     
     override fun onBindViewHolder(holder: SubtitleViewHolder, position: Int, payloads: MutableList<Any>) {
-        when {
-            payloads.contains(PAYLOAD_PLAYING) -> {
-                // 只更新播放高亮背景，完全不触碰选中状态（alpha / ivSelected）
-                holder.bindPlaying(position == currentPlayingPosition)
-            }
-            payloads.contains(PAYLOAD_SELECTION) -> {
-                holder.bindSelection(isSelected(position))
-            }
-            else -> onBindViewHolder(holder, position)
+        if (payloads.isEmpty() || payloads.any {
+                it != PAYLOAD_PLAYING && it != PAYLOAD_SELECTION && it != PAYLOAD_TIME_CONFLICT
+            }) {
+            onBindViewHolder(holder, position)
+            return
         }
+        if (PAYLOAD_TIME_CONFLICT in payloads) holder.bindTimeColors(currentList, position)
+        if (PAYLOAD_PLAYING in payloads) holder.bindPlaying(position == currentPlayingPosition)
+        if (PAYLOAD_SELECTION in payloads) holder.bindSelection(isSelected(position))
     }
 
     fun toggleSelection(position: Int) {
@@ -84,6 +84,7 @@ class SubtitleAdapter(
     companion object {
         const val PAYLOAD_SELECTION = "selection"
         const val PAYLOAD_PLAYING   = "playing"
+        const val PAYLOAD_TIME_CONFLICT = "time_conflict"
         private const val SELECTION_REFRESH_THRESHOLD = 200
     }
 
@@ -224,6 +225,20 @@ class SubtitleAdapter(
     fun refreshAllItems() {
         notifyAllItemsChanged()
     }
+
+    /** Recheck attached rows against the live document, including edits made outside the list. */
+    fun refreshVisibleTimeConflicts(recyclerView: RecyclerView, entries: List<SubtitleEntry>) {
+        if (entries.size != itemCount) return
+        for (childIndex in 0 until recyclerView.childCount) {
+            val holder = recyclerView.getChildViewHolder(recyclerView.getChildAt(childIndex))
+                as? SubtitleViewHolder ?: continue
+            val position = holder.bindingAdapterPosition
+            if (position !in currentList.indices ||
+                currentList[position].stableId != entries[position].stableId
+            ) continue
+            holder.bindTimeColors(entries, position)
+        }
+    }
     
     // 搜索高亮相关
     private var searchHighlightPosition: Int = -1
@@ -281,22 +296,6 @@ class SubtitleAdapter(
         if (oldPosition >= 0) notifyItemChanged(oldPosition, PAYLOAD_PLAYING)
     }
     
-    /**
-     * 检查当前字幕的结束时间是否超过下一行字幕的起始时间
-     * （LRC 格式冲突检测）
-     */
-    private fun hasTimeConflict(position: Int, entry: SubtitleEntry): Boolean {
-        // 如果不是最后一行，检查结束时间是否超过下一行的起始时间
-        if (position < currentList.size - 1) {
-            val nextEntry = currentList[position + 1]
-            // 如果结束时间超过下一行起始时间，则标记为冲突
-            if (entry.endTime > nextEntry.startTime) {
-                return true
-            }
-        }
-        return false
-    }
-
     inner class SubtitleViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val contentContainer: View = (itemView as ViewGroup).getChildAt(0)
         private val tvIndex: TextView = itemView.findViewById(R.id.tvIndex)
@@ -307,6 +306,16 @@ class SubtitleAdapter(
         private val ivSelected: ImageView = itemView.findViewById(R.id.ivSelected)
         private val btnJumpToTime: ImageView = itemView.findViewById(R.id.btnJumpToTime)
         private val btnSetTime: ImageView = itemView.findViewById(R.id.btnSetTime)
+
+        fun bindTimeColors(entries: List<SubtitleEntry>, position: Int) {
+            val markers = SubtitleTimeConflict.markers(entries, position)
+            val normalColor = ContextCompat.getColor(itemView.context, R.color.primary)
+            val errorColor = ContextCompat.getColor(itemView.context, R.color.error)
+            val startColor = if (markers.start) errorColor else normalColor
+            val endColor = if (markers.end) errorColor else normalColor
+            if (tvStartTime.currentTextColor != startColor) tvStartTime.setTextColor(startColor)
+            if (tvEndTime.currentTextColor != endColor) tvEndTime.setTextColor(endColor)
+        }
 
         /**
          * 只刷新选中状态（用于 payload 刷新）
@@ -342,29 +351,7 @@ class SubtitleAdapter(
             tvFormatMetadata.text = formatMetadata
             tvFormatMetadata.visibility = if (formatMetadata.isBlank()) View.GONE else View.VISIBLE
 
-            // 检查时间是否有效
-            // 1. 开始时间大于等于结束时间 - 两个时间都标红
-            // 2. 结束时间超过下一行字幕的起始时间（LRC 格式冲突检测）- 只标红结束时间
-            val isBasicInvalid = entry.startTime >= entry.endTime
-            val hasConflict = hasTimeConflict(position, entry)
-            
-            if (isBasicInvalid) {
-                // 开始时间 >= 结束时间，两个时间都标红
-                val errorColor = ContextCompat.getColor(itemView.context, R.color.error)
-                tvStartTime.setTextColor(errorColor)
-                tvEndTime.setTextColor(errorColor)
-            } else if (hasConflict) {
-                // 结束时间超过下一行起始时间，只标红结束时间
-                val normalColor = ContextCompat.getColor(itemView.context, R.color.primary)
-                val errorColor = ContextCompat.getColor(itemView.context, R.color.error)
-                tvStartTime.setTextColor(normalColor)
-                tvEndTime.setTextColor(errorColor)
-            } else {
-                // 恢复正常颜色
-                val normalColor = ContextCompat.getColor(itemView.context, R.color.primary)
-                tvStartTime.setTextColor(normalColor)
-                tvEndTime.setTextColor(normalColor)
-            }
+            bindTimeColors(currentList, position)
 
             // 根据是否为音频文件模式控制按钮显示
             btnJumpToTime.visibility = if (hasPlayableMedia) View.VISIBLE else View.GONE
