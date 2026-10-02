@@ -37,6 +37,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,6 +58,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppCard
+import com.subtitleedit.ui.theme.AppMotion
 
 internal data class MediaFormatOption(
     val extension: String,
@@ -156,17 +159,14 @@ internal fun MediaConvertScreen(
                         text = stringResource(R.string.activity_media_convert_text_03),
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                         style = MaterialTheme.typography.bodySmall,
-                        fontSize = 12.sp,
-                        color = Color(0xFF9E9E9E),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
                     )
                 } else {
                     Text(
                         text = sourceSummary,
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleSmall,
                         maxLines = 12,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -174,8 +174,7 @@ internal fun MediaConvertScreen(
                         text = sourceInfo,
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        fontSize = 12.sp,
-                        color = Color(0xFF9E9E9E),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 40,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -195,8 +194,7 @@ internal fun MediaConvertScreen(
                     text = outputDirectory,
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                     style = MaterialTheme.typography.bodySmall,
-                    fontSize = 12.sp,
-                    color = Color(0xFF9E9E9E)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
@@ -207,8 +205,7 @@ internal fun MediaConvertScreen(
                         text = stringResource(R.string.activity_media_convert_text_05),
                         modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
                         style = MaterialTheme.typography.bodySmall,
-                        fontSize = 12.sp,
-                        color = Color(0xFF9E9E9E)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     FormatGrid(videoFormats, selectedFormat, !isConverting, onFormatSelected)
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -216,8 +213,7 @@ internal fun MediaConvertScreen(
                         text = stringResource(R.string.activity_media_convert_text_06),
                         modifier = Modifier.padding(bottom = 4.dp),
                         style = MaterialTheme.typography.bodySmall,
-                        fontSize = 12.sp,
-                        color = Color(0xFF9E9E9E)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     FormatGrid(audioFormats, selectedFormat, !isConverting, onFormatSelected)
                 }
@@ -233,7 +229,7 @@ internal fun MediaConvertScreen(
                         text = if (advancedExpanded) "▼ 高级选项"
                         else stringResource(R.string.activity_media_convert_text_07),
                         modifier = Modifier.fillMaxWidth(),
-                        fontSize = 13.sp,
+                        style = MaterialTheme.typography.labelLarge,
                         textAlign = TextAlign.Start
                     )
                 }
@@ -326,7 +322,7 @@ internal fun MediaConvertScreen(
                         .fillMaxWidth()
                         .padding(top = 8.dp)
                         .height(180.dp)
-                        .background(Color(0xFF1A1A1A))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                         .verticalScroll(logScrollState)
                         .padding(8.dp)
                 ) {
@@ -336,7 +332,7 @@ internal fun MediaConvertScreen(
                             fontFamily = FontFamily.Monospace,
                             fontSize = 11.sp
                         ),
-                        color = Color(0xFFCCCCCC)
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
@@ -346,6 +342,8 @@ internal fun MediaConvertScreen(
     if (dialog == MediaConvertDialog.OUTPUT_CONFLICT) {
         AlertDialog(
             onDismissRequest = onDismissDialog,
+            shape = MaterialTheme.shapes.extraLarge,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = { Text("文件名冲突") },
             text = { Text("输出目录中已有同名文件，或所选文件会生成同名输出。请选择处理方式。") },
             confirmButton = {
@@ -361,12 +359,7 @@ internal fun MediaConvertScreen(
 
 @Composable
 private fun MediaConvertCard(content: @Composable () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
+    AppCard(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) { content() }
     }
 }
@@ -375,9 +368,7 @@ private fun MediaConvertCard(content: @Composable () -> Unit) {
 private fun MediaConvertTitle(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.bodyMedium,
-        fontSize = 14.sp,
-        fontWeight = FontWeight.Bold,
+        style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurface
     )
 }
@@ -394,7 +385,7 @@ private fun MediaConvertNumberField(
         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, modifier = Modifier.width(100.dp), fontSize = 13.sp)
+        Text(label, modifier = Modifier.width(100.dp), style = MaterialTheme.typography.bodyMedium)
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
@@ -417,27 +408,27 @@ private fun FormatGrid(
     val density = LocalDensity.current
     val buttonMargin = with(density) { 3.toDp() }
     val buttonVerticalPadding = with(density) { 14.toDp() }
-    val buttonCornerRadius = with(density) { 6.toDp() }
-    val buttonBorderWidth = with(density) { 1.toDp() }
+    val buttonCornerRadius = MaterialTheme.shapes.medium
     Column {
         formats.chunked(5).forEach { rowFormats ->
             Row {
                 rowFormats.forEach { format ->
                     val selected = selectedFormat == format.extension
+                    val containerColor by animateColorAsState(
+                        targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surface,
+                        animationSpec = AppMotion.fast(),
+                        label = "format-container"
+                    )
+                    val contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .padding(buttonMargin)
-                            .clip(RoundedCornerShape(buttonCornerRadius))
-                            .background(if (selected) Color(0xFF1976D2) else Color(0xFF2C2C2C))
-                            .then(
-                                if (selected) Modifier
-                                else Modifier.border(
-                                    buttonBorderWidth,
-                                    Color(0xFF555555),
-                                    RoundedCornerShape(buttonCornerRadius)
-                                )
-                            )
+                            .clip(buttonCornerRadius)
+                            .background(containerColor)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, buttonCornerRadius)
                             .clickable(enabled = enabled) { onSelected(format.extension) }
                             .padding(vertical = buttonVerticalPadding),
                         contentAlignment = Alignment.Center
@@ -445,8 +436,8 @@ private fun FormatGrid(
                         Text(
                             text = format.displayName,
                             maxLines = 1,
-                            fontSize = 12.sp,
-                            color = if (selected) Color.White else Color(0xFFCCCCCC)
+                            style = MaterialTheme.typography.labelMedium,
+                            color = contentColor
                         )
                     }
                 }
@@ -469,7 +460,7 @@ private fun OptionSelector(
         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, modifier = Modifier.width(100.dp), fontSize = 13.sp)
+        Text(label, modifier = Modifier.width(100.dp), style = MaterialTheme.typography.bodyMedium)
         androidx.compose.foundation.layout.Box(Modifier.weight(1f)) {
             OutlinedButton(
                 onClick = { expanded = true },

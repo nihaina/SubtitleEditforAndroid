@@ -21,7 +21,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -40,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AnimatedProgress
 import com.subtitleedit.demix.VocalSeparationEngine
 
 internal data class VocalSeparationUiState(
@@ -219,9 +219,10 @@ internal fun VocalSeparationScreen(
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    LinearProgressIndicator(
-                        progress = { state.progress.coerceIn(0, 100) / 100f },
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    AnimatedProgress(
+                        visible = true,
+                        progress = state.progress.coerceIn(0, 100) / 100f,
+                        modifier = Modifier.padding(top = 8.dp)
                     )
                     OutlinedButton(
                         onClick = onCancel,

@@ -1,22 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="primary">#1976D2</color>
-    <color name="launcher_background">#1976D2</color>
+    <color name="primary">#0E58C8</color>
+    <color name="launcher_background">#0E58C8</color>
     <color name="primary_dark">#1565C0</color>
-    <color name="primary_container">#E3F2FD</color>
-    <color name="on_primary_container">#1565C0</color>
+    <color name="primary_container">#D9E2FF</color>
+    <color name="on_primary_container">#001945</color>
     <color name="secondary">#26A69A</color>
     <color name="secondary_dark">#00897B</color>
     <color name="white">#FFFFFF</color>
     <color name="black">#000000</color>
-    <color name="background">#F5F5F5</color>
-    <color name="surface">#FFFFFF</color>
-    <color name="error">#B00020</color>
-    <color name="on_background">#1C1B1F</color>
-    <color name="on_surface">#1C1B1F</color>
-    <color name="on_surface_variant">#6C6B6F</color>
+    <color name="background">#FBF8FD</color>
+    <color name="surface">#FBF8FD</color>
+    <color name="error">#BA1A1A</color>
+    <color name="on_background">#1B1B1F</color>
+    <color name="on_surface">#1B1B1F</color>
+    <color name="on_surface_variant">#44464F</color>
     <color name="on_error">#FFFFFF</color>
-    <color name="inverse_primary">#FFD54F</color>
+    <color name="inverse_primary">#B0C6FF</color>
+    <color name="surface_dim">#DBD9DD</color>
+    <color name="surface_bright">#FBF8FD</color>
+    <color name="surface_container_lowest">#FFFFFF</color>
+    <color name="surface_container_low">#F5F3F7</color>
+    <color name="surface_container">#EFEDF1</color>
+    <color name="surface_container_high">#E9E7EC</color>
+    <color name="surface_container_highest">#E3E2E6</color>
+    <color name="outline">#757780</color>
+    <color name="outline_variant">#C5C6D0</color>
     <!-- 播放高亮颜色 - 淡黄色，避免遮挡时间轴 -->
     <color name="playing_highlight">#FFF9C4</color>
     <!-- 波形工具栏背景色 -->

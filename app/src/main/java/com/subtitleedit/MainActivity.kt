@@ -12,6 +12,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -164,6 +165,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val settingsManager = com.subtitleedit.util.SettingsManager.getInstance(this)
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         screenState = MainActivityScreenState(
             selectedTopLevelItem = stateModel.documentState.selectedTopLevelItem
         )

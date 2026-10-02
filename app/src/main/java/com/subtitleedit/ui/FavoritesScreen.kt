@@ -43,8 +43,8 @@ fun FavoritesScreen(
             ) {
                 Text(
                     text = stringResource(R.string.no_favorite_directories),
-                    color = MaterialTheme.colorScheme.onBackground,
-                    fontSize = 16.sp
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyLarge
                 )
             }
         } else {
@@ -81,6 +81,8 @@ fun FavoritesScreen(
     pendingRemoval?.let { directory ->
         AlertDialog(
             onDismissRequest = onDismissRemoval,
+            shape = MaterialTheme.shapes.extraLarge,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = { Text(stringResource(R.string.remove_favorite_directory)) },
             text = { Text(stringResource(R.string.remove_favorite_directory_confirm, directory.name)) },
             confirmButton = {

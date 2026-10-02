@@ -16,9 +16,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -29,8 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.text.font.FontWeight
+import com.subtitleedit.ui.components.AppCard
 import com.subtitleedit.R
 
 enum class ToolDestination {
@@ -132,16 +128,7 @@ private fun ToolCard(
     item: ToolItem,
     onClick: () -> Unit
 ) {
-    Card(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        // activity_tools.xml uses cardElevation="4dp". Keep the same depth
-        // after moving the card to Compose; ToolCardShadow only removed the
-        // outline provider and did not change the elevation value.
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
+    AppCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -153,7 +140,14 @@ private fun ToolCard(
                 contentDescription = stringResource(item.iconDescription),
                 modifier = Modifier
                     .size(48.dp)
-                    .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+                    .background(
+                        when (item.destination.ordinal % 3) {
+                            0 -> MaterialTheme.colorScheme.primaryContainer
+                            1 -> MaterialTheme.colorScheme.tertiaryContainer
+                            else -> MaterialTheme.colorScheme.secondaryContainer
+                        },
+                        CircleShape
+                    )
                     .padding(
                         when (item.destination) {
                             ToolDestination.SPEECH_TO_SUBTITLE -> 5.dp
@@ -167,14 +161,15 @@ private fun ToolCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = stringResource(item.title),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.size(4.dp))
                 Text(
                     text = stringResource(item.description),
-                    fontSize = 14.sp,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -182,7 +177,7 @@ private fun ToolCard(
                 painter = painterResource(R.drawable.ic_arrow_right),
                 contentDescription = stringResource(R.string.activity_tools_contentdescription_01),
                 modifier = Modifier.size(24.dp),
-                tint = Color.Unspecified
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
         }
     }

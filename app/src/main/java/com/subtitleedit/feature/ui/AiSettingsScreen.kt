@@ -53,6 +53,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
 import com.subtitleedit.util.AiProviderConfig
+import com.subtitleedit.ui.components.AppCard
 import com.subtitleedit.util.SettingsManager
 
 enum class AiModelTarget {
@@ -578,11 +579,7 @@ private fun FetchModelsButton(
 
 @Composable
 private fun SettingsCard(content: @Composable () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
+    AppCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -595,8 +592,7 @@ private fun SettingsCard(content: @Composable () -> Unit) {
 private fun SectionHeading(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.onSurface
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary
     )
 }

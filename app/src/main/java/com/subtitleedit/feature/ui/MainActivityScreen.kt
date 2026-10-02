@@ -23,7 +23,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.BasicTextField
@@ -42,7 +41,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -67,7 +71,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.appcompat.R as AppCompatR
 import com.subtitleedit.FileOperation
 import com.subtitleedit.DirectoryScrollPosition
@@ -87,6 +95,8 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.subtitleedit.ui.components.StatusBadge
+import com.subtitleedit.ui.theme.AppMotion
 
 internal data class MainDirectoryScrollRequest(
     val generation: Long,
@@ -188,6 +198,7 @@ internal fun MainActivityScreen(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val createNameFocusRequester = remember { FocusRequester() }
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     LaunchedEffect(createDialogKind) {
         if (createDialogKind != null) {
@@ -214,12 +225,26 @@ internal fun MainActivityScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
             .background(MaterialTheme.colorScheme.background)
     ) {
         TopAppBar(
             modifier = Modifier.height(56.dp),
+            scrollBehavior = scrollBehavior,
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
+            ),
             title = {
-                if (state.isSearchExpanded && isDirectoryPage && !isSelectionActive) {
+                androidx.compose.animation.AnimatedContent(
+                    targetState = state.isSearchExpanded && isDirectoryPage && !isSelectionActive,
+                    transitionSpec = {
+                        androidx.compose.animation.fadeIn(AppMotion.enter()) togetherWith
+                            androidx.compose.animation.fadeOut(AppMotion.exit())
+                    },
+                    label = "directory-search"
+                ) { searchOpen ->
+                if (searchOpen) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -249,6 +274,8 @@ internal fun MainActivityScreen(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
+                                        .clip(MaterialTheme.shapes.extraLarge)
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                                         .padding(horizontal = 8.dp),
                                     contentAlignment = Alignment.CenterStart
                                 ) {
@@ -296,6 +323,7 @@ internal fun MainActivityScreen(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                }
                 }
             },
             navigationIcon = {
@@ -397,7 +425,12 @@ internal fun MainActivityScreen(
             }
         )
 
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .nestedScroll(scrollBehavior.nestedScrollConnection)
+        ) {
             if (isDirectoryPage) {
                 DirectoryBrowserContent(
                     state = state,
@@ -417,30 +450,37 @@ internal fun MainActivityScreen(
             }
         }
 
-        if (isSelectionActive) {
-            SelectionActions(
-                operation = state.pendingOperation,
-                onCopy = onCopy,
-                onMove = onMove,
-                onRename = onRename,
-                onDelete = onDelete,
-                canConvert = state.canConvertSelected,
-                canCompress = state.canCompressSelected,
-                onConvert = onConvertSelection,
-                onCompress = onCompressSelection,
-                onProperties = onShowSelectionProperties,
-                onConfirmDestination = onConfirmDestination,
-                onCancelDestination = onCancelDestination
-            )
-        }
-        // The legacy activity hides bottom navigation while a file selection or
-        // destination operation is active. It returns after the operation exits.
-        if (state.selectedPaths.isEmpty() && state.pendingOperation == null) {
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            MainBottomNavigation(
-                selectedItemId = state.selectedTopLevelItem,
-                onSelected = onTopLevelPageSelected
-            )
+        val showBottomNavigation = state.selectedPaths.isEmpty() && state.pendingOperation == null
+        androidx.compose.animation.AnimatedContent(
+            targetState = showBottomNavigation,
+            transitionSpec = {
+                androidx.compose.animation.fadeIn(AppMotion.enter()) togetherWith
+                    androidx.compose.animation.fadeOut(AppMotion.exit())
+            },
+            label = "selection-actions"
+        ) { showBottom ->
+            if (showBottom) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                MainBottomNavigation(
+                    selectedItemId = state.selectedTopLevelItem,
+                    onSelected = onTopLevelPageSelected
+                )
+            } else if (isSelectionActive) {
+                SelectionActions(
+                    operation = state.pendingOperation,
+                    onCopy = onCopy,
+                    onMove = onMove,
+                    onRename = onRename,
+                    onDelete = onDelete,
+                    canConvert = state.canConvertSelected,
+                    canCompress = state.canCompressSelected,
+                    onConvert = onConvertSelection,
+                    onCompress = onCompressSelection,
+                    onProperties = onShowSelectionProperties,
+                    onConfirmDestination = onConfirmDestination,
+                    onCancelDestination = onCancelDestination
+                )
+            }
         }
     }
 
@@ -514,7 +554,7 @@ internal fun MainActivityScreen(
                                 .padding(start = 16.dp, end = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(label, modifier = Modifier.weight(1f), fontSize = 16.sp)
+                            Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                             RadioButton(
                                 selected = state.sortField == field,
                                 onClick = null,
@@ -538,7 +578,7 @@ internal fun MainActivityScreen(
                                 .padding(start = 16.dp, end = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(label, modifier = Modifier.weight(1f), fontSize = 16.sp)
+                            Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                             RadioButton(
                                 selected = state.sortDirection == direction,
                                 onClick = null,
@@ -603,13 +643,16 @@ private fun DirectoryBrowserContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(12.dp),
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = directory.absolutePath,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
                     softWrap = false
                 )
@@ -618,13 +661,17 @@ private fun DirectoryBrowserContent(
         // The legacy directory screen only exposed progress while a recursive
         // search was running. Loading a directory kept the existing list and
         // did not replace the empty-state text with the search message.
-        if (state.isSearchInProgress) {
-            androidx.compose.material3.LinearProgressIndicator(
-                modifier = Modifier.fillMaxWidth().height(2.dp)
-            )
-        } else {
-            Spacer(Modifier.fillMaxWidth().height(2.dp))
-        }
+        val searchProgressAlpha by animateFloatAsState(
+            targetValue = if (state.isSearchInProgress) 1f else 0f,
+            animationSpec = AppMotion.fast(),
+            label = "directory-search-progress"
+        )
+        androidx.compose.material3.LinearProgressIndicator(
+            modifier = Modifier.fillMaxWidth().height(2.dp),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = searchProgressAlpha),
+            trackColor = Color.Transparent,
+            progress = { 1f }
+        )
 
         if (state.showDirectoryEmptyState) {
             Box(
@@ -663,6 +710,7 @@ private fun DirectoryBrowserContent(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun BrowserFileRow(
+    modifier: Modifier = Modifier,
     file: File,
     relativePathRoot: File?,
     isSelected: Boolean,
@@ -708,14 +756,21 @@ internal fun BrowserFileRow(
         else -> 1f
     }
     val selectionStrokeWidth = with(LocalDensity.current) { 2.toDp() }
-    val border = if (isSelected) {
-        BorderStroke(selectionStrokeWidth, MaterialTheme.colorScheme.primary)
-    } else {
-        BorderStroke(0.dp, Color.Transparent)
-    }
+    val containerColor by animateColorAsState(
+        targetValue = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerLowest,
+        animationSpec = AppMotion.state(),
+        label = "file-row-container"
+    )
+    val animatedBorderWidth by animateDpAsState(
+        targetValue = if (isSelected) selectionStrokeWidth else 0.dp,
+        animationSpec = AppMotion.state(),
+        label = "file-row-border"
+    )
+    val border = BorderStroke(animatedBorderWidth, MaterialTheme.colorScheme.primary)
 
     Surface(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(4.dp)
             .alpha(alpha)
@@ -723,10 +778,10 @@ internal fun BrowserFileRow(
                 onClick = onClick,
                 onLongClick = { if (restricted) onClick() else onLongClick() }
             ),
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        color = containerColor,
         border = border,
-        shadowElevation = 2.dp
+        shadowElevation = 0.dp
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
@@ -740,8 +795,7 @@ internal fun BrowserFileRow(
                 Text(
                     text = displayName,
                     color = if (restricted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.MiddleEllipsis
                 )
@@ -757,8 +811,8 @@ internal fun BrowserFileRow(
                                 },
                                 modifier = Modifier.padding(top = 4.dp)
                                     .alpha(if (count == null) 0f else 1f),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall,
                                 maxLines = 1,
                                 softWrap = false
                             )
@@ -771,8 +825,8 @@ internal fun BrowserFileRow(
                     ) {
                         Text(
                             text = FileUtils.formatFileSize(file.length()),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
                             maxLines = 1
                         )
                         val mediaFile = MainFilePreviewLoader.isMediaFile(file)
@@ -784,7 +838,7 @@ internal fun BrowserFileRow(
                                     .width(72.dp)
                                     .alpha(0f),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 12.sp
+                                style = MaterialTheme.typography.bodySmall
                             )
                         } else {
                             preview?.mediaDuration?.takeIf(String::isNotEmpty)?.let { duration ->
@@ -792,7 +846,7 @@ internal fun BrowserFileRow(
                                     text = duration,
                                     modifier = Modifier.padding(start = 12.dp).width(72.dp),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontSize = 12.sp
+                                    style = MaterialTheme.typography.bodySmall
                                 )
                             }
                         }
@@ -809,31 +863,20 @@ internal fun BrowserFileRow(
                         Text(
                             text = modifiedTime,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 11.sp,
+                            style = MaterialTheme.typography.labelSmall,
                             modifier = Modifier.padding(top = 5.dp),
                             maxLines = 1
                         )
                     }
                 } else {
                     if (file.extension.isNotEmpty()) {
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = MaterialTheme.colorScheme.primary
-                        ) {
-                            Text(
-                                text = file.extension.uppercase(locale),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                maxLines = 1
-                            )
-                        }
+                        StatusBadge(file.extension.uppercase(locale))
                     }
                     Text(
                         text = modifiedTime,
                         modifier = Modifier.padding(top = 5.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         maxLines = 1
                     )
                 }
@@ -886,10 +929,10 @@ private fun SelectionActions(
     onCancelDestination: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    Spacer(Modifier.fillMaxWidth().height(4.dp).background(MaterialTheme.colorScheme.surface))
+    Spacer(Modifier.fillMaxWidth().height(4.dp).background(MaterialTheme.colorScheme.surfaceContainer))
     if (operation == null) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(64.dp).background(MaterialTheme.colorScheme.surface),
+            modifier = Modifier.fillMaxWidth().height(64.dp).background(MaterialTheme.colorScheme.surfaceContainer),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -925,14 +968,14 @@ private fun SelectionActions(
         }
     } else {
         Row(
-            modifier = Modifier.fillMaxWidth().height(64.dp).padding(start = 16.dp, end = 8.dp),
+            modifier = Modifier.fillMaxWidth().height(64.dp).background(MaterialTheme.colorScheme.surfaceContainer).padding(start = 16.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = stringResource(R.string.activity_main_text_02),
                 modifier = Modifier.weight(1f),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 13.sp
+                style = MaterialTheme.typography.bodySmall
             )
             TextButton(onClick = onCancelDestination) { Text(stringResource(R.string.cancel)) }
             Button(onClick = onConfirmDestination) {
@@ -957,14 +1000,14 @@ private fun SelectionAction(modifier: Modifier, icon: Int, label: String, onClic
             modifier = Modifier.size(24.dp),
             tint = Color.Unspecified
         )
-        Text(label, modifier = Modifier.padding(top = 2.dp), fontSize = 12.sp, maxLines = 1)
+        Text(label, modifier = Modifier.padding(top = 2.dp), style = MaterialTheme.typography.labelMedium, maxLines = 1)
     }
 }
 
 @Composable
 private fun MainBottomNavigation(selectedItemId: Int, onSelected: (Int) -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().height(52.dp).background(MaterialTheme.colorScheme.surface),
+        modifier = Modifier.fillMaxWidth().height(60.dp).background(MaterialTheme.colorScheme.surfaceContainer),
         verticalAlignment = Alignment.CenterVertically
     ) {
         val items = listOf(
@@ -976,8 +1019,18 @@ private fun MainBottomNavigation(selectedItemId: Int, onSelected: (Int) -> Unit)
         )
         items.forEach { (id, icon, title) ->
             val label = stringResource(title)
-            val tint = if (selectedItemId == id) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant
+            val selected = selectedItemId == id
+            val indicatorAlpha by animateFloatAsState(
+                targetValue = if (selected) 1f else 0f,
+                animationSpec = AppMotion.fade(),
+                label = "bottom-nav-indicator"
+            )
+            val tint by animateColorAsState(
+                targetValue = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                animationSpec = AppMotion.fast(),
+                label = "bottom-nav-tint"
+            )
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -991,12 +1044,20 @@ private fun MainBottomNavigation(selectedItemId: Int, onSelected: (Int) -> Unit)
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Icon(
-                    painter = painterResource(icon),
-                    contentDescription = label,
-                    modifier = Modifier.size(24.dp),
-                    tint = tint
-                )
+                Box(
+                    modifier = Modifier
+                        .size(width = 56.dp, height = 28.dp)
+                        .clip(MaterialTheme.shapes.extraLarge)
+                        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = indicatorAlpha)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = painterResource(icon),
+                        contentDescription = label,
+                        modifier = Modifier.size(24.dp),
+                        tint = tint
+                    )
+                }
                 Text(label, color = tint, style = MaterialTheme.typography.labelMedium, maxLines = 1)
             }
         }

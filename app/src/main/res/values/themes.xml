@@ -8,6 +8,13 @@
         <item name="colorSecondaryVariant">@color/secondary_dark</item>
         <item name="colorOnSecondary">@color/black</item>
         <item name="android:statusBarColor">@color/primary_dark</item>
+        <item name="android:windowBackground">@color/background</item>
         <item name="textInputStyle">@style/Widget.Material3.TextInputLayout.OutlinedBox</item>
+    </style>
+
+    <style name="Theme.SubtitleEditforAndroid.Compose" parent="Theme.SubtitleEditforAndroid">
+        <item name="android:windowBackground">@color/background</item>
+        <item name="colorPrimaryVariant">@null</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
     </style>
 </resources>

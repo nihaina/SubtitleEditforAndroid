@@ -27,6 +27,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -109,32 +112,35 @@ fun LogScreen(
                 modifier = Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = infoText,
+            Text(
+                text = infoText,
                     modifier = Modifier.weight(1f),
-                    fontSize = 13.sp,
+                style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 TextButton(onClick = onRefresh, enabled = !isRefreshing) { Text("刷新") }
                 Spacer(Modifier.width(8.dp))
                 OutlinedButton(onClick = onExport, enabled = isExportEnabled) { Text("导出") }
             }
-            Row(
-                modifier = Modifier.padding(start = 16.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
+            SingleChoiceSegmentedButtonRow(
+                modifier = Modifier.padding(start = 16.dp, bottom = 4.dp)
             ) {
-                DisplayModeButton(
-                    "简单",
-                    displayMode == RuntimeLogManager.DisplayMode.SIMPLE,
-                    { onDisplayModeChange(RuntimeLogManager.DisplayMode.SIMPLE) },
-                    RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp)
+                val modes = listOf(
+                    "简单" to RuntimeLogManager.DisplayMode.SIMPLE,
+                    "详细" to RuntimeLogManager.DisplayMode.DETAILED
                 )
-                DisplayModeButton(
-                    "详细",
-                    displayMode == RuntimeLogManager.DisplayMode.DETAILED,
-                    { onDisplayModeChange(RuntimeLogManager.DisplayMode.DETAILED) },
-                    RoundedCornerShape(topEnd = 20.dp, bottomEnd = 20.dp)
-                )
+                modes.forEachIndexed { index, (label, mode) ->
+                    SegmentedButton(
+                        selected = displayMode == mode,
+                        onClick = { onDisplayModeChange(mode) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size),
+                        colors = androidx.compose.material3.SegmentedButtonDefaults.colors(
+                            activeContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            activeContentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        ),
+                        icon = {}
+                    ) { Text(label, style = MaterialTheme.typography.labelLarge) }
+                }
             }
             PageFilterMenu(pageOptions, pageFilter, onPageFilterChange)
             LazyColumn(
@@ -160,24 +166,6 @@ fun LogScreen(
             }
         }
     }
-}
-
-@Composable
-private fun DisplayModeButton(
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    shape: RoundedCornerShape
-) {
-    OutlinedButton(
-        onClick = onClick,
-        modifier = Modifier.height(40.dp),
-        shape = shape,
-        colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-            contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-        )
-    ) { Text(text) }
 }
 
 @Composable
@@ -243,28 +231,29 @@ private fun LogSectionRow(
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().height(48.dp)
-                .clickable(onClick = onToggleExpanded)
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow, MaterialTheme.shapes.medium)
+                    .clickable(onClick = onToggleExpanded)
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = if (expanded) "▼" else "▶",
                 modifier = Modifier.width(24.dp),
-                fontSize = 14.sp,
+                style = MaterialTheme.typography.titleSmall,
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Column(Modifier.weight(1f)) {
                 Text(
                     section.title,
-                    fontSize = 15.sp,
+                    style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     "${section.startedAt} · ${section.lineCount} 行",
-                    fontSize = 12.sp,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -276,7 +265,7 @@ private fun LogSectionRow(
                 Text(
                     section.content,
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                        .background(MaterialTheme.colorScheme.surface).padding(8.dp),
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.shapes.small).padding(8.dp),
                     color = MaterialTheme.colorScheme.onSurface,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,

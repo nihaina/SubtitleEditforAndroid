@@ -24,7 +24,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -52,6 +51,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AnimatedProgress
 
 sealed interface SpeechToSubtitleDialogUi {
     data object OutputConflict : SpeechToSubtitleDialogUi
@@ -273,16 +273,11 @@ fun SpeechToSubtitleScreen(
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    if (state.progressVisible) {
-                        LinearProgressIndicator(
-                            progress = { state.progress.coerceIn(0, 100) / 100f },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 12.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                            trackColor = MaterialTheme.colorScheme.outlineVariant
-                        )
-                    }
+                    AnimatedProgress(
+                        visible = state.progressVisible,
+                        progress = state.progress.coerceIn(0, 100) / 100f,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
                     if (state.progressStatus.isNotBlank()) {
                         Text(
                             text = state.progressStatus,

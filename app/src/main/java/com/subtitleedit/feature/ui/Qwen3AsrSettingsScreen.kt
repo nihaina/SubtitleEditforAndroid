@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.ui.components.AppCard
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -305,11 +306,7 @@ fun Qwen3AsrSettingsScreen(
 
 @Composable
 private fun SettingsCard(content: @Composable () -> Unit) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
-    ) {
+    AppCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -324,9 +321,8 @@ private fun SettingsCard(content: @Composable () -> Unit) {
 private fun SectionTitle(resourceId: Int) {
     Text(
         text = stringResource(resourceId),
-        color = MaterialTheme.colorScheme.onSurface,
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.Bold
+        color = MaterialTheme.colorScheme.primary,
+        style = MaterialTheme.typography.titleSmall
     )
 }
 

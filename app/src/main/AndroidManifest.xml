@@ -60,7 +60,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.SubtitleEditforAndroid">
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -169,134 +169,134 @@
         <activity
             android:name=".ArchivePreviewActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
             
         <activity
             android:name=".BatchConvertActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
             android:name=".TranscriptMatchActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid"
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
             
         <activity
             android:name=".DraftsActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
             
         <activity
             android:name=".SettingsActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
             android:name=".AboutActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
             
         <activity
             android:name=".ToolsActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
             
         <activity
             android:name=".MediaConvertActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
             android:name=".SpeechToSubtitleActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid"
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
 
         <activity
             android:name=".VocalSeparationActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid"
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
 
         <activity
             android:name=".VocalSeparationSettingsActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
             android:name=".AutoTranslateActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
             android:name=".FileManagementSettingsActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
             android:name=".AutoTimestampActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid"
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
 
         <activity
             android:name=".SubtitleFormatSelectActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
             android:name=".SubtitleFormatEditorActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
           <activity
              android:name=".SenseVoiceSettingsActivity"
              android:exported="false"
-             android:theme="@style/Theme.SubtitleEditforAndroid" />
+             android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
           <activity
              android:name=".ParakeetSettingsActivity"
              android:exported="false"
-             android:theme="@style/Theme.SubtitleEditforAndroid" />
+             android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
           <activity
              android:name=".Qwen3AsrSettingsActivity"
              android:exported="false"
-             android:theme="@style/Theme.SubtitleEditforAndroid" />
+             android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
           <activity
              android:name=".VadModelSettingsActivity"
              android:exported="false"
-             android:theme="@style/Theme.SubtitleEditforAndroid" />
+             android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
             android:name=".WhisperSettingsActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
             android:name=".AiSettingsActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
             android:name=".chat.ChatActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
             android:name=".TtsSettingsActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
             android:name=".ModelManagementActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
             android:name=".LogActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
     </application>
 

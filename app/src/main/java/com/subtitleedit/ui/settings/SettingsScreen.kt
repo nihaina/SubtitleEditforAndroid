@@ -1,6 +1,7 @@
 package com.subtitleedit.ui.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -33,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -42,6 +44,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import com.subtitleedit.R
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.ui.components.SectionHeader
+import com.subtitleedit.ui.components.SettingsGroup
+import com.subtitleedit.ui.components.SettingsRow
+import com.subtitleedit.ui.components.SettingsSwitchRow as SharedSettingsSwitchRow
 import java.util.Locale
 
 data class SettingsPageState(
@@ -120,87 +126,81 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
-            SettingsNavigationRow(
-                title = stringResource(R.string.activity_settings_text_01),
-                value = state.encoding,
-                showArrow = true,
-                boldTitle = true,
-                onClick = { showEncodingDialog = true }
-            )
-            Spacer(Modifier.height(12.dp))
-            SettingsNavigationRow(
-                title = stringResource(R.string.activity_settings_text_02),
-                value = state.themeLabel,
-                icon = R.drawable.ic_theme_moon,
-                onClick = { showThemeDialog = true }
-            )
+            SettingsGroup {
+                SettingsRow(
+                    title = stringResource(R.string.activity_settings_text_01),
+                    value = state.encoding,
+                    showArrow = true,
+                    onClick = { showEncodingDialog = true }
+                )
+                SettingsRow(
+                    title = stringResource(R.string.activity_settings_text_02),
+                    value = state.themeLabel,
+                    iconRes = R.drawable.ic_theme_moon,
+                    onClick = { showThemeDialog = true }
+                )
+            }
             Spacer(Modifier.height(20.dp))
-            SettingsNavigationRow(
-                title = stringResource(R.string.activity_settings_ai_entry),
-                icon = R.drawable.ic_ai_translate,
-                onClick = onOpenAiSettings
-            )
-            Spacer(Modifier.height(4.dp))
-            SettingsNavigationRow(
-                title = stringResource(R.string.activity_settings_text_04),
-                icon = R.drawable.ic_model,
-                onClick = onOpenModelManagement
-            )
-            Spacer(Modifier.height(4.dp))
-            SettingsNavigationRow(
-                title = stringResource(R.string.tts_settings),
-                icon = R.drawable.ic_tts,
-                onClick = onOpenTtsSettings
-            )
-            Spacer(Modifier.height(4.dp))
-            SettingsNavigationRow(
-                title = stringResource(R.string.activity_settings_text_05),
-                value = state.cacheSize,
-                icon = R.drawable.ic_sweep,
-                onClick = { showCacheDialog = true }
-            )
-            Spacer(Modifier.height(4.dp))
-            SettingsNavigationRow(
-                title = stringResource(R.string.activity_settings_text_06),
-                icon = R.drawable.ic_document,
-                onClick = onOpenLogs
-            )
-            SettingsSwitchRow(
+            SectionHeader(stringResource(R.string.activity_settings_ai_entry))
+            SettingsGroup {
+                SettingsRow(
+                    title = stringResource(R.string.activity_settings_ai_entry),
+                    iconRes = R.drawable.ic_ai_translate,
+                    onClick = onOpenAiSettings
+                )
+                SettingsRow(
+                    title = stringResource(R.string.activity_settings_text_04),
+                    iconRes = R.drawable.ic_model,
+                    onClick = onOpenModelManagement
+                )
+                SettingsRow(
+                    title = stringResource(R.string.tts_settings),
+                    iconRes = R.drawable.ic_tts,
+                    onClick = onOpenTtsSettings
+                )
+                SettingsRow(
+                    title = stringResource(R.string.activity_settings_text_05),
+                    value = state.cacheSize,
+                    iconRes = R.drawable.ic_sweep,
+                    onClick = { showCacheDialog = true }
+                )
+                SettingsRow(
+                    title = stringResource(R.string.activity_settings_text_06),
+                    iconRes = R.drawable.ic_document,
+                    onClick = onOpenLogs
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+            SectionHeader(stringResource(R.string.activity_settings_text_09))
+            SettingsGroup {
+                SharedSettingsSwitchRow(
                 title = stringResource(R.string.activity_settings_text_07),
                 description = stringResource(R.string.activity_settings_text_08),
                 checked = state.checkUpdatesOnStartup,
-                topPadding = 12,
-                bottomPadding = 8,
                 onCheckedChange = onCheckUpdatesChanged
-            )
-            SettingsSwitchRow(
+                )
+                SharedSettingsSwitchRow(
                 title = stringResource(R.string.activity_settings_text_17),
                 description = stringResource(R.string.activity_settings_text_18),
                 checked = state.preserveOutputDirectories,
-                topPadding = 4,
-                bottomPadding = 8,
                 onCheckedChange = onPreserveDirectoriesChanged
-            )
-            Text(
-                text = stringResource(R.string.activity_settings_text_09),
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
-            )
-            SettingsSwitchRow(
+                )
+                SharedSettingsSwitchRow(
                 title = stringResource(R.string.activity_settings_text_10),
                 description = stringResource(R.string.activity_settings_text_11),
                 checked = state.loopSelectedSubtitle,
-                topPadding = 4,
-                bottomPadding = 4,
                 onCheckedChange = onLoopSelectedChanged
-            )
-            Spacer(Modifier.height(4.dp))
-            SettingsNavigationRow(
-                title = stringResource(R.string.about),
-                icon = R.drawable.ic_info,
-                showArrow = true,
-                onClick = onOpenAbout
-            )
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+            SettingsGroup {
+                SettingsRow(
+                    title = stringResource(R.string.about),
+                    iconRes = R.drawable.ic_info,
+                    showArrow = true,
+                    onClick = onOpenAbout
+                )
+            }
         }
     }
 
@@ -240,6 +240,8 @@ fun SettingsScreen(
     if (showCacheDialog) {
         AlertDialog(
             onDismissRequest = { showCacheDialog = false },
+            shape = MaterialTheme.shapes.extraLarge,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = { Text("清除缓存") },
             text = {
                 Column {
@@ -270,6 +272,8 @@ fun SettingsScreen(
     pendingCacheItem?.let { item ->
         AlertDialog(
             onDismissRequest = { pendingCacheItem = null },
+            shape = MaterialTheme.shapes.extraLarge,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = { Text("清除${item.label}") },
             text = { Text(item.confirmationMessage) },
             confirmButton = {
@@ -290,84 +294,6 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun SettingsNavigationRow(
-    title: String,
-    icon: Int? = null,
-    value: String? = null,
-    showArrow: Boolean = false,
-    boldTitle: Boolean = false,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            .clickable(onClick = onClick),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (icon != null) {
-            Icon(
-                painter = painterResource(icon),
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-                tint = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(Modifier.width(12.dp))
-        }
-        Text(
-            text = title,
-            fontSize = 16.sp,
-            fontWeight = if (boldTitle) FontWeight.Bold else FontWeight.Normal,
-            modifier = Modifier.weight(1f)
-        )
-        if (!value.isNullOrEmpty()) {
-            Text(
-                text = value,
-                color = MaterialTheme.colorScheme.primary,
-                fontSize = 14.sp,
-                modifier = if (showArrow) Modifier.padding(end = 8.dp) else Modifier
-            )
-        }
-        if (showArrow) {
-            Icon(
-                painter = painterResource(R.drawable.ic_arrow_right),
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
-private fun SettingsSwitchRow(
-    title: String,
-    description: String,
-    checked: Boolean,
-    topPadding: Int,
-    bottomPadding: Int,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = topPadding.dp, bottom = bottomPadding.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, fontSize = 14.sp)
-            Text(
-                description,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(top = 2.dp)
-            )
-        }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
-}
-
-@Composable
 private fun ChoiceDialog(
     title: String,
     choices: List<String>,
@@ -378,6 +304,8 @@ private fun ChoiceDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = MaterialTheme.shapes.extraLarge,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         title = { Text(title) },
         text = {
             LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
@@ -386,6 +314,11 @@ private fun ChoiceDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .background(
+                                if (choice == selected) MaterialTheme.colorScheme.primaryContainer
+                                else Color.Transparent,
+                                MaterialTheme.shapes.medium
+                            )
                             .clickable { onSelect(index) }
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically

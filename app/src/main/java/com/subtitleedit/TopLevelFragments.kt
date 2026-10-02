@@ -10,6 +10,12 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -142,8 +148,16 @@ internal fun MainTopLevelPages(
         goToDraftFolder("")
     }
 
-    key(selectedPage, selectionVersion) {
-    when (selectedPage) {
+    AnimatedContent(
+        targetState = selectedPage,
+        transitionSpec = {
+            (fadeIn(tween(210, delayMillis = 90)) + scaleIn(initialScale = 0.96f, animationSpec = tween(210, delayMillis = 90))) togetherWith
+                fadeOut(tween(90))
+        },
+        label = "top-level-page"
+    ) { page ->
+    key(page, selectionVersion) {
+    when (page) {
         R.id.nav_favorites -> FavoritesScreen(
             directories = state.favoriteDirectories,
             pendingRemoval = state.pendingFavoriteRemoval,
@@ -255,6 +269,7 @@ internal fun MainTopLevelPages(
             onCacheClear = { item -> clearSettingsCache(context, settings, state, item, false) },
             onEmptyCacheClear = { item -> clearSettingsCache(context, settings, state, item, false) }
         )
+    }
     }
     }
 }

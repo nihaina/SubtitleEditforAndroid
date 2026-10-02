@@ -36,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -145,11 +146,15 @@ internal fun ChatScreen(
                             )
                         }
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
+                )
             )
         },
         bottomBar = {
-            Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp) {
+            Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 0.dp) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -203,6 +208,8 @@ internal fun ChatScreen(
     if (showHistoryDialog) {
         AlertDialog(
             onDismissRequest = onCloseHistory,
+            shape = MaterialTheme.shapes.extraLarge,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = { Text("会话记录") },
             text = {
                 LazyColumn(modifier = Modifier.heightIn(max = 440.dp)) {
@@ -240,15 +247,15 @@ private fun ChatMessageRow(message: ChatUiMessage) {
             ) {
                 Surface(
                     modifier = Modifier.widthIn(min = 64.dp, max = 420.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.primary
+                        shape = MaterialTheme.shapes.large,
+                        color = MaterialTheme.colorScheme.primaryContainer
                 ) {
                     SelectionContainer {
                         Text(
                             text = message.text,
                             modifier = Modifier.padding(12.dp),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            fontSize = 16.sp
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            style = MaterialTheme.typography.bodyLarge
                         )
                     }
                 }
@@ -259,7 +266,7 @@ private fun ChatMessageRow(message: ChatUiMessage) {
             text = message.text,
             modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 12.sp,
+            style = MaterialTheme.typography.bodySmall,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
     }
@@ -272,7 +279,7 @@ private fun AssistantMessage(message: ChatUiMessage.Assistant) {
             text = "AI",
             modifier = Modifier.padding(bottom = 4.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 12.sp
+            style = MaterialTheme.typography.bodySmall
         )
         if (message.reasoning.isNotBlank()) {
             Surface(
@@ -283,8 +290,8 @@ private fun AssistantMessage(message: ChatUiMessage.Assistant) {
                         role = Role.Button,
                         onClick = { message.reasoningExpanded = !message.reasoningExpanded }
                     ),
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.surfaceContainer
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.tertiaryContainer
             ) {
                 Column(
                     Modifier.heightIn(min = 42.dp).padding(10.dp),
@@ -292,16 +299,16 @@ private fun AssistantMessage(message: ChatUiMessage.Assistant) {
                 ) {
                     Text(
                         if (message.reasoningExpanded) "收起思考" else "展开思考",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 14.sp
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        style = MaterialTheme.typography.bodyMedium
                     )
                     if (message.reasoningExpanded) {
                         Spacer(Modifier.height(8.dp))
                         SelectionContainer {
                             Text(
                                 message.reasoning,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 14.sp
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                style = MaterialTheme.typography.bodyMedium
                             )
                         }
                     }
@@ -311,7 +318,7 @@ private fun AssistantMessage(message: ChatUiMessage.Assistant) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
             Surface(
                 modifier = Modifier.widthIn(max = 440.dp),
-                shape = RoundedCornerShape(8.dp),
+                shape = MaterialTheme.shapes.large,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh
             ) {
                 SelectionContainer {
@@ -319,7 +326,7 @@ private fun AssistantMessage(message: ChatUiMessage.Assistant) {
                         text = message.text.ifBlank { if (message.streaming) "正在生成..." else "" },
                         modifier = Modifier.padding(12.dp),
                         color = MaterialTheme.colorScheme.onSurface,
-                        fontSize = 16.sp
+                        style = MaterialTheme.typography.bodyLarge
                     )
                 }
             }
