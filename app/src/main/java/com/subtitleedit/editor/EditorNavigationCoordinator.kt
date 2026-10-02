@@ -1,13 +1,8 @@
 package com.subtitleedit.editor
 
+import android.app.AlertDialog
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import com.subtitleedit.ComposeDialogHost
 import com.subtitleedit.EditorDocumentState
 import com.subtitleedit.adapter.SubtitleAdapter
 
@@ -47,31 +42,12 @@ internal class EditorNavigationCoordinator(
     }
 
     private fun showUnsavedChangesDialog() {
-        ComposeDialogHost.show(activity) { dialog ->
-            AlertDialog(
-                onDismissRequest = dialog::dismiss,
-                title = { Text("提示") },
-                text = { Text("是否保存更改？") },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            dialog.dismiss()
-                            saveAndFinish()
-                        }
-                    ) { Text("保存") }
-                },
-                dismissButton = {
-                    Row(horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = dialog::dismiss) { Text("取消") }
-                        TextButton(
-                            onClick = {
-                                dialog.dismiss()
-                                finishWithoutSaving()
-                            }
-                        ) { Text("不保存") }
-                    }
-                }
-            )
-        }
+        AlertDialog.Builder(activity)
+            .setTitle("提示")
+            .setMessage("是否保存更改？")
+            .setPositiveButton("保存") { _, _ -> saveAndFinish() }
+            .setNegativeButton("不保存") { _, _ -> finishWithoutSaving() }
+            .setNeutralButton("取消", null)
+            .show()
     }
 }

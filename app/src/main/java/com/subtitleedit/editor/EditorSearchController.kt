@@ -1,12 +1,15 @@
 package com.subtitleedit.editor
 
 import android.content.Context
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.KeyEvent
+import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.core.view.isVisible
 import com.subtitleedit.R
 import com.subtitleedit.adapter.SubtitleAdapter
+import com.subtitleedit.databinding.ActivityEditorBinding
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SearchResultRetention
@@ -15,15 +18,12 @@ import com.subtitleedit.util.SearchReplaceOps
 import com.subtitleedit.util.SearchTextMatcher
 import com.subtitleedit.util.TimeUtils
 import com.subtitleedit.usecase.SearchReplaceSubtitleUseCase
-import com.subtitleedit.ui.EditorSourceEditorState
-import com.subtitleedit.ui.EditorSourceHighlight
 
 /** Coordinates the editor search bar without owning the editor document. */
-internal class EditorSearchController(
+class EditorSearchController(
     private val context: Context,
-    private val sourceEditorState: EditorSourceEditorState,
+    private val binding: ActivityEditorBinding,
     private val subtitleAdapter: SubtitleAdapter,
-    private val scrollListToPosition: (Int) -> Unit,
     private val isSourceViewMode: () -> Boolean,
     private val ignoreSourceChanges: () -> Boolean,
     private val entries: () -> List<SubtitleEntry>,
@@ -32,11 +32,6 @@ internal class EditorSearchController(
     private val confirmReplaceAll: (matchCount: Int, onConfirm: () -> Unit) -> Unit,
     private val showMessage: (String) -> Unit
 ) {
-    var uiState by mutableStateOf(
-        EditorSearchUiState(resultCount = context.getString(R.string.search_result_position_empty))
-    )
-        private set
-
     private val engine = SearchReplaceEngine()
     private val searchReplaceSubtitle = SearchReplaceSubtitleUseCase()
     private var listResultEntries: List<SubtitleEntry> = emptyList()
@@ -51,6 +46,7 @@ internal class EditorSearchController(
     }
 
     init {
+        bindSearchBar()
         bindSourceChanges()
         updateSearchOptionButtons()
         updateResultCount()
@@ -58,55 +54,19 @@ internal class EditorSearchController(
 
     fun show() {
         clearSearchState()
-        uiState = uiState.copy(
-            visible = true,
-            query = "",
-            replacement = "",
-            focusRequestSequence = uiState.focusRequestSequence + 1
-        )
+        binding.searchBar.isVisible = true
+        binding.etSearch.requestFocus()
+        binding.etSearch.text?.clear()
+        binding.etReplace.text?.clear()
+        inputMethodManager().showSoftInput(binding.etSearch, InputMethodManager.SHOW_IMPLICIT)
     }
 
     fun hide() {
+        binding.searchBar.isVisible = false
         clearSearchState()
-        uiState = uiState.copy(visible = false, query = "", replacement = "")
-    }
-
-    fun onQueryChanged(query: String) {
-        uiState = uiState.copy(query = query)
-        if (!engine.setQueryIfChanged(query)) return
-        if (query.isEmpty()) {
-            engine.clearResults()
-            listResultEntries = emptyList()
-            clearHighlights()
-            updateResultCount()
-        } else {
-            performSearch()
-        }
-    }
-
-    fun onReplacementChanged(replacement: String) {
-        uiState = uiState.copy(replacement = replacement)
-    }
-
-    fun searchPrevious() = moveToPrevious()
-    fun searchNext() = moveToNext()
-    /** Legacy find-field Enter action: run the current query, rather than advancing. */
-    fun submitSearchFromUi() = performSearch()
-    fun replaceOneFromUi() = replaceOne()
-    fun replaceAllFromUi() = replaceAll()
-
-    fun toggleMatchCase() {
-        matchCase = !matchCase
-        updateSearchOptionButtons()
-        showMessage(context.getString(R.string.search_match_case_status, optionStateText(matchCase)))
-        refreshSearchAfterOptionChanged()
-    }
-
-    fun toggleWholeWord() {
-        wholeWord = !wholeWord
-        updateSearchOptionButtons()
-        showMessage(context.getString(R.string.search_whole_word_status, optionStateText(wholeWord)))
-        refreshSearchAfterOptionChanged()
+        binding.etSearch.text?.clear()
+        binding.etReplace.text?.clear()
+        inputMethodManager().hideSoftInputFromWindow(binding.etSearch.windowToken, 0)
     }
 
     fun onEditorModeChanged() {
@@ -134,29 +94,70 @@ internal class EditorSearchController(
         updateResultCount()
     }
 
+    private fun bindSearchBar() {
+        binding.etSearch.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+
+            override fun afterTextChanged(s: Editable?) {
+                val query = s?.toString().orEmpty()
+                if (!engine.setQueryIfChanged(query)) return
+                if (query.isEmpty()) {
+                    engine.clearResults()
+                    listResultEntries = emptyList()
+                    clearHighlights()
+                    updateResultCount()
+                } else {
+                    performSearch()
+                }
+            }
+        })
+
+        binding.btnSearchPrevious.setOnClickListener { moveToPrevious() }
+        binding.btnSearchNext.setOnClickListener { moveToNext() }
+        binding.btnSearchClose.setOnClickListener { hide() }
+        binding.btnReplace.setOnClickListener { replaceOne() }
+        binding.btnReplaceAll.setOnClickListener { replaceAll() }
+        binding.btnSearchMatchCase.setOnClickListener {
+            matchCase = !matchCase
+            updateSearchOptionButtons()
+            showMessage(
+                context.getString(
+                    R.string.search_match_case_status,
+                    optionStateText(matchCase)
+                )
+            )
+            refreshSearchAfterOptionChanged()
+        }
+        binding.btnSearchWholeWord.setOnClickListener {
+            wholeWord = !wholeWord
+            updateSearchOptionButtons()
+            showMessage(
+                context.getString(
+                    R.string.search_whole_word_status,
+                    optionStateText(wholeWord)
+                )
+            )
+            refreshSearchAfterOptionChanged()
+        }
+        binding.etSearch.setOnKeyListener { _, keyCode, event ->
+            if (keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN) {
+                performSearch()
+                true
+            } else {
+                false
+            }
+        }
+    }
+
     private fun bindSourceChanges() {
-        val listener = {
+        binding.etSourceView.addOnDocumentChangedListener {
             if (!applyingSourceReplacement && !ignoreSourceChanges() && isSourceViewMode() &&
                 isSearchVisible() && engine.query.isNotEmpty()
             ) {
                 searchInSourceView(announce = false, scrollToCurrent = false)
             }
         }
-        sourceEditorState.addOnDocumentChangedListener(listener)
-    }
-
-    private fun sourceDocumentText(): String = sourceEditorState.getDocumentText()
-
-    private fun setSourceSearchHighlights(ranges: List<EditorSourceHighlight>) {
-        sourceEditorState.setSearchHighlights(ranges)
-    }
-
-    private fun clearSourceSearchHighlights() {
-        sourceEditorState.clearSearchHighlights()
-    }
-
-    private fun scrollSourceToOffset(offset: Int) {
-        sourceEditorState.scrollToDocumentOffset(offset)
     }
 
     private fun replaceOne() {
@@ -168,7 +169,7 @@ internal class EditorSearchController(
     }
 
     private fun replaceOneInSourceView() {
-        val content = sourceDocumentText()
+        val content = binding.etSourceView.getDocumentText()
         val position = engine.currentResultPositionOrNull()
         val query = engine.query
         if (
@@ -184,7 +185,7 @@ internal class EditorSearchController(
             content = content,
             start = position,
             queryLength = query.length,
-            replacement = uiState.replacement
+            replacement = binding.etReplace.text?.toString().orEmpty()
         ) ?: return
 
         applyingSourceReplacement = true
@@ -209,7 +210,7 @@ internal class EditorSearchController(
         val newText = searchReplaceSubtitle.replaceFirstText(
             originalText = entry.text,
             query = engine.query,
-            replacement = uiState.replacement,
+            replacement = binding.etReplace.text?.toString().orEmpty(),
             matchCase = matchCase,
             wholeWord = wholeWord
         )
@@ -248,9 +249,9 @@ internal class EditorSearchController(
 
     private fun replaceAllInSourceView(query: String) {
         val result = searchReplaceSubtitle.replaceAllInContent(
-            content = sourceDocumentText(),
+            content = binding.etSourceView.getDocumentText(),
             query = query,
-            replacement = uiState.replacement,
+            replacement = binding.etReplace.text?.toString().orEmpty(),
             matchCase = matchCase,
             wholeWord = wholeWord
         )
@@ -276,7 +277,7 @@ internal class EditorSearchController(
         val updates = searchReplaceSubtitle.collectEntryUpdates(
             entries = entries(),
             query = query,
-            replacement = uiState.replacement,
+            replacement = binding.etReplace.text?.toString().orEmpty(),
             matchCase = matchCase,
             wholeWord = wholeWord
         )
@@ -328,7 +329,7 @@ internal class EditorSearchController(
         announce: Boolean = true,
         scrollToCurrent: Boolean = true
     ) {
-        val content = sourceDocumentText()
+        val content = binding.etSourceView.getDocumentText()
         listResultEntries = emptyList()
         if (engine.query.isEmpty() || content.isEmpty()) {
             engine.clearResults()
@@ -408,11 +409,11 @@ internal class EditorSearchController(
             addAll(engine.results.take(MAX_SOURCE_HIGHLIGHT_SPANS))
             current?.let(::add)
         }
-        setSourceSearchHighlights(
+        binding.etSourceView.setSearchHighlights(
             positions.map { start ->
-                EditorSourceHighlight(
+                com.subtitleedit.view.SourceEditorView.Highlight(
                     start = start,
-                    end = (start + query.length).coerceAtMost(sourceDocumentText().length),
+                    end = (start + query.length).coerceAtMost(binding.etSourceView.getDocumentText().length),
                     current = start == current
                 )
             }
@@ -421,7 +422,7 @@ internal class EditorSearchController(
     }
 
     private fun clearSourceHighlights() {
-        clearSourceSearchHighlights()
+        binding.etSourceView.clearSearchHighlights()
     }
 
     private fun clearHighlights() {
@@ -430,7 +431,7 @@ internal class EditorSearchController(
     }
 
     private fun scrollSourceViewToOffset(offset: Int) {
-        scrollSourceToOffset(offset)
+        binding.etSourceView.scrollToDocumentOffset(offset)
     }
 
     private fun moveToPrevious() {
@@ -452,13 +453,12 @@ internal class EditorSearchController(
         if (isSourceViewMode()) {
             highlightSourceResults(scrollToCurrent = true)
         } else {
-            scrollListToPosition(position)
+            binding.rvSubtitles.scrollToPosition(position)
             subtitleAdapter.highlightSearchResult(
                 position,
                 engine.query,
                 matchCase,
-                wholeWord,
-                stableId = entries().getOrNull(position)?.stableId
+                wholeWord
             )
         }
     }
@@ -472,8 +472,7 @@ internal class EditorSearchController(
                 position,
                 engine.query,
                 matchCase,
-                wholeWord,
-                stableId = entries().getOrNull(position)?.stableId
+                wholeWord
             )
         }
     }
@@ -496,7 +495,8 @@ internal class EditorSearchController(
     }
 
     private fun updateSearchOptionButtons() {
-        uiState = uiState.copy(matchCase = matchCase, wholeWord = wholeWord)
+        binding.btnSearchMatchCase.isChecked = matchCase
+        binding.btnSearchWholeWord.isChecked = wholeWord
     }
 
     private fun optionStateText(enabled: Boolean): String = context.getString(
@@ -509,12 +509,10 @@ internal class EditorSearchController(
         } else {
             0
         }
-        uiState = uiState.copy(
-            resultCount = context.getString(
-                R.string.search_result_position,
-                current,
-                engine.results.size
-            )
+        binding.tvSearchResultCount.text = context.getString(
+            R.string.search_result_position,
+            current,
+            engine.results.size
         )
     }
 
@@ -540,7 +538,7 @@ internal class EditorSearchController(
 
     private fun clearSearchInputAfterReplace() {
         clearSearchState()
-        uiState = uiState.copy(query = "")
+        binding.etSearch.text?.clear()
     }
 
     private fun clearSearchState() {
@@ -550,15 +548,8 @@ internal class EditorSearchController(
         updateResultCount()
     }
 
-    private fun isSearchVisible(): Boolean = uiState.visible
-}
+    private fun isSearchVisible(): Boolean = binding.searchBar.isVisible
 
-data class EditorSearchUiState(
-    val visible: Boolean = false,
-    val focusRequestSequence: Long = 0,
-    val query: String = "",
-    val replacement: String = "",
-    val matchCase: Boolean = false,
-    val wholeWord: Boolean = false,
-    val resultCount: String = ""
-)
+    private fun inputMethodManager(): InputMethodManager =
+        context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+}

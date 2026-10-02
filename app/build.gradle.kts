@@ -121,6 +121,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures {
+        viewBinding = true
         compose = true
     }
 
@@ -201,6 +202,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
     implementation("androidx.work:work-runtime-ktx:2.9.0")
     implementation("androidx.activity:activity-ktx:1.8.2")
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    implementation("androidx.fragment:fragment-ktx:1.6.2")
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
+    implementation("androidx.viewpager:viewpager:1.0.0")
     implementation("androidx.biometric:biometric:1.1.0")
 
     // Chat history storage

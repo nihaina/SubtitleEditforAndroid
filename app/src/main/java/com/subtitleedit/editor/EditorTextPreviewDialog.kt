@@ -1,59 +1,31 @@
 package com.subtitleedit.editor
 
 import android.app.Activity
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.DialogProperties
-import com.subtitleedit.ComposeDialogHost
+import android.app.AlertDialog
+import android.graphics.Typeface
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import androidx.recyclerview.widget.LinearLayoutManager
 import com.subtitleedit.R
+import com.subtitleedit.adapter.TranslationPreviewAdapter
 import com.subtitleedit.adapter.TranslationPreviewItem
-import com.subtitleedit.ui.DraggableScrollbar
-import kotlinx.coroutines.launch
+import com.subtitleedit.view.DraggableRecyclerView
 
-/** AI translation, quick transcription and subtitle merge share this result preview. */
+/** AI 翻译、快速转录与字幕合并共用的结果预览对话框。 */
 internal class EditorTextPreviewDialog(private val activity: Activity) {
+
     /**
-     * @param onApply Receives only the checked items.
-     * @param onNeutral Receives every item; omitted when the neutral action is not provided.
+     * @param onApply 只接收勾选了应用的条目。
+     * @param onNeutral 接收全部条目；为空时不显示中间按钮。
      */
     fun show(
         title: String,
@@ -64,218 +36,194 @@ internal class EditorTextPreviewDialog(private val activity: Activity) {
         onNeutral: ((List<TranslationPreviewItem>) -> Unit)? = null,
         suspectedProblem: ((TranslationPreviewItem) -> Boolean)? = null
     ) {
-        val applyStates = previewItems.map { mutableStateOf(it.apply) }
-        val translatedStates = previewItems.map { mutableStateOf(it.translatedText) }
-        val problemRevision = mutableIntStateOf(0)
-        val showProblems = mutableStateOf(false)
-        val editingIndex = mutableIntStateOf(-1)
-        val editingText = mutableStateOf(TextFieldValue())
-
-        ComposeDialogHost.show(activity) { dialog ->
-            val problemIndices = remember(problemRevision.value) {
-                previewItems.indices.filter { index ->
-                    suspectedProblem?.invoke(previewItems[index]) == true
-                }
-            }
-            val listState = rememberLazyListState()
-            val scope = rememberCoroutineScope()
-            val maxListHeight = LocalConfiguration.current.screenHeightDp.dp * 0.55f
-
-            AlertDialog(
-                onDismissRequest = dialog::dismiss,
-                // Match the legacy window sizing (96% width, 82% height).
-                modifier = Modifier.fillMaxWidth(0.96f).fillMaxHeight(0.82f),
-                properties = DialogProperties(usePlatformDefaultWidth = false),
-                title = {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = title,
-                            modifier = Modifier.weight(1f),
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (problemIndices.isNotEmpty()) {
-                            TextButton(
-                                onClick = { showProblems.value = true },
-                                contentPadding = PaddingValues(horizontal = 4.dp)
-                            ) {
-                                Text(
-                                    text = activity.getString(R.string.translation_preview_suspect_warning),
-                                    color = MaterialTheme.colorScheme.error,
-                                    fontSize = 12.sp,
-                                    maxLines = 2
-                                )
-                            }
-                        }
-                    }
+        val warningText = TextView(activity).apply {
+            text = activity.getString(R.string.translation_preview_suspect_warning)
+            setTextColor(activity.getColor(R.color.error))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            maxLines = 2
+            maxWidth = dp(160)
+            setPadding(dp(8), dp(8), 0, dp(8))
+            isClickable = true
+            isFocusable = true
+            setSelectableBackground(this)
+        }
+        val titleView = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(24), dp(8), dp(24), 0)
+            addView(
+                TextView(activity).apply {
+                    text = title
+                    setTextColor(activity.getColor(R.color.on_surface))
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+                    setTypeface(typeface, Typeface.BOLD)
+                    maxLines = 2
                 },
-                text = {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = maxListHeight)
-                    ) {
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier.fillMaxWidth(),
-                            contentPadding = PaddingValues(vertical = 4.dp)
-                        ) {
-                            itemsIndexed(previewItems) { index, item ->
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Checkbox(
-                                            modifier = Modifier
-                                                .size(40.dp)
-                                                .semantics { contentDescription = "应用此行翻译" },
-                                            checked = applyStates[index].value,
-                                            onCheckedChange = { checked ->
-                                                item.apply = checked
-                                                applyStates[index].value = checked
-                                            }
-                                        )
-                                        Text(
-                                            text = "${index + 1}. ${item.originalText}",
-                                            modifier = Modifier.weight(1f),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            fontSize = 13.sp
-                                        )
-                                    }
-                                    Text(
-                                        text = translatedStates[index].value,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(start = 40.dp, top = 2.dp, end = 0.dp)
-                                            .clickable {
-                                                val text = translatedStates[index].value
-                                                editingText.value = TextFieldValue(
-                                                    text = text,
-                                                    selection = TextRange(text.length)
-                                                )
-                                                editingIndex.value = index
-                                            },
-                                        maxLines = 3,
-                                        overflow = TextOverflow.Ellipsis,
-                                        fontSize = 14.sp
-                                    )
-                                }
-                            }
-                        }
-                        DraggableScrollbar(
-                            state = listState,
-                            modifier = Modifier.align(Alignment.CenterEnd),
-                            fixedThumbSize = true
-                        )
-                    }
-                },
-                confirmButton = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        if (neutralButtonText != null && onNeutral != null) {
-                            TextButton(
-                                onClick = {
-                                    dialog.dismiss()
-                                    onNeutral(previewItems)
-                                }
-                            ) { Text(neutralButtonText) }
-                        }
-                        Button(
-                            onClick = {
-                                dialog.dismiss()
-                                onApply(previewItems.filter { it.apply })
-                            }
-                        ) { Text("应用") }
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = dialog::dismiss) { Text("取消") }
-                }
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             )
-
-            if (showProblems.value && problemIndices.isNotEmpty()) {
-                AlertDialog(
-                    onDismissRequest = { showProblems.value = false },
-                    title = { Text(stringResource(R.string.translation_preview_suspect_dialog_title)) },
-                    text = {
-                        LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
-                            itemsIndexed(problemIndices) { _, previewIndex ->
-                                TextButton(
-                                    onClick = {
-                                        showProblems.value = false
-                                        scope.launch { listState.animateScrollToItem(previewIndex) }
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
-                                ) {
-                                    Text(
-                                        text = activity.getString(
-                                            R.string.translation_preview_suspect_row,
-                                            previewIndex + 1
-                                        ),
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
-                        }
-                    },
-                    confirmButton = {},
-                    dismissButton = {
-                        TextButton(onClick = { showProblems.value = false }) { Text("关闭") }
-                    }
+            addView(
+                warningText,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
                 )
-            }
+            )
+        }
 
-            val index = editingIndex.value
-            if (index in previewItems.indices) {
-                val focusRequester = remember(index) { FocusRequester() }
-                val keyboardController = LocalSoftwareKeyboardController.current
-                LaunchedEffect(index) {
-                    focusRequester.requestFocus()
-                    keyboardController?.show()
-                }
-                AlertDialog(
-                    onDismissRequest = { editingIndex.value = -1 },
-                    title = { Text(editTitle) },
-                    text = {
-                        OutlinedTextField(
-                            value = editingText.value,
-                            onValueChange = { editingText.value = it },
-                            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
-                            minLines = 3
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                val item = previewItems[index]
-                                item.translatedText = editingText.value.text
-                                translatedStates[index].value = editingText.value.text
-                                if (suspectedProblem != null) {
-                                    item.suspectedProblem = item.translatedText.isBlank()
-                                }
-                                problemRevision.value++
-                                editingIndex.value = -1
-                            }
-                        ) { Text("确定") }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { editingIndex.value = -1 }) { Text("取消") }
+        fun currentProblemIndices(): List<Int> = previewItems.indices.filter { index ->
+            suspectedProblem?.invoke(previewItems[index]) == true
+        }
+
+        fun refreshWarning() {
+            warningText.visibility = if (currentProblemIndices().isEmpty()) View.GONE else View.VISIBLE
+        }
+
+        lateinit var recyclerView: DraggableRecyclerView
+        val previewAdapter = TranslationPreviewAdapter(previewItems) { item, onUpdated ->
+            showTextEditDialog(
+                previewItem = item,
+                onUpdated = {
+                    if (suspectedProblem != null) {
+                        item.suspectedProblem = item.translatedText.isBlank()
                     }
+                    onUpdated()
+                    refreshWarning()
+                },
+                title = editTitle
+            )
+        }
+        recyclerView = DraggableRecyclerView(activity).apply {
+            layoutManager = LinearLayoutManager(activity)
+            adapter = previewAdapter
+            setPadding(16, 8, 16, 8)
+            clipToPadding = false
+            descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
+            post { showDragThumb() }
+        }
+        warningText.setOnClickListener {
+            showSuspectedProblemDialog(recyclerView, currentProblemIndices())
+        }
+        refreshWarning()
+
+        val builder = AlertDialog.Builder(activity)
+            .setCustomTitle(titleView)
+            .setView(recyclerView)
+            .setPositiveButton("应用") { _, _ ->
+                onApply(previewItems.filter { it.apply })
+            }
+            .setNegativeButton("取消", null)
+        if (neutralButtonText != null && onNeutral != null) {
+            builder.setNeutralButton(neutralButtonText) { _, _ -> onNeutral(previewItems) }
+        }
+
+        val dialog = builder.create()
+        dialog.setOnShowListener {
+            dialog.window?.apply {
+                setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+                setLayout(
+                    (activity.resources.displayMetrics.widthPixels * 0.96f).toInt(),
+                    (activity.resources.displayMetrics.heightPixels * 0.82f).toInt()
                 )
             }
         }
+        dialog.show()
     }
+
+    private fun showSuspectedProblemDialog(
+        previewList: DraggableRecyclerView,
+        problemIndices: List<Int>
+    ) {
+        if (problemIndices.isEmpty()) return
+        val rows = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        val scrollView = ScrollView(activity).apply {
+            addView(
+                rows,
+                ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
+        val dialog = AlertDialog.Builder(activity)
+            .setTitle(R.string.translation_preview_suspect_dialog_title)
+            .setView(scrollView)
+            .setNegativeButton("关闭", null)
+            .create()
+
+        problemIndices.forEach { previewIndex ->
+            rows.addView(
+                TextView(activity).apply {
+                    text = activity.getString(
+                        R.string.translation_preview_suspect_row,
+                        previewIndex + 1
+                    )
+                    setTextColor(activity.getColor(R.color.primary))
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(24), dp(12), dp(24), dp(12))
+                    isClickable = true
+                    isFocusable = true
+                    setSelectableBackground(this)
+                    setOnClickListener {
+                        dialog.dismiss()
+                        previewList.post {
+                            (previewList.layoutManager as? LinearLayoutManager)
+                                ?.scrollToPositionWithOffset(previewIndex, 0)
+                        }
+                    }
+                },
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
+        dialog.show()
+    }
+
+    private fun showTextEditDialog(
+        previewItem: TranslationPreviewItem,
+        onUpdated: () -> Unit,
+        title: String
+    ) {
+        val editText = EditText(activity).apply {
+            setText(previewItem.translatedText)
+            setSelection(text.length)
+            setLines(3)
+            inputType = EditorInfo.TYPE_CLASS_TEXT or EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE
+            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+        }
+        val dialog = AlertDialog.Builder(activity)
+            .setTitle(title)
+            .setView(editText)
+            .setPositiveButton("确定") { _, _ ->
+                previewItem.translatedText = editText.text?.toString().orEmpty()
+                onUpdated()
+            }
+            .setNegativeButton("取消", null)
+            .create()
+        dialog.setOnShowListener {
+            editText.requestFocus()
+            dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+            editText.post {
+                val inputMethodManager =
+                    activity.getSystemService(Activity.INPUT_METHOD_SERVICE) as InputMethodManager
+                inputMethodManager.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
+            }
+        }
+        dialog.show()
+    }
+
+    private fun setSelectableBackground(view: View) {
+        val value = TypedValue()
+        if (activity.theme.resolveAttribute(android.R.attr.selectableItemBackground, value, true)) {
+            view.setBackgroundResource(value.resourceId)
+        }
+    }
+
+    private fun dp(value: Int): Int =
+        (value * activity.resources.displayMetrics.density).toInt()
 }

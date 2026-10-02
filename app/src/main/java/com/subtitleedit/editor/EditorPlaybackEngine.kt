@@ -27,9 +27,6 @@ internal interface EditorPlaybackEngine {
     val durationMs: Long
     val isPlaying: Boolean
 
-    /** True while the engine is still settling the most recent asynchronous seek. */
-    val isSeekInProgress: Boolean
-
     fun prepare(file: File)
     fun play()
     fun pause()

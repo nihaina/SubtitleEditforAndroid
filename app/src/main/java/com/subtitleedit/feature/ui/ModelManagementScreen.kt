@@ -40,6 +40,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
@@ -248,11 +249,12 @@ private fun ModelListPage(
                 .padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            SelectionContainer {
+            SelectionContainer(modifier = Modifier.weight(1f)) {
                 Text(
                     text = modelsDirectoryLabel,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         }
@@ -330,7 +332,9 @@ private fun ModelRow(
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     if (item.canExport) {
                         TextButton(
@@ -344,11 +348,14 @@ private fun ModelRow(
                         }
                     }
                 }
-                Text(
-                    text = item.path,
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                SelectionContainer(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = item.path,
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 Text(
                     text = item.formattedSize,
                     style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),

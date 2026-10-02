@@ -482,6 +482,7 @@
     <string name="item_subtitle_contentdescription_01" translatable="false">selected</string>
     <string name="item_subtitle_contentdescription_02">跳转到字幕时间</string>
     <string name="item_subtitle_contentdescription_03">设置字幕时间</string>
+    <string name="item_translation_preview_contentdescription_01">应用此行翻译</string>
     <string name="translation_preview_suspect_warning">部分翻译结果疑似有误</string>
     <string name="translation_preview_suspect_dialog_title">疑似有误的字幕</string>
     <string name="translation_preview_suspect_row">第 %1$d 条字幕</string>

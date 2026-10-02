@@ -1,8 +1,16 @@
 package com.subtitleedit.editor
 
+import android.view.Menu
+import android.view.MenuItem
 import com.subtitleedit.EditorEditHistory
 
-/** Single composition boundary for editor menus, navigation, state and lifecycle work. */
+/**
+ * Single composition boundary for the editor screen.
+ *
+ * Menu routing, back navigation and lifecycle/resource coordination are exposed through
+ * this facade so the Activity does not need to know which editor subsystem owns them.
+ * Activity level editor actions enter through this composition boundary.
+ */
 internal class EditorCoordinator(
     private val menu: EditorMenuController,
     private val lifecycle: EditorLifecycleCoordinator,
@@ -16,16 +24,17 @@ internal class EditorCoordinator(
     fun bindState() = state.bind()
 
     fun prepareMenu(
+        menuView: Menu,
         sourceMode: Boolean,
         selectedCount: Int,
         undo: EditorEditHistory.Operation?,
         redo: EditorEditHistory.Operation?,
         sourceTransitioning: Boolean
-    ): List<EditorMenuGroupModel> = menu.build(
-        sourceMode, selectedCount, undo, redo, sourceTransitioning
+    ): Boolean = menu.prepare(
+        menuView, sourceMode, selectedCount, undo, redo, sourceTransitioning
     )
 
-    fun handleMenu(action: EditorMenuController.Action): Boolean = menu.handle(action)
+    fun handleMenu(item: MenuItem): Boolean = menu.handle(item)
 
     fun onStart() = lifecycle.onStart()
     fun onStop() = lifecycle.onStop()

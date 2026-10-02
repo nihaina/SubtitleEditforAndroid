@@ -3,7 +3,7 @@ package com.subtitleedit.editor
 import com.subtitleedit.adapter.SubtitleAdapter
 import com.subtitleedit.model.SubtitleEntry
 
-/** Keeps Compose list refresh and selection bookkeeping out of the Activity. */
+/** Keeps RecyclerView payload and selection bookkeeping out of the Activity. */
 internal class EditorListPresentationController(
     private val adapter: () -> SubtitleAdapter,
     private val entries: () -> List<SubtitleEntry>,

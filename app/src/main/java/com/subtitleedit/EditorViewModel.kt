@@ -100,7 +100,7 @@ internal class EditorViewModel(
         get() = documentState.sourceViewNeedsListSync
         set(value) { documentState.sourceViewNeedsListSync = value }
     fun setSourceDocumentContent(content: String) {
-        // The Compose source editor owns the visible document and emits a debounced preview.
+        // SourceEditorView already owns the visible document and emits a debounced preview.
         // Avoid publishing the entire document on every keystroke; history keeps the full
         // before snapshot and the preview publishes only when parsing completes.
         documentState.sourceViewContent = content

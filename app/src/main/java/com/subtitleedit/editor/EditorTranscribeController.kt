@@ -1,24 +1,15 @@
 package com.subtitleedit.editor
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.util.Log
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.Modifier
+import android.widget.ArrayAdapter
+import android.widget.LinearLayout
+import android.widget.Spinner
+import android.widget.TextView
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegSession
 import com.subtitleedit.adapter.TranslationPreviewItem
-import com.subtitleedit.ComposeDialogHost
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.repository.DefaultSpeechRecognitionService
 import com.subtitleedit.repository.SpeechRecognitionService
@@ -115,47 +106,77 @@ internal class EditorTranscribeController(
             return
         }
 
-        val selectedLanguage = mutableStateOf(
-            SettingsManager.TRANSCRIPTION_LANGUAGE_OPTIONS.getOrElse(
-                SettingsManager.TRANSCRIPTION_LANGUAGE_OPTIONS.indexOf(sourceLanguage).coerceAtLeast(0)
-            ) { SettingsManager.TRANSCRIPTION_LANGUAGE_OPTIONS.first() }
-        )
-        val menuExpanded = mutableStateOf(false)
-        ComposeDialogHost.show(activity) { dialog ->
-            TranscriptionLanguageDialog(
-                selectedCount = selectedEntries.size,
-                selectedLanguage = selectedLanguage.value,
-                expanded = menuExpanded.value,
-                onExpandedChange = { menuExpanded.value = it },
-                onLanguageSelected = {
-                    selectedLanguage.value = it
-                    menuExpanded.value = false
-                },
-                onDismiss = dialog::dismiss,
-                onStart = {
-                    dialog.dismiss()
-                    settings.setQuickTranscribeSourceLanguage(selectedLanguage.value)
-                    startTranscription(
-                        selectedEntries,
-                        timelineEntries,
-                        audioFile,
-                        encoderPath,
-                        decoderPath,
-                        joinerPath,
-                        tokensPath,
-                        modelType,
-                        selectedLanguage.value,
-                        audioCacheKey,
-                        audioStreamIndex
+        val (dialogView, languageSpinner) =
+            createLanguageView(selectedEntries.size, sourceLanguage)
+        AlertDialog.Builder(activity)
+            .setTitle("快速转录")
+            .setView(dialogView)
+            .setPositiveButton("开始转录") { _, _ ->
+                val selectedLanguage = SettingsManager.TRANSCRIPTION_LANGUAGE_OPTIONS[
+                    languageSpinner.selectedItemPosition.coerceIn(
+                        0,
+                        SettingsManager.TRANSCRIPTION_LANGUAGE_OPTIONS.lastIndex
                     )
-                }
-            )
-        }
+                ]
+                settings.setQuickTranscribeSourceLanguage(selectedLanguage)
+                startTranscription(
+                    selectedEntries,
+                    timelineEntries,
+                    audioFile,
+                    encoderPath,
+                    decoderPath,
+                    joinerPath,
+                    tokensPath,
+                    modelType,
+                    selectedLanguage,
+                    audioCacheKey,
+                    audioStreamIndex
+                )
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     fun release() {
         transcribeCancelled = true
         transcribeJob?.cancel()
+    }
+
+    private fun createLanguageView(
+        selectedCount: Int,
+        sourceLanguage: String
+    ): Pair<LinearLayout, Spinner> {
+        val horizontalPadding = (16 * activity.resources.displayMetrics.density).toInt()
+        val container = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(horizontalPadding, 0, horizontalPadding, 0)
+        }
+        val summary = TextView(activity).apply {
+            text = "将识别选中的 $selectedCount 条字幕对应音频，并在预览中确认后应用。"
+            textSize = 14f
+        }
+        val label = TextView(activity).apply {
+            text = "源语言"
+            textSize = 14f
+            setPadding(0, 24, 0, 0)
+        }
+        val spinner = Spinner(activity).apply {
+            val spinnerAdapter = ArrayAdapter(
+                activity,
+                android.R.layout.simple_spinner_item,
+                SettingsManager.TRANSCRIPTION_LANGUAGE_OPTIONS
+            )
+            spinnerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            adapter = spinnerAdapter
+            setSelection(
+                SettingsManager.TRANSCRIPTION_LANGUAGE_OPTIONS.indexOf(sourceLanguage)
+                    .coerceAtLeast(0)
+            )
+        }
+        container.addView(summary)
+        container.addView(label)
+        container.addView(spinner)
+        return container to spinner
     }
 
     private fun startTranscription(
@@ -173,26 +194,14 @@ internal class EditorTranscribeController(
     ) {
         val cachedPcmFile = recognitionPcmCacheFile(audioCacheKey, audioStreamIndex)
         val hasCachedPcm = isRecognitionPcmCacheValid(cachedPcmFile)
-        val progressMessage = mutableStateOf(
-            if (hasCachedPcm) "正在使用缓存音频..." else "正在准备音频..."
-        )
+        val progressDialog = AlertDialog.Builder(activity)
+            .setTitle("正在转录")
+            .setMessage(if (hasCachedPcm) "正在使用缓存音频..." else "正在准备音频...")
+            .setNegativeButton("取消") { _, _ -> transcribeCancelled = true }
+            .setCancelable(false)
+            .create()
+        progressDialog.show()
         transcribeCancelled = false
-        val progressDialog = ComposeDialogHost.show(activity) { dialog ->
-            AlertDialog(
-                onDismissRequest = {},
-                title = { Text("正在转录") },
-                text = { Text(progressMessage.value) },
-                confirmButton = {},
-                dismissButton = {
-                    TextButton(onClick = {
-                        transcribeCancelled = true
-                        // Match the legacy negative button: close immediately while the worker
-                        // finishes cancellation and cleans up its temporary files.
-                        dialog.dismiss()
-                    }) { Text("取消") }
-                }
-            )
-        }
 
         transcribeJob = scope.launch {
             try {
@@ -223,9 +232,7 @@ internal class EditorTranscribeController(
                         rangeContexts = rangeContexts,
                         progressCallback = { current, total ->
                             activity.runOnUiThread {
-                                if (progressDialog.isShowing) {
-                                    progressMessage.value = "正在转录第 $current/$total 条..."
-                                }
+                                progressDialog.setMessage("正在转录第 $current/$total 条...")
                             }
                         },
                         isCancelled = { transcribeCancelled }
@@ -242,7 +249,7 @@ internal class EditorTranscribeController(
             } catch (e: Exception) {
                 if (!transcribeCancelled) showMessage("转录失败：${e.message ?: "未知错误"}")
             } finally {
-                progressDialog.dismiss()
+                if (progressDialog.isShowing) progressDialog.dismiss()
                 transcribeJob = null
             }
         }
@@ -394,58 +401,4 @@ internal class EditorTranscribeController(
         const val RECOGNITION_SAMPLE_RATE = 16_000
         const val WAV_HEADER_SIZE = 44L
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun TranscriptionLanguageDialog(
-    selectedCount: Int,
-    selectedLanguage: String,
-    expanded: Boolean,
-    onExpandedChange: (Boolean) -> Unit,
-    onLanguageSelected: (String) -> Unit,
-    onDismiss: () -> Unit,
-    onStart: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("快速转录") },
-        text = {
-            Column {
-                Text("将识别选中的 $selectedCount 条字幕对应音频，并在预览中确认后应用。")
-                ExposedDropdownMenuBox(
-                    expanded = expanded,
-                    onExpandedChange = onExpandedChange
-                ) {
-                    OutlinedTextField(
-                        value = selectedLanguage,
-                        onValueChange = {},
-                        modifier = Modifier.fillMaxWidth().menuAnchor(),
-                        readOnly = true,
-                        label = { Text("源语言") },
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-                        }
-                    )
-                    ExposedDropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { onExpandedChange(false) }
-                    ) {
-                        SettingsManager.TRANSCRIPTION_LANGUAGE_OPTIONS.forEach { language ->
-                            DropdownMenuItem(
-                                text = { Text(language) },
-                                onClick = { onLanguageSelected(language) }
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onStart) { Text("开始转录") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        }
-    )
 }

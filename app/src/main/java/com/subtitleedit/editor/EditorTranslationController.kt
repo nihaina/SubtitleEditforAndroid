@@ -1,13 +1,8 @@
 package com.subtitleedit.editor
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.widget.Toast
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.mutableStateOf
-import com.subtitleedit.ComposeDialogHandle
-import com.subtitleedit.ComposeDialogHost
 import com.subtitleedit.adapter.TranslationPreviewItem
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.repository.AiTranslationService
@@ -42,7 +37,7 @@ internal class EditorTranslationController(
     private var translateCancelled = false
     private var userCancelledTranslation = false
     private var activeTranslationConversation: AiTranslationConversation? = null
-    private var activeTranslationDialog: ComposeDialogHandle? = null
+    private var activeTranslationDialog: AlertDialog? = null
 
     private data class TranslationSession(
         val selectedEntries: List<Pair<SubtitleEntry, Int>>,
@@ -80,39 +75,27 @@ internal class EditorTranslationController(
             return
         }
 
-        ComposeDialogHost.show(activity) { dialog ->
-            AlertDialog(
-                onDismissRequest = dialog::dismiss,
-                title = { Text("AI 翻译") },
-                text = {
-                    Text(
-                        "将使用 $providerName / $model 翻译选中的 ${selectedEntries.size} 条字幕\n" +
-                            "目标语言：$targetLanguage\n\n每 150 条字幕会作为一条对话消息发送，并按原时间轴格式处理。"
-                    )
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            dialog.dismiss()
-                            startTranslation(
-                                selectedEntries,
-                                provider,
-                                apiKey,
-                                model,
-                                targetLanguage,
-                                customPrompt,
-                                baseUrl,
-                                contextWindowTokens,
-                                reasoningLevel
-                            )
-                        }
-                    ) { Text("开始翻译") }
-                },
-                dismissButton = {
-                    TextButton(onClick = dialog::dismiss) { Text("取消") }
-                }
+        AlertDialog.Builder(activity)
+            .setTitle("AI 翻译")
+            .setMessage(
+                "将使用 $providerName / $model 翻译选中的 ${selectedEntries.size} 条字幕\n" +
+                    "目标语言：$targetLanguage\n\n每 150 条字幕会作为一条对话消息发送，并按原时间轴格式处理。"
             )
-        }
+            .setPositiveButton("开始翻译") { _, _ ->
+                startTranslation(
+                    selectedEntries,
+                    provider,
+                    apiKey,
+                    model,
+                    targetLanguage,
+                    customPrompt,
+                    baseUrl,
+                    contextWindowTokens,
+                    reasoningLevel
+                )
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     fun release() {
@@ -159,28 +142,7 @@ internal class EditorTranslationController(
         val completedBeforeRun = session.completedCount
             .coerceIn(0, session.selectedEntries.size)
         val totalCount = session.selectedEntries.size
-        val progressText = mutableStateOf("正在翻译 $completedBeforeRun/$totalCount 条")
-        val dialog = ComposeDialogHost.show(activity) { progressDialog ->
-            AlertDialog(
-                onDismissRequest = {},
-                title = { Text("AI 翻译") },
-                text = { Text(progressText.value) },
-                confirmButton = {},
-                dismissButton = {
-                    TextButton(
-                        onClick = {
-                            userCancelledTranslation = true
-                            translateCancelled = true
-                            activeTranslationConversation?.cancel()
-                            // The legacy negative button dismissed immediately; the job cleanup
-                            // still owns partial-result handling.
-                            progressDialog.dismiss()
-                        }
-                    ) { Text("取消") }
-                }
-            )
-        }
-        activeTranslationDialog = dialog
+        val dialog = createTranslationDialog(totalCount, completedBeforeRun)
         translateCancelled = false
         userCancelledTranslation = false
         isTranslating = true
@@ -195,11 +157,8 @@ internal class EditorTranslationController(
                     subtitles = subtitlesToTranslate,
                     startPosition = completedBeforeRun + 1,
                     progressCallback = { current, _ ->
-                        val message = "正在翻译 ${completedBeforeRun + current}/$totalCount 条"
-                        activity.runOnUiThread {
-                            if (activeTranslationDialog === dialog && dialog.isShowing) {
-                                progressText.value = message
-                            }
+                        if (activeTranslationDialog === dialog && dialog.isShowing) {
+                            dialog.setMessage("正在翻译 ${completedBeforeRun + current}/$totalCount 条")
                         }
                     },
                     isCancelled = { translateCancelled }
@@ -234,9 +193,25 @@ internal class EditorTranslationController(
         }
     }
 
+    private fun createTranslationDialog(totalCount: Int, completedCount: Int): AlertDialog =
+        AlertDialog.Builder(activity)
+            .setTitle("AI 翻译")
+            .setMessage("正在翻译 $completedCount/$totalCount 条")
+            .setNegativeButton("取消") { _, _ ->
+                userCancelledTranslation = true
+                translateCancelled = true
+                activeTranslationConversation?.cancel()
+            }
+            .setCancelable(false)
+            .create()
+            .also { dialog ->
+                activeTranslationDialog = dialog
+                dialog.show()
+            }
+
     private fun handleTranslationCancellation(
         session: TranslationSession,
-        progressDialog: ComposeDialogHandle
+        progressDialog: AlertDialog
     ) {
         val shouldShowPartialResult =
             userCancelledTranslation && session.translatedTexts.isNotEmpty()
@@ -250,35 +225,19 @@ internal class EditorTranslationController(
     private fun showTranslationInterrupted(session: TranslationSession, errorMessage: String) {
         val completedCount = session.translatedTexts.size
         val totalCount = session.selectedEntries.size
-        ComposeDialogHost.show(activity) { dialog ->
-            AlertDialog(
-                onDismissRequest = {},
-                title = { Text("翻译中断") },
-                text = {
-                    Text(
-                        "已完成 $completedCount/$totalCount 条字幕。\n\n" +
-                            "失败原因：$errorMessage\n\n" +
-                            "可重试未完成部分，或点击「确定」预览并保留已完成结果。"
-                    )
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            dialog.dismiss()
-                            showTranslationResult(session.selectedEntries, session.translatedTexts)
-                        }
-                    ) { Text("确定") }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = {
-                            dialog.dismiss()
-                            continueTranslation(session)
-                        }
-                    ) { Text("重试") }
-                }
+        AlertDialog.Builder(activity)
+            .setTitle("翻译中断")
+            .setMessage(
+                "已完成 $completedCount/$totalCount 条字幕。\n\n" +
+                    "失败原因：$errorMessage\n\n" +
+                    "可重试未完成部分，或点击「确定」预览并保留已完成结果。"
             )
-        }
+            .setPositiveButton("确定") { _, _ ->
+                showTranslationResult(session.selectedEntries, session.translatedTexts)
+            }
+            .setNegativeButton("重试") { _, _ -> continueTranslation(session) }
+            .setCancelable(false)
+            .show()
     }
 
     private fun showTranslationResult(
@@ -302,8 +261,8 @@ internal class EditorTranslationController(
         )
     }
 
-    private fun finishTranslation(progressDialog: ComposeDialogHandle) {
-        progressDialog.dismiss()
+    private fun finishTranslation(progressDialog: AlertDialog) {
+        if (progressDialog.isShowing) progressDialog.dismiss()
         if (activeTranslationDialog === progressDialog) activeTranslationDialog = null
         isTranslating = false
         translateJob = null

@@ -1,0 +1,713 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/editorRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true"
+    tools:context=".EditorActivity">
+
+        <com.google.android.material.appbar.AppBarLayout
+            android:id="@+id/editorAppBar"
+            android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fitsSystemWindows="true">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            app:navigationIcon="@drawable/ic_back"
+            app:titleMarginEnd="0dp"
+            app:titleTextAppearance="@style/TextAppearance.Material3.TitleSmall"
+            app:subtitleTextAppearance="@style/TextAppearance.Material3.LabelSmall" />
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <LinearLayout
+        android:id="@+id/editorContent"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <!-- 搜索条 -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/searchBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardBackgroundColor="@color/surface"
+            app:cardCornerRadius="0dp"
+            app:cardElevation="1dp"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <!-- Result position and match options. -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="8dp">
+
+                    <TextView
+                        android:id="@+id/tvSearchResultCount"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:ellipsize="end"
+                        android:maxLines="1"
+                        android:text="@string/search_result_position_empty"
+                        android:textColor="@color/on_surface"
+                        android:textSize="16sp"
+                        tools:text="搜索结果：6/16" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSearchMatchCase"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="48dp"
+                        android:layout_height="40dp"
+                        android:checkable="true"
+                        android:contentDescription="@string/search_match_case"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minWidth="0dp"
+                        android:padding="0dp"
+                        android:text="@string/search_match_case_short"
+                        android:textAllCaps="false"
+                        android:textColor="@color/search_option_text"
+                        android:textSize="16sp"
+                        android:tooltipText="@string/search_match_case"
+                        app:backgroundTint="@color/search_option_background"
+                        app:cornerRadius="6dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSearchWholeWord"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="48dp"
+                        android:layout_height="40dp"
+                        android:layout_marginStart="4dp"
+                        android:checkable="true"
+                        android:contentDescription="@string/search_whole_word"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minWidth="0dp"
+                        android:padding="0dp"
+                        android:text="@string/search_whole_word_short"
+                        android:textAllCaps="false"
+                        android:textColor="@color/search_option_text"
+                        android:textSize="16sp"
+                        android:tooltipText="@string/search_whole_word"
+                        app:backgroundTint="@color/search_option_background"
+                        app:cornerRadius="6dp" />
+
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:alpha="0.24"
+                    android:background="@color/on_surface_variant" />
+
+                <!-- Search and replacement fields. -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:maxLines="1"
+                        android:text="@string/search_find_label"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp" />
+
+                    <EditText
+                        android:id="@+id/etSearch"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1.15"
+                        android:backgroundTint="@color/primary"
+                        android:imeOptions="actionSearch"
+                        android:importantForAutofill="no"
+                        android:inputType="text"
+                        android:maxLines="1"
+                        android:minWidth="0dp"
+                        android:paddingStart="0dp"
+                        android:paddingEnd="0dp"
+                        android:textSize="15sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="12dp"
+                        android:layout_marginEnd="8dp"
+                        android:maxLines="1"
+                        android:text="@string/search_replace_label"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp" />
+
+                    <EditText
+                        android:id="@+id/etReplace"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="0.85"
+                        android:backgroundTint="@color/primary"
+                        android:imeOptions="actionDone"
+                        android:importantForAutofill="no"
+                        android:inputType="text"
+                        android:maxLines="1"
+                        android:minWidth="0dp"
+                        android:paddingStart="0dp"
+                        android:paddingEnd="0dp"
+                        android:textSize="15sp" />
+
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:alpha="0.24"
+                    android:background="@color/on_surface_variant" />
+
+                <!-- Navigation and replacement commands. -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSearchPrevious"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minWidth="0dp"
+                        android:padding="0dp"
+                        android:text="@string/search_previous"
+                        android:textSize="14sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSearchNext"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minWidth="0dp"
+                        android:padding="0dp"
+                        android:text="@string/search_next"
+                        android:textSize="14sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnReplace"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minWidth="0dp"
+                        android:padding="0dp"
+                        android:text="@string/activity_editor_text_01"
+                        android:textSize="14sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnReplaceAll"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:contentDescription="@string/activity_editor_text_02"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minWidth="0dp"
+                        android:padding="0dp"
+                        android:text="@string/search_replace_all_short"
+                        android:textSize="14sp" />
+
+                    <ImageButton
+                        android:id="@+id/btnSearchClose"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/search_close"
+                        android:padding="13dp"
+                        android:src="@drawable/ic_close"
+                        app:tint="@color/primary" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Media player container for audio and video editor modes. -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/mediaPlayerContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="8dp"
+            app:cardCornerRadius="8dp"
+            app:cardElevation="2dp"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <LinearLayout
+                    android:id="@+id/videoSection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="4dp"
+                    android:orientation="vertical"
+                    android:visibility="gone"
+                    tools:visibility="visible">
+
+                    <FrameLayout
+                        android:id="@+id/videoViewportContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/editor_video_height"
+                        android:background="#000000">
+
+                        <com.subtitleedit.mpv.EditorMpvView
+                            android:id="@+id/mpvView"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:keepScreenOn="true" />
+
+                        <TextView
+                            android:id="@+id/tvVideoStatus"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="center"
+                            android:gravity="center"
+                            android:maxWidth="260dp"
+                            android:padding="12dp"
+                            android:text="@string/editor_video_loading"
+                            android:textColor="#DDFFFFFF"
+                            android:textSize="13sp"
+                            android:visibility="gone"
+                            tools:visibility="visible" />
+
+                        <FrameLayout
+                            android:id="@+id/videoControlsOverlay"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:clickable="true"
+                            android:focusable="true">
+
+                            <TextView
+                                android:id="@+id/tvVideoTime"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_gravity="top|start"
+                                android:background="#26000000"
+                                android:ellipsize="end"
+                                android:fontFamily="monospace"
+                                android:gravity="center_vertical"
+                                android:maxLines="1"
+                                android:minHeight="32dp"
+                                android:paddingStart="12dp"
+                                android:paddingTop="8dp"
+                                android:paddingEnd="12dp"
+                                android:paddingBottom="6dp"
+                                android:textColor="#CCFFFFFF"
+                                android:textSize="12sp"
+                                tools:text="00:19:37.000 / 00:38:37.000" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="48dp"
+                                android:layout_gravity="bottom"
+                                android:background="#26000000"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingStart="4dp">
+
+                                <ImageButton
+                                    android:id="@+id/btnVideoPlayPause"
+                                    android:layout_width="48dp"
+                                    android:layout_height="48dp"
+                                    android:background="?attr/selectableItemBackgroundBorderless"
+                                    android:contentDescription="@string/editor_video_play"
+                                    android:padding="12dp"
+                                    android:src="@drawable/ic_video_play"
+                                    app:tint="#FFFFFFFF" />
+
+                                <SeekBar
+                                    android:id="@+id/videoSeekBar"
+                                    android:layout_width="0dp"
+                                    android:layout_height="48dp"
+                                    android:layout_weight="1"
+                                    android:minWidth="0dp"
+                                    android:progressBackgroundTint="#66FFFFFF"
+                                    android:progressTint="#FFFFFFFF"
+                                    android:thumbTint="#FFFFFFFF" />
+
+                                <TextView
+                                    android:id="@+id/tvVideoPlaybackSpeed"
+                                    android:layout_width="48dp"
+                                    android:layout_height="48dp"
+                                    android:background="?attr/selectableItemBackgroundBorderless"
+                                    android:clickable="true"
+                                    android:contentDescription="@string/editor_video_speed"
+                                    android:focusable="true"
+                                    android:gravity="center"
+                                    android:text="@string/activity_editor_text_08"
+                                    android:textColor="#FFFFFFFF"
+                                    android:textSize="14sp" />
+
+                                <ImageButton
+                                    android:id="@+id/btnVideoFullscreen"
+                                    android:layout_width="48dp"
+                                    android:layout_height="48dp"
+                                    android:background="?attr/selectableItemBackgroundBorderless"
+                                    android:contentDescription="@string/editor_video_fullscreen"
+                                    android:padding="10dp"
+                                    android:src="@drawable/ic_video_fullscreen"
+                                    app:tint="#FFFFFFFF" />
+
+                            </LinearLayout>
+
+                        </FrameLayout>
+
+                    </FrameLayout>
+
+                </LinearLayout>
+
+                <!-- 波形区域容器 -->
+                <LinearLayout
+                    android:id="@+id/waveformSection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <!-- 工具栏：展开/折叠 + 振幅缩放 + 模式切换 -->
+                    <LinearLayout
+                        android:id="@+id/waveformToolbar"
+                        android:layout_width="match_parent"
+                        android:layout_height="32dp"
+                        android:orientation="horizontal"
+                        android:paddingStart="6dp"
+                        android:paddingEnd="6dp"
+                        android:gravity="center_vertical"
+                        android:background="@color/waveform_toolbar_bg">
+
+                        <!-- 展开/折叠按钮 -->
+                        <TextView
+                            android:id="@+id/btnToggleWaveform"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:text="@string/activity_editor_text_03"
+                            android:gravity="center"
+                            android:textSize="11sp"
+                            android:textColor="#CCCCCC"
+                            android:background="@drawable/bg_waveform_btn"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:contentDescription="@string/activity_editor_contentdescription_02"/>
+
+                        <!-- 打轴按钮 -->
+                        <ImageButton
+                            android:id="@+id/btnInsertSubtitle"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            android:layout_marginStart="4dp"
+                            android:src="@drawable/ic_insert_subtitle"
+                            android:background="@drawable/bg_waveform_btn"
+                            android:padding="3dp"
+                            android:contentDescription="@string/activity_editor_contentdescription_03" />
+
+                        <!-- 对选中的字幕行按其时间范围进行语音转录 -->
+                        <ImageButton
+                            android:id="@+id/btnQuickTranscribe"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            android:layout_marginStart="4dp"
+                            android:src="@drawable/ic_quick_transcribe"
+                            android:background="@drawable/bg_waveform_btn"
+                            android:padding="3dp"
+                            android:contentDescription="@string/activity_editor_contentdescription_04" />
+
+                        <!-- 使用设置中选定的 TTS 引擎朗读选中字幕 -->
+                        <ImageButton
+                            android:id="@+id/btnQuickTts"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            android:layout_marginStart="4dp"
+                            android:background="@drawable/bg_waveform_btn"
+                            android:contentDescription="@string/quick_tts_selected_subtitles"
+                            android:padding="3dp"
+                            android:src="@drawable/ic_tts" />
+
+                        <!-- 按播放头位置快速拆分当前字幕 -->
+                        <ImageButton
+                            android:id="@+id/btnQuickSplit"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            android:layout_marginStart="4dp"
+                            android:background="@drawable/bg_waveform_btn"
+                            android:contentDescription="@string/quick_split_subtitle"
+                            android:padding="3dp"
+                            android:src="@drawable/ic_quick_split" />
+
+                        <Space
+                            android:layout_width="0dp"
+                            android:layout_height="1dp"
+                            android:layout_weight="1" />
+
+                        <!-- 模式切换：波形 ↔ 频谱 -->
+                        <TextView
+                            android:id="@+id/btnToggleDisplayMode"
+                            android:layout_width="wrap_content"
+                            android:layout_height="24dp"
+                            android:text="@string/activity_editor_text_04"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp"
+                            android:gravity="center"
+                            android:textSize="11sp"
+                            android:textColor="#CCCCCC"
+                            android:background="@drawable/bg_waveform_btn"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:layout_marginEnd="4dp"
+                            android:contentDescription="@string/activity_editor_contentdescription_05"/>
+
+                        <!-- 振幅缩小 -->
+                        <TextView
+                            android:id="@+id/btnAmplitudeZoomOut"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:text="@string/activity_editor_text_05"
+                            android:gravity="center"
+                            android:textSize="15sp"
+                            android:textColor="#CCCCCC"
+                            android:background="@drawable/bg_waveform_btn"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:layout_marginEnd="4dp"
+                            android:contentDescription="@string/activity_editor_contentdescription_06"/>
+
+                        <!-- 振幅放大（长按重置） -->
+                        <TextView
+                            android:id="@+id/btnAmplitudeZoomIn"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:text="@string/activity_editor_text_06"
+                            android:gravity="center"
+                            android:textSize="15sp"
+                            android:textColor="#CCCCCC"
+                            android:background="@drawable/bg_waveform_btn"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:contentDescription="@string/activity_editor_contentdescription_07"/>
+
+                    </LinearLayout>
+
+                    <!-- 波形图本体（折叠时 GONE） -->
+                    <com.google.android.material.card.MaterialCardView
+                        android:id="@+id/timelineContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="185dp"
+                        app:cardCornerRadius="4dp"
+                        app:cardElevation="1dp">
+
+                        <com.subtitleedit.view.WaveformTimelineView
+                            android:id="@+id/waveformTimelineView"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:background="@drawable/bg_waveform_placeholder" />
+
+                        <!-- 手动生成按钮，叠在波形图正中间 -->
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnGenerateCache"
+                            style="@style/Widget.Material3.Button.TonalButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="center"
+                            android:text="@string/activity_editor_text_07"
+                            android:visibility="gone" />
+
+                    </com.google.android.material.card.MaterialCardView>
+
+                </LinearLayout>
+
+                <!-- 播放控制：两行布局，进度条独占全宽避免被时间文字挤压 -->
+                <LinearLayout
+                    android:id="@+id/audioPlaybackControls"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginTop="4dp">
+
+                    <!-- 第一行：进度条独占全宽 -->
+                    <SeekBar
+                        android:id="@+id/seekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="2dp"
+                        android:layout_marginEnd="2dp" />
+
+                    <!-- 第二行：播放按钮 + 当前时间（左）+ 弹性空白 + 总时长（右）-->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginTop="2dp">
+
+                        <ImageButton
+                            android:id="@+id/btnPlayPause"
+                            android:layout_width="32dp"
+                            android:layout_height="32dp"
+                            android:src="@android:drawable/ic_media_play"
+                            android:background="?attr/selectableItemBackgroundBorderless"
+                            android:contentDescription="@string/activity_editor_contentdescription_08"
+                            android:layout_marginEnd="4dp"
+                            app:tint="@color/primary" />
+
+                        <!-- 播放速率按钮 -->
+                        <TextView
+                            android:id="@+id/tvPlaybackSpeed"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/activity_editor_text_08"
+                            android:textSize="11sp"
+                            android:textColor="@color/primary"
+                            android:paddingStart="6dp"
+                            android:paddingEnd="6dp"
+                            android:paddingTop="2dp"
+                            android:paddingBottom="2dp"
+                            android:background="@drawable/bg_waveform_btn"
+                            android:layout_marginEnd="6dp"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:contentDescription="@string/activity_editor_contentdescription_09" />
+
+                        <!-- 等宽字体：每个数字字形宽度一致，彻底消除抖动 -->
+                        <TextView
+                            android:id="@+id/tvCurrentTime"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="@color/on_surface"
+                            android:textSize="11sp"
+                            android:fontFamily="monospace"
+                            android:maxLines="1"
+                            tools:text="00:00:00.000" />
+
+                        <Space
+                            android:layout_width="0dp"
+                            android:layout_height="1dp"
+                            android:layout_weight="1" />
+
+                        <TextView
+                            android:id="@+id/tvTotalTime"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="@color/on_surface"
+                            android:textSize="11sp"
+                            android:fontFamily="monospace"
+                            android:maxLines="1"
+                            tools:text="05:30:00.000" />
+
+                    </LinearLayout>
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- 字幕列表 -->
+        <com.subtitleedit.view.DraggableRecyclerView
+            android:id="@+id/rvSubtitles"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:padding="8dp"
+            tools:listitem="@layout/item_subtitle" />
+
+        <!-- 源视图按物理文本行复用列表式 RecyclerView 块，空行也保留。 -->
+        <FrameLayout
+            android:id="@+id/sourceViewContainer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
+
+            <com.subtitleedit.view.SourceEditorView
+                android:id="@+id/etSourceView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:fillViewport="true"
+                android:overScrollMode="always"
+                android:scrollbars="none"
+                tools:text="Line 1\nLine 2\nLine 3" />
+
+        </FrameLayout>
+
+    </LinearLayout>
+
+    <FrameLayout
+        android:id="@+id/editorListLoadingOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clickable="true"
+        android:elevation="15dp"
+        android:focusable="true"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <ProgressBar
+                android:layout_width="48dp"
+                android:layout_height="48dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="正在更新字幕…"
+                android:textColor="@color/on_surface"
+                android:textSize="16sp" />
+        </LinearLayout>
+    </FrameLayout>
+
+    <FrameLayout
+        android:id="@+id/videoFullscreenHost"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#000000"
+        android:elevation="16dp"
+        android:visibility="gone" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
