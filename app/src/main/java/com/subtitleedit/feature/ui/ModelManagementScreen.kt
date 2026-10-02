@@ -40,7 +40,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
@@ -242,67 +241,77 @@ private fun ModelListPage(
     onExport: (ModelManagementItemUi) -> Unit,
     onDelete: (ModelManagementItemUi) -> Unit
 ) {
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            SelectionContainer(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = modelsDirectoryLabel,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.fillMaxWidth()
-                )
+    Box(Modifier.fillMaxSize()) {
+        val groupedModels = models.groupBy { it.category }
+        when {
+            errorMessage != null -> Column(Modifier.fillMaxSize()) {
+                ModelsDirectoryText(modelsDirectoryLabel)
+                EmptyState(errorMessage, Modifier.weight(1f))
             }
-        }
-
-        Box(Modifier.fillMaxSize()) {
-            val groupedModels = models.groupBy { it.category }
-            when {
-                errorMessage != null -> EmptyState(errorMessage)
-                models.isEmpty() && !isLoading -> EmptyState(emptyMessage)
-                models.isEmpty() -> Unit
-                else -> LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        start = 16.dp,
-                        top = 4.dp,
-                        end = 16.dp,
-                        bottom = 24.dp
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    groupedModels.forEach { (category, categoryModels) ->
-                        item(key = "category:$category") {
-                            Text(
-                                text = category,
-                                modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp),
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                        items(categoryModels, key = { it.key }) { item ->
-                            ModelRow(
-                                item = item,
-                                isExporting = isExporting,
-                                isDeleting = deletingModelKey == item.key,
-                                onExport = { onExport(item) },
-                                onDelete = { onDelete(item) }
-                            )
-                        }
+            models.isEmpty() && !isLoading -> Column(Modifier.fillMaxSize()) {
+                ModelsDirectoryText(modelsDirectoryLabel)
+                EmptyState(emptyMessage, Modifier.weight(1f))
+            }
+            models.isEmpty() -> Column(Modifier.fillMaxSize()) {
+                ModelsDirectoryText(modelsDirectoryLabel)
+                Box(Modifier.weight(1f))
+            }
+            else -> LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    start = 16.dp,
+                    top = 12.dp,
+                    end = 16.dp,
+                    bottom = 24.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                item(key = "models-directory") {
+                    ModelsDirectoryText(modelsDirectoryLabel)
+                }
+                groupedModels.forEach { (category, categoryModels) ->
+                    item(key = "category:$category") {
+                        Text(
+                            text = category,
+                            modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp),
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    items(categoryModels, key = { it.key }) { item ->
+                        ModelRow(
+                            item = item,
+                            isExporting = isExporting,
+                            isDeleting = deletingModelKey == item.key,
+                            onExport = { onExport(item) },
+                            onDelete = { onDelete(item) }
+                        )
                     }
                 }
             }
-            if (isLoading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
+        }
+        if (isLoading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
             }
         }
+    }
+}
+
+@Composable
+private fun ModelsDirectoryText(value: String) {
+    SelectionContainer(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 0.dp, vertical = 0.dp)
+    ) {
+        Text(
+            text = value,
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }
 
@@ -332,9 +341,7 @@ private fun ModelRow(
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        modifier = Modifier.weight(1f)
                     )
                     if (item.canExport) {
                         TextButton(
@@ -348,14 +355,11 @@ private fun ModelRow(
                         }
                     }
                 }
-                SelectionContainer(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = item.path,
-                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
+                Text(
+                    text = item.path,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Text(
                     text = item.formattedSize,
                     style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
@@ -375,8 +379,8 @@ private fun ModelRow(
 }
 
 @Composable
-private fun EmptyState(message: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+private fun EmptyState(message: String, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(
             text = message,
             modifier = Modifier.padding(24.dp),
