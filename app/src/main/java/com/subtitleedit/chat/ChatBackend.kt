@@ -1,7 +1,6 @@
 package com.subtitleedit.chat
 
 import java.io.IOException
-import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -20,8 +19,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * An OpenAI-compatible conversation backend. It owns request generation, stream decoding,
- * context trimming and the assistant -> tool -> assistant execution loop.
+ * An OpenAI-compatible conversation backend. It owns request generation, stream decoding and
+ * the assistant -> tool -> assistant execution loop.
  */
 class ChatBackend(
     private val config: ChatBackendConfig
@@ -129,10 +128,6 @@ class ChatBackend(
         .retryOnConnectionFailure(true)
         .build()
     private val sendMutex = Mutex()
-    private val contextWindowTokens = config.contextWindowTokens.coerceIn(
-        MIN_CONTEXT_WINDOW_TOKENS,
-        MAX_CONTEXT_WINDOW_TOKENS
-    )
     private val apiUrl = chatCompletionsUrl(config.baseUrl)
 
     @Volatile
@@ -153,7 +148,7 @@ class ChatBackend(
         withContext(Dispatchers.IO) {
             require(userContent.isNotBlank()) { "消息不能为空" }
             val toolRegistry = ToolRegistry(tools)
-            var requestMessages = compactConversationForRequest(conversation, userContent) +
+            var requestMessages = conversation +
                 ChatMessage(role = ROLE_USER, content = userContent)
             val appended = mutableListOf<ChatMessage>()
             appended += ChatMessage(role = ROLE_USER, content = userContent)
@@ -232,75 +227,6 @@ class ChatBackend(
                 }
             })
         }
-    }
-
-    /** Keeps whole user turns and their tool results when a request must be shortened. */
-    internal fun compactConversationForRequest(
-        conversation: List<ChatMessage>,
-        pendingUserContent: String
-    ): List<ChatMessage> {
-        val pending = ChatMessage(ROLE_USER, pendingUserContent)
-        val completionReserve = maxOf(
-            MIN_COMPLETION_RESERVE_TOKENS.toLong(),
-            estimateTextTokens(pendingUserContent).toLong() * 3L / 2L
-        ).coerceAtMost(Int.MAX_VALUE.toLong())
-        val inputLimit = contextWindowTokens.toLong() - completionReserve
-        val systemMessages = conversation.takeWhile { it.role == ROLE_SYSTEM }
-        val baseTokens = estimateConversationTokens(systemMessages + pending)
-        if (baseTokens.toLong() > inputLimit) {
-            throw IOException(
-                "当前消息预计需要 ${baseTokens + completionReserve} tokens，" +
-                    "超过上下文上限 $contextWindowTokens"
-            )
-        }
-        if (estimateConversationTokens(conversation + pending).toLong() <= inputLimit) {
-            return conversation
-        }
-
-        val turns = mutableListOf<List<ChatMessage>>()
-        var currentTurn = mutableListOf<ChatMessage>()
-        conversation.drop(systemMessages.size).forEach { message ->
-            if (message.role == ROLE_USER && currentTurn.isNotEmpty()) {
-                turns += currentTurn
-                currentTurn = mutableListOf()
-            }
-            currentTurn += message
-        }
-        if (currentTurn.isNotEmpty()) turns += currentTurn
-
-        val keepTarget = baseTokens.toLong() + ((inputLimit - baseTokens) * CONTEXT_KEEP_RATIO)
-        val selected = ArrayDeque<List<ChatMessage>>()
-        for (index in turns.indices.reversed()) {
-            val turn = turns[index]
-            val candidate = systemMessages + turn + selected.flatten() + pending
-            if (estimateConversationTokens(candidate).toLong() <= keepTarget) {
-                selected.addFirst(turn)
-            } else {
-                if (selected.isEmpty() &&
-                    estimateConversationTokens(systemMessages + turn + pending).toLong() <= inputLimit
-                ) {
-                    selected.addFirst(turn)
-                }
-                break
-            }
-        }
-        return systemMessages + selected.flatten()
-    }
-
-    internal fun estimateConversationTokens(messages: List<ChatMessage>): Int {
-        val estimate = 3L + messages.sumOf { message ->
-            6L + estimateTextTokens(message.role) +
-                estimateTextTokens(message.content) +
-                estimateTextTokens(message.reasoningContent) +
-                estimateTextTokens(message.toolCallId) +
-                estimateTextTokens(message.toolName) +
-                message.toolCalls.sumOf { call ->
-                    estimateTextTokens(call.id) +
-                        estimateTextTokens(call.name) +
-                        estimateTextTokens(call.arguments)
-                }
-        }
-        return estimate.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
     }
 
     internal fun readStreamingContent(
@@ -637,12 +563,6 @@ class ChatBackend(
         return "API 请求失败：$code - $detail"
     }
 
-    private fun estimateTextTokens(text: String): Int {
-        if (text.isEmpty()) return 0
-        return ((text.toByteArray(StandardCharsets.UTF_8).size.toLong() + 1L) / 2L)
-            .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-    }
-
     private fun chatCompletionsUrl(baseUrl: String): String {
         val normalized = baseUrl.trim().trimEnd('/')
         require(normalized.isNotEmpty()) { "请先填写 API 请求地址" }
@@ -667,10 +587,6 @@ class ChatBackend(
         private const val ROLE_TOOL = "tool"
         private const val MAX_RETRY_COUNT = 3
         private const val MAX_TOOL_ROUNDS = 8
-        private const val MIN_CONTEXT_WINDOW_TOKENS = 4 * 1024
-        private const val MAX_CONTEXT_WINDOW_TOKENS = 2 * 1024 * 1024
-        private const val MIN_COMPLETION_RESERVE_TOKENS = 1_024
-        private const val CONTEXT_KEEP_RATIO = 0.9
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
         private val RETRYABLE_HTTP_CODES = setOf(408, 429)
     }
@@ -681,7 +597,6 @@ data class ChatBackendConfig(
     val apiKey: String,
     val model: String,
     val baseUrl: String,
-    val contextWindowTokens: Int,
     val reasoningLevel: ChatReasoningLevel = ChatReasoningLevel.AUTO,
     val modelSupportsReasoning: Boolean = false
 )

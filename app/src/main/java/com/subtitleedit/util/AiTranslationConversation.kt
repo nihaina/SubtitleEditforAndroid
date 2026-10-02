@@ -25,7 +25,6 @@ class AiTranslationConversation(
     private val targetLanguage: String,
     private val customPrompt: String = "",
     baseUrl: String,
-    contextWindowTokens: Int,
     private val subtitleFormat: SubtitleFormat = SubtitleFormat.SRT,
     reasoningLevel: AiProviderConfig.ReasoningLevel = AiProviderConfig.defaultReasoningLevel(provider),
     /** Stable ID for one editor translation operation, including all split batches and retries. */
@@ -51,7 +50,6 @@ class AiTranslationConversation(
             apiKey = apiKey,
             model = model,
             baseUrl = baseUrl,
-            contextWindowTokens = contextWindowTokens,
             reasoningLevel = ChatReasoningLevel.valueOf(reasoningLevel.name),
             modelSupportsReasoning = AiProviderConfig.modelCapabilities(provider, model).reasoning
         ),

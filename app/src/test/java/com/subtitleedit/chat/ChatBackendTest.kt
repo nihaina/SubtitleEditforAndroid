@@ -1,6 +1,5 @@
 package com.subtitleedit.chat
 
-import java.io.IOException
 import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
@@ -9,14 +8,12 @@ import okhttp3.mockwebserver.MockWebServer
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatBackendTest {
     private fun backend(
         baseUrl: String = "https://example.com/v1",
-        contextWindowTokens: Int = 256 * 1024,
         reasoningLevel: ChatReasoningLevel = ChatReasoningLevel.AUTO,
         modelSupportsReasoning: Boolean = false
     ) = ChatBackend(
@@ -25,7 +22,6 @@ class ChatBackendTest {
             apiKey = "test-key",
             model = "test-model",
             baseUrl = baseUrl,
-            contextWindowTokens = contextWindowTokens,
             reasoningLevel = reasoningLevel,
             modelSupportsReasoning = modelSupportsReasoning
         )
@@ -98,7 +94,6 @@ class ChatBackendTest {
                 apiKey = "test-key",
                 model = "test-model",
                 baseUrl = "https://example.com/v1",
-                contextWindowTokens = 256 * 1024
             ),
             systemPrompt = "Be precise.",
             initialMessages = listOf(ChatBackend.ChatMessage("user", "已有消息"))
@@ -126,7 +121,6 @@ class ChatBackendTest {
                     apiKey = "test-key",
                     model = "test-model",
                     baseUrl = server.url("/v1").toString(),
-                    contextWindowTokens = 256 * 1024
                 ),
                 systemPrompt = "根据当前字幕合并"
             )
@@ -253,37 +247,6 @@ class ChatBackendTest {
             val continuation = JSONObject(server.takeRequest().body.readUtf8())
             assertTrue(continuation.getJSONArray("messages").getJSONObject(2)
                 .getString("content").contains("工具参数不是有效 JSON"))
-        }
-    }
-
-    @Test
-    fun contextCompaction_keepsCompleteToolTurn() {
-        val oldTurn = listOf(
-            ChatBackend.ChatMessage("user", "旧请求".repeat(3_000)),
-            ChatBackend.ChatMessage(
-                "assistant",
-                "",
-                toolCalls = listOf(ChatBackend.ToolCall("call-1", "calculate", "{}"))
-            ),
-            ChatBackend.ChatMessage("tool", "旧结果", toolCallId = "call-1", toolName = "calculate")
-        )
-        val recentTurn = listOf(
-            ChatBackend.ChatMessage("user", "较新请求"),
-            ChatBackend.ChatMessage("assistant", "较新结果")
-        )
-
-        val compacted = backend(contextWindowTokens = 8 * 1024)
-            .compactConversationForRequest(oldTurn + recentTurn, "当前请求")
-
-        assertFalse(compacted.any { it.toolCallId == "call-1" })
-        assertEquals(recentTurn, compacted)
-    }
-
-    @Test
-    fun oversizedCurrentMessage_isRejected() {
-        assertThrows(IOException::class.java) {
-            backend(contextWindowTokens = 4 * 1024)
-                .compactConversationForRequest(emptyList(), "超长消息".repeat(4_000))
         }
     }
 

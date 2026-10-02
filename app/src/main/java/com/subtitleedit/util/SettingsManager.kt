@@ -32,12 +32,10 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_AI_TARGET_LANGUAGE = "ai_target_language"
         private const val KEY_AI_CUSTOM_PROMPT = "ai_custom_prompt"
         private const val KEY_AI_CUSTOM_BASE_URL = "ai_custom_base_url"
-        private const val KEY_AI_CONTEXT_WINDOW_TOKENS = "ai_context_window_tokens"
         private const val KEY_AI_REASONING_LEVEL = "ai_reasoning_level"
         private const val KEY_AI_TRANSLATION_PROVIDER = "ai_translation_provider"
         private const val KEY_AI_PUNCTUATION_PROVIDER = "ai_punctuation_provider"
         private const val KEY_AI_PUNCTUATION_MODEL = "ai_punctuation_model"
-        private const val KEY_AI_PUNCTUATION_CONTEXT_WINDOW_TOKENS = "ai_punctuation_context_window_tokens"
         private const val KEY_AI_PUNCTUATION_REASONING_LEVEL = "ai_punctuation_reasoning_level"
         private const val KEY_AI_PUNCTUATION_CUSTOM_PROMPT = "ai_punctuation_custom_prompt"
         private const val KEY_WAVEFORM_CACHE_LOCATION = "waveform_cache_location"
@@ -327,31 +325,6 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putString(KEY_AI_PUNCTUATION_CUSTOM_PROMPT, prompt).apply()
     }
 
-    fun getAiContextWindowTokens(provider: String = getAiProvider()): Int {
-        val scopedKey = providerKey(KEY_AI_CONTEXT_WINDOW_TOKENS, provider)
-        val default = AiProviderConfig.defaultContextWindowTokens(provider)
-        val stored = if (prefs.contains(scopedKey)) {
-            prefs.getInt(scopedKey, default)
-        } else if (provider == AiProviderConfig.DEEPSEEK) {
-            // DeepSeek has a separate 1M default; do not let the old global 256K
-            // value silently override it after upgrading.
-            default
-        } else {
-            prefs.getInt(KEY_AI_CONTEXT_WINDOW_TOKENS, default)
-        }
-        return stored.coerceIn(MIN_AI_CONTEXT_WINDOW_TOKENS, MAX_AI_CONTEXT_WINDOW_TOKENS)
-    }
-
-    fun setAiContextWindowTokens(
-        tokens: Int,
-        provider: String = getAiProvider()
-    ) {
-        prefs.edit().putInt(
-            providerKey(KEY_AI_CONTEXT_WINDOW_TOKENS, provider),
-            tokens.coerceIn(MIN_AI_CONTEXT_WINDOW_TOKENS, MAX_AI_CONTEXT_WINDOW_TOKENS)
-        ).apply()
-    }
-
     fun getAiReasoningLevel(provider: String = getAiProvider()): AiProviderConfig.ReasoningLevel =
         prefs.getString(
             providerKey(KEY_AI_REASONING_LEVEL, provider),
@@ -377,16 +350,6 @@ class SettingsManager private constructor(context: Context) {
 
     fun setAiPunctuationModel(provider: String, model: String) {
         prefs.edit().putString(providerKey(KEY_AI_PUNCTUATION_MODEL, provider), model).apply()
-    }
-
-    fun getAiPunctuationContextWindowTokens(provider: String = getAiPunctuationProvider()): Int {
-        val key = providerKey(KEY_AI_PUNCTUATION_CONTEXT_WINDOW_TOKENS, provider)
-        return prefs.getInt(key, AiProviderConfig.defaultContextWindowTokens(provider))
-            .coerceIn(MIN_AI_CONTEXT_WINDOW_TOKENS, MAX_AI_CONTEXT_WINDOW_TOKENS)
-    }
-
-    fun setAiPunctuationContextWindowTokens(tokens: Int, provider: String = getAiPunctuationProvider()) {
-        prefs.edit().putInt(providerKey(KEY_AI_PUNCTUATION_CONTEXT_WINDOW_TOKENS, provider), tokens.coerceIn(MIN_AI_CONTEXT_WINDOW_TOKENS, MAX_AI_CONTEXT_WINDOW_TOKENS)).apply()
     }
 
     fun getAiPunctuationReasoningLevel(provider: String = getAiPunctuationProvider()): AiProviderConfig.ReasoningLevel =

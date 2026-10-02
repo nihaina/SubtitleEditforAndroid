@@ -68,7 +68,6 @@ internal class EditorTranslationController(
             return
         }
         val baseUrl = settingsManager.getAiBaseUrl(provider)
-        val contextWindowTokens = settingsManager.getAiContextWindowTokens(provider)
         val reasoningLevel = settingsManager.getAiReasoningLevel(provider)
         if (baseUrl.isBlank()) {
             showTranslationError("请先在设置中填写自定义 API 请求地址")
@@ -90,7 +89,6 @@ internal class EditorTranslationController(
                     targetLanguage,
                     customPrompt,
                     baseUrl,
-                    contextWindowTokens,
                     reasoningLevel
                 )
             }
@@ -115,7 +113,6 @@ internal class EditorTranslationController(
         targetLanguage: String,
         customPrompt: String,
         baseUrl: String,
-        contextWindowTokens: Int,
         reasoningLevel: AiProviderConfig.ReasoningLevel
     ) {
         // One editor action owns one history record; all subtitle batches and retries share it.
@@ -128,7 +125,6 @@ internal class EditorTranslationController(
             targetLanguage = targetLanguage,
             customPrompt = customPrompt,
             baseUrl = baseUrl,
-            contextWindowTokens = contextWindowTokens,
             subtitleFormat = subtitleFormatProvider(),
             reasoningLevel = reasoningLevel,
             historySessionId = historySessionId

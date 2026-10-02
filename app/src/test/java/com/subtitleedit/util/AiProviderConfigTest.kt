@@ -55,16 +55,12 @@ class AiProviderConfigTest {
     }
 
     @Test
-    fun deepseek_usesOfficialV1EndpointAndOneMillionContextDefaults() {
+    fun deepseek_usesOfficialV1EndpointAndDefaultReasoning() {
         assertEquals(
             "https://api.deepseek.com/v1/chat/completions",
             AiProviderConfig.chatCompletionsUrl(
                 AiProviderConfig.getProvider(AiProviderConfig.DEEPSEEK).baseUrl
             )
-        )
-        assertEquals(
-            1_000_000,
-            AiProviderConfig.defaultContextWindowTokens(AiProviderConfig.DEEPSEEK)
         )
         assertEquals(
             AiProviderConfig.ReasoningLevel.MEDIUM,

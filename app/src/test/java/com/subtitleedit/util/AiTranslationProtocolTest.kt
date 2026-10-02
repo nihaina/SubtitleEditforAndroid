@@ -21,11 +21,6 @@ class AiTranslationProtocolTest {
     }
 
     @Test
-    fun contextWindow_defaultsToTwoHundredFiftySixK() {
-        assertEquals(262_144, DEFAULT_AI_CONTEXT_WINDOW_TOKENS)
-    }
-
-    @Test
     fun timedInput_usesSrtBlocksWithoutSequenceNumbersAndPreservesEmbeddedLines() {
         val content = buildTimedSubtitleContent(
             listOf(

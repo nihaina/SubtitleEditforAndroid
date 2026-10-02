@@ -6,9 +6,6 @@ object AiProviderConfig {
     const val OPENAI = "openai"
     const val CUSTOM = "custom"
 
-    /** DeepSeek V4 models expose a one-million-token context window. */
-    const val DEFAULT_DEEPSEEK_CONTEXT_WINDOW_TOKENS = 1_000_000
-
     enum class ReasoningLevel(val displayName: String, val effort: String, val budgetTokens: Int) {
         OFF("关闭", "none", 0),
         AUTO("自动", "auto", -1),
@@ -71,13 +68,6 @@ object AiProviderConfig {
     fun getProvider(id: String): Provider {
         return providers.firstOrNull { it.id == id } ?: providers.first()
     }
-
-    fun defaultContextWindowTokens(provider: String): Int =
-        if (provider == DEEPSEEK) {
-            DEFAULT_DEEPSEEK_CONTEXT_WINDOW_TOKENS
-        } else {
-            DEFAULT_AI_CONTEXT_WINDOW_TOKENS
-        }
 
     fun defaultReasoningLevel(provider: String): ReasoningLevel =
         if (provider == DEEPSEEK) ReasoningLevel.MEDIUM else ReasoningLevel.AUTO

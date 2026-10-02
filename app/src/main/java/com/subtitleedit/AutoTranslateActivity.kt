@@ -69,7 +69,6 @@ class AutoTranslateActivity : AppCompatActivity() {
         val targetLanguage: String,
         val customPrompt: String,
         val baseUrl: String,
-        val contextWindowTokens: Int,
         val reasoningLevel: AiProviderConfig.ReasoningLevel
     )
 
@@ -387,7 +386,6 @@ class AutoTranslateActivity : AppCompatActivity() {
             targetLanguage = "",
             customPrompt = settingsManager.getAiPunctuationCustomPrompt(),
             baseUrl = baseUrl,
-            contextWindowTokens = settingsManager.getAiPunctuationContextWindowTokens(provider),
             subtitleFormat = document.format,
             reasoningLevel = settingsManager.getAiPunctuationReasoningLevel(provider),
             historySessionId = "punctuation_${file.sessionId}",
@@ -423,7 +421,6 @@ class AutoTranslateActivity : AppCompatActivity() {
             targetLanguage = config.targetLanguage,
             customPrompt = config.customPrompt,
             baseUrl = config.baseUrl,
-            contextWindowTokens = config.contextWindowTokens,
             subtitleFormat = document.format,
             reasoningLevel = config.reasoningLevel,
             historySessionId = file.sessionId,
@@ -516,7 +513,6 @@ class AutoTranslateActivity : AppCompatActivity() {
             targetLanguage = targetLanguage,
             customPrompt = settingsManager.getAiCustomPrompt(),
             baseUrl = baseUrl,
-            contextWindowTokens = settingsManager.getAiContextWindowTokens(provider),
             reasoningLevel = settingsManager.getAiReasoningLevel(provider)
         )
     }

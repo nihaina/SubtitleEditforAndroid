@@ -8,9 +8,6 @@ import java.util.Locale
 private const val MAX_SUBTITLES_PER_TRANSLATION_REQUEST = 150
 private const val TRANSLATION_BLOCK_START = "start"
 private const val TRANSLATION_BLOCK_END = "end"
-const val DEFAULT_AI_CONTEXT_WINDOW_TOKENS = 256 * 1024
-const val MIN_AI_CONTEXT_WINDOW_TOKENS = 4 * 1024
-const val MAX_AI_CONTEXT_WINDOW_TOKENS = 2 * 1024 * 1024
 private val TIMED_SUBTITLE_LINE = Regex(
     """^[ \t]*(\d{1,3}:\d{2}:\d{2}[,.]\d{3})[ \t]*(?:-->|->|—>|——>)[ \t]*(\d{1,3}:\d{2}:\d{2}[,.]\d{3})[ \t]*\r?$""",
     RegexOption.MULTILINE

@@ -74,13 +74,11 @@ data class AiSettingsScreenState(
     val apiKeyVisible: Boolean,
     val translationProvider: String,
     val translationModel: String,
-    val translationContextWindow: String,
     val targetLanguage: String,
     val translationReasoning: AiProviderConfig.ReasoningLevel,
     val translationPrompt: String,
     val punctuationProvider: String,
     val punctuationModel: String,
-    val punctuationContextWindow: String,
     val punctuationReasoning: AiProviderConfig.ReasoningLevel,
     val punctuationPrompt: String,
     val fetchingTranslationModels: Boolean = false,
@@ -103,13 +101,11 @@ data class AiSettingsScreenState(
                 apiKeyVisible = false,
                 translationProvider = translationProvider,
                 translationModel = settings.getAiModel(translationProvider),
-                translationContextWindow = settings.getAiContextWindowTokens(translationProvider).toString(),
                 targetLanguage = settings.getAiTargetLanguage(),
                 translationReasoning = settings.getAiReasoningLevel(translationProvider),
                 translationPrompt = settings.getAiCustomPrompt(),
                 punctuationProvider = punctuationProvider,
                 punctuationModel = settings.getAiPunctuationModel(punctuationProvider),
-                punctuationContextWindow = settings.getAiPunctuationContextWindowTokens(punctuationProvider).toString(),
                 punctuationReasoning = settings.getAiPunctuationReasoningLevel(punctuationProvider),
                 punctuationPrompt = settings.getAiPunctuationCustomPrompt()
             )
@@ -181,7 +177,6 @@ fun AiSettingsScreen(
                 state = state,
                 onSelectProvider = onSelectTranslationProvider,
                 onModelChange = { value -> onStateChange { it.copy(translationModel = value) } },
-                onContextWindowChange = { value -> onStateChange { it.copy(translationContextWindow = value) } },
                 onTargetLanguageChange = { value -> onStateChange { it.copy(targetLanguage = value) } },
                 onReasoningChange = { value -> onStateChange { it.copy(translationReasoning = value) } },
                 onPromptChange = { value -> onStateChange { it.copy(translationPrompt = value) } },
@@ -191,7 +186,6 @@ fun AiSettingsScreen(
                 state = state,
                 onSelectProvider = onSelectPunctuationProvider,
                 onModelChange = { value -> onStateChange { it.copy(punctuationModel = value) } },
-                onContextWindowChange = { value -> onStateChange { it.copy(punctuationContextWindow = value) } },
                 onReasoningChange = { value -> onStateChange { it.copy(punctuationReasoning = value) } },
                 onPromptChange = { value -> onStateChange { it.copy(punctuationPrompt = value) } },
                 onFetchModels = { onFetchModels(AiModelTarget.PUNCTUATION) }
@@ -331,7 +325,6 @@ private fun TranslationSettingsCard(
     state: AiSettingsScreenState,
     onSelectProvider: (String) -> Unit,
     onModelChange: (String) -> Unit,
-    onContextWindowChange: (String) -> Unit,
     onTargetLanguageChange: (String) -> Unit,
     onReasoningChange: (AiProviderConfig.ReasoningLevel) -> Unit,
     onPromptChange: (String) -> Unit,
@@ -355,14 +348,6 @@ private fun TranslationSettingsCard(
             visible = provider.customEndpoint,
             loading = state.fetchingTranslationModels,
             onClick = onFetchModels
-        )
-        OutlinedTextField(
-            value = state.translationContextWindow,
-            onValueChange = onContextWindowChange,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text(stringResource(R.string.activity_ai_settings_hint_context_window)) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
         )
         OutlinedTextField(
             value = state.targetLanguage,
@@ -390,7 +375,6 @@ private fun PunctuationSettingsCard(
     state: AiSettingsScreenState,
     onSelectProvider: (String) -> Unit,
     onModelChange: (String) -> Unit,
-    onContextWindowChange: (String) -> Unit,
     onReasoningChange: (AiProviderConfig.ReasoningLevel) -> Unit,
     onPromptChange: (String) -> Unit,
     onFetchModels: () -> Unit
@@ -418,14 +402,6 @@ private fun PunctuationSettingsCard(
             visible = provider.customEndpoint,
             loading = state.fetchingPunctuationModels,
             onClick = onFetchModels
-        )
-        OutlinedTextField(
-            value = state.punctuationContextWindow,
-            onValueChange = onContextWindowChange,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text(stringResource(R.string.activity_ai_settings_hint_context_window)) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
         )
         ReasoningSelector(
             level = state.punctuationReasoning,

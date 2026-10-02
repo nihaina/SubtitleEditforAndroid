@@ -124,11 +124,6 @@ class AiSettingsActivity : AppCompatActivity() {
             if (current.translationModel != next.translationModel) {
                 settingsManager.setAiModel(provider, next.translationModel.trim())
             }
-            if (current.translationContextWindow != next.translationContextWindow) {
-                next.translationContextWindow.toIntOrNull()?.let {
-                    settingsManager.setAiContextWindowTokens(it, provider)
-                }
-            }
             if (current.targetLanguage != next.targetLanguage) {
                 settingsManager.setAiTargetLanguage(next.targetLanguage.trim())
             }
@@ -144,11 +139,6 @@ class AiSettingsActivity : AppCompatActivity() {
             val provider = current.punctuationProvider
             if (current.punctuationModel != next.punctuationModel) {
                 settingsManager.setAiPunctuationModel(provider, next.punctuationModel.trim())
-            }
-            if (current.punctuationContextWindow != next.punctuationContextWindow) {
-                next.punctuationContextWindow.toIntOrNull()?.let {
-                    settingsManager.setAiPunctuationContextWindowTokens(it, provider)
-                }
             }
             if (current.punctuationReasoning != next.punctuationReasoning) {
                 settingsManager.setAiPunctuationReasoningLevel(next.punctuationReasoning, provider)
@@ -185,7 +175,6 @@ class AiSettingsActivity : AppCompatActivity() {
         screenState = current.copy(
             translationProvider = provider,
             translationModel = settingsManager.getAiModel(provider),
-            translationContextWindow = settingsManager.getAiContextWindowTokens(provider).toString(),
             translationReasoning = settingsManager.getAiReasoningLevel(provider),
             targetLanguage = settingsManager.getAiTargetLanguage(),
             translationPrompt = settingsManager.getAiCustomPrompt(),
@@ -201,7 +190,6 @@ class AiSettingsActivity : AppCompatActivity() {
         screenState = current.copy(
             punctuationProvider = provider,
             punctuationModel = settingsManager.getAiPunctuationModel(provider),
-            punctuationContextWindow = settingsManager.getAiPunctuationContextWindowTokens(provider).toString(),
             punctuationReasoning = settingsManager.getAiPunctuationReasoningLevel(provider),
             punctuationPrompt = settingsManager.getAiPunctuationCustomPrompt(),
             modelChooser = null
@@ -213,9 +201,6 @@ class AiSettingsActivity : AppCompatActivity() {
         if (AiProviderConfig.getProvider(translationProvider).models.isEmpty()) {
             settingsManager.setAiModel(translationProvider, state.translationModel.trim())
         }
-        state.translationContextWindow.toIntOrNull()?.let {
-            settingsManager.setAiContextWindowTokens(it, translationProvider)
-        }
         settingsManager.setAiTargetLanguage(state.targetLanguage.trim())
         settingsManager.setAiReasoningLevel(state.translationReasoning, translationProvider)
         settingsManager.setAiCustomPrompt(state.translationPrompt)
@@ -223,9 +208,6 @@ class AiSettingsActivity : AppCompatActivity() {
         val punctuationProvider = state.punctuationProvider
         if (AiProviderConfig.getProvider(punctuationProvider).models.isEmpty()) {
             settingsManager.setAiPunctuationModel(punctuationProvider, state.punctuationModel.trim())
-        }
-        state.punctuationContextWindow.toIntOrNull()?.let {
-            settingsManager.setAiPunctuationContextWindowTokens(it, punctuationProvider)
         }
         settingsManager.setAiPunctuationReasoningLevel(state.punctuationReasoning, punctuationProvider)
         settingsManager.setAiPunctuationCustomPrompt(state.punctuationPrompt)
@@ -393,7 +375,6 @@ class AiSettingsActivity : AppCompatActivity() {
                         apiKey = apiKey,
                         model = model,
                         baseUrl = baseUrl,
-                        contextWindowTokens = settingsManager.getAiContextWindowTokens(chatProvider),
                         reasoningLevel = ChatReasoningLevel.valueOf(
                             settingsManager.getAiReasoningLevel(chatProvider).name
                         ),

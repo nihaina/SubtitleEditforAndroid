@@ -16,7 +16,6 @@ internal interface AiTranslationService {
         targetLanguage: String,
         customPrompt: String,
         baseUrl: String,
-        contextWindowTokens: Int,
         subtitleFormat: SubtitleParser.SubtitleFormat,
         reasoningLevel: AiProviderConfig.ReasoningLevel,
         historySessionId: String,
