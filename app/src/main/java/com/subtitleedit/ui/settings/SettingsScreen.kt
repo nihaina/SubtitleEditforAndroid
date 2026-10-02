@@ -141,7 +141,6 @@ fun SettingsScreen(
                 )
             }
             Spacer(Modifier.height(20.dp))
-            SectionHeader(stringResource(R.string.activity_settings_ai_entry))
             SettingsGroup {
                 SettingsRow(
                     title = stringResource(R.string.activity_settings_ai_entry),
@@ -161,7 +160,7 @@ fun SettingsScreen(
                 SettingsRow(
                     title = stringResource(R.string.activity_settings_text_05),
                     value = state.cacheSize,
-                    iconRes = R.drawable.ic_sweep,
+                    iconRes = R.drawable.ic_delete_normal,
                     onClick = { showCacheDialog = true }
                 )
                 SettingsRow(
@@ -169,36 +168,36 @@ fun SettingsScreen(
                     iconRes = R.drawable.ic_document,
                     onClick = onOpenLogs
                 )
-            }
-            Spacer(Modifier.height(20.dp))
-            SectionHeader(stringResource(R.string.activity_settings_text_09))
-            SettingsGroup {
-                SharedSettingsSwitchRow(
-                title = stringResource(R.string.activity_settings_text_07),
-                description = stringResource(R.string.activity_settings_text_08),
-                checked = state.checkUpdatesOnStartup,
-                onCheckedChange = onCheckUpdatesChanged
-                )
-                SharedSettingsSwitchRow(
-                title = stringResource(R.string.activity_settings_text_17),
-                description = stringResource(R.string.activity_settings_text_18),
-                checked = state.preserveOutputDirectories,
-                onCheckedChange = onPreserveDirectoriesChanged
-                )
-                SharedSettingsSwitchRow(
-                title = stringResource(R.string.activity_settings_text_10),
-                description = stringResource(R.string.activity_settings_text_11),
-                checked = state.loopSelectedSubtitle,
-                onCheckedChange = onLoopSelectedChanged
-                )
-            }
-            Spacer(Modifier.height(20.dp))
-            SettingsGroup {
                 SettingsRow(
                     title = stringResource(R.string.about),
                     iconRes = R.drawable.ic_info,
                     showArrow = true,
                     onClick = onOpenAbout
+                )
+                SharedSettingsSwitchRow(
+                    title = stringResource(R.string.activity_settings_text_07),
+                    description = stringResource(R.string.activity_settings_text_08),
+                    checked = state.checkUpdatesOnStartup,
+                    onCheckedChange = onCheckUpdatesChanged
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+            SettingsGroup {
+                SharedSettingsSwitchRow(
+                    title = stringResource(R.string.activity_settings_text_17),
+                    description = stringResource(R.string.activity_settings_text_18),
+                    checked = state.preserveOutputDirectories,
+                    onCheckedChange = onPreserveDirectoriesChanged
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+            SectionHeader(stringResource(R.string.activity_settings_text_09))
+            SettingsGroup {
+                SharedSettingsSwitchRow(
+                    title = stringResource(R.string.activity_settings_text_10),
+                    description = stringResource(R.string.activity_settings_text_11),
+                    checked = state.loopSelectedSubtitle,
+                    onCheckedChange = onLoopSelectedChanged
                 )
             }
         }

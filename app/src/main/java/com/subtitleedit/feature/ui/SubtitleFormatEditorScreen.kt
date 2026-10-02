@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -46,7 +45,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextRange
@@ -54,9 +52,12 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.size
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppAlertDialog
+import com.subtitleedit.ui.components.AppBackButton
+import com.subtitleedit.ui.components.AppTopBar
+import com.subtitleedit.ui.components.AppTaskProgress
 import com.subtitleedit.util.PunctuationReplacementScope
 
 data class SubtitleFormatEditorRow(
@@ -132,29 +133,21 @@ fun SubtitleFormatEditorScreen(
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                modifier = Modifier.height(56.dp),
-                title = {
+            AppTopBar(
+                title = "字幕格式化",
+                titleContent = {
                     Column {
                         Text(text = "字幕格式化", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
                             text = fileName,
-                            fontSize = 12.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.MiddleEllipsis
                         )
                     }
                 },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_back),
-                            contentDescription = "返回",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                },
+                navigationIcon = { AppBackButton(onBack) },
                 actions = {
                     IconButton(onClick = onSelectAll, enabled = items.isNotEmpty() && !isLoading) {
                         Icon(
@@ -188,7 +181,7 @@ fun SubtitleFormatEditorScreen(
         ) {
             if (isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                    AppTaskProgress(visible = true, progress = null)
                 }
             } else {
                 Row(Modifier.fillMaxSize()) {
@@ -266,30 +259,24 @@ fun SubtitleFormatEditorScreen(
     }
 
     if (showSaveConfirmation) {
-        AlertDialog(
-            onDismissRequest = onDismissSaveConfirmation,
-            title = { Text("保存格式化结果") },
-            text = { Text("将覆盖原文件 $fileName，确定继续？") },
-            confirmButton = {
-                TextButton(onClick = onConfirmSave) { Text("保存") }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismissSaveConfirmation) { Text("取消") }
-            }
+        AppAlertDialog(
+            title = "保存格式化结果",
+            message = "将覆盖原文件 $fileName，确定继续？",
+            confirmText = "保存",
+            dismissText = "取消",
+            onConfirm = onConfirmSave,
+            onDismiss = onDismissSaveConfirmation
         )
     }
 
     if (showDiscardConfirmation) {
-        AlertDialog(
-            onDismissRequest = onDismissDiscardConfirmation,
-            title = { Text("放弃更改？") },
-            text = { Text("尚未保存的格式化结果将丢失。") },
-            confirmButton = {
-                TextButton(onClick = onConfirmDiscard) { Text("放弃") }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismissDiscardConfirmation) { Text("取消") }
-            }
+        AppAlertDialog(
+            title = "放弃更改？",
+            message = "尚未保存的格式化结果将丢失。",
+            confirmText = "放弃",
+            dismissText = "取消",
+            onConfirm = onConfirmDiscard,
+            onDismiss = onDismissDiscardConfirmation
         )
     }
 }
@@ -301,7 +288,7 @@ private fun FileInfo(fileInfo: String) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(6.dp),
-        fontSize = 13.sp,
+        style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,
         overflow = TextOverflow.MiddleEllipsis
@@ -334,7 +321,7 @@ private fun PreviewList(
                 Text(
                     text = "${index + 1}.",
                     modifier = Modifier.padding(end = 4.dp),
-                    fontSize = 13.sp,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
@@ -344,7 +331,7 @@ private fun PreviewList(
                         .defaultMinSize(minHeight = 40.dp)
                         .clickable { onEdit(index) }
                         .padding(6.dp),
-                    fontSize = 14.sp,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
@@ -383,8 +370,7 @@ private fun FormattingControls(
     ) {
         Text(
             stringResource(R.string.activity_subtitle_format_editor_text_01),
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold
+            style = MaterialTheme.typography.titleMedium
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = removeSpaces, onCheckedChange = onRemoveSpacesChanged)
@@ -401,8 +387,7 @@ private fun FormattingControls(
         Text(
             stringResource(R.string.subtitle_format_clear_start_punctuation),
             modifier = Modifier.padding(top = 16.dp),
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold
+            style = MaterialTheme.typography.titleMedium
         )
         PunctuationGrid(
             selected = startPunctuation,
@@ -412,8 +397,7 @@ private fun FormattingControls(
         Text(
             stringResource(R.string.activity_subtitle_format_editor_text_03),
             modifier = Modifier.padding(top = 16.dp),
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold
+            style = MaterialTheme.typography.titleMedium
         )
         PunctuationGrid(
             selected = endPunctuation,
@@ -423,8 +407,7 @@ private fun FormattingControls(
         Text(
             stringResource(R.string.activity_subtitle_format_editor_text_04),
             modifier = Modifier.padding(top = 16.dp),
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold
+            style = MaterialTheme.typography.titleMedium
         )
         ReplacementScopeSelector(
             selected = replacementScope,
@@ -449,8 +432,7 @@ private fun FormattingControls(
         Text(
             stringResource(R.string.activity_subtitle_format_editor_text_05),
             modifier = Modifier.padding(top = 16.dp),
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold
+            style = MaterialTheme.typography.titleMedium
         )
         EndPunctuationSelector(
             selectedIndex = addEndPunctuationIndex,
@@ -499,25 +481,25 @@ private fun PunctuationGrid(
                         modifier = Modifier
                             .weight(1f)
                             .height(40.dp),
-                        shape = RoundedCornerShape(6.dp),
+                        shape = MaterialTheme.shapes.medium,
                         color = if (isSelected) {
-                            MaterialTheme.colorScheme.primary
+                            MaterialTheme.colorScheme.primaryContainer
                         } else {
-                            MaterialTheme.colorScheme.surface
+                            MaterialTheme.colorScheme.surfaceContainerHighest
                         },
                         contentColor = if (isSelected) {
-                            Color.White
+                            MaterialTheme.colorScheme.onPrimaryContainer
                         } else {
                             MaterialTheme.colorScheme.onSurface
                         },
                         border = BorderStroke(
                             1.dp,
                             if (isSelected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.outlineVariant
                         )
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(punctuation.toString(), fontSize = 17.sp)
+                            Text(punctuation.toString(), style = MaterialTheme.typography.bodyLarge)
                         }
                     }
                 }

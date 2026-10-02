@@ -1,50 +1,39 @@
 package com.subtitleedit.feature.ui
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppAlertDialog
+import com.subtitleedit.ui.components.AppConflictDialog
+import com.subtitleedit.ui.components.AppPrimaryButton
+import com.subtitleedit.ui.components.AppSection
+import com.subtitleedit.ui.components.AppTaskProgress
+import com.subtitleedit.ui.components.AppToolScaffold
+import com.subtitleedit.ui.theme.AppSpacing
 
 data class AutoTranslateFileUi(
     val key: String,
@@ -71,7 +60,6 @@ data class AutoTranslateUiState(
     val removeFileName: String? = null
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AutoTranslateScreen(
     state: AutoTranslateUiState,
@@ -92,214 +80,123 @@ fun AutoTranslateScreen(
     onConfirmExit: () -> Unit,
     onDismissExit: () -> Unit
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                modifier = Modifier.height(56.dp),
-                title = { Text(stringResource(R.string.auto_translate)) },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_back),
-                            contentDescription = stringResource(R.string.tools_navigate_back)
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = onSettings) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_settings),
-                            contentDescription = "AI 设置"
-                        )
-                    }
-                }
+    AppToolScaffold(
+        title = stringResource(R.string.auto_translate),
+        onBack = onNavigateBack,
+        actions = {
+            IconButton(onClick = onSettings) {
+                Icon(painterResource(R.drawable.ic_settings), contentDescription = "AI 设置")
+            }
+        },
+        bottomBar = {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.Page, vertical = AppSpacing.Inner),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+            ) {
+                AppTaskProgress(visible = state.queueRunning, progress = null, status = state.progressSummary)
+                AppPrimaryButton(
+                    text = stringResource(R.string.activity_auto_translate_text_06),
+                    onClick = onStart,
+                    enabled = !state.queueRunning
+                )
+            }
+        }
+    ) {
+        AppSection(title = stringResource(R.string.batch_convert_select_subtitle_files)) {
+            OutlinedButton(onClick = onSelectFiles) {
+                Text(stringResource(R.string.activity_auto_timestamp_text_03))
+            }
+            Text(
+                if (state.files.isEmpty()) stringResource(R.string.activity_media_convert_text_03)
+                else stringResource(R.string.batch_convert_selected_file_count, state.files.size),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium
             )
         }
-    ) { insets ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(insets)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            AutoTranslateSection {
-                Text(
-                    text = stringResource(R.string.batch_convert_select_subtitle_files),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
+
+        AppSection(title = stringResource(R.string.activity_auto_translate_text_01)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)) {
+                SettingSwitch(
+                    label = stringResource(R.string.activity_auto_translate_text_08),
+                    checked = state.punctuationPredictionEnabled,
+                    onCheckedChange = onPunctuationPredictionChange,
+                    modifier = Modifier.weight(1f)
                 )
-                OutlinedButton(
-                    onClick = onSelectFiles,
-                    modifier = Modifier.padding(top = 12.dp)
-                ) {
-                    Text(stringResource(R.string.activity_auto_timestamp_text_03))
-                }
+                SettingSwitch(
+                    label = stringResource(R.string.activity_auto_translate_text_09),
+                    checked = state.translationEnabled,
+                    onCheckedChange = onTranslationChange,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        AppSection(title = stringResource(R.string.activity_auto_translate_text_04)) {
+            if (state.files.isEmpty()) {
                 Text(
-                    text = if (state.files.isEmpty()) {
-                        stringResource(R.string.activity_media_convert_text_03)
-                    } else {
-                        stringResource(R.string.batch_convert_selected_file_count, state.files.size)
-                    },
-                    modifier = Modifier.padding(top = 8.dp),
+                    stringResource(R.string.activity_media_convert_text_03),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = AppSpacing.Inner),
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium
+                    textAlign = TextAlign.Center
                 )
-            }
-
-            AutoTranslateSection {
-                Text(
-                    text = stringResource(R.string.activity_auto_translate_text_01),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
                 ) {
-                    SettingSwitch(
-                        label = stringResource(R.string.activity_auto_translate_text_08),
-                        checked = state.punctuationPredictionEnabled,
-                        onCheckedChange = onPunctuationPredictionChange,
-                        enabled = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    SettingSwitch(
-                        label = stringResource(R.string.activity_auto_translate_text_09),
-                        checked = state.translationEnabled,
-                        onCheckedChange = onTranslationChange,
-                        enabled = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-
-            AutoTranslateSection(contentPadding = 0.dp) {
-                Text(
-                    text = stringResource(R.string.activity_auto_translate_text_04),
-                    modifier = Modifier.padding(16.dp),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                if (state.files.isNotEmpty()) {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
-                    ) {
-                        items(state.files, key = AutoTranslateFileUi::key) { file ->
-                            AutoTranslateFileRow(
-                                file = file,
-                                onClick = { if (file.canRetry) onRetry(file.key) },
-                                onRemove = { onRemove(file.key) }
-                            )
-                        }
+                    items(state.files, key = AutoTranslateFileUi::key) { file ->
+                        AutoTranslateFileRow(
+                            file = file,
+                            onClick = { if (file.canRetry) onRetry(file.key) },
+                            onRemove = { onRemove(file.key) }
+                        )
                     }
                 }
             }
+        }
 
-            AutoTranslateSection {
-                Text(
-                    text = stringResource(R.string.activity_auto_timestamp_text_06),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = state.outputDirectory
-                        ?: stringResource(R.string.auto_translate_default_output_directory),
-                    modifier = Modifier.padding(top = 8.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.MiddleEllipsis
-                )
-                OutlinedButton(
-                    onClick = onSelectOutputDirectory,
-                    modifier = Modifier.padding(top = 8.dp)
-                ) {
-                    Text(stringResource(R.string.activity_auto_timestamp_text_08))
-                }
-            }
-
-            Button(
-                onClick = onStart,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !state.queueRunning
-            ) {
-                Text(stringResource(R.string.activity_auto_translate_text_06))
-            }
-            if (state.queueRunning && state.progressSummary.isNotBlank()) {
-                Text(
-                    text = state.progressSummary,
-                    modifier = Modifier.padding(horizontal = 4.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall
-                )
+        AppSection(title = stringResource(R.string.activity_auto_timestamp_text_06)) {
+            Text(
+                state.outputDirectory ?: stringResource(R.string.auto_translate_default_output_directory),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.MiddleEllipsis
+            )
+            OutlinedButton(onClick = onSelectOutputDirectory) {
+                Text(stringResource(R.string.activity_auto_timestamp_text_08))
             }
         }
     }
 
     if (state.showOutputConflict) {
-        AlertDialog(
-            onDismissRequest = onDismissOutputConflict,
-            title = { Text("文件名冲突") },
-            text = { Text("输出目录中已存在同名字幕文件。请选择处理方式。") },
-            confirmButton = {
-                TextButton(onClick = onOverwriteOutput) { Text("覆盖") }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(onClick = onRenameOutput) { Text("自动重命名") }
-                    TextButton(onClick = onDismissOutputConflict) { Text("取消") }
-                }
-            }
+        AppConflictDialog(
+            message = "输出目录中已存在同名字幕文件。请选择处理方式。",
+            onOverwrite = onOverwriteOutput,
+            onRename = onRenameOutput,
+            onCancel = onDismissOutputConflict
         )
     }
-
     if (state.removeFileName != null) {
-        AlertDialog(
-            onDismissRequest = onDismissRemove,
-            title = { Text("移除文件") },
-            text = { Text("当前文件正在处理，是否移除？") },
-            confirmButton = {
-                TextButton(onClick = onConfirmRemove) { Text("移除") }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismissRemove) { Text("取消") }
-            }
+        AppAlertDialog(
+            title = "移除文件",
+            message = "当前文件正在处理，是否移除？",
+            confirmText = "移除",
+            dismissText = "取消",
+            onConfirm = onConfirmRemove,
+            onDismiss = onDismissRemove
         )
     }
-
     if (state.showExitConfirmation) {
-        AlertDialog(
-            onDismissRequest = onDismissExit,
-            title = { Text("处理进行中") },
-            text = { Text("退出将停止正在进行的处理，已完成的文件会保留。确定退出吗？") },
-            confirmButton = {
-                TextButton(onClick = onConfirmExit) { Text("停止并退出") }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismissExit) { Text("继续处理") }
-            }
+        AppAlertDialog(
+            title = "处理进行中",
+            message = "退出将停止正在进行的处理，已完成的文件会保留。确定退出吗？",
+            confirmText = "停止并退出",
+            dismissText = "继续处理",
+            onConfirm = onConfirmExit,
+            onDismiss = onDismissExit
         )
-    }
-}
-
-@Composable
-private fun AutoTranslateSection(contentPadding: Dp = 16.dp, content: @Composable () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(Modifier.padding(contentPadding)) {
-            content()
-        }
     }
 }
 
@@ -308,29 +205,15 @@ private fun SettingSwitch(
     label: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    enabled: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
 ) {
     Row(
-        modifier = modifier.toggleable(
-            value = checked,
-            enabled = enabled,
-            role = Role.Switch,
-            onValueChange = onCheckedChange
-        ),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+        modifier = modifier.toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = label,
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp)
-        )
-        Switch(
-            checked = checked,
-            onCheckedChange = null,
-            enabled = enabled
-        )
+        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 
@@ -340,81 +223,38 @@ private fun AutoTranslateFileRow(
     onClick: () -> Unit,
     onRemove: () -> Unit
 ) {
-    Card(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(4.dp)
-            .clickable(enabled = file.canRetry, onClick = onClick),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            .then(if (file.canRetry) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(vertical = AppSpacing.Inner),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Image(
-                painter = painterResource(R.drawable.ic_file),
-                contentDescription = stringResource(R.string.file_name),
-                modifier = Modifier.size(40.dp).padding(4.dp)
+        Icon(
+            painter = painterResource(R.drawable.ic_file),
+            contentDescription = stringResource(R.string.file_name),
+            modifier = Modifier.size(32.dp),
+            tint = MaterialTheme.colorScheme.onPrimaryContainer
+        )
+        Column(Modifier.weight(1f).padding(start = AppSpacing.Inner)) {
+            Text(file.fileName, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+            Text(
+                "${file.fileSizeLabel} · 字幕 ${file.totalLines} · 已处理 ${file.processedLines}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
-            Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                Text(
-                    text = file.fileName,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.MiddleEllipsis
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = file.fileSizeLabel,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = if (file.progressLabel == null) {
-                            "字幕 ${file.totalLines}"
-                        } else {
-                            "字幕 ${file.totalLines} · 已处理 ${file.processedLines}"
-                        },
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.End
-                    )
-                }
-                Text(
-                    text = if (file.statusMessage.isBlank()) file.status else "${file.status}：${file.statusMessage}",
-                    modifier = Modifier.padding(top = 2.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            IconButton(onClick = onRemove, modifier = Modifier.size(40.dp)) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_delete),
-                    contentDescription = stringResource(R.string.delete),
-                    tint = MaterialTheme.colorScheme.error
-                )
-            }
+            Text(
+                if (file.statusMessage.isBlank()) file.status else "${file.status}：${file.statusMessage}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        IconButton(onClick = onRemove) {
+            Icon(painterResource(R.drawable.ic_delete), contentDescription = stringResource(R.string.delete), tint = MaterialTheme.colorScheme.error)
         }
     }
 }

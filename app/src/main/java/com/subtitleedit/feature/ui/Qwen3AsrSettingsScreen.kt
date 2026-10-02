@@ -22,7 +22,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -44,6 +43,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppSlider
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.ui.components.AppCard
 import kotlin.math.roundToInt
@@ -219,7 +219,7 @@ fun Qwen3AsrSettingsScreen(
                             .alpha(if (fixedGapEnabled) 1f else 0.5f),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Slider(
+                        AppSlider(
                             value = mergeGapMs.toFloat(),
                             onValueChange = { value ->
                                 val gap = ((value.roundToInt().coerceIn(0, 5000) + 25) / 50) * 50
@@ -279,7 +279,7 @@ fun Qwen3AsrSettingsScreen(
                             text = stringResource(R.string.speech_merge_max_characters),
                             style = MaterialTheme.typography.bodyMedium
                         )
-                        Slider(
+                        AppSlider(
                             value = maxCharacters.toFloat(),
                             onValueChange = { value ->
                                 val count = value.roundToInt().coerceIn(15, 50)

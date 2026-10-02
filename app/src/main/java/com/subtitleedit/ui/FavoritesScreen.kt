@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -16,13 +17,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
 import com.subtitleedit.feature.ui.BrowserFileRow
+import com.subtitleedit.ui.components.AppAlertDialog
 import java.io.File
 
 @Composable
@@ -65,32 +65,28 @@ fun FavoritesScreen(
                 }
             }
         }
-        IconButton(
+        FloatingActionButton(
             onClick = onAddDirectory,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp).size(72.dp)
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
         ) {
             Icon(
-                painter = painterResource(R.drawable.ic_add_favorite_directory),
+                painter = painterResource(R.drawable.ic_add),
                 contentDescription = stringResource(R.string.add_favorite_directory),
-                modifier = Modifier.size(72.dp),
-                tint = Color.Unspecified
+                modifier = Modifier.size(24.dp)
             )
         }
     }
 
     pendingRemoval?.let { directory ->
-        AlertDialog(
-            onDismissRequest = onDismissRemoval,
-            shape = MaterialTheme.shapes.extraLarge,
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = { Text(stringResource(R.string.remove_favorite_directory)) },
-            text = { Text(stringResource(R.string.remove_favorite_directory_confirm, directory.name)) },
-            confirmButton = {
-                TextButton(onClick = onConfirmRemoval) { Text(stringResource(R.string.confirm)) }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismissRemoval) { Text(stringResource(R.string.cancel)) }
-            }
+        AppAlertDialog(
+            title = stringResource(R.string.remove_favorite_directory),
+            message = stringResource(R.string.remove_favorite_directory_confirm, directory.name),
+            confirmText = stringResource(R.string.confirm),
+            dismissText = stringResource(R.string.cancel),
+            onConfirm = onConfirmRemoval,
+            onDismiss = onDismissRemoval
         )
     }
 }

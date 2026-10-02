@@ -1,65 +1,55 @@
 package com.subtitleedit.feature.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
-import com.subtitleedit.ui.components.AppCard
+import com.subtitleedit.ui.components.AppChoiceTile
+import com.subtitleedit.ui.components.AppConflictDialog
+import com.subtitleedit.ui.components.AppLogBox
+import com.subtitleedit.ui.components.AppOptionSelector
+import com.subtitleedit.ui.components.AppPrimaryButton
+import com.subtitleedit.ui.components.AppSection
+import com.subtitleedit.ui.components.AppTaskProgress
+import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.ui.theme.AppMotion
+import com.subtitleedit.ui.theme.AppSpacing
 
 internal data class MediaFormatOption(
     val extension: String,
@@ -69,7 +59,6 @@ internal data class MediaFormatOption(
 
 internal enum class MediaConvertDialog { NONE, OUTPUT_CONFLICT }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun MediaConvertScreen(
     sourceSummary: String,
@@ -121,141 +110,120 @@ internal fun MediaConvertScreen(
     onAutoRename: () -> Unit,
     onDismissDialog: () -> Unit
 ) {
-    val logScrollState = rememberScrollState()
-    LaunchedEffect(log) { logScrollState.scrollTo(logScrollState.maxValue) }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                modifier = Modifier.height(56.dp),
-                title = { Text("格式转换") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(painterResource(R.drawable.ic_back), contentDescription = "返回")
+    AppToolScaffold(
+        title = "格式转换",
+        onBack = onBack,
+        bottomBar = {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.Page, vertical = AppSpacing.Inner),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+            ) {
+                AppTaskProgress(
+                    visible = isConverting,
+                    progress = progress.coerceIn(0, 100) / 100f,
+                    onCancel = onCancel
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)) {
+                    AppPrimaryButton(
+                        text = stringResource(R.string.start_convert),
+                        onClick = onConvert,
+                        enabled = canConvert && !isConverting,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (canShare && !isConverting) {
+                        FilledTonalButton(onClick = onShare, modifier = Modifier.height(52.dp)) {
+                            Text(stringResource(R.string.activity_media_convert_text_16))
+                        }
                     }
                 }
-            )
-        }
-    ) { insets ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(insets)
-                .verticalScroll(rememberScrollState())
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            MediaConvertCard {
-                MediaConvertTitle(stringResource(R.string.activity_media_convert_text_01))
-                Button(
-                    onClick = onPickFiles,
-                    enabled = !isConverting,
-                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
-                ) {
-                    Text(stringResource(R.string.activity_media_convert_text_02), maxLines = 2)
-                }
-                if (sourceSummary.isBlank()) {
-                    Text(
-                        text = stringResource(R.string.activity_media_convert_text_03),
-                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
-                    )
-                } else {
-                    Text(
-                        text = sourceSummary,
-                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 12,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = sourceInfo,
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 40,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
             }
-
-            MediaConvertCard {
-                MediaConvertTitle(stringResource(R.string.activity_auto_timestamp_text_06))
-                Button(
-                    onClick = onSelectOutputDirectory,
-                    enabled = !isConverting,
-                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
-                ) {
-                    Text(stringResource(R.string.activity_batch_convert_text_02))
-                }
+        }
+    ) {
+        AppSection(title = stringResource(R.string.activity_media_convert_text_01)) {
+            OutlinedButton(onClick = onPickFiles, enabled = !isConverting, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.activity_media_convert_text_02), maxLines = 2)
+            }
+            if (sourceSummary.isBlank()) {
                 Text(
-                    text = outputDirectory,
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    stringResource(R.string.activity_media_convert_text_03),
+                    modifier = Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            } else {
+                Text(sourceSummary, style = MaterialTheme.typography.titleSmall, maxLines = 12, overflow = TextOverflow.Ellipsis)
+                Text(
+                    sourceInfo,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 40,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
+        }
 
-            if (sourceSummary.isNotBlank()) {
-                MediaConvertCard {
-                    MediaConvertTitle(stringResource(R.string.activity_auto_timestamp_text_05))
-                    Text(
-                        text = stringResource(R.string.activity_media_convert_text_05),
-                        modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    FormatGrid(videoFormats, selectedFormat, !isConverting, onFormatSelected)
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                    Text(
-                        text = stringResource(R.string.activity_media_convert_text_06),
-                        modifier = Modifier.padding(bottom = 4.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    FormatGrid(audioFormats, selectedFormat, !isConverting, onFormatSelected)
-                }
+        AppSection(title = stringResource(R.string.activity_auto_timestamp_text_06)) {
+            OutlinedButton(onClick = onSelectOutputDirectory, enabled = !isConverting, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.activity_batch_convert_text_02))
             }
+            Text(outputDirectory, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
 
-            MediaConvertCard {
-                TextButton(
-                    onClick = onToggleAdvanced,
-                    enabled = !isConverting,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+        if (sourceSummary.isNotBlank()) {
+            AppSection(title = stringResource(R.string.activity_auto_timestamp_text_05)) {
+                Text(stringResource(R.string.activity_media_convert_text_05), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FormatGrid(videoFormats, selectedFormat, !isConverting, onFormatSelected)
+                HorizontalDivider()
+                Text(stringResource(R.string.activity_media_convert_text_06), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FormatGrid(audioFormats, selectedFormat, !isConverting, onFormatSelected)
+            }
+        }
+
+        AppSection {
+            val rotation by animateFloatAsState(
+                targetValue = if (advancedExpanded) 90f else 0f,
+                animationSpec = AppMotion.fast(),
+                label = "advanced-chevron"
+            )
+            TextButton(onClick = onToggleAdvanced, enabled = !isConverting, modifier = Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = if (advancedExpanded) "▼ 高级选项"
-                        else stringResource(R.string.activity_media_convert_text_07),
-                        modifier = Modifier.fillMaxWidth(),
+                        if (advancedExpanded) "高级选项" else stringResource(R.string.activity_media_convert_text_07),
+                        modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.labelLarge,
                         textAlign = TextAlign.Start
                     )
+                    Icon(
+                        painter = painterResource(R.drawable.ic_arrow_right),
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp).graphicsLayer(rotationZ = rotation)
+                    )
                 }
-                if (advancedExpanded) {
+            }
+            AnimatedVisibility(
+                visible = advancedExpanded,
+                enter = expandVertically(animationSpec = AppMotion.enter()) + fadeIn(animationSpec = AppMotion.enter()),
+                exit = shrinkVertically(animationSpec = AppMotion.exit()) + fadeOut(animationSpec = AppMotion.exit())
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)) {
                     if (videoCodecs.isNotEmpty()) {
-                        OptionSelector(
-                            stringResource(R.string.activity_media_convert_text_08),
-                            selectedVideoCodec, videoCodecs, !isConverting, onVideoCodecSelected
-                        )
-                        OptionSelector(
+                        AppOptionSelector(stringResource(R.string.activity_media_convert_text_08), selectedVideoCodec, videoCodecs, !isConverting, onVideoCodecSelected)
+                        AppOptionSelector(
                             stringResource(R.string.activity_media_convert_text_09),
-                            resolutions.getOrElse(resolutionIndex) { resolutions.first() },
-                            resolutions, !isConverting
-                        ) { onResolutionSelected(resolutions.indexOf(it).coerceAtLeast(0)) }
-                        MediaConvertNumberField(
-                            label = stringResource(R.string.activity_media_convert_text_10),
-                            value = videoBitrate,
-                            hint = stringResource(R.string.activity_media_convert_hint_01),
-                            enabled = !isConverting,
-                            onValueChange = onVideoBitrateChange
+                            resolutions.getOrElse(resolutionIndex) { resolutions.firstOrNull().orEmpty() },
+                            resolutions,
+                            !isConverting,
+                            onSelected = { onResolutionSelected(resolutions.indexOf(it).coerceAtLeast(0)) }
                         )
-                        OptionSelector(
+                        MediaConvertNumberField(stringResource(R.string.activity_media_convert_text_10), videoBitrate, stringResource(R.string.activity_media_convert_hint_01), !isConverting, onVideoBitrateChange)
+                        AppOptionSelector(
                             stringResource(R.string.activity_media_convert_text_11),
-                            qualityLabels.getOrElse(qualityIndex) { qualityLabels.first() },
-                            qualityLabels, !isConverting
-                        ) { onQualitySelected(qualityLabels.indexOf(it).coerceAtLeast(0)) }
+                            qualityLabels.getOrElse(qualityIndex) { qualityLabels.firstOrNull().orEmpty() },
+                            qualityLabels,
+                            !isConverting,
+                            onSelected = { onQualitySelected(qualityLabels.indexOf(it).coerceAtLeast(0)) }
+                        )
                         if (qualityLabels.getOrNull(qualityIndex) == "自定义") {
                             OutlinedTextField(
                                 value = customQuality,
@@ -264,113 +232,44 @@ internal fun MediaConvertScreen(
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
                                 enabled = !isConverting,
-                                modifier = Modifier.fillMaxWidth().padding(start = 100.dp)
+                                modifier = Modifier.fillMaxWidth().padding(start = AppSpacing.FormLabelWidth)
                             )
                         }
-                        HorizontalDivider(modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
+                        HorizontalDivider()
                     }
-                    OptionSelector(
-                        stringResource(R.string.activity_media_convert_text_12),
-                        selectedAudioCodec, audioCodecs, !isConverting, onAudioCodecSelected
-                    )
-                    MediaConvertNumberField(
-                        label = stringResource(R.string.activity_media_convert_text_13),
-                        value = audioBitrate,
-                        hint = stringResource(R.string.activity_media_convert_hint_01),
-                        enabled = !isConverting,
-                        onValueChange = onAudioBitrateChange
-                    )
-                    OptionSelector(
+                    AppOptionSelector(stringResource(R.string.activity_media_convert_text_12), selectedAudioCodec, audioCodecs, !isConverting, onAudioCodecSelected)
+                    MediaConvertNumberField(stringResource(R.string.activity_media_convert_text_13), audioBitrate, stringResource(R.string.activity_media_convert_hint_01), !isConverting, onAudioBitrateChange)
+                    AppOptionSelector(
                         stringResource(R.string.activity_media_convert_text_14),
-                        sampleRates.getOrElse(sampleRateIndex) { sampleRates.first() },
-                        sampleRates, !isConverting
-                    ) { onSampleRateSelected(sampleRates.indexOf(it).coerceAtLeast(0)) }
-                    OptionSelector(
+                        sampleRates.getOrElse(sampleRateIndex) { sampleRates.firstOrNull().orEmpty() },
+                        sampleRates,
+                        !isConverting,
+                        onSelected = { onSampleRateSelected(sampleRates.indexOf(it).coerceAtLeast(0)) }
+                    )
+                    AppOptionSelector(
                         stringResource(R.string.activity_media_convert_text_15),
-                        channels.getOrElse(channelIndex) { channels.first() },
-                        channels, !isConverting
-                    ) { onChannelSelected(channels.indexOf(it).coerceAtLeast(0)) }
-                }
-            }
-
-            MediaConvertCard {
-                LinearProgressIndicator(
-                    progress = { (progress.coerceIn(0, 100) / 100f) },
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Button(
-                        onClick = onConvert,
-                        enabled = canConvert && !isConverting,
-                        modifier = Modifier.weight(1f)
-                    ) { Text(stringResource(R.string.start_convert)) }
-                    if (isConverting) {
-                        FilledTonalButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
-                    }
-                    if (canShare && !isConverting) {
-                        FilledTonalButton(onClick = onShare) {
-                            Text(stringResource(R.string.activity_media_convert_text_16))
-                        }
-                    }
-                }
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp)
-                        .height(180.dp)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                        .verticalScroll(logScrollState)
-                        .padding(8.dp)
-                ) {
-                    Text(
-                        text = log,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface
+                        channels.getOrElse(channelIndex) { channels.firstOrNull().orEmpty() },
+                        channels,
+                        !isConverting,
+                        onSelected = { onChannelSelected(channels.indexOf(it).coerceAtLeast(0)) }
                     )
                 }
             }
         }
+
+        AppSection(title = stringResource(R.string.activity_settings_text_06)) {
+            AppLogBox(log)
+        }
     }
 
     if (dialog == MediaConvertDialog.OUTPUT_CONFLICT) {
-        AlertDialog(
-            onDismissRequest = onDismissDialog,
-            shape = MaterialTheme.shapes.extraLarge,
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = { Text("文件名冲突") },
-            text = { Text("输出目录中已有同名文件，或所选文件会生成同名输出。请选择处理方式。") },
-            confirmButton = {
-                Row {
-                    TextButton(onClick = onOverwrite) { Text("覆盖") }
-                    TextButton(onClick = onAutoRename) { Text("自动重命名") }
-                    TextButton(onClick = onDismissDialog) { Text("取消") }
-                }
-            }
+        AppConflictDialog(
+            message = "输出目录中已有同名文件，或所选文件会生成同名输出。请选择处理方式。",
+            onOverwrite = onOverwrite,
+            onRename = onAutoRename,
+            onCancel = onDismissDialog
         )
     }
-}
-
-@Composable
-private fun MediaConvertCard(content: @Composable () -> Unit) {
-    AppCard(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.fillMaxWidth().padding(12.dp)) { content() }
-    }
-}
-
-@Composable
-private fun MediaConvertTitle(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurface
-    )
 }
 
 @Composable
@@ -381,11 +280,8 @@ private fun MediaConvertNumberField(
     enabled: Boolean,
     onValueChange: (String) -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(label, modifier = Modifier.width(100.dp), style = MaterialTheme.typography.bodyMedium)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
@@ -405,80 +301,19 @@ private fun FormatGrid(
     enabled: Boolean,
     onSelected: (String) -> Unit
 ) {
-    val density = LocalDensity.current
-    val buttonMargin = with(density) { 3.toDp() }
-    val buttonVerticalPadding = with(density) { 14.toDp() }
-    val buttonCornerRadius = MaterialTheme.shapes.medium
-    Column {
+    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)) {
         formats.chunked(5).forEach { rowFormats ->
-            Row {
+            Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)) {
                 rowFormats.forEach { format ->
-                    val selected = selectedFormat == format.extension
-                    val containerColor by animateColorAsState(
-                        targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surface,
-                        animationSpec = AppMotion.fast(),
-                        label = "format-container"
-                    )
-                    val contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
-                    else MaterialTheme.colorScheme.onSurfaceVariant
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(buttonMargin)
-                            .clip(buttonCornerRadius)
-                            .background(containerColor)
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, buttonCornerRadius)
-                            .clickable(enabled = enabled) { onSelected(format.extension) }
-                            .padding(vertical = buttonVerticalPadding),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = format.displayName,
-                            maxLines = 1,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = contentColor
-                        )
-                    }
-                }
-                repeat(5 - rowFormats.size) { Spacer(Modifier.weight(1f).width(1.dp)) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun OptionSelector(
-    label: String,
-    value: String,
-    options: List<String>,
-    enabled: Boolean,
-    onSelected: (String) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(label, modifier = Modifier.width(100.dp), style = MaterialTheme.typography.bodyMedium)
-        androidx.compose.foundation.layout.Box(Modifier.weight(1f)) {
-            OutlinedButton(
-                onClick = { expanded = true },
-                enabled = enabled,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(value, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                options.forEach { option ->
-                    DropdownMenuItem(
-                        text = { Text(option) },
-                        onClick = {
-                            expanded = false
-                            onSelected(option)
-                        }
+                    AppChoiceTile(
+                        text = format.displayName,
+                        selected = selectedFormat == format.extension,
+                        enabled = enabled,
+                        onClick = { onSelected(format.extension) },
+                        modifier = Modifier.weight(1f)
                     )
                 }
+                repeat(5 - rowFormats.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }

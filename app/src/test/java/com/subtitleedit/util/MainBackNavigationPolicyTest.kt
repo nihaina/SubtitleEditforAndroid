@@ -35,4 +35,12 @@ class MainBackNavigationPolicyTest {
             MainBackNavigationPolicy.decide(true, false, false, false)
         )
     }
+
+    @Test
+    fun directoryWithParentNavigatesUpWithoutHistory() {
+        assertEquals(
+            MainBackNavigationPolicy.Decision.GO_UP_LEVEL,
+            MainBackNavigationPolicy.decide(true, false, false, false, true)
+        )
+    }
 }

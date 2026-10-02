@@ -10,6 +10,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -76,6 +77,13 @@ private val SubtitleEditShapes = Shapes(
     large = RoundedCornerShape(16.dp),
     extraLarge = RoundedCornerShape(28.dp)
 )
+
+val ColorScheme.cardContainer: Color
+    @Composable get() = if (background.luminance() < 0.5f) {
+        surfaceContainerLow
+    } else {
+        surfaceContainerLowest
+    }
 
 @Composable
 fun SubtitleEditComposeTheme(

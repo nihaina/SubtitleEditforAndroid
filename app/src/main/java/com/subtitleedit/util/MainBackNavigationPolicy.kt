@@ -14,12 +14,13 @@ internal object MainBackNavigationPolicy {
         isDirectorySelected: Boolean,
         hasPendingFileOperation: Boolean,
         hasSelection: Boolean,
-        hasDirectoryHistory: Boolean
+        hasDirectoryHistory: Boolean,
+        hasParentDirectory: Boolean = false
     ): Decision = when {
         !isDirectorySelected -> Decision.DELEGATE_TO_TOP_LEVEL
         hasPendingFileOperation -> Decision.NAVIGATE_DESTINATION
         hasSelection -> Decision.EXIT_SELECTION
-        hasDirectoryHistory -> Decision.GO_UP_LEVEL
+        hasDirectoryHistory || hasParentDirectory -> Decision.GO_UP_LEVEL
         else -> Decision.FINISH
     }
 }

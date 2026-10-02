@@ -1,11 +1,11 @@
 package com.subtitleedit
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import com.subtitleedit.ui.components.AppCard
 
 @Composable
 internal fun VideoModeDialog(
@@ -26,17 +27,16 @@ internal fun VideoModeDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = MaterialTheme.shapes.extraLarge,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         title = { Text("打开视频文件") },
         text = {
-            Column(Modifier.fillMaxWidth()) {
-                ListItem(
-                    headlineContent = { Text("加载视频") },
-                    modifier = Modifier.clickable(onClick = onOpenVideo)
-                )
-                ListItem(
-                    headlineContent = { Text("仅加载音频") },
-                    modifier = Modifier.clickable(onClick = onOpenAudioOnly)
-                )
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                DialogOption("加载视频", onOpenVideo)
+                DialogOption("仅加载音频", onOpenAudioOnly)
             }
         },
         confirmButton = {},
@@ -56,6 +56,8 @@ internal fun SubtitleFilePickerDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = MaterialTheme.shapes.extraLarge,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         title = {
             Text(
                 "选择字幕文件",
@@ -64,20 +66,18 @@ internal fun SubtitleFilePickerDialog(
             )
         },
         text = {
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     "$mediaLabel「$mediaFileName」同目录下存在多个字幕文件，请选择要打开的文件：",
                     style = MaterialTheme.typography.bodyMedium,
                     fontSize = 14.sp
                 )
                 LazyColumn(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     itemsIndexed(fileNames) { index, name ->
-                        ListItem(
-                            headlineContent = { Text(name) },
-                            modifier = Modifier.clickable { onSelect(index) }
-                        )
+                        DialogOption(name) { onSelect(index) }
                     }
                 }
             }
@@ -87,4 +87,21 @@ internal fun SubtitleFilePickerDialog(
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
         }
     )
+}
+
+@Composable
+private fun DialogOption(
+    label: String,
+    onClick: () -> Unit
+) {
+    AppCard(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            style = MaterialTheme.typography.bodyLarge
+        )
+    }
 }

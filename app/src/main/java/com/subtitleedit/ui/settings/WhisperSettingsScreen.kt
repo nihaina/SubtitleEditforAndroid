@@ -20,7 +20,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -36,6 +35,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppSlider
 
 data class WhisperSettingsState(
     val threads: Int = 4,
@@ -111,7 +111,7 @@ fun WhisperSettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Slider(
+                    AppSlider(
                         value = state.threads.toFloat(),
                         onValueChange = onThreadsChanged,
                         valueRange = 1f..8f,
@@ -184,7 +184,7 @@ fun WhisperSettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Slider(
+                    AppSlider(
                         value = state.hotwordsScore,
                         onValueChange = onHotwordsScoreChanged,
                         valueRange = 0.5f..5f,

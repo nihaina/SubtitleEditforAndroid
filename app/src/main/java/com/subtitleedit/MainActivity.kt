@@ -87,6 +87,7 @@ class MainActivity : AppCompatActivity() {
 
     private companion object {
         const val CONFLICT_WAIT_INTERVAL_MS = 250L
+        const val BACK_EXIT_CONFIRM_WINDOW_MS = 2_000L
     }
 
     private lateinit var filePropertiesDialogController: FilePropertiesDialogController
@@ -132,6 +133,7 @@ class MainActivity : AppCompatActivity() {
     private val directoryWatcher = DirectoryWatcher(::refreshWatchedDirectory)
     private lateinit var directorySearchController: DirectorySearchController
     private lateinit var backNavigationCallback: OnBackPressedCallback
+    private var lastBackExitPromptAt = 0L
     private lateinit var lifecycleCoordinator: MainLifecycleCoordinator
     private var directoryLoadJob: Job? = null
     private var fileCopyJob: Job? = null
@@ -1712,14 +1714,22 @@ class MainActivity : AppCompatActivity() {
             saveCurrentDirectoryScrollPosition()
             val parent = stateModel.documentState.directoryHistory.removeAt(stateModel.documentState.directoryHistory.size - 1)
             loadDirectory(parent, restoreScrollPosition = true)
-        } else {
+        } else if (hasNavigableParentDirectory()) {
             stateModel.documentState.currentDirectory?.parentFile?.let { parent ->
-                if (parent.exists() && parent.canRead()) {
-                    saveCurrentDirectoryScrollPosition()
-                    loadDirectory(parent, restoreScrollPosition = true)
-                }
+                saveCurrentDirectoryScrollPosition()
+                loadDirectory(parent, restoreScrollPosition = true)
             }
         }
+    }
+
+    private fun hasNavigableParentDirectory(): Boolean {
+        val current = stateModel.documentState.currentDirectory ?: return false
+        val storageRoot = getDefaultDirectory()
+        val currentPath = runCatching { current.canonicalPath }.getOrElse { current.absolutePath }
+        val rootPath = runCatching { storageRoot.canonicalPath }.getOrElse { storageRoot.absolutePath }
+        if (currentPath == rootPath) return false
+        val parent = current.parentFile ?: return false
+        return parent.exists() && parent.canRead()
     }
     
     private fun openFileForEdit(file: File) {
@@ -1740,29 +1750,45 @@ class MainActivity : AppCompatActivity() {
             isDirectorySelected = stateModel.documentState.selectedTopLevelItem == R.id.nav_directory,
             hasPendingFileOperation = stateModel.documentState.pendingFileOperation != null,
             hasSelection = stateModel.documentState.selectedPaths.isNotEmpty(),
-            hasDirectoryHistory = stateModel.documentState.directoryHistory.isNotEmpty()
+            hasDirectoryHistory = stateModel.documentState.directoryHistory.isNotEmpty(),
+            hasParentDirectory = hasNavigableParentDirectory()
         )) {
             MainBackNavigationPolicy.Decision.DELEGATE_TO_TOP_LEVEL -> {
                 // Top-level pages are hosted by Compose. Nested pages publish
                 // their back action through the shared toolbar state.
                 if (customToolbarHasBack) {
+                    lastBackExitPromptAt = 0L
                     customToolbarBack?.invoke()
                 } else {
                     finishFromBackNavigation()
                 }
             }
             MainBackNavigationPolicy.Decision.NAVIGATE_DESTINATION -> {
+                lastBackExitPromptAt = 0L
                 if (!navigateDestinationUp()) cancelDestinationSelection()
             }
-            MainBackNavigationPolicy.Decision.EXIT_SELECTION -> exitSelectionMode()
-            MainBackNavigationPolicy.Decision.GO_UP_LEVEL -> goUpLevel()
+            MainBackNavigationPolicy.Decision.EXIT_SELECTION -> {
+                lastBackExitPromptAt = 0L
+                exitSelectionMode()
+            }
+            MainBackNavigationPolicy.Decision.GO_UP_LEVEL -> {
+                lastBackExitPromptAt = 0L
+                goUpLevel()
+            }
             MainBackNavigationPolicy.Decision.FINISH -> finishFromBackNavigation()
         }
     }
 
     private fun finishFromBackNavigation() {
-        backNavigationCallback.isEnabled = false
-        onBackPressedDispatcher.onBackPressed()
+        val now = System.currentTimeMillis()
+        if (now - lastBackExitPromptAt <= BACK_EXIT_CONFIRM_WINDOW_MS) {
+            lastBackExitPromptAt = 0L
+            backNavigationCallback.isEnabled = false
+            onBackPressedDispatcher.onBackPressed()
+        } else {
+            lastBackExitPromptAt = now
+            showShortToast("再按一次返回键退出")
+        }
     }
 
 }

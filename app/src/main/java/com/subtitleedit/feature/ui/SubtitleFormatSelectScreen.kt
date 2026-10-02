@@ -1,32 +1,22 @@
 package com.subtitleedit.feature.ui
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppPrimaryButton
+import com.subtitleedit.ui.components.AppSection
+import com.subtitleedit.ui.components.AppToolScaffold
+import com.subtitleedit.ui.theme.AppSpacing
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SubtitleFormatSelectScreen(
     selectedFileName: String?,
@@ -34,68 +24,34 @@ fun SubtitleFormatSelectScreen(
     onConfirm: () -> Unit,
     onNavigateBack: () -> Unit
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                modifier = Modifier.height(56.dp),
-                title = { Text("格式化工具") },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_back),
-                            contentDescription = "返回"
-                        )
-                    }
-                }
-            )
-        }
-    ) { contentPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(contentPadding)
-                .padding(20.dp)
-        ) {
-            Text(
-                text = stringResource(R.string.activity_subtitle_format_select_text_01),
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = stringResource(R.string.activity_subtitle_format_select_text_02),
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            OutlinedButton(
-                onClick = onSelectFile,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 24.dp)
-            ) {
-                Text(stringResource(R.string.activity_subtitle_format_select_text_03))
-            }
-            Text(
-                text = selectedFileName
-                    ?: stringResource(R.string.activity_subtitle_format_select_text_04),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.MiddleEllipsis
-            )
-            Button(
+    AppToolScaffold(
+        title = "格式化工具",
+        onBack = onNavigateBack,
+        bottomBar = {
+            AppPrimaryButton(
+                text = stringResource(R.string.activity_subtitle_format_select_text_05),
                 onClick = onConfirm,
                 enabled = selectedFileName != null,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 24.dp)
-            ) {
-                Text(stringResource(R.string.activity_subtitle_format_select_text_05))
+                modifier = Modifier.padding(horizontal = AppSpacing.Page, vertical = AppSpacing.Inner)
+            )
+        }
+    ) {
+        AppSection(
+            title = stringResource(R.string.activity_subtitle_format_select_text_01),
+            subtitle = stringResource(R.string.activity_subtitle_format_select_text_02)
+        ) {
+            OutlinedButton(onClick = onSelectFile, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.activity_subtitle_format_select_text_03))
+            }
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Icon(painterResource(R.drawable.ic_file), contentDescription = null, tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    selectedFileName ?: stringResource(R.string.activity_subtitle_format_select_text_04),
+                    modifier = Modifier.weight(1f),
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.MiddleEllipsis
+                )
             }
         }
     }

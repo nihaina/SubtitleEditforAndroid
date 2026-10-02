@@ -20,7 +20,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -39,6 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CardDefaults
 import androidx.compose.ui.text.style.TextOverflow
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppSlider
 
 data class AsrTimelineSettingsState(
     val useVadTimestamp: Boolean = false,
@@ -196,7 +196,7 @@ fun AsrTimelineSettingsScreen(
                                 .alpha(if (mergeEnabled && !state.smartMerge) 1f else 0.5f),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Slider(
+                            AppSlider(
                                 value = state.mergeGapMs.toFloat(),
                                 onValueChange = onMergeGapChanged,
                                 valueRange = 0f..5000f,
@@ -236,7 +236,7 @@ fun AsrTimelineSettingsScreen(
                                 maxLines = 2,
                                 overflow = TextOverflow.Clip
                             )
-                            Slider(
+                            AppSlider(
                                 value = state.mergeMaxCharacters.toFloat(),
                                 onValueChange = onMergeMaxCharactersChanged,
                                 valueRange = 15f..50f,
@@ -276,7 +276,7 @@ fun AsrTimelineSettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Slider(
+                    AppSlider(
                         value = state.fixedSegmentSeconds.toFloat(),
                         onValueChange = onFixedSegmentSecondsChanged,
                         valueRange = 5f..120f,

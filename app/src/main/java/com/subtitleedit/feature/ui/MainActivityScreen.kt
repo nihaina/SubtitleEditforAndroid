@@ -22,6 +22,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -44,9 +46,16 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.SizeTransform
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -60,6 +69,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLocale
@@ -71,6 +81,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.layout.WindowInsets
@@ -97,6 +108,16 @@ import java.util.Date
 import java.util.Locale
 import com.subtitleedit.ui.components.StatusBadge
 import com.subtitleedit.ui.theme.AppMotion
+
+private val MainBottomNavigationItems = listOf(
+    Triple(R.id.nav_directory, R.drawable.ic_nav_folder, R.string.nav_directory),
+    Triple(R.id.nav_favorites, R.drawable.ic_favorite, R.string.nav_favorites),
+    Triple(R.id.nav_drafts, R.drawable.ic_nav_draft, R.string.drafts),
+    Triple(R.id.nav_tools, R.drawable.ic_tools, R.string.menu_main_title_01),
+    Triple(R.id.nav_settings, R.drawable.ic_settings, R.string.menu_main_title_02)
+)
+
+private val TopLevelOrder = MainBottomNavigationItems.map { it.first }
 
 internal data class MainDirectoryScrollRequest(
     val generation: Long,
@@ -221,6 +242,10 @@ internal fun MainActivityScreen(
             keyboardController?.hide()
         }
     }
+    LaunchedEffect(state.selectedTopLevelItem) {
+        scrollBehavior.state.contentOffset = 0f
+        scrollBehavior.state.heightOffset = 0f
+    }
 
     Column(
         modifier = Modifier
@@ -318,11 +343,21 @@ internal fun MainActivityScreen(
                         isDirectoryPage -> stringResource(R.string.nav_directory)
                         else -> stringResource(MainNavigationPolicy.titleRes(state.selectedTopLevelItem))
                     }
-                    Text(
-                        text = title,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    AnimatedContent(
+                        targetState = title,
+                        transitionSpec = {
+                            fadeIn(animationSpec = AppMotion.fast()) +
+                                slideInVertically(animationSpec = AppMotion.fast()) { 8 } togetherWith
+                                fadeOut(animationSpec = AppMotion.fast())
+                        },
+                        label = "main-toolbar-title"
+                    ) { animatedTitle ->
+                        Text(
+                            text = animatedTitle,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
                 }
             },
@@ -431,22 +466,41 @@ internal fun MainActivityScreen(
                 .fillMaxWidth()
                 .nestedScroll(scrollBehavior.nestedScrollConnection)
         ) {
-            if (isDirectoryPage) {
-                DirectoryBrowserContent(
-                    state = state,
-                    listState = listState,
-                    onFileClick = onFileClick,
-                    onFileLongClick = onFileLongClick
-                )
-            } else {
-                MainTopLevelPages(
-                    selectedPage = state.selectedTopLevelItem,
-                    refreshVersion = topLevelPageRefreshVersion,
-                    selectionVersion = topLevelPageSelectionVersion,
-                    state = topLevelPagesState,
-                    onOpenDirectory = onOpenDirectoryFromFavorites,
-                    onToolbarChanged = onUpdateTopLevelToolbar
-                )
+            val topLevelOffsetPx = with(LocalDensity.current) { 28.dp.roundToPx() }
+            AnimatedContent(
+                targetState = state.selectedTopLevelItem,
+                transitionSpec = {
+                    val direction = if (
+                        TopLevelOrder.indexOf(targetState) > TopLevelOrder.indexOf(initialState)
+                    ) 1 else -1
+                    (
+                        slideInHorizontally(AppMotion.enter()) { direction * topLevelOffsetPx } +
+                            fadeIn(animationSpec = androidx.compose.animation.core.tween(210, delayMillis = 90))
+                        ) togetherWith (
+                        slideOutHorizontally(AppMotion.exit()) { -direction * topLevelOffsetPx } +
+                            fadeOut(animationSpec = androidx.compose.animation.core.tween(90))
+                        ) using SizeTransform(clip = false)
+                },
+                label = "main-top-level"
+            ) { page ->
+                if (page == R.id.nav_directory) {
+                    DirectoryBrowserContent(
+                        state = state,
+                        listState = listState,
+                        onFileClick = onFileClick,
+                        onFileLongClick = onFileLongClick
+                    )
+                } else {
+                    MainTopLevelPages(
+                        selectedPage = page,
+                        activePage = state.selectedTopLevelItem,
+                        refreshVersion = topLevelPageRefreshVersion,
+                        selectionVersion = topLevelPageSelectionVersion,
+                        state = topLevelPagesState,
+                        onOpenDirectory = onOpenDirectoryFromFavorites,
+                        onToolbarChanged = onUpdateTopLevelToolbar
+                    )
+                }
             }
         }
 
@@ -768,17 +822,19 @@ internal fun BrowserFileRow(
         label = "file-row-border"
     )
     val border = BorderStroke(animatedBorderWidth, MaterialTheme.colorScheme.primary)
+    val rowShape = MaterialTheme.shapes.large
 
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .padding(4.dp)
             .alpha(alpha)
+            .clip(rowShape)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = { if (restricted) onClick() else onLongClick() }
             ),
-        shape = MaterialTheme.shapes.large,
+        shape = rowShape,
         color = containerColor,
         border = border,
         shadowElevation = 0.dp
@@ -987,10 +1043,15 @@ private fun SelectionActions(
 
 @Composable
 private fun SelectionAction(modifier: Modifier, icon: Int, label: String, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
     Column(
         modifier = modifier
             .height(64.dp)
-            .clickable(onClick = onClick),
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
@@ -998,9 +1059,15 @@ private fun SelectionAction(modifier: Modifier, icon: Int, label: String, onClic
             painterResource(icon),
             contentDescription = label,
             modifier = Modifier.size(24.dp),
-            tint = Color.Unspecified
+            tint = MaterialTheme.colorScheme.onSurface
         )
-        Text(label, modifier = Modifier.padding(top = 2.dp), style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        Text(
+            label,
+            modifier = Modifier.padding(top = 2.dp),
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1
+        )
     }
 }
 
@@ -1010,20 +1077,18 @@ private fun MainBottomNavigation(selectedItemId: Int, onSelected: (Int) -> Unit)
         modifier = Modifier.fillMaxWidth().height(60.dp).background(MaterialTheme.colorScheme.surfaceContainer),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        val items = listOf(
-            Triple(R.id.nav_directory, R.drawable.ic_nav_folder, R.string.nav_directory),
-            Triple(R.id.nav_favorites, R.drawable.ic_favorite, R.string.nav_favorites),
-            Triple(R.id.nav_drafts, R.drawable.ic_nav_draft, R.string.drafts),
-            Triple(R.id.nav_tools, R.drawable.ic_tools, R.string.menu_main_title_01),
-            Triple(R.id.nav_settings, R.drawable.ic_settings, R.string.menu_main_title_02)
-        )
-        items.forEach { (id, icon, title) ->
+        MainBottomNavigationItems.forEach { (id, icon, title) ->
             val label = stringResource(title)
             val selected = selectedItemId == id
             val indicatorAlpha by animateFloatAsState(
                 targetValue = if (selected) 1f else 0f,
-                animationSpec = AppMotion.fade(),
+                animationSpec = AppMotion.enter(),
                 label = "bottom-nav-indicator"
+            )
+            val indicatorScale by animateFloatAsState(
+                targetValue = if (selected) 1f else 0.6f,
+                animationSpec = AppMotion.enter(),
+                label = "bottom-nav-indicator-scale"
             )
             val tint by animateColorAsState(
                 targetValue = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
@@ -1031,6 +1096,7 @@ private fun MainBottomNavigation(selectedItemId: Int, onSelected: (Int) -> Unit)
                 animationSpec = AppMotion.fast(),
                 label = "bottom-nav-tint"
             )
+            val interactionSource = remember { MutableInteractionSource() }
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -1040,7 +1106,13 @@ private fun MainBottomNavigation(selectedItemId: Int, onSelected: (Int) -> Unit)
                     // when the tapped item was already selected. MainActivity uses
                     // that callback to recreate/reset the corresponding top-level
                     // page, so repeated taps must remain observable here.
-                    .clickable { onSelected(id) },
+                    .selectable(
+                        selected = selected,
+                        role = Role.Tab,
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = { onSelected(id) }
+                    ),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
@@ -1048,6 +1120,10 @@ private fun MainBottomNavigation(selectedItemId: Int, onSelected: (Int) -> Unit)
                     modifier = Modifier
                         .size(width = 56.dp, height = 28.dp)
                         .clip(MaterialTheme.shapes.extraLarge)
+                        .graphicsLayer {
+                            scaleX = indicatorScale
+                            scaleY = indicatorScale
+                        }
                         .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = indicatorAlpha)),
                     contentAlignment = Alignment.Center
                 ) {

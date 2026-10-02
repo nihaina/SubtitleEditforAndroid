@@ -10,12 +10,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -53,12 +47,14 @@ internal class MainTopLevelPagesState {
 @Composable
 internal fun MainTopLevelPages(
     selectedPage: Int,
+    activePage: Int,
     refreshVersion: Int,
     selectionVersion: Int,
     state: MainTopLevelPagesState,
     onOpenDirectory: (File) -> Unit,
     onToolbarChanged: (String, Boolean, (() -> Unit)?) -> Unit
 ) {
+    val isActive = selectedPage == activePage
     val context = LocalContext.current
     val resources = LocalResources.current
     val preferences = context.getSharedPreferences(FAVORITES_PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -116,7 +112,8 @@ internal fun MainTopLevelPages(
         updateDraftToolbar()
     }
 
-    LaunchedEffect(selectedPage, refreshVersion, selectionVersion, resources) {
+    LaunchedEffect(selectedPage, activePage, refreshVersion, selectionVersion, resources) {
+        if (!isActive) return@LaunchedEffect
         if (selectionVersion != previousSelectionVersion) {
             state.pendingFavoriteRemoval = null
             state.draftDialog = null
@@ -143,21 +140,14 @@ internal fun MainTopLevelPages(
     }
 
     BackHandler(
-        enabled = selectedPage == R.id.nav_drafts && state.currentDraftFolder.isNotEmpty()
+        enabled = isActive && selectedPage == R.id.nav_drafts && state.currentDraftFolder.isNotEmpty()
     ) {
         goToDraftFolder("")
     }
 
-    AnimatedContent(
-        targetState = selectedPage,
-        transitionSpec = {
-            (fadeIn(tween(210, delayMillis = 90)) + scaleIn(initialScale = 0.96f, animationSpec = tween(210, delayMillis = 90))) togetherWith
-                fadeOut(tween(90))
-        },
-        label = "top-level-page"
-    ) { page ->
-    key(page, selectionVersion) {
-    when (page) {
+    val pageKey = if (selectedPage == R.id.nav_tools) 0 else selectionVersion
+    key(selectedPage, pageKey) {
+    when (selectedPage) {
         R.id.nav_favorites -> FavoritesScreen(
             directories = state.favoriteDirectories,
             pendingRemoval = state.pendingFavoriteRemoval,
@@ -269,7 +259,6 @@ internal fun MainTopLevelPages(
             onCacheClear = { item -> clearSettingsCache(context, settings, state, item, false) },
             onEmptyCacheClear = { item -> clearSettingsCache(context, settings, state, item, false) }
         )
-    }
     }
     }
 }

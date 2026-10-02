@@ -3,22 +3,21 @@
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
-    android:viewportHeight="24"
-    android:tint="?attr/colorControlNormal">
+    android:viewportHeight="24">
 
-    <group android:translateX="-1">
+    <group android:translateX="0">
     <!-- Speech bubble in the upper-right corner. -->
     <path
-        android:fillColor="#000000"
+        android:fillColor="#FFFFFFFF"
         android:pathData="M15.5,2L20.5,2C21.33,2 22,2.67 22,3.5L22,7.5C22,8.33 21.33,9 20.5,9L18.35,9L15.55,11.7L16.1,9L15.5,9C14.67,9 14,8.33 14,7.5L14,3.5C14,2.67 14.67,2 15.5,2Z" />
 
     <!-- Microphone and its stand. -->
     <path
-        android:fillColor="#000000"
+        android:fillColor="#FFFFFFFF"
         android:pathData="M10.5,15C11.88,15 13,13.88 13,12.5L13,7.5C13,6.12 11.88,5 10.5,5C9.12,5 8,6.12 8,7.5L8,12.5C8,13.88 9.12,15 10.5,15Z" />
 
     <path
-        android:fillColor="#000000"
+        android:fillColor="#FFFFFFFF"
         android:pathData="M15.5,12.5L14,12.5C14,14.43 12.43,16 10.5,16C8.57,16 7,14.43 7,12.5L5.5,12.5C5.5,14.98 7.33,17.04 9.75,17.42L9.75,20L8.5,20L8.5,21.5L12.5,21.5L12.5,20L11.25,20L11.25,17.42C13.67,17.04 15.5,14.98 15.5,12.5Z" />
     </group>
 </vector>
