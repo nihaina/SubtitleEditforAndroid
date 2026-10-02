@@ -16,6 +16,7 @@ import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.mpv.EditorMpvAudioPlayer
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleHighlightCursor
+import com.subtitleedit.util.SubtitlePlaybackSelectionTracker
 import com.subtitleedit.util.TimeUtils
 import java.io.File
 import java.util.Locale
@@ -27,6 +28,7 @@ internal class EditorPlaybackController(
     private val subtitles: () -> List<SubtitleEntry>,
     private val isSourceViewMode: () -> Boolean,
     private val onPlayingSubtitleChanged: (Int?) -> Unit,
+    private val onSubtitlePlaybackPassed: (Int) -> Boolean,
     private val onMediaReady: (Long, Int?) -> Unit,
     private val showMessage: (String) -> Unit
 ) {
@@ -45,6 +47,7 @@ internal class EditorPlaybackController(
     private var limitedPlaybackEntry: SubtitleEntry? = null
     private var isLimitedRangePlaybackActive = false
     private val highlightCursor = SubtitleHighlightCursor()
+    private val playbackSelectionTracker = SubtitlePlaybackSelectionTracker()
 
     private val frameCallback = Choreographer.FrameCallback { onProgressFrame() }
     private var progressScheduled = false
@@ -164,6 +167,7 @@ internal class EditorPlaybackController(
     fun prepare(mediaFile: File) {
         if (!mediaType.hasPlayableMedia) return
         if (engine == null) createEngine()
+        playbackSelectionTracker.reset()
         currentPositionMs = 0L
         durationMs = 0L
         if (mediaType == EditorMediaType.VIDEO) {
@@ -177,6 +181,7 @@ internal class EditorPlaybackController(
     fun seekTo(timeMs: Long) {
         val playbackEngine = engine?.takeIf { it.phase.canAccessPlayer } ?: return
         isLimitedRangePlaybackActive = false
+        playbackSelectionTracker.reset()
         val clampedTime = timeMs.coerceIn(0L, durationMs)
         playbackEngine.seekTo(clampedTime)
         currentPositionMs = clampedTime
@@ -204,6 +209,7 @@ internal class EditorPlaybackController(
         engine?.release()
         engine = null
         isPlaying = false
+        playbackSelectionTracker.reset()
     }
 
     fun invalidateHighlightCache() {
@@ -357,6 +363,7 @@ internal class EditorPlaybackController(
         val playbackEngine = engine?.takeIf { it.phase.canAccessPlayer } ?: return
         val correctedPositionMs = positionMs.coerceIn(0L, durationMs)
         val wasPlaying = playbackEngine.isPlaying
+        playbackSelectionTracker.reset()
         playbackEngine.seekTo(correctedPositionMs)
         isPlaying = wasPlaying
         updatePlayerUiAtKnownPosition(correctedPositionMs)
@@ -368,6 +375,7 @@ internal class EditorPlaybackController(
         val target = subtitles().getOrNull(subtitleIndex) ?: return
         limitedPlaybackEntry = target
         isLimitedRangePlaybackActive = true
+        playbackSelectionTracker.reset()
         playbackEngine.seekTo(target.startTime)
         if (!playbackEngine.isPlaying) playbackEngine.play()
         isPlaying = true
@@ -391,8 +399,16 @@ internal class EditorPlaybackController(
 
     private fun highlightSubtitleAtTime(timeMs: Long) {
         if (isSourceViewMode()) return
-        val index = highlightCursor.resolve(subtitles(), timeMs)
+        val entries = subtitles()
+        val index = highlightCursor.resolve(entries, timeMs)
         onPlayingSubtitleChanged(if (index >= 0) index else null)
+        if (isPlaying && index >= 0 &&
+            SettingsManager.getInstance(context).isSelectPlayingSubtitleEnabled()
+        ) {
+            playbackSelectionTracker.selectIfNeeded(entries[index].stableId) {
+                onSubtitlePlaybackPassed(index)
+            }
+        }
     }
 
     private fun renderProgress(positionMs: Long) {

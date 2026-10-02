@@ -547,6 +547,9 @@ class EditorActivity : AppCompatActivity() {
                     subtitleAdapter.highlightCurrentPlaying(index)
                 }
             },
+            onSubtitlePlaybackPassed = { index ->
+                waveformController.selectSubtitleIndex(index)
+            },
             onMediaReady = ::onMediaReady,
             showMessage = ::showShortToast
         )

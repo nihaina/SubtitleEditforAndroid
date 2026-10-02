@@ -42,6 +42,7 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_AI_PUNCTUATION_CUSTOM_PROMPT = "ai_punctuation_custom_prompt"
         private const val KEY_WAVEFORM_CACHE_LOCATION = "waveform_cache_location"
         private const val KEY_LOOP_SELECTED_SUBTITLE = "loop_selected_subtitle"
+        private const val KEY_SELECT_PLAYING_SUBTITLE = "select_playing_subtitle"
         private const val KEY_SHOW_ALL_FILE_TYPES = "show_all_file_types"
         private const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
         private const val KEY_FILE_SORT_FIELD = "file_sort_field"
@@ -432,6 +433,14 @@ class SettingsManager private constructor(context: Context) {
     /** 设置限定字幕区间播放结束后是否循环。 */
     fun setLoopSelectedSubtitleEnabled(enabled: Boolean) =
         prefs.edit().putBoolean(KEY_LOOP_SELECTED_SUBTITLE, enabled).apply()
+
+    /** 获取播放时是否自动选中播放头经过的字幕。 */
+    fun isSelectPlayingSubtitleEnabled(): Boolean =
+        prefs.getBoolean(KEY_SELECT_PLAYING_SUBTITLE, false)
+
+    /** 设置播放时是否自动选中播放头经过的字幕。 */
+    fun setSelectPlayingSubtitleEnabled(enabled: Boolean) =
+        prefs.edit().putBoolean(KEY_SELECT_PLAYING_SUBTITLE, enabled).apply()
 
     /**
      * 获取 Whisper Encoder 文件路径

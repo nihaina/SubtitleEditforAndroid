@@ -58,6 +58,7 @@ data class SettingsPageState(
     val checkUpdatesOnStartup: Boolean = false,
     val preserveOutputDirectories: Boolean = true,
     val loopSelectedSubtitle: Boolean = false,
+    val selectPlayingSubtitle: Boolean = false,
     val cacheItems: List<SettingsCacheItem> = emptyList()
 )
 
@@ -88,6 +89,7 @@ fun SettingsScreen(
     onCheckUpdatesChanged: (Boolean) -> Unit,
     onPreserveDirectoriesChanged: (Boolean) -> Unit,
     onLoopSelectedChanged: (Boolean) -> Unit,
+    onSelectPlayingChanged: (Boolean) -> Unit,
     onOpenAiSettings: () -> Unit,
     onOpenModelManagement: () -> Unit,
     onOpenTtsSettings: () -> Unit,
@@ -198,6 +200,12 @@ fun SettingsScreen(
                     description = stringResource(R.string.activity_settings_text_11),
                     checked = state.loopSelectedSubtitle,
                     onCheckedChange = onLoopSelectedChanged
+                )
+                SharedSettingsSwitchRow(
+                    title = stringResource(R.string.activity_settings_text_19),
+                    description = stringResource(R.string.activity_settings_text_20),
+                    checked = state.selectPlayingSubtitle,
+                    onCheckedChange = onSelectPlayingChanged
                 )
             }
         }

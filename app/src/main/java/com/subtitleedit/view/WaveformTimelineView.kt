@@ -1389,6 +1389,15 @@ class WaveformTimelineView @JvmOverloads constructor(
         invalidate()
     }
 
+    fun selectSubtitleIndex(index: Int): Boolean {
+        if (index !in subtitles.indices) return false
+        if (selectedIndices == setOf(index)) return true
+        selectedIndices = setOf(index)
+        onSelectedIndicesChangeListener?.invoke(selectedIndices)
+        invalidate()
+        return true
+    }
+
     private fun clearSelection() {
         selectedIndices = emptySet()
         onSelectedIndicesChangeListener?.invoke(selectedIndices)

@@ -57,6 +57,10 @@ class SettingsActivity : AppCompatActivity() {
                         pageState = pageState.copy(loopSelectedSubtitle = enabled)
                         settingsManager.setLoopSelectedSubtitleEnabled(enabled)
                     },
+                    onSelectPlayingChanged = { enabled ->
+                        pageState = pageState.copy(selectPlayingSubtitle = enabled)
+                        settingsManager.setSelectPlayingSubtitleEnabled(enabled)
+                    },
                     onOpenAiSettings = { open(AiSettingsActivity::class.java) },
                     onOpenModelManagement = { open(ModelManagementActivity::class.java) },
                     onOpenTtsSettings = { open(TtsSettingsActivity::class.java) },
@@ -97,6 +101,7 @@ class SettingsActivity : AppCompatActivity() {
             checkUpdatesOnStartup = settingsManager.shouldCheckUpdatesOnStartup(),
             preserveOutputDirectories = settingsManager.isOutputDirectoryPersistenceEnabled(),
             loopSelectedSubtitle = settingsManager.isLoopSelectedSubtitleEnabled(),
+            selectPlayingSubtitle = settingsManager.isSelectPlayingSubtitleEnabled(),
             cacheItems = cacheItems
         )
     }

@@ -8,6 +8,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -310,7 +311,9 @@ private fun FormatGrid(
                         selected = selectedFormat == format.extension,
                         enabled = enabled,
                         onClick = { onSelected(format.extension) },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp)
                     )
                 }
                 repeat(5 - rowFormats.size) { Spacer(Modifier.weight(1f)) }

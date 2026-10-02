@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -447,7 +448,9 @@ fun AppChoiceTile(
     selected: Boolean,
     enabled: Boolean = true,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    singleLine: Boolean = false,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 12.dp)
 ) {
     val containerColor by animateColorAsState(
         targetValue = when {
@@ -477,10 +480,17 @@ fun AppChoiceTile(
             .border(1.dp, borderColor, MaterialTheme.shapes.medium)
             .clickable(enabled = enabled, interactionSource = source, indication = null, onClick = onClick)
             .pressScale(source)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
+            .padding(contentPadding),
         contentAlignment = Alignment.Center
     ) {
-        Text(text, style = MaterialTheme.typography.bodyMedium, color = contentColor)
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = contentColor,
+            maxLines = if (singleLine) 1 else Int.MAX_VALUE,
+            softWrap = !singleLine,
+            overflow = TextOverflow.Clip
+        )
     }
 }
 

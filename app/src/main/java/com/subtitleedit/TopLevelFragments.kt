@@ -249,6 +249,10 @@ internal fun MainTopLevelPages(
                 state.settingsPage = state.settingsPage.copy(loopSelectedSubtitle = enabled)
                 settings.setLoopSelectedSubtitleEnabled(enabled)
             },
+            onSelectPlayingChanged = { enabled ->
+                state.settingsPage = state.settingsPage.copy(selectPlayingSubtitle = enabled)
+                settings.setSelectPlayingSubtitleEnabled(enabled)
+            },
             onOpenAiSettings = { context.openActivity(AiSettingsActivity::class.java) },
             onOpenModelManagement = { context.openActivity(ModelManagementActivity::class.java) },
             onOpenTtsSettings = { context.openActivity(TtsSettingsActivity::class.java) },
@@ -355,6 +359,7 @@ private fun loadSettingsPage(context: Context, settings: SettingsManager): Setti
         checkUpdatesOnStartup = settings.shouldCheckUpdatesOnStartup(),
         preserveOutputDirectories = settings.isOutputDirectoryPersistenceEnabled(),
         loopSelectedSubtitle = settings.isLoopSelectedSubtitleEnabled(),
+        selectPlayingSubtitle = settings.isSelectPlayingSubtitleEnabled(),
         cacheItems = cacheItems
     )
 }

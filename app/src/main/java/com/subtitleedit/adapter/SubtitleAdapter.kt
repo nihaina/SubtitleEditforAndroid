@@ -86,7 +86,7 @@ class SubtitleAdapter(
         // 通知选中状态变化
         onSelectionChanged?.invoke()
     }
-    
+
     companion object {
         const val PAYLOAD_SELECTION = "selection"
         const val PAYLOAD_PLAYING   = "playing"

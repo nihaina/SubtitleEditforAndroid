@@ -260,6 +260,11 @@ internal class EditorWaveformController(
         binding.waveformTimelineView.setSubtitles(subtitles)
     }
 
+    fun selectSubtitleIndex(index: Int): Boolean {
+        if (!hasPlayableMedia) return false
+        return binding.waveformTimelineView.selectSubtitleIndex(index)
+    }
+
     fun updateSubtitleEntries(changes: Map<Int, SubtitleEntry>, totalCount: Int): Boolean {
         if (!hasPlayableMedia) return true
         return binding.waveformTimelineView.updateSubtitleEntries(changes, totalCount)

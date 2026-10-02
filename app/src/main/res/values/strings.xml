@@ -270,6 +270,8 @@
     <string name="activity_settings_text_09">播放行为</string>
     <string name="activity_settings_text_10">限定区间循环播放</string>
     <string name="activity_settings_text_11">长按波形字幕块限定区间并双击播放时，结束后自动回到开头循环；关闭则播放一次后暂停</string>
+    <string name="activity_settings_text_19">播放时选中当前字幕块</string>
+    <string name="activity_settings_text_20">播放时自动选中播放头经过的字幕块，每条字幕只选中一次，循环播放不会重复选中</string>
     <string name="activity_settings_text_12">文件管理</string>
     <string name="activity_settings_text_13">显示所有类型文件</string>
     <string name="activity_settings_text_14">在文件列表中显示字幕和音频之外的文件</string>
