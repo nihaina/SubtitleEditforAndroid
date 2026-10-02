@@ -1,25 +1,26 @@
 package com.subtitleedit.feature.ui
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -35,7 +36,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
 import com.subtitleedit.demix.VocalSeparationEngine
 
@@ -81,6 +84,7 @@ internal fun VocalSeparationScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.height(56.dp),
                 title = { Text("人声分离") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -100,41 +104,53 @@ internal fun VocalSeparationScreen(
                 .fillMaxSize()
                 .padding(insets)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(16.dp)
         ) {
-            Column(
+            Card(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
-                Text("音视频文件", style = MaterialTheme.typography.titleMedium)
-                OutlinedButton(
-                    onClick = onSelectFiles,
-                    enabled = !state.isRunning,
-                    modifier = Modifier.padding(top = 8.dp)
-                ) {
-                    Text(stringResource(R.string.select_file))
-                }
-                SelectionContainer {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
                     Text(
-                        state.selectedFilesText,
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        stringResource(R.string.activity_speech_to_subtitle_text_01),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
                     )
+                    Button(
+                        onClick = onSelectFiles,
+                        enabled = !state.isRunning,
+                        modifier = Modifier.padding(top = 12.dp)
+                    ) {
+                        Text(stringResource(R.string.select_file))
+                    }
+                    SelectionContainer {
+                        Text(
+                            state.selectedFilesText,
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 
-            HorizontalDivider()
+            Spacer(Modifier.height(12.dp))
 
-            Column(
+            Card(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
-                Text(stringResource(R.string.activity_vocal_separation_text_02), style = MaterialTheme.typography.titleMedium)
-                VocalSeparationEngine.Stem.entries.chunked(2).forEach { rowStems ->
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    Text(
+                        stringResource(R.string.activity_vocal_separation_text_02),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    VocalSeparationEngine.Stem.entries.chunked(2).forEachIndexed { index, rowStems ->
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().padding(top = if (index == 0) 6.dp else 0.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         rowStems.forEach { stem ->
@@ -164,75 +180,88 @@ internal fun VocalSeparationScreen(
                         }
                     }
                 }
-            }
-
-            HorizontalDivider()
-
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text("输出目录", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(R.string.activity_auto_timestamp_text_06),
+                    modifier = Modifier.padding(top = 12.dp),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
                 SelectionContainer {
                     Text(
                         state.outputDirectory,
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                        style = MaterialTheme.typography.bodyMedium,
+                        fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 OutlinedButton(
                     onClick = onSelectOutputDirectory,
                     enabled = !state.isRunning,
-                    modifier = Modifier.padding(top = 8.dp)
+                    modifier = Modifier.padding(top = 10.dp)
                 ) {
-                    Text("选择输出目录")
+                    Text(stringResource(R.string.activity_auto_timestamp_text_08))
                 }
             }
-
-            HorizontalDivider()
+            }
 
             Button(
                 onClick = onStart,
                 enabled = state.canStart,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
             ) {
                 Text(stringResource(R.string.activity_vocal_separation_text_08))
             }
 
             if (state.progressVisible) {
-                Text(state.progressStatus, style = MaterialTheme.typography.bodyMedium)
-                LinearProgressIndicator(
-                    progress = { state.progress.coerceIn(0, 100) / 100f },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                TextButton(onClick = onCancel, modifier = Modifier.align(Alignment.End)) {
-                    Text(stringResource(R.string.cancel))
+                Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                    Text(
+                        state.progressStatus,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    LinearProgressIndicator(
+                        progress = { state.progress.coerceIn(0, 100) / 100f },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    )
+                    OutlinedButton(
+                        onClick = onCancel,
+                        modifier = Modifier.align(Alignment.End).padding(top = 8.dp)
+                    ) {
+                        Text(stringResource(R.string.cancel))
+                    }
                 }
             }
 
-            Text(stringResource(R.string.activity_settings_text_06), style = MaterialTheme.typography.titleMedium)
+            Text(
+                stringResource(R.string.activity_settings_text_06),
+                modifier = Modifier.padding(top = 16.dp),
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
             SelectionContainer {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 120.dp, max = 240.dp)
+                        .padding(top = 8.dp)
+                        .height(240.dp)
+                        .background(MaterialTheme.colorScheme.background)
                         .verticalScroll(logScrollState)
                         .padding(12.dp)
                 ) {
                     Text(
                         state.log,
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
             Text(
                 stringResource(R.string.activity_vocal_separation_text_10),
-                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 12.dp, bottom = 24.dp),
+                fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.height(8.dp))
         }
     }
 

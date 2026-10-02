@@ -12,7 +12,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
@@ -45,6 +48,7 @@ internal class MainTopLevelPagesState {
 internal fun MainTopLevelPages(
     selectedPage: Int,
     refreshVersion: Int,
+    selectionVersion: Int,
     state: MainTopLevelPagesState,
     onOpenDirectory: (File) -> Unit,
     onToolbarChanged: (String, Boolean, (() -> Unit)?) -> Unit
@@ -53,6 +57,8 @@ internal fun MainTopLevelPages(
     val resources = LocalResources.current
     val preferences = context.getSharedPreferences(FAVORITES_PREFERENCES_NAME, Context.MODE_PRIVATE)
     val settings = SettingsManager.getInstance(context)
+    var previousSelectedPage by remember { mutableIntStateOf(R.id.nav_directory) }
+    var previousSelectionVersion by remember { mutableIntStateOf(selectionVersion) }
 
     val directoryPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) addFavoriteDirectory(context, preferences, state, uri)
@@ -104,7 +110,22 @@ internal fun MainTopLevelPages(
         updateDraftToolbar()
     }
 
-    LaunchedEffect(selectedPage, refreshVersion, resources) {
+    LaunchedEffect(selectedPage, refreshVersion, selectionVersion, resources) {
+        if (selectionVersion != previousSelectionVersion) {
+            state.pendingFavoriteRemoval = null
+            state.draftDialog = null
+            state.draftToExport = null
+        }
+        if (selectedPage == R.id.nav_drafts &&
+            (previousSelectedPage != R.id.nav_drafts || selectionVersion != previousSelectionVersion)
+        ) {
+            // The old navigation replaced DraftsFragment on every tab entry.
+            state.currentDraftFolder = ""
+            state.draftDialog = null
+            state.draftToExport = null
+        }
+        previousSelectedPage = selectedPage
+        previousSelectionVersion = selectionVersion
         when (selectedPage) {
             R.id.nav_favorites -> loadFavoriteDirectories()
             R.id.nav_drafts -> {
@@ -121,6 +142,7 @@ internal fun MainTopLevelPages(
         goToDraftFolder("")
     }
 
+    key(selectedPage, selectionVersion) {
     when (selectedPage) {
         R.id.nav_favorites -> FavoritesScreen(
             directories = state.favoriteDirectories,
@@ -158,7 +180,9 @@ internal fun MainTopLevelPages(
                     )
                 }
             },
-            onLongPress = { item -> state.draftDialog = DraftsDialogState.Actions(item) },
+            onLongPress = { item ->
+                if (!item.isFolder) state.draftDialog = DraftsDialogState.Actions(item)
+            },
             onDeleteClick = { item ->
                 state.draftDialog = if (item.isFolder) DraftsDialogState.DeleteFolder(item)
                 else DraftsDialogState.DeleteDraft(item)
@@ -176,18 +200,16 @@ internal fun MainTopLevelPages(
             onLoadDraft = {},
             onDeleteDraft = { item ->
                 state.draftDialog = null
-                if (DraftManager.deleteDraft(context, item.folderName, item.fileName)) {
-                    showTopLevelToast(context, resources.getString(R.string.draft_deleted))
-                    loadDrafts()
-                }
+                // DraftsFragment always rebuilt its adapter after the delete attempt and did
+                // not show the standalone activity's success toast.
+                DraftManager.deleteDraft(context, item.folderName, item.fileName)
+                loadDrafts()
             },
             onDeleteFolder = { item ->
                 state.draftDialog = null
-                if (DraftManager.deleteDraftFolder(context, item.folderName)) {
-                    showTopLevelToast(context, resources.getString(R.string.draft_deleted))
-                    if (state.currentDraftFolder == item.folderName) goToDraftFolder("")
-                    else loadDrafts()
-                }
+                DraftManager.deleteDraftFolder(context, item.folderName)
+                if (state.currentDraftFolder == item.folderName) goToDraftFolder("")
+                else loadDrafts()
             }
         )
 
@@ -197,6 +219,10 @@ internal fun MainTopLevelPages(
             state = state.settingsPage,
             encodings = FileUtils.SUPPORTED_ENCODINGS,
             showTopBar = false,
+            // The legacy SettingsFragment removed the selected cache group
+            // immediately. The standalone SettingsActivity kept its
+            // confirmation dialog, so this host must opt out explicitly.
+            confirmCacheClear = false,
             onBack = {},
             onEncodingSelected = { encoding ->
                 settings.setDefaultEncoding(encoding.charset)
@@ -224,9 +250,12 @@ internal fun MainTopLevelPages(
             onOpenTtsSettings = { context.openActivity(TtsSettingsActivity::class.java) },
             onOpenLogs = { context.openActivity(LogActivity::class.java) },
             onOpenAbout = { context.openActivity(AboutActivity::class.java) },
-            onCacheClear = { item -> clearSettingsCache(context, settings, state, item) },
-            onEmptyCacheClear = { showTopLevelToast(context, it.emptyMessage) }
+            // SettingsFragment's legacy cache dialog deleted the selected group
+            // immediately and always used the generic result message.
+            onCacheClear = { item -> clearSettingsCache(context, settings, state, item, false) },
+            onEmptyCacheClear = { item -> clearSettingsCache(context, settings, state, item, false) }
         )
+    }
     }
 }
 
@@ -295,7 +324,11 @@ private fun openTool(context: Context, destination: ToolDestination) {
 }
 
 private fun Context.openActivity(activity: Class<*>) {
-    startActivity(Intent(this, activity))
+    val intent = Intent(this, activity)
+    if (this !is android.app.Activity) {
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    startActivity(intent)
 }
 
 private fun loadSettingsPage(context: Context, settings: SettingsManager): SettingsPageState {
@@ -350,7 +383,8 @@ private fun clearSettingsCache(
     context: Context,
     settings: SettingsManager,
     state: MainTopLevelPagesState,
-    item: SettingsCacheItem
+    item: SettingsCacheItem,
+    includeCacheLabel: Boolean = true
 ) {
     val matches: (File) -> Boolean = when (item.key) {
         "waveform" -> { file -> file.extension == "wave" }
@@ -366,7 +400,13 @@ private fun clearSettingsCache(
         cacheFilesInWaveformDirectory(context, matches)
     }
     val count = files.count(File::delete)
-    showTopLevelToast(context, "已清除 $count 个${item.label.removeSuffix("缓存")}缓存文件")
+    val message = if (includeCacheLabel) {
+        val label = item.label.removeSuffix("缓存")
+        "已清除 $count 个${label}缓存文件"
+    } else {
+        "已清除 $count 个缓存文件"
+    }
+    showTopLevelToast(context, message)
     state.settingsPage = loadSettingsPage(context, settings)
 }
 

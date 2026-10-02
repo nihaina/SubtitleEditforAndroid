@@ -137,7 +137,19 @@ class SettingsActivity : AppCompatActivity() {
             CACHE_QUICK_TRANSCRIBE -> quickTranscribeAudioCacheFiles()
             else -> return
         }
-        val deletedCount = files.count(File::delete)
+        // Keep the legacy result count semantics: waveform and spectrogram
+        // report every matching file visited, while quick-transcribe reports
+        // only successful deletions.
+        val deletedCount = if (item.key == CACHE_QUICK_TRANSCRIBE) {
+            files.count(File::delete)
+        } else {
+            var count = 0
+            files.forEach {
+                it.delete()
+                count++
+            }
+            count
+        }
         val label = item.label.removeSuffix("缓存")
         showToast("已清除 $deletedCount 个${label}缓存文件")
         refreshPageState()

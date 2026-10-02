@@ -3,6 +3,7 @@ package com.subtitleedit.editor
 import android.app.Activity
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -10,13 +11,13 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -33,12 +34,19 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import com.subtitleedit.ComposeDialogHost
 import com.subtitleedit.R
 import com.subtitleedit.adapter.TranslationPreviewItem
+import com.subtitleedit.ui.DraggableScrollbar
 import kotlinx.coroutines.launch
 
 /** AI translation, quick transcription and subtitle merge share this result preview. */
@@ -61,7 +69,7 @@ internal class EditorTextPreviewDialog(private val activity: Activity) {
         val problemRevision = mutableIntStateOf(0)
         val showProblems = mutableStateOf(false)
         val editingIndex = mutableIntStateOf(-1)
-        val editingText = mutableStateOf("")
+        val editingText = mutableStateOf(TextFieldValue())
 
         ComposeDialogHost.show(activity) { dialog ->
             val problemIndices = remember(problemRevision.value) {
@@ -75,7 +83,8 @@ internal class EditorTextPreviewDialog(private val activity: Activity) {
 
             AlertDialog(
                 onDismissRequest = dialog::dismiss,
-                modifier = Modifier.fillMaxWidth(0.96f).fillMaxHeight(0.84f),
+                // Match the legacy window sizing (96% width, 82% height).
+                modifier = Modifier.fillMaxWidth(0.96f).fillMaxHeight(0.82f),
                 properties = DialogProperties(usePlatformDefaultWidth = false),
                 title = {
                     Row(
@@ -86,6 +95,8 @@ internal class EditorTextPreviewDialog(private val activity: Activity) {
                         Text(
                             text = title,
                             modifier = Modifier.weight(1f),
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -97,7 +108,7 @@ internal class EditorTextPreviewDialog(private val activity: Activity) {
                                 Text(
                                     text = activity.getString(R.string.translation_preview_suspect_warning),
                                     color = MaterialTheme.colorScheme.error,
-                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 12.sp,
                                     maxLines = 2
                                 )
                             }
@@ -105,47 +116,66 @@ internal class EditorTextPreviewDialog(private val activity: Activity) {
                     }
                 },
                 text = {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxWidth().heightIn(max = maxListHeight),
-                        contentPadding = PaddingValues(vertical = 4.dp)
+                    Box(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = maxListHeight)
                     ) {
-                        itemsIndexed(previewItems) { index, item ->
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Checkbox(
-                                        checked = applyStates[index].value,
-                                        onCheckedChange = { checked ->
-                                            item.apply = checked
-                                            applyStates[index].value = checked
-                                        }
-                                    )
-                                    Text(
-                                        text = "${index + 1}. ${item.originalText}",
-                                        modifier = Modifier.weight(1f),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                }
-                                Text(
-                                    text = translatedStates[index].value,
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(vertical = 4.dp)
+                        ) {
+                            itemsIndexed(previewItems) { index, item ->
+                                Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(start = 48.dp, end = 4.dp, bottom = 8.dp)
-                                        .clickable {
-                                            editingText.value = translatedStates[index].value
-                                            editingIndex.value = index
-                                        },
-                                    maxLines = 3,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                if (index < previewItems.lastIndex) HorizontalDivider()
+                                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Checkbox(
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .semantics { contentDescription = "应用此行翻译" },
+                                            checked = applyStates[index].value,
+                                            onCheckedChange = { checked ->
+                                                item.apply = checked
+                                                applyStates[index].value = checked
+                                            }
+                                        )
+                                        Text(
+                                            text = "${index + 1}. ${item.originalText}",
+                                            modifier = Modifier.weight(1f),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 13.sp
+                                        )
+                                    }
+                                    Text(
+                                        text = translatedStates[index].value,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(start = 40.dp, top = 2.dp, end = 0.dp)
+                                            .clickable {
+                                                val text = translatedStates[index].value
+                                                editingText.value = TextFieldValue(
+                                                    text = text,
+                                                    selection = TextRange(text.length)
+                                                )
+                                                editingIndex.value = index
+                                            },
+                                        maxLines = 3,
+                                        overflow = TextOverflow.Ellipsis,
+                                        fontSize = 14.sp
+                                    )
+                                }
                             }
                         }
+                        DraggableScrollbar(
+                            state = listState,
+                            modifier = Modifier.align(Alignment.CenterEnd),
+                            fixedThumbSize = true
+                        )
                     }
                 },
                 confirmButton = {
@@ -231,8 +261,8 @@ internal class EditorTextPreviewDialog(private val activity: Activity) {
                         TextButton(
                             onClick = {
                                 val item = previewItems[index]
-                                item.translatedText = editingText.value
-                                translatedStates[index].value = editingText.value
+                                item.translatedText = editingText.value.text
+                                translatedStates[index].value = editingText.value.text
                                 if (suspectedProblem != null) {
                                     item.suspectedProblem = item.translatedText.isBlank()
                                 }

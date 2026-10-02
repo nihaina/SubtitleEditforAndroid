@@ -46,8 +46,8 @@ class TranscriptMatchActivity : AppCompatActivity() {
     private var textName = ""
     private var audioName = ""
     private var outputUri: Uri? = null
-    private var textFileDisplay by mutableStateOf("未选择")
-    private var audioFileDisplay by mutableStateOf("未选择")
+    private var textFileDisplay by mutableStateOf("")
+    private var audioFileDisplay by mutableStateOf("")
     private var outputDirectoryDisplay by mutableStateOf("")
     private var pendingFilesText by mutableStateOf("")
     private val formats = listOf("SRT", "LRC", "VTT")
@@ -93,6 +93,8 @@ class TranscriptMatchActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        textFileDisplay = getString(R.string.transcript_match_unselected)
+        audioFileDisplay = getString(R.string.transcript_match_unselected)
         pendingFilesText = getString(R.string.transcript_match_pending_empty)
         setContent {
             SubtitleEditComposeTheme {
@@ -125,7 +127,7 @@ class TranscriptMatchActivity : AppCompatActivity() {
                     onFormatSelected = { selectedFormat = it },
                     onLanguageSelected = { selectedLanguage = it },
                     onStartOrCancel = {
-                        if (isRunningUi) confirmCancelMatching() else startMatching()
+                        if (taskController.isRunning) confirmCancelMatching() else startMatching()
                     },
                     onDialogConfirm = ::confirmDialog,
                     onDialogDismiss = { dialog = TranscriptMatchDialog.NONE }

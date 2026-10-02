@@ -54,6 +54,10 @@ internal class EditorPlaybackController(
     var playbackSpeed: Float = 1.0f
         private set
 
+    // The legacy layout starts with the literal 1.0x label. Once the user edits the speed,
+    // applyPlaybackSpeed() formats whole-number values as 1x, matching the old controller.
+    private var playbackSpeedWasApplied = false
+
     /** Optional observer used by the Compose waveform to render the live playhead. */
     var onPositionChanged: ((positionMs: Long, durationMs: Long) -> Unit)? = null
 
@@ -225,6 +229,10 @@ internal class EditorPlaybackController(
         showVideoControls(scheduleAutoHide = isPlaying)
     }
 
+    fun hideVideoControlsForInteraction() {
+        setVideoControlsVisible(visible = false, animate = true)
+    }
+
     private fun onProgressFrame() {
         progressScheduled = false
         val playbackEngine = engine?.takeIf { it.phase.canAccessPlayer } ?: return
@@ -232,7 +240,10 @@ internal class EditorPlaybackController(
         isPlaying = true
         renderPlayPauseIcon()
 
-        if (!isUserSeeking) {
+        // MPV reports position and restart events asynchronously.  Until the latest seek has
+        // settled, its clock can still expose the previous position; accepting that sample here
+        // makes a slider or timeline seek visibly jump backwards on the next frame.
+        if (!isUserSeeking && !playbackEngine.isSeekInProgress) {
             val position = playbackEngine.currentPositionMs
             if (position >= currentPositionMs || currentPositionMs - position > 200L) {
                 currentPositionMs = position
@@ -303,6 +314,15 @@ internal class EditorPlaybackController(
         isUserSeeking = false
         seekTo(currentPositionMs)
         if (mediaType == EditorMediaType.VIDEO && isPlaying) scheduleVideoControlsAutoHide()
+    }
+
+    /**
+     * A Compose Slider can lose its release callback when another surface claims the next
+     * pointer sequence. Finalize only an actually active seek before timeline interaction so a
+     * stale user-seeking flag cannot make later playback samples disappear.
+     */
+    fun finishSeekIfActive() {
+        if (isUserSeeking) onSeekFinished()
     }
 
     fun togglePlayPause() {
@@ -396,7 +416,7 @@ internal class EditorPlaybackController(
 
     private fun updatePlayerUi() {
         engine?.takeIf { it.phase.canAccessPlayer }?.let { playbackEngine ->
-            if (!isUserSeeking) {
+            if (!isUserSeeking && !playbackEngine.isSeekInProgress) {
                 val position = playbackEngine.currentPositionMs
                 if (position >= currentPositionMs || currentPositionMs - position > 200L) {
                     currentPositionMs = position
@@ -424,6 +444,9 @@ internal class EditorPlaybackController(
     }
 
     fun showSpeedInputDialog() {
+        if (mediaType == EditorMediaType.VIDEO) {
+            showVideoControls(scheduleAutoHide = false)
+        }
         val activity = context as? Activity ?: return
         val input = mutableStateOf(formatPlaybackSpeedValue(playbackSpeed))
         val handle = ComposeDialogHost.show(activity) { dialog ->
@@ -476,6 +499,7 @@ internal class EditorPlaybackController(
 
     fun applyPlaybackSpeed(speed: Float, showConfirmation: Boolean = true) {
         playbackSpeed = speed
+        playbackSpeedWasApplied = true
         val label = if (speed == speed.toLong().toFloat()) {
             "${speed.toLong()}×"
         } else {
@@ -534,7 +558,11 @@ internal class EditorPlaybackController(
             isPlaying = isPlaying,
             enabled = engine?.phase?.canAccessPlayer == true,
             playbackSpeed = playbackSpeed,
-            playbackSpeedLabel = formatPlaybackSpeedValue(playbackSpeed) + "×",
+            playbackSpeedLabel = if (!playbackSpeedWasApplied && playbackSpeed == 1.0f) {
+                context.getString(R.string.activity_editor_text_08)
+            } else {
+                formatPlaybackSpeedValue(playbackSpeed) + "×"
+            },
             videoControlsVisible = videoControlsVisible
         )
     }

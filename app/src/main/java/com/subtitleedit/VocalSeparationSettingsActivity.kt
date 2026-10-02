@@ -5,13 +5,16 @@ import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,11 +30,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.SettingsManager
 
@@ -80,6 +85,7 @@ private fun VocalSeparationSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.height(56.dp),
                 title = { Text("人声分离设置") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -99,34 +105,50 @@ private fun VocalSeparationSettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 16.dp)
         ) {
-            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+            Spacer(Modifier.height(16.dp))
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                     Text(
                         text = stringResource(R.string.activity_vocal_separation_settings_text_14),
-                        style = MaterialTheme.typography.titleMedium,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
                     )
+                    Spacer(Modifier.height(12.dp))
                     SwitchSetting(
                         title = stringResource(R.string.activity_vocal_separation_settings_text_15),
-                        description = stringResource(R.string.activity_vocal_separation_settings_text_16),
                         checked = graphOptimizationEnabled,
                         onCheckedChange = onGraphOptimizationChanged
                     )
+                    Text(
+                        text = stringResource(R.string.activity_vocal_separation_settings_text_16),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                    Spacer(Modifier.height(16.dp))
                     SwitchSetting(
                         title = stringResource(R.string.activity_vocal_separation_settings_text_17),
-                        description = stringResource(R.string.activity_vocal_separation_settings_text_18),
                         checked = cpuArenaEnabled,
                         onCheckedChange = onCpuArenaChanged
+                    )
+                    Text(
+                        text = stringResource(R.string.activity_vocal_separation_settings_text_18),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 2.dp)
                     )
                 }
             }
 
             Text(
                 text = stringResource(R.string.activity_vocal_separation_settings_text_19),
-                style = MaterialTheme.typography.bodySmall,
+                fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 12.dp, start = 4.dp, end = 4.dp)
+                modifier = Modifier.padding(top = 12.dp)
             )
         }
     }
@@ -135,7 +157,6 @@ private fun VocalSeparationSettingsScreen(
 @Composable
 private fun SwitchSetting(
     title: String,
-    description: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
@@ -147,22 +168,15 @@ private fun SwitchSetting(
                 role = Role.Switch,
                 onValueChange = onCheckedChange
             )
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .height(48.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp)
-            )
-        }
+        Text(
+            text = title,
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
         Switch(checked = checked, onCheckedChange = null)
     }
 }

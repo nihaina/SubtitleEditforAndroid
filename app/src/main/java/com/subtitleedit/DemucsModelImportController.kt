@@ -160,7 +160,10 @@ class DemucsModelImportController(private val host: AppCompatActivity) {
             token = token,
             title = title,
             message = "正在准备下载",
-            onCancel = onCancel
+            onCancel = {
+                if ((dialog as? ModelImportDialogUi.Progress)?.token == token) dialog = null
+                onCancel()
+            }
         )
         return token
     }

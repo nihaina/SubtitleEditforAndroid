@@ -70,16 +70,16 @@ class AutoTimestampActivity : AppCompatActivity() {
     private var outputDirUri: Uri? = null
     private var generationJob: Job? = null
     private var isGenerating by mutableStateOf(false)
-    private var audioFilesText by mutableStateOf("尚未选择文件")
+    private var audioFilesText by mutableStateOf("未选择")
     private var subtitleFileText by mutableStateOf("未选择字幕文件")
-    private var outputDirectoryText by mutableStateOf("请选择输出目录")
+    private var outputDirectoryText by mutableStateOf("Download/SubtitleEdit/Convert")
     private var secondaryProcessingEnabled by mutableStateOf(false)
     private var secondaryProcessingAvailable by mutableStateOf(true)
     private var secondaryProcessingHint by mutableStateOf("")
     private var outputFormat by mutableStateOf("SRT")
     private var canGenerate by mutableStateOf(false)
     private var statusText by mutableStateOf("")
-    private var previewText by mutableStateOf("日志和结果将在这里显示")
+    private var previewText by mutableStateOf("等待生成...")
     private var dialog by mutableStateOf(AutoTimestampDialog.NONE)
     private lateinit var backNavigationCallback: OnBackPressedCallback
     private val taskController by lazy {

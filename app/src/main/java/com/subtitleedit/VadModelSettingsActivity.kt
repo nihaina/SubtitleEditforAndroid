@@ -12,14 +12,13 @@ import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.SettingsManager
 
 class VadModelSettingsActivity : AppCompatActivity() {
-    private lateinit var settings: SettingsManager
+    private lateinit var settingsManager: SettingsManager
     private var vadSettings by mutableStateOf<VadSettingsState?>(null)
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
-        settings = SettingsManager.getInstance(this)
-        vadSettings = VadSettingsState.read(settings)
-
+        settingsManager = SettingsManager.getInstance(this)
+        vadSettings = VadSettingsState.read(settingsManager)
         setContent {
             SubtitleEditComposeTheme {
                 vadSettings?.let { current ->
@@ -35,18 +34,18 @@ class VadModelSettingsActivity : AppCompatActivity() {
 
     private fun saveSettings(state: VadSettingsState) {
         vadSettings = state
-        settings.setSpeechVadMergeEnabled(state.mergeEnabled)
-        settings.setSpeechVadMergeGapMs(state.mergeGapMs)
-        settings.setVadThreshold(state.threshold)
-        settings.setVadMinSilenceDuration(state.minSilence)
-        settings.setVadMinSpeechDuration(state.minSpeech)
-        settings.setVadMaxSpeechDuration(state.maxSpeech)
-        settings.setSpeechSecondaryVadMode(state.secondaryMode)
-        settings.setSpeechSecondaryVadMergeEnabled(state.secondaryMergeEnabled)
-        settings.setSpeechSecondaryVadMergeGapMs(state.secondaryMergeGapMs)
-        settings.setSpeechSecondaryVadThreshold(state.secondaryThreshold)
-        settings.setSpeechSecondaryVadMinSilenceDuration(state.secondaryMinSilence)
-        settings.setSpeechSecondaryVadMinSpeechDuration(state.secondaryMinSpeech)
-        settings.setSpeechSecondaryVadMaxSpeechDuration(state.secondaryMaxSpeech)
+        settingsManager.setSpeechVadMergeEnabled(state.mergeEnabled)
+        settingsManager.setSpeechVadMergeGapMs(state.mergeGapMs)
+        settingsManager.setVadThreshold(state.threshold)
+        settingsManager.setVadMinSilenceDuration(state.minSilence)
+        settingsManager.setVadMinSpeechDuration(state.minSpeech)
+        settingsManager.setVadMaxSpeechDuration(state.maxSpeech)
+        settingsManager.setSpeechSecondaryVadMode(state.secondaryMode)
+        settingsManager.setSpeechSecondaryVadMergeEnabled(state.secondaryMergeEnabled)
+        settingsManager.setSpeechSecondaryVadMergeGapMs(state.secondaryMergeGapMs)
+        settingsManager.setSpeechSecondaryVadThreshold(state.secondaryThreshold)
+        settingsManager.setSpeechSecondaryVadMinSilenceDuration(state.secondaryMinSilence)
+        settingsManager.setSpeechSecondaryVadMinSpeechDuration(state.secondaryMinSpeech)
+        settingsManager.setSpeechSecondaryVadMaxSpeechDuration(state.secondaryMaxSpeech)
     }
 }

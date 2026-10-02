@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -17,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import com.subtitleedit.ui.ToolsScreen
 import com.subtitleedit.ui.ToolDestination
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
@@ -61,6 +63,7 @@ private fun ToolsPage(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
+                modifier = Modifier.height(56.dp),
                 title = { Text(stringResource(R.string.menu_main_title_01)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {

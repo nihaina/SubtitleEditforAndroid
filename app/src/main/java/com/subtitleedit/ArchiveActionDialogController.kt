@@ -1,7 +1,6 @@
 package com.subtitleedit
 
 import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.runtime.mutableStateOf
 import com.subtitleedit.util.ArchiveActionUiPolicy
 import com.subtitleedit.util.ArchiveActionUiPolicy.ArchiveAction
 import java.io.File
@@ -34,11 +33,12 @@ internal class ArchiveActionDialogController(
     }
 
     fun showBlockingProgress(title: String, message: String): ComposeDialogHandle {
-        val state = mutableStateOf(
-            ArchiveProgressDialogState(title = title, message = message)
-        )
-        return ComposeDialogHost.show(activity) { dialog ->
-            ArchiveProgressDialog(state.value, onCancel = dialog::dismiss)
+        return ComposeDialogHost.show(activity) { _ ->
+            // The archive preview/test operation used a plain, non-cancelable
+            // AlertDialog in the XML implementation. Keep that presentation
+            // separate from the detailed progress dialog used by extraction
+            // and copy operations.
+            ArchiveBlockingProgressDialog(title, message)
         }
     }
 }

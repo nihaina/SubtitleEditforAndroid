@@ -128,7 +128,9 @@ class MediaConvertActivity : AppCompatActivity() {
     private var dialogState by mutableStateOf(MediaConvertDialog.NONE)
     private var outputDirectoryUri: Uri? = null
     private lateinit var settingsManager: SettingsManager
-    private var outputUris = mutableListOf<Uri>()
+    // Compose must observe completed output changes so the share action appears
+    // after a conversion finishes.
+    private var outputUris by mutableStateOf<List<Uri>>(emptyList())
     private var conversionJob: Job? = null
     private var probeJob: Job? = null
     private var currentSession: FFmpegSession? = null
@@ -228,11 +230,8 @@ class MediaConvertActivity : AppCompatActivity() {
     }
 
     private fun selectFormat(extension: String) {
-        val format = if (selectedFormat?.extension == extension) {
-            null
-        } else {
-            formatList.firstOrNull { it.extension == extension }
-        }
+        val format = if (selectedFormat?.extension == extension) null
+            else formatList.firstOrNull { it.extension == extension }
         selectedFormat = format
         selectedVideoCodec = format?.videoCodecs?.firstOrNull() ?: "（请先选择视频格式）"
         selectedAudioCodec = format?.audioCodecs?.firstOrNull() ?: "（请先选择格式）"
@@ -357,7 +356,7 @@ class MediaConvertActivity : AppCompatActivity() {
         if (isConverting || taskController.isRunning) return
         val format = selectedFormat ?: return
         isConverting = true
-        outputUris.clear()
+        outputUris = emptyList()
         conversionProgress = 0
         logText = ""
         conversionJob = taskController.launch(lifecycleScope) { task ->
@@ -373,7 +372,7 @@ class MediaConvertActivity : AppCompatActivity() {
                     val result = convertFile(file, index, selectedMediaFiles.size, format, desiredName, overwrite, reservedNames)
                     result.onSuccess {
                         successCount++
-                        outputUris += it.uri
+                        outputUris = outputUris + it.uri
                     }.onFailure {
                         failures += file.fileName
                         appendLog("\n❌ ${file.fileName}：${it.message ?: "转换失败"}\n")

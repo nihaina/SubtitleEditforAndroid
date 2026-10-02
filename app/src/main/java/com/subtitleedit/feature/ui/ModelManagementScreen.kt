@@ -4,11 +4,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
@@ -22,7 +22,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
@@ -36,10 +35,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -83,7 +85,6 @@ fun ModelManagementScreen(
     onBuiltInVadChanged: (Boolean) -> Unit,
     onDemucsImportAction: (DemucsModelImportAction) -> Unit,
     onNavigateBack: () -> Unit,
-    onRefresh: () -> Unit,
     onExport: (ModelManagementItemUi) -> Unit,
     onDelete: (ModelManagementItemUi) -> Unit,
     onDismissDialog: () -> Unit,
@@ -103,6 +104,7 @@ fun ModelManagementScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.height(56.dp),
                 title = { Text(if (pagerState.currentPage == 0) "模型导入" else "模型管理") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
@@ -148,7 +150,6 @@ fun ModelManagementScreen(
                         emptyMessage = emptyMessage,
                         isExporting = isExporting,
                         deletingModelKey = deletingModelKey,
-                        onRefresh = onRefresh,
                         onExport = onExport,
                         onDelete = onDelete
                     )
@@ -210,11 +211,12 @@ private fun ImportPage(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(16.dp)
     ) {
         Text(
             text = "集中选择和导入识别、分段及人声分离模型",
             style = MaterialTheme.typography.bodyMedium,
+            fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         ModelManagementImportContent(
@@ -236,7 +238,6 @@ private fun ModelListPage(
     emptyMessage: String,
     isExporting: Boolean,
     deletingModelKey: String?,
-    onRefresh: () -> Unit,
     onExport: (ModelManagementItemUi) -> Unit,
     onDelete: (ModelManagementItemUi) -> Unit
 ) {
@@ -244,59 +245,59 @@ private fun ModelListPage(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, top = 8.dp, end = 8.dp, bottom = 4.dp),
+                .padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            SelectionContainer(modifier = Modifier.weight(1f)) {
+            SelectionContainer {
                 Text(
                     text = modelsDirectoryLabel,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            TextButton(onClick = onRefresh, enabled = !isLoading) { Text("刷新") }
         }
-        if (isLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
 
-        val groupedModels = models.groupBy { it.category }
-        if (errorMessage != null) {
-            EmptyState(errorMessage)
-        } else if (models.isEmpty() && isLoading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+        Box(Modifier.fillMaxSize()) {
+            val groupedModels = models.groupBy { it.category }
+            when {
+                errorMessage != null -> EmptyState(errorMessage)
+                models.isEmpty() && !isLoading -> EmptyState(emptyMessage)
+                models.isEmpty() -> Unit
+                else -> LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        start = 16.dp,
+                        top = 4.dp,
+                        end = 16.dp,
+                        bottom = 24.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    groupedModels.forEach { (category, categoryModels) ->
+                        item(key = "category:$category") {
+                            Text(
+                                text = category,
+                                modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp),
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        items(categoryModels, key = { it.key }) { item ->
+                            ModelRow(
+                                item = item,
+                                isExporting = isExporting,
+                                isDeleting = deletingModelKey == item.key,
+                                onExport = { onExport(item) },
+                                onDelete = { onDelete(item) }
+                            )
+                        }
+                    }
+                }
             }
-        } else if (models.isEmpty()) {
-            EmptyState(emptyMessage)
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    start = 16.dp,
-                    top = 4.dp,
-                    end = 16.dp,
-                    bottom = 24.dp
-                ),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                groupedModels.forEach { (category, categoryModels) ->
-                    item(key = "category:$category") {
-                        Text(
-                            text = category,
-                            modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    items(categoryModels, key = { it.key }) { item ->
-                        ModelRow(
-                            item = item,
-                            isExporting = isExporting,
-                            isDeleting = deletingModelKey == item.key,
-                            onExport = { onExport(item) },
-                            onDelete = { onDelete(item) }
-                        )
-                    }
+            if (isLoading) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
                 }
             }
         }
@@ -323,33 +324,39 @@ private fun ModelRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                Text(
-                    text = item.displayName,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = item.displayName,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (item.canExport) {
+                        TextButton(
+                            onClick = onExport,
+                            enabled = !isExporting && !isDeleting,
+                            modifier = Modifier.semantics {
+                                contentDescription = "导出 ${item.displayName}"
+                            }
+                        ) {
+                            Text("导出")
+                        }
+                    }
+                }
                 Text(
                     text = item.path,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
                     text = item.formattedSize,
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
                     color = MaterialTheme.colorScheme.primary
                 )
             }
-            if (item.canExport) {
-                TextButton(onClick = onExport, enabled = !isExporting && !isDeleting) {
-                    Text("导出")
-                }
-            }
             if (item.canDelete) {
-                TextButton(onClick = onDelete, enabled = !isExporting && !isDeleting) {
+                TextButton(onClick = onDelete, enabled = !isExporting && !isDeleting, modifier = Modifier.widthIn(min = 72.dp)) {
                     Text(
                         text = if (isDeleting) "删除中" else "删除文件",
                         color = MaterialTheme.colorScheme.error
@@ -363,6 +370,12 @@ private fun ModelRow(
 @Composable
 private fun EmptyState(message: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            text = message,
+            modifier = Modifier.padding(24.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 16.sp,
+            textAlign = TextAlign.Center
+        )
     }
 }

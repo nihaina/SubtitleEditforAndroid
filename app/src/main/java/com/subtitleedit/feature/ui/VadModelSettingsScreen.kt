@@ -4,17 +4,21 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +29,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,25 +40,31 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
 import com.subtitleedit.util.SettingsManager
 import kotlin.math.roundToInt
 
 data class VadSettingsState(
-    val mergeEnabled: Boolean,
-    val mergeGapMs: Int,
-    val threshold: Float,
-    val minSilence: Float,
-    val minSpeech: Float,
-    val maxSpeech: Float,
-    val secondaryMode: String,
-    val secondaryMergeEnabled: Boolean,
-    val secondaryMergeGapMs: Int,
-    val secondaryThreshold: Float,
-    val secondaryMinSilence: Float,
-    val secondaryMinSpeech: Float,
-    val secondaryMaxSpeech: Float
+    val mergeEnabled: Boolean = false,
+    val mergeGapMs: Int = 200,
+    val threshold: Float = 0.3f,
+    val minSilence: Float = 0.3f,
+    val minSpeech: Float = 0.25f,
+    val maxSpeech: Float = 10f,
+    val secondaryMode: String = SettingsManager.SECONDARY_VAD_MODE_NONE,
+    val secondaryMergeEnabled: Boolean = false,
+    val secondaryMergeGapMs: Int = 200,
+    val secondaryThreshold: Float = 0.2f,
+    val secondaryMinSilence: Float = 0.1f,
+    val secondaryMinSpeech: Float = 0.1f,
+    val secondaryMaxSpeech: Float = 5f
 ) {
     companion object {
         fun read(settings: SettingsManager) = VadSettingsState(
@@ -84,6 +95,7 @@ fun VadModelSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.height(56.dp),
                 title = { Text("VAD 配置") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -101,16 +113,20 @@ fun VadModelSettingsScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // vad_settings_content.xml gives the first card a 16dp top margin
+            // in addition to the 16dp parent padding.
+            Spacer(Modifier.height(16.dp))
             VadSettingsCard {
                 SectionHeading(stringResource(R.string.activity_speech_to_subtitle_settings_text_01))
                 SettingsSwitch(
                     title = stringResource(R.string.activity_speech_to_subtitle_settings_text_35),
                     description = stringResource(R.string.activity_speech_to_subtitle_settings_text_40),
                     checked = state.mergeEnabled,
-                    onCheckedChange = { onStateChange(state.copy(mergeEnabled = it)) }
+                    onCheckedChange = { onStateChange(state.copy(mergeEnabled = it)) },
+                    modifier = Modifier.padding(top = 16.dp)
                 )
                 ParameterSlider(
                     title = R.string.activity_speech_to_subtitle_settings_text_37,
@@ -119,21 +135,25 @@ fun VadModelSettingsScreen(
                     valueRange = 0f..5000f,
                     steps = 99,
                     suffix = "毫秒",
-                    decimals = 0,
                     enabled = state.mergeEnabled,
+                    initialText = R.string.activity_speech_to_subtitle_settings_text_39,
                     onValueChange = { value ->
-                        onStateChange(state.copy(mergeGapMs = (value / 50f).roundToInt() * 50))
+                        onStateChange(
+                            state.copy(mergeGapMs = (value / 50f).roundToInt() * 50)
+                        )
                     }
                 )
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                SectionHeading(stringResource(R.string.activity_speech_to_subtitle_settings_text_56))
+                SectionHeading(
+                    stringResource(R.string.activity_speech_to_subtitle_settings_text_56),
+                    modifier = Modifier.padding(top = 16.dp)
+                )
                 ParameterSlider(
                     title = R.string.activity_speech_to_subtitle_settings_text_57,
                     description = R.string.activity_speech_to_subtitle_settings_text_58,
                     value = state.threshold,
                     valueRange = 0.01f..0.9f,
                     steps = 88,
-                    decimals = 2,
+                    initialText = R.string.activity_model_settings_text_21,
                     onValueChange = { onStateChange(state.copy(threshold = it)) }
                 )
                 ParameterSlider(
@@ -143,7 +163,7 @@ fun VadModelSettingsScreen(
                     valueRange = 0.01f..2f,
                     steps = 198,
                     suffix = "秒",
-                    decimals = 2,
+                    initialText = R.string.activity_model_settings_text_21,
                     onValueChange = { onStateChange(state.copy(minSilence = it)) }
                 )
                 ParameterSlider(
@@ -153,7 +173,7 @@ fun VadModelSettingsScreen(
                     valueRange = 0.01f..1f,
                     steps = 98,
                     suffix = "秒",
-                    decimals = 2,
+                    initialText = R.string.activity_model_settings_text_26,
                     onValueChange = { onStateChange(state.copy(minSpeech = it)) }
                 )
                 ParameterSlider(
@@ -163,7 +183,7 @@ fun VadModelSettingsScreen(
                     valueRange = 1f..60f,
                     steps = 58,
                     suffix = "秒",
-                    decimals = 1,
+                    initialText = R.string.activity_model_settings_text_29,
                     onValueChange = { onStateChange(state.copy(maxSpeech = it)) }
                 )
             }
@@ -173,31 +193,46 @@ fun VadModelSettingsScreen(
                 Text(
                     text = stringResource(R.string.activity_speech_to_subtitle_settings_text_17),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp)
                 )
-                SettingsSwitch(
-                    title = stringResource(R.string.activity_speech_to_subtitle_settings_text_18),
-                    checked = state.secondaryMode == SettingsManager.SECONDARY_VAD_MODE_UNCOVERED,
-                    onCheckedChange = {
-                        val mode = if (it) SettingsManager.SECONDARY_VAD_MODE_UNCOVERED
-                        else SettingsManager.SECONDARY_VAD_MODE_NONE
-                        onStateChange(state.copy(secondaryMode = mode))
-                    }
-                )
-                SettingsSwitch(
-                    title = stringResource(R.string.activity_speech_to_subtitle_settings_text_20),
-                    checked = state.secondaryMode == SettingsManager.SECONDARY_VAD_MODE_WITHIN_SEGMENTS,
-                    onCheckedChange = {
-                        val mode = if (it) SettingsManager.SECONDARY_VAD_MODE_WITHIN_SEGMENTS
-                        else SettingsManager.SECONDARY_VAD_MODE_NONE
-                        onStateChange(state.copy(secondaryMode = mode))
-                    }
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SettingsSwitch(
+                        title = stringResource(R.string.activity_speech_to_subtitle_settings_text_18),
+                        checked = state.secondaryMode == SettingsManager.SECONDARY_VAD_MODE_UNCOVERED,
+                        onCheckedChange = {
+                            onStateChange(state.copy(
+                                secondaryMode = if (it) SettingsManager.SECONDARY_VAD_MODE_UNCOVERED
+                                else SettingsManager.SECONDARY_VAD_MODE_NONE
+                            ))
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    SettingsSwitch(
+                        title = stringResource(R.string.activity_speech_to_subtitle_settings_text_20),
+                        checked = state.secondaryMode == SettingsManager.SECONDARY_VAD_MODE_WITHIN_SEGMENTS,
+                        onCheckedChange = {
+                            onStateChange(state.copy(
+                                secondaryMode = if (it) SettingsManager.SECONDARY_VAD_MODE_WITHIN_SEGMENTS
+                                else SettingsManager.SECONDARY_VAD_MODE_NONE
+                            ))
+                        },
+                        modifier = Modifier.padding(start = 8.dp).weight(1f)
+                    )
+                }
                 Text(
-                    text = stringResource(R.string.activity_speech_to_subtitle_settings_text_19) + "\n" +
-                        stringResource(R.string.activity_speech_to_subtitle_settings_text_21),
+                    text = stringResource(R.string.activity_speech_to_subtitle_settings_text_19),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = stringResource(R.string.activity_speech_to_subtitle_settings_text_21),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp)
                 )
                 SettingsSwitch(
                     title = stringResource(R.string.activity_speech_to_subtitle_settings_text_35),
@@ -205,7 +240,8 @@ fun VadModelSettingsScreen(
                     checked = state.secondaryMergeEnabled,
                     onCheckedChange = {
                         onStateChange(state.copy(secondaryMergeEnabled = it))
-                    }
+                    },
+                    modifier = Modifier.padding(top = 16.dp)
                 )
                 ParameterSlider(
                     title = R.string.activity_speech_to_subtitle_settings_text_37,
@@ -214,21 +250,25 @@ fun VadModelSettingsScreen(
                     valueRange = 0f..5000f,
                     steps = 99,
                     suffix = "毫秒",
-                    decimals = 0,
                     enabled = state.secondaryMergeEnabled,
+                    initialText = R.string.activity_speech_to_subtitle_settings_text_39,
                     onValueChange = { value ->
-                        onStateChange(state.copy(secondaryMergeGapMs = (value / 50f).roundToInt() * 50))
+                        onStateChange(
+                            state.copy(secondaryMergeGapMs = (value / 50f).roundToInt() * 50)
+                        )
                     }
                 )
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                SectionHeading(stringResource(R.string.activity_speech_to_subtitle_settings_text_22))
+                SectionHeading(
+                    stringResource(R.string.activity_speech_to_subtitle_settings_text_22),
+                    modifier = Modifier.padding(top = 16.dp)
+                )
                 ParameterSlider(
                     title = R.string.activity_speech_to_subtitle_settings_text_23,
                     description = R.string.activity_speech_to_subtitle_settings_text_24,
                     value = state.secondaryThreshold,
                     valueRange = 0.01f..0.9f,
                     steps = 88,
-                    decimals = 2,
+                    initialText = R.string.activity_speech_to_subtitle_settings_text_25,
                     onValueChange = { onStateChange(state.copy(secondaryThreshold = it)) }
                 )
                 ParameterSlider(
@@ -238,7 +278,7 @@ fun VadModelSettingsScreen(
                     valueRange = 0.01f..2f,
                     steps = 198,
                     suffix = "秒",
-                    decimals = 2,
+                    initialText = R.string.activity_speech_to_subtitle_settings_text_28,
                     onValueChange = { onStateChange(state.copy(secondaryMinSilence = it)) }
                 )
                 ParameterSlider(
@@ -248,7 +288,7 @@ fun VadModelSettingsScreen(
                     valueRange = 0.01f..1f,
                     steps = 98,
                     suffix = "秒",
-                    decimals = 2,
+                    initialText = R.string.activity_speech_to_subtitle_settings_text_31,
                     onValueChange = { onStateChange(state.copy(secondaryMinSpeech = it)) }
                 )
                 ParameterSlider(
@@ -258,7 +298,7 @@ fun VadModelSettingsScreen(
                     valueRange = 1f..60f,
                     steps = 58,
                     suffix = "秒",
-                    decimals = 1,
+                    initialText = R.string.activity_speech_to_subtitle_settings_text_34,
                     onValueChange = { onStateChange(state.copy(secondaryMaxSpeech = it)) }
                 )
             }
@@ -270,19 +310,19 @@ fun VadModelSettingsScreen(
 private fun VadSettingsCard(content: @Composable ColumnScope.() -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp)
+        shape = RoundedCornerShape(8.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
             content = content
         )
     }
 }
 
 @Composable
-private fun SectionHeading(text: String) {
-    Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+private fun SectionHeading(text: String, modifier: Modifier = Modifier) {
+    Text(text, modifier = modifier, fontSize = 16.sp, fontWeight = FontWeight.Bold)
 }
 
 @Composable
@@ -290,19 +330,32 @@ private fun SettingsSwitch(
     title: String,
     description: String? = null,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            description?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 40.dp)
+                .toggleable(
+                    value = checked,
+                    role = Role.Switch,
+                    onValueChange = onCheckedChange
+                ),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(title, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            Switch(checked = checked, onCheckedChange = null)
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        description?.let {
+            Text(
+                it,
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
     }
 }
 
@@ -314,27 +367,36 @@ private fun ParameterSlider(
     valueRange: ClosedFloatingPointRange<Float>,
     steps: Int,
     suffix: String = "",
-    decimals: Int,
     enabled: Boolean = true,
+    initialText: Int,
+    modifier: Modifier = Modifier,
     onValueChange: (Float) -> Unit
 ) {
-    var valueText by remember(value, decimals) { mutableStateOf(formatValue(value, decimals)) }
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(stringResource(title), style = MaterialTheme.typography.bodyMedium)
+    val defaultText = stringResource(initialText)
+    var valueText by remember { mutableStateOf(formatSliderValue(value, suffix, defaultText)) }
+    var editingText by remember { mutableStateOf(false) }
+    LaunchedEffect(value, editingText) {
+        if (!editingText) valueText = formatSliderValue(value, suffix, defaultText)
+    }
+    val fieldWidth: Dp = when {
+        suffix == "毫秒" -> 104.dp
+        suffix.isNotEmpty() -> 90.dp
+        else -> 80.dp
+    }
+    Column(modifier = modifier.fillMaxWidth().padding(top = 12.dp)) {
+        Text(stringResource(title), fontSize = 14.sp)
         Text(
             text = stringResource(description),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp)
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             Slider(
                 value = value,
-                onValueChange = { changed ->
-                    if (enabled) {
-                        val snapped = snapValue(changed, valueRange, decimals, steps)
-                        valueText = formatValue(snapped, decimals)
-                        onValueChange(snapped)
-                    }
+                onValueChange = {
+                    onValueChange(it)
+                    if (!editingText) valueText = formatSliderValue(it, suffix, defaultText)
                 },
                 valueRange = valueRange,
                 steps = steps,
@@ -343,37 +405,42 @@ private fun ParameterSlider(
             )
             OutlinedTextField(
                 value = valueText,
-                onValueChange = { text ->
-                    valueText = text
-                    text.toFloatOrNull()?.takeIf { it in valueRange }?.let(onValueChange)
+                onValueChange = { input ->
+                    valueText = input
+                    if (!input.isBlank() && !input.endsWith('.')) input.toFloatOrNull()?.let { parsed ->
+                        val normalized = when (suffix) {
+                            "毫秒" -> parsed.roundToInt().coerceIn(0, 5000).toFloat()
+                            else -> {
+                                val step = (valueRange.endInclusive - valueRange.start) / (steps + 1)
+                                (valueRange.start +
+                                    ((parsed.coerceIn(valueRange.start, valueRange.endInclusive) - valueRange.start) /
+                                        step).roundToInt() * step)
+                                    .coerceIn(valueRange.start, valueRange.endInclusive)
+                            }
+                        }
+                        onValueChange(normalized)
+                        valueText = formatSliderValue(normalized, suffix, defaultText)
+                    }
                 },
-                enabled = enabled,
                 modifier = Modifier
                     .padding(start = 8.dp)
-                    .width(if (suffix.isEmpty()) 88.dp else 112.dp),
+                    .width(fieldWidth)
+                    .onFocusChanged { editingText = it.isFocused },
+                enabled = enabled,
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                textStyle = TextStyle(fontSize = 14.sp, textAlign = TextAlign.Center),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = if (suffix == "毫秒") KeyboardType.Number else KeyboardType.Decimal
+                ),
                 suffix = { if (suffix.isNotEmpty()) Text(suffix) }
             )
         }
     }
 }
 
-private fun snapValue(
-    value: Float,
-    range: ClosedFloatingPointRange<Float>,
-    decimals: Int,
-    steps: Int
-): Float {
-    val bounded = value.coerceIn(range)
-    if (decimals == 0) return bounded.roundToInt().toFloat()
-    val step = (range.endInclusive - range.start) / (steps + 1)
-    return (range.start + ((bounded - range.start) / step).roundToInt() * step)
-        .coerceIn(range)
-}
-
-private fun formatValue(value: Float, decimals: Int): String = when (decimals) {
-    0 -> value.roundToInt().toString()
-    1 -> "%.1f".format(value)
-    else -> "%.2f".format(value)
+private fun formatSliderValue(value: Float, suffix: String, fallback: String): String = when {
+    suffix == "毫秒" -> value.roundToInt().toString()
+    suffix == "秒" && value >= 1f -> value.roundToInt().toString()
+    suffix == "秒" -> String.format(java.util.Locale.US, "%.2f", value)
+    else -> fallback
 }

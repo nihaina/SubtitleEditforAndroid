@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -59,6 +60,7 @@ fun WhisperSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.height(56.dp),
                 title = { Text(stringResource(R.string.activity_whisper_settings_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -76,7 +78,7 @@ fun WhisperSettingsScreen(
                 .fillMaxSize()
                 .padding(contentPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             WhisperSettingsCard {
@@ -87,7 +89,7 @@ fun WhisperSettingsScreen(
                 )
                 OutlinedButton(
                     onClick = onOpenVadSettings,
-                    modifier = Modifier.padding(top = 8.dp)
+                    modifier = Modifier.padding(top = 12.dp)
                 ) {
                     Text(stringResource(R.string.asr_vad_settings_entry))
                 }
@@ -149,7 +151,7 @@ fun WhisperSettingsScreen(
                     text = stringResource(R.string.activity_whisper_settings_hotwords_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 2.dp)
+                    modifier = Modifier.padding(top = 4.dp)
                 )
                 OutlinedTextField(
                     value = state.hotwords,
@@ -165,18 +167,18 @@ fun WhisperSettingsScreen(
                     text = stringResource(R.string.activity_whisper_settings_hotwords_format_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 4.dp, top = 6.dp)
+                    modifier = Modifier.padding(top = 6.dp)
                 )
                 OutlinedButton(
                     onClick = onSaveHotwords,
-                    modifier = Modifier.padding(top = 4.dp)
+                    modifier = Modifier.padding(top = 8.dp)
                 ) {
                     Text(stringResource(R.string.activity_whisper_settings_hotwords_save))
                 }
                 Text(
                     text = stringResource(R.string.activity_whisper_settings_hotwords_score_title),
                     style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(start = 4.dp, top = 14.dp)
+                    modifier = Modifier.padding(top = 14.dp)
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),

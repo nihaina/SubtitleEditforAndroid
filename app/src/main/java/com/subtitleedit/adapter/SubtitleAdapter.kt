@@ -38,6 +38,8 @@ class SubtitleAdapter(
         Collections.newSetFromMap(IdentityHashMap())
 
     private var searchHighlightPosition = -1
+    /** Stable document identity for the current search result. Positions can change after edits. */
+    private var searchHighlightStableId: Long? = null
     private var searchQuery = ""
     private var searchMatchCase = false
     private var searchWholeWord = false
@@ -49,16 +51,53 @@ class SubtitleAdapter(
 
     fun submitList(entries: List<SubtitleEntry>, commitCallback: (() -> Unit)? = null) {
         val selectedIds = selectedEntries.mapTo(mutableSetOf()) { it.stableId }
-        currentListState = entries
+        // Compose rows must not share mutable SubtitleEntry instances with the document.  The
+        // editor updates the live model in place during waveform drags; sharing an object here
+        // lets its fields change without a snapshot publication and leaves a row visually stale.
+        val snapshot = entries.map { it.copy() }
+        currentListState = snapshot
         selectedEntries.clear()
-        entries.filterTo(selectedEntries) { it.stableId in selectedIds }
+        snapshot.filterTo(selectedEntries) { it.stableId in selectedIds }
         invalidateCompose()
         commitCallback?.invoke()
+    }
+
+    /**
+     * Replace the row snapshot after an in-place document edit.
+     *
+     * The legacy RecyclerView kept mutable row objects and refreshed them with a payload. The
+     * Compose list is rendered from a detached snapshot, so a drag or time edit must also update
+     * the adapter's backing list. Keep selection by stable id while replacing the objects; this
+     * prevents later commands from reading the pre-edit time/text values.
+     */
+    fun replaceListSnapshot(entries: List<SubtitleEntry>) {
+        val selectedIds = selectedEntries.mapTo(mutableSetOf()) { it.stableId }
+        val snapshot = entries.map { it.copy() }
+        currentListState = snapshot
+        selectedEntries.clear()
+        snapshot.filterTo(selectedEntries) { it.stableId in selectedIds }
+        invalidateCompose()
+    }
+
+    /**
+     * Replace only the rows changed by an in-place document edit.
+     *
+     * Source-view typing can resolve one cue without reparsing the whole document.  Keep the
+     * detached adapter snapshot aligned with that cue without copying every row on each key.
+     */
+    fun replaceListEntries(changes: Map<Int, SubtitleEntry>) {
+        if (changes.isEmpty()) return
+        val updated = currentListState.toMutableList()
+        val validChanges = changes.filterKeys { it in updated.indices }
+        if (validChanges.isEmpty()) return
+        validChanges.forEach { (position, entry) -> updated[position] = entry.copy() }
+        replaceListSnapshot(updated)
     }
 
     fun isPlayingPosition(position: Int): Boolean = position == currentPlayingPosition
     fun hasPlayableMedia(): Boolean = hasPlayableMedia
     fun searchHighlightPosition(): Int = searchHighlightPosition
+    fun searchHighlightStableId(): Long? = searchHighlightStableId
     fun searchQuery(): String = searchQuery
     fun searchMatchCase(): Boolean = searchMatchCase
     fun searchWholeWord(): Boolean = searchWholeWord
@@ -77,6 +116,16 @@ class SubtitleAdapter(
     }
 
     fun isSelected(position: Int): Boolean = currentList.getOrNull(position)?.let(selectedEntries::contains) == true
+
+    /**
+     * Resolve a row by its stable document id at action time.
+     *
+     * Compose keeps a LazyColumn item group by key while the document can insert or remove
+     * rows around it.  Callers must therefore use the current snapshot position instead of a
+     * position captured when the row was composed (the old RecyclerView used adapterPosition).
+     */
+    fun positionOfStableId(stableId: Long): Int =
+        currentList.indexOfFirst { it.stableId == stableId }
 
     fun getSelectedPositions(): Set<Int> = currentList.mapIndexedNotNullTo(mutableSetOf()) { index, entry ->
         index.takeIf { selectedEntries.contains(entry) }
@@ -146,9 +195,11 @@ class SubtitleAdapter(
         position: Int,
         query: String,
         matchCase: Boolean = false,
-        wholeWord: Boolean = false
+        wholeWord: Boolean = false,
+        stableId: Long? = null
     ) {
         searchHighlightPosition = position
+        searchHighlightStableId = stableId ?: currentList.getOrNull(position)?.stableId
         searchQuery = query
         searchMatchCase = matchCase
         searchWholeWord = wholeWord
@@ -157,6 +208,7 @@ class SubtitleAdapter(
 
     fun clearSearchHighlight() {
         searchHighlightPosition = -1
+        searchHighlightStableId = null
         searchQuery = ""
         searchMatchCase = false
         searchWholeWord = false

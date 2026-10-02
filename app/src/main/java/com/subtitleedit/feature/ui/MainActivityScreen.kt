@@ -11,11 +11,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,8 +23,10 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -36,8 +37,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -53,26 +52,32 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
+import androidx.appcompat.R as AppCompatR
 import com.subtitleedit.FileOperation
+import com.subtitleedit.DirectoryScrollPosition
 import com.subtitleedit.MainTopLevelPages
 import com.subtitleedit.MainTopLevelPagesState
 import com.subtitleedit.R
 import com.subtitleedit.util.AndroidDirectoryPolicy
 import com.subtitleedit.util.FileOperationUiPolicy
 import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.FilePathPolicy
 import com.subtitleedit.util.MainNavigationPolicy
 import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
@@ -83,14 +88,23 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+internal data class MainDirectoryScrollRequest(
+    val generation: Long,
+    val directoryPath: String,
+    val savedPosition: DirectoryScrollPosition?
+)
+
 internal data class MainActivityScreenState(
     val selectedTopLevelItem: Int = R.id.nav_directory,
     val toolbarTitle: String = "",
     val toolbarHasBack: Boolean = false,
     val isDirectoryLoading: Boolean = false,
     val isSearchInProgress: Boolean = false,
+    val showDirectoryEmptyState: Boolean = false,
+    val directoryEmptyStateMessage: Int = R.string.no_files,
     val currentDirectory: File? = null,
     val files: List<File> = emptyList(),
+    val scrollRequest: MainDirectoryScrollRequest? = null,
     val relativePathRoot: File? = null,
     val selectedPaths: Set<String> = emptySet(),
     val pendingOperation: FileOperation? = null,
@@ -111,6 +125,7 @@ internal data class MainCreateItemError(val field: MainCreateItemField, val mess
 internal fun MainActivityScreen(
     state: MainActivityScreenState,
     topLevelPageRefreshVersion: Int,
+    topLevelPageSelectionVersion: Int,
     onDirectoryListState: (LazyListState) -> Unit,
     onTopLevelPageSelected: (Int) -> Unit,
     onOpenDirectoryFromFavorites: (File) -> Unit,
@@ -164,10 +179,28 @@ internal fun MainActivityScreen(
     var createExtensionError by remember { mutableStateOf<String?>(null) }
     var showSortDialog by remember { mutableStateOf(false) }
     val isDirectoryPage = state.selectedTopLevelItem == R.id.nav_directory
-    val isSelectionActive = state.selectedPaths.isNotEmpty() || state.pendingOperation != null
+    // Selection actions belong to directoryContent in the legacy layout. The
+    // selection state can survive a top-level tab switch, but its toolbar and
+    // bottom action row stay hidden until the directory tab is visible again.
+    val isSelectionActive = isDirectoryPage &&
+        (state.selectedPaths.isNotEmpty() || state.pendingOperation != null)
     val searchFocusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    val createNameFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(createDialogKind) {
+        if (createDialogKind != null) {
+            createName = ""
+            createExtension = "txt"
+            createNameError = null
+            createExtensionError = null
+        }
+        if (createDialogKind == MainCreateItemKind.FILE) {
+            createNameFocusRequester.requestFocus()
+            keyboardController?.show()
+        }
+    }
     LaunchedEffect(state.isSearchExpanded, isSelectionActive, isDirectoryPage) {
         if (state.isSearchExpanded && !isSelectionActive && isDirectoryPage) {
             searchFocusRequester.requestFocus()
@@ -184,18 +217,70 @@ internal fun MainActivityScreen(
             .background(MaterialTheme.colorScheme.background)
     ) {
         TopAppBar(
+            modifier = Modifier.height(56.dp),
             title = {
                 if (state.isSearchExpanded && isDirectoryPage && !isSelectionActive) {
-                    OutlinedTextField(
-                        value = state.searchQuery,
-                        onValueChange = onSearchChanged,
-                        modifier = Modifier.fillMaxWidth().focusRequester(searchFocusRequester),
-                        placeholder = { Text(stringResource(R.string.file_search_hint)) },
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyLarge,
-                        keyboardOptions = KeyboardOptions.Default.copy(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { keyboardController?.hide() })
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        BasicTextField(
+                            value = state.searchQuery,
+                            onValueChange = onSearchChanged,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp)
+                                .focusRequester(searchFocusRequester),
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                color = MaterialTheme.colorScheme.onSurface
+                            ),
+                            keyboardOptions = KeyboardOptions.Default.copy(
+                                autoCorrectEnabled = false,
+                                imeAction = androidx.compose.ui.text.input.ImeAction.Search
+                            ),
+                            // SearchView's submit listener returned true without
+                            // changing the query or collapsing the action view.
+                            keyboardActions = KeyboardActions(onSearch = {}),
+                            decorationBox = { innerTextField ->
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 8.dp),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    if (state.searchQuery.isEmpty()) {
+                                        Text(
+                                            text = stringResource(R.string.file_search_hint),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            style = MaterialTheme.typography.bodyLarge
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            }
+                        )
+                        IconButton(
+                            onClick = {
+                                if (state.searchQuery.isEmpty()) onToolbarBack()
+                                else onSearchChanged("")
+                            },
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Icon(
+                                painterResource(AppCompatR.drawable.abc_ic_clear_material),
+                                contentDescription = if (state.searchQuery.isEmpty()) {
+                                    stringResource(R.string.cancel)
+                                } else {
+                                    "清除搜索"
+                                },
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
                 } else {
                     val title = when {
                         state.toolbarTitle.isNotBlank() -> state.toolbarTitle
@@ -214,7 +299,7 @@ internal fun MainActivityScreen(
                 }
             },
             navigationIcon = {
-                if (state.toolbarHasBack || isSelectionActive || state.isSearchExpanded) {
+                if (state.toolbarHasBack || isSelectionActive) {
                     IconButton(onClick = onToolbarBack) {
                         Icon(
                             painter = painterResource(
@@ -229,7 +314,24 @@ internal fun MainActivityScreen(
                 }
             },
             actions = {
-                if (isDirectoryPage && !isSelectionActive) {
+                if (isDirectoryPage && isSelectionActive) {
+                    // The legacy menu keeps these actions available while a
+                    // selection is active, except during destination picking.
+                    if (state.pendingOperation == null && state.selectedPaths.isNotEmpty()) {
+                        IconButton(onClick = onSelectAll) {
+                            Icon(
+                                painterResource(R.drawable.ic_select_all),
+                                contentDescription = stringResource(R.string.source_selection_select_all)
+                            )
+                        }
+                        IconButton(onClick = onSelectRange) {
+                            Icon(
+                                painterResource(R.drawable.ic_select_range),
+                                contentDescription = "局部全选"
+                            )
+                        }
+                    }
+                } else if (isDirectoryPage) {
                     if (!state.isSearchExpanded) {
                         IconButton(onClick = onSearchRequested) {
                             Icon(painterResource(R.drawable.ic_search), contentDescription = stringResource(R.string.menu_search))
@@ -291,13 +393,6 @@ internal fun MainActivityScreen(
                             )
                         }
                     }
-                } else if (isDirectoryPage && state.pendingOperation == null && state.selectedPaths.isNotEmpty()) {
-                    IconButton(onClick = onSelectAll) {
-                        Icon(painterResource(R.drawable.ic_select_all), contentDescription = stringResource(R.string.source_selection_select_all))
-                    }
-                    IconButton(onClick = onSelectRange) {
-                        Icon(painterResource(R.drawable.ic_select_range), contentDescription = "局部全选")
-                    }
                 }
             }
         )
@@ -314,6 +409,7 @@ internal fun MainActivityScreen(
                 MainTopLevelPages(
                     selectedPage = state.selectedTopLevelItem,
                     refreshVersion = topLevelPageRefreshVersion,
+                    selectionVersion = topLevelPageSelectionVersion,
                     state = topLevelPagesState,
                     onOpenDirectory = onOpenDirectoryFromFavorites,
                     onToolbarChanged = onUpdateTopLevelToolbar
@@ -336,7 +432,10 @@ internal fun MainActivityScreen(
                 onConfirmDestination = onConfirmDestination,
                 onCancelDestination = onCancelDestination
             )
-        } else {
+        }
+        // The legacy activity hides bottom navigation while a file selection or
+        // destination operation is active. It returns after the operation exits.
+        if (state.selectedPaths.isEmpty() && state.pendingOperation == null) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             MainBottomNavigation(
                 selectedItemId = state.selectedTopLevelItem,
@@ -350,12 +449,12 @@ internal fun MainActivityScreen(
             onDismissRequest = { createDialogKind = null },
             title = { Text(if (kind == MainCreateItemKind.FOLDER) "新建文件夹" else "新建文件") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column {
                     OutlinedTextField(
                         value = createName,
                         onValueChange = { createName = it; createNameError = null },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text(if (kind == MainCreateItemKind.FOLDER) "文件夹名称" else "文件名") },
+                        modifier = Modifier.fillMaxWidth().focusRequester(createNameFocusRequester),
+                        placeholder = { Text(if (kind == MainCreateItemKind.FOLDER) "文件夹名称" else "文件名") },
                         singleLine = true,
                         isError = createNameError != null,
                         supportingText = { createNameError?.let { Text(it) } }
@@ -365,7 +464,7 @@ internal fun MainActivityScreen(
                             value = createExtension,
                             onValueChange = { createExtension = it; createExtensionError = null },
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("扩展名") },
+                            placeholder = { Text("扩展名") },
                             singleLine = true,
                             isError = createExtensionError != null,
                             supportingText = { createExtensionError?.let { Text(it) } }
@@ -396,8 +495,7 @@ internal fun MainActivityScreen(
             onDismissRequest = { showSortDialog = false },
             title = { Text("排序") },
             text = {
-                Column {
-                    Text("排序方式", style = MaterialTheme.typography.labelLarge)
+                Column(Modifier.padding(8.dp)) {
                     listOf(
                         "名称" to FileSortField.NAME,
                         "类型" to FileSortField.TYPE,
@@ -405,38 +503,52 @@ internal fun MainActivityScreen(
                         "日期" to FileSortField.DATE
                     ).forEach { (label, field) ->
                         Row(
-                            modifier = Modifier.fillMaxWidth().clickable { onSortFieldChanged(field) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .background(
+                                    if (state.sortField == field) MaterialTheme.colorScheme.primaryContainer
+                                    else Color.Transparent
+                                )
+                                .clickable { onSortFieldChanged(field) }
+                                .padding(start = 16.dp, end = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Text(label, modifier = Modifier.weight(1f), fontSize = 16.sp)
                             RadioButton(
                                 selected = state.sortField == field,
-                                onClick = { onSortFieldChanged(field) }
+                                onClick = null,
+                                modifier = Modifier.width(40.dp)
                             )
-                            Text(label)
                         }
                     }
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
-                    Text("顺序", style = MaterialTheme.typography.labelLarge)
                     listOf(
                         "升序" to FileSortDirection.ASCENDING,
                         "降序" to FileSortDirection.DESCENDING
                     ).forEach { (label, direction) ->
                         Row(
-                            modifier = Modifier.fillMaxWidth().clickable { onSortDirectionChanged(direction) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .background(
+                                    if (state.sortDirection == direction) MaterialTheme.colorScheme.primaryContainer
+                                    else Color.Transparent
+                                )
+                                .clickable { onSortDirectionChanged(direction) }
+                                .padding(start = 16.dp, end = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Text(label, modifier = Modifier.weight(1f), fontSize = 16.sp)
                             RadioButton(
                                 selected = state.sortDirection == direction,
-                                onClick = { onSortDirectionChanged(direction) }
+                                onClick = null,
+                                modifier = Modifier.width(40.dp)
                             )
-                            Text(label)
                         }
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = { showSortDialog = false }) { Text(stringResource(R.string.confirm)) }
-            },
+            confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { showSortDialog = false }) { Text(stringResource(R.string.cancel)) }
             }
@@ -470,25 +582,43 @@ private fun DirectoryBrowserContent(
     onFileClick: (File) -> Unit,
     onFileLongClick: (File) -> Unit
 ) {
+    val scrollRequest = state.scrollRequest
+    var appliedScrollGeneration by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(scrollRequest, state.files, state.currentDirectory) {
+        val request = scrollRequest ?: return@LaunchedEffect
+        if (appliedScrollGeneration == request.generation || state.files.isEmpty()) return@LaunchedEffect
+        if (state.currentDirectory?.let(FilePathPolicy::canonicalOrAbsolute) != request.directoryPath) {
+            return@LaunchedEffect
+        }
+        val savedPosition = request.savedPosition
+        val position = savedPosition?.firstVisiblePath?.let { path ->
+            state.files.indexOfFirst { it.absolutePath == path }
+        }?.takeIf { it >= 0 } ?: savedPosition?.firstVisibleIndex ?: 0
+        listState.scrollToItem(position.coerceIn(0, state.files.lastIndex), savedPosition?.offset ?: 0)
+        appliedScrollGeneration = request.generation
+    }
     Column(Modifier.fillMaxSize()) {
         state.currentDirectory?.let { directory ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = directory.absolutePath,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    fontSize = 14.sp,
                     maxLines = 1,
                     softWrap = false
                 )
             }
         }
-        if (state.isDirectoryLoading || state.isSearchInProgress) {
+        // The legacy directory screen only exposed progress while a recursive
+        // search was running. Loading a directory kept the existing list and
+        // did not replace the empty-state text with the search message.
+        if (state.isSearchInProgress) {
             androidx.compose.material3.LinearProgressIndicator(
                 modifier = Modifier.fillMaxWidth().height(2.dp)
             )
@@ -496,32 +626,25 @@ private fun DirectoryBrowserContent(
             Spacer(Modifier.fillMaxWidth().height(2.dp))
         }
 
-        if (state.files.isEmpty()) {
+        if (state.showDirectoryEmptyState) {
             Box(
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = stringResource(
-                        if (state.isDirectoryLoading || state.isSearchInProgress) R.string.file_searching
-                        else R.string.no_files
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = stringResource(state.directoryEmptyStateMessage),
+                    color = MaterialTheme.colorScheme.onBackground,
                     style = MaterialTheme.typography.bodyLarge
                 )
             }
-        } else {
+        } else if (state.files.isNotEmpty()) {
             LazyColumn(
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 state = listState,
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    horizontal = 8.dp,
-                    vertical = 4.dp
-                ),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp)
             ) {
                 items(state.files, key = { it.absolutePath }) { file ->
-                    MainFileRow(
+                    BrowserFileRow(
                         file = file,
                         relativePathRoot = state.relativePathRoot,
                         isSelected = file.absolutePath in state.selectedPaths,
@@ -531,23 +654,31 @@ private fun DirectoryBrowserContent(
                     )
                 }
             }
+        } else {
+            Spacer(Modifier.weight(1f))
         }
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MainFileRow(
+internal fun BrowserFileRow(
     file: File,
     relativePathRoot: File?,
     isSelected: Boolean,
     isSelectionMode: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit
+    onLongClick: () -> Unit,
+    restrictedOverride: Boolean? = null
 ) {
     val context = LocalContext.current
     val locale = LocalLocale.current.platformLocale
-    val restricted = remember(file.absolutePath) { AndroidDirectoryPolicy.isRestricted(file) }
+    // FavoritesFragment historically used FileListAdapter without an
+    // isItemRestricted callback. Preserve that behavior for its rows while
+    // keeping the Android/data restriction for the main browser.
+    val restricted = remember(file.absolutePath, restrictedOverride) {
+        restrictedOverride ?: AndroidDirectoryPolicy.isRestricted(file)
+    }
     val previewKey = remember(file.absolutePath, file.length(), file.lastModified()) {
         "${file.absolutePath}:${file.length()}:${file.lastModified()}"
     }
@@ -574,11 +705,11 @@ private fun MainFileRow(
     val alpha = when {
         isSelectionMode && !isSelected -> 0.72f
         restricted -> 0.55f
-        file.name.startsWith(".") && file.name != ".." -> 0.72f
         else -> 1f
     }
+    val selectionStrokeWidth = with(LocalDensity.current) { 2.toDp() }
     val border = if (isSelected) {
-        BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+        BorderStroke(selectionStrokeWidth, MaterialTheme.colorScheme.primary)
     } else {
         BorderStroke(0.dp, Color.Transparent)
     }
@@ -586,43 +717,52 @@ private fun MainFileRow(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(4.dp)
             .alpha(alpha)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = { if (restricted) onClick() else onLongClick() }
             ),
-        shape = MaterialTheme.shapes.small,
-        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surface,
         border = border,
-        tonalElevation = 1.dp
+        shadowElevation = 2.dp
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             FileRowIcon(file, preview?.bitmap, restricted)
             Column(
-                modifier = Modifier.weight(1f).padding(start = 12.dp),
+                modifier = Modifier.weight(1f).padding(start = 8.dp),
                 verticalArrangement = Arrangement.Center
             ) {
                 Text(
                     text = displayName,
                     color = if (restricted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                    style = MaterialTheme.typography.titleSmall,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.MiddleEllipsis
                 )
                 if (file.isDirectory && file.name != "..") {
-                    if (!restricted && directoryCount != null) {
-                        val count = directoryCount!!
-                        Text(
-                            text = if (count < 0) "" else if (count == 0) stringResource(R.string.directory_empty)
-                            else stringResource(R.string.directory_item_count, count),
-                            modifier = Modifier.padding(top = 4.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1
-                        )
+                    if (!restricted) {
+                        val count = directoryCount
+                        if (count == null || count >= 0) {
+                            Text(
+                                text = when {
+                                    count == null -> ""
+                                    count == 0 -> stringResource(R.string.directory_empty)
+                                    else -> stringResource(R.string.directory_item_count, count)
+                                },
+                                modifier = Modifier.padding(top = 4.dp)
+                                    .alpha(if (count == null) 0f else 1f),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
                     }
                 } else if (!file.isDirectory) {
                     Row(
@@ -631,43 +771,60 @@ private fun MainFileRow(
                     ) {
                         Text(
                             text = FileUtils.formatFileSize(file.length()),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 12.sp,
                             maxLines = 1
                         )
-                        preview?.mediaDuration?.takeIf(String::isNotEmpty)?.let { duration ->
+                        val mediaFile = MainFilePreviewLoader.isMediaFile(file)
+                        if (mediaFile && preview == null) {
                             Text(
-                                text = duration,
-                                modifier = Modifier.padding(start = 12.dp),
+                                text = "00:00",
+                                modifier = Modifier
+                                    .padding(start = 12.dp)
+                                    .width(72.dp)
+                                    .alpha(0f),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodySmall
+                                fontSize = 12.sp
                             )
+                        } else {
+                            preview?.mediaDuration?.takeIf(String::isNotEmpty)?.let { duration ->
+                                Text(
+                                    text = duration,
+                                    modifier = Modifier.padding(start = 12.dp).width(72.dp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 12.sp
+                                )
+                            }
                         }
                     }
                 }
             }
-            Spacer(Modifier.width(8.dp))
-            Column(horizontalAlignment = Alignment.End) {
+            Column(
+                modifier = Modifier.padding(start = 8.dp),
+                horizontalAlignment = Alignment.End
+            ) {
                 if (file.isDirectory) {
                     if (file.name != "..") {
+                        Spacer(Modifier.height(24.dp))
                         Text(
                             text = modifiedTime,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(top = 5.dp),
                             maxLines = 1
                         )
                     }
                 } else {
                     if (file.extension.isNotEmpty()) {
                         Surface(
-                            shape = MaterialTheme.shapes.extraSmall,
+                            shape = RoundedCornerShape(4.dp),
                             color = MaterialTheme.colorScheme.primary
                         ) {
                             Text(
                                 text = file.extension.uppercase(locale),
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White,
+                                fontSize = 12.sp,
                                 maxLines = 1
                             )
                         }
@@ -676,7 +833,7 @@ private fun MainFileRow(
                         text = modifiedTime,
                         modifier = Modifier.padding(top = 5.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 11.sp,
                         maxLines = 1
                     )
                 }
@@ -687,28 +844,28 @@ private fun MainFileRow(
 
 @Composable
 private fun FileRowIcon(file: File, bitmap: android.graphics.Bitmap?, restricted: Boolean) {
-    val iconColor = if (restricted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
-    Surface(
-        modifier = Modifier.size(48.dp),
-        shape = MaterialTheme.shapes.small,
-        color = MaterialTheme.colorScheme.surfaceVariant
+    val iconDescription = stringResource(R.string.file_name)
+    Box(
+        modifier = Modifier.size(48.dp).alpha(
+            if (file.name.startsWith(".") && file.name != "..") 0.5f else 1f
+        ),
+        contentAlignment = Alignment.Center
     ) {
         if (bitmap != null) {
+            val isApk = file.extension.equals("apk", ignoreCase = true)
             androidx.compose.foundation.Image(
                 bitmap = bitmap.asImageBitmap(),
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize().clip(MaterialTheme.shapes.small),
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                contentDescription = iconDescription,
+                modifier = if (isApk) Modifier.fillMaxSize().padding(8.dp) else Modifier.fillMaxSize(),
+                contentScale = if (isApk) ContentScale.Fit else ContentScale.Crop
             )
         } else {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    painter = painterResource(MainFilePreviewLoader.iconResource(file)),
-                    contentDescription = null,
-                    modifier = Modifier.size(28.dp),
-                    tint = iconColor
-                )
-            }
+            Icon(
+                painter = painterResource(MainFilePreviewLoader.iconResource(file)),
+                contentDescription = iconDescription,
+                modifier = Modifier.size(32.dp),
+                tint = if (restricted) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified
+            )
         }
     }
 }
@@ -729,10 +886,10 @@ private fun SelectionActions(
     onCancelDestination: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    Spacer(Modifier.fillMaxWidth().height(4.dp).background(MaterialTheme.colorScheme.surface))
     if (operation == null) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(68.dp).background(MaterialTheme.colorScheme.surface),
+            modifier = Modifier.fillMaxWidth().height(64.dp).background(MaterialTheme.colorScheme.surface),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -768,14 +925,14 @@ private fun SelectionActions(
         }
     } else {
         Row(
-            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 16.dp, end = 8.dp),
+            modifier = Modifier.fillMaxWidth().height(64.dp).padding(start = 16.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = stringResource(R.string.activity_main_text_02),
                 modifier = Modifier.weight(1f),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall
+                fontSize = 13.sp
             )
             TextButton(onClick = onCancelDestination) { Text(stringResource(R.string.cancel)) }
             Button(onClick = onConfirmDestination) {
@@ -789,22 +946,26 @@ private fun SelectionActions(
 private fun SelectionAction(modifier: Modifier, icon: Int, label: String, onClick: () -> Unit) {
     Column(
         modifier = modifier
-            .height(68.dp)
+            .height(64.dp)
             .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(painterResource(icon), contentDescription = label, modifier = Modifier.size(24.dp))
-        Text(label, modifier = Modifier.padding(top = 2.dp), style = MaterialTheme.typography.labelSmall, maxLines = 1)
+        Icon(
+            painterResource(icon),
+            contentDescription = label,
+            modifier = Modifier.size(24.dp),
+            tint = Color.Unspecified
+        )
+        Text(label, modifier = Modifier.padding(top = 2.dp), fontSize = 12.sp, maxLines = 1)
     }
 }
 
 @Composable
 private fun MainBottomNavigation(selectedItemId: Int, onSelected: (Int) -> Unit) {
-    NavigationBar(
-        modifier = Modifier.fillMaxWidth().height(60.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
-        windowInsets = WindowInsets(0.dp, 0.dp, 0.dp, 0.dp)
+    Row(
+        modifier = Modifier.fillMaxWidth().height(52.dp).background(MaterialTheme.colorScheme.surface),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         val items = listOf(
             Triple(R.id.nav_directory, R.drawable.ic_nav_folder, R.string.nav_directory),
@@ -814,13 +975,30 @@ private fun MainBottomNavigation(selectedItemId: Int, onSelected: (Int) -> Unit)
             Triple(R.id.nav_settings, R.drawable.ic_settings, R.string.menu_main_title_02)
         )
         items.forEach { (id, icon, title) ->
-            NavigationBarItem(
-                selected = selectedItemId == id,
-                onClick = { onSelected(id) },
-                icon = { Icon(painterResource(icon), contentDescription = null, modifier = Modifier.size(22.dp)) },
-                label = { Text(stringResource(title), maxLines = 1) },
-                alwaysShowLabel = true
-            )
+            val label = stringResource(title)
+            val tint = if (selectedItemId == id) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .padding(vertical = 4.dp)
+                    // BottomNavigationView dispatched the selection callback even
+                    // when the tapped item was already selected. MainActivity uses
+                    // that callback to recreate/reset the corresponding top-level
+                    // page, so repeated taps must remain observable here.
+                    .clickable { onSelected(id) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    painter = painterResource(icon),
+                    contentDescription = label,
+                    modifier = Modifier.size(24.dp),
+                    tint = tint
+                )
+                Text(label, color = tint, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+            }
         }
     }
 }

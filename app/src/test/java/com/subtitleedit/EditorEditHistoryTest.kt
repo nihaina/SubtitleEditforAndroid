@@ -190,6 +190,40 @@ class EditorEditHistoryTest {
     }
 
     @Test
+    fun splitHistoryUndoRestoresTheOriginalCueInsteadOfKeepingOnlyTheLeftHalf() {
+        val original = SubtitleEntry(
+            startTime = 0L,
+            endTime = 2_000L,
+            text = "左\n右"
+        )
+        val left = original.copy(endTime = 900L, text = "左", endTimeModified = true)
+        val right = SubtitleEntry(
+            startTime = 900L,
+            endTime = 2_000L,
+            text = "右",
+            endTimeModified = false
+        )
+        val operation = EditorEditHistory.Operation.ListChange(
+            before = EditorEditHistory.ListState(listOf(original), emptySet()),
+            after = EditorEditHistory.ListState(listOf(left, right), emptySet()),
+            description = "切分"
+        )
+        val state = EditorDocumentState().apply {
+            subtitleEntries = mutableListOf(left.copy(), right.copy())
+            currentFormat = com.subtitleedit.util.SubtitleParser.SubtitleFormat.SRT
+        }
+
+        val result = operation.execute(state, undo = true)
+
+        assertEquals(1, state.subtitleEntries.size)
+        assertEquals(original.stableId, state.subtitleEntries.single().stableId)
+        assertEquals(original.text, state.subtitleEntries.single().text)
+        assertEquals(original.startTime, state.subtitleEntries.single().startTime)
+        assertEquals(original.endTime, state.subtitleEntries.single().endTime)
+        assertEquals(1, result.entries.size)
+    }
+
+    @Test
     fun viewModelExecutesHistoryCommandAndPublishesDocument() {
         val viewModel = EditorViewModel()
         val before = SubtitleEntry(text = "前")

@@ -1,18 +1,24 @@
 package com.subtitleedit.feature.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -20,8 +26,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
@@ -104,11 +117,13 @@ fun ModelManagementImportContent(
     onBuiltInVadChanged: (Boolean) -> Unit,
     onDemucsAction: (DemucsModelImportAction) -> Unit
 ) {
-    Column(
-        modifier = Modifier.padding(vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        AsrModelImportCard(asr, onAsrAction, onBuiltInVadChanged)
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        AsrModelImportCard(
+            asr,
+            onAsrAction,
+            onBuiltInVadChanged,
+            modifier = Modifier.padding(top = 16.dp)
+        )
         DemucsModelImportCard(demucs, onDemucsAction)
     }
 }
@@ -117,165 +132,186 @@ fun ModelManagementImportContent(
 private fun AsrModelImportCard(
     state: AsrModelImportUiState,
     onAction: (AsrModelImportAction) -> Unit,
-    onBuiltInVadChanged: (Boolean) -> Unit
+    onBuiltInVadChanged: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(8.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        ModelImportCard {
+            Row(verticalAlignment = Alignment.Top) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = state.modelTitle,
-                        modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.Bold
                     )
-                    TextButton(
-                        onClick = { onAction(AsrModelImportAction.ShowGuide) }
-                    ) { Text("帮助") }
+                    ModelFileControl(
+                        label = state.encoderLabel,
+                        value = state.encoderValue,
+                        selectLabel = state.encoderButtonLabel,
+                        onSelect = { onAction(AsrModelImportAction.SelectEncoder) },
+                        enabled = state.actionsEnabled,
+                        fillSelectButton = true,
+                        showDownload = state.showModelDownload,
+                        showReset = state.showModelReset,
+                        downloadDescription = "一键下载并导入 ${state.modelTitle}",
+                        onDownload = { onAction(AsrModelImportAction.DownloadModel) },
+                        onReset = { onAction(AsrModelImportAction.ResetModel) },
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    modifier = Modifier.padding(start = 12.dp),
+                    horizontalAlignment = Alignment.End
+                ) {
+                    TextButton(
+                        onClick = { onAction(AsrModelImportAction.ConfigureWhisper) },
+                        modifier = Modifier.height(36.dp)
+                    ) { Text("配置") }
                     OutlinedButton(
                         onClick = { onAction(AsrModelImportAction.SelectModelType) },
-                        enabled = state.actionsEnabled
-                    ) { Text("模型类型") }
-                    TextButton(
-                        onClick = { onAction(AsrModelImportAction.ConfigureWhisper) }
-                    ) { Text("配置") }
-                }
-
-                if (state.showSenseVoiceProvider) {
-                    ChoiceChips(
-                        options = listOf("CPU" to !state.useSenseVoiceNpu, "NPU" to state.useSenseVoiceNpu),
                         enabled = state.actionsEnabled,
-                        onSelected = { if (it == "NPU") onAction(AsrModelImportAction.SelectSenseVoiceNpu)
-                            else onAction(AsrModelImportAction.SelectSenseVoiceCpu) }
-                    )
-                    if (!state.npuAvailable) {
-                        Text(
-                            "SenseVoice NPU 需要安装 QNN 版",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        modifier = Modifier.height(36.dp)
+                    ) { Text("模型类型") }
+                    if (state.showSenseVoiceProvider) {
+                        ChoiceOptions(
+                            options = listOf("CPU" to !state.useSenseVoiceNpu, "NPU" to state.useSenseVoiceNpu),
+                            enabled = state.actionsEnabled,
+                            secondOptionAvailable = state.npuAvailable,
+                            onSelected = {
+                                onAction(
+                                    if (it == "NPU") AsrModelImportAction.SelectSenseVoiceNpu
+                                    else AsrModelImportAction.SelectSenseVoiceCpu
+                                )
+                            }
                         )
                     }
-                }
-                if (state.showParakeetVariant) {
-                    ChoiceChips(
-                        options = listOf("TDT" to !state.parakeetCtcSelected, "CTC" to state.parakeetCtcSelected),
-                        enabled = state.actionsEnabled,
-                        onSelected = { if (it == "CTC") onAction(AsrModelImportAction.SelectParakeetCtc)
-                            else onAction(AsrModelImportAction.SelectParakeetTdt) }
-                    )
-                }
-
-                ModelFileControl(
-                    label = state.encoderLabel,
-                    value = state.encoderValue,
-                    selectLabel = state.encoderButtonLabel,
-                    onSelect = { onAction(AsrModelImportAction.SelectEncoder) },
-                    enabled = state.actionsEnabled,
-                    showDownload = state.showModelDownload,
-                    showReset = state.showModelReset,
-                    onDownload = { onAction(AsrModelImportAction.DownloadModel) },
-                    onReset = { onAction(AsrModelImportAction.ResetModel) }
-                )
-                if (state.showDecoder) {
-                    ModelFileControl(
-                        label = "Decoder 模型",
-                        value = state.decoderValue,
-                        selectLabel = "选择 Decoder",
-                        onSelect = { onAction(AsrModelImportAction.SelectDecoder) },
-                        enabled = state.actionsEnabled
-                    )
-                }
-                if (state.showJoiner) {
-                    ModelFileControl(
-                        label = state.joinerLabel,
-                        value = state.joinerValue,
-                        selectLabel = state.joinerButtonLabel,
-                        onSelect = { onAction(AsrModelImportAction.SelectJoiner) },
-                        enabled = state.actionsEnabled
-                    )
-                }
-                ModelFileControl(
-                    label = state.tokensLabel,
-                    value = state.tokensValue,
-                    selectLabel = if (state.tokensLabel == "Tokenizer 文件夹") "选择 Tokenizer 文件夹" else "选择 Tokens",
-                    onSelect = { onAction(AsrModelImportAction.SelectTokens) },
-                    enabled = state.actionsEnabled
-                )
-                if (state.showForcedAligner) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Qwen3 ForcedAligner", style = MaterialTheme.typography.titleSmall)
-                        Text(
-                            state.forcedAlignerStatus,
-                            color = if (state.forcedAlignerComplete) MaterialTheme.colorScheme.onSurfaceVariant
-                            else MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(
-                                onClick = { onAction(AsrModelImportAction.SelectForcedAligner) },
-                                enabled = state.actionsEnabled
-                            ) { Text("选择模型") }
-                            if (!state.forcedAlignerComplete) {
-                                IconButton(
-                                    onClick = { onAction(AsrModelImportAction.DownloadForcedAligner) },
-                                    enabled = state.actionsEnabled
-                                ) {
-                                    Icon(
-                                        painterResource(R.drawable.ic_download),
-                                        contentDescription = "下载 ForcedAligner 模型"
-                                    )
-                                }
-                            } else {
-                                TextButton(
-                                    onClick = { onAction(AsrModelImportAction.ResetForcedAligner) },
-                                    enabled = state.actionsEnabled
-                                ) { Text("重置") }
+                    if (state.showParakeetVariant) {
+                        ChoiceOptions(
+                            options = listOf("TDT" to !state.parakeetCtcSelected, "CTC" to state.parakeetCtcSelected),
+                            enabled = state.actionsEnabled,
+                            onSelected = {
+                                onAction(
+                                    if (it == "CTC") AsrModelImportAction.SelectParakeetCtc
+                                    else AsrModelImportAction.SelectParakeetTdt
+                                )
                             }
-                        }
+                        )
                     }
                 }
             }
-        }
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(8.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("VAD 模型", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        Text(state.vadValue, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    TextButton(onClick = { onAction(AsrModelImportAction.ConfigureVad) }) { Text("配置") }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(
-                        onClick = { onAction(AsrModelImportAction.SelectVad) }
-                    ) { Text("选择 VAD 模型") }
+            if (state.showDecoder) {
+                ModelFileControl(
+                    label = "Decoder 模型",
+                    value = state.decoderValue,
+                    selectLabel = "选择 Decoder",
+                    onSelect = { onAction(AsrModelImportAction.SelectDecoder) },
+                    enabled = state.actionsEnabled,
+                    modifier = Modifier.padding(top = 12.dp)
+                )
+            }
+            if (state.showJoiner) {
+                ModelFileControl(
+                    label = state.joinerLabel,
+                    value = state.joinerValue,
+                    selectLabel = state.joinerButtonLabel,
+                    onSelect = { onAction(AsrModelImportAction.SelectJoiner) },
+                    enabled = state.actionsEnabled,
+                    modifier = Modifier.padding(top = 12.dp)
+                )
+            }
+            ModelFileControl(
+                label = state.tokensLabel,
+                value = state.tokensValue,
+                selectLabel = if (state.tokensLabel == "Tokenizer 文件夹") "选择 Tokenizer 文件夹" else "选择 Tokens",
+                onSelect = { onAction(AsrModelImportAction.SelectTokens) },
+                enabled = state.actionsEnabled,
+                modifier = Modifier.padding(top = 12.dp)
+            )
+
+            if (state.showForcedAligner) {
+                Column(modifier = Modifier.padding(top = 16.dp)) {
+                    Text(
+                        text = stringResource(R.string.activity_model_management_qwen_aligner_title),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = stringResource(R.string.activity_model_management_qwen_aligner_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
                     Row(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Checkbox(
-                            checked = state.useBuiltInVad,
-                            onCheckedChange = onBuiltInVadChanged
-                        )
-                        Text("使用内置模型", style = MaterialTheme.typography.bodyMedium)
+                        OutlinedButton(
+                            onClick = { onAction(AsrModelImportAction.SelectForcedAligner) },
+                            enabled = state.actionsEnabled,
+                            modifier = Modifier.weight(1f)
+                        ) { Text(stringResource(R.string.activity_model_management_qwen_aligner_select)) }
+                        if (!state.forcedAlignerComplete) {
+                            ModelDownloadButton(
+                                onClick = { onAction(AsrModelImportAction.DownloadForcedAligner) },
+                                enabled = state.actionsEnabled,
+                                description = stringResource(R.string.activity_model_management_qwen_aligner_download)
+                            )
+                        } else {
+                            ModelResetButton(
+                                onClick = { onAction(AsrModelImportAction.ResetForcedAligner) },
+                                enabled = state.actionsEnabled
+                            )
+                        }
                     }
+                    Text(
+                        text = state.forcedAlignerStatus,
+                        color = if (state.forcedAlignerComplete) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+            }
+            HelpLink(onClick = { onAction(AsrModelImportAction.ShowGuide) })
+        }
+
+        ModelImportCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(R.string.activity_model_settings_text_14),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                TextButton(onClick = { onAction(AsrModelImportAction.ConfigureVad) }) { Text("配置") }
+            }
+            Text(
+                text = state.vadValue,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(onClick = { onAction(AsrModelImportAction.SelectVad) }) {
+                    Text("选择 VAD 模型")
+                }
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 12.dp)
+                        .toggleable(
+                            value = state.useBuiltInVad,
+                            role = Role.Checkbox,
+                            onValueChange = onBuiltInVadChanged
+                        ),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(checked = state.useBuiltInVad, onCheckedChange = null)
+                    Text("使用内置模型", style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
@@ -287,86 +323,125 @@ private fun DemucsModelImportCard(
     state: DemucsModelImportUiState,
     onAction: (DemucsModelImportAction) -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    if (state.useFtModels) "FT 单音轨模型" else "通用四轨模型",
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                TextButton(onClick = { onAction(DemucsModelImportAction.ShowGuide) }) { Text("帮助") }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = { onAction(DemucsModelImportAction.SelectModelType) },
-                    enabled = state.actionsEnabled
-                ) { Text("模型类型") }
-                TextButton(onClick = { onAction(DemucsModelImportAction.Configure) }) { Text("配置") }
-            }
-            if (!state.useFtModels) {
-                ModelFileControl(
-                    label = "通用四轨模型",
-                    value = state.generalModelValue,
-                    selectLabel = "选择模型",
-                    onSelect = { onAction(DemucsModelImportAction.SelectGeneralModel) },
-                    enabled = state.actionsEnabled,
-                    showDownload = !state.hasGeneralModel,
-                    showReset = state.hasGeneralModel,
-                    onDownload = { onAction(DemucsModelImportAction.DownloadGeneralModel) },
-                    onReset = { onAction(DemucsModelImportAction.ResetGeneralModel) }
-                )
-                Text(
-                    "通用模型可一次输出 Vocals、Drums、Bass、Other 多个音轨。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                listOf(
-                    Triple("Vocals", "vocals", DemucsModelImportAction.SelectVocalsModel),
-                    Triple("Drums", "drums", DemucsModelImportAction.SelectDrumsModel),
-                    Triple("Bass", "bass", DemucsModelImportAction.SelectBassModel),
-                    Triple("Other", "other", DemucsModelImportAction.SelectOtherModel)
-                ).forEach { (title, key, action) ->
-                    ModelFileControl(
-                        label = "$title specialist 模型",
-                        value = state.ftModelValues[key] ?: "未选择 $title specialist 模型",
-                        selectLabel = "选择 $title 模型",
-                        onSelect = { onAction(action) },
-                        enabled = true
+    ModelImportCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = if (state.useFtModels) "FT 单音轨模型" else "通用四轨模型",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            TextButton(
+                onClick = { onAction(DemucsModelImportAction.Configure) },
+                modifier = Modifier.height(36.dp)
+            ) { Text("配置") }
+        }
+        if (!state.useFtModels) {
+            DemucsValueWithSwitch(
+                value = state.generalModelValue,
+                enabled = state.actionsEnabled,
+                onSwitch = { onAction(DemucsModelImportAction.SelectModelType) },
+                modifier = Modifier.padding(top = 12.dp)
+            )
+            ModelSelectRow(
+                selectLabel = "选择模型",
+                onSelect = { onAction(DemucsModelImportAction.SelectGeneralModel) },
+                enabled = state.actionsEnabled,
+                fillSelectButton = true,
+                showDownload = !state.hasGeneralModel,
+                showReset = state.hasGeneralModel,
+                downloadDescription = stringResource(R.string.activity_vocal_separation_settings_contentdescription_01),
+                onDownload = { onAction(DemucsModelImportAction.DownloadGeneralModel) },
+                onReset = { onAction(DemucsModelImportAction.ResetGeneralModel) }
+            )
+            Text(
+                text = stringResource(R.string.activity_vocal_separation_settings_text_04),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        } else {
+            DemucsValueWithSwitch(
+                value = state.ftModelValues["vocals"] ?: "未选择 Vocals specialist 模型",
+                enabled = state.actionsEnabled,
+                onSwitch = { onAction(DemucsModelImportAction.SelectModelType) },
+                modifier = Modifier.padding(top = 12.dp)
+            )
+            OutlinedButton(
+                onClick = { onAction(DemucsModelImportAction.SelectVocalsModel) }
+            ) { Text(stringResource(R.string.activity_vocal_separation_settings_text_06)) }
+            listOf(
+                Triple("drums", R.string.activity_vocal_separation_settings_text_08, DemucsModelImportAction.SelectDrumsModel),
+                Triple("bass", R.string.activity_vocal_separation_settings_text_10, DemucsModelImportAction.SelectBassModel),
+                Triple("other", R.string.activity_vocal_separation_settings_text_12, DemucsModelImportAction.SelectOtherModel)
+            ).forEach { (key, label, action) ->
+                SelectionContainer(modifier = Modifier.padding(top = 10.dp)) {
+                    Text(
+                        text = state.ftModelValues[key] ?: "未选择 $key specialist 模型",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Text(
-                    "FT 模型用于对应单音轨任务；未配置时回退通用模型。多音轨任务仍需要通用模型。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                OutlinedButton(onClick = { onAction(action) }) {
+                    Text(stringResource(label))
+                }
             }
         }
+        Text(
+            text = stringResource(R.string.activity_vocal_separation_settings_text_13),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp)
+        )
+        HelpLink(onClick = { onAction(DemucsModelImportAction.ShowGuide) })
     }
 }
 
 @Composable
-private fun ChoiceChips(
+private fun ModelImportCard(content: @Composable () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) { content() }
+    }
+}
+
+@Composable
+private fun ChoiceOptions(
     options: List<Pair<String, Boolean>>,
     enabled: Boolean,
+    secondOptionAvailable: Boolean = true,
     onSelected: (String) -> Unit
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        options.forEach { (label, selected) ->
-            FilterChip(
-                selected = selected,
-                onClick = { onSelected(label) },
-                enabled = enabled,
-                label = { Text(label) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        options.forEachIndexed { index, (label, selected) ->
+            Text(
+                text = label,
+                modifier = Modifier
+                    .widthIn(min = 44.dp)
+                    .height(36.dp)
+                    .clickable(
+                        enabled = enabled
+                    ) { onSelected(label) }
+                    .alpha(if (index == 1 && !secondOptionAvailable) 0.55f else 1f)
+                    .then(
+                        if (label == "NPU") Modifier.semantics {
+                            contentDescription = if (secondOptionAvailable) {
+                                "选择 SenseVoice NPU"
+                            } else {
+                                "SenseVoice NPU，需要安装 QNN 版"
+                            }
+                        } else Modifier
+                    ),
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                color = if (selected) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -379,46 +454,146 @@ private fun ModelFileControl(
     selectLabel: String,
     onSelect: () -> Unit,
     enabled: Boolean,
+    modifier: Modifier = Modifier,
+    fillSelectButton: Boolean = false,
     showDownload: Boolean = false,
     showReset: Boolean = false,
+    downloadDescription: String = "下载并导入模型",
     onDownload: () -> Unit = {},
     onReset: () -> Unit = {}
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, style = MaterialTheme.typography.labelLarge)
-        SelectionContainer {
+    Column(modifier = modifier) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.MiddleEllipsis,
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+        )
+        ModelSelectRow(
+            selectLabel = selectLabel,
+            onSelect = onSelect,
+            enabled = enabled,
+            fillSelectButton = fillSelectButton,
+            showDownload = showDownload,
+            showReset = showReset,
+            downloadDescription = downloadDescription,
+            onDownload = onDownload,
+            onReset = onReset,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
+}
+
+@Composable
+private fun ModelSelectRow(
+    selectLabel: String,
+    onSelect: () -> Unit,
+    enabled: Boolean,
+    fillSelectButton: Boolean = false,
+    showDownload: Boolean = false,
+    showReset: Boolean = false,
+    downloadDescription: String = "下载并导入模型",
+    onDownload: () -> Unit = {},
+    onReset: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(
+            onClick = onSelect,
+            enabled = enabled,
+            modifier = (if (fillSelectButton) Modifier.weight(1f) else Modifier)
+                .height(36.dp)
+        ) { Text(selectLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        if (showDownload) {
+            ModelDownloadButton(onClick = onDownload, enabled = enabled, description = downloadDescription)
+        }
+        if (showReset) {
+            ModelResetButton(onClick = onReset, enabled = enabled)
+        }
+    }
+}
+
+@Composable
+private fun ModelDownloadButton(onClick: () -> Unit, enabled: Boolean, description: String) {
+    Box(
+        modifier = Modifier
+            .padding(start = 8.dp)
+            .size(28.dp)
+            .clip(CircleShape)
+            .background(
+                if (enabled) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+            )
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_download),
+            contentDescription = null,
+            tint = if (enabled) {
+                MaterialTheme.colorScheme.onPrimary
+            } else {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+            },
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
+@Composable
+private fun ModelResetButton(onClick: () -> Unit, enabled: Boolean) {
+    Box(
+        modifier = Modifier
+            .padding(start = 8.dp)
+            .widthIn(min = 52.dp)
+            .height(28.dp)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = stringResource(R.string.activity_model_settings_text_07),
+            color = if (enabled) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+            style = MaterialTheme.typography.bodyMedium
+        )
+    }
+}
+
+@Composable
+private fun DemucsValueWithSwitch(
+    value: String,
+    enabled: Boolean,
+    onSwitch: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        SelectionContainer(modifier = Modifier.weight(1f)) {
             Text(
-                value,
-                modifier = Modifier.fillMaxWidth(),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+                text = value,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedButton(
-                onClick = onSelect,
-                modifier = Modifier.weight(1f),
-                enabled = enabled
-            ) {
-                Text(selectLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            if (showDownload) {
-                IconButton(onClick = onDownload, enabled = enabled) {
-                    Icon(
-                        painterResource(R.drawable.ic_download),
-                        contentDescription = "下载并导入模型"
-                    )
-                }
-            }
-            if (showReset) {
-                TextButton(onClick = onReset, enabled = enabled) { Text("重置") }
-            }
-        }
+        OutlinedButton(
+            onClick = onSwitch,
+            enabled = enabled,
+            modifier = Modifier.padding(start = 12.dp).height(36.dp)
+        ) { Text("模型类型") }
+    }
+}
+
+@Composable
+private fun HelpLink(onClick: () -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End) {
+        Text(
+            text = stringResource(R.string.tts_help),
+            color = MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.clickable(onClick = onClick)
+        )
     }
 }

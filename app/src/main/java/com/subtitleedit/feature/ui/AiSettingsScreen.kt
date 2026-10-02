@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -43,6 +44,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -109,6 +113,7 @@ data class AiSettingsScreenState(
                 punctuationPrompt = settings.getAiPunctuationCustomPrompt()
             )
         }
+
     }
 }
 
@@ -132,6 +137,7 @@ fun AiSettingsScreen(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
+                modifier = Modifier.height(56.dp),
                 title = { Text("AI 设置") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
@@ -158,8 +164,8 @@ fun AiSettingsScreen(
                 .fillMaxSize()
                 .padding(contentPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             ProviderCard(
                 state = state,
@@ -288,7 +294,17 @@ private fun ProviderCard(
             }
         }
         Text(
-            text = "官网：${provider.websiteUrl}",
+            text = buildAnnotatedString {
+                append("官网：")
+                withStyle(
+                    SpanStyle(
+                        color = MaterialTheme.colorScheme.primary,
+                        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
+                    )
+                ) {
+                    append(provider.websiteUrl)
+                }
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(role = Role.Button) { runCatching { uriHandler.openUri(provider.websiteUrl) } }
@@ -435,7 +451,9 @@ private fun ModelField(
     if (provider.models.isNotEmpty()) {
         val selectedModel = model.takeIf(provider.models::contains) ?: provider.models.first()
         ChoiceField(
-            label = label,
+            // The legacy fixed-model spinner was preceded by a plain
+            // "模型" label; editable providers used the TextInput hint.
+            label = stringResource(R.string.activity_ai_settings_text_03),
             selected = selectedModel,
             options = provider.models,
             onSelect = onModelChange
@@ -563,7 +581,7 @@ private fun SettingsCard(content: @Composable () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -578,7 +596,7 @@ private fun SectionHeading(text: String) {
     Text(
         text = text,
         style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Bold,
         color = MaterialTheme.colorScheme.onSurface
     )
 }

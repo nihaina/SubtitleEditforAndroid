@@ -20,11 +20,20 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemGestures
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -45,7 +54,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.viewinterop.AndroidView
 import com.subtitleedit.adapter.SubtitleAdapter
 import com.subtitleedit.adapter.TranslationPreviewItem
@@ -135,6 +147,7 @@ class EditorActivity : AppCompatActivity() {
     private var composeSubtitleRevision by mutableIntStateOf(0)
     private var composeSourceViewMode by mutableStateOf(false)
     private var composeListLoading by mutableStateOf(false)
+    private var composeHasPlayableMedia by mutableStateOf(false)
     private val sourceEditorState = EditorSourceEditorState()
     private var toolbarTitle by mutableStateOf("未命名")
     private var toolbarSubtitle by mutableStateOf("")
@@ -230,7 +243,7 @@ class EditorActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        videoPlayerView = EditorMpvView(this)
+        videoPlayerView = EditorMpvView(this).apply { keepScreenOn = true }
         mediaRepository = (application as SubtitleEditApplication).dependencies.mediaRepository(cacheDir)
         
         if (!stateModel.initialized) {
@@ -258,6 +271,7 @@ class EditorActivity : AppCompatActivity() {
             stateModel.initialized = true
         }
         composeSourceViewMode = stateModel.isSourceViewMode
+        composeHasPlayableMedia = stateModel.mediaType.hasPlayableMedia
         
         setupSubtitleAdapter()
         listPresentationController = EditorListPresentationController(
@@ -391,7 +405,12 @@ class EditorActivity : AppCompatActivity() {
                         onSeekProgress = playbackController::onSeekProgress,
                         onSeekFinished = playbackController::onSeekFinished,
                         onSpeedClick = { playbackController.showSpeedInputDialog() },
-                        onToggleFullscreen = ::exitVideoFullscreen
+                        onShowVideoControls = playbackController::showVideoControlsForInteraction,
+                        onToggleFullscreen = {
+                            playbackController.showVideoControlsForInteraction()
+                            exitVideoFullscreen()
+                        },
+                        onHideVideoControls = playbackController::hideVideoControlsForInteraction
                     )
                 } else EditorScreen(
                     title = toolbarTitle,
@@ -404,6 +423,7 @@ class EditorActivity : AppCompatActivity() {
                     onReplacementChange = searchController::onReplacementChanged,
                     onPrevious = searchController::searchPrevious,
                     onNext = searchController::searchNext,
+                    onSubmitSearch = searchController::submitSearchFromUi,
                     onReplace = searchController::replaceOneFromUi,
                     onReplaceAll = searchController::replaceAllFromUi,
                     onToggleMatchCase = searchController::toggleMatchCase,
@@ -415,7 +435,7 @@ class EditorActivity : AppCompatActivity() {
                     contentRevision = composeSubtitleRevision,
                     listState = subtitleListState,
                     adapter = subtitleAdapter,
-                    hasPlayableMedia = subtitleAdapter.hasPlayableMedia(),
+                    hasPlayableMedia = composeHasPlayableMedia,
                     onLongClick = { _, position -> showContextMenu(position) },
                     onTimeClick = { entry, position, isStart -> showTimeEditDialog(entry, position, isStart) },
                     onTextClick = { entry, position -> showTextEditDialog(entry, position) },
@@ -423,50 +443,73 @@ class EditorActivity : AppCompatActivity() {
                     onSetTime = { entry, position -> setSubtitleTimeToCurrentPosition(entry, position) },
                     mediaContent = {
                         val playbackState = playbackController.uiState
-                        EditorPlaybackPanel(
-                            state = playbackState,
-                            onTogglePlayPause = playbackController::togglePlayPause,
-                            onSeekStarted = playbackController::onSeekStarted,
-                            onSeekProgress = playbackController::onSeekProgress,
-                            onSeekFinished = playbackController::onSeekFinished,
-                            onSpeedClick = { playbackController.showSpeedInputDialog() },
-                            onToggleFullscreen = ::toggleVideoFullscreen,
-                            isFullscreen = editorUiState.isVideoFullscreen
-                        )
-                        if (playbackState.mediaType == EditorMediaType.VIDEO) {
-                            AndroidView(
-                                factory = { videoPlayerView },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(220.dp)
-                            )
-                        }
-                        if (playbackState.mediaType.hasPlayableMedia) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                TextButton(onClick = ::showQuickTranscribe) { Text("转录") }
-                                TextButton(onClick = ::showQuickTts) { Text("朗读") }
-                                TextButton(onClick = ::splitSubtitleAtPlaybackHead) { Text("切分") }
-                            }
-                        }
+                             val videoViewportHeight = if (
+                                 LocalConfiguration.current.orientation ==
+                                     Configuration.ORIENTATION_LANDSCAPE
+                             ) 220.dp else 180.dp
                         val waveformState by waveformController.composeState.collectAsState()
-                        EditorWaveformPanel(
-                            state = waveformState,
-                            actions = EditorWaveformActions(
+                        val waveformActions = EditorWaveformActions(
                                 onViewportSizeChanged = waveformController::updateComposeViewport,
-                                onViewportPan = waveformController::panComposeViewport,
-                                onZoom = waveformController::zoomComposeViewport,
+                                onViewportPan = { deltaMs ->
+                                     playbackController.finishSeekIfActive()
+                                    val corrected = waveformController.panComposeViewport(deltaMs)
+                                    if (corrected != null) {
+                                        playbackController.onViewportPlayheadCorrection(corrected)
+                                    }
+                                    if (waveformController.isComposeLimitedPlaybackOutOfView()) {
+                                        waveformController.clearComposeLimitedPlayback()
+                                        playbackController.onLimitedPlaybackRangeOutOfView()
+                                    }
+                                },
+                                onViewportPanTo = { startMs ->
+                                     playbackController.finishSeekIfActive()
+                                    val corrected = waveformController.setComposeViewportStart(startMs)
+                                    if (corrected != null) {
+                                        playbackController.onViewportPlayheadCorrection(corrected)
+                                    }
+                                    if (waveformController.isComposeLimitedPlaybackOutOfView()) {
+                                        waveformController.clearComposeLimitedPlayback()
+                                        playbackController.onLimitedPlaybackRangeOutOfView()
+                                    }
+                                },
+                                onZoom = { scale, anchorMs ->
+                                    waveformController.zoomComposeViewport(scale, anchorMs)
+                                },
+                                onZoomAbsolute = { startMs, durationMs ->
+                                    waveformController.setComposeViewportAbsolute(startMs, durationMs)
+                                },
                                 onSeek = { positionMs ->
                                     waveformController.seekComposeToTime(positionMs)
                                     playbackController.seekTo(positionMs)
                                 },
+                                 onSeekStarted = playbackController::onSeekStarted,
+                                 onSeekProgress = { positionMs ->
+                                     val duration = playbackController.durationMs
+                                     if (duration > 0L) {
+                                         playbackController.onSeekProgress(
+                                             positionMs.toFloat() / duration.toFloat()
+                                         )
+                                     } else {
+                                         waveformController.seekComposeToTime(positionMs)
+                                     }
+                                 },
+                                 onSeekFinished = playbackController::onSeekFinished,
                                 onSelectSubtitle = waveformController::selectComposeSubtitle,
+                                onLimitedPlaybackRangeChanged = { index ->
+                                    waveformController.toggleComposeLimitedPlayback(index)
+                                    playbackController.onLimitedPlaybackRangeChanged(
+                                        waveformController.composeLimitedPlaybackIndex()
+                                    )
+                                },
+                                onLimitedPlaybackStartRequest = playbackController::onLimitedPlaybackStartRequest,
+                                onSubtitleStartSeekRequest = playbackController::seekTo,
+                                onLimitedPlaybackRangeOutOfView = {
+                                    waveformController.clearComposeLimitedPlayback()
+                                    playbackController.onLimitedPlaybackRangeOutOfView()
+                                },
                                 onSubtitleDrag = waveformController::updateComposeSubtitleDrag,
-                                onTimestampDrag = waveformController::updateComposeTimestampAnchor,
+                                onSubtitleDragGestureStarted = waveformController::resetComposeSubtitleDragSession,
+                                onTimestampViewportPan = waveformController::panComposeTimestampViewport,
                                 onTimestampFinished = waveformController::finishComposeTimestamping,
                                 onToggleExpanded = waveformController::toggleComposeExpanded,
                                 onToggleDisplayMode = waveformController::toggleComposeDisplayMode,
@@ -474,14 +517,110 @@ class EditorActivity : AppCompatActivity() {
                                 onAmplitudeZoomOut = waveformController::zoomComposeAmplitudeOut,
                                 onAmplitudeReset = waveformController::resetComposeAmplitude,
                                 onGenerate = waveformController::startComposeGeneration,
-                                onStartTimestamping = waveformController::startComposeTimestamping,
+                                onStartTimestampingLongClick = waveformController::startComposeTimestamping,
                                 onQuickTranscribe = ::showQuickTranscribe,
+                                onQuickTranscribeLongClick = { AsrSettingsNavigation.open(this@EditorActivity) },
                                 onQuickTts = ::showQuickTts,
+                                onQuickTtsLongClick = {
+                                    startActivity(Intent(this@EditorActivity, TtsSettingsActivity::class.java))
+                                },
                                 onQuickSplit = ::splitSubtitleAtPlaybackHead,
                                 onChunkRequested = waveformController::requestComposeChunk,
                                 onSpectrogramChunkRequested = waveformController::requestComposeSpectrogramChunk
                             )
-                        )
+                        if (playbackState.mediaType == EditorMediaType.VIDEO) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                     .height(videoViewportHeight)
+                            ) {
+                                AndroidView(
+                                    factory = { videoPlayerView },
+                                    update = { view ->
+                                        view.setOnClickListener {
+                                            playbackController.showVideoControlsForInteraction()
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                if (playbackState.videoControlsVisible) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clickable { playbackController.hideVideoControlsForInteraction() }
+                                    )
+                                }
+                                if (playbackState.videoControlsVisible) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(min = 32.dp)
+                                            .align(Alignment.TopCenter)
+                                            .background(Color.Black.copy(alpha = 0.15f))
+                                            .padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 6.dp),
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        Text(
+                                            text = playbackState.videoTimeText,
+                                            color = Color(0xCCFFFFFF),
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                                                fontSize = 12.sp,
+                                                letterSpacing = 0.sp
+                                            )
+                                        )
+                                    }
+                                }
+                                playbackState.videoStatus?.let { status ->
+                                    Text(
+                                        text = status,
+                                        modifier = Modifier
+                                            .align(Alignment.Center)
+                                            .widthIn(max = 260.dp)
+                                            .padding(12.dp),
+                                        color = Color(0xDDFFFFFF),
+                                        textAlign = TextAlign.Center,
+                                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                                            fontSize = 13.sp,
+                                            letterSpacing = 0.sp
+                                        )
+                                    )
+                                }
+                                EditorPlaybackPanel(
+                                    state = playbackState,
+                                    onTogglePlayPause = playbackController::togglePlayPause,
+                                    onSeekStarted = playbackController::onSeekStarted,
+                                    onSeekProgress = playbackController::onSeekProgress,
+                                    onSeekFinished = playbackController::onSeekFinished,
+                                    onSpeedClick = { playbackController.showSpeedInputDialog() },
+                                    onToggleFullscreen = {
+                                        playbackController.showVideoControlsForInteraction()
+                                        toggleVideoFullscreen()
+                                    },
+                                    isFullscreen = editorUiState.isVideoFullscreen,
+                                    overlay = true,
+                                    modifier = Modifier.align(Alignment.BottomCenter)
+                                )
+                            }
+                             // The legacy video section keeps an orientation-specific viewport
+                             // and adds its 4dp bottom margin outside that viewport.
+                            Spacer(Modifier.height(4.dp))
+                            EditorWaveformPanel(state = waveformState, actions = waveformActions)
+                        } else {
+                            EditorWaveformPanel(state = waveformState, actions = waveformActions)
+                            EditorPlaybackPanel(
+                                state = playbackState,
+                                onTogglePlayPause = playbackController::togglePlayPause,
+                                onSeekStarted = playbackController::onSeekStarted,
+                                onSeekProgress = playbackController::onSeekProgress,
+                                onSeekFinished = playbackController::onSeekFinished,
+                                onSpeedClick = { playbackController.showSpeedInputDialog() },
+                                onToggleFullscreen = ::toggleVideoFullscreen,
+                                isFullscreen = editorUiState.isVideoFullscreen
+                            )
+                        }
                     },
                     sourceContent = {
                         EditorSourceEditor(state = sourceEditorState)
@@ -559,7 +698,38 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun publishComposeSubtitleEntries() {
-        composeSubtitleEntries = stateModel.subtitleEntries.toList()
+        // SubtitleEntry is mutable and waveform drags update the live model in place before
+        // this method is called. Keep Compose rows isolated from those mutations so replacing
+        // the list always gives the snapshot policy a real content change to observe.
+        val snapshot = stateModel.subtitleEntries.map { it.copy() }
+        composeSubtitleEntries = snapshot
+        // notifyEntriesChanged() is used for high-frequency edits such as waveform drags and
+        // does not call submitSubtitleList(). Keep the adapter's row snapshot aligned here as
+        // well; otherwise selection and subsequent row actions can continue reading the old
+        // mutable objects even though the Compose rows already show the new timestamps.
+        if (::subtitleAdapter.isInitialized) {
+            subtitleAdapter.replaceListSnapshot(snapshot)
+        }
+        composeSubtitleRevision++
+    }
+
+    /** Publish a small in-place edit without rebuilding snapshots for every subtitle row. */
+    private fun publishComposeSubtitleEntriesAt(positions: Iterable<Int>) {
+        val changed = positions.distinct().filter { it in stateModel.subtitleEntries.indices }
+        if (changed.isEmpty()) return
+        if (composeSubtitleEntries.size != stateModel.subtitleEntries.size ||
+            changed.any { it !in composeSubtitleEntries.indices }
+        ) {
+            publishComposeSubtitleEntries()
+            return
+        }
+        val snapshot = composeSubtitleEntries.toMutableList()
+        val replacements = changed.associateWith { position ->
+            stateModel.subtitleEntries[position].copy()
+        }
+        replacements.forEach { (position, entry) -> snapshot[position] = entry }
+        composeSubtitleEntries = snapshot
+        if (::subtitleAdapter.isInitialized) subtitleAdapter.replaceListEntries(replacements)
         composeSubtitleRevision++
     }
 
@@ -610,7 +780,10 @@ class EditorActivity : AppCompatActivity() {
 
     private fun onComposeSourceDocumentChange(change: EditorSourceDocumentChange) {
         if (stateModel.isSourceViewMode && !suppressSourceViewChanges) {
-            if (change.oldLineCount != change.newLineCount) sourceLineEditController.invalidateLineIndex()
+            // A same-line edit can change how many cues a physical line contributes (for
+            // example adding/removing an LRC time tag). The cached line-to-cue map therefore
+            // cannot be retained solely based on the line count.
+            sourceLineEditController.invalidateLineIndex()
             applySimpleSourceLineChange(change.startLine, change.oldLineCount, change.newLineCount)
         }
     }
@@ -715,6 +888,9 @@ class EditorActivity : AppCompatActivity() {
             showMessage = ::showShortToast,
             videoPlayerHost = videoPlayerView
         )
+        // The legacy video surface revealed the controls whenever the video itself was tapped.
+        // Keep that interaction for both inline and fullscreen Compose layouts.
+        videoPlayerView.setOnClickListener { playbackController.showVideoControlsForInteraction() }
         playbackController.bind()
     }
 
@@ -759,6 +935,9 @@ class EditorActivity : AppCompatActivity() {
                         null
                     )
                     stateModel.subtitleEntries[changedIndex] = updatedEntry.copy()
+                    // The list is hidden in source mode. Publish the detached row snapshot once
+                    // the drag commits instead of copying every row for each MOVE event.
+                    if (isFinal) publishComposeSubtitleEntries()
                     markAsChanged()
                 } else {
                     currentEntry.startTime = updatedEntry.startTime
@@ -777,6 +956,7 @@ class EditorActivity : AppCompatActivity() {
                     scrollToSubtitle(index)
                 }
             },
+            onLimitedPlaybackRangeChanged = playbackController::onLimitedPlaybackRangeChanged,
             onTimestampInserted = ::insertSubtitleFromTimestamp,
             showMessage = ::showShortToast
         )
@@ -801,6 +981,7 @@ class EditorActivity : AppCompatActivity() {
             return
         }
         stateModel.mediaType = type
+        composeHasPlayableMedia = type.hasPlayableMedia
         playbackController.setMediaType(type)
         waveformController.setMediaAvailable(type.hasPlayableMedia)
         subtitleAdapter.setHasPlayableMedia(type.hasPlayableMedia)
@@ -808,10 +989,7 @@ class EditorActivity : AppCompatActivity() {
 
     private fun exitVideoFullscreen() {
         if (stateModel.isVideoFullscreen) {
-            val previousOrientation = stateModel.previousRequestedOrientation
-            if (previousOrientation != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
-                requestedOrientation = previousOrientation
-            }
+            requestedOrientation = stateModel.previousRequestedOrientation
         }
         stateModel.isVideoFullscreen = false
     }
@@ -899,9 +1077,9 @@ class EditorActivity : AppCompatActivity() {
         stateModel.documentState.sourceViewEntriesGeneration = stateModel.documentState.sourceViewEditGeneration
         sourceViewHasPendingEdits = false
         stateModel.updateSourceHistory(stateModel.sourceViewContent, stateModel.subtitleEntries)
-        if (::subtitleAdapter.isInitialized && entryIndex in 0 until subtitleAdapter.itemCount) {
-            subtitleAdapter.notifyItemChanged(entryIndex)
-        }
+        // The Compose adapter owns detached row snapshots.  A notify alone only causes a
+        // redraw and would leave later selection/actions reading the pre-edit row object.
+        publishComposeSubtitleEntriesAt(listOf(entryIndex))
         // Keep only the dependent waveform row in sync. Publishing the complete document here
         // would copy/broadcast every subtitle for each source-editor keystroke on large files.
         syncWaveformSubtitles(changedPositions = listOf(entryIndex))
@@ -1220,6 +1398,12 @@ class EditorActivity : AppCompatActivity() {
             replaceSubtitleEntries(document.entries, preserveStableIds = false)
             exitSourceViewMode()
         }
+
+        // Parsing replaces the document list before either the RecyclerView adapter or the
+        // Compose snapshot has a chance to observe it.  The old View path submitted the rows
+        // during the load transition; Compose needs the same explicit publication, otherwise
+        // the visible list remains empty and adapter-backed selection reports itemCount == 0.
+        publishComposeSubtitleEntries()
         
         updateFormatInfo()
         
@@ -1387,6 +1571,58 @@ class EditorActivity : AppCompatActivity() {
             try {
                 sourceWaveformSyncController.cancelAndJoin()
                 editedContent = stateModel.sourceViewContent
+                // A source-view waveform drag updates the in-memory entries immediately while
+                // its lossless source patch is debounced in the background.  If the user leaves
+                // the view before that patch is accepted, cancelling the sync job would leave
+                // editedContent at the pre-drag timestamps and the subsequent list parse would
+                // silently discard the drag.  The source editor has no pending text edit in
+                // this path, so rebuild the source from the current entries before parsing.
+                if (!sourceViewHasPendingEdits && stateModel.subtitleEntries.isNotEmpty()) {
+                    // A waveform drag changes the live entries before its debounced source
+                    // patch runs, so the generation counters can still be equal here. Compare
+                    // the parsed source values directly instead of relying on that counter.
+                    val sourceEntriesBeforeSync = withContext(Dispatchers.Default) {
+                        SubtitleParser.parseDocument(
+                            editedContent,
+                            format = stateModel.currentFormat
+                        ).entries
+                    }
+                    val targetEntries = stateModel.subtitleEntries.map { it.copy() }
+                    val sourceNeedsModelSync = sourceEntriesBeforeSync.size == targetEntries.size &&
+                        sourceEntriesBeforeSync.indices.any { index ->
+                            val source = sourceEntriesBeforeSync[index]
+                            val target = targetEntries[index]
+                            source.startTime != target.startTime ||
+                                source.endTime != target.endTime ||
+                                source.text != target.text ||
+                                source.endTimeModified != target.endTimeModified ||
+                                source.cueIdentifier != target.cueIdentifier ||
+                                source.cueSettings != target.cueSettings
+                        }
+                    if (sourceNeedsModelSync) {
+                        val beforeSource = editedContent
+                        editedContent = withContext(Dispatchers.Default) {
+                            SubtitleSourceSynchronizer.apply(
+                                content = editedContent,
+                                format = stateModel.currentFormat,
+                                oldEntries = sourceEntriesBeforeSync,
+                                newEntries = targetEntries
+                            )
+                        }
+                        recordSourceTextChange(
+                            beforeSource,
+                            editedContent,
+                            sourceEntriesBeforeSync
+                        )
+                        stateModel.originalFileContent = editedContent
+                        stateModel.sourceViewContent = editedContent
+                        stateModel.sourceHistoryTextSnapshot = editedContent
+                        stateModel.sourceViewNeedsListSync = false
+                        stateModel.documentState.sourceViewEntriesGeneration =
+                            stateModel.documentState.sourceViewEditGeneration
+                        setSourceViewEditorText(editedContent, preserveScroll = true)
+                    }
+                }
                 sourcePreviewController.cancel()
                 if (stateModel.documentState.sourceViewEntriesGeneration != stateModel.documentState.sourceViewEditGeneration) {
                     val appliedLocally = sourceViewCoordinator.applyDeletionLocally(editedContent)
@@ -2120,6 +2356,7 @@ class EditorActivity : AppCompatActivity() {
         targetEntries: List<SubtitleEntry>,
         targetSourceText: String?
     ) {
+        val previousStableIds = stateModel.subtitleEntries.map { it.stableId }
         val effectiveTargetEntries: List<SubtitleEntry>
         val updated: String
         if (targetSourceText != null) {
@@ -2144,6 +2381,12 @@ class EditorActivity : AppCompatActivity() {
         stateModel.sourceHistoryTextSnapshot = updated
         setSourceViewEditorText(updated, preserveScroll = true)
         applySourceViewEntries(effectiveTargetEntries.map { it.copy() })
+        // A structural undo/redo must rebuild the waveform from the model snapshot. The range
+        // update in applySourceViewEntries is an optimization, but it can observe an older
+        // Compose list while a source transition is still settling and leave a split half out.
+        if (previousStableIds != stateModel.subtitleEntries.map { it.stableId }) {
+            syncWaveformSubtitles(preserveSelection = true)
+        }
         updateFormatInfo()
     }
 
@@ -2157,6 +2400,7 @@ class EditorActivity : AppCompatActivity() {
         }
 
         val previousCount = stateModel.subtitleEntries.size
+        val previousStableIds = stateModel.subtitleEntries.map { it.stableId }
         val effectiveTargetEntries: List<SubtitleEntry>
         val updatedSource: String
         if (targetSourceText != null) {
@@ -2180,6 +2424,11 @@ class EditorActivity : AppCompatActivity() {
         stateModel.sourceViewContent = updatedSource
         stateModel.sourceHistoryTextSnapshot = updatedSource
         applySourceViewEntries(effectiveTargetEntries.map { it.copy() })
+        if (previousStableIds != stateModel.subtitleEntries.map { it.stableId }) {
+            // Keep the waveform as a live mapping of the restored model. This full publication
+            // closes the race between a structural history restore and a stale range snapshot.
+            syncWaveformSubtitles(preserveSelection = true)
+        }
         if (previousCount != stateModel.subtitleEntries.size || subtitleAdapter.itemCount != stateModel.subtitleEntries.size) {
             submitSubtitleList(
                 // A structural history restore can update retained entries in place before
@@ -2331,12 +2580,24 @@ class EditorActivity : AppCompatActivity() {
             val changes = changedPositions.distinct().mapNotNull { index ->
                 stateModel.subtitleEntries.getOrNull(index)?.let { index to it }
             }.toMap()
-            if (waveformController.updateSubtitleEntries(changes, stateModel.subtitleEntries.size)) return
+            if (waveformController.updateSubtitleEntries(changes, stateModel.subtitleEntries.size)) {
+                if (::playbackController.isInitialized) {
+                    playbackController.onLimitedPlaybackRangeChanged(
+                        waveformController.composeLimitedPlaybackIndex()
+                    )
+                }
+                return
+            }
         }
         if (preserveSelection) {
             waveformController.setSubtitlesPreserveSelection(stateModel.subtitleEntries.toList())
         } else {
             waveformController.setSubtitles(stateModel.subtitleEntries.toList())
+        }
+        if (::playbackController.isInitialized) {
+            playbackController.onLimitedPlaybackRangeChanged(
+                waveformController.composeLimitedPlaybackIndex()
+            )
         }
     }
 
@@ -2347,11 +2608,20 @@ class EditorActivity : AppCompatActivity() {
     ) {
         if (!waveformController.replaceSubtitleRange(startIndex, removedCount, inserted)) {
             syncWaveformSubtitles()
+        } else if (::playbackController.isInitialized) {
+            playbackController.onLimitedPlaybackRangeChanged(
+                waveformController.composeLimitedPlaybackIndex()
+            )
         }
     }
 
     private fun setWaveformSubtitlesKeepSelection(selectedIndex: Int) {
         waveformController.setSubtitlesKeepSelection(stateModel.subtitleEntries.toList(), selectedIndex)
+        if (::playbackController.isInitialized) {
+            playbackController.onLimitedPlaybackRangeChanged(
+                waveformController.composeLimitedPlaybackIndex()
+            )
+        }
     }
 
     private fun showListLoading() {
@@ -2417,7 +2687,12 @@ class EditorActivity : AppCompatActivity() {
             stateModel.selectedIndices, selectedStableIds, clearSelection
         )
         if (markChanged) recordListStateChange(targetSelectedIds)
-        subtitleAdapter.submitList(stateModel.subtitleEntries.toList()) {
+        // ListAdapter commits asynchronously.  A quick split -> undo can finish the first
+        // commit after the undo submission; its callback must not read the now-restored model
+        // and publish stale selection/row snapshots over the newer submission.
+        val submittedEntries = stateModel.subtitleEntries.map { it.copy() }
+        subtitleAdapter.submitList(submittedEntries) {
+            if (renderVersion != listRenderVersion) return@submitList
             // ListAdapter replaces row objects asynchronously. Rebind selection by stable ID
             // after the new list is installed so selected rows survive source parsing and undo.
             listPresentationController.bindSelection(targetSelectedIds, clearSelection)
@@ -2980,6 +3255,10 @@ class EditorActivity : AppCompatActivity() {
         )
         if (!waveformController.removeSubtitleIndices(deletedIndices)) {
             syncWaveformSubtitles(preserveSelection = true)
+        } else if (::playbackController.isInitialized) {
+            playbackController.onLimitedPlaybackRangeChanged(
+                waveformController.composeLimitedPlaybackIndex()
+            )
         }
     }
 
@@ -3137,6 +3416,10 @@ class EditorActivity : AppCompatActivity() {
                 pendingListIndexRefreshStart ?: prefix,
                 prefix
             )
+            // Source parsing can change cue count while the list is hidden. Keep the detached
+            // Compose/adapter snapshot aligned immediately; waiting until source-mode exit left
+            // toolbar actions and later waveform callbacks reading the previous row count.
+            publishComposeSubtitleEntries()
             syncWaveformSubtitleRange(prefix, removedCount, inserted)
             return
         }
@@ -3174,6 +3457,10 @@ class EditorActivity : AppCompatActivity() {
             syncWaveformSubtitles(preserveSelection = true, changedPositions = changedPositions)
         } else {
             syncWaveformSubtitles(preserveSelection = true, changedPositions = changedPositions)
+            // This branch is used when the adapter is temporarily not attached or its item count
+            // is stale during a source transition. Publish the changed row objects explicitly so
+            // a subsequent return to list mode cannot render pre-parse timestamps/text.
+            if (changedPositions.isNotEmpty()) publishComposeSubtitleEntriesAt(changedPositions)
         }
     }
 
@@ -3335,6 +3622,10 @@ class EditorActivity : AppCompatActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         editorCoordinator.onWindowFocusChanged(hasFocus)
+        if (hasFocus && stateModel.isVideoFullscreen) {
+            WindowCompat.getInsetsController(window, window.decorView)
+                .hide(WindowInsetsCompat.Type.systemBars())
+        }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -3601,12 +3892,14 @@ class EditorActivity : AppCompatActivity() {
 private fun EditorFullscreenVideo(
     playbackState: EditorPlaybackUiState,
     videoPlayerView: EditorMpvView,
+    onShowVideoControls: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onSeekStarted: () -> Unit,
     onSeekProgress: (Float) -> Unit,
     onSeekFinished: () -> Unit,
     onSpeedClick: () -> Unit,
-    onToggleFullscreen: () -> Unit
+    onToggleFullscreen: () -> Unit,
+    onHideVideoControls: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -3615,19 +3908,74 @@ private fun EditorFullscreenVideo(
     ) {
         AndroidView(
             factory = { videoPlayerView },
+            update = { view ->
+                view.setOnClickListener { onShowVideoControls() }
+            },
             modifier = Modifier.fillMaxSize()
         )
-        EditorPlaybackPanel(
-            state = playbackState,
-            onTogglePlayPause = onTogglePlayPause,
-            onSeekStarted = onSeekStarted,
-            onSeekProgress = onSeekProgress,
-            onSeekFinished = onSeekFinished,
-            onSpeedClick = onSpeedClick,
-            onToggleFullscreen = onToggleFullscreen,
-            isFullscreen = true,
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
+        playbackState.videoStatus?.let { status ->
+            Text(
+                text = status,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .widthIn(max = 260.dp)
+                    .padding(12.dp),
+                color = Color(0xDDFFFFFF),
+                textAlign = TextAlign.Center,
+                style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                    fontSize = 13.sp,
+                    letterSpacing = 0.sp
+                )
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(
+                    WindowInsets.displayCutout.union(WindowInsets.systemGestures)
+                        .only(WindowInsetsSides.Horizontal)
+                )
+        ) {
+            if (playbackState.videoControlsVisible) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable { onHideVideoControls() }
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 32.dp)
+                        .align(Alignment.TopCenter)
+                        .background(Color.Black.copy(alpha = 0.15f))
+                        .padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 6.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Text(
+                        text = playbackState.videoTimeText,
+                        color = Color(0xCCFFFFFF),
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                            fontSize = 12.sp,
+                            letterSpacing = 0.sp
+                        )
+                    )
+                }
+            }
+            EditorPlaybackPanel(
+                state = playbackState,
+                onTogglePlayPause = onTogglePlayPause,
+                onSeekStarted = onSeekStarted,
+                onSeekProgress = onSeekProgress,
+                onSeekFinished = onSeekFinished,
+                onSpeedClick = onSpeedClick,
+                onToggleFullscreen = onToggleFullscreen,
+                isFullscreen = true,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
+        }
     }
 }
 

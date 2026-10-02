@@ -12,13 +12,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 
 @Composable
 internal fun VideoModeDialog(
-    fileName: String,
     onDismiss: () -> Unit,
     onOpenVideo: () -> Unit,
     onOpenAudioOnly: () -> Unit
@@ -28,7 +29,6 @@ internal fun VideoModeDialog(
         title = { Text("打开视频文件") },
         text = {
             Column(Modifier.fillMaxWidth()) {
-                Text(fileName, style = MaterialTheme.typography.bodyMedium)
                 ListItem(
                     headlineContent = { Text("加载视频") },
                     modifier = Modifier.clickable(onClick = onOpenVideo)
@@ -56,12 +56,19 @@ internal fun SubtitleFilePickerDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("选择字幕文件") },
+        title = {
+            Text(
+                "选择字幕文件",
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Bold
+            )
+        },
         text = {
             Column {
                 Text(
                     "$mediaLabel「$mediaFileName」同目录下存在多个字幕文件，请选择要打开的文件：",
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontSize = 14.sp
                 )
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)

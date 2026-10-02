@@ -110,7 +110,6 @@ class ModelManagementActivity : AppCompatActivity() {
                     onBuiltInVadChanged = asrImportController::onBuiltInVadChanged,
                     onDemucsImportAction = demucsImportController::onAction,
                     onNavigateBack = { onBackPressedDispatcher.onBackPressed() },
-                    onRefresh = ::loadModels,
                     onExport = ::onExportRequested,
                     onDelete = ::onDeleteRequested,
                     onDismissDialog = { dialog = null },
@@ -398,6 +397,9 @@ class ModelManagementActivity : AppCompatActivity() {
             title = "导出 ${item.displayName}",
             message = "正在准备下载"
         ) {
+            if ((exportProgressDialog as? ModelImportDialogUi.Progress)?.token == progressToken) {
+                exportProgressDialog = null
+            }
             exportJob?.cancel()
         }
         isExportingModels = true

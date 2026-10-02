@@ -19,7 +19,6 @@ internal class MediaOpenController(
     fun showVideoModePicker(videoFile: File) {
         ComposeDialogHost.show(activity) { dialog ->
             VideoModeDialog(
-                fileName = videoFile.name,
                 onDismiss = dialog::dismiss,
                 onOpenVideo = {
                     dialog.dismiss()

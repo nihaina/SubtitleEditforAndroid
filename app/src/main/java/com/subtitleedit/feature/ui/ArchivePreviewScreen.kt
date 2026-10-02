@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -38,8 +36,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
 import com.subtitleedit.model.ArchivePreviewItem
 import com.subtitleedit.util.ArchiveManager
@@ -73,6 +73,7 @@ fun ArchivePreviewScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.height(56.dp),
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Image(
@@ -105,29 +106,20 @@ fun ArchivePreviewScreen(
                 .fillMaxSize()
                 .padding(contentPadding)
         ) {
-            Row(
+            Text(
+                text = buildString {
+                    append(archiveName)
+                    if (currentDirectory.isNotEmpty()) append(" / ").append(currentDirectory)
+                },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .background(MaterialTheme.colorScheme.background)
                     .horizontalScroll(pathScrollState)
-                    .padding(horizontal = 12.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = archiveName,
-                    maxLines = 1,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                if (currentDirectory.isNotEmpty()) {
-                    Text(
-                        text = " / $currentDirectory",
-                        maxLines = 1,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-            }
+                    .padding(12.dp),
+                maxLines = 1,
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onBackground
+            )
 
             Box(
                 modifier = Modifier
@@ -138,7 +130,6 @@ fun ArchivePreviewScreen(
                     isLoading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     errorMessage != null -> PreviewEmptyState(
                         text = errorMessage,
-                        isError = true,
                         modifier = Modifier.align(Alignment.Center)
                     )
                     items.isEmpty() -> PreviewEmptyState(
@@ -147,8 +138,7 @@ fun ArchivePreviewScreen(
                     )
                     else -> LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        contentPadding = PaddingValues(8.dp)
                     ) {
                         items(items, key = ArchivePreviewItem::path) { item ->
                             ArchivePreviewRow(item = item) {
@@ -165,15 +155,13 @@ fun ArchivePreviewScreen(
 @Composable
 private fun PreviewEmptyState(
     text: String,
-    modifier: Modifier = Modifier,
-    isError: Boolean = false
+    modifier: Modifier = Modifier
 ) {
     Text(
         text = text,
         modifier = modifier.padding(horizontal = 24.dp),
-        style = MaterialTheme.typography.bodyLarge,
-        color = if (isError) MaterialTheme.colorScheme.error
-        else MaterialTheme.colorScheme.onSurfaceVariant
+        fontSize = 16.sp,
+        color = MaterialTheme.colorScheme.onBackground
     )
 }
 
@@ -198,6 +186,7 @@ private fun ArchivePreviewRow(
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(4.dp)
             .then(
                 if (item.isDirectory) {
                     Modifier.clickable(
@@ -210,6 +199,9 @@ private fun ArchivePreviewRow(
                 }
             ),
         shape = MaterialTheme.shapes.small,
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
     ) {
         Row(
@@ -218,7 +210,7 @@ private fun ArchivePreviewRow(
         ) {
             Image(
                 painter = painterResource(icon),
-                contentDescription = item.name,
+                contentDescription = stringResource(R.string.file_name),
                 modifier = Modifier
                     .size(48.dp)
                     .padding(8.dp)
@@ -230,8 +222,9 @@ private fun ArchivePreviewRow(
                 Text(
                     text = item.name,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.titleSmall,
+                    overflow = TextOverflow.MiddleEllipsis,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.height(4.dp))
@@ -242,8 +235,8 @@ private fun ArchivePreviewRow(
                         item.size >= 0L -> FileUtils.formatFileSize(item.size)
                         else -> "大小未知"
                     },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
 
@@ -254,23 +247,21 @@ private fun ArchivePreviewRow(
                     Text(
                         text = suffix,
                         modifier = Modifier
-                            .widthIn(max = 88.dp)
                             .background(
                                 color = MaterialTheme.colorScheme.primary,
                                 shape = MaterialTheme.shapes.extraSmall
                             )
                             .padding(horizontal = 8.dp, vertical = 4.dp),
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        color = androidx.compose.ui.graphics.Color.White,
+                        fontSize = 12.sp,
+                        maxLines = 1
                     )
                 }
                 modifiedDate?.let { date ->
                     Text(
                         text = date,
                         modifier = Modifier.padding(top = if (suffix.isNotEmpty()) 5.dp else 0.dp),
-                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1
                     )

@@ -30,6 +30,12 @@ internal object MainFilePreviewLoader {
     private val emptyPreviewKeys = ConcurrentHashMap.newKeySet<String>()
     private val emptyApkIconKeys = ConcurrentHashMap.newKeySet<String>()
 
+    /** Keeps the file row's media-duration slot stable while an async preview is loading. */
+    fun isMediaFile(file: File): Boolean {
+        val extension = file.extension.lowercase(Locale.ROOT)
+        return extension in audioExtensions || extension in videoExtensions
+    }
+
     fun preview(context: Context, file: File, targetSize: Int): MainFilePreview {
         val key = key(file)
         val extension = file.extension.lowercase(Locale.ROOT)
@@ -39,7 +45,9 @@ internal object MainFilePreviewLoader {
         if (!isMedia && !isImage && !isApk) return MainFilePreview()
         val cachedBitmap = bitmapCache.get(key)
         val cachedDuration = mediaDurationCache[key]
-        if (cachedBitmap != null || cachedDuration != null || key in emptyPreviewKeys) {
+        // A cached duration does not mean the thumbnail is still cached: the bitmap
+        // cache can evict media artwork while the duration cache retains its entry.
+        if (cachedBitmap != null || (!isImage && key in emptyPreviewKeys)) {
             return MainFilePreview(cachedBitmap, cachedDuration.orEmpty())
         }
 
@@ -52,7 +60,9 @@ internal object MainFilePreviewLoader {
             else -> null
         }
         if (preview != null) bitmapCache.put(key, preview)
-        if (preview == null && (!isMedia || cachedDuration != null)) emptyPreviewKeys += key
+        // Image rows retried decoding on each bind in FileListAdapter. Keep that
+        // behavior so a transient read failure does not hide an image forever.
+        if (preview == null && !isImage) emptyPreviewKeys += key
         return MainFilePreview(preview, mediaDurationCache[key].orEmpty())
     }
 

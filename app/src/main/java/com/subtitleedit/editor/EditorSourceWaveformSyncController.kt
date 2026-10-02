@@ -50,12 +50,21 @@ internal class EditorSourceWaveformSyncController(
 
     fun schedule(updated: List<SubtitleEntry>, dragKey: Long?, shouldRecord: Boolean, initialEntries: List<SubtitleEntry>?) {
         val inFlight = hasPendingSourceEdits() || isPreviewActive()
-        val content = if (hasPendingSourceEdits()) snapshotSourceContent() else sourceContent()
+        val liveContent = if (hasPendingSourceEdits()) snapshotSourceContent() else sourceContent()
         if (inFlight) cancelPreview()
         if (dragKey != null && historyKey != dragKey) {
             historyKey = dragKey
-            historyStart = content
+            historyStart = liveContent
             historyEntries = initialEntries ?: currentEntries().map { it.copy() }
+        }
+        // A drag can outlive one async patch. Once the first patch has been accepted,
+        // sourceContent() already contains the intermediate timing, while the entries below
+        // still describe the drag's original document. Always patch against that original
+        // content for the lifetime of the drag, otherwise each MOVE can apply its delta twice.
+        val content = if (dragKey != null && historyKey == dragKey) {
+            historyStart ?: liveContent
+        } else {
+            liveContent
         }
         pending = Request(
             content = content,
@@ -124,12 +133,22 @@ internal class EditorSourceWaveformSyncController(
         job?.cancel()
         job = null
         pending = null
+        clearHistory()
     }
 
     suspend fun cancelAndJoin() {
-        val active = job ?: return
-        active.cancelAndJoin()
-        if (job === active) job = null
+        val active = job
+        if (active != null) {
+            active.cancelAndJoin()
+            if (job === active) job = null
+        }
         pending = null
+        clearHistory()
+    }
+
+    private fun clearHistory() {
+        historyKey = null
+        historyStart = null
+        historyEntries = null
     }
 }

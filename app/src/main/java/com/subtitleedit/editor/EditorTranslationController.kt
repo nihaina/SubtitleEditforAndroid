@@ -160,7 +160,7 @@ internal class EditorTranslationController(
             .coerceIn(0, session.selectedEntries.size)
         val totalCount = session.selectedEntries.size
         val progressText = mutableStateOf("正在翻译 $completedBeforeRun/$totalCount 条")
-        val dialog = ComposeDialogHost.show(activity) { _ ->
+        val dialog = ComposeDialogHost.show(activity) { progressDialog ->
             AlertDialog(
                 onDismissRequest = {},
                 title = { Text("AI 翻译") },
@@ -172,6 +172,9 @@ internal class EditorTranslationController(
                             userCancelledTranslation = true
                             translateCancelled = true
                             activeTranslationConversation?.cancel()
+                            // The legacy negative button dismissed immediately; the job cleanup
+                            // still owns partial-result handling.
+                            progressDialog.dismiss()
                         }
                     ) { Text("取消") }
                 }

@@ -69,7 +69,7 @@ class AiSettingsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         settingsManager = SettingsManager.getInstance(this)
-        screenState = AiSettingsScreenState.from(settingsManager)
+        screenState = loadScreenState()
         setContent {
             com.subtitleedit.ui.theme.SubtitleEditComposeTheme {
                 screenState?.let { state ->
@@ -105,6 +105,10 @@ class AiSettingsActivity : AppCompatActivity() {
         screenState = next
     }
 
+    private fun loadScreenState(): AiSettingsScreenState {
+        return AiSettingsScreenState.from(settingsManager)
+    }
+
     private fun persistChangedFields(current: AiSettingsScreenState, next: AiSettingsScreenState) {
         if (current.provider == next.provider) {
             if (current.apiKey != next.apiKey) {
@@ -117,9 +121,7 @@ class AiSettingsActivity : AppCompatActivity() {
 
         if (current.translationProvider == next.translationProvider) {
             val provider = current.translationProvider
-            if (current.translationModel != next.translationModel &&
-                AiProviderConfig.getProvider(provider).models.isEmpty()
-            ) {
+            if (current.translationModel != next.translationModel) {
                 settingsManager.setAiModel(provider, next.translationModel.trim())
             }
             if (current.translationContextWindow != next.translationContextWindow) {
@@ -140,9 +142,7 @@ class AiSettingsActivity : AppCompatActivity() {
 
         if (current.punctuationProvider == next.punctuationProvider) {
             val provider = current.punctuationProvider
-            if (current.punctuationModel != next.punctuationModel &&
-                AiProviderConfig.getProvider(provider).models.isEmpty()
-            ) {
+            if (current.punctuationModel != next.punctuationModel) {
                 settingsManager.setAiPunctuationModel(provider, next.punctuationModel.trim())
             }
             if (current.punctuationContextWindow != next.punctuationContextWindow) {

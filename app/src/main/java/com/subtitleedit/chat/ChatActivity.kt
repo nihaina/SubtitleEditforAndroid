@@ -81,9 +81,9 @@ class ChatActivity : AppCompatActivity() {
                         openHistory(sessionId)
                     },
                     onClearHistory = {
+                        showHistoryDialog = false
                         lifecycleScope.launch {
                             historyStore.clear()
-                            showHistoryDialog = false
                             startNewConversation()
                         }
                     }
@@ -129,10 +129,12 @@ class ChatActivity : AppCompatActivity() {
                 if (assistant != null) {
                     assistant.streaming = false
                 }
+                setSending(false)
             } catch (error: Exception) {
                 clearPendingStreamUpdates()
                 messages.removeAt(assistantIndex)
                 append(ChatUiMessage.Status(error.message ?: "对话失败"))
+                setSending(false)
             } finally {
                 sendJob = null
                 if (!waitingForVisualCompletion) setSending(false)
@@ -268,6 +270,7 @@ class ChatActivity : AppCompatActivity() {
         conversation = newConversation()
         currentSessionId = null
         messages.clear()
+        setSending(false)
     }
 
     private fun showHistory() {
@@ -293,6 +296,7 @@ class ChatActivity : AppCompatActivity() {
         sendJob?.cancel()
         clearPendingStreamUpdates()
         conversation.cancel()
+        setSending(false)
         currentSessionId = session.id.takeIf { session.type == ChatHistoryStore.TYPE_CHAT }
         val chatMessages = session.messages.filter { message ->
             message.role != "tool" &&

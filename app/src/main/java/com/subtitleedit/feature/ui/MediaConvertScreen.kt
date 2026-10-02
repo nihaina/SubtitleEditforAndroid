@@ -1,23 +1,30 @@
 package com.subtitleedit.feature.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -36,11 +43,19 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
 
 internal data class MediaFormatOption(
@@ -109,6 +124,7 @@ internal fun MediaConvertScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.height(56.dp),
                 title = { Text("格式转换") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -123,134 +139,207 @@ internal fun MediaConvertScreen(
                 .fillMaxSize()
                 .padding(insets)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("选择媒体", style = MaterialTheme.typography.titleMedium)
-            OutlinedButton(onClick = onPickFiles, enabled = !isConverting, modifier = Modifier.fillMaxWidth()) {
-                Text("选择音频或视频文件")
-            }
-            Text(
-                sourceSummary.ifBlank { "未选择文件" },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            if (sourceInfo.isNotBlank()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 280.dp)
-                        .verticalScroll(rememberScrollState())
+            MediaConvertCard {
+                MediaConvertTitle(stringResource(R.string.activity_media_convert_text_01))
+                Button(
+                    onClick = onPickFiles,
+                    enabled = !isConverting,
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
                 ) {
-                    Text(sourceInfo, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.activity_media_convert_text_02), maxLines = 2)
                 }
-            }
-
-            HorizontalDivider()
-
-            Text("输出目录", style = MaterialTheme.typography.titleMedium)
-            Text(outputDirectory, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedButton(onClick = onSelectOutputDirectory, enabled = !isConverting) {
-                Text("选择输出目录")
-            }
-
-            if (sourceSummary.isNotBlank() && videoFormats.isNotEmpty()) {
-                HorizontalDivider()
-                Text("输出格式", style = MaterialTheme.typography.titleMedium)
-                Text("视频", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                FormatGrid(videoFormats, selectedFormat, !isConverting, onFormatSelected)
-                HorizontalDivider()
-                Text("音频", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                FormatGrid(audioFormats, selectedFormat, !isConverting, onFormatSelected)
-            }
-
-            TextButton(onClick = onToggleAdvanced, enabled = !isConverting) {
-                Text(if (advancedExpanded) "隐藏高级选项" else "高级选项")
-            }
-            if (advancedExpanded && selectedFormat != null) {
-                if (videoCodecs.isNotEmpty()) {
-                    OptionSelector("视频编码器", selectedVideoCodec, videoCodecs, !isConverting, onVideoCodecSelected)
-                    OptionSelector("分辨率", resolutions.getOrElse(resolutionIndex) { resolutions.first() }, resolutions, !isConverting) {
-                        onResolutionSelected(resolutions.indexOf(it).coerceAtLeast(0))
-                    }
-                    OutlinedTextField(
-                        value = videoBitrate,
-                        onValueChange = onVideoBitrateChange,
-                        label = { Text("视频码率 (kb/s)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        enabled = !isConverting,
-                        modifier = Modifier.fillMaxWidth()
+                if (sourceSummary.isBlank()) {
+                    Text(
+                        text = stringResource(R.string.activity_media_convert_text_03),
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = 12.sp,
+                        color = Color(0xFF9E9E9E),
+                        textAlign = TextAlign.Center
                     )
-                    OptionSelector("质量", qualityLabels.getOrElse(qualityIndex) { qualityLabels.first() }, qualityLabels, !isConverting) {
-                        onQualitySelected(qualityLabels.indexOf(it).coerceAtLeast(0))
-                    }
-                    if (qualityLabels.getOrNull(qualityIndex) == "自定义") {
-                        OutlinedTextField(
-                            value = customQuality,
-                            onValueChange = onCustomQualityChange,
-                            label = { Text("CRF (1-31)") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            singleLine = true,
-                            enabled = !isConverting,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
+                } else {
+                    Text(
+                        text = sourceSummary,
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 12,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = sourceInfo,
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        fontSize = 12.sp,
+                        color = Color(0xFF9E9E9E),
+                        maxLines = 40,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
-                OptionSelector("音频编码器", selectedAudioCodec, audioCodecs, !isConverting, onAudioCodecSelected)
-                OutlinedTextField(
-                    value = audioBitrate,
-                    onValueChange = onAudioBitrateChange,
-                    label = { Text("音频码率 (kb/s)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
+            }
+
+            MediaConvertCard {
+                MediaConvertTitle(stringResource(R.string.activity_auto_timestamp_text_06))
+                Button(
+                    onClick = onSelectOutputDirectory,
+                    enabled = !isConverting,
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                ) {
+                    Text(stringResource(R.string.activity_batch_convert_text_02))
+                }
+                Text(
+                    text = outputDirectory,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 12.sp,
+                    color = Color(0xFF9E9E9E)
+                )
+            }
+
+            if (sourceSummary.isNotBlank()) {
+                MediaConvertCard {
+                    MediaConvertTitle(stringResource(R.string.activity_auto_timestamp_text_05))
+                    Text(
+                        text = stringResource(R.string.activity_media_convert_text_05),
+                        modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = 12.sp,
+                        color = Color(0xFF9E9E9E)
+                    )
+                    FormatGrid(videoFormats, selectedFormat, !isConverting, onFormatSelected)
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    Text(
+                        text = stringResource(R.string.activity_media_convert_text_06),
+                        modifier = Modifier.padding(bottom = 4.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = 12.sp,
+                        color = Color(0xFF9E9E9E)
+                    )
+                    FormatGrid(audioFormats, selectedFormat, !isConverting, onFormatSelected)
+                }
+            }
+
+            MediaConvertCard {
+                TextButton(
+                    onClick = onToggleAdvanced,
                     enabled = !isConverting,
                     modifier = Modifier.fillMaxWidth()
-                )
-                OptionSelector("采样率", sampleRates.getOrElse(sampleRateIndex) { sampleRates.first() }, sampleRates, !isConverting) {
-                    onSampleRateSelected(sampleRates.indexOf(it).coerceAtLeast(0))
+                ) {
+                    Text(
+                        text = if (advancedExpanded) "▼ 高级选项"
+                        else stringResource(R.string.activity_media_convert_text_07),
+                        modifier = Modifier.fillMaxWidth(),
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Start
+                    )
                 }
-                OptionSelector("声道", channels.getOrElse(channelIndex) { channels.first() }, channels, !isConverting) {
-                    onChannelSelected(channels.indexOf(it).coerceAtLeast(0))
+                if (advancedExpanded) {
+                    if (videoCodecs.isNotEmpty()) {
+                        OptionSelector(
+                            stringResource(R.string.activity_media_convert_text_08),
+                            selectedVideoCodec, videoCodecs, !isConverting, onVideoCodecSelected
+                        )
+                        OptionSelector(
+                            stringResource(R.string.activity_media_convert_text_09),
+                            resolutions.getOrElse(resolutionIndex) { resolutions.first() },
+                            resolutions, !isConverting
+                        ) { onResolutionSelected(resolutions.indexOf(it).coerceAtLeast(0)) }
+                        MediaConvertNumberField(
+                            label = stringResource(R.string.activity_media_convert_text_10),
+                            value = videoBitrate,
+                            hint = stringResource(R.string.activity_media_convert_hint_01),
+                            enabled = !isConverting,
+                            onValueChange = onVideoBitrateChange
+                        )
+                        OptionSelector(
+                            stringResource(R.string.activity_media_convert_text_11),
+                            qualityLabels.getOrElse(qualityIndex) { qualityLabels.first() },
+                            qualityLabels, !isConverting
+                        ) { onQualitySelected(qualityLabels.indexOf(it).coerceAtLeast(0)) }
+                        if (qualityLabels.getOrNull(qualityIndex) == "自定义") {
+                            OutlinedTextField(
+                                value = customQuality,
+                                onValueChange = onCustomQualityChange,
+                                placeholder = { Text(stringResource(R.string.activity_media_convert_hint_02)) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                enabled = !isConverting,
+                                modifier = Modifier.fillMaxWidth().padding(start = 100.dp)
+                            )
+                        }
+                        HorizontalDivider(modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
+                    }
+                    OptionSelector(
+                        stringResource(R.string.activity_media_convert_text_12),
+                        selectedAudioCodec, audioCodecs, !isConverting, onAudioCodecSelected
+                    )
+                    MediaConvertNumberField(
+                        label = stringResource(R.string.activity_media_convert_text_13),
+                        value = audioBitrate,
+                        hint = stringResource(R.string.activity_media_convert_hint_01),
+                        enabled = !isConverting,
+                        onValueChange = onAudioBitrateChange
+                    )
+                    OptionSelector(
+                        stringResource(R.string.activity_media_convert_text_14),
+                        sampleRates.getOrElse(sampleRateIndex) { sampleRates.first() },
+                        sampleRates, !isConverting
+                    ) { onSampleRateSelected(sampleRates.indexOf(it).coerceAtLeast(0)) }
+                    OptionSelector(
+                        stringResource(R.string.activity_media_convert_text_15),
+                        channels.getOrElse(channelIndex) { channels.first() },
+                        channels, !isConverting
+                    ) { onChannelSelected(channels.indexOf(it).coerceAtLeast(0)) }
                 }
             }
 
-            if (isConverting || progress > 0) {
+            MediaConvertCard {
                 LinearProgressIndicator(
                     progress = { (progress.coerceIn(0, 100) / 100f) },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
                 )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onConvert, enabled = canConvert && !isConverting, modifier = Modifier.weight(1f)) {
-                    Text("开始转换")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = onConvert,
+                        enabled = canConvert && !isConverting,
+                        modifier = Modifier.weight(1f)
+                    ) { Text(stringResource(R.string.start_convert)) }
+                    if (isConverting) {
+                        FilledTonalButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
+                    }
+                    if (canShare && !isConverting) {
+                        FilledTonalButton(onClick = onShare) {
+                            Text(stringResource(R.string.activity_media_convert_text_16))
+                        }
+                    }
                 }
-                if (isConverting) {
-                    TextButton(onClick = onCancel) { Text("取消") }
-                }
-                if (canShare && !isConverting) {
-                    TextButton(onClick = onShare) { Text("分享结果") }
-                }
-            }
-
-            if (log.isNotBlank()) {
-                HorizontalDivider()
-                Text("转换日志", style = MaterialTheme.typography.titleMedium)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .padding(top = 8.dp)
                         .height(180.dp)
+                        .background(Color(0xFF1A1A1A))
                         .verticalScroll(logScrollState)
                         .padding(8.dp)
                 ) {
                     Text(
-                        log,
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = log,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp
+                        ),
+                        color = Color(0xFFCCCCCC)
                     )
                 }
             }
-            Spacer(Modifier.height(8.dp))
         }
     }
 
@@ -271,23 +360,95 @@ internal fun MediaConvertScreen(
 }
 
 @Composable
+private fun MediaConvertCard(content: @Composable () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(Modifier.fillMaxWidth().padding(12.dp)) { content() }
+    }
+}
+
+@Composable
+private fun MediaConvertTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurface
+    )
+}
+
+@Composable
+private fun MediaConvertNumberField(
+    label: String,
+    value: String,
+    hint: String,
+    enabled: Boolean,
+    onValueChange: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, modifier = Modifier.width(100.dp), fontSize = 13.sp)
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            placeholder = { Text(hint) },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            enabled = enabled,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
 private fun FormatGrid(
     formats: List<MediaFormatOption>,
     selectedFormat: String?,
     enabled: Boolean,
     onSelected: (String) -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    val density = LocalDensity.current
+    val buttonMargin = with(density) { 3.toDp() }
+    val buttonVerticalPadding = with(density) { 14.toDp() }
+    val buttonCornerRadius = with(density) { 6.toDp() }
+    val buttonBorderWidth = with(density) { 1.toDp() }
+    Column {
         formats.chunked(5).forEach { rowFormats ->
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row {
                 rowFormats.forEach { format ->
-                    FilterChip(
-                        selected = selectedFormat == format.extension,
-                        onClick = { onSelected(format.extension) },
-                        enabled = enabled,
-                        label = { Text(format.displayName, maxLines = 1) },
-                        modifier = Modifier.weight(1f)
-                    )
+                    val selected = selectedFormat == format.extension
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(buttonMargin)
+                            .clip(RoundedCornerShape(buttonCornerRadius))
+                            .background(if (selected) Color(0xFF1976D2) else Color(0xFF2C2C2C))
+                            .then(
+                                if (selected) Modifier
+                                else Modifier.border(
+                                    buttonBorderWidth,
+                                    Color(0xFF555555),
+                                    RoundedCornerShape(buttonCornerRadius)
+                                )
+                            )
+                            .clickable(enabled = enabled) { onSelected(format.extension) }
+                            .padding(vertical = buttonVerticalPadding),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = format.displayName,
+                            maxLines = 1,
+                            fontSize = 12.sp,
+                            color = if (selected) Color.White else Color(0xFFCCCCCC)
+                        )
+                    }
                 }
                 repeat(5 - rowFormats.size) { Spacer(Modifier.weight(1f).width(1.dp)) }
             }
@@ -304,11 +465,18 @@ private fun OptionSelector(
     onSelected: (String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, style = MaterialTheme.typography.labelLarge)
-        androidx.compose.foundation.layout.Box {
-            OutlinedButton(onClick = { expanded = true }, enabled = enabled) {
-                Text(value)
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, modifier = Modifier.width(100.dp), fontSize = 13.sp)
+        androidx.compose.foundation.layout.Box(Modifier.weight(1f)) {
+            OutlinedButton(
+                onClick = { expanded = true },
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(value, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 options.forEach { option ->

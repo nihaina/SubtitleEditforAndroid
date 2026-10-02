@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.subtitleedit.util.FilePropertiesInfo
@@ -58,8 +59,11 @@ internal fun FilePropertiesDialog(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp
         ) {
-            Column(Modifier.padding(24.dp).heightIn(max = 640.dp)) {
-                Text("详情", style = MaterialTheme.typography.titleLarge)
+            Column(
+                Modifier.padding(start = 24.dp, top = 20.dp, end = 24.dp, bottom = 4.dp)
+                    .heightIn(max = 640.dp)
+            ) {
+                Text("详情", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                 Column(
                     modifier = Modifier.weight(1f, fill = false)
                         .padding(top = 16.dp)
@@ -99,7 +103,7 @@ private fun SingleProperties(
     )
     PropertyRow("类型", info.type)
     PropertyRow("大小", info.size)
-    PropertyRow("修改时间", info.modifiedTime)
+    PropertyRow("修改时间", info.modifiedTime, bottomSpacing = 0.dp)
 
     if (state.loading) {
         CircularProgressIndicator(
@@ -109,14 +113,21 @@ private fun SingleProperties(
     }
     info.mediaInfoTitle?.let { title ->
         Text(title, modifier = Modifier.padding(top = 20.dp), style = MaterialTheme.typography.titleMedium)
-        info.mediaDetails.forEach { detail -> PropertyRow(detail.label, detail.value) }
+        info.mediaDetails.forEach { detail ->
+            PropertyRow(
+                detail.label,
+                detail.value,
+                topSpacing = 12.dp,
+                bottomSpacing = 0.dp
+            )
+        }
     }
 }
 
 @Composable
 private fun MultipleProperties(state: FilePropertiesDialogUiState.Multiple) {
     PropertyRow("已选择", "${state.count} 项")
-    PropertyRow("总大小", state.totalSize)
+    PropertyRow("总大小", state.totalSize, bottomSpacing = 0.dp)
     if (state.loading) {
         CircularProgressIndicator(
             modifier = Modifier.fillMaxWidth().padding(top = 16.dp).wrapContentSize(Alignment.Center),
@@ -130,11 +141,13 @@ private fun PropertyRow(
     label: String,
     value: String,
     onClick: (() -> Unit)? = null,
-    contentDescription: String? = null
+    contentDescription: String? = null,
+    topSpacing: androidx.compose.ui.unit.Dp = 0.dp,
+    bottomSpacing: androidx.compose.ui.unit.Dp = 12.dp
 ) {
     Row(
         modifier = Modifier.fillMaxWidth()
-            .padding(bottom = 12.dp)
+            .padding(top = topSpacing, bottom = bottomSpacing)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .then(
                 if (contentDescription != null) Modifier.semantics { this.contentDescription = contentDescription }
@@ -144,7 +157,7 @@ private fun PropertyRow(
     ) {
         Text(
             label,
-            modifier = Modifier.width(76.dp),
+            modifier = Modifier.width(72.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyLarge
         )

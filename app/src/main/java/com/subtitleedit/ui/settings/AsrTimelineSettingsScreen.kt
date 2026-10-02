@@ -77,6 +77,7 @@ fun AsrTimelineSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.height(56.dp),
                 title = { Text(title) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -94,7 +95,7 @@ fun AsrTimelineSettingsScreen(
                 .fillMaxSize()
                 .padding(contentPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             TimelineSettingsCard {
@@ -125,8 +126,8 @@ fun AsrTimelineSettingsScreen(
                 }
             }
 
-            TimelineSettingsCard {
-                if (!state.useVadTimestamp) {
+            if (!state.useVadTimestamp) {
+                TimelineSettingsCard {
                     Text(
                         text = stringResource(R.string.activity_speech_to_subtitle_settings_text_41),
                         style = MaterialTheme.typography.titleMedium,
@@ -212,7 +213,7 @@ fun AsrTimelineSettingsScreen(
                                 suffix = { Text("毫秒") },
                                 modifier = Modifier
                                     .padding(start = 8.dp)
-                                    .width(128.dp)
+                                    .width(104.dp)
                             )
                         }
                         SettingsSwitchRow(
@@ -251,9 +252,7 @@ fun AsrTimelineSettingsScreen(
                             )
                         }
                     }
-                }
-
-                SettingsSwitchRow(
+                    SettingsSwitchRow(
                     title = "VAD 分段：在固定时长附近的相对静音处切分",
                     description = "使用当前 VAD 模型，在固定切点前后半个分段时长内寻找语音概率最低的连续区间；无需达到固定静音阈值（模型最大时长仍会限制搜索范围）",
                     checked = state.fixedVadSegmentation,
@@ -261,19 +260,19 @@ fun AsrTimelineSettingsScreen(
                     onCheckedChange = onFixedVadSegmentationChanged,
                     modifier = Modifier.padding(top = 12.dp),
                     dimDescriptionWhenDisabled = false
-                )
-                Text(
+                    )
+                    Text(
                     text = stringResource(R.string.activity_speech_to_subtitle_settings_text_02),
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(start = 4.dp, top = 12.dp)
-                )
-                Text(
+                    )
+                    Text(
                     text = stringResource(R.string.activity_speech_to_subtitle_settings_text_03),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 4.dp, top = 4.dp)
-                )
-                Row(
+                    )
+                    Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -294,6 +293,7 @@ fun AsrTimelineSettingsScreen(
                             .padding(start = 8.dp)
                             .width(96.dp)
                     )
+                    }
                 }
             }
         }
@@ -338,7 +338,7 @@ private fun SettingsSwitchRow(
         Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.5f)
             )
             if (description != null) {

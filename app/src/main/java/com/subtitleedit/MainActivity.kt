@@ -32,6 +32,7 @@ import com.subtitleedit.feature.ui.MainCreateItemKind
 import com.subtitleedit.feature.ui.MainActivityDialogUi
 import com.subtitleedit.feature.ui.MainActivityScreen
 import com.subtitleedit.feature.ui.MainActivityScreenState
+import com.subtitleedit.feature.ui.MainDirectoryScrollRequest
 import com.subtitleedit.feature.ui.MainFileOperationDialogs
 import com.subtitleedit.feature.ui.SubtitleConversionDialogUi
 import com.subtitleedit.feature.ui.SubtitleConversionResultUi
@@ -101,6 +102,8 @@ class MainActivity : AppCompatActivity() {
     private val visibleFiles = mutableListOf<File>()
     private val directoryFiles = mutableListOf<File>()
     private var displayedFiles = emptyList<File>()
+    private var directoryEmptyStateVisible = false
+    private var directoryEmptyStateMessage = R.string.no_files
     private var showAllFileTypes = false
     private var showHiddenFiles = false
     private var directoryLoading = false
@@ -110,8 +113,11 @@ class MainActivity : AppCompatActivity() {
     private var customToolbarBack: (() -> Unit)? = null
     private var customToolbarHasBack = false
     private var topLevelPageRefreshVersion by mutableIntStateOf(0)
+    private var topLevelPageSelectionVersion by mutableIntStateOf(0)
     private var searchExpanded = false
     private var directoryListState: LazyListState? = null
+    private var directoryScrollRequest: MainDirectoryScrollRequest? = null
+    private var nextDirectoryScrollGeneration = 0L
     private var screenState by mutableStateOf(MainActivityScreenState())
     private var subtitleConversionDialog by mutableStateOf<SubtitleConversionDialogUi?>(null)
     private var subtitleConversionResult by mutableStateOf<SubtitleConversionResultUi?>(null)
@@ -232,7 +238,11 @@ class MainActivity : AppCompatActivity() {
             },
             onPageChanged = { selectedPage ->
                 stateModel.documentState.selectedTopLevelItem = selectedPage
-                if (selectedPage != R.id.nav_directory && stateModel.documentState.searchQuery.isBlank()) {
+                // The XML toolbar removed the directory SearchView whenever a
+                // top-level page was selected. Keep the query in state so it
+                // can be restored on return, but hide the expanded field while
+                // the directory page is not visible.
+                if (selectedPage != R.id.nav_directory) {
                     searchExpanded = false
                 } else if (selectedPage == R.id.nav_directory &&
                     stateModel.documentState.isFileSearchActive &&
@@ -254,6 +264,7 @@ class MainActivity : AppCompatActivity() {
                 MainActivityScreen(
                         state = screenState,
                         topLevelPageRefreshVersion = topLevelPageRefreshVersion,
+                        topLevelPageSelectionVersion = topLevelPageSelectionVersion,
                         onDirectoryListState = { directoryListState = it },
                         onTopLevelPageSelected = ::showTopLevelPage,
                         onOpenDirectoryFromFavorites = ::openDirectoryFromFavorites,
@@ -356,6 +367,11 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun showTopLevelPage(itemId: Int) {
+        // The legacy BottomNavigationView replaced the selected fragment even
+        // when the user tapped the already-selected item. Keep a generation
+        // change for that case so Compose pages reset/refresh with the same
+        // lifecycle semantics.
+        topLevelPageSelectionVersion++
         topLevelNavigationCoordinator.showPage(itemId)
     }
 
@@ -372,12 +388,22 @@ class MainActivity : AppCompatActivity() {
         }
         screenState = MainActivityScreenState(
             selectedTopLevelItem = document.selectedTopLevelItem,
-            toolbarTitle = if (isSelectionActive) selectionTitle else customToolbarTitle.orEmpty(),
+            // Selection actions and title belong to the directory content. The
+            // legacy top-level pages could be shown while a directory selection
+            // remained stored, but their toolbar continued to show the page title.
+            toolbarTitle = if (document.selectedTopLevelItem == R.id.nav_directory && isSelectionActive) {
+                selectionTitle
+            } else {
+                customToolbarTitle.orEmpty()
+            },
             toolbarHasBack = customToolbarHasBack,
             isDirectoryLoading = directoryLoading,
             isSearchInProgress = searchInProgress,
+            showDirectoryEmptyState = directoryEmptyStateVisible,
+            directoryEmptyStateMessage = directoryEmptyStateMessage,
             currentDirectory = document.currentDirectory,
             files = displayedFiles,
+            scrollRequest = directoryScrollRequest,
             relativePathRoot = relativePathRoot,
             selectedPaths = document.selectedPaths.toSet(),
             pendingOperation = document.pendingFileOperation,
@@ -555,6 +581,7 @@ class MainActivity : AppCompatActivity() {
         }
         
         stateModel.documentState.currentDirectory = directory
+        directoryScrollRequest = null
         updatePathDisplay()
         directoryLoading = true
         publishScreenState()
@@ -651,22 +678,22 @@ class MainActivity : AppCompatActivity() {
         adapterItems.addAll(displayed)
         this.relativePathRoot = relativePathRoot
         displayedFiles = adapterItems
+        directoryEmptyStateVisible = adapterItems.isEmpty()
+        directoryEmptyStateMessage = if (searching) R.string.file_searching else R.string.no_files
         val directoryPath = stateModel.documentState.currentDirectory?.let(::directoryPath)
         val savedScrollPosition = if (restoreScrollPosition && directoryPath != null) {
             stateModel.documentState.directoryScrollPositions[directoryPath]
         } else {
             null
         }
+        directoryScrollRequest = if (restoreScrollPosition && directoryPath != null) {
+            MainDirectoryScrollRequest(++nextDirectoryScrollGeneration, directoryPath, savedScrollPosition)
+        } else {
+            null
+        }
         searchInProgress = searching
         updateSelectionUi()
         publishScreenState()
-        if (restoreScrollPosition && directoryPath != null) {
-            lifecycleScope.launch {
-                val currentListState = directoryListState ?: return@launch
-                if (stateModel.documentState.currentDirectory?.let(::directoryPath) != directoryPath) return@launch
-                restoreDirectoryScrollPosition(savedScrollPosition, currentListState)
-            }
-        }
     }
 
     private fun directoryPath(directory: File): String =
@@ -681,20 +708,6 @@ class MainActivity : AppCompatActivity() {
             firstVisiblePath = firstVisiblePath,
             firstVisibleIndex = firstVisibleIndex,
             offset = listState.firstVisibleItemScrollOffset
-        )
-    }
-
-    private suspend fun restoreDirectoryScrollPosition(
-        savedPosition: DirectoryScrollPosition?,
-        listState: LazyListState
-    ) {
-        if (displayedFiles.isEmpty()) return
-        val position = savedPosition?.firstVisiblePath?.let { path ->
-            displayedFiles.indexOfFirst { it.absolutePath == path }
-        }?.takeIf { it >= 0 } ?: savedPosition?.firstVisibleIndex ?: 0
-        listState.scrollToItem(
-            position.coerceIn(0, displayedFiles.lastIndex),
-            savedPosition?.offset ?: 0
         )
     }
 
@@ -1728,7 +1741,13 @@ class MainActivity : AppCompatActivity() {
             hasDirectoryHistory = stateModel.documentState.directoryHistory.isNotEmpty()
         )) {
             MainBackNavigationPolicy.Decision.DELEGATE_TO_TOP_LEVEL -> {
-                finishFromBackNavigation()
+                // Top-level pages are hosted by Compose. Nested pages publish
+                // their back action through the shared toolbar state.
+                if (customToolbarHasBack) {
+                    customToolbarBack?.invoke()
+                } else {
+                    finishFromBackNavigation()
+                }
             }
             MainBackNavigationPolicy.Decision.NAVIGATE_DESTINATION -> {
                 if (!navigateDestinationUp()) cancelDestinationSelection()

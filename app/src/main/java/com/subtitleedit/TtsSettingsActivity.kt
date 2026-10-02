@@ -6,9 +6,14 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
+import android.widget.Spinner
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,16 +22,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -38,7 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -54,18 +57,23 @@ class TtsSettingsActivity : AppCompatActivity() {
         val settingsManager = SettingsManager.getInstance(this)
         val engineOptions = loadEngineOptions()
         val savedEngine = settingsManager.getTtsEngine()
+        // Keep the legacy fallback: a missing/uninstalled saved engine resets to
+        // the system default instead of silently selecting the first installed one.
         val initialEngine = engineOptions.firstOrNull { it.packageName == savedEngine }
             ?: engineOptions.first()
         if (initialEngine.packageName != savedEngine) {
-            settingsManager.setTtsEngine(initialEngine.packageName)
+            settingsManager.setTtsEngine("")
         }
+        val savedLanguage = settingsManager.getTtsLanguage()
+        val initialLanguage = savedLanguage.takeIf { it in supportedLanguageValues }
+            ?: SettingsManager.TTS_LANGUAGE_AUTO
 
         setContent {
             SubtitleEditComposeTheme {
                 TtsSettingsScreen(
                     engineOptions = engineOptions,
                     selectedEngine = initialEngine.packageName,
-                    selectedLanguage = settingsManager.getTtsLanguage(),
+                    selectedLanguage = initialLanguage,
                     installedEngineCount = engineOptions.size - 1,
                     onEngineSelected = settingsManager::setTtsEngine,
                     onLanguageSelected = settingsManager::setTtsLanguage,
@@ -100,6 +108,16 @@ class TtsSettingsActivity : AppCompatActivity() {
             // Some customized system builds do not expose a standalone TTS settings page.
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
+    }
+
+    private companion object {
+        val supportedLanguageValues = setOf(
+            SettingsManager.TTS_LANGUAGE_AUTO,
+            SettingsManager.TTS_LANGUAGE_SYSTEM,
+            SettingsManager.TTS_LANGUAGE_JAPANESE,
+            SettingsManager.TTS_LANGUAGE_CHINESE,
+            SettingsManager.TTS_LANGUAGE_ENGLISH
+        )
     }
 }
 
@@ -138,6 +156,7 @@ private fun TtsSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.height(56.dp),
                 title = { Text(stringResource(R.string.tts_settings)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -155,16 +174,17 @@ private fun TtsSettingsScreen(
                 .fillMaxSize()
                 .padding(contentPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .padding(16.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = stringResource(R.string.tts_engine),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(onClick = onSystemSettings) {
+                IconButton(onClick = onSystemSettings, modifier = Modifier.size(40.dp)) {
                     Icon(
                         painter = painterResource(R.drawable.ic_settings),
                         contentDescription = stringResource(R.string.tts_system_settings),
@@ -176,7 +196,8 @@ private fun TtsSettingsScreen(
                 text = stringResource(R.string.tts_engine_description),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 13.sp
+                fontSize = 13.sp,
+                modifier = Modifier.padding(top = 4.dp)
             )
             Spacer(Modifier.height(12.dp))
             TtsDropdown(
@@ -195,14 +216,16 @@ private fun TtsSettingsScreen(
                     "检测到 $installedEngineCount 个朗读引擎；选择后立即保存。"
                 },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp
             )
 
             Spacer(Modifier.height(28.dp))
             Text(
                 text = stringResource(R.string.tts_language),
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
             )
             Text(
                 text = stringResource(R.string.tts_language_description),
@@ -220,13 +243,21 @@ private fun TtsSettingsScreen(
                     onLanguageSelected(language)
                 }
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp)
+                    .height(48.dp)
+                    .clickable { showHelp = true }
+                    .padding(horizontal = 12.dp),
+                contentAlignment = Alignment.CenterEnd
             ) {
-                TextButton(onClick = { showHelp = true }) {
-                    Text(stringResource(R.string.tts_help))
-                }
+                Text(
+                    text = stringResource(R.string.tts_help),
+                    color = MaterialTheme.colorScheme.primary,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.End
+                )
             }
         }
     }
@@ -251,47 +282,41 @@ private fun TtsDropdown(
     selectedValue: String,
     onSelected: (String) -> Unit
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val selectedLabel = options.firstOrNull { it.second == selectedValue }?.first
-        ?: options.firstOrNull()?.first.orEmpty()
-
-    Box {
-        OutlinedButton(
-            onClick = { expanded = true },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = selectedLabel,
-                    modifier = Modifier.weight(1f),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Icon(
-                    painter = painterResource(R.drawable.ic_arrow_right),
-                    contentDescription = null,
-                    modifier = Modifier.rotate(90f),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            options.forEach { (label, value) ->
-                DropdownMenuItem(
-                    text = { Text(label) },
-                    onClick = {
-                        expanded = false
-                        onSelected(value)
+    AndroidView(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp),
+        factory = { context ->
+            Spinner(context).apply {
+                adapter = ArrayAdapter(
+                    context,
+                    android.R.layout.simple_spinner_item,
+                    options.map { it.first }
+                ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+                val initial = options.indexOfFirst { it.second == selectedValue }.coerceAtLeast(0)
+                setSelection(initial, false)
+                var lastSelectedValue = options.getOrNull(initial)?.second.orEmpty()
+                onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(
+                        parent: AdapterView<*>?,
+                        view: android.view.View?,
+                        position: Int,
+                        id: Long
+                    ) {
+                        val value = options.getOrNull(position)?.second ?: return
+                        if (value != lastSelectedValue) {
+                            lastSelectedValue = value
+                            onSelected(value)
+                        }
                     }
-                )
+
+                    override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+                }
             }
+        },
+        update = { spinner ->
+            val selected = options.indexOfFirst { it.second == selectedValue }.coerceAtLeast(0)
+            if (spinner.selectedItemPosition != selected) spinner.setSelection(selected)
         }
-    }
+    )
 }

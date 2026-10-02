@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -85,6 +86,7 @@ fun Qwen3AsrSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.height(56.dp),
                 title = { Text(stringResource(R.string.qwen3_asr_settings_title)) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
@@ -219,7 +221,7 @@ fun Qwen3AsrSettingsScreen(
                         Slider(
                             value = mergeGapMs.toFloat(),
                             onValueChange = { value ->
-                                val gap = value.roundToInt().coerceIn(0, 5000)
+                                val gap = ((value.roundToInt().coerceIn(0, 5000) + 25) / 50) * 50
                                 mergeGapMs = gap
                                 mergeGapText = gap.toString()
                                 settingsManager.setSpeechTokenTimestampMergeGapMs(gap)
@@ -251,7 +253,7 @@ fun Qwen3AsrSettingsScreen(
                             ),
                             modifier = Modifier
                                 .padding(start = 8.dp)
-                                .width(120.dp)
+                                .width(104.dp)
                         )
                     }
 

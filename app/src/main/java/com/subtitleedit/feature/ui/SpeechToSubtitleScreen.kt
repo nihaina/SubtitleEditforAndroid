@@ -3,6 +3,7 @@ package com.subtitleedit.feature.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,14 +20,14 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -46,8 +47,10 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
 
 sealed interface SpeechToSubtitleDialogUi {
@@ -107,6 +110,7 @@ fun SpeechToSubtitleScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.height(56.dp),
                 title = { Text("语音转字幕") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
@@ -132,27 +136,22 @@ fun SpeechToSubtitleScreen(
                 .fillMaxSize()
                 .padding(insets)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
+            SpeechCard(Modifier.padding(16.dp)) {
                 Text(
                     text = stringResource(R.string.activity_speech_to_subtitle_text_01),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
                 )
                 Text(
                     text = stringResource(R.string.activity_speech_to_subtitle_text_02),
                     modifier = Modifier.padding(top = 4.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall
+                    fontSize = 14.sp
                 )
                 OutlinedButton(
                     onClick = onSelectFiles,
-                    modifier = Modifier.padding(top = 10.dp)
+                    modifier = Modifier.padding(top = 12.dp)
                 ) {
                     Text(stringResource(R.string.activity_auto_timestamp_text_03))
                 }
@@ -169,23 +168,17 @@ fun SpeechToSubtitleScreen(
                     },
                     modifier = Modifier.padding(top = 8.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium
+                    fontSize = 14.sp
                 )
             }
 
-            HorizontalDivider()
-
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
+            SpeechCard(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
                 Text(
                     text = stringResource(R.string.activity_speech_to_subtitle_text_03),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
                 )
                 SpeechSelector(
-                    label = stringResource(R.string.activity_speech_to_subtitle_text_03),
                     options = state.languageOptions,
                     selectedIndex = state.selectedLanguageIndex,
                     onSelected = onLanguageSelected,
@@ -193,19 +186,13 @@ fun SpeechToSubtitleScreen(
                 )
             }
 
-            HorizontalDivider()
-
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
+            SpeechCard(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
                 Text(
                     text = stringResource(R.string.activity_auto_timestamp_text_05),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
                 )
                 SpeechSelector(
-                    label = stringResource(R.string.activity_auto_timestamp_text_05),
                     options = state.formatOptions,
                     selectedIndex = state.selectedFormatIndex,
                     onSelected = onFormatSelected,
@@ -215,44 +202,39 @@ fun SpeechToSubtitleScreen(
                     label = stringResource(R.string.activity_speech_to_subtitle_text_10),
                     checked = state.addToAutoTranslate,
                     onCheckedChange = onAddToAutoTranslateChange,
-                    modifier = Modifier.padding(top = 8.dp)
+                    modifier = Modifier.padding(top = 10.dp)
                 )
                 SpeechToggle(
                     label = stringResource(R.string.activity_speech_to_subtitle_text_04),
                     checked = state.disableVadForTxt,
                     onCheckedChange = onDisableVadForTxtChange,
                     enabled = state.isTxtSelected,
-                    modifier = Modifier.padding(top = 4.dp)
+                    modifier = Modifier.padding(top = 10.dp)
                 )
                 Text(
                     text = stringResource(R.string.activity_speech_to_subtitle_text_05),
-                    modifier = Modifier.padding(start = 12.dp, top = 2.dp),
+                    modifier = Modifier.padding(top = 4.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
                         alpha = if (state.isTxtSelected) 1f else 0.6f
                     ),
-                    style = MaterialTheme.typography.bodySmall
+                    fontSize = 13.sp
                 )
             }
 
-            HorizontalDivider()
-
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
+            SpeechCard(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
                 Text(
                     text = stringResource(R.string.activity_auto_timestamp_text_06),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
                 )
                 Text(
                     text = state.outputDirectory
                         ?: stringResource(R.string.activity_auto_timestamp_text_07),
-                    modifier = Modifier.padding(top = 6.dp),
+                    modifier = Modifier.padding(top = 8.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    fontSize = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.MiddleEllipsis
                 )
                 OutlinedButton(
                     onClick = onSelectOutputDirectory,
@@ -262,41 +244,41 @@ fun SpeechToSubtitleScreen(
                 }
             }
 
-            HorizontalDivider()
-
             if (!state.asrModelReady) {
                 Text(
                     text = stringResource(R.string.speech_to_subtitle_asr_model_required),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 4.dp),
+                        .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
                     color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyMedium
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center
                 )
             }
             Button(
                 onClick = onStart,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
                     .height(56.dp),
                 enabled = state.startEnabled
             ) {
-                Text(stringResource(R.string.start_convert))
+                Text(stringResource(R.string.start_convert), fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
 
             if (state.showProcessingPanel) {
-                Column(Modifier.fillMaxWidth().padding(8.dp)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
                     Text(
                         text = stringResource(R.string.activity_speech_to_subtitle_text_06),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
                     )
                     if (state.progressVisible) {
                         LinearProgressIndicator(
                             progress = { state.progress.coerceIn(0, 100) / 100f },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 10.dp),
+                                .padding(top = 12.dp),
                             color = MaterialTheme.colorScheme.primary,
                             trackColor = MaterialTheme.colorScheme.outlineVariant
                         )
@@ -306,22 +288,20 @@ fun SpeechToSubtitleScreen(
                             text = state.progressStatus,
                             modifier = Modifier.padding(top = 8.dp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyMedium
+                            fontSize = 14.sp
                         )
                     }
                     Text(
                         text = stringResource(R.string.activity_speech_to_subtitle_text_08),
                         modifier = Modifier.padding(top = 16.dp),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
                     )
-                    Surface(
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 8.dp)
-                            .height(200.dp),
-                        shape = RoundedCornerShape(4.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            .height(200.dp)
                     ) {
                         SelectionContainer {
                             Text(
@@ -331,15 +311,16 @@ fun SpeechToSubtitleScreen(
                                     .verticalScroll(logScrollState)
                                     .padding(8.dp),
                                 color = MaterialTheme.colorScheme.onSurface,
-                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                lineHeight = MaterialTheme.typography.bodySmall.lineHeight
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp
                             )
                         }
                     }
                     if (state.progressVisible) {
                         TextButton(
                             onClick = onCancel,
-                            modifier = Modifier.padding(top = 8.dp)
+                            modifier = Modifier.padding(top = 12.dp)
                         ) {
                             Text(stringResource(R.string.cancel))
                         }
@@ -387,8 +368,22 @@ fun SpeechToSubtitleScreen(
 }
 
 @Composable
+private fun SpeechCard(
+    modifier: Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    ElevatedCard(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), content = content)
+    }
+}
+
+@Composable
 private fun SpeechSelector(
-    label: String,
     options: List<String>,
     selectedIndex: Int,
     onSelected: (Int) -> Unit,
@@ -398,7 +393,7 @@ private fun SpeechSelector(
     Box(modifier.fillMaxWidth()) {
         OutlinedButton(
             onClick = { expanded = true },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().height(48.dp),
             shape = RoundedCornerShape(6.dp)
         ) {
             Row(
@@ -407,7 +402,7 @@ private fun SpeechSelector(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "$label：${options.getOrNull(selectedIndex).orEmpty()}",
+                    text = options.getOrNull(selectedIndex).orEmpty(),
                     modifier = Modifier.weight(1f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -448,14 +443,13 @@ private fun SpeechToggle(
     enabled: Boolean = true
 ) {
     Row(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth()
+            .clickable(enabled = enabled, role = Role.Switch) { onCheckedChange(!checked) },
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = label,
-            modifier = Modifier
-                .weight(1f)
-                .clickable(enabled = enabled, role = Role.Switch) { onCheckedChange(!checked) },
+            modifier = Modifier.weight(1f),
             color = if (enabled) MaterialTheme.colorScheme.onSurface else {
                 MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
             },

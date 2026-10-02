@@ -19,7 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,15 +28,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -45,7 +46,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.DraftManager
 
@@ -288,6 +292,7 @@ internal fun DraftsPage(
         topBar = {
             if (showTopBar) {
                 TopAppBar(
+                modifier = Modifier.height(56.dp),
                     title = {
                         Text(
                             text = if (currentFolder.isEmpty()) {
@@ -310,8 +315,12 @@ internal fun DraftsPage(
                     },
                     actions = {
                         if (currentFolder.isNotEmpty()) {
-                            TextButton(onClick = onBackToRoot) {
-                                Text(stringResource(R.string.menu_drafts_title_01))
+                            IconButton(onClick = onBackToRoot) {
+                                Icon(
+                                    painter = painterResource(android.R.drawable.ic_menu_revert),
+                                    contentDescription = stringResource(R.string.menu_drafts_title_01),
+                                    tint = Color.Unspecified
+                                )
                             }
                         }
                     }
@@ -328,8 +337,8 @@ internal fun DraftsPage(
             ) {
                 Text(
                     text = stringResource(R.string.no_drafts),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    fontSize = 18.sp,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
         } else {
@@ -337,7 +346,7 @@ internal fun DraftsPage(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding),
-                contentPadding = PaddingValues(vertical = 4.dp)
+                contentPadding = PaddingValues(8.dp)
             ) {
                 items(
                     items = drafts,
@@ -349,7 +358,6 @@ internal fun DraftsPage(
                         onLongClick = { onLongPress(draft) },
                         onDeleteClick = { onDeleteClick(draft) }
                     )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
         }
@@ -385,51 +393,41 @@ private fun DraftRow(
                     if (!draft.isFolder) onLongClick()
                 }
             )
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            painter = painterResource(if (draft.isFolder) R.drawable.ic_folder else R.drawable.ic_document),
-            contentDescription = null,
-            modifier = Modifier.size(24.dp),
-            tint = if (draft.isFolder) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            }
-        )
-        Spacer(Modifier.size(16.dp))
         Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(vertical = 4.dp),
+            modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.Center
         ) {
             Text(
                 text = draft.displayName,
-                style = MaterialTheme.typography.bodyLarge,
+                fontSize = 16.sp,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.size(4.dp))
             Text(
                 text = if (draft.isFolder) "文件夹" else draft.formattedDate,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp,
+                color = Color(0xFF888888),
+                modifier = Modifier.padding(top = 4.dp),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
-        IconButton(
-            onClick = onDeleteClick,
-            modifier = Modifier.size(48.dp)
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_delete_normal),
-                contentDescription = stringResource(R.string.delete),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+            IconButton(
+                onClick = onDeleteClick,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    painter = painterResource(android.R.drawable.ic_menu_delete),
+                    contentDescription = stringResource(R.string.delete),
+                    tint = Color.Unspecified,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
         }
     }
 }
@@ -448,54 +446,53 @@ private fun DraftsDialogHost(
 ) {
     when (dialogState) {
         is DraftsDialogState.Preview -> {
+            val density = LocalDensity.current
+            val previewHorizontalPadding = with(density) { 50.toDp() }
+            val previewVerticalPadding = with(density) { 40.toDp() }
             AlertDialog(
                 onDismissRequest = onDismiss,
                 title = { Text("预览：${dialogState.draft.displayName}") },
                 text = {
-                    Column {
-                        Box(
-                            modifier = Modifier
-                                .heightIn(max = 360.dp)
-                                .verticalScroll(rememberScrollState())
-                        ) {
-                            Text(
-                                text = dialogState.content,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
+                    Box(
+                        modifier = Modifier
+                            .verticalScroll(rememberScrollState())
+                            .padding(
+                                horizontal = previewHorizontalPadding,
+                                vertical = previewVerticalPadding
                             )
-                        }
-                        TextButton(
-                            onClick = {
-                                onCopyDraft(dialogState.draft)
-                                onDismiss()
-                            }
-                        ) {
-                            Text("复制全文")
-                        }
+                    ) {
+                        Text(
+                            text = dialogState.content,
+                            fontSize = 14.sp,
+                            lineHeight = 18.2.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 },
                 confirmButton = {
-                    TextButton(
-                        onClick = {
-                            if (fromEditor) {
-                                onLoadDraft(dialogState.draft)
-                            } else {
-                                onDismiss()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(onClick = {
+                            onCopyDraft(dialogState.draft)
+                            onDismiss()
+                        }) { Text("复制全文") }
+                        Spacer(Modifier.weight(1f))
+                        if (fromEditor) {
+                            TextButton(onClick = onDismiss) {
+                                Text(stringResource(R.string.cancel))
                             }
                         }
-                    ) {
-                        Text(if (fromEditor) "加载此草稿" else stringResource(R.string.confirm))
-                    }
-                },
-                dismissButton = if (fromEditor) {
-                    {
-                        TextButton(onClick = onDismiss) {
-                            Text(stringResource(R.string.cancel))
+                        TextButton(onClick = {
+                            if (fromEditor) onLoadDraft(dialogState.draft)
+                            else onDismiss()
+                        }) {
+                            Text(if (fromEditor) "加载此草稿" else stringResource(R.string.confirm))
                         }
                     }
-                } else {
-                    {}
-                }
+                },
+                dismissButton = {}
             )
         }
 

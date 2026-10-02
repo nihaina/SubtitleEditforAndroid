@@ -1,14 +1,18 @@
 package com.subtitleedit.feature.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -21,11 +25,9 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -33,11 +35,15 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
 
 data class AutoTranslateFileUi(
@@ -89,6 +95,7 @@ fun AutoTranslateScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.height(56.dp),
                 title = { Text(stringResource(R.string.auto_translate)) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
@@ -114,8 +121,8 @@ fun AutoTranslateScreen(
                 .fillMaxSize()
                 .padding(insets)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             AutoTranslateSection {
                 Text(
@@ -125,17 +132,9 @@ fun AutoTranslateScreen(
                 )
                 OutlinedButton(
                     onClick = onSelectFiles,
-                    modifier = Modifier.padding(top = 10.dp)
+                    modifier = Modifier.padding(top = 12.dp)
                 ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_file),
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = stringResource(R.string.activity_auto_translate_text_05),
-                        modifier = Modifier.padding(start = 8.dp)
-                    )
+                    Text(stringResource(R.string.activity_auto_timestamp_text_03))
                 }
                 Text(
                     text = if (state.files.isEmpty()) {
@@ -178,30 +177,19 @@ fun AutoTranslateScreen(
                 }
             }
 
-            AutoTranslateSection {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = stringResource(R.string.activity_auto_translate_text_04),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "${state.files.size}",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                }
+            AutoTranslateSection(contentPadding = 0.dp) {
+                Text(
+                    text = stringResource(R.string.activity_auto_translate_text_04),
+                    modifier = Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
                 if (state.files.isNotEmpty()) {
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 200.dp)
-                            .padding(top = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                            .height(200.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
                     ) {
                         items(state.files, key = AutoTranslateFileUi::key) { file ->
                             AutoTranslateFileRow(
@@ -222,12 +210,12 @@ fun AutoTranslateScreen(
                 )
                 Text(
                     text = state.outputDirectory
-                        ?: stringResource(R.string.activity_auto_translate_text_03),
-                    modifier = Modifier.padding(top = 6.dp),
+                        ?: stringResource(R.string.auto_translate_default_output_directory),
+                    modifier = Modifier.padding(top = 8.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = 1,
+                    overflow = TextOverflow.MiddleEllipsis
                 )
                 OutlinedButton(
                     onClick = onSelectOutputDirectory,
@@ -276,7 +264,7 @@ fun AutoTranslateScreen(
         AlertDialog(
             onDismissRequest = onDismissRemove,
             title = { Text("移除文件") },
-            text = { Text("${state.removeFileName} 正在处理，是否移除？") },
+            text = { Text("当前文件正在处理，是否移除？") },
             confirmButton = {
                 TextButton(onClick = onConfirmRemove) { Text("移除") }
             },
@@ -302,14 +290,14 @@ fun AutoTranslateScreen(
 }
 
 @Composable
-private fun AutoTranslateSection(content: @Composable () -> Unit) {
+private fun AutoTranslateSection(contentPadding: Dp = 16.dp, content: @Composable () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Column(Modifier.padding(16.dp)) {
+        Column(Modifier.padding(contentPadding)) {
             content()
         }
     }
@@ -324,18 +312,23 @@ private fun SettingSwitch(
     modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = modifier,
+        modifier = modifier.toggleable(
+            value = checked,
+            enabled = enabled,
+            role = Role.Switch,
+            onValueChange = onCheckedChange
+        ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(
             text = label,
             modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyMedium
+            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp)
         )
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange,
+            onCheckedChange = null,
             enabled = enabled
         )
     }
@@ -347,24 +340,33 @@ private fun AutoTranslateFileRow(
     onClick: () -> Unit,
     onRemove: () -> Unit
 ) {
-    Surface(
+    Card(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(4.dp)
             .clickable(enabled = file.canRetry, onClick = onClick),
         shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 12.dp, top = 10.dp, end = 4.dp, bottom = 10.dp),
+                .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(Modifier.weight(1f)) {
+            Image(
+                painter = painterResource(R.drawable.ic_file),
+                contentDescription = stringResource(R.string.file_name),
+                modifier = Modifier.size(40.dp).padding(4.dp)
+            )
+            Column(Modifier.weight(1f).padding(start = 8.dp)) {
                 Text(
                     text = file.fileName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.MiddleEllipsis
                 )
@@ -377,44 +379,36 @@ private fun AutoTranslateFileRow(
                     Text(
                         text = file.fileSizeLabel,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
+                    Spacer(Modifier.width(8.dp))
                     Text(
                         text = if (file.progressLabel == null) {
                             "字幕 ${file.totalLines}"
                         } else {
                             "字幕 ${file.totalLines} · 已处理 ${file.processedLines}"
                         },
+                        modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.labelSmall,
+                        fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.End
                     )
                 }
                 Text(
                     text = if (file.statusMessage.isBlank()) file.status else "${file.status}：${file.statusMessage}",
                     modifier = Modifier.padding(top = 2.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = when {
-                        file.canRetry -> MaterialTheme.colorScheme.error
-                        file.status == "已完成" -> MaterialTheme.colorScheme.primary
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-                if (file.showStageProgress && file.progressLabel != null && file.totalLines > 0) {
-                    LinearProgressIndicator(
-                        progress = { (file.processedLines.toFloat() / file.totalLines).coerceIn(0f, 1f) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 6.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.outlineVariant
-                    )
-                }
             }
-            IconButton(onClick = onRemove) {
+            IconButton(onClick = onRemove, modifier = Modifier.size(40.dp)) {
                 Icon(
                     painter = painterResource(R.drawable.ic_delete),
                     contentDescription = stringResource(R.string.delete),

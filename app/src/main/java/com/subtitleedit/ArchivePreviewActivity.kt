@@ -84,8 +84,9 @@ class ArchivePreviewActivity : AppCompatActivity() {
     }
 
     private fun showDirectory(directory: String) {
+        val loadedBrowser = browser ?: return
         currentDirectory = directory.trim('/')
-        items = browser?.itemsAt(currentDirectory).orEmpty()
+        items = loadedBrowser.itemsAt(currentDirectory)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

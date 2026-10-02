@@ -27,6 +27,7 @@ class LogActivity : AppCompatActivity() {
     private var hasLoadedLog = false
     private var isRefreshing by mutableStateOf(false)
     private var isExportEnabled by mutableStateOf(false)
+    private var showClearedPlaceholder by mutableStateOf(false)
     private var refreshGeneration = 0
     private var allSections by mutableStateOf(emptyList<LogSection>())
     private var pageFilter by mutableStateOf("全部页面")
@@ -51,6 +52,7 @@ class LogActivity : AppCompatActivity() {
                     infoText = infoText,
                     isRefreshing = isRefreshing,
                     isExportEnabled = isExportEnabled,
+                    showClearedPlaceholder = showClearedPlaceholder,
                     onBack = { onBackPressedDispatcher.onBackPressed() },
                     onRefresh = { refreshLog() },
                     onExport = ::requestExport,
@@ -61,7 +63,12 @@ class LogActivity : AppCompatActivity() {
                             refreshLog()
                         }
                     },
-                    onPageFilterChange = { pageFilter = it }
+                    onPageFilterChange = {
+                        pageFilter = it
+                        // The legacy spinner replaced the cleared placeholder with
+                        // the filtered adapter as soon as a selection was made.
+                        showClearedPlaceholder = false
+                    }
                 )
             }
         }
@@ -73,8 +80,8 @@ class LogActivity : AppCompatActivity() {
         val mode = displayMode
         isRefreshing = true
         isExportEnabled = false
+        showClearedPlaceholder = false
         infoText = "正在读取本应用最近 1 小时日志..."
-        allSections = emptyList()
 
         lifecycleScope.launch {
             val result = runCatching {
@@ -98,6 +105,10 @@ class LogActivity : AppCompatActivity() {
                 isExportEnabled = true
                 onComplete?.invoke()
             }.onFailure { error ->
+                hasLoadedLog = false
+                allSections = emptyList()
+                pageOptions = listOf("全部页面")
+                pageFilter = "全部页面"
                 infoText = "读取日志失败：${error.message ?: "未知错误"}"
                 isExportEnabled = true
                 OverwritingToast.makeText(
@@ -111,11 +122,13 @@ class LogActivity : AppCompatActivity() {
     }
 
     private fun clearLog() {
+        // Ignore an in-flight capture so a pre-clear snapshot cannot repopulate the view.
         refreshGeneration++
         RuntimeLogManager.clear(this)
         hasLoadedLog = false
         isRefreshing = false
         isExportEnabled = true
+        showClearedPlaceholder = true
         allSections = emptyList()
         pageOptions = listOf("全部页面")
         pageFilter = "全部页面"

@@ -177,14 +177,19 @@ internal class EditorTranscribeController(
             if (hasCachedPcm) "正在使用缓存音频..." else "正在准备音频..."
         )
         transcribeCancelled = false
-        val progressDialog = ComposeDialogHost.show(activity) { _ ->
+        val progressDialog = ComposeDialogHost.show(activity) { dialog ->
             AlertDialog(
                 onDismissRequest = {},
                 title = { Text("正在转录") },
                 text = { Text(progressMessage.value) },
                 confirmButton = {},
                 dismissButton = {
-                    TextButton(onClick = { transcribeCancelled = true }) { Text("取消") }
+                    TextButton(onClick = {
+                        transcribeCancelled = true
+                        // Match the legacy negative button: close immediately while the worker
+                        // finishes cancellation and cleans up its temporary files.
+                        dialog.dismiss()
+                    }) { Text("取消") }
                 }
             )
         }

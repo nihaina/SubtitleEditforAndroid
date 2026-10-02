@@ -85,7 +85,7 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
                     onSelectRange = ::selectRange,
                     onSelectionChanged = ::setSelection,
                     onEditItem = ::editItem,
-                    onMoveItem = ::moveItem,
+                    onInvalidRange = { showMessage("请输入有效的起止行号") },
                     onApply = ::applyFormatting
                 )
             }
@@ -148,16 +148,6 @@ class SubtitleFormatEditorActivity : AppCompatActivity() {
         if (item.text == text) return
         previewItems = previewItems.toMutableList().also {
             it[position] = item.copy(text = text)
-        }
-        hasChanges = true
-    }
-
-    private fun moveItem(fromPosition: Int, toPosition: Int) {
-        if (fromPosition !in previewItems.indices || toPosition !in previewItems.indices) return
-        if (fromPosition == toPosition) return
-        previewItems = previewItems.toMutableList().also { items ->
-            val moved = items.removeAt(fromPosition)
-            items.add(toPosition, moved)
         }
         hasChanges = true
     }

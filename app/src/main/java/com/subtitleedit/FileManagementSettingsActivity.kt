@@ -4,12 +4,15 @@ import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -20,8 +23,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.SettingsManager
@@ -70,6 +76,7 @@ private fun FileManagementSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.height(56.dp),
                 title = { Text(stringResource(R.string.file_management_settings)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -86,27 +93,44 @@ private fun FileManagementSettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(contentPadding)
+                .padding(16.dp)
         ) {
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.activity_settings_text_13)) },
-                supportingContent = { Text(stringResource(R.string.activity_settings_text_14)) },
-                trailingContent = {
-                    Switch(
-                        checked = showAllFileTypes,
-                        onCheckedChange = onShowAllFileTypesChanged
-                    )
-                }
+            FileManagementSwitchRow(
+                title = stringResource(R.string.activity_settings_text_13),
+                description = stringResource(R.string.activity_settings_text_14),
+                checked = showAllFileTypes,
+                onCheckedChange = onShowAllFileTypesChanged
             )
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.activity_settings_text_15)) },
-                supportingContent = { Text(stringResource(R.string.activity_settings_text_16)) },
-                trailingContent = {
-                    Switch(
-                        checked = showHiddenFiles,
-                        onCheckedChange = onShowHiddenFilesChanged
-                    )
-                }
+            FileManagementSwitchRow(
+                title = stringResource(R.string.activity_settings_text_15),
+                description = stringResource(R.string.activity_settings_text_16),
+                checked = showHiddenFiles,
+                onCheckedChange = onShowHiddenFilesChanged
             )
         }
+    }
+}
+
+@Composable
+private fun FileManagementSwitchRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().height(64.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontSize = 16.sp)
+            Text(
+                description,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

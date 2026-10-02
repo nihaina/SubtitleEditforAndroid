@@ -63,6 +63,9 @@ internal class MpvPlaybackEngine(
     override val isPlaying: Boolean
         get() = phase.canAccessPlayer && !paused && !eofReached
 
+    override val isSeekInProgress: Boolean
+        get() = seekInProgress
+
     override fun prepare(file: File) {
         playbackPhase = PlaybackPhase.LOADING
         try {

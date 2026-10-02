@@ -3,6 +3,7 @@ package com.subtitleedit.chat
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,8 +24,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -37,16 +40,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -69,6 +75,8 @@ internal fun ChatScreen(
     onOpenHistory: (String) -> Unit,
     onClearHistory: () -> Unit
 ) {
+    val compactActions = LocalConfiguration.current.screenWidthDp < 360
+    var overflowExpanded by remember { mutableStateOf(false) }
     LaunchedEffect(scrollRevision, messages.size) {
         if (messages.isNotEmpty()) listState.scrollToItem(messages.lastIndex)
     }
@@ -76,6 +84,7 @@ internal fun ChatScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.height(56.dp),
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Image(
@@ -105,12 +114,36 @@ internal fun ChatScreen(
                             colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurfaceVariant)
                         )
                     }
-                    IconButton(onClick = onClearConversation) {
-                        Image(
-                            painter = painterResource(R.drawable.ic_delete),
-                            contentDescription = "清空对话",
-                            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.error)
-                        )
+                    if (compactActions) {
+                        Box {
+                            IconButton(onClick = { overflowExpanded = true }) {
+                                Image(
+                                    painter = painterResource(R.drawable.ic_more_vertical),
+                                    contentDescription = "更多选项",
+                                    colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurfaceVariant)
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = overflowExpanded,
+                                onDismissRequest = { overflowExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("清空对话") },
+                                    onClick = {
+                                        overflowExpanded = false
+                                        onClearConversation()
+                                    }
+                                )
+                            }
+                        }
+                    } else {
+                        IconButton(onClick = onClearConversation) {
+                            Image(
+                                painter = painterResource(R.drawable.ic_delete),
+                                contentDescription = "清空对话",
+                                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.error)
+                            )
+                        }
                     }
                 }
             )
@@ -120,7 +153,7 @@ internal fun ChatScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.Bottom
                 ) {
@@ -129,7 +162,7 @@ internal fun ChatScreen(
                         onValueChange = onInputTextChange,
                         modifier = Modifier.weight(1f),
                         enabled = !isSending,
-                        placeholder = { Text("输入消息") },
+                        label = { Text("输入消息") },
                         shape = RoundedCornerShape(8.dp),
                         minLines = 1,
                         maxLines = 6,
@@ -139,7 +172,7 @@ internal fun ChatScreen(
                         ),
                         keyboardActions = KeyboardActions(onSend = { onSendOrStop() })
                     )
-                    IconButton(onClick = onSendOrStop) {
+                    IconButton(onClick = onSendOrStop, modifier = Modifier.width(48.dp)) {
                         Image(
                             painter = painterResource(if (isSending) R.drawable.ic_stop else R.drawable.ic_send),
                             contentDescription = if (isSending) "停止生成" else "发送消息",
@@ -156,7 +189,7 @@ internal fun ChatScreen(
                 .fillMaxSize()
                 .padding(contentPadding),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.Bottom
         ) {
             itemsIndexed(
                 items = messages,
@@ -174,27 +207,21 @@ internal fun ChatScreen(
             text = {
                 LazyColumn(modifier = Modifier.heightIn(max = 440.dp)) {
                     items(historySessions, key = { it.id }) { session ->
+                        val type = if (session.type == ChatHistoryStore.TYPE_TRANSLATION) "AI 翻译" else "AI 对话"
                         ListItem(
                             headlineContent = {
-                                Text(session.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            },
-                            supportingContent = {
-                                Text(
-                                    if (session.type == ChatHistoryStore.TYPE_TRANSLATION) "AI 翻译" else "AI 对话",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Text("$type · ${session.title}", maxLines = 1, overflow = TextOverflow.Ellipsis)
                             },
                             modifier = Modifier.clickable(
                                 role = Role.Button,
                                 onClick = { onOpenHistory(session.id) }
                             )
                         )
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = onCloseHistory) { Text("关闭") }
+                TextButton(onClick = onCloseHistory) { Text("取消") }
             },
             dismissButton = {
                 TextButton(onClick = onClearHistory) { Text("清空记录") }
@@ -207,9 +234,12 @@ internal fun ChatScreen(
 private fun ChatMessageRow(message: ChatUiMessage) {
     when (message) {
         is ChatUiMessage.User -> {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
                 Surface(
-                    modifier = Modifier.widthIn(max = 440.dp),
+                    modifier = Modifier.widthIn(min = 64.dp, max = 420.dp),
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.primary
                 ) {
@@ -218,7 +248,7 @@ private fun ChatMessageRow(message: ChatUiMessage) {
                             text = message.text,
                             modifier = Modifier.padding(12.dp),
                             color = MaterialTheme.colorScheme.onPrimary,
-                            style = MaterialTheme.typography.bodyLarge
+                            fontSize = 16.sp
                         )
                     }
                 }
@@ -227,11 +257,9 @@ private fun ChatMessageRow(message: ChatUiMessage) {
         is ChatUiMessage.Assistant -> AssistantMessage(message)
         is ChatUiMessage.Status -> Text(
             text = message.text,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 6.dp),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelSmall,
+            fontSize = 12.sp,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
     }
@@ -239,12 +267,12 @@ private fun ChatMessageRow(message: ChatUiMessage) {
 
 @Composable
 private fun AssistantMessage(message: ChatUiMessage.Assistant) {
-    Column(Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(
             text = "AI",
             modifier = Modifier.padding(bottom = 4.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelSmall
+            fontSize = 12.sp
         )
         if (message.reasoning.isNotBlank()) {
             Surface(
@@ -256,13 +284,16 @@ private fun AssistantMessage(message: ChatUiMessage.Assistant) {
                         onClick = { message.reasoningExpanded = !message.reasoningExpanded }
                     ),
                 shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant
+                color = MaterialTheme.colorScheme.surfaceContainer
             ) {
-                Column(Modifier.padding(10.dp)) {
+                Column(
+                    Modifier.heightIn(min = 42.dp).padding(10.dp),
+                    verticalArrangement = Arrangement.Center
+                ) {
                     Text(
                         if (message.reasoningExpanded) "收起思考" else "展开思考",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium
+                        fontSize = 14.sp
                     )
                     if (message.reasoningExpanded) {
                         Spacer(Modifier.height(8.dp))
@@ -270,7 +301,7 @@ private fun AssistantMessage(message: ChatUiMessage.Assistant) {
                             Text(
                                 message.reasoning,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodyMedium
+                                fontSize = 14.sp
                             )
                         }
                     }
@@ -288,7 +319,7 @@ private fun AssistantMessage(message: ChatUiMessage.Assistant) {
                         text = message.text.ifBlank { if (message.streaming) "正在生成..." else "" },
                         modifier = Modifier.padding(12.dp),
                         color = MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.bodyLarge
+                        fontSize = 16.sp
                     )
                 }
             }

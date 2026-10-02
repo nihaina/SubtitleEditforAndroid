@@ -2,19 +2,23 @@ package com.subtitleedit.feature.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -28,12 +32,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
 import com.subtitleedit.util.ArchiveManager
 
@@ -206,7 +214,9 @@ private fun RenameDialog(
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit
 ) {
-    var name by remember(initialName) { mutableStateOf(initialName) }
+    var name by remember(initialName) {
+        mutableStateOf(TextFieldValue(initialName, selection = TextRange(initialName.length)))
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("重命名") },
@@ -219,7 +229,7 @@ private fun RenameDialog(
             )
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(name) }) { Text(stringResource(R.string.confirm)) }
+            TextButton(onClick = { onConfirm(name.text) }) { Text(stringResource(R.string.confirm)) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
@@ -241,22 +251,26 @@ private fun SubtitleConversionDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.dialog_subtitle_convert_title)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column {
                 Text(dialog.sourceFileText, style = MaterialTheme.typography.bodyMedium)
                 Text(
                     dialog.sourceFormatText,
+                    modifier = Modifier.padding(top = 8.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp)
                 )
                 ChoiceField(
+                    modifier = Modifier.padding(top = 12.dp),
                     label = stringResource(R.string.target_format),
                     selected = dialog.targetFormats[targetIndex],
                     options = dialog.targetFormats,
+                    horizontal = true,
                     onSelect = { targetIndex = dialog.targetFormats.indexOf(it) }
                 )
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .padding(top = 8.dp)
                         .clickable { keepOriginal = !keepOriginal },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -264,7 +278,11 @@ private fun SubtitleConversionDialog(
                         checked = keepOriginal,
                         onCheckedChange = { keepOriginal = it }
                     )
-                    Text(stringResource(R.string.dialog_subtitle_convert_keep_original))
+                    Text(
+                        stringResource(R.string.dialog_subtitle_convert_keep_original),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 14.sp
+                    )
                 }
             }
         },
@@ -275,7 +293,7 @@ private fun SubtitleConversionDialog(
                     converting = onConvert(targetIndex, keepOriginal)
                 }
             ) {
-                Text(if (converting) "正在转换…" else stringResource(R.string.start_convert))
+                Text(stringResource(R.string.start_convert))
             }
         },
         dismissButton = {
@@ -294,7 +312,11 @@ private fun ArchiveCreationDialog(
     onClearPasswordBook: () -> Unit
 ) {
     val initialFormat = remember(dialog) { dialog.formats.first() }
-    var name by remember(dialog) { mutableStateOf(dialog.initialName) }
+    var name by remember(dialog) {
+        mutableStateOf(
+            TextFieldValue(dialog.initialName, selection = TextRange(dialog.initialName.length))
+        )
+    }
     var selectedFormat by remember(dialog) { mutableStateOf(initialFormat) }
     var selectedMethod by remember(dialog) { mutableStateOf(initialFormat.compressionMethods.first()) }
     var selectedEncryption by remember(dialog) { mutableStateOf(initialFormat.encryptionMethods.firstOrNull()) }
@@ -317,8 +339,7 @@ private fun ArchiveCreationDialog(
             Column(
                 modifier = Modifier
                     .heightIn(max = 480.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .verticalScroll(rememberScrollState())
             ) {
                 OutlinedTextField(
                     value = name,
@@ -329,30 +350,34 @@ private fun ArchiveCreationDialog(
                     isError = nameError != null,
                     supportingText = { nameError?.let { Text(it) } }
                 )
-                ChoiceField(
-                    label = stringResource(R.string.dialog_create_archive_text_01),
-                    selected = selectedFormat.format.displayName,
-                    options = dialog.formats.map { it.format.displayName },
-                    onSelect = { label ->
-                        val option = dialog.formats.first { it.format.displayName == label }
-                        selectedFormat = option
-                        selectedMethod = option.compressionMethods.first()
-                        selectedEncryption = option.encryptionMethods.firstOrNull()
-                        if (option.format == ArchiveManager.CreateFormat.TAR) {
-                            splitSize = dialog.splitOptions.first().bytes
+                Column(modifier = Modifier.padding(top = 12.dp)) {
+                    ChoiceField(
+                        label = stringResource(R.string.dialog_create_archive_text_01),
+                        selected = selectedFormat.format.displayName,
+                        options = dialog.formats.map { it.format.displayName },
+                        onSelect = { label ->
+                            val option = dialog.formats.first { it.format.displayName == label }
+                            selectedFormat = option
+                            selectedMethod = option.compressionMethods.first()
+                            selectedEncryption = option.encryptionMethods.firstOrNull()
+                            if (option.format == ArchiveManager.CreateFormat.TAR) {
+                                splitSize = dialog.splitOptions.first().bytes
+                            }
                         }
-                    }
-                )
-                ChoiceField(
-                    label = stringResource(R.string.dialog_create_archive_text_02),
-                    selected = selectedMethod.displayName,
-                    options = selectedFormatOption.compressionMethods.map { it.displayName },
-                    onSelect = { label ->
-                        selectedMethod = selectedFormatOption.compressionMethods.first { it.displayName == label }
-                    }
-                )
+                    )
+                    ChoiceField(
+                        modifier = Modifier.padding(top = 8.dp),
+                        label = stringResource(R.string.dialog_create_archive_text_02),
+                        selected = selectedMethod.displayName,
+                        options = selectedFormatOption.compressionMethods.map { it.displayName },
+                        onSelect = { label ->
+                            selectedMethod = selectedFormatOption.compressionMethods.first { it.displayName == label }
+                        }
+                    )
+                }
                 if (selectedFormat.format == ArchiveManager.CreateFormat.ZIP) {
                     ChoiceField(
+                        modifier = Modifier.padding(top = 8.dp),
                         label = stringResource(R.string.dialog_create_archive_text_03),
                         selected = selectedEncryption?.displayName.orEmpty(),
                         options = selectedFormatOption.encryptionMethods.map { it.displayName },
@@ -361,7 +386,12 @@ private fun ArchiveCreationDialog(
                         }
                     )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     OutlinedTextField(
                         value = password,
                         onValueChange = { password = it },
@@ -388,6 +418,7 @@ private fun ArchiveCreationDialog(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
                     )
                     IconButton(
+                        modifier = Modifier.padding(start = 8.dp),
                         onClick = {
                             passwordBook = onLoadPasswords()
                         },
@@ -400,15 +431,17 @@ private fun ArchiveCreationDialog(
                     }
                 }
                 Text(
+                    modifier = Modifier.padding(top = 4.dp),
                     text = when (selectedFormat.format) {
                         ArchiveManager.CreateFormat.ZIP -> "留空则不加密；ZipCrypto 兼容性更好，AES-256 更安全"
                         ArchiveManager.CreateFormat.SEVEN_Z -> "使用 7Z AES-256 加密；留空则不加密"
                         ArchiveManager.CreateFormat.TAR -> "密码仅适用于 ZIP 和 7Z 格式"
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall
+                    fontSize = 12.sp
                 )
                 ChoiceField(
+                    modifier = Modifier.padding(top = 12.dp),
                     label = stringResource(R.string.dialog_create_archive_text_05),
                     selected = dialog.splitOptions.first { it.bytes == splitSize }.label,
                     options = dialog.splitOptions.map { it.label },
@@ -418,7 +451,10 @@ private fun ArchiveCreationDialog(
                     }
                 )
                 Row(
-                    modifier = Modifier.clickable { deleteSources = !deleteSources },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp)
+                        .clickable { deleteSources = !deleteSources },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Checkbox(checked = deleteSources, onCheckedChange = { deleteSources = it })
@@ -430,7 +466,7 @@ private fun ArchiveCreationDialog(
             TextButton(onClick = {
                 val error = onCreate(
                     ArchiveCreateSubmission(
-                        name = name,
+                        name = name.text,
                         format = selectedFormat.format,
                         method = selectedMethod,
                         password = if (canSetPassword) password else "",
@@ -499,43 +535,88 @@ private fun ArchiveCreationDialog(
     }
 }
 
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun ChoiceField(
+    modifier: Modifier = Modifier,
     label: String,
     selected: String,
     options: List<String>,
     enabled: Boolean = true,
+    horizontal: Boolean = false,
     onSelect: (String) -> Unit
 ) {
     var expanded by remember(label, options) { mutableStateOf(false) }
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = if (enabled) it else false }
-    ) {
-        OutlinedTextField(
-            value = selected,
-            onValueChange = {},
-            modifier = Modifier
-                .fillMaxWidth()
-                .menuAnchor(),
-            readOnly = true,
-            enabled = enabled,
-            label = { Text(label) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
-        )
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            options.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(option) },
-                    onClick = {
-                        expanded = false
-                        onSelect(option)
+    Box(modifier = modifier.fillMaxWidth()) {
+        val labelContent: @Composable () -> Unit = {
+            Text(
+                text = label,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = if (horizontal) 14.sp else 13.sp,
+                modifier = Modifier.alpha(if (enabled) 1f else 0.38f)
+            )
+        }
+        val selectedContent: @Composable (Modifier) -> Unit = { selectionModifier ->
+            Box(modifier = selectionModifier) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .clickable(enabled = enabled) { expanded = true }
+                        .alpha(if (enabled) 1f else 0.38f),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = selected,
+                            modifier = Modifier.weight(1f),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = 16.sp,
+                                letterSpacing = 0.sp
+                            )
+                        )
+                        Text(
+                            text = "▾",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = 18.sp,
+                                letterSpacing = 0.sp
+                            )
+                        )
                     }
-                )
+                }
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
+                    options.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option) },
+                            onClick = {
+                                expanded = false
+                                onSelect(option)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        if (horizontal) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                labelContent()
+                Spacer(Modifier.width(12.dp))
+                selectedContent(Modifier.weight(1f))
+            }
+        } else {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                labelContent()
+                selectedContent(Modifier.fillMaxWidth())
             }
         }
     }

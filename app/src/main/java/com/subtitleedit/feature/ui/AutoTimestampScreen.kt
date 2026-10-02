@@ -3,20 +3,21 @@ package com.subtitleedit.feature.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -35,9 +36,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.subtitleedit.R
 
 internal enum class AutoTimestampDialog { NONE, OUTPUT_CONFLICT, CANCEL_GENERATION, BACK_WHILE_GENERATING }
@@ -78,6 +87,7 @@ internal fun AutoTimestampScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.height(56.dp),
                 title = { Text("自动打轴") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -97,50 +107,102 @@ internal fun AutoTimestampScreen(
                 .fillMaxSize()
                 .padding(insets)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("音频文件", style = MaterialTheme.typography.titleMedium)
-            OutlinedButton(onClick = onSelectAudio, enabled = !isGenerating) {
-                Text("选择音频或视频")
-            }
-            Text(audioFilesText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-            HorizontalDivider()
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("二次处理", style = MaterialTheme.typography.titleMedium)
-                Switch(
-                    checked = secondaryProcessingEnabled,
-                    onCheckedChange = onSecondaryProcessingChange,
-                    enabled = secondaryProcessingAvailable && !isGenerating
+            AutoTimestampCard {
+                AutoTimestampTitle(stringResource(R.string.activity_auto_timestamp_text_02))
+                OutlinedButton(
+                    onClick = onSelectAudio,
+                    enabled = !isGenerating,
+                    modifier = Modifier.padding(top = 8.dp)
+                ) {
+                    Text(stringResource(R.string.activity_auto_timestamp_text_03))
+                }
+                Text(
+                    text = audioFilesText,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 40.dp)
+                        .alpha(if (secondaryProcessingAvailable) 1f else 0.55f)
+                        .toggleable(
+                            value = secondaryProcessingEnabled,
+                            enabled = secondaryProcessingAvailable && !isGenerating,
+                            role = Role.Switch,
+                            onValueChange = onSecondaryProcessingChange
+                        ),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = stringResource(R.string.activity_auto_timestamp_text_12),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontSize = 14.sp
+                    )
+                    Switch(
+                        checked = secondaryProcessingEnabled,
+                        onCheckedChange = null,
+                            enabled = secondaryProcessingAvailable && !isGenerating
+                    )
+                }
+                Text(
+                    text = secondaryProcessingHint,
+                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = stringResource(R.string.activity_auto_timestamp_text_14),
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                        .alpha(if (secondaryProcessingEnabled) 1f else 0.55f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontSize = 14.sp
+                )
+                OutlinedButton(
+                    onClick = onSelectSubtitle,
+                    enabled = secondaryProcessingEnabled && !isGenerating,
+                    modifier = Modifier.padding(top = 8.dp)
+                ) {
+                    Text(stringResource(R.string.activity_auto_timestamp_text_15))
+                }
+                Text(
+                    text = subtitleFileText,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                        .alpha(if (secondaryProcessingEnabled) 1f else 0.55f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Text(secondaryProcessingHint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("参考字幕", style = MaterialTheme.typography.titleSmall)
-            OutlinedButton(
-                onClick = onSelectSubtitle,
-                enabled = secondaryProcessingEnabled && !isGenerating
-            ) {
-                Text("选择 SRT 或 LRC 字幕")
+
+            AutoTimestampCard {
+                AutoTimestampTitle(stringResource(R.string.activity_auto_timestamp_text_05))
+                FormatSelector(value = outputFormat, enabled = !isGenerating, onSelected = onFormatChange)
             }
-            Text(subtitleFileText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-            HorizontalDivider()
-
-            Text("输出格式", style = MaterialTheme.typography.titleMedium)
-            FormatSelector(value = outputFormat, enabled = !isGenerating, onSelected = onFormatChange)
-
-            HorizontalDivider()
-
-            Text("输出目录", style = MaterialTheme.typography.titleMedium)
-            Text(outputDirectory, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedButton(onClick = onSelectOutputDirectory, enabled = !isGenerating) {
-                Text("选择输出目录")
+            AutoTimestampCard {
+                AutoTimestampTitle(stringResource(R.string.activity_auto_timestamp_text_06))
+                Text(
+                    text = outputDirectory,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.MiddleEllipsis
+                )
+                OutlinedButton(
+                    onClick = onSelectOutputDirectory,
+                    enabled = !isGenerating,
+                    modifier = Modifier.padding(top = 8.dp)
+                ) {
+                    Text(stringResource(R.string.activity_auto_timestamp_text_08))
+                }
             }
 
             Button(
@@ -148,36 +210,53 @@ internal fun AutoTimestampScreen(
                 enabled = canGenerate && !isGenerating,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("开始打轴")
+                Text(stringResource(R.string.activity_auto_timestamp_text_09))
             }
 
-            if (isGenerating) {
-                LinearProgressIndicator(Modifier.fillMaxWidth())
-                TextButton(onClick = onRequestCancel, modifier = Modifier.align(Alignment.End)) {
-                    Text("取消处理")
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                if (isGenerating) {
+                    CircularProgressIndicator()
+                }
+                if (status.isNotBlank()) {
+                    Text(
+                        text = status,
+                        modifier = Modifier.padding(top = 8.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+                if (isGenerating) {
+                    TextButton(onClick = onRequestCancel, modifier = Modifier.padding(top = 8.dp)) {
+                        Text(stringResource(R.string.cancel))
+                    }
                 }
             }
-            if (status.isNotBlank()) {
-                Text(status, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
 
-            HorizontalDivider()
-
-            Text("处理日志与结果", style = MaterialTheme.typography.titleMedium)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 120.dp, max = 300.dp)
-                    .verticalScroll(previewScrollState)
-                    .padding(bottom = 16.dp)
-            ) {
-                Text(
-                    preview,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+            AutoTimestampCard {
+                AutoTimestampTitle(stringResource(R.string.activity_auto_timestamp_text_10))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                        .height(300.dp)
+                        .verticalScroll(previewScrollState)
+                ) {
+                    Text(
+                        text = preview,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
             }
-            Spacer(Modifier.height(8.dp))
         }
     }
 
@@ -213,10 +292,37 @@ internal fun AutoTimestampScreen(
 }
 
 @Composable
+private fun AutoTimestampCard(content: @Composable () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) { content() }
+    }
+}
+
+@Composable
+private fun AutoTimestampTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleMedium,
+        fontSize = 16.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurface
+    )
+}
+
+@Composable
 private fun FormatSelector(value: String, enabled: Boolean, onSelected: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     androidx.compose.foundation.layout.Box {
-        OutlinedButton(onClick = { expanded = true }, enabled = enabled) {
+        OutlinedButton(
+            onClick = { expanded = true },
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+        ) {
             Text(value)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {

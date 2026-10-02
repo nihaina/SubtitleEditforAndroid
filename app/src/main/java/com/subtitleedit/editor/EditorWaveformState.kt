@@ -41,12 +41,17 @@ data class EditorWaveformState(
     val isTimestamping: Boolean = false,
     val timestampStartMs: Long = 0L,
     val timestampAnchorMs: Long = 0L,
+    val timestampAnchorX: Float = 0f,
+    /** Monotonic token used to discard a timeline touch sequence that spans timestamping. */
+    val timestampGestureGeneration: Long = 0L,
     val hasPlayableMedia: Boolean = true,
     val hasAudioTrack: Boolean = true,
     val isPreparingCacheIndex: Boolean = false,
     val cacheIndexFailure: String? = null,
     val isWaveformGenerated: Boolean = false,
     val isWaveformGenerating: Boolean = false,
+    /** Monotonic refresh token used when a waveform loader is connected or reconnected. */
+    val chunkRequestGeneration: Long = 0L,
     val isSpectrogramGenerationStarted: Boolean = false,
     val spectrogramTotalChunks: Int = 0,
     val spectrogramDoneChunks: Int = 0,

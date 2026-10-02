@@ -47,6 +47,7 @@ internal class ArchivePasswordDialogController(
                     error = null
                 },
                 onDismiss = ::dismissAsCancelled,
+                onCancelButton = ::dismissAsCancelled,
                 onSubmit = {
                     if (password.isEmpty()) {
                         error = "请输入密码"
@@ -62,10 +63,12 @@ internal class ArchivePasswordDialogController(
                     passwordBook = null
                 },
                 onSavePassword = {
-                    passwordBook = savePassword(vault, password, passwordBook.orEmpty())
+                    savePassword(vault, password)
+                    passwordBook = null
                 },
                 onClearPasswordBook = {
-                    passwordBook = clearPasswordBook(vault, passwordBook.orEmpty())
+                    clearPasswordBook(vault)
+                    passwordBook = null
                 },
                 onClosePasswordBook = { passwordBook = null }
             )
@@ -74,30 +77,20 @@ internal class ArchivePasswordDialogController(
 
     private fun savePassword(
         vault: ArchivePasswordVault,
-        password: String,
-        previousPasswords: List<String>
-    ): List<String> {
+        password: String
+    ) {
         if (password.isEmpty()) {
             showToast("请先输入密码")
-            return previousPasswords
+            return
         }
-        return runCatching {
-            vault.savePassword(password)
-            vault.getPasswords()
-        }.onSuccess { showToast("密码已保存") }
+        runCatching { vault.savePassword(password) }
+            .onSuccess { showToast("密码已保存") }
             .onFailure { showToast("密码保存失败") }
-            .getOrElse { previousPasswords }
     }
 
-    private fun clearPasswordBook(
-        vault: ArchivePasswordVault,
-        previousPasswords: List<String>
-    ): List<String> {
-        return runCatching {
-            vault.clear()
-            emptyList<String>()
-        }.onSuccess { showToast("密码本已清空") }
+    private fun clearPasswordBook(vault: ArchivePasswordVault) {
+        runCatching { vault.clear() }
+            .onSuccess { showToast("密码本已清空") }
             .onFailure { showToast("密码本清空失败") }
-            .getOrElse { previousPasswords }
     }
 }

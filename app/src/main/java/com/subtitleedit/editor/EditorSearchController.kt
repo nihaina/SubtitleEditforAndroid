@@ -58,7 +58,12 @@ internal class EditorSearchController(
 
     fun show() {
         clearSearchState()
-        uiState = uiState.copy(visible = true, query = "", replacement = "")
+        uiState = uiState.copy(
+            visible = true,
+            query = "",
+            replacement = "",
+            focusRequestSequence = uiState.focusRequestSequence + 1
+        )
     }
 
     fun hide() {
@@ -85,6 +90,8 @@ internal class EditorSearchController(
 
     fun searchPrevious() = moveToPrevious()
     fun searchNext() = moveToNext()
+    /** Legacy find-field Enter action: run the current query, rather than advancing. */
+    fun submitSearchFromUi() = performSearch()
     fun replaceOneFromUi() = replaceOne()
     fun replaceAllFromUi() = replaceAll()
 
@@ -450,7 +457,8 @@ internal class EditorSearchController(
                 position,
                 engine.query,
                 matchCase,
-                wholeWord
+                wholeWord,
+                stableId = entries().getOrNull(position)?.stableId
             )
         }
     }
@@ -464,7 +472,8 @@ internal class EditorSearchController(
                 position,
                 engine.query,
                 matchCase,
-                wholeWord
+                wholeWord,
+                stableId = entries().getOrNull(position)?.stableId
             )
         }
     }
@@ -546,6 +555,7 @@ internal class EditorSearchController(
 
 data class EditorSearchUiState(
     val visible: Boolean = false,
+    val focusRequestSequence: Long = 0,
     val query: String = "",
     val replacement: String = "",
     val matchCase: Boolean = false,

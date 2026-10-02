@@ -109,16 +109,18 @@ internal class EditorSubtitleDialogController(
                             value = identifier.value,
                             onValueChange = { identifier.value = it },
                             singleLine = true,
-                            label = { Text("Cue identifier（可选）") }
+                            label = { Text("Cue identifier") },
+                            placeholder = { Text("Cue identifier（可选）") }
                         )
                         OutlinedTextField(
                             value = settings.value,
                             onValueChange = { settings.value = it },
                             singleLine = true,
-                            label = { Text("Cue settings") },
-                            placeholder = { Text("line:90% position:50% align:start") }
+                            label = {
+                                Text("Cue settings（line / position / size / align / vertical / region）")
+                            },
+                            placeholder = { Text("例如：line:90% position:50% align:start") }
                         )
-                        Text("line / position / size / align / vertical / region")
                     }
                 },
                 confirmButton = {

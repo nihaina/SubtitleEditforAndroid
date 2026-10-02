@@ -24,6 +24,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Semaphore
@@ -42,6 +43,7 @@ internal class EditorWaveformController(
     private val currentPlaybackPositionMs: () -> Long,
     private val onSubtitleChanged: (Int, SubtitleEntry, Long, Boolean) -> Unit,
     private val onSelectedIndexChanged: (Int) -> Unit,
+    private val onLimitedPlaybackRangeChanged: (Int?) -> Unit,
     private val onTimestampInserted: (Long, Long) -> Unit,
     private val showMessage: (String) -> Unit
 ) {
@@ -51,15 +53,17 @@ internal class EditorWaveformController(
     val composeState: StateFlow<EditorWaveformState> = _composeState.asStateFlow()
 
     private val composeChunkData = mutableListOf<FloatArray?>()
+    /** Requested sample count per chunk, matching the legacy view's de-duplication rules. */
+    private val composeChunkRequestedSamples = mutableListOf<Int>()
     private val composeSpectrogramChunks = mutableMapOf<Int, Bitmap>()
     private var composeVisibleStartMs = 0L
     private var composeVisibleDurationMs = EditorWaveformState.DEFAULT_VISIBLE_DURATION_MS
     private var composeCurrentPosition = 0f
     private var composeSelectedIndices: Set<Int> = emptySet()
     private var composeLimitedPlaybackIndex: Int? = null
-    private var composeIsTimestamping = false
-    private var composeTimestampStartMs = 0L
-    private var composeTimestampAnchorMs = 0L
+    private var composeTimestampSession: EditorWaveformTimestampSession? = null
+    /** Changes whenever the toolbar starts a timestamping session. */
+    private var composeTimestampGestureGeneration = 0L
     private var composeViewportWidthPx = 0
     private var composeViewportHeightPx = 0
     private var composeDragSessionKey = 0L
@@ -80,6 +84,8 @@ internal class EditorWaveformController(
     private var spectrogramIsGenerating = false
     private var isWaveformGenerated = false
     private var isSpectrogramGenerationStarted = false
+    /** Mirrors WaveformTimelineView.refreshVisibleChunks() after loader reconnection. */
+    private var composeChunkRequestGeneration = 0L
     private var isWaveformGenerating = false
     private var isPreparingCacheIndex = false
     private var cacheIndexFailure: String? = null
@@ -105,15 +111,20 @@ internal class EditorWaveformController(
             displayMode = currentDisplayMode,
             initialized = durationMs > 0L,
             isExpanded = isWaveformExpanded,
-            isTimestamping = composeIsTimestamping,
-            timestampStartMs = composeTimestampStartMs,
-            timestampAnchorMs = composeTimestampAnchorMs,
+            isTimestamping = composeTimestampSession != null,
+            timestampStartMs = composeTimestampSession?.startMs ?: 0L,
+            timestampAnchorMs = composeTimestampSession?.endTime(
+                composeVisibleStartMs, composeVisibleDurationMs, composeViewportWidthPx, durationMs
+            ) ?: 0L,
+            timestampAnchorX = composeTimestampSession?.anchorX ?: 0f,
+            timestampGestureGeneration = composeTimestampGestureGeneration,
             hasPlayableMedia = hasPlayableMedia,
             hasAudioTrack = hasAudioTrack,
             isPreparingCacheIndex = isPreparingCacheIndex,
             cacheIndexFailure = cacheIndexFailure,
             isWaveformGenerated = isWaveformGenerated,
             isWaveformGenerating = isWaveformGenerating,
+            chunkRequestGeneration = composeChunkRequestGeneration,
             isSpectrogramGenerationStarted = isSpectrogramGenerationStarted,
             spectrogramTotalChunks = spectrogramTotalChunks,
             spectrogramDoneChunks = spectrogramDoneChunks,
@@ -131,6 +142,14 @@ internal class EditorWaveformController(
             val dimensions = SPECTROGRAM_WIDTH to
                 (composeViewportHeightPx * WAVE_HEIGHT_FRACTION).toInt().coerceAtLeast(64)
             if (spectrogramCacheDimensions != dimensions) {
+                // A bitmap is decoded at the exact viewport height.  Drop the old
+                // in-memory chunks before loading the cache index for the new size;
+                // otherwise Compose can keep drawing a bitmap from the previous layout.
+                cancelSpectrogramJobs()
+                composeSpectrogramChunks.values.forEach { bitmap ->
+                    if (!bitmap.isRecycled) bitmap.recycle()
+                }
+                composeSpectrogramChunks.clear()
                 restoreSpectrogramCacheState(audioFile!!)
             }
         }
@@ -154,24 +173,41 @@ internal class EditorWaveformController(
         publishComposeState()
     }
 
-    /** Seeks the Compose viewport and asks the owner to seek playback. */
+    /** Seeks playback from the visible timeline without moving its viewport. */
     fun seekComposeToTime(timeMs: Long) {
-        composeVisibleStartMs = timeMs.coerceIn(
-            0L,
-            (durationMs - composeVisibleDurationMs).coerceAtLeast(0L)
-        )
         requestComposeChunksAroundTime(timeMs)
-        publishComposeState()
+        // Keep the local playhead update as one StateFlow publication.  Publishing once before
+        // and once after the update makes a ruler drag render an intermediate old position and
+        // lets a playback callback win between the two emissions, which appears as stutter.
         onTimelineClickFromCompose(timeMs)
     }
 
-    /** Applies a horizontal viewport drag expressed in milliseconds. */
-    fun panComposeViewport(deltaMs: Long) {
-        composeVisibleStartMs = (composeVisibleStartMs + deltaMs).coerceIn(
+    /** Applies a horizontal viewport drag and returns a corrected playhead time when needed. */
+    fun panComposeViewport(deltaMs: Long): Long? {
+        return setComposeViewportStart(composeVisibleStartMs + deltaMs)
+    }
+
+    /** Sets the viewport start using the absolute position calculated from a legacy gesture. */
+    fun setComposeViewportStart(startMs: Long): Long? {
+        val previousStart = composeVisibleStartMs
+        composeVisibleStartMs = startMs.coerceIn(
             0L,
             (durationMs - composeVisibleDurationMs).coerceAtLeast(0L)
         )
+        if (composeVisibleStartMs == previousStart || durationMs <= 0L) {
+            publishComposeState()
+            return null
+        }
+        val playheadMs = (durationMs * composeCurrentPosition).toLong()
+        val visibleEnd = composeVisibleStartMs + composeVisibleDurationMs
+        if (playheadMs in composeVisibleStartMs..visibleEnd) {
+            publishComposeState()
+            return null
+        }
+        val corrected = composeVisibleStartMs.coerceIn(0L, durationMs)
+        composeCurrentPosition = corrected.toFloat() / durationMs.toFloat()
         publishComposeState()
+        return corrected
     }
 
     /** Applies pinch zoom around an anchor time. scale > 1 zooms in. */
@@ -179,7 +215,11 @@ internal class EditorWaveformController(
         if (durationMs <= 0L || scale <= 0f) return
         val newDuration = (composeVisibleDurationMs / scale).toLong().coerceIn(
             EditorWaveformState.MIN_VISIBLE_DURATION_MS,
-            minOf(EditorWaveformState.MAX_VISIBLE_DURATION_MS, durationMs.coerceAtLeast(1L))
+            // Keep the legacy 2-second minimum even for very short media. The old View
+            // allowed the viewport to extend past the media edges and clamped its start;
+            // constraining the upper bound to duration here makes coerceIn throw when the
+            // media is shorter than the minimum window.
+            EditorWaveformState.MAX_VISIBLE_DURATION_MS
         )
         val anchorFraction = if (composeVisibleDurationMs <= 0L) 0.5f else
             ((anchorMs - composeVisibleStartMs).toFloat() / composeVisibleDurationMs).coerceIn(0f, 1f)
@@ -187,6 +227,20 @@ internal class EditorWaveformController(
         composeVisibleStartMs = (anchorMs - (newDuration * anchorFraction).toLong()).coerceIn(
             0L,
             (durationMs - newDuration).coerceAtLeast(0L)
+        )
+        publishComposeState()
+    }
+
+    /** Applies the legacy pinch formula from a gesture's fixed start viewport. */
+    fun setComposeViewportAbsolute(startMs: Long, durationMs: Long) {
+        if (this.durationMs <= 0L) return
+        composeVisibleDurationMs = durationMs.coerceIn(
+            EditorWaveformState.MIN_VISIBLE_DURATION_MS,
+            EditorWaveformState.MAX_VISIBLE_DURATION_MS
+        )
+        composeVisibleStartMs = startMs.coerceIn(
+            0L,
+            (this.durationMs - composeVisibleDurationMs).coerceAtLeast(0L)
         )
         publishComposeState()
     }
@@ -222,13 +276,39 @@ internal class EditorWaveformController(
 
     fun resetComposeAmplitude() {
         _composeState.value = _composeState.value.copy(amplitudeScale = 1f)
+        showMessage("振幅已重置")
     }
 
     fun selectComposeSubtitle(index: Int?) {
-        composeSelectedIndices = index?.takeIf { it in _composeState.value.subtitles.indices }
-            ?.let(::setOf) ?: emptySet()
+        val candidate = index?.takeIf { it in _composeState.value.subtitles.indices }
+        composeSelectedIndices = when {
+            candidate == null || candidate in composeSelectedIndices -> emptySet()
+            else -> setOf(candidate)
+        }
         composeSelectedIndices.firstOrNull()?.let(onSelectedIndexChanged)
         publishComposeState()
+    }
+
+    /** Toggles the subtitle range used by the playback controller's limited-playback mode. */
+    fun toggleComposeLimitedPlayback(index: Int?) {
+        composeLimitedPlaybackIndex = index?.takeIf { it in _composeState.value.subtitles.indices }
+            ?.let { candidate -> if (composeLimitedPlaybackIndex == candidate) null else candidate }
+        publishComposeState()
+    }
+
+    fun clearComposeLimitedPlayback() {
+        if (composeLimitedPlaybackIndex == null) return
+        composeLimitedPlaybackIndex = null
+        publishComposeState()
+    }
+
+    fun composeLimitedPlaybackIndex(): Int? = composeLimitedPlaybackIndex
+
+    fun isComposeLimitedPlaybackOutOfView(): Boolean {
+        val index = composeLimitedPlaybackIndex ?: return false
+        val subtitle = _composeState.value.subtitles.getOrNull(index) ?: return true
+        val visibleEnd = composeVisibleStartMs + composeVisibleDurationMs
+        return subtitle.endTime < composeVisibleStartMs || subtitle.startTime > visibleEnd
     }
 
     fun updateComposeSubtitleDrag(
@@ -280,40 +360,66 @@ internal class EditorWaveformController(
                     nextStartTime = bounds.nextStartTime,
                     minimumDurationMs = MIN_SUBTITLE_DURATION_MS
                 )
+                updated.endTimeModified = true
             }
             EditorWaveformDragMode.NONE -> return
         }
+        // Keep the timeline inside the media duration after applying neighbor bounds. The
+        // neighbor helpers intentionally use an open upper bound for the last subtitle, so a
+        // large rightward drag still needs this final clamp.
         updated.startTime = updated.startTime.coerceIn(0L, durationMs)
         updated.endTime = updated.endTime.coerceIn(
             updated.startTime + MIN_SUBTITLE_DURATION_MS,
             durationMs.coerceAtLeast(updated.startTime + MIN_SUBTITLE_DURATION_MS)
         )
-        onSubtitleChanged(index, updated, composeDragSessionKey, isFinal)
         val updatedSubtitles = _composeState.value.subtitles.toMutableList()
         if (index in updatedSubtitles.indices) updatedSubtitles[index] = updated
         _composeState.value = _composeState.value.copy(subtitles = updatedSubtitles)
+        // WaveformTimelineView mutates its own block before notifying the Activity. Publish the
+        // detached Compose snapshot in the same order so the timeline is immediately current
+        // while the Activity refreshes the list and document model in its callback.
+        publishComposeState()
+        onSubtitleChanged(index, updated, composeDragSessionKey, isFinal)
         if (isFinal) composeDragBases.remove(index)
     }
 
+    /** Drop a drag origin when Compose cancels a pointer stream before ACTION_UP. */
+    fun resetComposeSubtitleDragSession() {
+        composeDragBases.clear()
+    }
+
     fun startComposeTimestamping() {
-        composeIsTimestamping = true
-        composeTimestampStartMs = currentPlaybackPositionMs().coerceIn(0L, durationMs)
-        composeTimestampAnchorMs = composeTimestampStartMs
+        composeTimestampGestureGeneration++
+        composeTimestampSession = EditorWaveformTimestampSession.start(
+            startMs = currentPlaybackPositionMs().coerceIn(0L, durationMs),
+            visibleStartMs = composeVisibleStartMs,
+            visibleDurationMs = composeVisibleDurationMs,
+            viewportWidthPx = composeViewportWidthPx
+        )
+        composeDragBases.clear()
         publishComposeState()
     }
 
-    fun updateComposeTimestampAnchor(timeMs: Long) {
-        if (!composeIsTimestamping) return
-        composeTimestampAnchorMs = timeMs.coerceIn(0L, durationMs)
+    /** Pans the timeline while preserving the timestamp button's fixed screen anchor. */
+    fun panComposeTimestampViewport(deltaMs: Long) {
+        val session = composeTimestampSession ?: return
+        composeVisibleStartMs = session.panViewport(
+            composeVisibleStartMs, deltaMs, composeVisibleDurationMs, durationMs
+        )
         publishComposeState()
     }
 
     fun finishComposeTimestamping() {
-        if (!composeIsTimestamping) return
-        composeIsTimestamping = false
-        val end = composeTimestampAnchorMs
-        val start = composeTimestampStartMs
-        if (end > start) onTimestampInserted(start, end)
+        val session = composeTimestampSession ?: return
+        val end = session.endTime(
+            composeVisibleStartMs, composeVisibleDurationMs, composeViewportWidthPx, durationMs
+        )
+        composeTimestampSession = null
+        composeVisibleStartMs = composeVisibleStartMs.coerceIn(
+            0L, (durationMs - composeVisibleDurationMs).coerceAtLeast(0L)
+        )
+        // The existing insert operation orders the endpoints and rejects ranges under 100 ms.
+        onTimestampInserted(session.startMs, end)
         publishComposeState()
     }
 
@@ -345,11 +451,25 @@ internal class EditorWaveformController(
             EditorWaveformState.CHUNK_DURATION_MS * 4f).toInt().coerceIn(150, 30_000)
 
     private fun requestComposeChunk(index: Int, targetSamples: Int) {
+        val loader = chunkLoader ?: return
+        if (index !in composeChunkData.indices) return
+
+        val requested = composeChunkRequestedSamples.getOrNull(index) ?: 0
+        val existing = composeChunkData[index]
+        val needsUpgrade = existing != null &&
+            existing.size < targetSamples * LEGACY_RESAMPLE_THRESHOLD
+        if (existing != null && (!needsUpgrade || requested >= targetSamples)) return
+        if (existing == null && requested >= targetSamples) return
+
+        val requestSamples = maxOf(requested, targetSamples)
+        composeChunkRequestedSamples[index] = requestSamples
         val start = index * EditorWaveformState.CHUNK_DURATION_MS
         val end = minOf(start + EditorWaveformState.CHUNK_DURATION_MS, durationMs)
-        chunkLoader?.requestChunk(index, start, end, targetSamples) { chunkIndex, data ->
+        loader.requestChunk(index, start, end, requestSamples) { chunkIndex, data ->
             if (chunkIndex in composeChunkData.indices) {
-                composeChunkData[chunkIndex] = data
+                // An empty response means the cache is disabled or generation failed. Keep it
+                // nullable so enabling generation can retry the same visible chunk.
+                composeChunkData[chunkIndex] = data.takeIf { it.isNotEmpty() }
                 publishComposeState()
             }
         }
@@ -364,9 +484,18 @@ internal class EditorWaveformController(
     ) {
         val loader = chunkLoader ?: return
         if (chunkIndex !in composeChunkData.indices) return
-        loader.requestChunk(chunkIndex, startMs, endMs, targetSamples) { index, data ->
+        val requested = composeChunkRequestedSamples.getOrNull(chunkIndex) ?: 0
+        val existing = composeChunkData[chunkIndex]
+        val needsUpgrade = existing != null &&
+            existing.size < targetSamples * LEGACY_RESAMPLE_THRESHOLD
+        if ((existing != null && (!needsUpgrade || requested >= targetSamples)) ||
+            (existing == null && requested >= targetSamples)
+        ) return
+        val requestSamples = maxOf(requested, targetSamples)
+        composeChunkRequestedSamples[chunkIndex] = requestSamples
+        loader.requestChunk(chunkIndex, startMs, endMs, requestSamples) { index, data ->
             if (index in composeChunkData.indices) {
-                composeChunkData[index] = data
+                composeChunkData[index] = data.takeIf { it.isNotEmpty() }
                 publishComposeState()
             }
         }
@@ -419,6 +548,9 @@ internal class EditorWaveformController(
         subtitles: List<SubtitleEntry>,
         audioStreamIndex: Int? = null
     ) {
+        // WaveformTimelineView.initialize() always cleared the playback controller's
+        // limited-range target. Preserve that contract when replacing the media/document.
+        onLimitedPlaybackRangeChanged(null)
         cancelSpectrogramJobs()
         spectrogramReadyChunks.clear()
         spectrogramCacheDimensions = null
@@ -436,11 +568,20 @@ internal class EditorWaveformController(
         spectrogramIsGenerating = false
         composeVisibleStartMs = 0L
         composeVisibleDurationMs = minOf(EditorWaveformState.DEFAULT_VISIBLE_DURATION_MS, durationMs)
+        composeTimestampSession = null
         composeChunkData.clear()
-        repeat(calcTotalChunks()) { composeChunkData += null }
+        composeChunkRequestedSamples.clear()
+        repeat(calcTotalChunks()) {
+            composeChunkData += null
+            composeChunkRequestedSamples += 0
+        }
         composeSpectrogramChunks.clear()
         composeSelectedIndices = emptySet()
-        _composeState.value = _composeState.value.copy(subtitles = subtitles.toList())
+        composeLimitedPlaybackIndex = null
+        // Keep the timeline snapshot detached from the mutable document model.  List edits
+        // mutate SubtitleEntry in place; sharing those objects lets the waveform change without
+        // a StateFlow publication, leaving gesture hit tests and rendered blocks out of sync.
+        _composeState.value = _composeState.value.copy(subtitles = subtitles.map { it.copy() })
         publishComposeState()
         chunkLoader?.release()
         chunkLoader = null
@@ -472,6 +613,7 @@ internal class EditorWaveformController(
     }
 
     fun showNoAudioTrack(durationMs: Long, subtitles: List<SubtitleEntry>) {
+        onLimitedPlaybackRangeChanged(null)
         cancelSpectrogramJobs()
         spectrogramReadyChunks.clear()
         spectrogramCacheDimensions = null
@@ -491,19 +633,29 @@ internal class EditorWaveformController(
         isSpectrogramGenerationStarted = false
         composeVisibleStartMs = 0L
         composeVisibleDurationMs = minOf(EditorWaveformState.DEFAULT_VISIBLE_DURATION_MS, durationMs)
+        composeTimestampSession = null
         composeChunkData.clear()
-        repeat(calcTotalChunks()) { composeChunkData += null }
+        composeChunkRequestedSamples.clear()
+        repeat(calcTotalChunks()) {
+            composeChunkData += null
+            composeChunkRequestedSamples += 0
+        }
         composeSpectrogramChunks.clear()
         composeSelectedIndices = emptySet()
-        _composeState.value = _composeState.value.copy(subtitles = subtitles.toList())
-        publishComposeState()
+        composeLimitedPlaybackIndex = null
+        _composeState.value = _composeState.value.copy(subtitles = subtitles.map { it.copy() })
         publishComposeState()
     }
 
     fun setSubtitles(subtitles: List<SubtitleEntry>) {
         if (!hasPlayableMedia) return
+        val previousLimitedPlayback = composeLimitedPlaybackIndex
+        composeLimitedPlaybackIndex = composeLimitedPlaybackIndex?.takeIf { it in subtitles.indices }
+        if (previousLimitedPlayback != null && composeLimitedPlaybackIndex == null) {
+            onLimitedPlaybackRangeChanged(null)
+        }
         _composeState.value = _composeState.value.copy(
-            subtitles = subtitles.toList(),
+            subtitles = subtitles.map { it.copy() },
             selectedIndices = emptySet()
         )
         composeSelectedIndices = emptySet()
@@ -513,31 +665,52 @@ internal class EditorWaveformController(
     fun updateSubtitleEntries(changes: Map<Int, SubtitleEntry>, totalCount: Int): Boolean {
         if (!hasPlayableMedia) return true
         val entries = _composeState.value.subtitles.toMutableList()
-        if (entries.size == totalCount && changes.keys.all { it in entries.indices }) {
-            changes.forEach { (index, entry) -> entries[index] = entry.copy() }
+        // Match WaveformTimelineView.updateSubtitleEntries(): an invalid changed index
+        // must fall back to a complete subtitle replacement. Returning success for a
+        // bad index makes the caller skip that fallback and leaves the waveform stale.
+        if (entries.size != totalCount || changes.keys.any { it !in entries.indices }) {
+            return false
+        }
+        changes.forEach { (index, entry) -> entries[index] = entry.copy() }
+        if (changes.isNotEmpty()) {
             _composeState.value = _composeState.value.copy(subtitles = entries)
             publishComposeState()
         }
-        return entries.size == totalCount
+        return true
     }
 
     fun setSubtitlesPreserveSelection(subtitles: List<SubtitleEntry>) {
         if (!hasPlayableMedia) return
+        val previousSelection = composeSelectedIndices
+        val previousLimitedPlayback = composeLimitedPlaybackIndex
         _composeState.value = _composeState.value.copy(
-            subtitles = subtitles.toList(),
+            subtitles = subtitles.map { it.copy() },
             selectedIndices = composeSelectedIndices.filter { it in subtitles.indices }.toSet()
         )
         composeSelectedIndices = _composeState.value.selectedIndices
+        composeLimitedPlaybackIndex = composeLimitedPlaybackIndex?.takeIf { it in subtitles.indices }
+        if (previousLimitedPlayback != null && composeLimitedPlaybackIndex == null) {
+            onLimitedPlaybackRangeChanged(null)
+        }
+        if (composeSelectedIndices != previousSelection ||
+            composeLimitedPlaybackIndex != previousLimitedPlayback
+        ) {
+            composeSelectedIndices.firstOrNull()?.let(onSelectedIndexChanged)
+        }
         publishComposeState()
     }
 
     fun setSubtitlesKeepSelection(subtitles: List<SubtitleEntry>, selectedIndex: Int) {
         if (!hasPlayableMedia) return
         composeSelectedIndices = composeSelectedIndices.map { if (it >= selectedIndex) it + 1 else it }.toSet()
+        composeLimitedPlaybackIndex = composeLimitedPlaybackIndex?.let {
+            if (it >= selectedIndex) it + 1 else it
+        }
         _composeState.value = _composeState.value.copy(
-            subtitles = subtitles.toList(),
+            subtitles = subtitles.map { it.copy() },
             selectedIndices = composeSelectedIndices
         )
+        composeSelectedIndices.firstOrNull()?.let(onSelectedIndexChanged)
         publishComposeState()
     }
 
@@ -548,10 +721,30 @@ internal class EditorWaveformController(
         if (!hasPlayableMedia) return true
         val entries = _composeState.value.subtitles.toMutableList()
         if (startIndex !in 0..entries.size || removedCount !in 0..(entries.size - startIndex)) return false
+        val delta = inserted.size - removedCount
         repeat(removedCount) { entries.removeAt(startIndex) }
         entries.addAll(startIndex, inserted.map { it.copy() })
         _composeState.value = _composeState.value.copy(subtitles = entries)
-        composeSelectedIndices = composeSelectedIndices.filter { it in entries.indices }.toSet()
+        composeSelectedIndices = composeSelectedIndices.mapNotNull { index ->
+            when {
+                index < startIndex -> index
+                index >= startIndex + removedCount -> index + delta
+                else -> null
+            }
+        }.filter { it in entries.indices }.toSet()
+        val previousLimitedPlayback = composeLimitedPlaybackIndex
+        composeLimitedPlaybackIndex = composeLimitedPlaybackIndex?.let { index ->
+            when {
+                index < startIndex -> index
+                index >= startIndex + removedCount -> (index + delta).takeIf { it in entries.indices }
+                else -> null
+            }
+        }
+        if (previousLimitedPlayback != null && composeLimitedPlaybackIndex == null) {
+            onLimitedPlaybackRangeChanged(null)
+        }
+        _composeState.value = _composeState.value.copy(selectedIndices = composeSelectedIndices)
+        composeSelectedIndices.firstOrNull()?.let(onSelectedIndexChanged)
         publishComposeState()
         return true
     }
@@ -562,10 +755,21 @@ internal class EditorWaveformController(
         composeSelectedIndices = composeSelectedIndices.mapNotNull { index ->
             if (index in deletedIndices) null else index - sorted.count { it < index }
         }.toSet()
+        val previousLimitedPlayback = composeLimitedPlaybackIndex
+        composeLimitedPlaybackIndex = composeLimitedPlaybackIndex?.let { index ->
+            when {
+                index in deletedIndices -> null
+                else -> index - sorted.count { it < index }
+            }
+        }
+        if (previousLimitedPlayback != null && composeLimitedPlaybackIndex == null) {
+            onLimitedPlaybackRangeChanged(null)
+        }
         _composeState.value = _composeState.value.copy(
-            subtitles = subtitles.toList(),
+            subtitles = subtitles.map { it.copy() },
             selectedIndices = composeSelectedIndices
         )
+        composeSelectedIndices.firstOrNull()?.let(onSelectedIndexChanged)
         publishComposeState()
     }
 
@@ -579,6 +783,7 @@ internal class EditorWaveformController(
     }
 
     fun release() {
+        onLimitedPlaybackRangeChanged(null)
         cancelSpectrogramJobs()
         cacheIndexGeneration++
         cacheIndexJob?.cancel()
@@ -592,6 +797,7 @@ internal class EditorWaveformController(
         isPreparingCacheIndex = false
         cacheIndexFailure = null
         composeChunkData.clear()
+        composeChunkRequestedSamples.clear()
         composeSpectrogramChunks.values.forEach { bitmap ->
             if (!bitmap.isRecycled) bitmap.recycle()
         }
@@ -599,7 +805,9 @@ internal class EditorWaveformController(
         composeVisibleStartMs = 0L
         composeVisibleDurationMs = EditorWaveformState.DEFAULT_VISIBLE_DURATION_MS
         composeCurrentPosition = 0f
+        composeTimestampSession = null
         composeSelectedIndices = emptySet()
+        composeLimitedPlaybackIndex = null
         publishComposeState()
     }
 
@@ -732,7 +940,28 @@ internal class EditorWaveformController(
                 return@withContext
             }
 
-            if (bitmap == null) return@withContext
+            if (bitmap == null) {
+                // The legacy timeline removed the failed request and invalidated itself
+                // after a short delay.  Retry through the same Compose request path so a
+                // transient ffmpeg/cache failure does not leave a permanent blank chunk.
+                scope.launch {
+                    delay(SPECTROGRAM_RETRY_DELAY_MS)
+                    if (requestVersion == spectrogramGenerationVersion &&
+                        this@EditorWaveformController.audioFile?.absolutePath == audioFile.absolutePath &&
+                        isSpectrogramGenerationStarted &&
+                        currentDisplayMode == EditorWaveformDisplayMode.SPECTROGRAM
+                    ) {
+                        generateSpectrogramChunkAsync(
+                            chunkIndex = key.chunkIndex,
+                            startMs = startMs,
+                            endMs = endMs,
+                            widthPx = key.width,
+                            heightPx = key.height
+                        )
+                    }
+                }
+                return@withContext
+            }
             composeSpectrogramChunks.put(key.chunkIndex, bitmap)?.let { previous ->
                 if (previous !== bitmap && !previous.isRecycled) previous.recycle()
             }
@@ -1024,16 +1253,26 @@ internal class EditorWaveformController(
     }
 
     private fun connectWaveformLoader() {
-        // Compose requests chunks through requestComposeChunk when they enter the viewport.
+        // The legacy view reset its request counters after generation was enabled so empty
+        // pre-generation responses are requested again at the current precision.
+        composeChunkRequestedSamples.indices.forEach { index ->
+            composeChunkRequestedSamples[index] = 0
+        }
+        // The legacy view explicitly refreshed the visible chunks whenever a loader became
+        // available. A state token keeps that refresh observable even when the loader was
+        // already marked generated and no other waveform flag changes.
+        composeChunkRequestGeneration++
         publishComposeState()
     }
 
     private companion object {
         const val TAG = "EditorWaveformController"
         const val MIN_SUBTITLE_DURATION_MS = 100L
+        const val LEGACY_RESAMPLE_THRESHOLD = 0.6f
         const val SPECTROGRAM_WIDTH = 2048
         const val WAVE_HEIGHT_FRACTION = 0.67f
         const val MAX_CONCURRENT_SPECTROGRAM_GENERATIONS = 2
         const val STALE_SPECTROGRAM_PART_MAX_AGE_MS = 24L * 60L * 60L * 1000L
+        const val SPECTROGRAM_RETRY_DELAY_MS = 5_000L
     }
 }
