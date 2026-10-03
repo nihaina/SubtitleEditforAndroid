@@ -4,7 +4,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.compose.setContent
-import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -20,7 +19,7 @@ import java.io.File
 import java.util.Locale
 
 /** Settings screen host. Android settings and cache operations stay outside the UI. */
-class SettingsActivity : AppCompatActivity() {
+class SettingsActivity : AppComposeActivity() {
 
     private lateinit var settingsManager: SettingsManager
     private var pageState by mutableStateOf(SettingsPageState())
@@ -83,9 +82,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun refreshPageState() {
-        val encoding = FileUtils.SUPPORTED_ENCODINGS.firstOrNull {
-            it.charset == settingsManager.getDefaultEncoding()
-        }?.displayName ?: settingsManager.getDefaultEncoding().displayName()
+        val encoding = settingsManager.getDefaultEncoding().name()
         val themeMode = settingsManager.getThemeMode()
         val cacheItems = cacheItems()
         val totalCacheSize = cacheItems.sumOf(SettingsCacheItem::sizeBytes)

@@ -8,7 +8,6 @@ import android.util.Log
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,7 +38,7 @@ import java.io.File
 /**
  * 自动打轴页面 - 自动检测语音段并生成时间轴
  */
-class AutoTimestampActivity : AppCompatActivity() {
+class AutoTimestampActivity : AppComposeActivity() {
 
     private enum class TimelineSource { VAD, TOKEN, ASR }
 

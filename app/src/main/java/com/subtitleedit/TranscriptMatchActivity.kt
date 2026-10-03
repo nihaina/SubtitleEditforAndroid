@@ -7,7 +7,6 @@ import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
@@ -36,7 +35,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
-class TranscriptMatchActivity : AppCompatActivity() {
+class TranscriptMatchActivity : AppComposeActivity() {
     private val settings by lazy { SettingsManager.getInstance(this) }
     private val taskController by lazy {
         LongTaskController((application as SubtitleEditApplication).dependencies.taskStateStore, "transcript-match")

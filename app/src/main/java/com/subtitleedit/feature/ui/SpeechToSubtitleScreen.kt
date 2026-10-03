@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -24,7 +22,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -34,10 +31,13 @@ import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppAlertDialog
 import com.subtitleedit.ui.components.AppConflictDialog
 import com.subtitleedit.ui.components.AppLogBox
+import com.subtitleedit.ui.components.AppOption
+import com.subtitleedit.ui.components.AppOptionSelector
 import com.subtitleedit.ui.components.AppPrimaryButton
 import com.subtitleedit.ui.components.AppSection
 import com.subtitleedit.ui.components.AppTaskProgress
 import com.subtitleedit.ui.components.AppToolScaffold
+import com.subtitleedit.ui.components.SettingsSwitchRow
 import com.subtitleedit.ui.theme.AppMotion
 import com.subtitleedit.ui.theme.AppSpacing
 
@@ -49,12 +49,12 @@ sealed interface SpeechToSubtitleDialogUi {
 }
 
 data class SpeechToSubtitleUiState(
-    val languageOptions: List<String> = emptyList(),
-    val formatOptions: List<String> = emptyList(),
+    val languageOptions: List<AppOption<String>> = emptyList(),
+    val formatOptions: List<AppOption<String>> = emptyList(),
     val selectedFiles: List<String> = emptyList(),
     val outputDirectory: String? = null,
-    val selectedLanguageIndex: Int = 0,
-    val selectedFormatIndex: Int = 0,
+    val selectedLanguage: String = "",
+    val selectedFormat: String = "",
     val addToAutoTranslate: Boolean = false,
     val disableVadForTxt: Boolean = false,
     val isTxtSelected: Boolean = false,
@@ -75,8 +75,8 @@ fun SpeechToSubtitleScreen(
     onNavigateBack: () -> Unit,
     onSettings: () -> Unit,
     onSelectFiles: () -> Unit,
-    onLanguageSelected: (Int) -> Unit,
-    onFormatSelected: (Int) -> Unit,
+    onLanguageSelected: (String) -> Unit,
+    onFormatSelected: (String) -> Unit,
     onAddToAutoTranslateChange: (Boolean) -> Unit,
     onDisableVadForTxtChange: (Boolean) -> Unit,
     onSelectOutputDirectory: () -> Unit,
@@ -89,7 +89,7 @@ fun SpeechToSubtitleScreen(
     onConfirmBack: () -> Unit
 ) {
     AppToolScaffold(
-        title = "语音转字幕",
+        title = stringResource(R.string.speech_to_subtitle_title),
         onBack = onNavigateBack,
         actions = {
             IconButton(onClick = onSettings, enabled = !state.isConverting) {
@@ -117,7 +117,7 @@ fun SpeechToSubtitleScreen(
                     stringResource(R.string.activity_media_convert_text_03)
                 } else {
                     buildString {
-                        append("已选择 ${state.selectedFiles.size} 个文件：")
+                        append(stringResource(R.string.selected_file_count_with_colon, state.selectedFiles.size))
                         state.selectedFiles.forEachIndexed { index, fileName -> append("\n${index + 1}. $fileName") }
                     }
                 },
@@ -127,26 +127,29 @@ fun SpeechToSubtitleScreen(
         }
 
         AppSection(title = stringResource(R.string.activity_speech_to_subtitle_text_03)) {
-            SpeechSelector(
+            AppOptionSelector(
+                label = stringResource(R.string.activity_speech_to_subtitle_text_03),
+                value = state.languageOptions.firstOrNull { it.id == state.selectedLanguage },
                 options = state.languageOptions,
-                selectedIndex = state.selectedLanguageIndex,
                 onSelected = onLanguageSelected
             )
         }
 
         AppSection(title = stringResource(R.string.activity_auto_timestamp_text_05)) {
-            SpeechSelector(
+            AppOptionSelector(
+                label = stringResource(R.string.target_format),
+                value = state.formatOptions.firstOrNull { it.id == state.selectedFormat },
                 options = state.formatOptions,
-                selectedIndex = state.selectedFormatIndex,
                 onSelected = onFormatSelected
             )
-            SpeechToggle(
-                label = stringResource(R.string.activity_speech_to_subtitle_text_10),
+            SettingsSwitchRow(
+                title = stringResource(R.string.activity_speech_to_subtitle_text_10),
                 checked = state.addToAutoTranslate,
                 onCheckedChange = onAddToAutoTranslateChange
             )
-            SpeechToggle(
-                label = stringResource(R.string.activity_speech_to_subtitle_text_04),
+            SettingsSwitchRow(
+                title = stringResource(R.string.activity_speech_to_subtitle_text_04),
+                description = stringResource(R.string.activity_speech_to_subtitle_text_05),
                 checked = state.disableVadForTxt,
                 onCheckedChange = onDisableVadForTxtChange,
                 enabled = state.isTxtSelected
@@ -196,99 +199,33 @@ fun SpeechToSubtitleScreen(
 
     when (val dialog = state.dialog) {
         SpeechToSubtitleDialogUi.OutputConflict -> AppConflictDialog(
-            message = "输出目录中已存在同名字幕文件。请选择处理方式。",
+            message = stringResource(R.string.output_subtitle_conflict),
             onOverwrite = onOverwriteOutput,
             onRename = onRenameOutput,
             onCancel = onDismissDialog
         )
         SpeechToSubtitleDialogUi.CancelConfirmation -> AppAlertDialog(
-            title = "确认取消",
-            message = "语音识别正在进行，确定要取消吗？",
-            confirmText = "取消识别",
-            dismissText = "继续识别",
+            title = stringResource(R.string.operation_confirm_cancel),
+            message = stringResource(R.string.speech_recognition_cancel_message),
+            confirmText = stringResource(R.string.cancel_recognition),
+            dismissText = stringResource(R.string.continue_recognition),
             onConfirm = onConfirmCancel,
             onDismiss = onDismissDialog
         )
         SpeechToSubtitleDialogUi.BackConfirmation -> AppAlertDialog(
-            title = "正在识别中",
-            message = "语音识别正在进行，确定要返回吗？返回后识别将被取消。",
-            confirmText = "返回并取消",
-            dismissText = "继续识别",
+            title = stringResource(R.string.recognition_in_progress),
+            message = stringResource(R.string.speech_recognition_back_message),
+            confirmText = stringResource(R.string.back_and_cancel),
+            dismissText = stringResource(R.string.continue_recognition),
             onConfirm = onConfirmBack,
             onDismiss = onDismissDialog
         )
         is SpeechToSubtitleDialogUi.Error -> AppAlertDialog(
-            title = "错误",
+            title = stringResource(R.string.error),
             message = dialog.message,
             onConfirm = onDismissDialog,
             onDismiss = onDismissDialog
         )
         null -> Unit
-    }
-}
-
-@Composable
-private fun SpeechSelector(
-    options: List<String>,
-    selectedIndex: Int,
-    onSelected: (Int) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val rotation by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (expanded) 90f else 0f,
-        animationSpec = AppMotion.fast(),
-        label = "speech-selector-chevron"
-    )
-    Box {
-        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    options.getOrNull(selectedIndex).orEmpty(),
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Icon(
-                    painter = painterResource(R.drawable.ic_arrow_right),
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp).graphicsLayer(rotationZ = rotation),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEachIndexed { index, option ->
-                DropdownMenuItem(
-                    text = { Text(option) },
-                    onClick = {
-                        expanded = false
-                        onSelected(index)
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SpeechToggle(
-    label: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    enabled: Boolean = true
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, role = Role.Switch) { onCheckedChange(!checked) },
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            label,
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-        )
-        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }

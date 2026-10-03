@@ -18,21 +18,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -42,14 +36,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppOption
+import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.util.RuntimeLogManager
+
+internal const val LOG_ALL_PAGES_ID = "__all_pages__"
 
 data class LogSection(
     val title: String,
@@ -58,11 +56,10 @@ data class LogSection(
     val lineCount: Int
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LogScreen(
     sections: List<LogSection>,
-    pageOptions: List<String>,
+    pageOptions: List<AppOption<String>>,
     pageFilter: String,
     displayMode: RuntimeLogManager.DisplayMode,
     infoText: String,
@@ -84,7 +81,7 @@ fun LogScreen(
         emptyList()
     } else {
         sections.mapIndexedNotNull { index, section ->
-            if (pageFilter == "全部页面" || section.title.substringBefore(" - ") == pageFilter) {
+            if (pageFilter == LOG_ALL_PAGES_ID || section.title.substringBefore(" - ") == pageFilter) {
                 index to section
             } else {
                 null
@@ -92,24 +89,14 @@ fun LogScreen(
         }
     }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        topBar = {
-            TopAppBar(
-                modifier = Modifier.height(56.dp),
-                title = { Text("运行日志") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(painterResource(R.drawable.ic_back), contentDescription = "返回")
-                    }
-                },
-                actions = { TextButton(onClick = onClear) { Text("清空") } }
-            )
-        }
-    ) { contentPadding ->
-        Column(Modifier.fillMaxSize().padding(contentPadding)) {
+    AppToolScaffold(
+        title = stringResource(R.string.activity_settings_text_06),
+        onBack = onBack,
+        scrollable = false,
+        actions = { TextButton(onClick = onClear) { Text(stringResource(R.string.log_clear)) } }
+    ) {
             Row(
-                modifier = Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 16.dp),
+                modifier = Modifier.fillMaxWidth().height(56.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
             Text(
@@ -118,16 +105,16 @@ fun LogScreen(
                 style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                TextButton(onClick = onRefresh, enabled = !isRefreshing) { Text("刷新") }
+                TextButton(onClick = onRefresh, enabled = !isRefreshing) { Text(stringResource(R.string.activity_log_text_02)) }
                 Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = onExport, enabled = isExportEnabled) { Text("导出") }
+                OutlinedButton(onClick = onExport, enabled = isExportEnabled) { Text(stringResource(R.string.activity_log_text_03)) }
             }
             SingleChoiceSegmentedButtonRow(
                 modifier = Modifier.padding(start = 16.dp, bottom = 4.dp)
             ) {
                 val modes = listOf(
-                    "简单" to RuntimeLogManager.DisplayMode.SIMPLE,
-                    "详细" to RuntimeLogManager.DisplayMode.DETAILED
+                    stringResource(R.string.activity_log_text_04) to RuntimeLogManager.DisplayMode.SIMPLE,
+                    stringResource(R.string.activity_log_text_05) to RuntimeLogManager.DisplayMode.DETAILED
                 )
                 modes.forEachIndexed { index, (label, mode) ->
                     SegmentedButton(
@@ -157,20 +144,19 @@ fun LogScreen(
                 if (showClearedPlaceholder && sections.isEmpty()) {
                     item {
                         LogSectionRow(
-                            section = LogSection("暂无可读取的日志", "", "", 0),
+                            section = LogSection(stringResource(R.string.log_empty), "", "", 0),
                             expanded = placeholderExpanded,
                             onToggleExpanded = { placeholderExpanded = !placeholderExpanded }
                         )
                     }
                 }
             }
-        }
     }
 }
 
 @Composable
 private fun PageFilterMenu(
-    options: List<String>,
+    options: List<AppOption<String>>,
     selected: String,
     onSelected: (String) -> Unit
 ) {
@@ -186,9 +172,7 @@ private fun PageFilterMenu(
                         position: Int,
                         id: Long
                     ) {
-                        parent?.getItemAtPosition(position)?.toString()?.let {
-                            currentOnSelected.value(it)
-                        }
+                        options.getOrNull(position)?.let { currentOnSelected.value(it.id) }
                     }
 
                     override fun onNothingSelected(parent: AdapterView<*>?) = Unit
@@ -196,20 +180,20 @@ private fun PageFilterMenu(
                 adapter = ArrayAdapter(
                     context,
                     android.R.layout.simple_spinner_item,
-                    options
+                    options.map(AppOption<String>::label)
                 ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
             }
         },
         update = { spinner ->
-            val selectedIndex = options.indexOf(selected).takeIf { it >= 0 } ?: 0
+            val selectedIndex = options.indexOfFirst { it.id == selected }.takeIf { it >= 0 } ?: 0
             val adapter = spinner.adapter as? ArrayAdapter<*>
             val needsAdapterUpdate = adapter == null || adapter.count != options.size ||
-                options.indices.any { index -> adapter.getItem(index)?.toString() != options[index] }
+                options.indices.any { index -> adapter.getItem(index)?.toString() != options[index].label }
             if (needsAdapterUpdate) {
                 spinner.adapter = ArrayAdapter(
                     spinner.context,
                     android.R.layout.simple_spinner_item,
-                    options
+                    options.map(AppOption<String>::label)
                 ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
             }
             if (spinner.selectedItemPosition != selectedIndex) {
@@ -267,10 +251,9 @@ private fun LogSectionRow(
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.shapes.small).padding(8.dp),
                     color = MaterialTheme.colorScheme.onSurface,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     // item_log_section.xml uses 12sp plus 2dp lineSpacingExtra.
-                    lineHeight = 16.sp
+                    lineHeight = 18.sp
                 )
             }
         }

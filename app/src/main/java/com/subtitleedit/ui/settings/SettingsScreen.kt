@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -15,36 +14,32 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import com.subtitleedit.R
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.ui.components.SectionHeader
+import com.subtitleedit.ui.components.AppToolScaffold
+import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.components.SettingsGroup
 import com.subtitleedit.ui.components.SettingsRow
 import com.subtitleedit.ui.components.SettingsSwitchRow as SharedSettingsSwitchRow
@@ -98,40 +93,22 @@ fun SettingsScreen(
     onCacheClear: (SettingsCacheItem) -> Unit,
     onEmptyCacheClear: (SettingsCacheItem) -> Unit
 ) {
-    var showEncodingDialog by remember { mutableStateOf(false) }
-    var showThemeDialog by remember { mutableStateOf(false) }
-    var showCacheDialog by remember { mutableStateOf(false) }
-    var pendingCacheItem by remember { mutableStateOf<SettingsCacheItem?>(null) }
+    var showEncodingDialog by rememberSaveable { mutableStateOf(false) }
+    var showThemeDialog by rememberSaveable { mutableStateOf(false) }
+    var showCacheDialog by rememberSaveable { mutableStateOf(false) }
+    var pendingCacheKey by rememberSaveable { mutableStateOf<String?>(null) }
 
-    Scaffold(
-        topBar = {
-            if (showTopBar) {
-                TopAppBar(
-                modifier = Modifier.height(56.dp),
-                    title = { Text(stringResource(R.string.menu_main_title_02)) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_back),
-                                contentDescription = stringResource(R.string.tools_navigate_back)
-                            )
-                        }
-                    }
-                )
-            }
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp)
-        ) {
+    AppToolScaffold(
+        title = stringResource(R.string.menu_main_title_02),
+        onBack = onBack,
+        showTopBar = showTopBar,
+        imePadding = true
+    ) {
             SettingsGroup {
                 SettingsRow(
                     title = stringResource(R.string.activity_settings_text_01),
-                    value = state.encoding,
+                    value = encodings.firstOrNull { it.charset.name() == state.encoding }?.displayName
+                        ?: state.encoding,
                     showArrow = true,
                     onClick = { showEncodingDialog = true }
                 )
@@ -208,38 +185,37 @@ fun SettingsScreen(
                     onCheckedChange = onSelectPlayingChanged
                 )
             }
-        }
     }
 
     if (showEncodingDialog) {
         ChoiceDialog(
             title = stringResource(R.string.activity_settings_text_01),
-            choices = encodings.map { it.displayName },
+            choices = encodings.map { AppOption(it.charset.name(), it.displayName) },
             selected = state.encoding,
             showCancel = true,
             onDismiss = { showEncodingDialog = false },
-            onSelect = { index ->
+            onSelect = { charset ->
                 showEncodingDialog = false
-                encodings.getOrNull(index)?.let(onEncodingSelected)
+                encodings.firstOrNull { it.charset.name() == charset }?.let(onEncodingSelected)
             }
         )
     }
 
     if (showThemeDialog) {
         val themes = listOf(
-            "亮色主题" to SettingsManager.THEME_LIGHT,
-            "深色主题" to SettingsManager.THEME_DARK,
-            "跟随系统" to SettingsManager.THEME_SYSTEM
+            AppOption(SettingsManager.THEME_LIGHT, "亮色主题"),
+            AppOption(SettingsManager.THEME_DARK, "深色主题"),
+            AppOption(SettingsManager.THEME_SYSTEM, "跟随系统")
         )
         ChoiceDialog(
-            title = "主题",
-            choices = themes.map { it.first },
-            selected = themes.firstOrNull { it.second == state.themeMode }?.first.orEmpty(),
+            title = stringResource(R.string.theme),
+            choices = themes,
+            selected = state.themeMode,
             showCancel = false,
             onDismiss = { showThemeDialog = false },
-            onSelect = { index ->
+            onSelect = { mode ->
                 showThemeDialog = false
-                themes.getOrNull(index)?.second?.let(onThemeSelected)
+                onThemeSelected(mode)
             }
         )
     }
@@ -249,7 +225,7 @@ fun SettingsScreen(
             onDismissRequest = { showCacheDialog = false },
             shape = MaterialTheme.shapes.extraLarge,
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = { Text("清除缓存") },
+            title = { Text(stringResource(R.string.clear_cache)) },
             text = {
                 Column {
                     state.cacheItems.forEach { item ->
@@ -258,7 +234,7 @@ fun SettingsScreen(
                                 showCacheDialog = false
                                 if (item.sizeBytes == 0L) onEmptyCacheClear(item)
                                 else if (!confirmCacheClear) onCacheClear(item)
-                                else pendingCacheItem = item
+                                else pendingCacheKey = item.key
                             },
                             contentPadding = PaddingValues(vertical = 12.dp)
                         ) {
@@ -276,23 +252,23 @@ fun SettingsScreen(
         )
     }
 
-    pendingCacheItem?.let { item ->
+    state.cacheItems.firstOrNull { it.key == pendingCacheKey }?.let { item ->
         AlertDialog(
-            onDismissRequest = { pendingCacheItem = null },
+            onDismissRequest = { pendingCacheKey = null },
             shape = MaterialTheme.shapes.extraLarge,
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = { Text("清除${item.label}") },
+            title = { Text(stringResource(R.string.clear_cache_item, item.label)) },
             text = { Text(item.confirmationMessage) },
             confirmButton = {
                 TextButton(onClick = {
-                    pendingCacheItem = null
+                    pendingCacheKey = null
                     onCacheClear(item)
                 }) {
-                    Text("清除")
+                    Text(stringResource(R.string.clear))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { pendingCacheItem = null }) {
+                TextButton(onClick = { pendingCacheKey = null }) {
                     Text(stringResource(R.string.cancel))
                 }
             }
@@ -301,13 +277,13 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun ChoiceDialog(
+private fun <T> ChoiceDialog(
     title: String,
-    choices: List<String>,
-    selected: String,
+    choices: List<AppOption<T>>,
+    selected: T,
     showCancel: Boolean,
     onDismiss: () -> Unit,
-    onSelect: (Int) -> Unit
+    onSelect: (T) -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -322,16 +298,16 @@ private fun ChoiceDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(
-                                if (choice == selected) MaterialTheme.colorScheme.primaryContainer
+                                if (choice.id == selected) MaterialTheme.colorScheme.primaryContainer
                                 else Color.Transparent,
                                 MaterialTheme.shapes.medium
                             )
-                            .clickable { onSelect(index) }
+                            .clickable { onSelect(choice.id) }
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        RadioButton(selected = choice == selected, onClick = { onSelect(index) })
-                        Text(choice, modifier = Modifier.padding(start = 8.dp))
+                        RadioButton(selected = choice.id == selected, onClick = { onSelect(choice.id) })
+                        Text(choice.label, modifier = Modifier.padding(start = 8.dp))
                     }
                 }
             }

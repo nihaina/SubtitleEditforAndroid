@@ -7,7 +7,6 @@ import android.os.Bundle
 import android.os.PersistableBundle
 import android.widget.Toast
 import androidx.activity.compose.setContent
-import androidx.appcompat.app.AppCompatActivity
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.runtime.getValue
@@ -30,7 +29,7 @@ import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SettingsManager
 import kotlinx.coroutines.launch
 
-class AiSettingsActivity : AppCompatActivity() {
+class AiSettingsActivity : AppComposeActivity() {
 
     private lateinit var settingsManager: SettingsManager
     private val aiTranslationService: AiTranslationService
@@ -223,7 +222,7 @@ class AiSettingsActivity : AppCompatActivity() {
 
         val baseUrl = settingsManager.getAiBaseUrl(provider)
         if (baseUrl.isBlank()) {
-            showToast("请先在 AI 平台设置中填写 API 请求地址")
+            showToast(getString(R.string.ai_base_url_required))
             return
         }
 
@@ -237,14 +236,14 @@ class AiSettingsActivity : AppCompatActivity() {
             try {
                 val models = aiTranslationService.fetchModels(baseUrl, settingsManager.getAiApiKey(provider))
                 if (models.isEmpty()) {
-                    showToast("模型列表为空")
+                    showToast(getString(R.string.ai_models_empty))
                 } else {
                     updateScreenState {
                         it.copy(modelChooser = AiModelChooserUi(provider, target, models))
                     }
                 }
             } catch (error: Exception) {
-                showToast(error.message ?: "获取模型列表失败")
+                showToast(error.message ?: getString(R.string.ai_models_fetch_failed))
             } finally {
                 updateScreenState {
                     when (target) {
@@ -357,12 +356,12 @@ class AiSettingsActivity : AppCompatActivity() {
         }
         val baseUrl = settingsManager.getAiBaseUrl(chatProvider)
         if (baseUrl.isBlank()) {
-            showToast("请先填写 API 请求地址")
+            showToast(getString(R.string.ai_base_url_required))
             return
         }
         val model = settingsManager.getAiModel(chatProvider)
         if (model.isBlank()) {
-            showToast("请先填写模型名称")
+            showToast(getString(R.string.ai_model_name_required))
             return
         }
         startActivity(

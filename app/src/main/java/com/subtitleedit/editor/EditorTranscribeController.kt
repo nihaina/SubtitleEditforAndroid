@@ -57,7 +57,7 @@ internal class EditorTranscribeController(
 
         val settings = SettingsManager.getInstance(activity)
         val modelType = settings.getAsrModelType()
-        val sourceLanguage = settings.getQuickTranscribeSourceLanguage()
+        val sourceLanguageId = settings.getQuickTranscribeSourceLanguageId()
         val encoderPath: String
         val decoderPath: String
         val joinerPath: String
@@ -107,18 +107,18 @@ internal class EditorTranscribeController(
         }
 
         val (dialogView, languageSpinner) =
-            createLanguageView(selectedEntries.size, sourceLanguage)
+            createLanguageView(selectedEntries.size, sourceLanguageId)
         AlertDialog.Builder(activity)
             .setTitle("快速转录")
             .setView(dialogView)
             .setPositiveButton("开始转录") { _, _ ->
-                val selectedLanguage = SettingsManager.TRANSCRIPTION_LANGUAGE_OPTIONS[
+                val selectedLanguageId = SettingsManager.TRANSCRIPTION_LANGUAGE_IDS[
                     languageSpinner.selectedItemPosition.coerceIn(
                         0,
-                        SettingsManager.TRANSCRIPTION_LANGUAGE_OPTIONS.lastIndex
+                        SettingsManager.TRANSCRIPTION_LANGUAGE_IDS.lastIndex
                     )
                 ]
-                settings.setQuickTranscribeSourceLanguage(selectedLanguage)
+                settings.setQuickTranscribeSourceLanguageId(selectedLanguageId)
                 startTranscription(
                     selectedEntries,
                     timelineEntries,
@@ -128,7 +128,7 @@ internal class EditorTranscribeController(
                     joinerPath,
                     tokensPath,
                     modelType,
-                    selectedLanguage,
+                    settings.transcriptionLanguageLabel(selectedLanguageId),
                     audioCacheKey,
                     audioStreamIndex
                 )
@@ -144,7 +144,7 @@ internal class EditorTranscribeController(
 
     private fun createLanguageView(
         selectedCount: Int,
-        sourceLanguage: String
+        sourceLanguageId: String
     ): Pair<LinearLayout, Spinner> {
         val horizontalPadding = (16 * activity.resources.displayMetrics.density).toInt()
         val container = LinearLayout(activity).apply {
@@ -169,7 +169,7 @@ internal class EditorTranscribeController(
             spinnerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
             adapter = spinnerAdapter
             setSelection(
-                SettingsManager.TRANSCRIPTION_LANGUAGE_OPTIONS.indexOf(sourceLanguage)
+                SettingsManager.TRANSCRIPTION_LANGUAGE_IDS.indexOf(sourceLanguageId)
                     .coerceAtLeast(0)
             )
         }

@@ -254,7 +254,6 @@ internal fun MainActivityScreen(
             .background(MaterialTheme.colorScheme.background)
     ) {
         TopAppBar(
-            modifier = Modifier.height(56.dp),
             scrollBehavior = scrollBehavior,
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = MaterialTheme.colorScheme.surface,

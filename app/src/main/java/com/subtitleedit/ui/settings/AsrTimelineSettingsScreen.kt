@@ -3,42 +3,28 @@ package com.subtitleedit.ui.settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CardDefaults
 import androidx.compose.ui.text.style.TextOverflow
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppSection
 import com.subtitleedit.ui.components.AppSlider
+import com.subtitleedit.ui.components.AppToolScaffold
+import com.subtitleedit.ui.components.SectionHeader
+import com.subtitleedit.ui.components.SettingsSwitchRow
 
 data class AsrTimelineSettingsState(
     val useVadTimestamp: Boolean = false,
@@ -55,7 +41,6 @@ data class AsrTimelineSettingsState(
     val mergeGapText: String = "150"
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AsrTimelineSettingsScreen(
     title: String,
@@ -74,44 +59,20 @@ fun AsrTimelineSettingsScreen(
     onMergeGapChanged: (Float) -> Unit,
     onMergeGapTextChanged: (String) -> Unit
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                modifier = Modifier.height(56.dp),
-                title = { Text(title) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_back),
-                            contentDescription = stringResource(R.string.tools_navigate_back)
-                        )
-                    }
-                }
-            )
-        }
-    ) { contentPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(contentPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            TimelineSettingsCard {
-                Text(
-                    text = "使用 VAD 打轴",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.height(8.dp))
+    AppToolScaffold(
+        title = title,
+        onBack = onBack,
+        imePadding = true
+    ) {
+            AppSection {
+                SectionHeader(stringResource(R.string.asr_timeline_vad_title))
                 SettingsSwitchRow(
-                    title = "使用 VAD 检测并划分语音段",
+                    title = stringResource(R.string.qwen3_asr_vad_switch),
                     checked = state.useVadTimestamp,
                     onCheckedChange = onUseVadTimestampChanged
                 )
                 Text(
-                    text = "开启后使用 VAD 打轴；关闭后可使用下方实验功能或固定时长分段",
+                    text = stringResource(R.string.asr_timeline_vad_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 4.dp)
@@ -127,16 +88,10 @@ fun AsrTimelineSettingsScreen(
             }
 
             if (!state.useVadTimestamp) {
-                TimelineSettingsCard {
-                    Text(
-                        text = stringResource(R.string.activity_speech_to_subtitle_settings_text_41),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
+                AppSection {
+                    SectionHeader(stringResource(R.string.activity_speech_to_subtitle_settings_text_41))
+                    SectionHeader(
                         text = stringResource(R.string.activity_speech_to_subtitle_settings_text_55),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(top = 16.dp)
                     )
                     SettingsSwitchRow(
@@ -210,7 +165,7 @@ fun AsrTimelineSettingsScreen(
                                 enabled = mergeEnabled && !state.smartMerge,
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                suffix = { Text("毫秒") },
+                                suffix = { Text(stringResource(R.string.unit_milliseconds)) },
                                 modifier = Modifier
                                     .padding(start = 8.dp)
                                     .width(104.dp)
@@ -253,8 +208,8 @@ fun AsrTimelineSettingsScreen(
                         }
                     }
                     SettingsSwitchRow(
-                    title = "VAD 分段：在固定时长附近的相对静音处切分",
-                    description = "使用当前 VAD 模型，在固定切点前后半个分段时长内寻找语音概率最低的连续区间；无需达到固定静音阈值（模型最大时长仍会限制搜索范围）",
+                    title = stringResource(R.string.asr_timeline_fixed_vad_title),
+                    description = stringResource(R.string.asr_timeline_fixed_vad_hint),
                     checked = state.fixedVadSegmentation,
                     enabled = !state.useVadTimestamp,
                     onCheckedChange = onFixedVadSegmentationChanged,
@@ -288,7 +243,7 @@ fun AsrTimelineSettingsScreen(
                         onValueChange = onFixedSegmentSecondsTextChanged,
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        suffix = { Text("秒") },
+                        suffix = { Text(stringResource(R.string.unit_seconds)) },
                         modifier = Modifier
                             .padding(start = 8.dp)
                             .width(96.dp)
@@ -297,65 +252,4 @@ fun AsrTimelineSettingsScreen(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun TimelineSettingsCard(content: @Composable () -> Unit) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.elevatedCardColors()
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            content()
-        }
-    }
-}
-
-@Composable
-private fun SettingsSwitchRow(
-    title: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
-    description: String? = null,
-    enabled: Boolean = true,
-    dimDescriptionWhenDisabled: Boolean = true
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .toggleable(
-                value = checked,
-                enabled = enabled,
-                role = Role.Switch,
-                onValueChange = onCheckedChange
-            )
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.5f)
-            )
-            if (description != null) {
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
-                        alpha = if (enabled || !dimDescriptionWhenDisabled) 1f else 0.5f
-                    ),
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-            }
-        }
-        Switch(
-            checked = checked,
-            onCheckedChange = null,
-            enabled = enabled
-        )
-    }
 }

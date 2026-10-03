@@ -3,39 +3,27 @@ package com.subtitleedit.ui.settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalLocale
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.shape.RoundedCornerShape
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppSection
 import com.subtitleedit.ui.components.AppSlider
+import com.subtitleedit.ui.components.AppToolScaffold
+import com.subtitleedit.ui.components.SectionHeader
+import com.subtitleedit.ui.components.SettingsSwitchRow
 
 data class WhisperSettingsState(
     val threads: Int = 4,
@@ -44,7 +32,6 @@ data class WhisperSettingsState(
     val hotwordsScore: Float = 1.5f
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WhisperSettingsScreen(
     state: WhisperSettingsState,
@@ -57,35 +44,15 @@ fun WhisperSettingsScreen(
     onHotwordsScoreChanged: (Float) -> Unit
 ) {
     val locale = LocalLocale.current.platformLocale
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                modifier = Modifier.height(56.dp),
-                title = { Text(stringResource(R.string.activity_whisper_settings_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_back),
-                            contentDescription = stringResource(R.string.tools_navigate_back)
-                        )
-                    }
-                }
-            )
-        }
-    ) { contentPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(contentPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            WhisperSettingsCard {
+    AppToolScaffold(
+        title = stringResource(R.string.activity_whisper_settings_title),
+        onBack = onBack,
+        imePadding = true
+    ) {
+            AppSection {
                 Text(
                     text = stringResource(R.string.activity_whisper_settings_vad_title),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    style = MaterialTheme.typography.titleMedium
                 )
                 OutlinedButton(
                     onClick = onOpenVadSettings,
@@ -95,12 +62,8 @@ fun WhisperSettingsScreen(
                 }
             }
 
-            WhisperSettingsCard {
-                Text(
-                    text = stringResource(R.string.activity_whisper_settings_threads_title),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
+            AppSection {
+                SectionHeader(stringResource(R.string.activity_whisper_settings_threads_title))
                 Text(
                     text = stringResource(R.string.activity_whisper_settings_threads_hint),
                     style = MaterialTheme.typography.bodySmall,
@@ -127,31 +90,12 @@ fun WhisperSettingsScreen(
                 }
             }
 
-            WhisperSettingsCard {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .toggleable(
-                            value = state.hotwordsEnabled,
-                            role = Role.Switch,
-                            onValueChange = onHotwordsEnabledChanged
-                        )
-                        .padding(vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = stringResource(R.string.activity_whisper_settings_hotwords_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Switch(checked = state.hotwordsEnabled, onCheckedChange = null)
-                }
-                Text(
-                    text = stringResource(R.string.activity_whisper_settings_hotwords_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp)
+            AppSection {
+                SettingsSwitchRow(
+                    title = stringResource(R.string.activity_whisper_settings_hotwords_title),
+                    description = stringResource(R.string.activity_whisper_settings_hotwords_hint),
+                    checked = state.hotwordsEnabled,
+                    onCheckedChange = onHotwordsEnabledChanged
                 )
                 OutlinedTextField(
                     value = state.hotwords,
@@ -199,18 +143,5 @@ fun WhisperSettingsScreen(
                     )
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun WhisperSettingsCard(content: @Composable () -> Unit) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            content()
-        }
     }
 }

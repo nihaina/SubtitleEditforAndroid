@@ -24,7 +24,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.subtitleedit.util.FilePropertiesInfo
@@ -63,7 +62,7 @@ internal fun FilePropertiesDialog(
                 Modifier.padding(start = 24.dp, top = 20.dp, end = 24.dp, bottom = 4.dp)
                     .heightIn(max = 640.dp)
             ) {
-                Text("详情", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                Text("详情", style = MaterialTheme.typography.titleMedium)
                 Column(
                     modifier = Modifier.weight(1f, fill = false)
                         .padding(top = 16.dp)

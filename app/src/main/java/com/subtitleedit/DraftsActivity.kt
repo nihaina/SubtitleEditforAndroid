@@ -8,7 +8,6 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
@@ -35,10 +34,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -54,10 +51,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
+import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.util.DraftManager
 
 /** Draft browser host. File access and platform results remain in the Activity. */
-class DraftsActivity : AppCompatActivity() {
+class DraftsActivity : AppComposeActivity() {
 
     private var currentFolder by mutableStateOf("")
     private var drafts by mutableStateOf(emptyList<DraftItem>())
@@ -290,52 +288,27 @@ internal fun DraftsPage(
     onDeleteDraft: (DraftsActivity.DraftItem) -> Unit,
     onDeleteFolder: (DraftsActivity.DraftItem) -> Unit
 ) {
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        topBar = {
-            if (showTopBar) {
-                TopAppBar(
-                modifier = Modifier.height(56.dp),
-                    title = {
-                        Text(
-                            text = if (currentFolder.isEmpty()) {
-                                stringResource(R.string.drafts)
-                            } else {
-                                currentFolder
-                            },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_back),
-                                contentDescription = stringResource(R.string.tools_navigate_back),
-                                tint = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    },
-                    actions = {
-                        if (currentFolder.isNotEmpty()) {
-                            IconButton(onClick = onBackToRoot) {
-                                Icon(
-                                    painter = painterResource(android.R.drawable.ic_menu_revert),
-                                    contentDescription = stringResource(R.string.menu_drafts_title_01),
-                                    tint = Color.Unspecified
-                                )
-                            }
-                        }
-                    }
-                )
+    AppToolScaffold(
+        title = if (currentFolder.isEmpty()) stringResource(R.string.drafts) else currentFolder,
+        onBack = onBack,
+        showTopBar = showTopBar,
+        scrollable = false,
+        actions = {
+            if (currentFolder.isNotEmpty()) {
+                IconButton(onClick = onBackToRoot) {
+                    Icon(
+                        painter = painterResource(android.R.drawable.ic_menu_revert),
+                        contentDescription = stringResource(R.string.menu_drafts_title_01),
+                        tint = Color.Unspecified
+                    )
+                }
             }
         }
-    ) { innerPadding ->
+    ) {
         if (drafts.isEmpty()) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
+                    .fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -347,9 +320,8 @@ internal fun DraftsPage(
         } else {
             LazyColumn(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-                contentPadding = PaddingValues(8.dp)
+                    .fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 8.dp)
             ) {
                 items(
                     items = drafts,
@@ -414,7 +386,7 @@ private fun DraftRow(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = if (draft.isFolder) "文件夹" else draft.formattedDate,
+                text = if (draft.isFolder) stringResource(R.string.draft_folder) else draft.formattedDate,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
@@ -457,7 +429,9 @@ private fun DraftsDialogHost(
             val previewVerticalPadding = with(density) { 40.toDp() }
             AlertDialog(
                 onDismissRequest = onDismiss,
-                title = { Text("预览：${dialogState.draft.displayName}") },
+                title = {
+                    Text(stringResource(R.string.draft_preview_title, dialogState.draft.displayName))
+                },
                 text = {
                     Box(
                         modifier = Modifier
@@ -469,8 +443,7 @@ private fun DraftsDialogHost(
                     ) {
                         Text(
                             text = dialogState.content,
-                            fontSize = 14.sp,
-                            lineHeight = 18.2.sp,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }
@@ -483,7 +456,7 @@ private fun DraftsDialogHost(
                         TextButton(onClick = {
                             onCopyDraft(dialogState.draft)
                             onDismiss()
-                        }) { Text("复制全文") }
+                        }) { Text(stringResource(R.string.draft_copy_full_text)) }
                         Spacer(Modifier.weight(1f))
                         if (fromEditor) {
                             TextButton(onClick = onDismiss) {
@@ -494,7 +467,10 @@ private fun DraftsDialogHost(
                             if (fromEditor) onLoadDraft(dialogState.draft)
                             else onDismiss()
                         }) {
-                            Text(if (fromEditor) "加载此草稿" else stringResource(R.string.confirm))
+                            Text(
+                                if (fromEditor) stringResource(R.string.draft_load)
+                                else stringResource(R.string.confirm)
+                            )
                         }
                     }
                 },
@@ -516,7 +492,7 @@ private fun DraftsDialogHost(
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("导出草稿")
+                            Text(stringResource(R.string.draft_export))
                         }
                         TextButton(
                             onClick = {
@@ -526,7 +502,7 @@ private fun DraftsDialogHost(
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("复制全文")
+                            Text(stringResource(R.string.draft_copy_full_text))
                         }
                         TextButton(
                             onClick = {
@@ -534,7 +510,7 @@ private fun DraftsDialogHost(
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("删除草稿")
+                            Text(stringResource(R.string.draft_delete))
                         }
                     }
                 },
@@ -569,7 +545,7 @@ private fun DraftsDialogHost(
             AlertDialog(
                 onDismissRequest = onDismiss,
                 title = { Text(stringResource(R.string.delete)) },
-                text = { Text("确定要删除此文件夹及其所有内容吗？") },
+                text = { Text(stringResource(R.string.draft_delete_folder_confirm)) },
                 confirmButton = {
                     TextButton(onClick = { onDeleteFolder(dialogState.draft) }) {
                         Text(stringResource(R.string.confirm))

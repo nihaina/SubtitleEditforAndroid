@@ -179,8 +179,7 @@
         <activity
             android:name=".TranscriptMatchActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid.Compose"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
             
         <activity
             android:name=".DraftsActivity"
@@ -210,19 +209,16 @@
         <activity
             android:name=".SpeechToSubtitleActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid.Compose"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
             android:name=".VocalSeparationActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid.Compose"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
             android:name=".VocalSeparationSettingsActivity"
             android:exported="false"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
@@ -238,8 +234,7 @@
         <activity
             android:name=".AutoTimestampActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid.Compose"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
             android:name=".SubtitleFormatSelectActivity"

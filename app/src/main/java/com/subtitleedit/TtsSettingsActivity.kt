@@ -10,7 +10,6 @@ import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Spinner
 import androidx.activity.compose.setContent
-import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.viewinterop.AndroidView
@@ -26,32 +25,30 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.SettingsManager
 
 /** System TTS engine selection page. */
-class TtsSettingsActivity : AppCompatActivity() {
+class TtsSettingsActivity : AppComposeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val settingsManager = SettingsManager.getInstance(this)
@@ -125,7 +122,6 @@ private data class TtsEngineOption(val label: String, val packageName: String)
 
 private data class LanguageOption(val label: String, val value: String)
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TtsSettingsScreen(
     engineOptions: List<TtsEngineOption>,
@@ -146,42 +142,25 @@ private fun TtsSettingsScreen(
             LanguageOption("英语（美国）", SettingsManager.TTS_LANGUAGE_ENGLISH)
         )
     }
-    var currentEngine by remember { mutableStateOf(selectedEngine) }
-    var currentLanguage by remember {
+    var currentEngine by rememberSaveable { mutableStateOf(selectedEngine) }
+    var currentLanguage by rememberSaveable {
         mutableStateOf(languageOptions.firstOrNull { it.value == selectedLanguage }?.value
             ?: SettingsManager.TTS_LANGUAGE_AUTO)
     }
-    var showHelp by remember { mutableStateOf(false) }
+    var showHelp by rememberSaveable { mutableStateOf(false) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                modifier = Modifier.height(56.dp),
-                title = { Text(stringResource(R.string.tts_settings)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_back),
-                            contentDescription = stringResource(R.string.tools_navigate_back)
-                        )
-                    }
-                }
-            )
-        }
-    ) { contentPadding ->
+    AppToolScaffold(
+        title = stringResource(R.string.tts_settings),
+        onBack = onBack,
+        imePadding = true
+    ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(contentPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp)
+            modifier = Modifier.fillMaxWidth()
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = stringResource(R.string.tts_engine),
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
                     modifier = Modifier.weight(1f)
                 )
                 IconButton(onClick = onSystemSettings, modifier = Modifier.size(40.dp)) {
@@ -196,7 +175,6 @@ private fun TtsSettingsScreen(
                 text = stringResource(R.string.tts_engine_description),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 13.sp,
                 modifier = Modifier.padding(top = 4.dp)
             )
             Spacer(Modifier.height(12.dp))
@@ -211,27 +189,23 @@ private fun TtsSettingsScreen(
             Spacer(Modifier.height(8.dp))
             Text(
                 text = if (installedEngineCount == 0) {
-                    "未检测到可用的朗读引擎，请先在系统中安装或启用 TTS 引擎。"
+                    stringResource(R.string.tts_no_engines)
                 } else {
-                    "检测到 $installedEngineCount 个朗读引擎；选择后立即保存。"
+                    stringResource(R.string.tts_engine_count, installedEngineCount)
                 },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             Spacer(Modifier.height(28.dp))
             Text(
                 text = stringResource(R.string.tts_language),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp
+                style = MaterialTheme.typography.titleMedium
             )
             Text(
                 text = stringResource(R.string.tts_language_description),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 13.sp,
                 modifier = Modifier.padding(top = 4.dp)
             )
             Spacer(Modifier.height(12.dp))
@@ -255,7 +229,7 @@ private fun TtsSettingsScreen(
                 Text(
                     text = stringResource(R.string.tts_help),
                     color = MaterialTheme.colorScheme.primary,
-                    fontSize = 14.sp,
+                    style = MaterialTheme.typography.labelLarge,
                     textAlign = TextAlign.End
                 )
             }

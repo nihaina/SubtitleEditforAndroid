@@ -5,7 +5,6 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
-import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -20,7 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-class ArchivePreviewActivity : AppCompatActivity() {
+class ArchivePreviewActivity : AppComposeActivity() {
     private var archiveName by mutableStateOf("")
     private var currentDirectory by mutableStateOf("")
     private var items by mutableStateOf(emptyList<ArchivePreviewItem>())

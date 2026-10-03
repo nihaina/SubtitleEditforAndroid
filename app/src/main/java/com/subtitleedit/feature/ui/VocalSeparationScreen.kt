@@ -28,14 +28,14 @@ import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.ui.theme.AppSpacing
 
 internal data class VocalSeparationUiState(
-    val selectedFilesText: String = "未选择文件",
+    val selectedFilesText: String? = null,
     val hasSelectedFiles: Boolean = false,
     val outputDirectory: String = "",
     val selectedStems: Set<VocalSeparationEngine.Stem> = setOf(VocalSeparationEngine.Stem.VOCALS),
     val enabledStems: Set<VocalSeparationEngine.Stem> = emptySet(),
     val isRunning: Boolean = false,
     val progressVisible: Boolean = false,
-    val progressStatus: String = "正在准备...",
+    val progressStatus: String? = null,
     val progress: Int = 0,
     val log: String = "",
     val dialog: VocalSeparationDialog = VocalSeparationDialog.NONE,
@@ -63,11 +63,11 @@ internal fun VocalSeparationScreen(
     onDismissDialog: () -> Unit
 ) {
     AppToolScaffold(
-        title = "人声分离",
+        title = stringResource(R.string.activity_vocal_separation_title),
         onBack = onBack,
         actions = {
             IconButton(onClick = onSettings, enabled = !state.isRunning) {
-                Icon(painterResource(R.drawable.ic_settings), contentDescription = "人声分离设置")
+                Icon(painterResource(R.drawable.ic_settings), contentDescription = stringResource(R.string.activity_vocal_separation_settings_title))
             }
         },
         bottomBar = {
@@ -83,7 +83,11 @@ internal fun VocalSeparationScreen(
             OutlinedButton(onClick = onSelectFiles, enabled = !state.isRunning) {
                 Text(stringResource(R.string.select_file))
             }
-            Text(state.selectedFilesText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                state.selectedFilesText ?: stringResource(R.string.vocal_separation_no_files),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
         AppSection(title = stringResource(R.string.activity_vocal_separation_text_02)) {
@@ -123,7 +127,7 @@ internal fun VocalSeparationScreen(
                 AppTaskProgress(
                     visible = true,
                     progress = state.progress.coerceIn(0, 100) / 100f,
-                    status = state.progressStatus,
+                    status = state.progressStatus.orEmpty(),
                     onCancel = onCancel
                 )
             }
@@ -137,29 +141,29 @@ internal fun VocalSeparationScreen(
     when (state.dialog) {
         VocalSeparationDialog.NONE -> Unit
         VocalSeparationDialog.CANCEL -> AppAlertDialog(
-            title = "确认取消",
-            message = "人声分离正在进行，确定要取消吗？",
-            confirmText = "取消分离",
-            dismissText = "继续分离",
+            title = stringResource(R.string.vocal_separation_cancel_title),
+            message = stringResource(R.string.vocal_separation_cancel_message),
+            confirmText = stringResource(R.string.vocal_separation_cancel_confirm),
+            dismissText = stringResource(R.string.vocal_separation_cancel_dismiss),
             onConfirm = onCancel,
             onDismiss = onDismissDialog
         )
         VocalSeparationDialog.BACK -> AppAlertDialog(
-            title = "正在分离中",
-            message = "人声分离正在进行，确定要返回吗？返回后任务将被取消。",
-            confirmText = "返回并取消",
-            dismissText = "继续分离",
+            title = stringResource(R.string.vocal_separation_back_title),
+            message = stringResource(R.string.vocal_separation_back_message),
+            confirmText = stringResource(R.string.vocal_separation_back_confirm),
+            dismissText = stringResource(R.string.vocal_separation_back_dismiss),
             onConfirm = onConfirmBack,
             onDismiss = onDismissDialog
         )
         VocalSeparationDialog.OUTPUT_CONFLICT -> AppConflictDialog(
-            message = "输出目录中已有同名音频文件。请选择处理方式。",
+            message = stringResource(R.string.vocal_separation_output_conflict),
             onOverwrite = onOverwrite,
             onRename = onAutoRename,
             onCancel = onDismissDialog
         )
         VocalSeparationDialog.ERROR -> AppAlertDialog(
-            title = "人声分离失败",
+            title = stringResource(R.string.vocal_separation_error_title),
             message = state.errorMessage,
             onConfirm = onDismissDialog,
             onDismiss = onDismissDialog

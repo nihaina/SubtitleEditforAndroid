@@ -20,12 +20,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,11 +32,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.model.ArchivePreviewItem
 import com.subtitleedit.util.ArchiveManager
 import com.subtitleedit.util.FileTypePolicy
@@ -51,7 +46,6 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.flow.collectLatest
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ArchivePreviewScreen(
     archiveName: String,
@@ -70,41 +64,26 @@ fun ArchivePreviewScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                modifier = Modifier.height(56.dp),
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Image(
-                            painter = painterResource(R.drawable.ic_back),
-                            contentDescription = "返回"
-                        )
-                    }
-                },
-                title = {
-                    Column {
-                        Text(
-                            text = archiveName,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        entryCount?.let {
-                            Text(
-                                text = "${it} 项",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+    AppToolScaffold(
+        title = archiveName,
+        onBack = onNavigateBack,
+        scrollable = false,
+        titleContent = {
+            Column {
+                Text(text = archiveName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                entryCount?.let {
+                    Text(
+                        text = stringResource(R.string.archive_entry_count, it),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-            )
+            }
         }
-    ) { contentPadding ->
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(contentPadding)
         ) {
             Text(
                 text = buildString {
@@ -117,7 +96,7 @@ fun ArchivePreviewScreen(
                     .horizontalScroll(pathScrollState)
                     .padding(12.dp),
                 maxLines = 1,
-                fontSize = 14.sp,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onBackground
             )
 
@@ -160,7 +139,7 @@ private fun PreviewEmptyState(
     Text(
         text = text,
         modifier = modifier.padding(horizontal = 24.dp),
-        fontSize = 16.sp,
+        style = MaterialTheme.typography.titleMedium,
         color = MaterialTheme.colorScheme.onBackground
     )
 }
@@ -191,7 +170,7 @@ private fun ArchivePreviewRow(
                 if (item.isDirectory) {
                     Modifier.clickable(
                         role = Role.Button,
-                        onClickLabel = "打开文件夹",
+                        onClickLabel = stringResource(R.string.open_folder),
                         onClick = onOpenDirectory
                     )
                 } else {
@@ -223,8 +202,7 @@ private fun ArchivePreviewRow(
                     text = item.name,
                     maxLines = 1,
                     overflow = TextOverflow.MiddleEllipsis,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.height(4.dp))
@@ -233,9 +211,9 @@ private fun ArchivePreviewRow(
                         item.isDirectory && item.itemCount == 0 -> stringResource(R.string.directory_empty)
                         item.isDirectory -> stringResource(R.string.directory_item_count, item.itemCount)
                         item.size >= 0L -> FileUtils.formatFileSize(item.size)
-                        else -> "大小未知"
+                        else -> stringResource(R.string.file_size_unknown)
                     },
-                    fontSize = 12.sp,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
@@ -253,7 +231,7 @@ private fun ArchivePreviewRow(
                             )
                             .padding(horizontal = 8.dp, vertical = 4.dp),
                         color = androidx.compose.ui.graphics.Color.White,
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         maxLines = 1
                     )
                 }
@@ -261,7 +239,7 @@ private fun ArchivePreviewRow(
                     Text(
                         text = date,
                         modifier = Modifier.padding(top = if (suffix.isNotEmpty()) 5.dp else 0.dp),
-                        fontSize = 11.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1
                     )

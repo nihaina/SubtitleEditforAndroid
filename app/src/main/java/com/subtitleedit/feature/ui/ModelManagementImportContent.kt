@@ -31,7 +31,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -39,21 +38,25 @@ import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppCard
 
 data class AsrModelImportUiState(
-    val modelTitle: String = "Whisper 模型",
-    val encoderLabel: String = "Encoder 模型",
-    val encoderValue: String = "未选择",
-    val encoderButtonLabel: String = "选择 Encoder",
-    val decoderValue: String = "未选择",
-    val joinerLabel: String = "Joiner 模型",
-    val joinerValue: String = "未选择",
-    val joinerButtonLabel: String = "选择 Joiner",
-    val tokensLabel: String = "Tokens 文件",
-    val tokensValue: String = "未选择",
+    val modelTitleRes: Int = R.string.model_import_whisper_model,
+    val encoderLabelRes: Int = R.string.model_import_encoder_model,
+    val encoderValue: String = "",
+    val encoderDurationSeconds: Int? = null,
+    val encoderButtonLabelRes: Int = R.string.activity_model_settings_text_06,
+    val decoderValue: String = "",
+    val joinerLabelRes: Int = R.string.model_import_joiner_model,
+    val joinerValue: String = "",
+    val joinerButtonLabelRes: Int = R.string.model_import_select_joiner,
+    val tokensLabelRes: Int = R.string.model_import_tokens_file,
+    val tokensIsDirectory: Boolean = false,
+    val tokensValue: String = "",
     val showDecoder: Boolean = true,
     val showJoiner: Boolean = false,
     val showForcedAligner: Boolean = false,
     val forcedAlignerComplete: Boolean = false,
-    val forcedAlignerStatus: String = "尚未配置 ForcedAligner 模型及权重",
+    val forcedAlignerStatus: ForcedAlignerImportStatus = ForcedAlignerImportStatus.NOT_CONFIGURED,
+    val forcedAlignerGraphName: String? = null,
+    val forcedAlignerDataName: String? = null,
     val showModelDownload: Boolean = true,
     val showModelReset: Boolean = false,
     val showSenseVoiceProvider: Boolean = false,
@@ -61,18 +64,25 @@ data class AsrModelImportUiState(
     val npuAvailable: Boolean = true,
     val showParakeetVariant: Boolean = false,
     val parakeetCtcSelected: Boolean = false,
-    val vadValue: String = "silero_vad.onnx（内置）",
+    val vadModelFileName: String? = null,
     val useBuiltInVad: Boolean = true,
     val actionsEnabled: Boolean = true
 )
 
 data class DemucsModelImportUiState(
     val useFtModels: Boolean = false,
-    val generalModelValue: String = "未选择通用四轨模型",
+    val generalModelValue: String? = null,
     val hasGeneralModel: Boolean = false,
-    val ftModelValues: Map<String, String> = emptyMap(),
+    val ftModelValues: Map<String, String?> = emptyMap(),
     val actionsEnabled: Boolean = true
 )
+
+enum class ForcedAlignerImportStatus {
+    NOT_CONFIGURED,
+    LOCAL_MODEL_AVAILABLE,
+    INCOMPLETE,
+    CONFIGURED
+}
 
 enum class AsrModelImportAction {
     SelectModelType,
@@ -94,6 +104,12 @@ enum class AsrModelImportAction {
     SelectParakeetCtc,
     ShowGuide
 }
+
+private data class ModelChoiceOption(
+    val id: AsrModelImportAction,
+    val label: String,
+    val selected: Boolean
+)
 
 enum class DemucsModelImportAction {
     Configure,
@@ -139,20 +155,30 @@ private fun AsrModelImportCard(
             Row(verticalAlignment = Alignment.Top) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = state.modelTitle,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        text = stringResource(state.modelTitleRes),
+                        style = MaterialTheme.typography.titleMedium
                     )
                     ModelFileControl(
-                        label = state.encoderLabel,
-                        value = state.encoderValue,
-                        selectLabel = state.encoderButtonLabel,
+                        label = stringResource(state.encoderLabelRes),
+                        value = when {
+                            state.encoderValue.isBlank() -> stringResource(R.string.model_import_not_selected)
+                            state.encoderDurationSeconds != null -> stringResource(
+                                R.string.model_import_npu_duration,
+                                state.encoderValue,
+                                state.encoderDurationSeconds
+                            )
+                            else -> state.encoderValue
+                        },
+                        selectLabel = stringResource(state.encoderButtonLabelRes),
                         onSelect = { onAction(AsrModelImportAction.SelectEncoder) },
                         enabled = state.actionsEnabled,
                         fillSelectButton = true,
                         showDownload = state.showModelDownload,
                         showReset = state.showModelReset,
-                        downloadDescription = "一键下载并导入 ${state.modelTitle}",
+                        downloadDescription = stringResource(
+                            R.string.model_import_download_and_import_model,
+                            stringResource(state.modelTitleRes)
+                        ),
                         onDownload = { onAction(AsrModelImportAction.DownloadModel) },
                         onReset = { onAction(AsrModelImportAction.ResetModel) },
                         modifier = Modifier.padding(top = 12.dp)
@@ -165,7 +191,7 @@ private fun AsrModelImportCard(
                     TextButton(
                         onClick = { onAction(AsrModelImportAction.ConfigureWhisper) },
                         modifier = Modifier.height(36.dp)
-                    ) { Text("配置") }
+                    ) { Text(stringResource(R.string.activity_model_settings_text_08)) }
                     OutlinedButton(
                         onClick = { onAction(AsrModelImportAction.SelectModelType) },
                         enabled = state.actionsEnabled,
@@ -173,27 +199,23 @@ private fun AsrModelImportCard(
                     ) { Text(stringResource(R.string.activity_model_settings_text_09), maxLines = 1) }
                     if (state.showSenseVoiceProvider) {
                         ChoiceOptions(
-                            options = listOf("CPU" to !state.useSenseVoiceNpu, "NPU" to state.useSenseVoiceNpu),
+                            options = listOf(
+                                ModelChoiceOption(AsrModelImportAction.SelectSenseVoiceCpu, "CPU", !state.useSenseVoiceNpu),
+                                ModelChoiceOption(AsrModelImportAction.SelectSenseVoiceNpu, "NPU", state.useSenseVoiceNpu)
+                            ),
                             enabled = state.actionsEnabled,
                             secondOptionAvailable = state.npuAvailable,
-                            onSelected = {
-                                onAction(
-                                    if (it == "NPU") AsrModelImportAction.SelectSenseVoiceNpu
-                                    else AsrModelImportAction.SelectSenseVoiceCpu
-                                )
-                            }
+                            onSelected = onAction
                         )
                     }
                     if (state.showParakeetVariant) {
                         ChoiceOptions(
-                            options = listOf("TDT" to !state.parakeetCtcSelected, "CTC" to state.parakeetCtcSelected),
+                            options = listOf(
+                                ModelChoiceOption(AsrModelImportAction.SelectParakeetTdt, "TDT", !state.parakeetCtcSelected),
+                                ModelChoiceOption(AsrModelImportAction.SelectParakeetCtc, "CTC", state.parakeetCtcSelected)
+                            ),
                             enabled = state.actionsEnabled,
-                            onSelected = {
-                                onAction(
-                                    if (it == "CTC") AsrModelImportAction.SelectParakeetCtc
-                                    else AsrModelImportAction.SelectParakeetTdt
-                                )
-                            }
+                            onSelected = onAction
                         )
                     }
                 }
@@ -201,9 +223,9 @@ private fun AsrModelImportCard(
 
             if (state.showDecoder) {
                 ModelFileControl(
-                    label = "Decoder 模型",
+                    label = stringResource(R.string.model_import_decoder_model),
                     value = state.decoderValue,
-                    selectLabel = "选择 Decoder",
+                    selectLabel = stringResource(R.string.model_import_select_decoder),
                     onSelect = { onAction(AsrModelImportAction.SelectDecoder) },
                     enabled = state.actionsEnabled,
                     modifier = Modifier.padding(top = 12.dp)
@@ -211,18 +233,21 @@ private fun AsrModelImportCard(
             }
             if (state.showJoiner) {
                 ModelFileControl(
-                    label = state.joinerLabel,
+                    label = stringResource(state.joinerLabelRes),
                     value = state.joinerValue,
-                    selectLabel = state.joinerButtonLabel,
+                    selectLabel = stringResource(state.joinerButtonLabelRes),
                     onSelect = { onAction(AsrModelImportAction.SelectJoiner) },
                     enabled = state.actionsEnabled,
                     modifier = Modifier.padding(top = 12.dp)
                 )
             }
             ModelFileControl(
-                label = state.tokensLabel,
-                value = state.tokensValue,
-                selectLabel = if (state.tokensLabel == "Tokenizer 文件夹") "选择 Tokenizer 文件夹" else "选择 Tokens",
+                    label = stringResource(state.tokensLabelRes),
+                    value = state.tokensValue,
+                    selectLabel = stringResource(
+                        if (state.tokensIsDirectory) R.string.model_import_select_tokenizer_folder
+                        else R.string.model_import_select_tokens
+                    ),
                 onSelect = { onAction(AsrModelImportAction.SelectTokens) },
                 enabled = state.actionsEnabled,
                 modifier = Modifier.padding(top = 12.dp)
@@ -232,8 +257,7 @@ private fun AsrModelImportCard(
                 Column(modifier = Modifier.padding(top = 16.dp)) {
                     Text(
                         text = stringResource(R.string.activity_model_management_qwen_aligner_title),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold
+                        style = MaterialTheme.typography.bodyMedium
                     )
                     Text(
                         text = stringResource(R.string.activity_model_management_qwen_aligner_hint),
@@ -271,7 +295,7 @@ private fun AsrModelImportCard(
                         }
                     }
                     Text(
-                        text = state.forcedAlignerStatus,
+                        text = forcedAlignerStatusText(state),
                         color = if (state.forcedAlignerComplete) MaterialTheme.colorScheme.onSurfaceVariant
                         else MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
@@ -287,13 +311,18 @@ private fun AsrModelImportCard(
                 Text(
                     text = stringResource(R.string.activity_model_settings_text_14),
                     modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    style = MaterialTheme.typography.titleMedium
                 )
-                TextButton(onClick = { onAction(AsrModelImportAction.ConfigureVad) }) { Text("配置") }
+                TextButton(onClick = { onAction(AsrModelImportAction.ConfigureVad) }) {
+                    Text(stringResource(R.string.activity_model_settings_text_08))
+                }
             }
             Text(
-                text = state.vadValue,
+                text = when {
+                    state.useBuiltInVad -> stringResource(R.string.model_import_builtin_vad_value)
+                    state.vadModelFileName.isNullOrBlank() -> stringResource(R.string.model_import_vad_not_selected)
+                    else -> state.vadModelFileName.orEmpty()
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp)
@@ -303,7 +332,7 @@ private fun AsrModelImportCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 OutlinedButton(onClick = { onAction(AsrModelImportAction.SelectVad) }) {
-                    Text("选择 VAD 模型")
+                    Text(stringResource(R.string.model_import_select_vad))
                 }
                 Row(
                     modifier = Modifier
@@ -317,7 +346,7 @@ private fun AsrModelImportCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Checkbox(checked = state.useBuiltInVad, onCheckedChange = null)
-                    Text("使用内置模型", style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(R.string.model_import_use_builtin_vad), style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
@@ -332,21 +361,23 @@ private fun DemucsModelImportCard(
     ModelImportCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = if (state.useFtModels) "FT 单音轨模型" else "通用四轨模型",
+                text = stringResource(
+                    if (state.useFtModels) R.string.model_import_demucs_ft
+                    else R.string.model_import_demucs_general
+                ),
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             TextButton(
                 onClick = { onAction(DemucsModelImportAction.Configure) },
                 modifier = Modifier.height(36.dp)
-            ) { Text("配置") }
+            ) { Text(stringResource(R.string.activity_model_settings_text_08)) }
         }
         if (!state.useFtModels) {
             DemucsValueWithSwitch(
-                value = state.generalModelValue,
+                value = state.generalModelValue ?: stringResource(R.string.model_import_general_not_selected),
                 enabled = state.actionsEnabled,
                 onSwitch = { onAction(DemucsModelImportAction.SelectModelType) },
                 modifier = Modifier.padding(top = 12.dp)
@@ -370,7 +401,8 @@ private fun DemucsModelImportCard(
             )
         } else {
             DemucsValueWithSwitch(
-                value = state.ftModelValues["vocals"] ?: "未选择 Vocals specialist 模型",
+                value = state.ftModelValues["vocals"]
+                    ?: stringResource(R.string.model_import_ft_not_selected, "Vocals"),
                 enabled = state.actionsEnabled,
                 onSwitch = { onAction(DemucsModelImportAction.SelectModelType) },
                 modifier = Modifier.padding(top = 12.dp)
@@ -385,7 +417,11 @@ private fun DemucsModelImportCard(
             ).forEach { (key, label, action) ->
                 SelectionContainer(modifier = Modifier.padding(top = 10.dp)) {
                     Text(
-                        text = state.ftModelValues[key] ?: "未选择 $key specialist 模型",
+                        text = state.ftModelValues[key]
+                            ?: stringResource(
+                                R.string.model_import_ft_not_selected,
+                                key.replaceFirstChar(Char::uppercase)
+                            ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -406,6 +442,21 @@ private fun DemucsModelImportCard(
 }
 
 @Composable
+private fun forcedAlignerStatusText(state: AsrModelImportUiState): String = when (state.forcedAlignerStatus) {
+    ForcedAlignerImportStatus.NOT_CONFIGURED ->
+        stringResource(R.string.model_import_forced_aligner_not_configured)
+    ForcedAlignerImportStatus.LOCAL_MODEL_AVAILABLE ->
+        stringResource(R.string.model_import_forced_aligner_detected)
+    ForcedAlignerImportStatus.INCOMPLETE ->
+        stringResource(R.string.model_import_forced_aligner_incomplete)
+    ForcedAlignerImportStatus.CONFIGURED -> stringResource(
+        R.string.model_import_forced_aligner_configured,
+        state.forcedAlignerGraphName.orEmpty(),
+        state.forcedAlignerDataName.orEmpty()
+    )
+}
+
+@Composable
 private fun ModelImportCard(content: @Composable () -> Unit) {
     AppCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) { content() }
@@ -414,35 +465,38 @@ private fun ModelImportCard(content: @Composable () -> Unit) {
 
 @Composable
 private fun ChoiceOptions(
-    options: List<Pair<String, Boolean>>,
+    options: List<ModelChoiceOption>,
     enabled: Boolean,
     secondOptionAvailable: Boolean = true,
-    onSelected: (String) -> Unit
+    onSelected: (AsrModelImportAction) -> Unit
 ) {
+    val npuContentDescription = stringResource(
+        if (secondOptionAvailable) {
+            R.string.model_import_sensevoice_npu_content_description
+        } else {
+            R.string.model_import_sensevoice_npu_unavailable
+        }
+    )
     Row(verticalAlignment = Alignment.CenterVertically) {
-        options.forEachIndexed { index, (label, selected) ->
+        options.forEachIndexed { index, option ->
             Text(
-                text = label,
+                text = option.label,
                 modifier = Modifier
                     .widthIn(min = 44.dp)
                     .height(36.dp)
                     .clickable(
                         enabled = enabled
-                    ) { onSelected(label) }
+                    ) { onSelected(option.id) }
                     .alpha(if (index == 1 && !secondOptionAvailable) 0.55f else 1f)
                     .then(
-                        if (label == "NPU") Modifier.semantics {
-                            contentDescription = if (secondOptionAvailable) {
-                                "选择 SenseVoice NPU"
-                            } else {
-                                "SenseVoice NPU，需要安装 QNN 版"
-                            }
+                        if (option.id == AsrModelImportAction.SelectSenseVoiceNpu) Modifier.semantics {
+                            contentDescription = npuContentDescription
                         } else Modifier
                     ),
                 textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                color = if (selected) MaterialTheme.colorScheme.primary
+                style = if (option.selected) MaterialTheme.typography.labelLarge
+                else MaterialTheme.typography.bodySmall,
+                color = if (option.selected) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -460,7 +514,7 @@ private fun ModelFileControl(
     fillSelectButton: Boolean = false,
     showDownload: Boolean = false,
     showReset: Boolean = false,
-    downloadDescription: String = "下载并导入模型",
+    downloadDescription: String? = null,
     onDownload: () -> Unit = {},
     onReset: () -> Unit = {}
 ) {
@@ -481,7 +535,8 @@ private fun ModelFileControl(
             fillSelectButton = fillSelectButton,
             showDownload = showDownload,
             showReset = showReset,
-            downloadDescription = downloadDescription,
+            downloadDescription = downloadDescription
+                ?: stringResource(R.string.activity_model_settings_contentdescription_01),
             onDownload = onDownload,
             onReset = onReset,
             modifier = Modifier.padding(top = 4.dp)
@@ -497,7 +552,7 @@ private fun ModelSelectRow(
     fillSelectButton: Boolean = false,
     showDownload: Boolean = false,
     showReset: Boolean = false,
-    downloadDescription: String = "下载并导入模型",
+    downloadDescription: String,
     onDownload: () -> Unit = {},
     onReset: () -> Unit = {},
     modifier: Modifier = Modifier

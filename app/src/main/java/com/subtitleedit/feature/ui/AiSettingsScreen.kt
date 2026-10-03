@@ -4,13 +4,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,10 +26,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,6 +50,10 @@ import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
 import com.subtitleedit.util.AiProviderConfig
 import com.subtitleedit.ui.components.AppCard
+import com.subtitleedit.ui.components.AppOption
+import com.subtitleedit.ui.components.AppSection
+import com.subtitleedit.ui.components.AppToolScaffold
+import com.subtitleedit.ui.components.SectionHeader
 import com.subtitleedit.util.SettingsManager
 
 enum class AiModelTarget {
@@ -130,40 +130,20 @@ fun AiSettingsScreen(
     onOpenChat: () -> Unit,
     onNavigateBack: () -> Unit
 ) {
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        topBar = {
-            TopAppBar(
-                modifier = Modifier.height(56.dp),
-                title = { Text("AI 设置") },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_back),
-                            contentDescription = stringResource(R.string.tools_navigate_back)
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = onOpenChat) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_ai_chat),
-                            contentDescription = stringResource(R.string.activity_ai_settings_open_chat),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-            )
+    AppToolScaffold(
+        title = stringResource(R.string.activity_settings_ai_entry),
+        onBack = onNavigateBack,
+        imePadding = true,
+        actions = {
+            IconButton(onClick = onOpenChat) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_ai_chat),
+                    contentDescription = stringResource(R.string.activity_ai_settings_open_chat),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
         }
-    ) { contentPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(contentPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+    ) {
             ProviderCard(
                 state = state,
                 onSelectProvider = onSelectProvider,
@@ -190,7 +170,6 @@ fun AiSettingsScreen(
                 onPromptChange = { value -> onStateChange { it.copy(punctuationPrompt = value) } },
                 onFetchModels = { onFetchModels(AiModelTarget.PUNCTUATION) }
             )
-        }
     }
 
     state.modelChooser?.let { chooser ->
@@ -239,8 +218,8 @@ private fun ProviderCard(
 ) {
     val provider = AiProviderConfig.getProvider(state.provider)
     val uriHandler = LocalUriHandler.current
-    SettingsCard {
-        SectionHeading("AI 平台设置（${provider.displayName}）")
+    AppSection {
+        SectionHeader(stringResource(R.string.activity_ai_settings_provider_heading, provider.displayName))
         ProviderSelector(
             label = stringResource(R.string.activity_ai_settings_text_02),
             selectedProvider = state.provider,
@@ -331,8 +310,8 @@ private fun TranslationSettingsCard(
     onFetchModels: () -> Unit
 ) {
     val provider = AiProviderConfig.getProvider(state.translationProvider)
-    SettingsCard {
-        SectionHeading(stringResource(R.string.activity_ai_settings_translation_title))
+    AppSection {
+        SectionHeader(stringResource(R.string.activity_ai_settings_translation_title))
         ProviderSelector(
             label = "平台",
             selectedProvider = state.translationProvider,
@@ -380,15 +359,15 @@ private fun PunctuationSettingsCard(
     onFetchModels: () -> Unit
 ) {
     val provider = AiProviderConfig.getProvider(state.punctuationProvider)
-    SettingsCard {
-        SectionHeading(stringResource(R.string.activity_ai_settings_punctuation_title))
+    AppSection {
+        SectionHeader(stringResource(R.string.activity_ai_settings_punctuation_title))
         Text(
             text = stringResource(R.string.activity_ai_settings_punctuation_prompt_hint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         ProviderSelector(
-            label = "平台",
+            label = stringResource(R.string.activity_ai_settings_text_02),
             selectedProvider = state.punctuationProvider,
             onSelect = onSelectProvider
         )
@@ -431,8 +410,8 @@ private fun ModelField(
             // The legacy fixed-model spinner was preceded by a plain
             // "模型" label; editable providers used the TextInput hint.
             label = stringResource(R.string.activity_ai_settings_text_03),
-            selected = selectedModel,
-            options = provider.models,
+            selected = AppOption(selectedModel, selectedModel),
+            options = provider.models.map { AppOption(it, it) },
             onSelect = onModelChange
         )
     } else {
@@ -442,7 +421,7 @@ private fun ModelField(
             modifier = Modifier.fillMaxWidth(),
             label = { Text(label) },
             singleLine = true,
-            placeholder = { Text("默认 ${provider.defaultModel}") }
+            placeholder = { Text(stringResource(R.string.activity_ai_settings_default_model, provider.defaultModel)) }
         )
     }
 }
@@ -455,13 +434,9 @@ private fun ReasoningSelector(
 ) {
     ChoiceField(
         label = stringResource(R.string.activity_ai_settings_reasoning_title),
-        selected = level.displayName,
-        options = AiProviderConfig.ReasoningLevel.entries.map { it.displayName },
-        onSelect = { selected ->
-            AiProviderConfig.ReasoningLevel.entries
-                .firstOrNull { it.displayName == selected }
-                ?.let(onSelect)
-        }
+        selected = AppOption(level, level.displayName),
+        options = AiProviderConfig.ReasoningLevel.entries.map { AppOption(it, it.displayName) },
+        onSelect = onSelect
     )
 }
 
@@ -474,21 +449,21 @@ private fun ProviderSelector(
 ) {
     ChoiceField(
         label = label,
-        selected = AiProviderConfig.getProvider(selectedProvider).displayName,
-        options = AiProviderConfig.providers.map { it.displayName },
-        onSelect = { name ->
-            AiProviderConfig.providers.firstOrNull { it.displayName == name }?.let { onSelect(it.id) }
-        }
+        selected = AiProviderConfig.getProvider(selectedProvider).let {
+            AppOption(it.id, it.displayName)
+        },
+        options = AiProviderConfig.providers.map { AppOption(it.id, it.displayName) },
+        onSelect = onSelect
     )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ChoiceField(
+private fun <T> ChoiceField(
     label: String,
-    selected: String,
-    options: List<String>,
-    onSelect: (String) -> Unit
+    selected: AppOption<T>,
+    options: List<AppOption<T>>,
+    onSelect: (T) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(
@@ -496,7 +471,7 @@ private fun ChoiceField(
         onExpandedChange = { expanded = it }
     ) {
         OutlinedTextField(
-            value = selected,
+            value = selected.label,
             onValueChange = {},
             modifier = Modifier
                 .fillMaxWidth()
@@ -511,10 +486,10 @@ private fun ChoiceField(
         ) {
             options.forEach { option ->
                 DropdownMenuItem(
-                    text = { Text(option) },
+                    text = { Text(option.label) },
                     onClick = {
                         expanded = false
-                        onSelect(option)
+                        onSelect(option.id)
                     }
                 )
             }
@@ -551,24 +526,4 @@ private fun FetchModelsButton(
             modifier = Modifier.padding(start = 8.dp)
         )
     }
-}
-
-@Composable
-private fun SettingsCard(content: @Composable () -> Unit) {
-    AppCard(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            content = { content() }
-        )
-    }
-}
-
-@Composable
-private fun SectionHeading(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary
-    )
 }

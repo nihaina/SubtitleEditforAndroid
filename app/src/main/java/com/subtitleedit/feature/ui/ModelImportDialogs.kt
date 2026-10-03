@@ -21,18 +21,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppTaskProgress
 
 sealed interface ModelImportDialogUi {
     data class Message(
         val title: String,
         val message: String,
-        val confirmLabel: String? = "确定",
+        val confirmLabel: String? = null,
         val dismissLabel: String? = null,
         val auxiliaryLabel: String? = null,
         val destructiveConfirm: Boolean = false,
@@ -156,7 +159,7 @@ private fun OptionsDialog(dialog: ModelImportDialogUi.Options) {
             }
         },
         confirmButton = {
-            TextButton(onClick = dialog.onDismiss) { Text("取消") }
+            TextButton(onClick = dialog.onDismiss) { Text(stringResource(R.string.cancel)) }
         }
     )
 }
@@ -168,20 +171,17 @@ private fun ProgressDialog(dialog: ModelImportDialogUi.Progress) {
         title = { Text(dialog.title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(dialog.message, style = MaterialTheme.typography.bodyMedium)
-                if (dialog.progress == null) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                } else {
-                    LinearProgressIndicator(
-                        progress = { dialog.progress.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
+                AppTaskProgress(
+                    visible = true,
+                    progress = dialog.progress,
+                    status = dialog.message,
+                    onCancel = dialog.onCancel
+                )
             }
         },
         confirmButton = {},
         dismissButton = {
-            TextButton(onClick = dialog.onCancel) { Text("取消") }
+            TextButton(onClick = dialog.onCancel) { Text(stringResource(R.string.cancel)) }
         },
         properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false)
     )

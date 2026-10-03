@@ -44,6 +44,7 @@ import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppChoiceTile
 import com.subtitleedit.ui.components.AppConflictDialog
 import com.subtitleedit.ui.components.AppLogBox
+import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.components.AppOptionSelector
 import com.subtitleedit.ui.components.AppPrimaryButton
 import com.subtitleedit.ui.components.AppSection
@@ -72,16 +73,16 @@ internal fun MediaConvertScreen(
     selectedVideoCodec: String,
     audioCodecs: List<String>,
     selectedAudioCodec: String,
-    resolutions: List<String>,
+    resolutions: List<AppOption<Int>>,
     resolutionIndex: Int,
     videoBitrate: String,
-    qualityLabels: List<String>,
-    qualityIndex: Int,
+    qualityOptions: List<AppOption<String>>,
+    selectedQualityId: String,
     customQuality: String,
     audioBitrate: String,
-    sampleRates: List<String>,
+    sampleRates: List<AppOption<Int>>,
     sampleRateIndex: Int,
-    channels: List<String>,
+    channels: List<AppOption<Int>>,
     channelIndex: Int,
     advancedExpanded: Boolean,
     isConverting: Boolean,
@@ -98,7 +99,7 @@ internal fun MediaConvertScreen(
     onAudioCodecSelected: (String) -> Unit,
     onResolutionSelected: (Int) -> Unit,
     onVideoBitrateChange: (String) -> Unit,
-    onQualitySelected: (Int) -> Unit,
+    onQualitySelected: (String) -> Unit,
     onCustomQualityChange: (String) -> Unit,
     onAudioBitrateChange: (String) -> Unit,
     onSampleRateSelected: (Int) -> Unit,
@@ -112,18 +113,14 @@ internal fun MediaConvertScreen(
     onDismissDialog: () -> Unit
 ) {
     AppToolScaffold(
-        title = "格式转换",
+        title = stringResource(R.string.media_convert_title),
         onBack = onBack,
+        imePadding = true,
         bottomBar = {
             Column(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.Page, vertical = AppSpacing.Inner),
                 verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
             ) {
-                AppTaskProgress(
-                    visible = isConverting,
-                    progress = progress.coerceIn(0, 100) / 100f,
-                    onCancel = onCancel
-                )
                 Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)) {
                     AppPrimaryButton(
                         text = stringResource(R.string.start_convert),
@@ -190,7 +187,8 @@ internal fun MediaConvertScreen(
             TextButton(onClick = onToggleAdvanced, enabled = !isConverting, modifier = Modifier.fillMaxWidth()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        if (advancedExpanded) "高级选项" else stringResource(R.string.activity_media_convert_text_07),
+                        if (advancedExpanded) stringResource(R.string.media_convert_advanced_options)
+                        else stringResource(R.string.activity_media_convert_text_07),
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.labelLarge,
                         textAlign = TextAlign.Start
@@ -212,20 +210,20 @@ internal fun MediaConvertScreen(
                         AppOptionSelector(stringResource(R.string.activity_media_convert_text_08), selectedVideoCodec, videoCodecs, !isConverting, onVideoCodecSelected)
                         AppOptionSelector(
                             stringResource(R.string.activity_media_convert_text_09),
-                            resolutions.getOrElse(resolutionIndex) { resolutions.firstOrNull().orEmpty() },
+                            resolutions.getOrNull(resolutionIndex),
                             resolutions,
                             !isConverting,
-                            onSelected = { onResolutionSelected(resolutions.indexOf(it).coerceAtLeast(0)) }
+                            onSelected = onResolutionSelected
                         )
                         MediaConvertNumberField(stringResource(R.string.activity_media_convert_text_10), videoBitrate, stringResource(R.string.activity_media_convert_hint_01), !isConverting, onVideoBitrateChange)
                         AppOptionSelector(
                             stringResource(R.string.activity_media_convert_text_11),
-                            qualityLabels.getOrElse(qualityIndex) { qualityLabels.firstOrNull().orEmpty() },
-                            qualityLabels,
+                            qualityOptions.firstOrNull { it.id == selectedQualityId },
+                            qualityOptions,
                             !isConverting,
-                            onSelected = { onQualitySelected(qualityLabels.indexOf(it).coerceAtLeast(0)) }
+                            onSelected = onQualitySelected
                         )
-                        if (qualityLabels.getOrNull(qualityIndex) == "自定义") {
+                        if (selectedQualityId == "custom") {
                             OutlinedTextField(
                                 value = customQuality,
                                 onValueChange = onCustomQualityChange,
@@ -242,22 +240,27 @@ internal fun MediaConvertScreen(
                     MediaConvertNumberField(stringResource(R.string.activity_media_convert_text_13), audioBitrate, stringResource(R.string.activity_media_convert_hint_01), !isConverting, onAudioBitrateChange)
                     AppOptionSelector(
                         stringResource(R.string.activity_media_convert_text_14),
-                        sampleRates.getOrElse(sampleRateIndex) { sampleRates.firstOrNull().orEmpty() },
+                        sampleRates.getOrNull(sampleRateIndex),
                         sampleRates,
                         !isConverting,
-                        onSelected = { onSampleRateSelected(sampleRates.indexOf(it).coerceAtLeast(0)) }
+                        onSelected = onSampleRateSelected
                     )
                     AppOptionSelector(
                         stringResource(R.string.activity_media_convert_text_15),
-                        channels.getOrElse(channelIndex) { channels.firstOrNull().orEmpty() },
+                        channels.getOrNull(channelIndex),
                         channels,
                         !isConverting,
-                        onSelected = { onChannelSelected(channels.indexOf(it).coerceAtLeast(0)) }
+                        onSelected = onChannelSelected
                     )
                 }
             }
         }
 
+        AppTaskProgress(
+            visible = isConverting,
+            progress = progress.coerceIn(0, 100) / 100f,
+            onCancel = onCancel
+        )
         AppSection(title = stringResource(R.string.activity_settings_text_06)) {
             AppLogBox(log)
         }
@@ -265,7 +268,7 @@ internal fun MediaConvertScreen(
 
     if (dialog == MediaConvertDialog.OUTPUT_CONFLICT) {
         AppConflictDialog(
-            message = "输出目录中已有同名文件，或所选文件会生成同名输出。请选择处理方式。",
+            message = stringResource(R.string.media_convert_output_conflict),
             onOverwrite = onOverwrite,
             onRename = onAutoRename,
             onCancel = onDismissDialog

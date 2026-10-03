@@ -85,7 +85,7 @@ fun AutoTranslateScreen(
         onBack = onNavigateBack,
         actions = {
             IconButton(onClick = onSettings) {
-                Icon(painterResource(R.drawable.ic_settings), contentDescription = "AI 设置")
+                Icon(painterResource(R.drawable.ic_settings), contentDescription = stringResource(R.string.ai_settings_content_description))
             }
         },
         bottomBar = {
@@ -93,7 +93,6 @@ fun AutoTranslateScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.Page, vertical = AppSpacing.Inner),
                 verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
             ) {
-                AppTaskProgress(visible = state.queueRunning, progress = null, status = state.progressSummary)
                 AppPrimaryButton(
                     text = stringResource(R.string.activity_auto_translate_text_06),
                     onClick = onStart,
@@ -132,6 +131,11 @@ fun AutoTranslateScreen(
         }
 
         AppSection(title = stringResource(R.string.activity_auto_translate_text_04)) {
+            AppTaskProgress(
+                visible = state.queueRunning,
+                progress = null,
+                status = state.progressSummary
+            )
             if (state.files.isEmpty()) {
                 Text(
                     stringResource(R.string.activity_media_convert_text_03),
@@ -172,7 +176,7 @@ fun AutoTranslateScreen(
 
     if (state.showOutputConflict) {
         AppConflictDialog(
-            message = "输出目录中已存在同名字幕文件。请选择处理方式。",
+            message = stringResource(R.string.output_subtitle_conflict),
             onOverwrite = onOverwriteOutput,
             onRename = onRenameOutput,
             onCancel = onDismissOutputConflict
@@ -180,20 +184,20 @@ fun AutoTranslateScreen(
     }
     if (state.removeFileName != null) {
         AppAlertDialog(
-            title = "移除文件",
-            message = "当前文件正在处理，是否移除？",
-            confirmText = "移除",
-            dismissText = "取消",
+            title = stringResource(R.string.auto_translate_remove_title),
+            message = stringResource(R.string.auto_translate_remove_message),
+            confirmText = stringResource(R.string.remove),
+            dismissText = stringResource(R.string.cancel),
             onConfirm = onConfirmRemove,
             onDismiss = onDismissRemove
         )
     }
     if (state.showExitConfirmation) {
         AppAlertDialog(
-            title = "处理进行中",
-            message = "退出将停止正在进行的处理，已完成的文件会保留。确定退出吗？",
-            confirmText = "停止并退出",
-            dismissText = "继续处理",
+            title = stringResource(R.string.auto_translate_processing_title),
+            message = stringResource(R.string.auto_translate_exit_message),
+            confirmText = stringResource(R.string.stop_and_exit),
+            dismissText = stringResource(R.string.continue_processing),
             onConfirm = onConfirmExit,
             onDismiss = onDismissExit
         )
@@ -239,7 +243,12 @@ private fun AutoTranslateFileRow(
         Column(Modifier.weight(1f).padding(start = AppSpacing.Inner)) {
             Text(file.fileName, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
             Text(
-                "${file.fileSizeLabel} · 字幕 ${file.totalLines} · 已处理 ${file.processedLines}",
+                stringResource(
+                    R.string.subtitle_file_progress_summary,
+                    file.fileSizeLabel,
+                    file.totalLines,
+                    file.processedLines
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

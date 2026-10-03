@@ -6,14 +6,15 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
+import com.subtitleedit.ui.LOG_ALL_PAGES_ID
 import com.subtitleedit.ui.LogScreen
 import com.subtitleedit.ui.LogSection
+import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.RuntimeLogManager
@@ -21,7 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class LogActivity : AppCompatActivity() {
+class LogActivity : AppComposeActivity() {
 
     private var displayMode by mutableStateOf(RuntimeLogManager.DisplayMode.SIMPLE)
     private var hasLoadedLog = false
@@ -30,8 +31,8 @@ class LogActivity : AppCompatActivity() {
     private var showClearedPlaceholder by mutableStateOf(false)
     private var refreshGeneration = 0
     private var allSections by mutableStateOf(emptyList<LogSection>())
-    private var pageFilter by mutableStateOf("全部页面")
-    private var pageOptions by mutableStateOf(listOf("全部页面"))
+    private var pageFilter by mutableStateOf(LOG_ALL_PAGES_ID)
+    private var pageOptions by mutableStateOf(listOf(AppOption(LOG_ALL_PAGES_ID, "全部页面")))
     private var infoText by mutableStateOf("")
 
     private val exportDirLauncher = registerForActivityResult(
@@ -93,10 +94,11 @@ class LogActivity : AppCompatActivity() {
 
             result.onSuccess { snapshot ->
                 allSections = buildLogSections(snapshot.content)
-                pageOptions = listOf("全部页面") + allSections
+                pageOptions = listOf(AppOption(LOG_ALL_PAGES_ID, "全部页面")) + allSections
                     .map { it.title.substringBefore(" - ") }
                     .distinct()
-                if (pageFilter !in pageOptions) pageFilter = "全部页面"
+                    .map { AppOption(it, it) }
+                if (pageOptions.none { it.id == pageFilter }) pageFilter = LOG_ALL_PAGES_ID
                 hasLoadedLog = true
                 infoText = buildString {
                     append("${snapshot.packageName} 最近 1 小时，显示 ${snapshot.matchedLineCount} 行")
@@ -107,8 +109,8 @@ class LogActivity : AppCompatActivity() {
             }.onFailure { error ->
                 hasLoadedLog = false
                 allSections = emptyList()
-                pageOptions = listOf("全部页面")
-                pageFilter = "全部页面"
+                pageOptions = listOf(AppOption(LOG_ALL_PAGES_ID, "全部页面"))
+                pageFilter = LOG_ALL_PAGES_ID
                 infoText = "读取日志失败：${error.message ?: "未知错误"}"
                 isExportEnabled = true
                 OverwritingToast.makeText(
@@ -130,8 +132,8 @@ class LogActivity : AppCompatActivity() {
         isExportEnabled = true
         showClearedPlaceholder = true
         allSections = emptyList()
-        pageOptions = listOf("全部页面")
-        pageFilter = "全部页面"
+        pageOptions = listOf(AppOption(LOG_ALL_PAGES_ID, "全部页面"))
+        pageFilter = LOG_ALL_PAGES_ID
         infoText = "$packageName 最近 1 小时"
         OverwritingToast.makeText(this, "日志已清空", Toast.LENGTH_SHORT).show()
     }

@@ -7,7 +7,6 @@ import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -15,7 +14,7 @@ import com.subtitleedit.feature.ui.SubtitleFormatSelectScreen
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.OverwritingToast
 
-class SubtitleFormatSelectActivity : AppCompatActivity() {
+class SubtitleFormatSelectActivity : AppComposeActivity() {
     private var selectedUri by mutableStateOf<Uri?>(null)
     private var selectedName by mutableStateOf("")
 

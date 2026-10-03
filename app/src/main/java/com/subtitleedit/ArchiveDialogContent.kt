@@ -41,7 +41,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import com.subtitleedit.model.ArchiveConflictDialogFormatter
 import com.subtitleedit.model.ArchiveConflictDialogModel
@@ -133,7 +132,7 @@ internal fun ArchiveConflictDialog(
                         if (archiveInternal) "压缩包内重复条目：${model.entryName}"
                         else "（${model.entryName}）已存在",
                         modifier = Modifier.padding(top = 8.dp),
-                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp),
+                        style = MaterialTheme.typography.titleMedium,
                         maxLines = 3
                     )
                     ConflictMetadataBlock(
@@ -181,15 +180,15 @@ internal fun ArchiveConflictDialog(
 private fun ConflictMetadataBlock(title: String, size: String, modified: String, topPadding: androidx.compose.ui.unit.Dp) {
     Column(Modifier.fillMaxWidth().padding(top = topPadding)) {
         Text(title, style = MaterialTheme.typography.bodyLarge)
-        Text("大小：$size", Modifier.padding(start = 16.dp, top = 2.dp), style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp))
-        Text("最后修改：$modified", Modifier.padding(start = 16.dp), style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp))
+        Text("大小：$size", Modifier.padding(start = 16.dp, top = 2.dp), style = MaterialTheme.typography.bodyMedium)
+        Text("最后修改：$modified", Modifier.padding(start = 16.dp), style = MaterialTheme.typography.bodyMedium)
     }
 }
 
 @Composable
 private fun ConflictActionButton(label: String, modifier: Modifier, onClick: () -> Unit) {
     TextButton(onClick = onClick, modifier = modifier.height(48.dp), contentPadding = PaddingValues(horizontal = 2.dp)) {
-        Text(label, maxLines = 1, fontSize = 14.sp)
+        Text(label, maxLines = 1, style = MaterialTheme.typography.labelLarge)
     }
 }
 
@@ -351,9 +350,8 @@ internal fun ArchiveProgressDialog(
             Column(Modifier.fillMaxWidth()) {
                 Text(
                     state.message,
-                    style = MaterialTheme.typography.bodyMedium,
                     color = secondaryTextColor,
-                    fontSize = 14.sp,
+                    style = MaterialTheme.typography.bodyMedium,
                     maxLines = 2,
                     overflow = TextOverflow.MiddleEllipsis
                 )
@@ -361,9 +359,8 @@ internal fun ArchiveProgressDialog(
                     Text(
                         it,
                         Modifier.padding(top = 4.dp),
-                        style = MaterialTheme.typography.bodyMedium,
                         color = secondaryTextColor,
-                        fontSize = 14.sp,
+                        style = MaterialTheme.typography.bodyMedium,
                         maxLines = 2
                     )
                 }
@@ -379,9 +376,8 @@ internal fun ArchiveProgressDialog(
                     Text(
                         it,
                         Modifier.padding(top = 16.dp),
-                        style = MaterialTheme.typography.bodyMedium,
                         color = secondaryTextColor,
-                        fontSize = 14.sp,
+                        style = MaterialTheme.typography.bodyMedium,
                         maxLines = 2
                     )
                 }
@@ -389,9 +385,8 @@ internal fun ArchiveProgressDialog(
                     Text(
                         it,
                         Modifier.padding(top = 4.dp),
-                        style = MaterialTheme.typography.bodyMedium,
                         color = secondaryTextColor,
-                        fontSize = 14.sp,
+                        style = MaterialTheme.typography.bodyMedium,
                         maxLines = 2
                     )
                 }

@@ -32,11 +32,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,9 +53,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.size
 import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppAlertDialog
-import com.subtitleedit.ui.components.AppBackButton
-import com.subtitleedit.ui.components.AppTopBar
 import com.subtitleedit.ui.components.AppTaskProgress
+import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.util.PunctuationReplacementScope
 
 data class SubtitleFormatEditorRow(
@@ -130,54 +127,48 @@ fun SubtitleFormatEditorScreen(
         addEndPunctuation = addEndPunctuationOptions[addEndPunctuationIndex]
     )
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        topBar = {
-            AppTopBar(
-                title = "字幕格式化",
-                titleContent = {
-                    Column {
-                        Text(text = "字幕格式化", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            text = fileName,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.MiddleEllipsis
-                        )
-                    }
-                },
-                navigationIcon = { AppBackButton(onBack) },
-                actions = {
-                    IconButton(onClick = onSelectAll, enabled = items.isNotEmpty() && !isLoading) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_select_all),
-                            contentDescription = if (items.isNotEmpty() && items.all { it.selected }) {
-                                "取消全选"
-                            } else {
-                                "全选"
-                            },
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    IconButton(
-                        onClick = { selectingRange = true },
-                        enabled = items.isNotEmpty() && !isLoading
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_select_range),
-                            contentDescription = "区间选择",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-            )
+    AppToolScaffold(
+        title = stringResource(R.string.subtitle_format_editor_title),
+        onBack = onBack,
+        scrollable = false,
+        titleContent = {
+            Column {
+                Text(
+                    text = stringResource(R.string.subtitle_format_editor_title),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = fileName,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.MiddleEllipsis
+                )
+            }
+        },
+        actions = {
+            IconButton(onClick = onSelectAll, enabled = items.isNotEmpty() && !isLoading) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_select_all),
+                    contentDescription = stringResource(R.string.menu_subtitle_format_editor_title_01),
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            IconButton(
+                onClick = { selectingRange = true },
+                enabled = items.isNotEmpty() && !isLoading
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_select_range),
+                    contentDescription = stringResource(R.string.menu_subtitle_format_editor_title_02),
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
         }
-    ) { innerPadding ->
+    ) {
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
+            modifier = Modifier.fillMaxSize()
         ) {
             if (isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -260,10 +251,10 @@ fun SubtitleFormatEditorScreen(
 
     if (showSaveConfirmation) {
         AppAlertDialog(
-            title = "保存格式化结果",
-            message = "将覆盖原文件 $fileName，确定继续？",
-            confirmText = "保存",
-            dismissText = "取消",
+            title = stringResource(R.string.subtitle_format_save_title),
+            message = stringResource(R.string.subtitle_format_save_message, fileName),
+            confirmText = stringResource(R.string.save),
+            dismissText = stringResource(R.string.cancel),
             onConfirm = onConfirmSave,
             onDismiss = onDismissSaveConfirmation
         )
@@ -271,10 +262,10 @@ fun SubtitleFormatEditorScreen(
 
     if (showDiscardConfirmation) {
         AppAlertDialog(
-            title = "放弃更改？",
-            message = "尚未保存的格式化结果将丢失。",
-            confirmText = "放弃",
-            dismissText = "取消",
+            title = stringResource(R.string.discard_changes_title),
+            message = stringResource(R.string.discard_changes_message),
+            confirmText = stringResource(R.string.discard),
+            dismissText = stringResource(R.string.cancel),
             onConfirm = onConfirmDiscard,
             onDismiss = onDismissDiscardConfirmation
         )
@@ -447,7 +438,10 @@ private fun FormattingControls(
                 .padding(top = 18.dp),
             enabled = !isApplying
         ) {
-            Text(if (isApplying) "正在应用…" else stringResource(R.string.activity_subtitle_format_editor_text_06))
+            Text(
+                if (isApplying) stringResource(R.string.applying)
+                else stringResource(R.string.activity_subtitle_format_editor_text_06)
+            )
         }
         OutlinedButton(
             onClick = onSave,
@@ -521,18 +515,24 @@ private fun ReplacementScopeSelector(
             onClick = { expanded = true },
             modifier = Modifier.fillMaxWidth().height(48.dp)
         ) {
-            Text(if (selected == PunctuationReplacementScope.END) "句末替换" else "句内替换")
+            Text(
+                if (selected == PunctuationReplacementScope.END) {
+                    stringResource(R.string.punctuation_scope_end)
+                } else {
+                    stringResource(R.string.punctuation_scope_inner)
+                }
+            )
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
-                text = { Text("句内替换") },
+                text = { Text(stringResource(R.string.punctuation_scope_inner)) },
                 onClick = {
                     onSelected(PunctuationReplacementScope.INNER)
                     expanded = false
                 }
             )
             DropdownMenuItem(
-                text = { Text("句末替换") },
+                text = { Text(stringResource(R.string.punctuation_scope_end)) },
                 onClick = {
                     onSelected(PunctuationReplacementScope.END)
                     expanded = false
@@ -550,7 +550,7 @@ private fun EndPunctuationSelector(
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val selectedText = addEndPunctuationOptions[selectedIndex]
-        .ifEmpty { "不添加" }
+        .ifEmpty { stringResource(R.string.punctuation_none) }
     Box(modifier.fillMaxWidth()) {
         OutlinedButton(
             onClick = { expanded = true },
@@ -561,7 +561,7 @@ private fun EndPunctuationSelector(
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             addEndPunctuationOptions.forEachIndexed { index, punctuation ->
                 DropdownMenuItem(
-                    text = { Text(punctuation.ifEmpty { "不添加" }) },
+                    text = { Text(punctuation.ifEmpty { stringResource(R.string.punctuation_none) }) },
                     onClick = {
                         onSelected(index)
                         expanded = false
@@ -587,7 +587,7 @@ private fun EditSubtitleDialog(
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("编辑第 ${position + 1} 条字幕") },
+        title = { Text(stringResource(R.string.edit_subtitle_number, position + 1)) },
         text = {
             OutlinedTextField(
                 value = editedState.value,
@@ -597,10 +597,12 @@ private fun EditSubtitleDialog(
             )
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(editedState.value.text) }) { Text("确定") }
+            TextButton(onClick = { onConfirm(editedState.value.text) }) {
+                Text(stringResource(R.string.confirm))
+            }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
         }
     )
 }
@@ -621,18 +623,18 @@ private fun RangeSelectionDialog(
         startValue in 1..itemCount && endValue in 1..itemCount && startValue <= endValue
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("区间选择（1-$itemCount）") },
+        title = { Text(stringResource(R.string.range_selection_title, itemCount)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = start,
                     onValueChange = { start = it.filter(Char::isDigit) },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("开始行") },
+                    label = { Text(stringResource(R.string.range_start_line)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     isError = validationAttempted && !isValid,
                     supportingText = if (validationAttempted && !isValid) {
-                        { Text("请输入有效的起止行号") }
+                        { Text(stringResource(R.string.range_invalid)) }
                     } else {
                         null
                     },
@@ -642,7 +644,7 @@ private fun RangeSelectionDialog(
                     value = end,
                     onValueChange = { end = it.filter(Char::isDigit) },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("结束行") },
+                    label = { Text(stringResource(R.string.range_end_line)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     isError = validationAttempted && !isValid,
                     singleLine = true
@@ -659,10 +661,10 @@ private fun RangeSelectionDialog(
                     }
                 },
                 enabled = true
-            ) { Text("选择") }
+            ) { Text(stringResource(R.string.select)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
         }
     )
 }

@@ -4,7 +4,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.compose.setContent
-import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -17,7 +16,7 @@ import com.subtitleedit.util.TokenTimestampGenerator
 import java.util.Locale
 import kotlin.math.roundToInt
 
-abstract class AsrTimelineSettingsActivity : AppCompatActivity() {
+abstract class AsrTimelineSettingsActivity : AppComposeActivity() {
 
     protected abstract val modelType: String
     protected abstract val modelName: String

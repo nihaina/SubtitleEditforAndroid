@@ -41,8 +41,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.util.ArchiveManager
 
 internal sealed interface MainActivityDialogUi {
@@ -56,7 +56,7 @@ internal data class SubtitleConversionDialogUi(
     val id: Int,
     val sourceFileText: String,
     val sourceFormatText: String,
-    val targetFormats: List<String>,
+    val targetFormats: List<AppOption<Int>>,
     val initialTargetIndex: Int
 )
 
@@ -257,15 +257,15 @@ private fun SubtitleConversionDialog(
                     dialog.sourceFormatText,
                     modifier = Modifier.padding(top = 8.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp)
+                    style = MaterialTheme.typography.bodySmall
                 )
                 ChoiceField(
                     modifier = Modifier.padding(top = 12.dp),
                     label = stringResource(R.string.target_format),
-                    selected = dialog.targetFormats[targetIndex],
+                    selected = dialog.targetFormats.getOrNull(targetIndex),
                     options = dialog.targetFormats,
                     horizontal = true,
-                    onSelect = { targetIndex = dialog.targetFormats.indexOf(it) }
+                    onSelect = { targetIndex = it }
                 )
                 Row(
                     modifier = Modifier
@@ -281,7 +281,7 @@ private fun SubtitleConversionDialog(
                     Text(
                         stringResource(R.string.dialog_subtitle_convert_keep_original),
                         color = MaterialTheme.colorScheme.onSurface,
-                        fontSize = 14.sp
+                        style = MaterialTheme.typography.bodyMedium
                     )
                 }
             }
@@ -353,10 +353,9 @@ private fun ArchiveCreationDialog(
                 Column(modifier = Modifier.padding(top = 12.dp)) {
                     ChoiceField(
                         label = stringResource(R.string.dialog_create_archive_text_01),
-                        selected = selectedFormat.format.displayName,
-                        options = dialog.formats.map { it.format.displayName },
-                        onSelect = { label ->
-                            val option = dialog.formats.first { it.format.displayName == label }
+                        selected = AppOption(selectedFormat, selectedFormat.format.displayName),
+                        options = dialog.formats.map { AppOption(it, it.format.displayName) },
+                        onSelect = { option ->
                             selectedFormat = option
                             selectedMethod = option.compressionMethods.first()
                             selectedEncryption = option.encryptionMethods.firstOrNull()
@@ -368,22 +367,18 @@ private fun ArchiveCreationDialog(
                     ChoiceField(
                         modifier = Modifier.padding(top = 8.dp),
                         label = stringResource(R.string.dialog_create_archive_text_02),
-                        selected = selectedMethod.displayName,
-                        options = selectedFormatOption.compressionMethods.map { it.displayName },
-                        onSelect = { label ->
-                            selectedMethod = selectedFormatOption.compressionMethods.first { it.displayName == label }
-                        }
+                        selected = AppOption(selectedMethod, selectedMethod.displayName),
+                        options = selectedFormatOption.compressionMethods.map { AppOption(it, it.displayName) },
+                        onSelect = { selectedMethod = it }
                     )
                 }
                 if (selectedFormat.format == ArchiveManager.CreateFormat.ZIP) {
                     ChoiceField(
                         modifier = Modifier.padding(top = 8.dp),
                         label = stringResource(R.string.dialog_create_archive_text_03),
-                        selected = selectedEncryption?.displayName.orEmpty(),
-                        options = selectedFormatOption.encryptionMethods.map { it.displayName },
-                        onSelect = { label ->
-                            selectedEncryption = selectedFormatOption.encryptionMethods.first { it.displayName == label }
-                        }
+                        selected = selectedEncryption?.let { AppOption(it, it.displayName) },
+                        options = selectedFormatOption.encryptionMethods.map { AppOption(it, it.displayName) },
+                        onSelect = { selectedEncryption = it }
                     )
                 }
                 Row(
@@ -438,17 +433,16 @@ private fun ArchiveCreationDialog(
                         ArchiveManager.CreateFormat.TAR -> "密码仅适用于 ZIP 和 7Z 格式"
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 12.sp
+                    style = MaterialTheme.typography.bodySmall
                 )
                 ChoiceField(
                     modifier = Modifier.padding(top = 12.dp),
                     label = stringResource(R.string.dialog_create_archive_text_05),
-                    selected = dialog.splitOptions.first { it.bytes == splitSize }.label,
-                    options = dialog.splitOptions.map { it.label },
+                    selected = dialog.splitOptions.firstOrNull { it.bytes == splitSize }
+                        ?.let { AppOption(it, it.label) },
+                    options = dialog.splitOptions.map { AppOption(it, it.label) },
                     enabled = supportsSplit,
-                    onSelect = { label ->
-                        splitSize = dialog.splitOptions.first { it.label == label }.bytes
-                    }
+                    onSelect = { splitSize = it.bytes }
                 )
                 Row(
                     modifier = Modifier
@@ -536,14 +530,14 @@ private fun ArchiveCreationDialog(
 }
 
 @Composable
-private fun ChoiceField(
+private fun <T> ChoiceField(
     modifier: Modifier = Modifier,
     label: String,
-    selected: String,
-    options: List<String>,
+    selected: AppOption<T>?,
+    options: List<AppOption<T>>,
     enabled: Boolean = true,
     horizontal: Boolean = false,
-    onSelect: (String) -> Unit
+    onSelect: (T) -> Unit
 ) {
     var expanded by remember(label, options) { mutableStateOf(false) }
     Box(modifier = modifier.fillMaxWidth()) {
@@ -551,7 +545,8 @@ private fun ChoiceField(
             Text(
                 text = label,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = if (horizontal) 14.sp else 13.sp,
+                style = if (horizontal) MaterialTheme.typography.bodyMedium
+                else MaterialTheme.typography.bodySmall,
                 modifier = Modifier.alpha(if (enabled) 1f else 0.38f)
             )
         }
@@ -570,21 +565,15 @@ private fun ChoiceField(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = selected,
+                            text = selected?.label.orEmpty(),
                             modifier = Modifier.weight(1f),
                             color = MaterialTheme.colorScheme.onSurface,
-                            style = MaterialTheme.typography.bodyLarge.copy(
-                                fontSize = 16.sp,
-                                letterSpacing = 0.sp
-                            )
+                            style = MaterialTheme.typography.bodyLarge
                         )
                         Text(
                             text = "▾",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyLarge.copy(
-                                fontSize = 18.sp,
-                                letterSpacing = 0.sp
-                            )
+                            style = MaterialTheme.typography.titleLarge
                         )
                     }
                 }
@@ -594,10 +583,10 @@ private fun ChoiceField(
                 ) {
                     options.forEach { option ->
                         DropdownMenuItem(
-                            text = { Text(option) },
+                            text = { Text(option.label) },
                             onClick = {
                                 expanded = false
-                                onSelect(option)
+                                onSelect(option.id)
                             }
                         )
                     }

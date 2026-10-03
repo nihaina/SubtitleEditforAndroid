@@ -8,7 +8,6 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -41,7 +40,7 @@ import java.io.File
 import java.util.UUID
 
 /** Multiple-file AI subtitle translation. Each source file owns one history session. */
-class AutoTranslateActivity : AppCompatActivity() {
+class AutoTranslateActivity : AppComposeActivity() {
 
     companion object {
         private const val OUTPUT_DIRECTORY_KEY = "auto_translate"

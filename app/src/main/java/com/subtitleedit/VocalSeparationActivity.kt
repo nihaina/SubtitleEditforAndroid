@@ -8,7 +8,6 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,7 +34,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 
-class VocalSeparationActivity : AppCompatActivity() {
+class VocalSeparationActivity : AppComposeActivity() {
     private companion object {
         const val OUTPUT_DIRECTORY_KEY = "vocal_separation"
     }
@@ -244,7 +243,7 @@ class VocalSeparationActivity : AppCompatActivity() {
         uiState = uiState.copy(
             isRunning = true,
             progressVisible = true,
-            progressStatus = "正在准备...",
+            progressStatus = null,
             progress = 0,
             log = "",
             dialog = VocalSeparationDialog.NONE

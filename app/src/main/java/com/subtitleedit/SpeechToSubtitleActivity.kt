@@ -11,7 +11,6 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -26,6 +25,7 @@ import com.subtitleedit.task.LongTaskController
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.repository.SpeechRecognitionService
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
+import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleParser
@@ -44,7 +44,7 @@ import java.io.File
  * 支持音频/视频文件转字幕，多种语言识别
  * 使用 sherpa-onnx + Whisper 进行离线语音识别
  */
-class SpeechToSubtitleActivity : AppCompatActivity() {
+class SpeechToSubtitleActivity : AppComposeActivity() {
 
     private lateinit var settingsManager: SettingsManager
     private val speechRecognitionService: SpeechRecognitionService
@@ -94,14 +94,14 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     )
 
     // 语言选项
-    private val languageOptions = SettingsManager.TRANSCRIPTION_LANGUAGE_OPTIONS
+    private val languageOptions = SettingsManager.TRANSCRIPTION_LANGUAGE_OPTIONS.map { AppOption(it, it) }
 
     // 输出格式选项
     private val formatOptions = listOf(
         "SRT",
         "LRC",
         "TXT"
-    )
+    ).map { AppOption(it, it) }
 
     // 文件选择器
     private val filePickerLauncher = registerForActivityResult(
@@ -122,7 +122,9 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
         settingsManager = SettingsManager.getInstance(this)
         uiState = uiState.copy(
             languageOptions = languageOptions,
-            formatOptions = formatOptions
+            formatOptions = formatOptions,
+            selectedLanguage = languageOptions.firstOrNull()?.id.orEmpty(),
+            selectedFormat = formatOptions.firstOrNull()?.id.orEmpty()
         )
         setContent {
             SubtitleEditComposeTheme {
@@ -133,11 +135,11 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
                         if (!isConverting) AsrSettingsNavigation.open(this, settingsManager)
                     },
                     onSelectFiles = { filePickerLauncher.launch(arrayOf("audio/*", "video/*")) },
-                    onLanguageSelected = { index ->
-                        uiState = uiState.copy(selectedLanguageIndex = index)
+                    onLanguageSelected = { language ->
+                        uiState = uiState.copy(selectedLanguage = language)
                     },
-                    onFormatSelected = { index ->
-                        uiState = uiState.copy(selectedFormatIndex = index)
+                    onFormatSelected = { format ->
+                        uiState = uiState.copy(selectedFormat = format)
                         updateVadOptionState()
                     },
                     onAddToAutoTranslateChange = { enabled ->
@@ -321,10 +323,10 @@ class SpeechToSubtitleActivity : AppCompatActivity() {
     }
 
     private val selectedFormat: String
-        get() = formatOptions.getOrElse(uiState.selectedFormatIndex) { formatOptions.first() }
+        get() = uiState.selectedFormat.ifBlank { formatOptions.first().id }
 
     private val selectedLanguage: String
-        get() = languageOptions.getOrElse(uiState.selectedLanguageIndex) { languageOptions.first() }
+        get() = uiState.selectedLanguage.ifBlank { languageOptions.first().id }
 
     /**
      * 开始转换

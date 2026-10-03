@@ -3,7 +3,6 @@ package com.subtitleedit
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
-import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -14,7 +13,7 @@ import com.subtitleedit.util.SettingsManager
 import kotlin.math.roundToInt
 
 /** Whisper-specific controls. Shared recognition-flow settings are configured globally. */
-class WhisperSettingsActivity : AppCompatActivity() {
+class WhisperSettingsActivity : AppComposeActivity() {
     private lateinit var settings: SettingsManager
     private var settingsState by mutableStateOf(WhisperSettingsState())
 

@@ -18,7 +18,9 @@ import androidx.lifecycle.lifecycleScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.subtitleedit.R
 import com.subtitleedit.feature.ui.AsrModelImportAction
+import com.subtitleedit.feature.ui.ForcedAlignerImportStatus
 import com.subtitleedit.feature.ui.AsrModelImportUiState
 import com.subtitleedit.feature.ui.ModelImportDialogUi
 import com.subtitleedit.repository.ModelRepository
@@ -81,6 +83,13 @@ class AsrModelImportController(
     }
     private var nextProgressToken = 0L
     private var pendingStorageAction: (() -> Unit)? = null
+
+    private data class ForcedAlignerUi(
+        val complete: Boolean,
+        val status: ForcedAlignerImportStatus,
+        val graphName: String? = null,
+        val dataName: String? = null
+    )
 
     // Encoder 文件选择器
     private val encoderPickerLauncher = host.registerForActivityResult(
@@ -1130,13 +1139,8 @@ class AsrModelImportController(
     private fun updateVadModelUi() {
         val useBuiltInModel = settingsManager.isVadUseBuiltInModel()
         uiState = uiState.copy(
-            vadValue = if (useBuiltInModel) {
-                "silero_vad.onnx（内置）"
-            } else if (vadModelPath.isBlank()) {
-                "尚未选择 VAD 模型"
-            } else {
-                getFileNameFromUri(Uri.parse(vadModelPath))
-            },
+            vadModelFileName = if (useBuiltInModel || vadModelPath.isBlank()) null
+            else getFileNameFromUri(Uri.parse(vadModelPath)),
             useBuiltInVad = useBuiltInModel
         )
     }
@@ -1446,53 +1450,99 @@ class AsrModelImportController(
             val downloadedGraph = if (hasModelStorageAccess()) {
                 Qwen3ForcedAlignerModelFiles.findCompleteGraph(qwen3ForcedAlignerDirectory())
             } else null
-            val status = when {
-                complete -> "已配置：${alignerFile!!.name} + ${Qwen3ForcedAlignerModelFiles.dataFile(alignerFile).name}"
-                downloadedGraph != null -> "检测到本地模型，点击选择模型即可导入"
-                alignerPath.isNotBlank() -> "模型或权重文件缺失/不可读，请重新导入两个文件"
-                else -> "尚未配置 ForcedAligner 模型及权重"
+            when {
+                complete -> ForcedAlignerUi(
+                    complete = true,
+                    status = ForcedAlignerImportStatus.CONFIGURED,
+                    graphName = alignerFile!!.name,
+                    dataName = Qwen3ForcedAlignerModelFiles.dataFile(alignerFile).name
+                )
+                downloadedGraph != null -> ForcedAlignerUi(
+                    complete = false,
+                    status = ForcedAlignerImportStatus.LOCAL_MODEL_AVAILABLE
+                )
+                alignerPath.isNotBlank() -> ForcedAlignerUi(
+                    complete = false,
+                    status = ForcedAlignerImportStatus.INCOMPLETE
+                )
+                else -> ForcedAlignerUi(
+                    complete = false,
+                    status = ForcedAlignerImportStatus.NOT_CONFIGURED
+                )
             }
-            complete to status
         } else {
-            false to uiState.forcedAlignerStatus
+            ForcedAlignerUi(
+                complete = uiState.forcedAlignerComplete,
+                status = uiState.forcedAlignerStatus,
+                graphName = uiState.forcedAlignerGraphName,
+                dataName = uiState.forcedAlignerDataName
+            )
         }
-        val encoderLabel = when {
-            senseVoiceNpu -> "SenseVoice NPU 模型"
-            senseVoice -> "SenseVoice CPU 模型"
-            parakeetCtc -> "CTC 模型"
-            qwen3Asr -> "Encoder 模型"
-            else -> "Encoder 模型"
+        val modelTitleRes = when {
+            parakeet -> R.string.model_import_parakeet_model
+            qwen3Asr -> R.string.model_import_qwen3_model
+            senseVoice -> R.string.model_import_sensevoice_model
+            else -> R.string.model_import_whisper_model
+        }
+        val encoderLabelRes = when {
+            senseVoiceNpu -> R.string.model_import_sensevoice_npu_model
+            senseVoice -> R.string.model_import_sensevoice_cpu_model
+            parakeetCtc -> R.string.model_import_ctc_model
+            else -> R.string.model_import_encoder_model
+        }
+        val encoderButtonLabelRes = if (senseVoice || parakeetCtc) {
+            R.string.model_import_select_model
+        } else {
+            R.string.activity_model_settings_text_06
+        }
+        val joinerLabelRes = if (qwen3Asr) {
+            R.string.model_import_conv_frontend_model
+        } else {
+            R.string.model_import_joiner_model
+        }
+        val joinerButtonLabelRes = if (qwen3Asr) {
+            R.string.model_import_select_conv_frontend
+        } else {
+            R.string.model_import_select_joiner
+        }
+        val tokensLabelRes = if (qwen3Asr) {
+            R.string.model_import_tokenizer_folder
+        } else {
+            R.string.model_import_tokens_file
         }
         val qnnRuntimeAvailable = QnnRuntimeAvailability.isAvailable(host)
         uiState = uiState.copy(
-            modelTitle = if (parakeet) "Parakeet 模型" else "${currentModelDisplayName()} 模型",
-            encoderLabel = encoderLabel,
+            modelTitleRes = modelTitleRes,
+            encoderLabelRes = encoderLabelRes,
             encoderValue = encoderPath.takeIf(String::isNotEmpty)?.let {
-                val fileName = getFileNameFromUri(Uri.parse(it))
-                if (isSenseVoiceNpu()) {
-                    "$fileName（${settingsManager.getSenseVoiceNpuDurationSeconds()} 秒）"
-                } else fileName
-            } ?: "未选择",
-            encoderButtonLabel = if (senseVoice || parakeetCtc) "选择模型" else "选择 Encoder",
+                getFileNameFromUri(Uri.parse(it))
+            } ?: "",
+            encoderDurationSeconds = if (isSenseVoiceNpu() && encoderPath.isNotBlank()) {
+                settingsManager.getSenseVoiceNpuDurationSeconds()
+            } else null,
+            encoderButtonLabelRes = encoderButtonLabelRes,
             decoderValue = decoderPath.takeIf(String::isNotEmpty)?.let {
                 getFileNameFromUri(Uri.parse(it))
-            } ?: "未选择",
-            joinerLabel = if (qwen3Asr) "Conv Frontend 模型" else "Joiner 模型",
+            } ?: "",
+            joinerLabelRes = joinerLabelRes,
             joinerValue = joinerPath.takeIf(String::isNotEmpty)?.let {
                 getFileNameFromUri(Uri.parse(it))
-            } ?: "未选择",
-            joinerButtonLabel = if (qwen3Asr) "选择 Conv Frontend" else "选择 Joiner",
-            tokensLabel = if (qwen3Asr) "Tokenizer 文件夹" else "Tokens 文件",
+            } ?: "",
+            joinerButtonLabelRes = joinerButtonLabelRes,
+            tokensLabelRes = tokensLabelRes,
+            tokensIsDirectory = qwen3Asr,
             tokensValue = when {
-                tokensPath.isEmpty() -> "未选择"
+                tokensPath.isEmpty() -> ""
                 qwen3Asr -> "tokenizer/"
                 else -> getFileNameFromUri(Uri.parse(tokensPath))
             },
             showDecoder = !senseVoice && !parakeetCtc,
             showJoiner = parakeetTdt || qwen3Asr,
             showForcedAligner = qwen3Asr,
-            forcedAlignerComplete = alignerUi.first,
-            forcedAlignerStatus = alignerUi.second,
+            forcedAlignerComplete = alignerUi.complete,
+            forcedAlignerStatus = alignerUi.status,
+            forcedAlignerGraphName = alignerUi.graphName,
+            forcedAlignerDataName = alignerUi.dataName,
             showModelDownload = !hasSelectedModel,
             showModelReset = hasSelectedModel,
             showSenseVoiceProvider = senseVoice,

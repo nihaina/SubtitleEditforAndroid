@@ -62,11 +62,11 @@ internal fun AutoTimestampScreen(
     onDismissDialog: () -> Unit
 ) {
     AppToolScaffold(
-        title = "自动打轴",
+        title = stringResource(R.string.auto_timestamp_title),
         onBack = onBack,
         actions = {
             IconButton(onClick = onSettings, enabled = !isGenerating) {
-                Icon(painterResource(R.drawable.ic_settings), contentDescription = "打轴设置")
+                Icon(painterResource(R.drawable.ic_settings), contentDescription = stringResource(R.string.auto_timestamp_settings))
             }
         },
         bottomBar = {
@@ -148,24 +148,24 @@ internal fun AutoTimestampScreen(
     when (dialog) {
         AutoTimestampDialog.NONE -> Unit
         AutoTimestampDialog.OUTPUT_CONFLICT -> AppConflictDialog(
-            message = "输出目录中已存在同名字幕文件。请选择处理方式。",
+            message = stringResource(R.string.output_subtitle_conflict),
             onOverwrite = onOverwrite,
             onRename = onRename,
             onCancel = onDismissDialog
         )
         AutoTimestampDialog.CANCEL_GENERATION -> AppAlertDialog(
-            title = "确认取消",
-            message = "自动打轴正在进行，确定要取消吗？",
-            confirmText = "取消处理",
-            dismissText = "继续处理",
+            title = stringResource(R.string.operation_confirm_cancel),
+            message = stringResource(R.string.auto_timestamp_cancel_message),
+            confirmText = stringResource(R.string.cancel_processing),
+            dismissText = stringResource(R.string.continue_processing),
             onConfirm = onConfirmCancel,
             onDismiss = onDismissDialog
         )
         AutoTimestampDialog.BACK_WHILE_GENERATING -> AppAlertDialog(
-            title = "正在处理中",
-            message = "自动打轴正在进行，确定要返回吗？返回后处理将被取消。",
-            confirmText = "返回并取消",
-            dismissText = "继续处理",
+            title = stringResource(R.string.processing_in_progress),
+            message = stringResource(R.string.auto_timestamp_back_message),
+            confirmText = stringResource(R.string.back_and_cancel),
+            dismissText = stringResource(R.string.continue_processing),
             onConfirm = onConfirmCancel,
             onDismiss = onDismissDialog
         )

@@ -3,49 +3,38 @@ package com.subtitleedit.feature.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.selection.toggleable
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppSection
 import com.subtitleedit.ui.components.AppSlider
+import com.subtitleedit.ui.components.AppToolScaffold
+import com.subtitleedit.ui.components.SectionHeader
+import com.subtitleedit.ui.components.SettingsSwitchRow
 import com.subtitleedit.util.SettingsManager
-import com.subtitleedit.ui.components.AppCard
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -70,47 +59,28 @@ fun Qwen3AsrSettingsScreen(
         )
     }
 
-    var useVadTimestamp by remember(refreshKey) { mutableStateOf(initial.useVadTimestamp) }
-    var forcedAlignment by remember(refreshKey) { mutableStateOf(initial.forcedAlignment) }
-    var mergeSegments by remember(refreshKey) { mutableStateOf(initial.mergeSegments) }
-    var smartMerge by remember(refreshKey) { mutableStateOf(initial.smartMerge) }
-    var filterLongMerge by remember(refreshKey) { mutableStateOf(initial.filterLongMerge) }
-    var maxCharacters by remember(refreshKey) { mutableIntStateOf(initial.maxCharacters) }
-    var mergeGapMs by remember(refreshKey) { mutableIntStateOf(initial.mergeGapMs) }
-    var mergeGapText by remember(refreshKey) { mutableStateOf(initial.mergeGapMs.toString()) }
+    var useVadTimestamp by rememberSaveable(refreshKey) { mutableStateOf(initial.useVadTimestamp) }
+    var forcedAlignment by rememberSaveable(refreshKey) { mutableStateOf(initial.forcedAlignment) }
+    var mergeSegments by rememberSaveable(refreshKey) { mutableStateOf(initial.mergeSegments) }
+    var smartMerge by rememberSaveable(refreshKey) { mutableStateOf(initial.smartMerge) }
+    var filterLongMerge by rememberSaveable(refreshKey) { mutableStateOf(initial.filterLongMerge) }
+    var maxCharacters by rememberSaveable(refreshKey) { mutableIntStateOf(initial.maxCharacters) }
+    var mergeGapMs by rememberSaveable(refreshKey) { mutableIntStateOf(initial.mergeGapMs) }
+    var mergeGapText by rememberSaveable(refreshKey) { mutableStateOf(initial.mergeGapMs.toString()) }
 
     val alignerEnabled = forcedAlignmentAvailable && forcedAlignment
     val mergeEnabled = alignerEnabled && mergeSegments
     val fixedGapEnabled = mergeEnabled && !smartMerge
     val maxCharactersEnabled = mergeEnabled && filterLongMerge
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                modifier = Modifier.height(56.dp),
-                title = { Text(stringResource(R.string.qwen3_asr_settings_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_back),
-                            contentDescription = "返回"
-                        )
-                    }
-                }
-            )
-        }
-    ) { contentPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(contentPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            SettingsCard {
-                SectionTitle(R.string.qwen3_asr_vad_title)
-                SwitchSettingRow(
+    AppToolScaffold(
+        title = stringResource(R.string.qwen3_asr_settings_title),
+        onBack = onNavigateBack,
+        imePadding = true
+    ) {
+            AppSection {
+                SectionHeader(stringResource(R.string.qwen3_asr_vad_title))
+                SettingsSwitchRow(
                     title = stringResource(R.string.qwen3_asr_vad_switch),
                     checked = useVadTimestamp,
                     onCheckedChange = { enabled ->
@@ -141,9 +111,9 @@ fun Qwen3AsrSettingsScreen(
             }
 
             if (!useVadTimestamp) {
-                SettingsCard {
-                    SectionTitle(R.string.activity_speech_to_subtitle_settings_text_55)
-                    SwitchSettingRow(
+                AppSection {
+                    SectionHeader(stringResource(R.string.activity_speech_to_subtitle_settings_text_55))
+                    SettingsSwitchRow(
                         title = stringResource(R.string.qwen3_asr_forced_alignment_switch),
                         checked = forcedAlignment,
                         enabled = forcedAlignmentAvailable,
@@ -166,7 +136,7 @@ fun Qwen3AsrSettingsScreen(
                         )
                     }
 
-                    SwitchSettingRow(
+                    SettingsSwitchRow(
                         title = stringResource(R.string.activity_speech_to_subtitle_settings_text_50),
                         checked = mergeSegments,
                         enabled = alignerEnabled,
@@ -184,7 +154,7 @@ fun Qwen3AsrSettingsScreen(
                             .alpha(if (alignerEnabled) 1f else 0.5f)
                     )
 
-                    SwitchSettingRow(
+                    SettingsSwitchRow(
                         title = stringResource(R.string.speech_merge_smart),
                         checked = smartMerge,
                         enabled = mergeEnabled,
@@ -258,7 +228,7 @@ fun Qwen3AsrSettingsScreen(
                         )
                     }
 
-                    SwitchSettingRow(
+                    SettingsSwitchRow(
                         title = stringResource(R.string.speech_merge_filter_long),
                         checked = filterLongMerge,
                         enabled = mergeEnabled,
@@ -301,29 +271,6 @@ fun Qwen3AsrSettingsScreen(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun SettingsCard(content: @Composable () -> Unit) {
-    AppCard(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            content()
-        }
-    }
-}
-
-@Composable
-private fun SectionTitle(resourceId: Int) {
-    Text(
-        text = stringResource(resourceId),
-        color = MaterialTheme.colorScheme.primary,
-        style = MaterialTheme.typography.titleSmall
-    )
 }
 
 @Composable
@@ -334,42 +281,6 @@ private fun SupportingText(text: String, modifier: Modifier = Modifier) {
         style = MaterialTheme.typography.bodySmall,
         modifier = modifier
     )
-}
-
-@Composable
-private fun SwitchSettingRow(
-    title: String,
-    checked: Boolean,
-    enabled: Boolean = true,
-    opacity: Float = 1f,
-    modifier: Modifier = Modifier,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = 40.dp)
-            .alpha(opacity)
-            .toggleable(
-                value = checked,
-                enabled = enabled,
-                role = Role.Switch,
-                onValueChange = onCheckedChange
-            ),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = title,
-            color = MaterialTheme.colorScheme.onSurface,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.weight(1f)
-        )
-        Switch(
-            checked = checked,
-            onCheckedChange = null,
-            enabled = enabled
-        )
-    }
 }
 
 private data class Qwen3AsrSettingsValues(

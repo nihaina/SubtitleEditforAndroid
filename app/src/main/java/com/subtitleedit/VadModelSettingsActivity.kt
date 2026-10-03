@@ -2,7 +2,6 @@ package com.subtitleedit
 
 import android.os.Bundle
 import androidx.activity.compose.setContent
-import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -11,12 +10,12 @@ import com.subtitleedit.feature.ui.VadSettingsState
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.SettingsManager
 
-class VadModelSettingsActivity : AppCompatActivity() {
+class VadModelSettingsActivity : AppComposeActivity() {
     private lateinit var settingsManager: SettingsManager
     private var vadSettings by mutableStateOf<VadSettingsState?>(null)
 
-    override fun onCreate(state: Bundle?) {
-        super.onCreate(state)
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
         settingsManager = SettingsManager.getInstance(this)
         vadSettings = VadSettingsState.read(settingsManager)
         setContent {

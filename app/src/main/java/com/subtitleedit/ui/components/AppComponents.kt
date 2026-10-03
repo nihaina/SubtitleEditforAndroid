@@ -16,6 +16,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -65,10 +67,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -245,7 +250,8 @@ fun AppTopBar(
     titleContent: (@Composable () -> Unit)? = null
 ) {
     TopAppBar(
-        modifier = modifier.height(56.dp),
+        modifier = modifier,
+        windowInsets = TopAppBarDefaults.windowInsets,
         title = {
             titleContent?.invoke() ?: Text(
                 title,
@@ -267,7 +273,7 @@ fun AppTopBar(
 @Composable
 fun AppBackButton(onClick: () -> Unit) {
     androidx.compose.material3.IconButton(onClick = onClick) {
-        Icon(painter = painterResource(R.drawable.ic_back), contentDescription = "返回")
+        Icon(painter = painterResource(R.drawable.ic_back), contentDescription = stringResource(R.string.tools_navigate_back))
     }
 }
 
@@ -277,8 +283,12 @@ fun AppToolScaffold(
     title: String,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    showTopBar: Boolean = true,
     actions: @Composable RowScope.() -> Unit = {},
     bottomBar: @Composable () -> Unit = {},
+    scrollable: Boolean = true,
+    imePadding: Boolean = false,
+    titleContent: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
@@ -287,20 +297,30 @@ fun AppToolScaffold(
             .fillMaxSize()
             .nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            AppTopBar(
-                title = title,
-                navigationIcon = { AppBackButton(onBack) },
-                actions = actions,
-                scrollBehavior = scrollBehavior
-            )
+            if (showTopBar) {
+                AppTopBar(
+                    title = title,
+                    navigationIcon = { AppBackButton(onBack) },
+                    actions = actions,
+                    scrollBehavior = scrollBehavior,
+                    titleContent = titleContent
+                )
+            }
         },
-        bottomBar = bottomBar
+        bottomBar = {
+            Box(
+                modifier = if (imePadding) Modifier.imePadding() else Modifier
+            ) {
+                bottomBar()
+            }
+        }
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
+                .then(if (scrollable) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+                .then(if (imePadding) Modifier.imePadding() else Modifier)
                 .padding(AppSpacing.Page),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.CardGap),
             content = content
@@ -363,7 +383,9 @@ fun AppTaskProgress(
                 )
             }
             onCancel?.let {
-                TextButton(onClick = it, modifier = Modifier.align(Alignment.End)) { Text("取消") }
+                TextButton(onClick = it, modifier = Modifier.align(Alignment.End)) {
+                    Text(stringResource(R.string.cancel))
+                }
             }
         }
     }
@@ -442,6 +464,56 @@ fun AppOptionSelector(
     }
 }
 
+data class AppOption<out T>(
+    val id: T,
+    val label: String
+)
+
+@Composable
+fun <T> AppOptionSelector(
+    label: String,
+    value: AppOption<T>?,
+    options: List<AppOption<T>>,
+    enabled: Boolean = true,
+    onSelected: (T) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val rotation by animateFloatAsState(
+        targetValue = if (expanded) 90f else 0f,
+        animationSpec = AppMotion.fast(),
+        label = "option-chevron"
+    )
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+    ) {
+        Text(label, modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
+        Box(Modifier.weight(1f)) {
+            OutlinedButton(onClick = { expanded = true }, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+                Text(value?.label.orEmpty(), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Icon(
+                    painter = painterResource(R.drawable.ic_arrow_right),
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp).graphicsLayer(rotationZ = rotation)
+                )
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(option.label) },
+                        onClick = {
+                            expanded = false
+                            onSelected(option.id)
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun AppChoiceTile(
     text: String,
@@ -496,7 +568,7 @@ fun AppChoiceTile(
 
 @Composable
 fun AppConflictDialog(
-    title: String = "文件名冲突",
+    title: String? = null,
     message: String,
     onOverwrite: () -> Unit,
     onRename: () -> Unit,
@@ -506,13 +578,13 @@ fun AppConflictDialog(
         onDismissRequest = onCancel,
         shape = MaterialTheme.shapes.extraLarge,
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        title = { Text(title) },
+        title = { Text(title ?: stringResource(R.string.dialog_file_conflict_title)) },
         text = { Text(message) },
         confirmButton = {
             Column(horizontalAlignment = Alignment.End) {
-                TextButton(onClick = onOverwrite) { Text("覆盖") }
-                TextButton(onClick = onRename) { Text("自动重命名") }
-                TextButton(onClick = onCancel) { Text("取消") }
+                TextButton(onClick = onOverwrite) { Text(stringResource(R.string.overwrite)) }
+                TextButton(onClick = onRename) { Text(stringResource(R.string.auto_rename)) }
+                TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
             }
         }
     )
@@ -522,7 +594,7 @@ fun AppConflictDialog(
 fun AppAlertDialog(
     title: String,
     message: String,
-    confirmText: String = "确定",
+    confirmText: String? = null,
     dismissText: String? = null,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
@@ -533,7 +605,11 @@ fun AppAlertDialog(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         title = { Text(title) },
         text = { Text(message) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(confirmText) } },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(confirmText ?: stringResource(R.string.confirm))
+            }
+        },
         dismissButton = dismissText?.let { text ->
             { TextButton(onClick = onDismiss) { Text(text) } }
         }
@@ -607,23 +683,41 @@ fun SettingsRow(
 @Composable
 fun SettingsSwitchRow(
     title: String,
-    description: String,
+    description: String = "",
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    opacity: Float = 1f,
+    dimDescriptionWhenDisabled: Boolean = true
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
+            .alpha(opacity)
+            .toggleable(
+                value = checked,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = onCheckedChange
+            )
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (description.isNotBlank()) {
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                        alpha = if (enabled || !dimDescriptionWhenDisabled) 1f else 0.5f
+                    )
+                )
+            }
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 

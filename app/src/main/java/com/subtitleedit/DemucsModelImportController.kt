@@ -440,10 +440,8 @@ class DemucsModelImportController(private val host: AppCompatActivity) {
         val uriString = settings.getDemixModelUri("general")
         val hasSelectedModel = uriString.isNotBlank()
         uiState = uiState.copy(
-            generalModelValue = if (uriString.isBlank()) {
-                "未选择通用四轨模型"
-            } else {
-                "${getFileName(Uri.parse(uriString))}\n支持一次推理输出多个音轨"
+            generalModelValue = uriString.takeIf(String::isNotBlank)?.let {
+                getFileName(Uri.parse(it))
             },
             hasGeneralModel = hasSelectedModel
         )
@@ -451,10 +449,8 @@ class DemucsModelImportController(private val host: AppCompatActivity) {
 
     private fun updateModelUi(stem: VocalSeparationEngine.Stem) {
         val uriString = settings.getDemixModelUri(stem.fileSuffix)
-        val value = if (uriString.isBlank()) {
-            "未选择 ${stem.displayName} specialist 模型"
-        } else {
-            "${getFileName(Uri.parse(uriString))}\n已保存读取权限，将直接从原位置调用"
+        val value = uriString.takeIf(String::isNotBlank)?.let {
+            getFileName(Uri.parse(it))
         }
         uiState = uiState.copy(ftModelValues = uiState.ftModelValues + (stem.fileSuffix to value))
     }

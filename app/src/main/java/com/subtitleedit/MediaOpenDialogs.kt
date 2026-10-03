@@ -12,9 +12,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import com.subtitleedit.ui.components.AppCard
@@ -61,16 +59,14 @@ internal fun SubtitleFilePickerDialog(
         title = {
             Text(
                 "选择字幕文件",
-                fontSize = 19.sp,
-                fontWeight = FontWeight.Bold
+                style = MaterialTheme.typography.titleLarge
             )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     "$mediaLabel「$mediaFileName」同目录下存在多个字幕文件，请选择要打开的文件：",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontSize = 14.sp
+                    style = MaterialTheme.typography.bodyMedium
                 )
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),

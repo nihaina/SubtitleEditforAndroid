@@ -25,7 +25,7 @@ fun SubtitleFormatSelectScreen(
     onNavigateBack: () -> Unit
 ) {
     AppToolScaffold(
-        title = "格式化工具",
+        title = stringResource(R.string.formatting_tool_title),
         onBack = onNavigateBack,
         bottomBar = {
             AppPrimaryButton(

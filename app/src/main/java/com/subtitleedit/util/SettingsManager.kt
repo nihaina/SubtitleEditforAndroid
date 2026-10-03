@@ -19,6 +19,7 @@ class SettingsManager private constructor(context: Context) {
 
     init {
         migrateAiApiKeys()
+        clearRemovedAiContextPreferences()
     }
     
     companion object {
@@ -32,6 +33,9 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_AI_TARGET_LANGUAGE = "ai_target_language"
         private const val KEY_AI_CUSTOM_PROMPT = "ai_custom_prompt"
         private const val KEY_AI_CUSTOM_BASE_URL = "ai_custom_base_url"
+        private const val LEGACY_AI_CONTEXT_WINDOW_TOKENS = "ai_context_window_tokens"
+        private const val LEGACY_AI_PUNCTUATION_CONTEXT_WINDOW_TOKENS =
+            "ai_punctuation_context_window_tokens"
         private const val KEY_AI_REASONING_LEVEL = "ai_reasoning_level"
         private const val KEY_AI_TRANSLATION_PROVIDER = "ai_translation_provider"
         private const val KEY_AI_PUNCTUATION_PROVIDER = "ai_punctuation_provider"
@@ -158,6 +162,21 @@ class SettingsManager private constructor(context: Context) {
             "葡萄牙语",
             "意大利语",
             "土耳其语"
+        )
+
+        val TRANSCRIPTION_LANGUAGE_IDS = listOf(
+            "auto",
+            "zh",
+            "en",
+            "ja",
+            "ko",
+            "fr",
+            "de",
+            "es",
+            "ru",
+            "pt",
+            "it",
+            "tr"
         )
 
         const val DEMIX_MODEL_GENERAL = "general"
@@ -1025,13 +1044,33 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun getQuickTranscribeSourceLanguage(): String =
-        prefs.getString(KEY_QUICK_TRANSCRIBE_SOURCE_LANGUAGE, "自动检测")
-            ?.takeIf { it in TRANSCRIPTION_LANGUAGE_OPTIONS }
-            ?: "自动检测"
+        transcriptionLanguageLabel(getQuickTranscribeSourceLanguageId())
 
     fun setQuickTranscribeSourceLanguage(language: String) {
         require(language in TRANSCRIPTION_LANGUAGE_OPTIONS)
-        prefs.edit().putString(KEY_QUICK_TRANSCRIBE_SOURCE_LANGUAGE, language).apply()
+        setQuickTranscribeSourceLanguageId(
+            TRANSCRIPTION_LANGUAGE_IDS[TRANSCRIPTION_LANGUAGE_OPTIONS.indexOf(language)]
+        )
+    }
+
+    fun getQuickTranscribeSourceLanguageId(): String {
+        val stored = prefs.getString(KEY_QUICK_TRANSCRIBE_SOURCE_LANGUAGE, null)
+        return when {
+            stored in TRANSCRIPTION_LANGUAGE_IDS -> stored!!
+            stored in TRANSCRIPTION_LANGUAGE_OPTIONS ->
+                TRANSCRIPTION_LANGUAGE_IDS[TRANSCRIPTION_LANGUAGE_OPTIONS.indexOf(stored)]
+            else -> TRANSCRIPTION_LANGUAGE_IDS.first()
+        }
+    }
+
+    fun setQuickTranscribeSourceLanguageId(languageId: String) {
+        require(languageId in TRANSCRIPTION_LANGUAGE_IDS)
+        prefs.edit().putString(KEY_QUICK_TRANSCRIBE_SOURCE_LANGUAGE, languageId).apply()
+    }
+
+    fun transcriptionLanguageLabel(languageId: String): String {
+        val index = TRANSCRIPTION_LANGUAGE_IDS.indexOf(languageId).coerceAtLeast(0)
+        return TRANSCRIPTION_LANGUAGE_OPTIONS[index]
     }
 
     fun getThemeMode(): String {
@@ -1207,6 +1246,17 @@ class SettingsManager private constructor(context: Context) {
             }.getOrDefault(false)
             if (migrated) removeLegacyAiApiKey(provider)
         }
+    }
+
+    private fun clearRemovedAiContextPreferences() {
+        prefs.edit().apply {
+            remove(LEGACY_AI_CONTEXT_WINDOW_TOKENS)
+            remove(LEGACY_AI_PUNCTUATION_CONTEXT_WINDOW_TOKENS)
+            AiProviderConfig.providers.forEach { provider ->
+                remove(providerKey(LEGACY_AI_CONTEXT_WINDOW_TOKENS, provider.id))
+                remove(providerKey(LEGACY_AI_PUNCTUATION_CONTEXT_WINDOW_TOKENS, provider.id))
+            }
+        }.apply()
     }
 
     private fun removeLegacyAiApiKey(provider: String) {

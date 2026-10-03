@@ -8,7 +8,6 @@ import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -27,6 +26,7 @@ import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.task.LongTaskController
+import com.subtitleedit.ui.components.AppOption
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -45,7 +45,7 @@ import java.util.concurrent.atomic.AtomicLong
  * 输入通过 FFmpegKit 的 SAF 协议直接交给 FFmpeg/FFprobe 处理，输出只使用
  * 应用缓存中的临时文件，避免复制用户选择的源文件。
  */
-class MediaConvertActivity : AppCompatActivity() {
+class MediaConvertActivity : AppComposeActivity() {
 
     private companion object {
         const val OUTPUT_DIRECTORY_KEY = "media_convert"
@@ -115,7 +115,7 @@ class MediaConvertActivity : AppCompatActivity() {
     private var selectedAudioCodec by mutableStateOf("（请先选择格式）")
     private var resolutionIndex by mutableStateOf(0)
     private var videoBitrate by mutableStateOf("")
-    private var qualityIndex by mutableStateOf(0)
+    private var selectedQualityId by mutableStateOf(qualityValues.first())
     private var customQuality by mutableStateOf("")
     private var audioBitrate by mutableStateOf("")
     private var sampleRateIndex by mutableStateOf(0)
@@ -173,16 +173,16 @@ class MediaConvertActivity : AppCompatActivity() {
                     selectedVideoCodec = selectedVideoCodec,
                     audioCodecs = selectedFormat?.audioCodecs.orEmpty(),
                     selectedAudioCodec = selectedAudioCodec,
-                    resolutions = resolutions,
+                    resolutions = resolutions.mapIndexed { index, label -> AppOption(index, label) },
                     resolutionIndex = resolutionIndex,
                     videoBitrate = videoBitrate,
-                    qualityLabels = qualityLabels,
-                    qualityIndex = qualityIndex,
+                    qualityOptions = qualityValues.mapIndexed { index, id -> AppOption(id, qualityLabels[index]) },
+                    selectedQualityId = selectedQualityId,
                     customQuality = customQuality,
                     audioBitrate = audioBitrate,
-                    sampleRates = sampleRates,
+                    sampleRates = sampleRates.mapIndexed { index, label -> AppOption(index, label) },
                     sampleRateIndex = sampleRateIndex,
-                    channels = channels,
+                    channels = channels.mapIndexed { index, label -> AppOption(index, label) },
                     channelIndex = channelIndex,
                     advancedExpanded = advancedExpanded,
                     isConverting = isConverting,
@@ -199,7 +199,7 @@ class MediaConvertActivity : AppCompatActivity() {
                     onAudioCodecSelected = { selectedAudioCodec = it },
                     onResolutionSelected = { resolutionIndex = it },
                     onVideoBitrateChange = { videoBitrate = it },
-                    onQualitySelected = { qualityIndex = it },
+                    onQualitySelected = { id -> selectedQualityId = id },
                     onCustomQualityChange = { customQuality = it },
                     onAudioBitrateChange = { audioBitrate = it },
                     onSampleRateSelected = { sampleRateIndex = it },
@@ -591,7 +591,7 @@ class MediaConvertActivity : AppCompatActivity() {
     }
 
     private fun selectedQuality(): Int? {
-        val value = qualityValues.getOrNull(qualityIndex) ?: return null
+        val value = selectedQualityId
         val number = if (value == "custom") customQuality.toIntOrNull() else value.toIntOrNull()
         return number?.coerceIn(1, 31)?.takeIf { value != "-1" }
     }

@@ -10,7 +10,6 @@ import android.os.Environment
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.compose.setContent
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -38,7 +37,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 
-class ModelManagementActivity : AppCompatActivity() {
+class ModelManagementActivity : AppComposeActivity() {
     private lateinit var settingsManager: SettingsManager
     private val modelRepository: ModelRepository
         get() = (application as SubtitleEditApplication).dependencies.modelRepository

@@ -30,10 +30,12 @@ import com.subtitleedit.ui.components.AppAlertDialog
 import com.subtitleedit.ui.components.AppChoiceTile
 import com.subtitleedit.ui.components.AppConflictDialog
 import com.subtitleedit.ui.components.AppOptionSelector
+import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.components.AppPrimaryButton
 import com.subtitleedit.ui.components.AppSection
 import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.ui.theme.AppSpacing
+import com.subtitleedit.util.SubtitleParser
 
 data class BatchConvertFileUi(
     val key: String,
@@ -49,14 +51,14 @@ sealed interface BatchConvertDialogUi {
 @Composable
 fun BatchConvertScreen(
     files: List<BatchConvertFileUi>,
-    formats: List<String>,
-    selectedFormatIndex: Int,
+    formats: List<AppOption<SubtitleParser.SubtitleFormat>>,
+    selectedFormat: SubtitleParser.SubtitleFormat,
     outputDirectoryLabel: String?,
     dialog: BatchConvertDialogUi?,
     onNavigateBack: () -> Unit,
     onSelectFiles: () -> Unit,
     onRemoveFile: (String) -> Unit,
-    onSelectFormat: (Int) -> Unit,
+    onSelectFormat: (SubtitleParser.SubtitleFormat) -> Unit,
     onSelectOutputDirectory: () -> Unit,
     onStartConversion: () -> Unit,
     onDismissDialog: () -> Unit,
@@ -92,9 +94,9 @@ fun BatchConvertScreen(
         AppSection(title = stringResource(R.string.activity_batch_convert_text_01)) {
             AppOptionSelector(
                 label = stringResource(R.string.target_format),
-                value = formats.getOrNull(selectedFormatIndex).orEmpty(),
+                value = formats.firstOrNull { it.id == selectedFormat },
                 options = formats,
-                onSelected = { value -> onSelectFormat(formats.indexOf(value).coerceAtLeast(0)) }
+                onSelected = onSelectFormat
             )
         }
 
@@ -143,13 +145,13 @@ fun BatchConvertScreen(
 
     when (dialog) {
         BatchConvertDialogUi.Conflict -> AppConflictDialog(
-            message = "输出目录中已存在同名字幕文件。请选择处理方式。",
+            message = stringResource(R.string.output_subtitle_conflict),
             onOverwrite = onOverwriteConflicts,
             onRename = onRenameConflicts,
             onCancel = onDismissDialog
         )
         is BatchConvertDialogUi.Result -> AppAlertDialog(
-            title = "批量转换结果",
+            title = stringResource(R.string.batch_convert_result_title),
             message = dialog.message,
             onConfirm = onDismissDialog,
             onDismiss = onDismissDialog

@@ -191,6 +191,29 @@ class ChatBackendTest {
     }
 
     @Test
+    fun requestBody_preservesTheCompleteConversationWithoutCompaction() {
+        val messages = listOf(
+            ChatBackend.ChatMessage("user", "旧请求".repeat(200)),
+            ChatBackend.ChatMessage(
+                role = "assistant",
+                content = "",
+                toolCalls = listOf(ChatBackend.ToolCall("call-1", "calculate", "{}"))
+            ),
+            ChatBackend.ChatMessage("tool", "旧结果", toolCallId = "call-1", toolName = "calculate"),
+            ChatBackend.ChatMessage("user", "较新请求"),
+            ChatBackend.ChatMessage("assistant", "较新结果")
+        )
+
+        val serialized = backend().buildRequestBody(messages).getJSONArray("messages")
+
+        assertEquals(messages.size, serialized.length())
+        assertEquals(messages.first().content, serialized.getJSONObject(0).getString("content"))
+        assertEquals("call-1", serialized.getJSONObject(1).getJSONArray("tool_calls")
+            .getJSONObject(0).getString("id"))
+        assertEquals("tool", serialized.getJSONObject(2).getString("role"))
+    }
+
+    @Test
     fun unknownTool_isReturnedToModelBeforeFinalAnswer() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse()

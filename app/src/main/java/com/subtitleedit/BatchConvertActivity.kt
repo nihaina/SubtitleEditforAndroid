@@ -7,7 +7,6 @@ import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -15,6 +14,7 @@ import com.subtitleedit.feature.ui.BatchConvertDialogUi
 import com.subtitleedit.feature.ui.BatchConvertFileUi
 import com.subtitleedit.feature.ui.BatchConvertScreen
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
+import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.OverwritingToast
@@ -25,7 +25,7 @@ import com.subtitleedit.util.SubtitleParser
 import java.io.File
 
 /** 批量转换界面 */
-class BatchConvertActivity : AppCompatActivity() {
+class BatchConvertActivity : AppComposeActivity() {
 
     private companion object {
         const val OUTPUT_DIRECTORY_KEY = "batch_convert"
@@ -81,11 +81,10 @@ class BatchConvertActivity : AppCompatActivity() {
                             fileSizeLabel = formatFileSize(it.fileSize)
                         )
                     },
-                    formats = SubtitleFormatConverter.supportedTargetFormats.map(
-                        SubtitleFormatConverter::displayName
-                    ),
-                    selectedFormatIndex = SubtitleFormatConverter.supportedTargetFormats
-                        .indexOf(targetFormat).coerceAtLeast(0),
+                    formats = SubtitleFormatConverter.supportedTargetFormats.map { format ->
+                        AppOption(format, SubtitleFormatConverter.displayName(format))
+                    },
+                    selectedFormat = targetFormat,
                     outputDirectoryLabel = outputDirectoryLabel,
                     dialog = dialogState,
                     onNavigateBack = { finish() },
@@ -95,11 +94,7 @@ class BatchConvertActivity : AppCompatActivity() {
                     onRemoveFile = { key ->
                         convertFiles = convertFiles.filterNot { it.uri.toString() == key }
                     },
-                    onSelectFormat = { index ->
-                        targetFormat = SubtitleFormatConverter.supportedTargetFormats.getOrElse(index) {
-                            SubtitleParser.SubtitleFormat.LRC
-                        }
-                    },
+                    onSelectFormat = { targetFormat = it },
                     onSelectOutputDirectory = {
                         directoryPickerLauncher.launch(outputDirectoryUri)
                     },

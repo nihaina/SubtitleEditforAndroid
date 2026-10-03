@@ -12,9 +12,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.getValue
@@ -38,6 +36,7 @@ import com.subtitleedit.feature.ui.MainFileOperationDialogs
 import com.subtitleedit.feature.ui.SubtitleConversionDialogUi
 import com.subtitleedit.feature.ui.SubtitleConversionResultUi
 import com.subtitleedit.repository.ArchiveRepository
+import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.ArchiveManager
 import com.subtitleedit.util.ArchivePreviewCache
@@ -80,7 +79,7 @@ import java.util.concurrent.TimeUnit
 /**
  * 主界面 - 文件浏览器
  */
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppComposeActivity() {
 
     private val archiveRepository: ArchiveRepository
         get() = (application as SubtitleEditApplication).dependencies.archiveRepository
@@ -167,7 +166,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val settingsManager = com.subtitleedit.util.SettingsManager.getInstance(this)
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
         screenState = MainActivityScreenState(
             selectedTopLevelItem = stateModel.documentState.selectedTopLevelItem
         )
@@ -1089,7 +1087,9 @@ class MainActivity : AppCompatActivity() {
                     id = nextSubtitleConversionDialogId,
                     sourceFileText = sourceFileText,
                     sourceFormatText = sourceFormatText,
-                    targetFormats = targetFormats.map(SubtitleFormatConverter::displayName),
+                    targetFormats = targetFormats.mapIndexed { index, format ->
+                        AppOption(index, SubtitleFormatConverter.displayName(format))
+                    },
                     initialTargetIndex = defaultTargetIndex
                 )
             }

@@ -3,7 +3,6 @@ package com.subtitleedit
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
-import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -13,7 +12,7 @@ import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.TokenTimestampGenerator
 
-class Qwen3AsrSettingsActivity : AppCompatActivity() {
+class Qwen3AsrSettingsActivity : AppComposeActivity() {
 
     private lateinit var settingsManager: SettingsManager
     private var refreshKey by mutableIntStateOf(0)

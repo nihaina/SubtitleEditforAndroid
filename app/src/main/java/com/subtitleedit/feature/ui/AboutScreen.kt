@@ -9,28 +9,22 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppToolScaffold
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(
     versionName: String,
@@ -39,26 +33,15 @@ fun AboutScreen(
     onCheckForUpdates: () -> Unit,
     onOpenGithub: () -> Unit
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                modifier = Modifier.height(56.dp),
-                title = { Text(stringResource(R.string.about)) },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_back),
-                            contentDescription = "返回"
-                        )
-                    }
-                }
-            )
-        }
-    ) { contentPadding ->
+    AppToolScaffold(
+        title = stringResource(R.string.about),
+        onBack = onNavigateBack,
+        scrollable = false
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(contentPadding),
+                .padding(vertical = 24.dp),
             contentAlignment = Alignment.Center
         ) {
             Column(
@@ -81,19 +64,18 @@ fun AboutScreen(
                 Text(
                     text = stringResource(R.string.app_name),
                     color = MaterialTheme.colorScheme.primary,
-                    fontSize = 35.sp,
-                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.displaySmall,
                     modifier = Modifier.padding(top = 24.dp)
                 )
                 Surface(
-                    shape = RoundedCornerShape(24.dp),
+                    shape = MaterialTheme.shapes.extraLarge,
                     color = MaterialTheme.colorScheme.primaryContainer,
                     modifier = Modifier.padding(top = 12.dp)
                 ) {
                     Text(
                         text = stringResource(R.string.version_format, versionName),
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        fontSize = 16.sp,
+                        style = MaterialTheme.typography.bodyLarge,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
                     )
                 }
@@ -103,7 +85,7 @@ fun AboutScreen(
                     modifier = Modifier.padding(top = 12.dp)
                 ) {
                     Text(
-                        text = if (isCheckingForUpdates) "检测中…" else stringResource(R.string.check_for_updates)
+                        text = if (isCheckingForUpdates) stringResource(R.string.checking_for_updates) else stringResource(R.string.check_for_updates)
                     )
                 }
                 IconButton(
@@ -123,5 +105,5 @@ fun AboutScreen(
                 }
             }
         }
-    }
+}
 }
