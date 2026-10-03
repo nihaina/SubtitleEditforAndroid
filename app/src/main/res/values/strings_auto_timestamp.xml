@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Runtime wording for the auto-timestamp page (toasts, status, run log). -->
+<resources>
+    <!-- Toasts -->
+    <string name="auto_timestamp_select_files_failed">选择文件失败：%1$s</string>
+    <string name="auto_timestamp_subtitle_type_required">请选择 SRT 或 LRC 字幕文件</string>
+    <string name="auto_timestamp_select_subtitle_failed">选择字幕文件失败：%1$s</string>
+    <string name="auto_timestamp_secondary_single_media">二次处理时请选择一个音频或视频文件</string>
+    <string name="auto_timestamp_secondary_subtitle_required">请先选择要二次处理的字幕文件</string>
+    <string name="auto_timestamp_asr_model_required">请先配置当前 ASR 模型</string>
+    <string name="auto_timestamp_qwen3_models_required">请先导入 Qwen3-ASR 和 ForcedAligner 模型</string>
+    <string name="auto_timestamp_token_model_required">实验打轴需要先在模型设置中配置当前非 Whisper ASR 模型</string>
+    <string name="auto_timestamp_vad_model_required">请先选择外部 VAD 模型，或在模型设置中勾选使用内置</string>
+    <string name="auto_timestamp_output_directory_required">请选择输出目录</string>
+    <string name="auto_timestamp_summary">自动打轴完成：成功 %1$d/%2$d</string>
+    <string name="auto_timestamp_summary_with_failures">自动打轴完成：成功 %1$d/%2$d，失败 %3$d</string>
+
+    <!-- Status -->
+    <string name="auto_timestamp_status_processing">正在处理...</string>
+    <string name="auto_timestamp_status_failed">处理失败</string>
+    <string name="auto_timestamp_status_cancelling">正在取消...</string>
+    <string name="auto_timestamp_status_copying">%1$s 正在复制文件...</string>
+    <string name="auto_timestamp_status_extracting">%1$s 正在提取音频...</string>
+    <string name="auto_timestamp_status_detecting">%1$s 正在检测语音段...</string>
+    <string name="auto_timestamp_status_recognizing">%1$s 正在识别语音...</string>
+    <string name="auto_timestamp_status_token_progress">%1$s %2$s 打轴：%3$s (%4$d%%)</string>
+    <string name="auto_timestamp_status_asr_progress">%1$s ASR 打轴：%2$s (%3$d%%)</string>
+    <string name="auto_timestamp_status_saving">%1$s 正在保存...</string>
+
+    <!-- Errors shown in log / toast -->
+    <string name="auto_timestamp_error_copy_failed">复制文件失败</string>
+    <string name="auto_timestamp_error_user_cancelled">用户取消</string>
+    <string name="auto_timestamp_error_convert_failed">音频转换失败</string>
+    <string name="auto_timestamp_error_no_speech">未检测到任何语音段</string>
+    <string name="auto_timestamp_error_reference_invalid">参考字幕不是有效的 SRT 或 LRC 文件</string>
+    <string name="auto_timestamp_error_reference_empty">参考字幕中没有有效时间段</string>
+    <string name="auto_timestamp_error_reference_read_failed">读取参考字幕失败：%1$s</string>
+    <string name="auto_timestamp_error_save_failed">保存文件失败: %1$s</string>
+
+    <!-- Generated subtitle content -->
+    <string name="auto_timestamp_placeholder_text">请输入文本</string>
+    <string name="auto_timestamp_merged_placeholder">（%1$s）</string>
+
+    <!-- Run log -->
+    <string name="auto_timestamp_log_start">开始自动打轴</string>
+    <string name="auto_timestamp_log_preprocess_config">预处理配置：FFmpeg 提取 16kHz 单声道 PCM WAV</string>
+    <string name="auto_timestamp_log_secondary_on">二次处理：启用，方案一</string>
+    <string name="auto_timestamp_log_reference_subtitle">参考字幕：%1$s</string>
+    <string name="auto_timestamp_log_secondary_off">二次处理：关闭</string>
+    <string name="auto_timestamp_log_file_start">开始处理 %1$s：%2$s</string>
+    <string name="auto_timestamp_log_copy_to_cache">预处理：复制输入文件到缓存目录</string>
+    <string name="auto_timestamp_log_cache_file">缓存文件：%1$s，大小 %2$s</string>
+    <string name="auto_timestamp_log_ffmpeg_convert">预处理：使用 FFmpeg 转换音频</string>
+    <string name="auto_timestamp_log_pcm_file">PCM 文件：%1$s，大小 %2$s</string>
+    <string name="auto_timestamp_log_read_reference">读取参考字幕：%1$s</string>
+    <string name="auto_timestamp_timeline_forced_align">强制对齐打轴</string>
+    <string name="auto_timestamp_timeline_token">Token 时间戳实验打轴</string>
+    <string name="auto_timestamp_log_token_uncovered">%1$s：在未覆盖区间生成 %2$d 个新增时间段</string>
+    <string name="auto_timestamp_log_token_segments">%1$s：生成 %2$d 个时间段</string>
+    <string name="auto_timestamp_log_asr_segments">ASR 模型打轴：识别后保留 %1$d 个时间段，丢弃转录文本</string>
+    <string name="auto_timestamp_log_secondary_vad_segments">二次 VAD：在未覆盖区间检测到 %1$d 个新增语音段</string>
+    <string name="auto_timestamp_log_vad_segments">VAD：检测到 %1$d 个语音段</string>
+    <string name="auto_timestamp_log_segment_line">"  #%1$02d %2$s --> %3$s，时长 %4$.2fs"</string>
+    <string name="auto_timestamp_log_generate_subtitle">生成字幕：%1$s 格式</string>
+    <string name="auto_timestamp_log_save">保存：写入输出目录</string>
+    <string name="auto_timestamp_log_saved">已保存字幕：%1$s</string>
+    <string name="auto_timestamp_log_result_header">===== %1$s 生成结果 =====</string>
+
+    <!-- Run log: timeline configuration -->
+    <string name="auto_timestamp_log_asr_timeline">ASR 模型打轴：%1$s</string>
+    <string name="auto_timestamp_log_asr_timeline_detail">"  先完成语音识别，再丢弃转录文本，仅使用字幕时间段"</string>
+    <string name="auto_timestamp_log_qwen3_chunking">"  Qwen3-ASR：按模型预算和低能量切点分块"</string>
+    <string name="auto_timestamp_log_fixed_segment">"  固定分段：%1$ds"</string>
+    <string name="auto_timestamp_log_fixed_vad_cut">"  固定分段 VAD 相对静音切点：启用（窗口内最低语音概率）"</string>
+    <string name="auto_timestamp_log_qwen3_config">Qwen3 强制对齐打轴配置：</string>
+    <string name="auto_timestamp_log_token_config">Token 时间戳实验打轴配置：</string>
+    <string name="auto_timestamp_log_model_with_file">"  模型：%1$s (%2$s)"</string>
+    <string name="auto_timestamp_log_tokens">"  Tokens：%1$s"</string>
+    <string name="auto_timestamp_log_merge">"  合并语音段：%1$s"</string>
+    <string name="auto_timestamp_merge_enabled_summary">启用，%1$s</string>
+    <string name="auto_timestamp_merge_enabled_gap">启用，最大间隔 %1$dms</string>
+    <string name="auto_timestamp_off">关闭</string>
+    <string name="auto_timestamp_log_vad_not_used">"  VAD 检测与分段设置：不使用"</string>
+    <string name="auto_timestamp_log_exclude_covered">"  二次处理：排除已有字幕覆盖范围"</string>
+    <string name="auto_timestamp_log_vad_config">VAD 配置：</string>
+    <string name="auto_timestamp_log_model">"  模型：%1$s"</string>
+    <string name="auto_timestamp_log_vad_runtime">"  采样率：16000Hz，线程：2，provider：cpu"</string>
+    <string name="auto_timestamp_log_secondary_scheme">"  自动打轴字幕二次处理：方案一（独立开关）"</string>
+    <string name="auto_timestamp_log_secondary_threshold">"  二次阈值：%1$s，最小静音：%2$ss"</string>
+    <string name="auto_timestamp_log_speech_duration">"  最小语音：%1$ss，最大语音：%2$ss"</string>
+    <string name="auto_timestamp_log_threshold">"  阈值：%1$s，最小静音：%2$ss"</string>
+    <string name="auto_timestamp_log_secondary_vad_mode">"  高级配置二次 VAD：%1$s"</string>
+    <string name="auto_timestamp_secondary_mode_uncovered">方案一（处理未划分区间）</string>
+    <string name="auto_timestamp_secondary_mode_within">方案二（段内再次划分）</string>
+    <string name="auto_timestamp_log_secondary_speech_duration">"  二次最小语音：%1$ss，最大语音：%2$ss"</string>
+    <string name="auto_timestamp_asr_model_parakeet_ctc_ja">Parakeet CTC 日语</string>
+    <string name="auto_timestamp_vad_model_builtin">内置 silero_vad.onnx</string>
+    <string name="auto_timestamp_vad_model_external_unset">外部模型（未选择）</string>
+    <string name="auto_timestamp_vad_model_external">外部模型 %1$s</string>
+</resources>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Batch subtitle conversion page (BatchConvertActivity / BatchConvertViewModel). -->
+<resources>
+    <string name="batch_convert_no_files">请先添加要转换的文件</string>
+    <string name="batch_convert_result_done">转换完成！</string>
+    <string name="batch_convert_result_success_count">成功：%1$d</string>
+    <string name="batch_convert_result_skipped_count">跳过（格式相同）：%1$d</string>
+    <string name="batch_convert_result_failed_count">失败：%1$d</string>
+    <string name="batch_convert_result_success_files">成功文件:</string>
+    <string name="batch_convert_result_skipped_files">跳过文件（格式已为目标格式）:</string>
+    <string name="batch_convert_result_failed_files">失败文件:</string>
+    <string name="batch_convert_result_file_item">"  - %1$s"</string>
+</resources>

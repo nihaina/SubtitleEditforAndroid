@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="speech_to_subtitle_qwen_aligner_required">请先导入 Qwen3-ASR 和 ForcedAligner 模型</string>
+    <string name="speech_to_subtitle_timestamp_experiment_required">实验打轴需要先在模型设置中配置当前非 Whisper ASR 模型</string>
+    <string name="speech_to_subtitle_missing_inputs">请先选择文件和模型</string>
+    <string name="speech_to_subtitle_vad_model_required">请先选择外部 VAD 模型，或在模型设置中勾选使用内置</string>
+    <string name="speech_to_subtitle_summary">转录完成：成功 %1$d/%2$d</string>
+    <string name="speech_to_subtitle_summary_with_failures">转录完成：成功 %1$d/%2$d，失败 %3$d</string>
+    <string name="speech_to_subtitle_toast_saved">字幕已保存：%1$s（共 %2$d 条）</string>
+
+    <string name="speech_to_subtitle_progress_preparing">%1$s 正在准备...</string>
+    <string name="speech_to_subtitle_progress_extract">%1$s 正在提取音频...</string>
+    <string name="speech_to_subtitle_progress_recognize">%1$s 正在识别语音...</string>
+    <string name="speech_to_subtitle_progress_generate">%1$s 正在生成字幕...</string>
+    <string name="speech_to_subtitle_progress_done">%1$s 完成</string>
+    <string name="speech_to_subtitle_progress_status">%1$s %2$s</string>
+    <string name="speech_to_subtitle_progress_timeline">%1$s %2$s：%3$s</string>
+
+    <string name="speech_to_subtitle_error_copy_failed">复制文件失败</string>
+    <string name="speech_to_subtitle_error_user_cancelled">用户取消</string>
+    <string name="speech_to_subtitle_error_audio_convert_failed">音频转换失败</string>
+    <string name="speech_to_subtitle_error_no_speech">未识别到语音内容</string>
+    <string name="speech_to_subtitle_error_output_dir_invalid">输出目录无效</string>
+    <string name="speech_to_subtitle_error_output_file_not_found">无法定位已生成的字幕文件</string>
+
+    <string name="speech_to_subtitle_log_start">开始语音转字幕</string>
+    <string name="speech_to_subtitle_log_source_language">源语言：%1$s</string>
+    <string name="speech_to_subtitle_log_file_start">开始处理 %1$s：%2$s</string>
+    <string name="speech_to_subtitle_log_copy_to_cache">预处理：复制输入文件到缓存目录</string>
+    <string name="speech_to_subtitle_log_cache_file">缓存文件：%1$s，大小 %2$s</string>
+    <string name="speech_to_subtitle_log_extract_pcm">预处理：使用 FFmpeg 提取 16kHz 单声道 PCM WAV</string>
+    <string name="speech_to_subtitle_log_pcm_file">PCM 文件：%1$s，大小 %2$s</string>
+    <string name="speech_to_subtitle_log_init_recognizer">识别：初始化 %1$s 模型并开始识别</string>
+    <string name="speech_to_subtitle_log_sensevoice_language">SenseVoice 指定语言：%1$s (%2$s)</string>
+    <string name="speech_to_subtitle_log_recognized">识别完成：共 %1$d 条字幕片段</string>
+    <string name="speech_to_subtitle_log_saved">已保存字幕：%1$s</string>
+    <string name="speech_to_subtitle_log_timeline_init">%1$s：初始化 %2$s 模型</string>
+    <string name="speech_to_subtitle_log_timeline_done">%1$s 完成：生成 %2$d 个字幕段，保留当前模型文本</string>
+
+    <string name="speech_to_subtitle_timeline_forced_alignment">强制对齐打轴</string>
+    <string name="speech_to_subtitle_timeline_experiment">实验打轴</string>
+    <string name="speech_to_subtitle_forced_alignment">强制对齐</string>
+    <string name="speech_to_subtitle_model_parakeet_ctc_ja">Parakeet CTC 0.6B 日语</string>
+    <string name="speech_to_subtitle_path_not_set">未设置</string>
+    <string name="speech_to_subtitle_enabled">启用</string>
+    <string name="speech_to_subtitle_disabled">关闭</string>
+    <string name="speech_to_subtitle_not_enabled">未启用</string>
+    <string name="speech_to_subtitle_enabled_with">启用，%1$s</string>
+
+    <string name="speech_to_subtitle_config_header">模型配置：</string>
+    <string name="speech_to_subtitle_config_type">类型：%1$s</string>
+    <string name="speech_to_subtitle_config_model">模型：%1$s</string>
+    <string name="speech_to_subtitle_config_named_path">%1$s：%2$s</string>
+    <string name="speech_to_subtitle_config_qwen_chunking">Qwen 分段：按模型预算限制块长，在上限内优先选择低能量切点</string>
+    <string name="speech_to_subtitle_config_threads">识别线程：%1$d</string>
+    <string name="speech_to_subtitle_config_vad_disabled_by_timeline">VAD：禁用，由%1$s 划分语音段</string>
+    <string name="speech_to_subtitle_config_fixed_vad_cut">固定分段 VAD 相对静音切点：启用（窗口内最低语音概率）</string>
+    <string name="speech_to_subtitle_config_timeline_model">%1$s 模型：%2$s (%3$s)</string>
+    <string name="speech_to_subtitle_config_experiment_tokens">实验打轴 Tokens：%1$s</string>
+    <string name="speech_to_subtitle_config_merge_segments">合并语音段：%1$s</string>
+    <string name="speech_to_subtitle_config_dynamic_padding">动态 Padding：%1$s</string>
+    <string name="speech_to_subtitle_config_dynamic_padding_enabled">启用（前后最多各 500ms）</string>
+    <string name="speech_to_subtitle_config_hotwords">热词：%1$s</string>
+    <string name="speech_to_subtitle_config_hotwords_enabled">启用，权重 %1$s</string>
+    <string name="speech_to_subtitle_config_fixed_segment_npu">NPU 模型固定分段 %1$d 秒</string>
+    <string name="speech_to_subtitle_config_fixed_segment_qwen">按模型 cache 容量限制分段长度，并选择低能量切点</string>
+    <string name="speech_to_subtitle_config_fixed_segment">固定分段 %1$d 秒</string>
+    <string name="speech_to_subtitle_config_vad">VAD：%1$s</string>
+    <string name="speech_to_subtitle_config_vad_disabled_with">禁用，%1$s</string>
+    <string name="speech_to_subtitle_config_vad_model">VAD 模型：%1$s</string>
+    <string name="speech_to_subtitle_config_vad_builtin">内置 silero_vad.onnx</string>
+    <string name="speech_to_subtitle_config_vad_params">VAD 阈值：%1$s，最小静音：%2$ss，最小语音：%3$ss，最大语音：%4$ss</string>
+    <string name="speech_to_subtitle_config_vad_merge">识别流程合并语音段：%1$s</string>
+    <string name="speech_to_subtitle_config_merge_gap">启用，最大间隔 %1$dms</string>
+    <string name="speech_to_subtitle_config_secondary_vad">二次 VAD：%1$s</string>
+    <string name="speech_to_subtitle_config_secondary_vad_uncovered">方案一（处理未划分区间）</string>
+    <string name="speech_to_subtitle_config_secondary_vad_within">方案二（段内再次划分）</string>
+    <string name="speech_to_subtitle_config_secondary_vad_params">二次 VAD 参数：阈值 %1$s，最小静音 %2$ss，最小语音 %3$ss，最大语音 %4$ss</string>
+    <string name="speech_to_subtitle_config_secondary_vad_merge">一次/二次 VAD 合并语音段：%1$s</string>
+</resources>

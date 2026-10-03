@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="vocal_separation_multi_stem_requires_general">选择两个及以上音轨必须先选择通用四轨模型</string>
+    <string name="vocal_separation_missing_inputs">请先选择音视频、模型和输出音轨</string>
+    <string name="vocal_separation_model_access_lost">模型访问权限已失效，请重新选择模型文件</string>
+    <string name="vocal_separation_failed_default">人声分离失败</string>
+    <string name="vocal_separation_log_start">开始人声分离</string>
+    <string name="vocal_separation_log_stems">输出音轨：%1$s</string>
+    <string name="vocal_separation_log_route_general_multi">推理路线：通用四轨模型，一次推理输出 %1$d 条音轨</string>
+    <string name="vocal_separation_log_general_model">通用模型：%1$s</string>
+    <string name="vocal_separation_log_route_ft">推理路线：优先使用 %1$s FT specialist</string>
+    <string name="vocal_separation_log_route_ft_fallback">推理路线：未配置 %1$s FT，回退通用模型</string>
+    <string name="vocal_separation_log_route_general">推理路线：使用通用四轨模型</string>
+    <string name="vocal_separation_log_cancelled">任务已取消，已删除本次任务缓存和未完成输出</string>
+    <string name="vocal_separation_log_done">人声分离完成：成功 %1$d/%2$d</string>
+    <string name="vocal_separation_toast_done">分离完成：成功 %1$d/%2$d</string>
+    <string name="vocal_separation_log_coroutine_cancelled">协程已取消</string>
+    <string name="vocal_separation_progress_preparing">%1$s 正在准备</string>
+    <string name="vocal_separation_log_file_start">%1$s 开始处理：%2$s</string>
+    <string name="vocal_separation_copy_input_failed">复制输入文件失败</string>
+    <string name="vocal_separation_read_input_failed">无法读取输入文件</string>
+    <string name="vocal_separation_log_input_cache">%1$s 输入缓存：%2$s（%3$s）</string>
+    <string name="vocal_separation_progress_extract">%1$s 正在提取 44.1kHz 双声道音频</string>
+    <string name="vocal_separation_log_extract">%1$s 使用 FFmpeg 提取 44.1kHz、双声道、32-bit float PCM</string>
+    <string name="vocal_separation_ffmpeg_failed">FFmpeg 音频预处理失败</string>
+    <string name="vocal_separation_log_pcm_cache">%1$s PCM 缓存：%2$s（%3$s）</string>
+    <string name="vocal_separation_progress_onnx">%1$s 正在运行 ONNX 分离</string>
+    <string name="vocal_separation_model_general">通用四轨模型</string>
+    <string name="vocal_separation_model_specialist">%1$s specialist</string>
+    <string name="vocal_separation_model_general_fallback">通用模型回退</string>
+    <string name="vocal_separation_log_use_model">%1$s 使用%2$s：%3$s</string>
+    <string name="vocal_separation_progress_chunks">%1$s %2$s：%3$d/%4$d</string>
+    <string name="vocal_separation_log_saved_stem">%1$s 已保存 %2$s：%3$s</string>
+    <string name="vocal_separation_log_file_done">%1$s 完成：%2$d 个分块，耗时 %3$s</string>
+    <string name="vocal_separation_progress_file_done">%1$s 输出完成</string>
+    <string name="vocal_separation_log_file_cancelled">%1$s 已取消：%2$s</string>
+    <string name="vocal_separation_open_model_failed">无法打开模型：%1$s</string>
+</resources>

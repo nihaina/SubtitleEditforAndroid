@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AI chat page (ChatActivity / ChatViewModel). -->
+<resources>
+    <string name="chat_configuration_expired">对话配置已失效，请从 AI 设置重新打开</string>
+    <string name="chat_provider_subtitle">%1$s · %2$s</string>
+    <string name="chat_failed_default">对话失败</string>
+    <string name="chat_status_tool_called">调用工具：%1$s</string>
+    <string name="chat_status_tool_finished">工具已完成：%1$s</string>
+    <string name="chat_status_retrying">连接重试 %1$d/%2$d</string>
+    <string name="chat_history_empty">暂无会话记录</string>
+</resources>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings page (SettingsActivity / SettingsScreen). -->
+<resources>
+    <string name="settings_theme_light">亮色</string>
+    <string name="settings_theme_dark">深色</string>
+    <string name="settings_theme_system">跟随系统</string>
+    <string name="settings_theme_option_light">亮色主题</string>
+    <string name="settings_theme_option_dark">深色主题</string>
+    <string name="settings_cache_item_with_size">%1$s（%2$s）</string>
+    <string name="settings_cache_waveform_label">波形图缓存</string>
+    <string name="settings_cache_waveform_kind">波形图</string>
+    <string name="settings_cache_waveform_empty">暂无波形图缓存可清除</string>
+    <string name="settings_cache_waveform_confirm">将删除 %1$s 的波形图缓存，下次打开音频时会重新生成。\n确定继续？</string>
+    <string name="settings_cache_spectrogram_label">频谱图缓存</string>
+    <string name="settings_cache_spectrogram_kind">频谱图</string>
+    <string name="settings_cache_spectrogram_empty">暂无频谱图缓存可清除</string>
+    <string name="settings_cache_spectrogram_confirm">将删除 %1$s 的频谱图缓存，下次查看频谱图时会重新生成。\n确定继续？</string>
+    <string name="settings_cache_quick_transcribe_label">快速转录音频缓存</string>
+    <string name="settings_cache_quick_transcribe_kind">快速转录音频</string>
+    <string name="settings_cache_quick_transcribe_empty">暂无快速转录音频缓存可清除</string>
+    <string name="settings_cache_quick_transcribe_confirm">将删除 %1$s 的快速转录音频缓存，下次快速转录时会重新生成。\n确定继续？</string>
+    <string name="settings_cache_cleared">已清除 %1$d 个%2$s缓存文件</string>
+</resources>

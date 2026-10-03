@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Drafts page (DraftsActivity / DraftsViewModel). -->
+<resources>
+    <string name="drafts_copied_to_clipboard">已复制到剪贴板</string>
+    <string name="drafts_export_success">导出成功</string>
+    <string name="drafts_export_failed">导出失败：%1$s</string>
+</resources>

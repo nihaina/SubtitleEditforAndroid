@@ -236,7 +236,7 @@ private fun LogSectionRow(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    "${section.startedAt} · ${section.lineCount} 行",
+                    stringResource(R.string.log_section_meta, section.startedAt, section.lineCount),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

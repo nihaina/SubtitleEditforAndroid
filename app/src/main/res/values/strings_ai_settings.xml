@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AI settings page. -->
+<resources>
+    <string name="ai_settings_error_with_detail">%1$s：%2$s</string>
+    <string name="ai_settings_choose_model_title">选择模型（%1$d）</string>
+    <string name="ai_settings_website_prefix">官网：</string>
+    <string name="ai_settings_base_url_label">API 请求地址（Base URL 或完整 Chat Completions 地址）</string>
+</resources>

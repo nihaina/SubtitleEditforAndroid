@@ -112,7 +112,7 @@ fun ArchivePreviewScreen(
                         modifier = Modifier.align(Alignment.Center)
                     )
                     items.isEmpty() -> PreviewEmptyState(
-                        text = "此文件夹为空",
+                        text = stringResource(R.string.archive_preview_folder_empty),
                         modifier = Modifier.align(Alignment.Center)
                     )
                     else -> LazyColumn(

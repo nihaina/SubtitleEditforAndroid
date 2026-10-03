@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Runtime log page (LogActivity / LogViewModel / LogScreen). -->
+<resources>
+    <string name="log_all_pages">全部页面</string>
+    <string name="log_loading">正在读取本应用最近 1 小时日志...</string>
+    <string name="log_info_loaded">%1$s 最近 1 小时，显示 %2$d 行</string>
+    <string name="log_info_preview_truncated">（预览已限制）</string>
+    <string name="log_info_cleared">%1$s 最近 1 小时</string>
+    <string name="log_read_failed">读取日志失败：%1$s</string>
+    <string name="log_cleared">日志已清空</string>
+    <string name="log_export_dir_inaccessible">无法访问所选目录</string>
+    <string name="log_export_create_failed">无法创建日志文件</string>
+    <string name="log_export_write_failed">无法写入日志文件</string>
+    <string name="log_exported">已导出：%1$s</string>
+    <string name="log_export_failed">导出失败：%1$s</string>
+    <string name="log_section_meta">%1$s · %2$d 行</string>
+    <string name="log_section_startup">应用启动与后台日志</string>
+    <!-- %1$s is log_section_speech_to_subtitle; the " - " separator groups it under that page filter. -->
+    <string name="log_section_speech_recognition">%1$s - 识别过程</string>
+    <string name="log_section_speech_to_subtitle">语音转字幕</string>
+    <string name="log_section_sense_voice_settings">SenseVoice 配置</string>
+    <string name="log_section_parakeet_settings">Parakeet 配置</string>
+    <string name="log_section_speech_settings">语音转字幕配置</string>
+    <string name="log_section_auto_timestamp">自动打轴</string>
+    <string name="log_section_editor">字幕编辑</string>
+    <string name="log_section_settings">应用设置</string>
+    <string name="log_section_log">运行日志</string>
+</resources>

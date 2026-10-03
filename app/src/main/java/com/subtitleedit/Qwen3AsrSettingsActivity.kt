@@ -3,32 +3,25 @@ package com.subtitleedit
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import com.subtitleedit.feature.ui.Qwen3AsrSettingsScreen
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
-import com.subtitleedit.util.SettingsManager
-import com.subtitleedit.util.TokenTimestampGenerator
 
 class Qwen3AsrSettingsActivity : AppComposeActivity() {
-
-    private lateinit var settingsManager: SettingsManager
-    private var refreshKey by mutableIntStateOf(0)
-    private var forcedAlignmentAvailable by mutableStateOf(false)
+    private val viewModel: Qwen3AsrSettingsViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        settingsManager = SettingsManager.getInstance(this)
-        updateForcedAlignmentAvailability()
 
         setContent {
+            val state by viewModel.state.collectAsState()
             SubtitleEditComposeTheme {
                 Qwen3AsrSettingsScreen(
-                    settingsManager = settingsManager,
-                    forcedAlignmentAvailable = forcedAlignmentAvailable,
-                    refreshKey = refreshKey,
+                    settingsManager = viewModel.settingsManager,
+                    forcedAlignmentAvailable = state.forcedAlignmentAvailable,
+                    refreshKey = state.refreshKey,
                     onNavigateBack = { onBackPressedDispatcher.onBackPressed() },
                     onOpenVadSettings = {
                         startActivity(Intent(this, VadModelSettingsActivity::class.java))
@@ -40,15 +33,6 @@ class Qwen3AsrSettingsActivity : AppComposeActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (::settingsManager.isInitialized) {
-            updateForcedAlignmentAvailability()
-            refreshKey++
-        }
-    }
-
-    private fun updateForcedAlignmentAvailability() {
-        forcedAlignmentAvailable =
-            settingsManager.getAsrModelType() == SettingsManager.ASR_MODEL_QWEN3_ASR &&
-                TokenTimestampGenerator.isConfigured(this)
+        viewModel.refresh()
     }
 }

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- TTS settings page. -->
+<resources>
+    <string name="tts_settings_engine_system_default">系统默认</string>
+    <string name="tts_settings_language_auto">自动判断</string>
+    <string name="tts_settings_language_system">跟随系统</string>
+    <string name="tts_settings_language_japanese">日语（日本）</string>
+    <string name="tts_settings_language_chinese">中文（简体）</string>
+    <string name="tts_settings_language_english">英语（美国）</string>
+</resources>

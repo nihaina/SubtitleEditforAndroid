@@ -48,6 +48,7 @@ import java.util.Locale
 data class SettingsPageState(
     val encoding: String = "",
     val themeMode: String = SettingsManager.THEME_SYSTEM,
+    // Default only (no Context here); hosts fill it from R.string.settings_theme_system.
     val themeLabel: String = "跟随系统",
     val cacheSize: String = "",
     val checkUpdatesOnStartup: Boolean = false,
@@ -203,9 +204,9 @@ fun SettingsScreen(
 
     if (showThemeDialog) {
         val themes = listOf(
-            AppOption(SettingsManager.THEME_LIGHT, "亮色主题"),
-            AppOption(SettingsManager.THEME_DARK, "深色主题"),
-            AppOption(SettingsManager.THEME_SYSTEM, "跟随系统")
+            AppOption(SettingsManager.THEME_LIGHT, stringResource(R.string.settings_theme_option_light)),
+            AppOption(SettingsManager.THEME_DARK, stringResource(R.string.settings_theme_option_dark)),
+            AppOption(SettingsManager.THEME_SYSTEM, stringResource(R.string.settings_theme_system))
         )
         ChoiceDialog(
             title = stringResource(R.string.theme),
@@ -238,7 +239,10 @@ fun SettingsScreen(
                             },
                             contentPadding = PaddingValues(vertical = 12.dp)
                         ) {
-                            Text("${item.label}（${item.displaySize()}）", modifier = Modifier.fillMaxWidth())
+                            Text(
+                                stringResource(R.string.settings_cache_item_with_size, item.label, item.displaySize()),
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
                     }
                 }

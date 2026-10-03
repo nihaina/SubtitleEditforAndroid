@@ -1,242 +1,50 @@
 package com.subtitleedit
 
-import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.documentfile.provider.DocumentFile
-import androidx.lifecycle.lifecycleScope
-import com.subtitleedit.ui.LOG_ALL_PAGES_ID
 import com.subtitleedit.ui.LogScreen
-import com.subtitleedit.ui.LogSection
-import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
-import com.subtitleedit.util.OverwritingToast
-import com.subtitleedit.util.RuntimeLogManager
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class LogActivity : AppComposeActivity() {
-
-    private var displayMode by mutableStateOf(RuntimeLogManager.DisplayMode.SIMPLE)
-    private var hasLoadedLog = false
-    private var isRefreshing by mutableStateOf(false)
-    private var isExportEnabled by mutableStateOf(false)
-    private var showClearedPlaceholder by mutableStateOf(false)
-    private var refreshGeneration = 0
-    private var allSections by mutableStateOf(emptyList<LogSection>())
-    private var pageFilter by mutableStateOf(LOG_ALL_PAGES_ID)
-    private var pageOptions by mutableStateOf(listOf(AppOption(LOG_ALL_PAGES_ID, "全部页面")))
-    private var infoText by mutableStateOf("")
+    private val viewModel: LogViewModel by viewModels()
 
     private val exportDirLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
-        uri?.let(::exportLogToDirectory)
+        uri?.let(viewModel::exportLogToDirectory)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        collectEvents(viewModel.events) { event ->
+            when (event) {
+                LogEvent.PickExportDirectory -> exportDirLauncher.launch(null)
+            }
+        }
         setContent {
+            val state by viewModel.state.collectAsState()
             SubtitleEditComposeTheme {
                 LogScreen(
-                    sections = allSections,
-                    pageOptions = pageOptions,
-                    pageFilter = pageFilter,
-                    displayMode = displayMode,
-                    infoText = infoText,
-                    isRefreshing = isRefreshing,
-                    isExportEnabled = isExportEnabled,
-                    showClearedPlaceholder = showClearedPlaceholder,
+                    sections = state.sections,
+                    pageOptions = state.pageOptions,
+                    pageFilter = state.pageFilter,
+                    displayMode = state.displayMode,
+                    infoText = state.infoText,
+                    isRefreshing = state.isRefreshing,
+                    isExportEnabled = state.isExportEnabled,
+                    showClearedPlaceholder = state.showClearedPlaceholder,
                     onBack = { onBackPressedDispatcher.onBackPressed() },
-                    onRefresh = { refreshLog() },
-                    onExport = ::requestExport,
-                    onClear = ::clearLog,
-                    onDisplayModeChange = { mode ->
-                        if (displayMode != mode) {
-                            displayMode = mode
-                            refreshLog()
-                        }
-                    },
-                    onPageFilterChange = {
-                        pageFilter = it
-                        // The legacy spinner replaced the cleared placeholder with
-                        // the filtered adapter as soon as a selection was made.
-                        showClearedPlaceholder = false
-                    }
+                    onRefresh = { viewModel.refreshLog() },
+                    onExport = viewModel::requestExport,
+                    onClear = viewModel::clearLog,
+                    onDisplayModeChange = viewModel::setDisplayMode,
+                    onPageFilterChange = viewModel::setPageFilter
                 )
             }
         }
-        refreshLog()
-    }
-
-    private fun refreshLog(onComplete: (() -> Unit)? = null) {
-        val generation = ++refreshGeneration
-        val mode = displayMode
-        isRefreshing = true
-        isExportEnabled = false
-        showClearedPlaceholder = false
-        infoText = "正在读取本应用最近 1 小时日志..."
-
-        lifecycleScope.launch {
-            val result = runCatching {
-                withContext(Dispatchers.IO) {
-                    RuntimeLogManager.captureRecent(this@LogActivity, mode)
-                }
-            }
-            if (generation != refreshGeneration) return@launch
-
-            result.onSuccess { snapshot ->
-                allSections = buildLogSections(snapshot.content)
-                pageOptions = listOf(AppOption(LOG_ALL_PAGES_ID, "全部页面")) + allSections
-                    .map { it.title.substringBefore(" - ") }
-                    .distinct()
-                    .map { AppOption(it, it) }
-                if (pageOptions.none { it.id == pageFilter }) pageFilter = LOG_ALL_PAGES_ID
-                hasLoadedLog = true
-                infoText = buildString {
-                    append("${snapshot.packageName} 最近 1 小时，显示 ${snapshot.matchedLineCount} 行")
-                    if (snapshot.isPreviewTruncated) append("（预览已限制）")
-                }
-                isExportEnabled = true
-                onComplete?.invoke()
-            }.onFailure { error ->
-                hasLoadedLog = false
-                allSections = emptyList()
-                pageOptions = listOf(AppOption(LOG_ALL_PAGES_ID, "全部页面"))
-                pageFilter = LOG_ALL_PAGES_ID
-                infoText = "读取日志失败：${error.message ?: "未知错误"}"
-                isExportEnabled = true
-                OverwritingToast.makeText(
-                    this@LogActivity,
-                    infoText,
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-            isRefreshing = false
-        }
-    }
-
-    private fun clearLog() {
-        // Ignore an in-flight capture so a pre-clear snapshot cannot repopulate the view.
-        refreshGeneration++
-        RuntimeLogManager.clear(this)
-        hasLoadedLog = false
-        isRefreshing = false
-        isExportEnabled = true
-        showClearedPlaceholder = true
-        allSections = emptyList()
-        pageOptions = listOf(AppOption(LOG_ALL_PAGES_ID, "全部页面"))
-        pageFilter = LOG_ALL_PAGES_ID
-        infoText = "$packageName 最近 1 小时"
-        OverwritingToast.makeText(this, "日志已清空", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun requestExport() {
-        if (!hasLoadedLog) {
-            refreshLog { openExportDirectoryPicker() }
-        } else {
-            openExportDirectoryPicker()
-        }
-    }
-
-    private fun openExportDirectoryPicker() {
-        exportDirLauncher.launch(null)
-    }
-
-    private fun exportLogToDirectory(uri: Uri) {
-        val mode = displayMode
-        lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    contentResolver.takePersistableUriPermission(
-                        uri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                    )
-                    val dir = DocumentFile.fromTreeUri(this@LogActivity, uri)
-                        ?: throw IllegalStateException("无法访问所选目录")
-                    val fileName = uniqueFileName(dir, RuntimeLogManager.exportFileName())
-                    val file = dir.createFile("text/plain", fileName)
-                        ?: throw IllegalStateException("无法创建日志文件")
-                    contentResolver.openOutputStream(file.uri, "wt")?.use { output ->
-                        RuntimeLogManager.exportRecent(this@LogActivity, mode, output)
-                    } ?: throw IllegalStateException("无法写入日志文件")
-                    fileName
-                }
-            }
-
-            result.onSuccess { fileName ->
-                OverwritingToast.makeText(this@LogActivity, "已导出：$fileName", Toast.LENGTH_SHORT).show()
-            }.onFailure { error ->
-                OverwritingToast.makeText(this@LogActivity, "导出失败：${error.message}", Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-
-    private fun uniqueFileName(dir: DocumentFile, originalName: String): String {
-        val name = originalName.substringBeforeLast(".")
-        val extension = originalName.substringAfterLast(".", "")
-        val suffix = if (extension.isEmpty()) "" else ".$extension"
-        var fileName = originalName
-        var index = 1
-        while (dir.findFile(fileName) != null) {
-            fileName = "$name ($index)$suffix"
-            index++
-        }
-        return fileName
-    }
-
-    private fun buildLogSections(content: String): List<LogSection> {
-        val sections = mutableListOf<LogSection>()
-        val sectionLines = mutableListOf<String>()
-        var title = "应用启动与后台日志"
-        var startedAt = ""
-        val pageBoundary = Regex("^(.{19}).*INFO/Navigation: ([A-Za-z]+Activity) resumed$")
-
-        fun addSection() {
-            if (sectionLines.isNotEmpty()) {
-                sections.add(LogSection(title, startedAt, sectionLines.joinToString("\n"), sectionLines.size))
-                sectionLines.clear()
-            }
-        }
-        content.lineSequence().forEach { line ->
-            val match = pageBoundary.matchEntire(line)
-            if (match != null) {
-                addSection()
-                startedAt = match.groupValues[1]
-                title = activitySectionTitle(match.groupValues[2])
-            } else if (title == "语音转字幕" && isSpeechRecognitionLine(line)) {
-                addSection()
-                title = "语音转字幕 - 识别过程"
-                startedAt = line.take(19)
-            }
-            sectionLines.add(line)
-        }
-        addSection()
-        return sections
-    }
-
-    private fun isSpeechRecognitionLine(line: String): Boolean =
-        line.contains("ffmpeg-kit") ||
-            line.contains("WhisperRecognizer") ||
-            line.contains("sherpa-onnx") ||
-            line.contains("Pcm16Wav")
-
-    private fun activitySectionTitle(activity: String): String = when (activity) {
-        "SpeechToSubtitleActivity" -> "语音转字幕"
-        "SenseVoiceSettingsActivity" -> "SenseVoice 配置"
-        "ParakeetSettingsActivity" -> "Parakeet 配置"
-        "SpeechToSubtitleSettingsActivity" -> "语音转字幕配置"
-        "AutoTimestampActivity" -> "自动打轴"
-        "EditorActivity" -> "字幕编辑"
-        "SettingsActivity" -> "应用设置"
-        "LogActivity" -> "运行日志"
-        else -> activity.removeSuffix("Activity")
     }
 }

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shared wording for long-task pages (progress, completion, errors). -->
+<resources>
+    <string name="task_preparing">正在准备...</string>
+    <string name="task_all_done">全部处理完成</string>
+    <string name="task_cancelled">已取消</string>
+    <string name="task_cancel_requested">收到取消请求，正在停止当前处理</string>
+    <string name="task_failed_with_reason">任务失败：%1$s</string>
+    <string name="task_file_failed_with_reason">处理失败：%1$s</string>
+    <string name="task_pending_files">待处理文件：%1$d 个</string>
+    <string name="task_output_directory">输出目录：%1$s</string>
+    <string name="task_output_format">输出格式：%1$s</string>
+    <string name="task_file_progress_prefix">[%1$d/%2$d]</string>
+    <string name="error_unknown">未知错误</string>
+    <string name="unknown_file">未知文件</string>
+    <string name="files_selected_header">已选择 %1$d 个文件：</string>
+    <string name="files_selected_item">%1$d. %2$s</string>
+    <string name="directory_permission_save_failed">目录权限保存失败：%1$s</string>
+    <string name="directory_select_failed">选择目录失败：%1$s</string>
+    <string name="output_directory_not_set">输出目录未设置</string>
+    <string name="duration_seconds_decimal">%1$.1f 秒</string>
+</resources>

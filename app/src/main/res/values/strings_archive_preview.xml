@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Archive preview page (ArchivePreviewActivity / ArchivePreviewViewModel / ArchivePreviewScreen). -->
+<resources>
+    <string name="archive_preview_read_failed">无法读取预览：%1$s</string>
+    <string name="archive_preview_folder_empty">此文件夹为空</string>
+</resources>

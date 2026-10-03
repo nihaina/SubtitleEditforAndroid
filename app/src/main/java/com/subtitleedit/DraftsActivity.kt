@@ -1,13 +1,10 @@
 package com.subtitleedit
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
@@ -38,9 +35,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -52,192 +48,62 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.ui.components.AppToolScaffold
-import com.subtitleedit.util.DraftManager
 
-/** Draft browser host. File access and platform results remain in the Activity. */
+/** Draft browser host. Page state and file access live in [DraftsViewModel]. */
 class DraftsActivity : AppComposeActivity() {
-
-    private var currentFolder by mutableStateOf("")
-    private var drafts by mutableStateOf(emptyList<DraftItem>())
-    private var dialogState by mutableStateOf<DraftsDialogState?>(null)
-
-    // Whether the editor launched this page to load a saved draft.
-    private var fromEditor = false
-
-    private var draftToExport: DraftItem? = null
+    private val viewModel: DraftsViewModel by viewModels()
 
     private val exportFileLauncher = registerForActivityResult(
         ActivityResultContracts.CreateDocument("*/*")
-    ) { uri ->
-        if (uri != null) {
-            exportToUri(uri)
-        } else {
-            draftToExport = null
-        }
-    }
+    ) { uri -> viewModel.onExportTargetSelected(uri) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        fromEditor = intent.getBooleanExtra(EXTRA_FROM_EDITOR, false)
-        loadDrafts()
+        // Whether the editor launched this page to load a saved draft.
+        viewModel.initialize(fromEditor = intent.getBooleanExtra(EXTRA_FROM_EDITOR, false))
+        collectEvents(viewModel.events) { event ->
+            when (event) {
+                is DraftsEvent.PickExportFile -> exportFileLauncher.launch(event.fileName)
+                is DraftsEvent.ReturnDraft -> returnDraftToEditor(event)
+            }
+        }
 
         setContent {
+            val state by viewModel.state.collectAsState()
             SubtitleEditComposeTheme {
                 DraftsPage(
-                    currentFolder = currentFolder,
-                    drafts = drafts,
-                    fromEditor = fromEditor,
-                    dialogState = dialogState,
+                    currentFolder = state.currentFolder,
+                    drafts = state.drafts,
+                    fromEditor = state.fromEditor,
+                    dialogState = state.dialogState,
                     onBack = ::handleBack,
-                    onBackToRoot = ::goToRoot,
-                    onItemClick = ::openDraft,
-                    onLongPress = ::showActions,
-                    onDeleteClick = ::requestDelete,
-                    onRequestDelete = ::requestDelete,
-                    onDismissDialog = { dialogState = null },
-                    onCopyDraft = { draft ->
-                        copyToClipboard(DraftManager.readDraft(this, draft.folderName, draft.fileName))
-                    },
-                    onExportDraft = ::exportDraft,
-                    onLoadDraft = ::returnDraftToEditor,
-                    onDeleteDraft = ::deleteDraft,
-                    onDeleteFolder = ::deleteFolder
+                    onBackToRoot = viewModel::goToRoot,
+                    onItemClick = viewModel::openDraft,
+                    onLongPress = viewModel::showActions,
+                    onDeleteClick = viewModel::requestDelete,
+                    onRequestDelete = viewModel::requestDelete,
+                    onDismissDialog = viewModel::dismissDialog,
+                    onCopyDraft = viewModel::copyDraft,
+                    onExportDraft = viewModel::exportDraft,
+                    onLoadDraft = viewModel::loadDraftIntoEditor,
+                    onDeleteDraft = viewModel::deleteDraft,
+                    onDeleteFolder = viewModel::deleteFolder
                 )
             }
         }
     }
 
     private fun handleBack() {
-        if (currentFolder.isNotEmpty()) {
-            goToRoot()
-        } else {
-            onBackPressedDispatcher.onBackPressed()
-        }
+        if (viewModel.navigateUp()) onBackPressedDispatcher.onBackPressed()
     }
 
-    private fun goToRoot() {
-        currentFolder = ""
-        dialogState = null
-        loadDrafts()
-    }
-
-    private fun openDraft(draft: DraftItem) {
-        if (draft.isFolder) {
-            currentFolder = draft.folderName
-            loadDrafts()
-        } else {
-            dialogState = DraftsDialogState.Preview(
-                draft = draft,
-                content = DraftManager.readDraft(this, draft.folderName, draft.fileName)
-            )
-        }
-    }
-
-    private fun showActions(draft: DraftItem) {
-        if (!draft.isFolder) dialogState = DraftsDialogState.Actions(draft)
-    }
-
-    private fun requestDelete(draft: DraftItem) {
-        dialogState = if (draft.isFolder) {
-            DraftsDialogState.DeleteFolder(draft)
-        } else {
-            DraftsDialogState.DeleteDraft(draft)
-        }
-    }
-
-    private fun copyToClipboard(content: String) {
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("draft", content))
-        com.subtitleedit.util.OverwritingToast.makeText(
-            this,
-            "已复制到剪贴板",
-            Toast.LENGTH_SHORT
-        ).show()
-    }
-
-    private fun exportDraft(draft: DraftItem) {
-        draftToExport = draft
-        exportFileLauncher.launch(draft.fileName)
-    }
-
-    private fun exportToUri(uri: android.net.Uri) {
-        draftToExport?.let { draft ->
-            try {
-                val content = DraftManager.readDraft(this, draft.folderName, draft.fileName)
-                contentResolver.openOutputStream(uri)?.use { outputStream ->
-                    outputStream.write(content.toByteArray())
-                }
-                com.subtitleedit.util.OverwritingToast.makeText(
-                    this,
-                    "导出成功",
-                    Toast.LENGTH_SHORT
-                ).show()
-            } catch (e: Exception) {
-                com.subtitleedit.util.OverwritingToast.makeText(
-                    this,
-                    "导出失败：${e.message}",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        }
-        draftToExport = null
-    }
-
-    private fun returnDraftToEditor(draft: DraftItem) {
-        val content = DraftManager.readDraft(this, draft.folderName, draft.fileName)
+    private fun returnDraftToEditor(event: DraftsEvent.ReturnDraft) {
         val resultIntent = Intent()
-        resultIntent.putExtra(EXTRA_DRAFT_CONTENT, content)
-        resultIntent.putExtra(EXTRA_DRAFT_FILE_NAME, draft.fileName)
-        resultIntent.putExtra(EXTRA_DRAFT_FOLDER_NAME, draft.folderName)
+        resultIntent.putExtra(EXTRA_DRAFT_CONTENT, event.content)
+        resultIntent.putExtra(EXTRA_DRAFT_FILE_NAME, event.fileName)
+        resultIntent.putExtra(EXTRA_DRAFT_FOLDER_NAME, event.folderName)
         setResult(RESULT_OK, resultIntent)
         finish()
-    }
-
-    private fun deleteDraft(draft: DraftItem) {
-        dialogState = null
-        val success = DraftManager.deleteDraft(this, draft.folderName, draft.fileName)
-        if (success) {
-            com.subtitleedit.util.OverwritingToast.makeText(
-                this,
-                R.string.draft_deleted,
-                Toast.LENGTH_SHORT
-            ).show()
-            loadDrafts()
-        }
-    }
-
-    private fun deleteFolder(draft: DraftItem) {
-        dialogState = null
-        val success = DraftManager.deleteDraftFolder(this, draft.folderName)
-        if (success) {
-            com.subtitleedit.util.OverwritingToast.makeText(
-                this,
-                R.string.draft_deleted,
-                Toast.LENGTH_SHORT
-            ).show()
-            if (currentFolder == draft.folderName) {
-                currentFolder = ""
-            }
-            loadDrafts()
-        }
-    }
-
-    private fun loadDrafts() {
-        drafts = if (currentFolder.isEmpty()) {
-            DraftManager.getAllDraftFolders(this).map { folder ->
-                DraftItem(folder.name, "", folder.name, "", true)
-            }
-        } else {
-            DraftManager.getDraftsInFolder(this, currentFolder).map { file ->
-                DraftItem(
-                    currentFolder,
-                    file.name,
-                    file.name,
-                    DraftManager.getFormattedDate(file),
-                    false
-                )
-            }
-        }
     }
 
     companion object {

@@ -1,34 +1,23 @@
 package com.subtitleedit
 
 import android.Manifest
-import android.content.Intent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
-import android.os.Bundle
-import android.os.Environment
-import android.provider.Settings
 import android.widget.Toast
-import androidx.documentfile.provider.DocumentFile
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import com.subtitleedit.R
+import androidx.documentfile.provider.DocumentFile
+import androidx.lifecycle.SavedStateHandle
 import com.subtitleedit.feature.ui.AsrModelImportAction
-import com.subtitleedit.feature.ui.ForcedAlignerImportStatus
 import com.subtitleedit.feature.ui.AsrModelImportUiState
-import com.subtitleedit.feature.ui.ModelImportDialogUi
+import com.subtitleedit.feature.ui.ForcedAlignerImportStatus
 import com.subtitleedit.repository.ModelRepository
 import com.subtitleedit.task.TaskStatus
 import com.subtitleedit.usecase.DownloadAsrModelUseCase
-import com.subtitleedit.util.ModelDownloader
 import com.subtitleedit.util.InternalModelExport
-import com.subtitleedit.util.OverwritingToast
+import com.subtitleedit.util.ModelDownloader
 import com.subtitleedit.util.QnnRuntimeAvailability
 import com.subtitleedit.util.Qwen3ForcedAlignerModelFiles
 import com.subtitleedit.util.Qwen3ForcedAlignerPathResolver
@@ -36,6 +25,7 @@ import com.subtitleedit.util.Qwen3ForcedAlignerReleaseDownloader
 import com.subtitleedit.util.SenseVoiceNpuModelImporter
 import com.subtitleedit.util.SenseVoiceNpuModelPathPolicy
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.util.UriDisplayName
 import com.subtitleedit.work.ModelDownloadWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -43,30 +33,38 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 import java.util.UUID
 
 /**
- * 模型设置页面
+ * ASR model import section of the model management page. Owned by
+ * ModelManagementViewModel so its state, dialogs and running imports survive
+ * Activity recreation; pickers/permissions/navigation go through [host] events.
  */
-class AsrModelImportController(
-    private val host: AppCompatActivity,
+internal class AsrModelImportController(
+    private val host: ModelImportHost,
+    private val savedState: SavedStateHandle,
     private val onModelsChanged: () -> Unit = {}
-) {
+) : ModelImportDialogState(host) {
 
-    var uiState by mutableStateOf(AsrModelImportUiState())
-        private set
-    var dialog by mutableStateOf<ModelImportDialogUi?>(null)
-        private set
+    private val _uiState = MutableStateFlow(AsrModelImportUiState())
+    val state: StateFlow<AsrModelImportUiState> = _uiState.asStateFlow()
+    private var uiState: AsrModelImportUiState
+        get() = _uiState.value
+        set(value) { _uiState.value = value }
 
-    private lateinit var settingsManager: SettingsManager
+    private val context: Context get() = host.app
+    private val settingsManager: SettingsManager = SettingsManager.getInstance(host.app)
     private val modelRepository: ModelRepository
-        get() = (host.application as SubtitleEditApplication).dependencies.modelRepository
+        get() = (host.app as SubtitleEditApplication).dependencies.modelRepository
 
     private var encoderPath: String = ""
     private var decoderPath: String = ""
@@ -76,12 +74,15 @@ class AsrModelImportController(
     private var modelType: String = SettingsManager.ASR_MODEL_SENSEVOICE
     private var accessWarningShown = false
     private var modelDownloadJob: Job? = null
-    private var modelDownloadWorkId: UUID? = null
+
+    /** Kept in SavedStateHandle so an active download is re-attached after process death. */
+    private var modelDownloadWorkId: UUID?
+        get() = savedState.get<String>(KEY_WORK_ID)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        set(value) { savedState[KEY_WORK_ID] = value?.toString() }
     private var pendingNotificationAction: (() -> Unit)? = null
     private val notificationPermissionPreferences by lazy {
-        host.getSharedPreferences("task_notifications", Context.MODE_PRIVATE)
+        context.getSharedPreferences("task_notifications", Context.MODE_PRIVATE)
     }
-    private var nextProgressToken = 0L
     private var pendingStorageAction: (() -> Unit)? = null
 
     private data class ForcedAlignerUi(
@@ -91,78 +92,43 @@ class AsrModelImportController(
         val dataName: String? = null
     )
 
-    // Encoder 文件选择器
-    private val encoderPickerLauncher = host.registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        uri?.let { handleSelectedEncoder(it) }
-    }
-
-    // Decoder 文件选择器
-    private val decoderPickerLauncher = host.registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        uri?.let { handleSelectedDecoder(it) }
-    }
-
-    private val joinerPickerLauncher = host.registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        uri?.let { handleSelectedJoiner(it) }
-    }
-
-    // Tokens 文件选择器
-    private val tokensPickerLauncher = host.registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        uri?.let { handleSelectedTokens(it) }
-    }
-
-    private val qwen3TokenizerPickerLauncher = host.registerForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri -> uri?.let { handleSelectedQwen3Tokenizer(it) } }
-
-    private val qwen3ForcedAlignerPickerLauncher = host.registerForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris -> if (uris.isNotEmpty()) importQwen3ForcedAligner(uris) }
-
-    // VAD 模型文件选择器
-    private val vadPickerLauncher = host.registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        uri?.let { handleSelectedVad(it) }
-    }
-
-    private val manageStorageLauncher = host.registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { continuePendingModelDownload() }
-
-    private val writeStoragePermissionLauncher = host.registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { continuePendingModelDownload() }
-
-    private val notificationPermissionLauncher = host.registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        notificationPermissionPreferences.edit().putBoolean("requested", true).apply()
-        val action = pendingNotificationAction
-        pendingNotificationAction = null
-        if (action != null) {
-            if (!granted) {
-                OverwritingToast.makeText(
-                    host, "未开启通知，下载仍会继续，可在此页面查看进度", Toast.LENGTH_LONG
-                ).show()
-            }
-            action()
-        }
-    }
-
     init {
-        settingsManager = SettingsManager.getInstance(host)
-        restoreModelDownloadState()
         observeAsrModelDownload()
         loadSavedSettings()
     }
+
+    fun onDocumentPicked(target: ModelPickTarget, uri: Uri) {
+        when (target) {
+            ModelPickTarget.ASR_ENCODER -> handleSelectedEncoder(uri)
+            ModelPickTarget.ASR_DECODER -> handleSelectedDecoder(uri)
+            ModelPickTarget.ASR_JOINER -> handleSelectedJoiner(uri)
+            ModelPickTarget.ASR_TOKENS -> handleSelectedTokens(uri)
+            ModelPickTarget.ASR_VAD -> handleSelectedVad(uri)
+            else -> Unit
+        }
+    }
+
+    fun onTokenizerFolderPicked(uri: Uri) = handleSelectedQwen3Tokenizer(uri)
+
+    fun onForcedAlignerPicked(uris: List<Uri>) = importQwen3ForcedAligner(uris)
+
+    /** Result of the storage permission flow requested by this controller. */
+    fun onStorageAccessResult() = continuePendingModelDownload()
+
+    /** The storage permission settings screen could not be opened. */
+    fun onStorageAccessUnavailable() {
+        pendingStorageAction = null
+        host.showToast(R.string.model_mgmt_storage_settings_unavailable, duration = Toast.LENGTH_LONG)
+    }
+
+    fun onNotificationPermissionResult(granted: Boolean) {
+        val action = pendingNotificationAction ?: return
+        pendingNotificationAction = null
+        if (!granted) host.showToast(R.string.model_mgmt_notification_denied, duration = Toast.LENGTH_LONG)
+        action()
+    }
+
+    private fun launchPicker(target: ModelPickTarget) = host.sendEvent(ModelManagementEvent.PickDocument(target))
 
     fun onAction(action: AsrModelImportAction) {
         when (action) {
@@ -172,35 +138,35 @@ class AsrModelImportController(
                 if (isSenseVoiceNpu() && restoreAvailableModelPathsIfMissing(includeQwen = false)) {
                     loadModelPaths()
                     updateAsrModelUi()
-                    OverwritingToast.makeText(host, "已找到 SenseVoice NPU BIN 模型", Toast.LENGTH_SHORT).show()
+                    host.showToast(R.string.model_mgmt_asr_npu_found)
                     return
                 }
-                encoderPickerLauncher.launch(arrayOf("*/*"))
+                launchPicker(ModelPickTarget.ASR_ENCODER)
             }
             AsrModelImportAction.DownloadModel -> showAsrDownloadOptions()
             AsrModelImportAction.ResetModel -> confirmResetCurrentAsrModel()
-            AsrModelImportAction.ConfigureWhisper -> AsrSettingsNavigation.open(host, settingsManager)
-            AsrModelImportAction.SelectDecoder -> decoderPickerLauncher.launch(arrayOf("*/*"))
-            AsrModelImportAction.SelectJoiner -> joinerPickerLauncher.launch(arrayOf("*/*"))
+            AsrModelImportAction.ConfigureWhisper -> host.sendEvent(ModelManagementEvent.OpenAsrSettings)
+            AsrModelImportAction.SelectDecoder -> launchPicker(ModelPickTarget.ASR_DECODER)
+            AsrModelImportAction.SelectJoiner -> launchPicker(ModelPickTarget.ASR_JOINER)
             AsrModelImportAction.SelectTokens -> {
                 if (isSenseVoiceNpu() && !ensureQnnRuntimeAvailable()) return
-                if (isQwen3Asr()) qwen3TokenizerPickerLauncher.launch(null)
-                else tokensPickerLauncher.launch(arrayOf("*/*"))
+                if (isQwen3Asr()) host.sendEvent(ModelManagementEvent.PickQwen3Tokenizer)
+                else launchPicker(ModelPickTarget.ASR_TOKENS)
             }
             AsrModelImportAction.SelectForcedAligner -> {
                 if (modelDownloadJob?.isActive == true) return
                 runWithModelStorageAccess {
-                    qwen3ForcedAlignerPickerLauncher.launch(arrayOf("*/*"))
+                    host.sendEvent(ModelManagementEvent.PickForcedAligner)
                 }
             }
             AsrModelImportAction.DownloadForcedAligner -> runWithModelStorageAccess {
                 confirmQwen3ForcedAlignerDownload()
             }
             AsrModelImportAction.ResetForcedAligner -> confirmResetQwen3ForcedAligner()
-            AsrModelImportAction.ConfigureVad -> host.startActivity(
-                Intent(host, VadModelSettingsActivity::class.java)
+            AsrModelImportAction.ConfigureVad -> host.sendEvent(
+                ModelManagementEvent.OpenScreen(VadModelSettingsActivity::class.java)
             )
-            AsrModelImportAction.SelectVad -> vadPickerLauncher.launch(arrayOf("*/*"))
+            AsrModelImportAction.SelectVad -> launchPicker(ModelPickTarget.ASR_VAD)
             AsrModelImportAction.SelectSenseVoiceCpu -> selectSenseVoiceProvider(
                 SettingsManager.SENSEVOICE_PROVIDER_CPU
             )
@@ -222,89 +188,14 @@ class AsrModelImportController(
         updateVadModelUi()
     }
 
-    private fun showMessageDialog(
-        title: String,
-        message: String,
-        confirmLabel: String? = "确定",
-        dismissLabel: String? = null,
-        auxiliaryLabel: String? = null,
-        destructiveConfirm: Boolean = false,
-        onConfirm: () -> Unit = {},
-        onDismiss: () -> Unit = {},
-        onAuxiliary: () -> Unit = {}
-    ) {
-        dialog = ModelImportDialogUi.Message(
-            title = title,
-            message = message,
-            confirmLabel = confirmLabel,
-            dismissLabel = dismissLabel,
-            auxiliaryLabel = auxiliaryLabel,
-            destructiveConfirm = destructiveConfirm,
-            onConfirm = { dialog = null; onConfirm() },
-            onDismiss = { dialog = null; onDismiss() },
-            onAuxiliary = { dialog = null; onAuxiliary() }
-        )
-    }
+    private fun downloadLocation(directoryName: String) = "/Download/SubtitleEdit/models/$directoryName"
 
-    private fun showOptionsDialog(
-        title: String,
-        options: List<String>,
-        selectedIndex: Int? = null,
-        onSelect: (Int) -> Unit
-    ) {
-        dialog = ModelImportDialogUi.Options(
-            title = title,
-            options = options,
-            selectedIndex = selectedIndex,
-            onSelect = { index -> dialog = null; onSelect(index) },
-            onDismiss = { dialog = null }
-        )
-    }
-
-    private fun showProgressDialog(title: String, onCancel: () -> Unit): Long {
-        val token = ++nextProgressToken
-        dialog = ModelImportDialogUi.Progress(
-            token = token,
-            title = title,
-            message = "正在准备下载",
-            onCancel = {
-                if ((dialog as? ModelImportDialogUi.Progress)?.token == token) dialog = null
-                onCancel()
-            }
-        )
-        return token
-    }
-
-    private fun updateProgressDialog(token: Long, progress: ModelDownloader.Progress) {
-        val current = dialog as? ModelImportDialogUi.Progress ?: return
-        if (current.token != token) return
-        val total = progress.totalBytes
-        val message = if (total > 0L) {
-            val percent = ((progress.downloadedBytes * 100L) / total).coerceIn(0L, 100L)
-            "${progress.message}：$percent%（${formatBytes(progress.downloadedBytes)} / ${formatBytes(total)}）"
-        } else {
-            "${progress.message}：已处理 ${formatBytes(progress.downloadedBytes.coerceAtLeast(0L))}"
-        }
-        dialog = current.copy(
-            message = message,
-            progress = if (total > 0L) progress.downloadedBytes.toFloat() / total else null
-        )
-    }
-
-    private fun dismissProgressDialog(token: Long) {
-        if ((dialog as? ModelImportDialogUi.Progress)?.token == token) dialog = null
-    }
-
-    private fun formatBytes(bytes: Long): String = when {
-        bytes >= 1024L * 1024L * 1024L -> String.format(Locale.getDefault(), "%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0))
-        bytes >= 1024L * 1024L -> String.format(Locale.getDefault(), "%.1f MB", bytes / (1024.0 * 1024.0))
-        bytes >= 1024L -> String.format(Locale.getDefault(), "%.1f KB", bytes / 1024.0)
-        else -> "$bytes B"
-    }
+    private fun optionLabel(displayName: String, sizeLabel: String) =
+        host.text(R.string.model_mgmt_option_with_size, displayName, sizeLabel)
 
     private fun showAsrDownloadOptions() {
         if (modelDownloadJob?.isActive == true) {
-            OverwritingToast.makeText(host, "模型正在下载", Toast.LENGTH_SHORT).show()
+            host.showToast(R.string.model_mgmt_asr_downloading)
             return
         }
         if (isSenseVoiceNpu() && !ensureQnnRuntimeAvailable()) return
@@ -325,8 +216,8 @@ class AsrModelImportController(
             if (!ensureQnnRuntimeAvailable()) return
             val options = modelRepository.senseVoiceNpuModels
             showOptionsDialog(
-                title = "选择 SenseVoice NPU 模型",
-                options = options.map { "${it.displayName}（${it.sizeLabel}）" }
+                title = host.text(R.string.model_mgmt_asr_select_npu_model),
+                options = options.map { optionLabel(it.displayName, it.sizeLabel) }
             ) { confirmSenseVoiceDownload(options[it]) }
         } else {
             confirmSenseVoiceDownload(modelRepository.senseVoiceCpuModel)
@@ -335,21 +226,17 @@ class AsrModelImportController(
 
     private fun confirmSenseVoiceDownload(option: ModelDownloader.SenseVoiceModelOption) {
         val isNpu = option.architecture == ModelDownloader.SenseVoiceArchitecture.QNN
-        val location = "/Download/SubtitleEdit/models/${option.directoryName}"
-        val compatibility = if (isNpu) {
-            "\n\n下载完成后会立即生成内部 model.bin，并清理已导入的 libmodel.so。" +
-                "\n适用于支持 Qualcomm HTP 的 arm64 骁龙设备。"
-        } else {
-            ""
-        }
+        val compatibility = if (isNpu) host.text(R.string.model_mgmt_asr_npu_download_note) else ""
         showMessageDialog(
-            title = "一键下载导入 SenseVoice ${option.displayName}",
-            message =
-                "是否一键下载导入该模型？\n\n" +
-                    "文件存放至：\n$location\n\n" +
-                    "${option.sizeLabel} 存储空间。$compatibility",
-            confirmLabel = "下载并导入",
-            dismissLabel = "取消",
+            title = host.text(R.string.model_mgmt_asr_sensevoice_download_title, option.displayName),
+            message = host.text(
+                R.string.model_mgmt_asr_download_message,
+                downloadLocation(option.directoryName),
+                option.sizeLabel,
+                compatibility
+            ),
+            confirmLabel = host.text(R.string.model_mgmt_download_and_import),
+            dismissLabel = host.text(R.string.cancel),
             onConfirm = {
                 runWithModelStorageAccess { startSenseVoiceDownload(option) }
             }
@@ -358,13 +245,15 @@ class AsrModelImportController(
 
     private fun confirmParakeetDownload(option: ModelDownloader.ParakeetModelOption) {
         showMessageDialog(
-            title = "一键下载导入 ${option.displayName}",
-            message =
-                "${option.description}\n\n" +
-                    "文件存放至：\n/Download/SubtitleEdit/models/${option.directoryName}\n\n" +
-                    "${option.sizeLabel} 存储空间。",
-            confirmLabel = "下载并导入",
-            dismissLabel = "取消",
+            title = host.text(R.string.model_mgmt_download_import_title, option.displayName),
+            message = host.text(
+                R.string.model_mgmt_asr_parakeet_download_message,
+                option.description,
+                downloadLocation(option.directoryName),
+                option.sizeLabel
+            ),
+            confirmLabel = host.text(R.string.model_mgmt_download_and_import),
+            dismissLabel = host.text(R.string.cancel),
             onConfirm = {
                 runWithModelStorageAccess { startParakeetDownload(option) }
             }
@@ -374,20 +263,22 @@ class AsrModelImportController(
     private fun showWhisperDownloadModelPicker() {
         val options = modelRepository.whisperModels
         showOptionsDialog(
-            title = "选择 Whisper 模型",
-            options = options.map { "${it.displayName}（${it.sizeLabel}）" }
+            title = host.text(R.string.model_mgmt_asr_select_whisper),
+            options = options.map { optionLabel(it.displayName, it.sizeLabel) }
         ) { confirmWhisperDownload(options[it]) }
     }
 
     private fun confirmWhisperDownload(option: ModelDownloader.WhisperModelOption) {
         showMessageDialog(
-            title = "一键下载导入 Whisper ${option.displayName}",
-            message =
-                "是否一键下载导入该模型？\n\n" +
-                    "文件存放至：\n/Download/SubtitleEdit/models/${option.directoryName}\n\n" +
-                    "${option.sizeLabel} 存储空间。",
-            confirmLabel = "下载并导入",
-            dismissLabel = "取消",
+            title = host.text(R.string.model_mgmt_asr_whisper_download_title, option.displayName),
+            message = host.text(
+                R.string.model_mgmt_asr_download_message,
+                downloadLocation(option.directoryName),
+                option.sizeLabel,
+                ""
+            ),
+            confirmLabel = host.text(R.string.model_mgmt_download_and_import),
+            dismissLabel = host.text(R.string.cancel),
             onConfirm = {
                 runWithModelStorageAccess { startWhisperDownload(option) }
             }
@@ -396,13 +287,14 @@ class AsrModelImportController(
 
     private fun confirmQwen3AsrDownload(option: ModelDownloader.Qwen3AsrModelOption) {
         showMessageDialog(
-            title = "一键下载导入 Qwen3-ASR ${option.displayName}",
-            message =
-                "从 ModelScope 下载 int8 模型文件与 tokenizer。\n\n" +
-                    "文件存放至：\n/Download/SubtitleEdit/models/${option.directoryName}\n\n" +
-                    "模型文件约 ${option.sizeLabel}。",
-            confirmLabel = "下载并导入",
-            dismissLabel = "取消",
+            title = host.text(R.string.model_mgmt_asr_qwen_download_title, option.displayName),
+            message = host.text(
+                R.string.model_mgmt_asr_qwen_download_message,
+                downloadLocation(option.directoryName),
+                option.sizeLabel
+            ),
+            confirmLabel = host.text(R.string.model_mgmt_download_and_import),
+            dismissLabel = host.text(R.string.cancel),
             onConfirm = {
                 runWithModelStorageAccess { startQwen3AsrDownload(option) }
             }
@@ -412,22 +304,21 @@ class AsrModelImportController(
     private fun confirmQwen3ForcedAlignerDownload() {
         if (modelDownloadJob?.isActive == true) return
         if (adoptAvailableQwenForcedAligner()) {
-            OverwritingToast.makeText(host, "已找到 ForcedAligner 模型，无需重新下载", Toast.LENGTH_SHORT).show()
+            host.showToast(R.string.model_mgmt_asr_aligner_found)
             return
         }
         if (hasConfiguredQwen3ForcedAligner()) {
-            OverwritingToast.makeText(host, "ForcedAligner 已导入，可在模型管理中查看或删除", Toast.LENGTH_SHORT).show()
+            host.showToast(R.string.model_mgmt_asr_aligner_already_imported)
             return
         }
         showMessageDialog(
-            title = "一键下载导入 Qwen3 ForcedAligner",
-            message =
-                "从项目 Release 下载两卷压缩模型，约 1.38 GB；解压后模型约 3.67 GB。" +
-                    "\n\n模型将保存至 Download/SubtitleEdit/models/${Qwen3ForcedAlignerModelFiles.DIRECTORY_NAME}。" +
-                    "解压时还需约 5.2 GB 可用空间。" +
-                    "\n\n离开页面后任务会继续运行，可从通知中取消。",
-            confirmLabel = "下载并导入",
-            dismissLabel = "取消",
+            title = host.text(R.string.model_mgmt_asr_aligner_download_title),
+            message = host.text(
+                R.string.model_mgmt_asr_aligner_download_message,
+                Qwen3ForcedAlignerModelFiles.DIRECTORY_NAME
+            ),
+            confirmLabel = host.text(R.string.model_mgmt_download_and_import),
+            dismissLabel = host.text(R.string.cancel),
             onConfirm = {
                 runWithModelStorageAccess { startQwen3ForcedAlignerDownload() }
             }
@@ -442,10 +333,10 @@ class AsrModelImportController(
 
     private fun confirmResetQwen3ForcedAligner() {
         showMessageDialog(
-            title = "重置强制对齐模型选择",
-            message = "清除 ForcedAligner 模型选择？模型文件不会被删除，可再次选择使用。",
-            confirmLabel = "重置",
-            dismissLabel = "取消",
+            title = host.text(R.string.model_mgmt_asr_aligner_reset_title),
+            message = host.text(R.string.model_mgmt_asr_aligner_reset_message),
+            confirmLabel = host.text(R.string.model_mgmt_reset),
+            dismissLabel = host.text(R.string.cancel),
             onConfirm = {
                 settingsManager.clearQwen3ForcedAlignerPath()
                 updateAsrModelUi()
@@ -456,8 +347,8 @@ class AsrModelImportController(
     private fun showQwen3AsrDownloadModelPicker() {
         val options = modelRepository.qwen3AsrModels
         showOptionsDialog(
-            title = "选择 Qwen3-ASR 模型",
-            options = options.map { "${it.displayName}（${it.sizeLabel}）" }
+            title = host.text(R.string.model_mgmt_asr_select_qwen),
+            options = options.map { optionLabel(it.displayName, it.sizeLabel) }
         ) { confirmQwen3AsrDownload(options[it]) }
     }
 
@@ -465,9 +356,7 @@ class AsrModelImportController(
         val isNpu = option.architecture == ModelDownloader.SenseVoiceArchitecture.QNN
         if (isNpu && !ensureQnnRuntimeAvailable()) return
         if (isNpu && "arm64-v8a" !in Build.SUPPORTED_ABIS) {
-            OverwritingToast.makeText(
-                host, "SenseVoice NPU 模型仅支持 arm64-v8a 骁龙设备", Toast.LENGTH_LONG
-            ).show()
+            host.showToast(R.string.model_mgmt_asr_npu_arm64_only, duration = Toast.LENGTH_LONG)
             return
         }
         startAsrModelDownload(DownloadAsrModelUseCase.KIND_SENSEVOICE, option.id)
@@ -488,26 +377,15 @@ class AsrModelImportController(
     private fun startAsrModelDownload(kind: String, optionId: String? = null) {
         if (modelDownloadJob?.isActive == true || pendingNotificationAction != null) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(host, Manifest.permission.POST_NOTIFICATIONS) !=
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED &&
             !notificationPermissionPreferences.getBoolean("requested", false)
         ) {
             pendingNotificationAction = { observeAsrModelDownload(kind, optionId) }
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            host.sendEvent(ModelManagementEvent.RequestNotificationPermission)
             return
         }
         observeAsrModelDownload(kind, optionId)
-    }
-
-    private fun restoreModelDownloadState() {
-        val key = "asr-model-download"
-        val savedState = host.savedStateRegistry.consumeRestoredStateForKey(key)
-        modelDownloadWorkId = savedState?.getString("work-id")?.let {
-            runCatching { UUID.fromString(it) }.getOrNull()
-        }
-        host.savedStateRegistry.registerSavedStateProvider(key) {
-            Bundle().apply { putString("work-id", modelDownloadWorkId?.toString()) }
-        }
     }
 
     private fun observeAsrModelDownload(
@@ -517,10 +395,10 @@ class AsrModelImportController(
     ) {
         if (modelDownloadJob?.isActive == true) return
         setAsrModelActionsEnabled(false)
-        modelDownloadJob = host.lifecycleScope.launch {
+        modelDownloadJob = host.scope.launch {
             var progressToken: Long? = null
             try {
-                val scheduler = (host.application as SubtitleEditApplication).dependencies.taskWorkScheduler
+                val scheduler = (host.app as SubtitleEditApplication).dependencies.taskWorkScheduler
                 val workId = if (retryWorkId != null) {
                     scheduler.retryModelDownload(retryWorkId)
                 } else if (kind == ModelDownloadWorker.KIND_QWEN3_FORCED_ALIGNER) {
@@ -531,21 +409,25 @@ class AsrModelImportController(
                     scheduler.findActiveAsrModelDownload(modelDownloadWorkId) ?: return@launch
                 }
                 modelDownloadWorkId = workId
-                progressToken = showProgressDialog("下载模型") {
-                    host.lifecycleScope.launch {
+                progressToken = showProgressDialog(host.text(R.string.model_mgmt_asr_download_progress_title)) {
+                    host.scope.launch {
                         try {
                             scheduler.cancel(workId)
                         } catch (error: CancellationException) {
                             throw error
                         } catch (error: Exception) {
-                            OverwritingToast.makeText(host, "取消下载失败：${error.message}", Toast.LENGTH_LONG).show()
+                            host.showToast(
+                                R.string.model_mgmt_cancel_download_failed,
+                                error.message.toString(),
+                                duration = Toast.LENGTH_LONG
+                            )
                         }
                     }
                 }
                 scheduler.observeTask(workId).takeWhile { taskState ->
                     if (taskState == null) {
                         modelDownloadWorkId = null
-                        throw IllegalStateException("下载任务不存在")
+                        throw IllegalStateException(host.text(R.string.model_mgmt_task_missing))
                     }
                     taskState.progress.message.takeIf(String::isNotBlank)?.let { message ->
                         updateProgressDialog(
@@ -559,15 +441,16 @@ class AsrModelImportController(
                             loadSavedSettings()
                             onModelsChanged()
                             val successMessage = if (taskState.type == ModelDownloadWorker.KIND_QWEN3_FORCED_ALIGNER) {
-                                "Qwen3 ForcedAligner 已下载并导入"
-                            } else "语音识别模型已下载、导入并自动选择"
-                            OverwritingToast.makeText(
-                                host, successMessage, Toast.LENGTH_LONG
-                            ).show()
+                                R.string.model_mgmt_asr_aligner_downloaded
+                            } else R.string.model_mgmt_asr_model_downloaded
+                            host.showToast(successMessage, duration = Toast.LENGTH_LONG)
                             false
                         }
                         TaskStatus.FAILED -> {
-                            showModelDownloadFailure(workId, taskState.errorMessage ?: "模型任务失败")
+                            showModelDownloadFailure(
+                                workId,
+                                taskState.errorMessage ?: host.text(R.string.model_mgmt_task_failed)
+                            )
                             false
                         }
                         TaskStatus.CANCELLED -> {
@@ -580,12 +463,16 @@ class AsrModelImportController(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                OverwritingToast.makeText(host, "模型任务失败：${error.message}", Toast.LENGTH_LONG).show()
+                host.showToast(
+                    R.string.model_mgmt_task_failed_with_reason,
+                    error.message.toString(),
+                    duration = Toast.LENGTH_LONG
+                )
             } finally {
                 progressToken?.let(::dismissProgressDialog)
                 modelDownloadJob = null
                 setAsrModelActionsEnabled(true)
-                if (isActive && !host.isDestroyed && modelDownloadWorkId == null) {
+                if (isActive && modelDownloadWorkId == null) {
                     migrateLegacySenseVoiceNpuSelectionIfNeeded()
                 }
             }
@@ -594,10 +481,10 @@ class AsrModelImportController(
 
     private fun showModelDownloadFailure(workId: UUID, error: String) {
         showMessageDialog(
-            title = "模型下载或导入失败",
-            message = "$error\n\n重试时会尝试从已保存的下载进度继续。",
-            confirmLabel = "重试",
-            dismissLabel = "关闭",
+            title = host.text(R.string.model_mgmt_asr_download_failed_title),
+            message = host.text(R.string.model_mgmt_download_retry_hint, error),
+            confirmLabel = host.text(R.string.model_mgmt_retry),
+            dismissLabel = host.text(R.string.model_mgmt_close),
             onConfirm = {
                 runWithModelStorageAccess { observeAsrModelDownload(retryWorkId = workId) }
             },
@@ -608,12 +495,10 @@ class AsrModelImportController(
     private fun confirmResetCurrentAsrModel() {
         val modelName = currentModelDisplayName()
         showMessageDialog(
-            title = "重置模型选择",
-            message =
-                "确定清除当前 $modelName 模型选择吗？\n\n" +
-                    "模型文件不会被删除，重置后需要重新选择或导入。",
-            confirmLabel = "重置",
-            dismissLabel = "取消",
+            title = host.text(R.string.model_mgmt_reset_selection_title),
+            message = host.text(R.string.model_mgmt_asr_reset_message, modelName),
+            confirmLabel = host.text(R.string.model_mgmt_reset),
+            dismissLabel = host.text(R.string.cancel),
             onConfirm = ::resetCurrentAsrModel
         )
     }
@@ -628,7 +513,7 @@ class AsrModelImportController(
         }
         loadModelPaths()
         updateAsrModelUi()
-        OverwritingToast.makeText(host, "已清除当前模型选择，请重新选择", Toast.LENGTH_SHORT).show()
+        host.showToast(R.string.model_mgmt_asr_reset_done)
     }
 
     private fun setAsrModelActionsEnabled(enabled: Boolean) {
@@ -641,31 +526,10 @@ class AsrModelImportController(
             return
         }
         pendingStorageAction = action
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val appIntent = Intent(
-                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                Uri.parse("package:$host.packageName")
-            )
-            val opened = runCatching { manageStorageLauncher.launch(appIntent) }.isSuccess ||
-                runCatching {
-                    manageStorageLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                }.isSuccess
-            if (!opened) {
-                pendingStorageAction = null
-                OverwritingToast.makeText(host, "无法打开存储权限设置", Toast.LENGTH_LONG).show()
-            }
-        } else {
-            writeStoragePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-        }
+        host.requestStorageAccess(StorageAccessRequester.ASR_IMPORT)
     }
 
-    private fun hasModelStorageAccess(): Boolean =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Environment.isExternalStorageManager()
-        } else {
-            ContextCompat.checkSelfPermission(host, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
-                PackageManager.PERMISSION_GRANTED
-        }
+    private fun hasModelStorageAccess(): Boolean = hasModelStorageAccess(context)
 
     private fun continuePendingModelDownload() {
         val action = pendingStorageAction ?: return
@@ -673,7 +537,7 @@ class AsrModelImportController(
         if (hasModelStorageAccess()) {
             action()
         } else {
-            OverwritingToast.makeText(host, "需要存储权限才能保存下载的模型", Toast.LENGTH_LONG).show()
+            host.showToast(R.string.model_mgmt_storage_required_for_download, duration = Toast.LENGTH_LONG)
         }
     }
 
@@ -692,7 +556,7 @@ class AsrModelImportController(
 
     private fun migrateLegacySenseVoiceNpuSelectionIfNeeded() {
         if (!isSenseVoiceNpu() || encoderPath.isBlank()) return
-        if (!QnnRuntimeAvailability.isAvailable(host)) return
+        if (!QnnRuntimeAvailability.isAvailable(context)) return
         if (SenseVoiceNpuModelPathPolicy.isContextBinarySelection(encoderPath)) return
         startSenseVoiceNpuImport(
             Uri.parse(encoderPath),
@@ -706,7 +570,7 @@ class AsrModelImportController(
             val fileName = getFileNameFromUri(uri)
             val senseVoiceNpu = isSenseVoiceNpu()
             if (!senseVoiceNpu) {
-                host.contentResolver.takePersistableUriPermission(
+                context.contentResolver.takePersistableUriPermission(
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
@@ -721,15 +585,14 @@ class AsrModelImportController(
                         fileName.endsWith(".onnx", ignoreCase = true)
             }
             if (!isValid) {
-                OverwritingToast.makeText(
-                    host,
+                host.showToast(
                     when {
-                        senseVoiceNpu -> "请选择 SenseVoice NPU 模型文件 libmodel.so"
-                        isSingleFileModel() -> "请选择 ONNX 模型文件（以 .onnx 结尾）"
-                        else -> "请选择 encoder 模型文件（文件名应包含 'encoder' 且以 .onnx 结尾）"
+                        senseVoiceNpu -> host.text(R.string.model_mgmt_asr_pick_npu_libmodel)
+                        isSingleFileModel() -> host.text(R.string.model_mgmt_asr_pick_onnx)
+                        else -> host.text(R.string.model_mgmt_asr_pick_named_onnx, "encoder")
                     },
                     Toast.LENGTH_LONG
-                ).show()
+                )
                 return
             }
 
@@ -745,9 +608,12 @@ class AsrModelImportController(
             }
 
         } catch (e: Exception) {
-            OverwritingToast.makeText(host, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
+            showSelectFileFailed(e)
         }
     }
+
+    private fun showSelectFileFailed(e: Exception) =
+        host.showToast(R.string.model_mgmt_select_file_failed, e.message.toString(), duration = Toast.LENGTH_LONG)
 
     private fun saveSelectedEncoder(uri: Uri, fileName: String) {
         encoderPath = uri.toString()
@@ -774,7 +640,10 @@ class AsrModelImportController(
 
     private fun showSenseVoiceNpuDurationPicker(uri: Uri) {
         val durations = intArrayOf(5, 10)
-        showOptionsDialog("选择 SenseVoice NPU 模型时长", durations.map { "$it 秒模型" }) {
+        showOptionsDialog(
+            host.text(R.string.model_mgmt_asr_npu_duration_title),
+            durations.map { host.text(R.string.model_mgmt_asr_npu_duration_option, it) }
+        ) {
             startSenseVoiceNpuImport(uri, durations[it])
         }
     }
@@ -783,34 +652,26 @@ class AsrModelImportController(
         if (modelDownloadJob?.isActive == true) return
         if (!ensureQnnRuntimeAvailable()) return
         if ("arm64-v8a" !in Build.SUPPORTED_ABIS) {
-            OverwritingToast.makeText(
-                host,
-                "SenseVoice NPU 模型仅支持 arm64-v8a 骁龙设备",
-                Toast.LENGTH_LONG
-            ).show()
+            host.showToast(R.string.model_mgmt_asr_npu_arm64_only, duration = Toast.LENGTH_LONG)
             return
         }
         val selectedTokensPath = settingsManager.getSenseVoiceTokensPath(
             SettingsManager.SENSEVOICE_PROVIDER_NPU
         )
         if (selectedTokensPath.isBlank() || !canReadSavedUri(selectedTokensPath)) {
-            OverwritingToast.makeText(
-                host,
-                "请先选择 SenseVoice NPU 模型对应的 tokens.txt，再导入 libmodel.so",
-                Toast.LENGTH_LONG
-            ).show()
+            host.showToast(R.string.model_mgmt_asr_npu_tokens_first, duration = Toast.LENGTH_LONG)
             return
         }
 
-        val progressToken = showProgressDialog("导入 SenseVoice NPU 模型") {
+        val progressToken = showProgressDialog(host.text(R.string.model_mgmt_asr_npu_import_title)) {
             modelDownloadJob?.cancel()
         }
         setAsrModelActionsEnabled(false)
 
-        modelDownloadJob = host.lifecycleScope.launch {
+        modelDownloadJob = host.scope.launch {
             val importer = SenseVoiceNpuModelImporter(
-                host,
-                host.contentResolver
+                context,
+                context.contentResolver
             )
             val previousModelPath = settingsManager.getSenseVoiceModelPath(
                 SettingsManager.SENSEVOICE_PROVIDER_NPU
@@ -822,9 +683,7 @@ class AsrModelImportController(
                         tokensUri = Uri.parse(selectedTokensPath),
                         durationSeconds = durationSeconds
                     ) { message ->
-                        host.runOnUiThread {
-                            updateProgressDialog(progressToken, ModelDownloader.Progress(message))
-                        }
+                        updateProgressDialog(progressToken, ModelDownloader.Progress(message))
                     }
                 }
                 val importedUri = Uri.fromFile(imported.contextBinary).toString()
@@ -846,19 +705,15 @@ class AsrModelImportController(
                 releasePersistedReadPermission(selectedTokensPath)
                 loadModelPaths()
                 updateAsrModelUi()
-                OverwritingToast.makeText(
-                    host,
-                    "SenseVoice NPU BIN 模型已生成并自动选择",
-                    Toast.LENGTH_LONG
-                ).show()
+                host.showToast(R.string.model_mgmt_asr_npu_imported, duration = Toast.LENGTH_LONG)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                OverwritingToast.makeText(
-                    host,
-                    "SenseVoice NPU 模型导入失败：${e.message}",
-                    Toast.LENGTH_LONG
-                ).show()
+                host.showToast(
+                    R.string.model_mgmt_asr_npu_import_failed,
+                    e.message.toString(),
+                    duration = Toast.LENGTH_LONG
+                )
             } finally {
                 dismissProgressDialog(progressToken)
                 setAsrModelActionsEnabled(true)
@@ -879,7 +734,7 @@ class AsrModelImportController(
 
     private fun handleSelectedDecoder(uri: Uri) {
         try {
-            host.contentResolver.takePersistableUriPermission(
+            context.contentResolver.takePersistableUriPermission(
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
@@ -888,11 +743,7 @@ class AsrModelImportController(
 
             if (!fileName.contains("decoder", ignoreCase = true) ||
                 !fileName.endsWith(".onnx", ignoreCase = true)) {
-                com.subtitleedit.util.OverwritingToast.makeText(
-                    host,
-                    "请选择 decoder 模型文件（文件名应包含 'decoder' 且以 .onnx 结尾）",
-                    Toast.LENGTH_LONG
-                ).show()
+                host.showToast(R.string.model_mgmt_asr_pick_named_onnx, "decoder", duration = Toast.LENGTH_LONG)
                 return
             }
 
@@ -905,23 +756,19 @@ class AsrModelImportController(
             updateAsrModelUi()
 
         } catch (e: Exception) {
-            com.subtitleedit.util.OverwritingToast.makeText(host, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
+            showSelectFileFailed(e)
         }
     }
 
     private fun handleSelectedJoiner(uri: Uri) {
         try {
-            host.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             val fileName = getFileNameFromUri(uri)
             val expectedName = if (isQwen3Asr()) "conv_frontend" else "joiner"
             if (!fileName.contains(expectedName, ignoreCase = true) ||
                 !fileName.endsWith(".onnx", ignoreCase = true)
             ) {
-                OverwritingToast.makeText(
-                    host,
-                    "请选择 ${if (isQwen3Asr()) "conv_frontend" else "joiner"} 模型文件（文件名应包含 '$expectedName' 且以 .onnx 结尾）",
-                    Toast.LENGTH_LONG
-                ).show()
+                host.showToast(R.string.model_mgmt_asr_pick_named_onnx, expectedName, duration = Toast.LENGTH_LONG)
                 return
             }
             joinerPath = uri.toString()
@@ -929,14 +776,14 @@ class AsrModelImportController(
             else settingsManager.setParakeetTdtJoinerPath(joinerPath)
             updateAsrModelUi()
         } catch (e: Exception) {
-            OverwritingToast.makeText(host, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
+            showSelectFileFailed(e)
         }
     }
 
     private fun handleSelectedTokens(uri: Uri) {
         try {
             if (isSenseVoiceNpu() && !ensureQnnRuntimeAvailable()) return
-            host.contentResolver.takePersistableUriPermission(
+            context.contentResolver.takePersistableUriPermission(
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
@@ -945,11 +792,7 @@ class AsrModelImportController(
 
             if (!fileName.contains("token", ignoreCase = true) ||
                 !fileName.endsWith(".txt", ignoreCase = true)) {
-                com.subtitleedit.util.OverwritingToast.makeText(
-                    host,
-                    "请选择 tokens 文件（文件名应包含 'token' 且以 .txt 结尾）",
-                    Toast.LENGTH_LONG
-                ).show()
+                host.showToast(R.string.model_mgmt_asr_pick_tokens, duration = Toast.LENGTH_LONG)
                 return
             }
 
@@ -963,7 +806,7 @@ class AsrModelImportController(
             updateAsrModelUi()
 
         } catch (e: Exception) {
-            com.subtitleedit.util.OverwritingToast.makeText(host, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
+            showSelectFileFailed(e)
         }
     }
 
@@ -972,43 +815,39 @@ class AsrModelImportController(
             "chat_template.json", "config.json", "merges.txt",
             "preprocessor_config.json", "tokenizer_config.json", "vocab.json"
         )
-        val source = DocumentFile.fromTreeUri(host, uri)
+        val source = DocumentFile.fromTreeUri(context, uri)
         val sourceFiles = source?.listFiles()?.associateBy { it.name?.lowercase(Locale.ROOT) }
         val selectedFiles = requiredFiles.mapNotNull { name ->
             sourceFiles?.get(name.lowercase(Locale.ROOT))?.takeIf { it.isFile }
                 ?.let { name to it }
         }
         if (selectedFiles.size != requiredFiles.size) {
-            OverwritingToast.makeText(
-                host,
-                "请选择包含六个 Qwen3-ASR tokenizer 配置文件的文件夹",
-                Toast.LENGTH_LONG
-            ).show()
+            host.showToast(R.string.model_mgmt_asr_pick_tokenizer_folder, duration = Toast.LENGTH_LONG)
             return
         }
 
         val variant = settingsManager.getQwen3AsrModelVariant()
-        val modelDirectory = File(host.filesDir, "models/qwen3-asr/$variant")
+        val modelDirectory = File(context.filesDir, "models/qwen3-asr/$variant")
         val target = File(modelDirectory, "tokenizer")
         val staging = File(modelDirectory, ".tokenizer_importing")
         val backup = File(modelDirectory, ".tokenizer_backup")
-        val progressToken = showProgressDialog("导入 Qwen3-ASR tokenizer") {
+        val progressToken = showProgressDialog(host.text(R.string.model_mgmt_asr_tokenizer_import_title)) {
             modelDownloadJob?.cancel(CancellationException("用户取消 Qwen3-ASR tokenizer 导入"))
         }
         setAsrModelActionsEnabled(false)
-        modelDownloadJob = host.lifecycleScope.launch {
+        modelDownloadJob = host.scope.launch {
             try {
                 val imported = withContext(Dispatchers.IO) {
                     if (!modelDirectory.exists() && !modelDirectory.mkdirs()) {
-                        throw IllegalStateException("无法创建 Qwen3-ASR 模型目录")
+                        throw IllegalStateException(host.text(R.string.model_mgmt_asr_tokenizer_mkdir_failed))
                     }
                     staging.deleteRecursively()
                     backup.deleteRecursively()
-                    if (!staging.mkdirs()) throw IllegalStateException("无法创建 tokenizer 暂存目录")
+                    if (!staging.mkdirs()) throw IllegalStateException(host.text(R.string.model_mgmt_asr_tokenizer_staging_failed))
                     selectedFiles.forEach { (name, document) ->
                         currentCoroutineContext().ensureActive()
                         val output = File(staging, name)
-                        host.contentResolver.openInputStream(document.uri)?.use { input ->
+                        context.contentResolver.openInputStream(document.uri)?.use { input ->
                             output.outputStream().use { destination ->
                                 val buffer = ByteArray(64 * 1024)
                                 while (true) {
@@ -1018,20 +857,22 @@ class AsrModelImportController(
                                     destination.write(buffer, 0, count)
                                 }
                             }
-                        } ?: throw IllegalStateException("无法读取 $name")
-                        if (output.length() == 0L) throw IllegalStateException("$name 文件为空")
+                        } ?: throw IllegalStateException(host.text(R.string.model_mgmt_asr_tokenizer_read_failed, name))
+                        if (output.length() == 0L) {
+                            throw IllegalStateException(host.text(R.string.model_mgmt_asr_tokenizer_file_empty, name))
+                        }
                     }
                     currentCoroutineContext().ensureActive()
                     if (target.exists() && !target.renameTo(backup)) {
-                        throw IllegalStateException("无法备份现有 tokenizer 文件夹")
+                        throw IllegalStateException(host.text(R.string.model_mgmt_asr_tokenizer_backup_failed))
                     }
                     try {
                         if (!staging.renameTo(target)) {
-                            throw IllegalStateException("无法安装 tokenizer 文件夹")
+                            throw IllegalStateException(host.text(R.string.model_mgmt_asr_tokenizer_install_failed))
                         }
                     } catch (error: Exception) {
                         if (backup.exists() && !backup.renameTo(target)) {
-                            error.addSuppressed(IllegalStateException("无法恢复原 tokenizer 文件夹"))
+                            error.addSuppressed(IllegalStateException(host.text(R.string.model_mgmt_asr_tokenizer_restore_failed)))
                         }
                         throw error
                     }
@@ -1044,7 +885,11 @@ class AsrModelImportController(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                OverwritingToast.makeText(host, "Tokenizer 导入失败：${e.message}", Toast.LENGTH_LONG).show()
+                host.showToast(
+                    R.string.model_mgmt_asr_tokenizer_import_failed,
+                    e.message.toString(),
+                    duration = Toast.LENGTH_LONG
+                )
             } finally {
                 withContext(NonCancellable + Dispatchers.IO) {
                     staging.deleteRecursively()
@@ -1060,55 +905,56 @@ class AsrModelImportController(
     private fun importQwen3ForcedAligner(uris: List<Uri>) {
         if (modelDownloadJob?.isActive == true) return
         if (uris.size != 2 || uris.distinct().size != 2) {
-            OverwritingToast.makeText(host, host.getString(R.string.qwen_aligner_select_pair), Toast.LENGTH_LONG).show()
+            host.showToast(R.string.qwen_aligner_select_pair, duration = Toast.LENGTH_LONG)
             return
         }
         setAsrModelActionsEnabled(false)
-        modelDownloadJob = host.lifecycleScope.launch {
+        modelDownloadJob = host.scope.launch {
             try {
                 val graph = withContext(Dispatchers.IO) {
                     val files = uris.map { uri ->
-                        val document = DocumentFile.fromSingleUri(host, uri)
-                            ?: error("无法读取所选文件信息")
-                        val name = document.name ?: error("无法读取模型文件名，请保留原始文件名")
-                        val file = Qwen3ForcedAlignerPathResolver.resolve(host, uri)
-                            ?: error("无法取得 $name 的本地文件路径，请从设备本地存储选择")
-                        check(file.name == name) { "$name 的文件路径与所选文件不一致" }
+                        val document = DocumentFile.fromSingleUri(context, uri)
+                            ?: error(host.text(R.string.model_mgmt_asr_aligner_read_info_failed))
+                        val name = document.name
+                            ?: error(host.text(R.string.model_mgmt_asr_aligner_read_name_failed))
+                        val file = Qwen3ForcedAlignerPathResolver.resolve(context, uri)
+                            ?: error(host.text(R.string.model_mgmt_asr_aligner_local_path_failed, name))
+                        check(file.name == name) { host.text(R.string.model_mgmt_asr_aligner_path_mismatch, name) }
                         name to file
                     }
                     val graphName = Qwen3ForcedAlignerModelFiles.graphName(files.map { it.first })
                     val selectedGraph = files.single { it.first == graphName }.second
                     check(files.all { it.second.canonicalFile.parentFile == selectedGraph.canonicalFile.parentFile }) {
-                        "模型与权重文件必须位于同一文件夹"
+                        host.text(R.string.model_mgmt_asr_aligner_same_folder)
                     }
-                    check(Qwen3ForcedAlignerModelFiles.isConfigured(selectedGraph, host.filesDir)) {
-                        "ForcedAligner 模型或配套权重缺失/不可读，请检查两个文件"
+                    check(Qwen3ForcedAlignerModelFiles.isConfigured(selectedGraph, context.filesDir)) {
+                        host.text(R.string.model_mgmt_asr_aligner_files_missing)
                     }
                     selectedGraph
                 }
                 settingsManager.setQwen3ForcedAlignerPath(Uri.fromFile(graph).toString())
                 updateAsrModelUi()
                 onModelsChanged()
-                OverwritingToast.makeText(host, "已选择 Qwen3 ForcedAligner 模型及权重", Toast.LENGTH_SHORT).show()
+                host.showToast(R.string.model_mgmt_asr_aligner_selected)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                OverwritingToast.makeText(
-                    host,
-                    "ForcedAligner 导入失败：${error.message}",
-                    Toast.LENGTH_LONG
-                ).show()
+                host.showToast(
+                    R.string.model_mgmt_asr_aligner_import_failed,
+                    error.message.toString(),
+                    duration = Toast.LENGTH_LONG
+                )
             } finally {
                 modelDownloadJob = null
                 setAsrModelActionsEnabled(true)
-                if (!host.isDestroyed) updateAsrModelUi()
+                updateAsrModelUi()
             }
         }
     }
 
     private fun handleSelectedVad(uri: Uri) {
         try {
-            host.contentResolver.takePersistableUriPermission(
+            context.contentResolver.takePersistableUriPermission(
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
@@ -1117,11 +963,7 @@ class AsrModelImportController(
 
             if (!fileName.contains("vad", ignoreCase = true) ||
                 !fileName.endsWith(".onnx", ignoreCase = true)) {
-                com.subtitleedit.util.OverwritingToast.makeText(
-                    host,
-                    "请选择 VAD 模型文件（文件名应包含 'vad' 且以 .onnx 结尾）",
-                    Toast.LENGTH_LONG
-                ).show()
+                host.showToast(R.string.model_mgmt_asr_pick_vad, duration = Toast.LENGTH_LONG)
                 return
             }
 
@@ -1129,10 +971,10 @@ class AsrModelImportController(
             settingsManager.setVadModelPath(vadModelPath)
             settingsManager.setVadUseBuiltInModel(false)
             updateVadModelUi()
-            com.subtitleedit.util.OverwritingToast.makeText(host, "外部 VAD 模型已选择", Toast.LENGTH_SHORT).show()
+            host.showToast(R.string.model_mgmt_asr_vad_selected)
 
         } catch (e: Exception) {
-            com.subtitleedit.util.OverwritingToast.makeText(host, "选择文件失败：${e.message}", Toast.LENGTH_LONG).show()
+            showSelectFileFailed(e)
         }
     }
 
@@ -1145,105 +987,36 @@ class AsrModelImportController(
         )
     }
 
-    private fun getFileNameFromUri(uri: Uri): String {
-        return runCatching {
-            var fileName = uri.lastPathSegment ?: "未知文件"
-            host.contentResolver.query(uri, null, null, null, null)?.use {
-                val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                if (it.moveToFirst() && nameIndex >= 0) {
-                    fileName = it.getString(nameIndex)
-                }
-            }
-            fileName
-        }.getOrElse { uri.lastPathSegment ?: "未知文件" }
-    }
+    private fun getFileNameFromUri(uri: Uri): String =
+        UriDisplayName.of(context, uri, uri.lastPathSegment ?: host.text(R.string.model_mgmt_unknown_file))
 
     private fun showModelGuide() {
         val message = when (modelType) {
             SettingsManager.ASR_MODEL_SENSEVOICE ->
                 if (settingsManager.getSenseVoiceProvider() == SettingsManager.SENSEVOICE_PROVIDER_NPU) {
-                    """
-                        SenseVoice NPU 模型下载指引：
-
-                        1. 点击蓝色下载按钮选择 5 秒或 10 秒模型，应用会自动下载、解压、生成 model.bin 并选择。5秒的模型一次最长只能识别5秒钟,也就是说单句话超过时间会被强制分段,请根据需要自行选择合适的模型。
-
-                        2. 手动导入时请先选择 tokens.txt，再选择 libmodel.so；应用会立即生成并索引 model.bin，不会保留对 libmodel.so 的授权。
-
-                        3. NPU 模型使用 Qualcomm QNN HTP，仅支持兼容的 arm64 骁龙设备,首次使用需要一段时间进行初始化。
-
-                        4. 请注意,NPU模型的识别的速度不一定比CPU模型快,甚至可能会更慢,但是一定程度上可以减少转录时的设备负载。
-
-                        5. SenseVoice 支持中文、英语、日语、韩语和粤语，并能识别部分声音事件与情绪。
-                    """.trimIndent()
+                    host.text(R.string.model_mgmt_asr_guide_sensevoice_npu)
                 } else {
-                    """
-                        SenseVoice CPU 模型下载指引：
-
-                        1. 推荐点击“选择模型”右侧的蓝色下载按钮，应用会自动下载、解压并选择模型。
-
-                        2. SenseVoice 支持中文、英语、日语、韩语和粤语，并能识别部分声音事件与情绪。
-
-                        3. 手动导入需要选择 model.int8.onnx（或 model.onnx）和 tokens.txt。
-                    """.trimIndent()
+                    host.text(R.string.model_mgmt_asr_guide_sensevoice_cpu)
                 }
-            SettingsManager.ASR_MODEL_PARAKEET_TDT -> """
-                Parakeet TDT 0.6B v3 模型说明：
-
-                1. 推荐点击蓝色下载按钮一键下载、解压并选择模型，约占用 640 MB。
-
-                2. 这是 NVIDIA NeMo FastConformer-TDT 模型，支持英语、法语、德语、西班牙语、意大利语、俄语、乌克兰语等 25 种欧洲语言，可自动识别语言，并输出标点、大小写和时间信息。
-
-                3. 当前应用仍按 VAD 或固定时长分段进行离线识别；每个分段内部可利用 TDT 上下文，但不会在分段之间传递解码状态。
-
-                4. 手动导入需要选择 encoder.int8.onnx、decoder.int8.onnx、joiner.int8.onnx 和 tokens.txt。
-
-                5. 该模型不支持中文和日语。
-            """.trimIndent()
-            SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> """
-                Parakeet CTC 0.6B 日语模型说明：
-
-                1. 推荐点击蓝色下载按钮一键下载、解压并选择模型，约占用 628 MB。
-
-                2. 这是 NVIDIA NeMo Parakeet 日语模型导出的 CTC 分支，适合日语音频转写和日语字幕生成。
-
-                3. CTC 结构使用单个模型文件，解码和部署比 TDT 简单；该模型只用于日语，不支持中文，也不用于多语自动检测。
-
-                4. 手动导入需要选择 model.int8.onnx 和 tokens.txt。
-            """.trimIndent()
-            SettingsManager.ASR_MODEL_QWEN3_ASR -> """
-                Qwen3-ASR 模型说明：
-
-                点击 ASR 模型旁的蓝色下载按钮，可从魔塔一键获取 conv_frontend、encoder、decoder 和 tokenizer 文件。
-
-                ASR 模型手动导入需要选择 conv_frontend.onnx、encoder.int8.onnx、decoder.int8.onnx 和包含六个 tokenizer 配置文件的文件夹。
-
-                强制对齐打轴还需要 Qwen3 ForcedAligner 模型。点击其旁的蓝色下载按钮，可从项目 Release 下载两卷压缩包，自动校验并导入 Download 模型目录；0.6B 和 1.7B ASR 共用此对齐模型。重置仅清除选择，不删除模型文件。
-
-                手动导入强制对齐模型时，请同时选择 forced_aligner.onnx 与 forced_aligner.onnx.data 两个文件并保留原名。
-            """.trimIndent()
-            else -> """
-                Whisper 模型下载指引：
-
-                Whisper 是通用多语言语音识别模型，可在源语言中选择指定语言或使用自动检测。
-
-                1. 推荐点击蓝色下载按钮选择 Tiny、Small、Large v3 或 Turbo，应用会自动下载、解压并选择模型。
-
-                2. 模型越大通常识别效果越好，但需要更多存储、内存和处理时间。
-
-                3. 手动导入需要选择 encoder.onnx、decoder.onnx 和 tokens.txt。
-            """.trimIndent()
+            SettingsManager.ASR_MODEL_PARAKEET_TDT -> host.text(R.string.model_mgmt_asr_guide_parakeet_tdt)
+            SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> host.text(R.string.model_mgmt_asr_guide_parakeet_ctc)
+            SettingsManager.ASR_MODEL_QWEN3_ASR -> host.text(R.string.model_mgmt_asr_guide_qwen3)
+            else -> host.text(R.string.model_mgmt_asr_guide_whisper)
         }
 
         val isQwenGuide = modelType == SettingsManager.ASR_MODEL_QWEN3_ASR
         val guideMessage = if (isQwenGuide) {
             val url = Qwen3ForcedAlignerReleaseDownloader.PROJECT_URL
-            "$message\n\n强制对齐模型项目地址：$url"
+            host.text(R.string.model_mgmt_asr_guide_aligner_project, message, url)
         } else message
         showMessageDialog(
-            title = "模型下载指引",
+            title = host.text(R.string.model_mgmt_asr_guide_title),
             message = guideMessage,
-            confirmLabel = "确定",
-            auxiliaryLabel = if (isQwenGuide) "打开魔塔" else "打开 GitHub",
+            confirmLabel = host.text(R.string.model_mgmt_ok),
+            auxiliaryLabel = host.text(
+                if (isQwenGuide) R.string.model_mgmt_asr_guide_open_modelscope
+                else R.string.model_mgmt_asr_guide_open_github
+            ),
             onAuxiliary = {
                 val url = if (isQwenGuide) {
                     ModelDownloader.QWEN3_ASR_MODELSCOPE_URL
@@ -1255,8 +1028,7 @@ class AsrModelImportController(
                 } else {
                     "https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models"
                 }
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                host.startActivity(intent)
+                host.sendEvent(ModelManagementEvent.OpenUrl(url))
             }
         )
     }
@@ -1269,7 +1041,7 @@ class AsrModelImportController(
             SettingsManager.ASR_MODEL_WHISPER
         )
         val labels = arrayOf(
-            "SenseVoice（推荐）",
+            host.text(R.string.model_mgmt_asr_type_sensevoice_recommended),
             "Qwen3-ASR",
             "Parakeet",
             "Whisper"
@@ -1281,7 +1053,11 @@ class AsrModelImportController(
             SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> 2
             else -> 3
         }
-        showOptionsDialog("选择识别模型", labels.toList(), selectedIndex = checked) { which ->
+        showOptionsDialog(
+            host.text(R.string.model_mgmt_asr_select_type_title),
+            labels.toList(),
+            selectedIndex = checked
+        ) { which ->
                 val selectedType = types[which]
                 if (selectedType != modelType) {
                     modelType = selectedType
@@ -1407,7 +1183,7 @@ class AsrModelImportController(
             val file = uri.path?.let(::File) ?: return false
             file.isFile || (isQwen3Asr() && uriString == tokensPath && file.isDirectory)
         } else {
-            host.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
         }
     }.getOrDefault(false)
 
@@ -1415,12 +1191,12 @@ class AsrModelImportController(
         if (uriString.isBlank()) return
         val uri = Uri.parse(uriString)
         if (uri.scheme != "content") return
-        val hasPersistedReadPermission = host.contentResolver.persistedUriPermissions.any {
+        val hasPersistedReadPermission = context.contentResolver.persistedUriPermissions.any {
             it.uri == uri && it.isReadPermission
         }
         if (!hasPersistedReadPermission) return
         runCatching {
-            host.contentResolver.releasePersistableUriPermission(
+            context.contentResolver.releasePersistableUriPermission(
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
@@ -1430,7 +1206,7 @@ class AsrModelImportController(
     private fun showAccessExpiredMessage() {
         if (accessWarningShown) return
         accessWarningShown = true
-        OverwritingToast.makeText(host, "模型访问权限已失效，请重新选择模型文件", Toast.LENGTH_LONG).show()
+        host.showToast(R.string.model_mgmt_access_expired, duration = Toast.LENGTH_LONG)
     }
 
     private fun updateAsrModelUi() {
@@ -1446,7 +1222,7 @@ class AsrModelImportController(
         val alignerUi = if (qwen3Asr) {
             val alignerPath = settingsManager.getQwen3ForcedAlignerPath()
             val alignerFile = localFile(alignerPath)
-            val complete = Qwen3ForcedAlignerModelFiles.isConfigured(alignerFile, host.filesDir)
+            val complete = Qwen3ForcedAlignerModelFiles.isConfigured(alignerFile, context.filesDir)
             val downloadedGraph = if (hasModelStorageAccess()) {
                 Qwen3ForcedAlignerModelFiles.findCompleteGraph(qwen3ForcedAlignerDirectory())
             } else null
@@ -1510,7 +1286,7 @@ class AsrModelImportController(
         } else {
             R.string.model_import_tokens_file
         }
-        val qnnRuntimeAvailable = QnnRuntimeAvailability.isAvailable(host)
+        val qnnRuntimeAvailable = QnnRuntimeAvailability.isAvailable(context)
         uiState = uiState.copy(
             modelTitleRes = modelTitleRes,
             encoderLabelRes = encoderLabelRes,
@@ -1582,7 +1358,7 @@ class AsrModelImportController(
             ) {
                 val selectedDuration = settingsManager.getSenseVoiceNpuDurationSeconds()
                 val durations = listOf(selectedDuration, if (selectedDuration == 5) 10 else 5)
-                val importer = SenseVoiceNpuModelImporter(host, host.contentResolver)
+                val importer = SenseVoiceNpuModelImporter(context, context.contentResolver)
                 val internalModel = durations.firstNotNullOfOrNull { seconds ->
                     importer.findInstalledModel(seconds)?.let { seconds to (it.contextBinary to it.tokens) }
                 }
@@ -1620,7 +1396,7 @@ class AsrModelImportController(
 
     fun refreshForcedAlignerStatus() {
         val selected = Qwen3ForcedAlignerModelFiles.configuredGraph(
-            localFile(settingsManager.getQwen3ForcedAlignerPath()), host.filesDir
+            localFile(settingsManager.getQwen3ForcedAlignerPath()), context.filesDir
         )
         val detectedPath = selected?.let { Uri.fromFile(it).toString() }.orEmpty()
         if (settingsManager.getQwen3ForcedAlignerPath() != detectedPath) {
@@ -1631,7 +1407,7 @@ class AsrModelImportController(
 
     private fun hasConfiguredQwen3ForcedAligner(): Boolean =
         Qwen3ForcedAlignerModelFiles.isConfigured(
-            localFile(settingsManager.getQwen3ForcedAlignerPath()), host.filesDir
+            localFile(settingsManager.getQwen3ForcedAlignerPath()), context.filesDir
         )
 
     private fun isSingleFileModel(): Boolean =
@@ -1645,33 +1421,30 @@ class AsrModelImportController(
     private fun isQwen3Asr(): Boolean = modelType == SettingsManager.ASR_MODEL_QWEN3_ASR
 
     private fun ensureQnnRuntimeAvailable(): Boolean {
-        if (QnnRuntimeAvailability.isAvailable(host)) return true
+        if (QnnRuntimeAvailability.isAvailable(context)) return true
         showMessageDialog(
-            title = "需要安装 QNN 版",
-            message =
-                "当前安装包不包含 Qualcomm QNN 运行库，无法使用 SenseVoice NPU 模型。\n\n" +
-                    "请前往项目发布页下载相同版本或更新版本的 arm64 QNN 安装包，并直接覆盖安装。已有模型和软件数据不会被清除。",
-            confirmLabel = "打开下载页",
-            dismissLabel = "取消",
+            title = host.text(R.string.model_mgmt_asr_qnn_required_title),
+            message = host.text(R.string.model_mgmt_asr_qnn_required_message),
+            confirmLabel = host.text(R.string.model_mgmt_asr_open_download_page),
+            dismissLabel = host.text(R.string.cancel),
             onConfirm = ::openQnnEditionReleases
         )
         return false
     }
 
     private fun openQnnEditionReleases() {
-        val intent = Intent(
-            Intent.ACTION_VIEW,
-            Uri.parse(QnnRuntimeAvailability.QNN_EDITION_RELEASES_URL)
+        host.sendEvent(
+            ModelManagementEvent.OpenUrl(
+                QnnRuntimeAvailability.QNN_EDITION_RELEASES_URL,
+                failureMessage = host.text(R.string.model_mgmt_open_download_page_failed)
+            )
         )
-        runCatching { host.startActivity(intent) }.onFailure {
-            OverwritingToast.makeText(host, "无法打开下载页", Toast.LENGTH_LONG).show()
-        }
     }
 
     private fun currentModelDisplayName(): String = when (modelType) {
         SettingsManager.ASR_MODEL_SENSEVOICE -> "SenseVoice"
         SettingsManager.ASR_MODEL_PARAKEET_TDT -> "Parakeet TDT 0.6B v3"
-        SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> "Parakeet CTC 0.6B 日语"
+        SettingsManager.ASR_MODEL_PARAKEET_CTC_JA -> host.text(R.string.model_mgmt_asr_name_parakeet_ctc_ja)
         SettingsManager.ASR_MODEL_QWEN3_ASR -> "Qwen3-ASR"
         else -> "Whisper"
     }
@@ -1680,10 +1453,15 @@ class AsrModelImportController(
         loadSavedSettings()
     }
 
+    /** Called from ViewModel.onCleared(): the page is finishing for real. */
     fun dispose() {
         modelDownloadJob?.cancel()
-        dialog = null
+        setDialog(null)
         pendingStorageAction = null
         pendingNotificationAction = null
+    }
+
+    private companion object {
+        const val KEY_WORK_ID = "asr-model-download-work-id"
     }
 }

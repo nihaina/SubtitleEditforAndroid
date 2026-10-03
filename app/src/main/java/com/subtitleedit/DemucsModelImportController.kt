@@ -1,221 +1,130 @@
 package com.subtitleedit
 
 import android.Manifest
-import android.content.Intent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
-import android.os.Bundle
-import android.os.Environment
-import android.provider.Settings
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.lifecycle.SavedStateHandle
 import com.subtitleedit.demix.VocalSeparationEngine
 import com.subtitleedit.feature.ui.DemucsModelImportAction
 import com.subtitleedit.feature.ui.DemucsModelImportUiState
-import com.subtitleedit.feature.ui.ModelImportDialogUi
 import com.subtitleedit.util.ModelDownloader
-import com.subtitleedit.util.OverwritingToast
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.util.UriDisplayName
 import com.subtitleedit.task.TaskStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
 import java.io.File
-import java.util.Locale
 import java.util.UUID
 
-class DemucsModelImportController(private val host: AppCompatActivity) {
-    var uiState by mutableStateOf(DemucsModelImportUiState())
-        private set
-    var dialog by mutableStateOf<ModelImportDialogUi?>(null)
-        private set
-    private lateinit var settings: SettingsManager
-    private var loading = false
+/**
+ * Vocal separation model import section of the model management page. Owned by
+ * ModelManagementViewModel so its state and running download survive Activity
+ * recreation; pickers/permissions/navigation go through [host] events.
+ */
+internal class DemucsModelImportController(
+    private val host: ModelImportHost,
+    private val savedState: SavedStateHandle
+) : ModelImportDialogState(host) {
+    private val _uiState = MutableStateFlow(DemucsModelImportUiState())
+    val state: StateFlow<DemucsModelImportUiState> = _uiState.asStateFlow()
+    private var uiState: DemucsModelImportUiState
+        get() = _uiState.value
+        set(value) { _uiState.value = value }
+
+    private val context: Context get() = host.app
+    private val settings: SettingsManager = SettingsManager.getInstance(host.app)
     private var accessWarningShown = false
     private var modelType = SettingsManager.DEMIX_MODEL_GENERAL
     private var modelDownloadJob: Job? = null
-    private var modelDownloadWorkId: UUID? = null
-    private var nextProgressToken = 0L
+
+    /** Kept in SavedStateHandle so an active download is re-attached after process death. */
+    private var modelDownloadWorkId: UUID?
+        get() = savedState.get<String>(KEY_WORK_ID)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        set(value) { savedState[KEY_WORK_ID] = value?.toString() }
     private var pendingGeneralModelDownload = false
     private var pendingNotificationPermission = false
 
     private val notificationPermissionPreferences by lazy {
-        host.getSharedPreferences("task_notifications", Context.MODE_PRIVATE)
+        context.getSharedPreferences("task_notifications", Context.MODE_PRIVATE)
     }
 
-    private val vocalsModelPicker = modelPicker(VocalSeparationEngine.Stem.VOCALS)
-    private val drumsModelPicker = modelPicker(VocalSeparationEngine.Stem.DRUMS)
-    private val bassModelPicker = modelPicker(VocalSeparationEngine.Stem.BASS)
-    private val otherModelPicker = modelPicker(VocalSeparationEngine.Stem.OTHER)
-    private val generalModelPicker = host.registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri -> uri?.let(::handleSelectedGeneralModel) }
+    init {
+        loadSettings()
+        restoreActiveGeneralModelDownload()
+    }
 
-    private val manageStorageLauncher = host.registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { continuePendingGeneralModelDownload() }
-
-    private val writeStoragePermissionLauncher = host.registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { continuePendingGeneralModelDownload() }
-
-    private val notificationPermissionLauncher = host.registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        notificationPermissionPreferences.edit().putBoolean("requested", true).apply()
-        if (pendingNotificationPermission) {
-            pendingNotificationPermission = false
-            if (!granted) {
-                OverwritingToast.makeText(
-                    host,
-                    "未开启通知，下载仍会继续，可在此页面查看进度",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-            startGeneralModelDownload()
+    fun onDocumentPicked(target: ModelPickTarget, uri: Uri) {
+        when (target) {
+            ModelPickTarget.DEMUCS_GENERAL -> handleSelectedGeneralModel(uri)
+            ModelPickTarget.DEMUCS_VOCALS -> handleSelectedModel(VocalSeparationEngine.Stem.VOCALS, uri)
+            ModelPickTarget.DEMUCS_DRUMS -> handleSelectedModel(VocalSeparationEngine.Stem.DRUMS, uri)
+            ModelPickTarget.DEMUCS_BASS -> handleSelectedModel(VocalSeparationEngine.Stem.BASS, uri)
+            ModelPickTarget.DEMUCS_OTHER -> handleSelectedModel(VocalSeparationEngine.Stem.OTHER, uri)
+            else -> Unit
         }
     }
 
-    private fun modelPicker(stem: VocalSeparationEngine.Stem) = host.registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri -> uri?.let { handleSelectedModel(stem, it) } }
+    /** Result of the storage permission flow requested by this controller. */
+    fun onStorageAccessResult() = continuePendingGeneralModelDownload()
 
-    init {
-        settings = SettingsManager.getInstance(host)
-        loadSettings()
-        restoreModelDownloadState()
-        restoreActiveGeneralModelDownload()
+    /** The storage permission settings screen could not be opened. */
+    fun onStorageAccessUnavailable() {
+        pendingGeneralModelDownload = false
+        host.showToast(R.string.model_mgmt_storage_settings_unavailable, duration = Toast.LENGTH_LONG)
+    }
+
+    fun onNotificationPermissionResult(granted: Boolean) {
+        if (!pendingNotificationPermission) return
+        pendingNotificationPermission = false
+        if (!granted) host.showToast(R.string.model_mgmt_notification_denied, duration = Toast.LENGTH_LONG)
+        startGeneralModelDownload()
     }
 
     fun onAction(action: DemucsModelImportAction) {
         when (action) {
-            DemucsModelImportAction.Configure -> host.startActivity(
-                Intent(host, VocalSeparationSettingsActivity::class.java)
+            DemucsModelImportAction.Configure -> host.sendEvent(
+                ModelManagementEvent.OpenScreen(VocalSeparationSettingsActivity::class.java)
             )
             DemucsModelImportAction.SelectModelType -> showDemixModelPicker()
-            DemucsModelImportAction.SelectGeneralModel -> generalModelPicker.launch(modelMimeTypes)
+            DemucsModelImportAction.SelectGeneralModel -> launchPicker(ModelPickTarget.DEMUCS_GENERAL)
             DemucsModelImportAction.DownloadGeneralModel -> confirmGeneralModelDownload()
             DemucsModelImportAction.ResetGeneralModel -> confirmResetGeneralModelSelection()
-            DemucsModelImportAction.SelectVocalsModel -> vocalsModelPicker.launch(modelMimeTypes)
-            DemucsModelImportAction.SelectDrumsModel -> drumsModelPicker.launch(modelMimeTypes)
-            DemucsModelImportAction.SelectBassModel -> bassModelPicker.launch(modelMimeTypes)
-            DemucsModelImportAction.SelectOtherModel -> otherModelPicker.launch(modelMimeTypes)
+            DemucsModelImportAction.SelectVocalsModel -> launchPicker(ModelPickTarget.DEMUCS_VOCALS)
+            DemucsModelImportAction.SelectDrumsModel -> launchPicker(ModelPickTarget.DEMUCS_DRUMS)
+            DemucsModelImportAction.SelectBassModel -> launchPicker(ModelPickTarget.DEMUCS_BASS)
+            DemucsModelImportAction.SelectOtherModel -> launchPicker(ModelPickTarget.DEMUCS_OTHER)
             DemucsModelImportAction.ShowGuide -> showModelHelp()
         }
     }
 
-    private val modelMimeTypes = arrayOf("application/octet-stream", "application/onnx", "*/*")
-
-    private fun showMessageDialog(
-        title: String,
-        message: String,
-        confirmLabel: String? = "确定",
-        dismissLabel: String? = null,
-        auxiliaryLabel: String? = null,
-        destructiveConfirm: Boolean = false,
-        onConfirm: () -> Unit = {},
-        onDismiss: () -> Unit = {},
-        onAuxiliary: () -> Unit = {}
-    ) {
-        dialog = ModelImportDialogUi.Message(
-            title = title,
-            message = message,
-            confirmLabel = confirmLabel,
-            dismissLabel = dismissLabel,
-            auxiliaryLabel = auxiliaryLabel,
-            destructiveConfirm = destructiveConfirm,
-            onConfirm = { dialog = null; onConfirm() },
-            onDismiss = { dialog = null; onDismiss() },
-            onAuxiliary = { dialog = null; onAuxiliary() }
-        )
-    }
-
-    private fun showOptionsDialog(
-        title: String,
-        options: List<String>,
-        selectedIndex: Int? = null,
-        onSelect: (Int) -> Unit
-    ) {
-        dialog = ModelImportDialogUi.Options(
-            title = title,
-            options = options,
-            selectedIndex = selectedIndex,
-            onSelect = { index -> dialog = null; onSelect(index) },
-            onDismiss = { dialog = null }
-        )
-    }
-
-    private fun showProgressDialog(title: String, onCancel: () -> Unit): Long {
-        val token = ++nextProgressToken
-        dialog = ModelImportDialogUi.Progress(
-            token = token,
-            title = title,
-            message = "正在准备下载",
-            onCancel = {
-                if ((dialog as? ModelImportDialogUi.Progress)?.token == token) dialog = null
-                onCancel()
-            }
-        )
-        return token
-    }
-
-    private fun updateProgressDialog(token: Long, progress: ModelDownloader.Progress) {
-        val current = dialog as? ModelImportDialogUi.Progress ?: return
-        if (current.token != token) return
-        val total = progress.totalBytes
-        val message = if (total > 0L) {
-            val percent = ((progress.downloadedBytes * 100L) / total).coerceIn(0L, 100L)
-            "${progress.message}：$percent%（${formatBytes(progress.downloadedBytes)} / ${formatBytes(total)}）"
-        } else {
-            "${progress.message}：已处理 ${formatBytes(progress.downloadedBytes.coerceAtLeast(0L))}"
-        }
-        dialog = current.copy(
-            message = message,
-            progress = if (total > 0L) progress.downloadedBytes.toFloat() / total else null
-        )
-    }
-
-    private fun dismissProgressDialog(token: Long) {
-        if ((dialog as? ModelImportDialogUi.Progress)?.token == token) dialog = null
-    }
-
-    private fun formatBytes(bytes: Long): String = when {
-        bytes >= 1024L * 1024L * 1024L -> String.format(Locale.getDefault(), "%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0))
-        bytes >= 1024L * 1024L -> String.format(Locale.getDefault(), "%.1f MB", bytes / (1024.0 * 1024.0))
-        bytes >= 1024L -> String.format(Locale.getDefault(), "%.1f KB", bytes / 1024.0)
-        else -> "$bytes B"
-    }
+    private fun launchPicker(target: ModelPickTarget) = host.sendEvent(ModelManagementEvent.PickDocument(target))
 
     private fun confirmGeneralModelDownload() {
         showMessageDialog(
-            title = "一键下载导入",
-            message =
-                "是否一键下载导入 HTDemucs 通用模型？\n\n" +
-                    "文件存放至：\n/Download/SubtitleEdit/models/separation\n\n" +
-                    "约占用 158 MB 存储空间。",
-            confirmLabel = "下载并导入",
-            dismissLabel = "取消",
+            title = host.text(R.string.model_mgmt_demucs_download_title),
+            message = host.text(R.string.model_mgmt_demucs_download_message),
+            confirmLabel = host.text(R.string.model_mgmt_download_and_import),
+            dismissLabel = host.text(R.string.cancel),
             onConfirm = ::startGeneralModelDownload
         )
     }
 
     private fun confirmResetGeneralModelSelection() {
         showMessageDialog(
-            title = "重置模型选择",
-            message =
-                "确定清除当前人声分离通用模型选择吗？\n\n" +
-                    "模型文件不会被删除，重置后需要重新选择或导入。",
-            confirmLabel = "重置",
-            dismissLabel = "取消",
+            title = host.text(R.string.model_mgmt_reset_selection_title),
+            message = host.text(R.string.model_mgmt_demucs_reset_message),
+            confirmLabel = host.text(R.string.model_mgmt_reset),
+            dismissLabel = host.text(R.string.cancel),
             onConfirm = ::resetGeneralModelSelection
         )
     }
@@ -223,7 +132,7 @@ class DemucsModelImportController(private val host: AppCompatActivity) {
     private fun resetGeneralModelSelection() {
         settings.setDemixModelUri("general", "")
         updateGeneralModelUi()
-        OverwritingToast.makeText(host, "已清除通用模型选择，请重新选择", Toast.LENGTH_SHORT).show()
+        host.showToast(R.string.model_mgmt_demucs_reset_done)
     }
 
     private fun startGeneralModelDownload() {
@@ -231,12 +140,12 @@ class DemucsModelImportController(private val host: AppCompatActivity) {
         if (pendingNotificationPermission) return
         if (!ensureModelStorageAccess()) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(host, Manifest.permission.POST_NOTIFICATIONS) !=
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED &&
             !notificationPermissionPreferences.getBoolean("requested", false)
         ) {
             pendingNotificationPermission = true
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            host.sendEvent(ModelManagementEvent.RequestNotificationPermission)
             return
         }
         observeGeneralModelDownload(enqueue = true)
@@ -246,45 +155,34 @@ class DemucsModelImportController(private val host: AppCompatActivity) {
         observeGeneralModelDownload(enqueue = false)
     }
 
-    private fun restoreModelDownloadState() {
-        val key = "demix-model-download"
-        val savedState = host.savedStateRegistry.consumeRestoredStateForKey(key)
-        modelDownloadWorkId = savedState?.getString("work-id")?.let {
-            runCatching { UUID.fromString(it) }.getOrNull()
-        }
-        host.savedStateRegistry.registerSavedStateProvider(key) {
-            Bundle().apply { putString("work-id", modelDownloadWorkId?.toString()) }
-        }
-    }
-
     private fun observeGeneralModelDownload(enqueue: Boolean) {
         if (modelDownloadJob?.isActive == true) return
         setModelDownloadActionsEnabled(false)
-        modelDownloadJob = host.lifecycleScope.launch {
+        modelDownloadJob = host.scope.launch {
             var progressToken: Long? = null
             try {
-                val scheduler = (host.application as SubtitleEditApplication).dependencies.taskWorkScheduler
+                val scheduler = (host.app as SubtitleEditApplication).dependencies.taskWorkScheduler
                 val workId = if (enqueue) {
                     scheduler.enqueueGeneralModelDownload()
                 } else {
                     scheduler.findActiveModelDownload(modelDownloadWorkId) ?: return@launch
                 }
                 modelDownloadWorkId = workId
-                progressToken = showProgressDialog("下载人声分离模型") {
-                    host.lifecycleScope.launch {
+                progressToken = showProgressDialog(host.text(R.string.model_mgmt_demucs_download_progress_title)) {
+                    host.scope.launch {
                         try {
                             scheduler.cancel(workId)
                         } catch (error: CancellationException) {
                             throw error
                         } catch (error: Exception) {
-                            showError("取消下载失败：" + error.message)
+                            showError(host.text(R.string.model_mgmt_cancel_download_failed, error.message.toString()))
                         }
                     }
                 }
                 scheduler.observeTask(workId).takeWhile { taskState ->
                     if (taskState == null) {
                         modelDownloadWorkId = null
-                        throw IllegalStateException("下载任务不存在")
+                        throw IllegalStateException(host.text(R.string.model_mgmt_task_missing))
                     }
                     taskState.progress.message.takeIf(String::isNotBlank)?.let { message ->
                         updateProgressDialog(
@@ -302,15 +200,13 @@ class DemucsModelImportController(private val host: AppCompatActivity) {
                             modelType = settings.getDemixModelType()
                             updateGeneralModelUi()
                             updateDemixModelUi()
-                            OverwritingToast.makeText(
-                                host,
-                                "人声分离模型已下载并自动选择",
-                                Toast.LENGTH_LONG
-                            ).show()
+                            host.showToast(R.string.model_mgmt_demucs_downloaded, duration = Toast.LENGTH_LONG)
                             false
                         }
                         TaskStatus.FAILED -> {
-                            showModelDownloadFailure(taskState.errorMessage ?: "模型任务失败")
+                            showModelDownloadFailure(
+                                taskState.errorMessage ?: host.text(R.string.model_mgmt_task_failed)
+                            )
                             false
                         }
                         TaskStatus.CANCELLED -> {
@@ -323,7 +219,7 @@ class DemucsModelImportController(private val host: AppCompatActivity) {
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                showError("模型任务失败：" + error.message)
+                showError(host.text(R.string.model_mgmt_task_failed_with_reason, error.message.toString()))
             } finally {
                 progressToken?.let(::dismissProgressDialog)
                 setModelDownloadActionsEnabled(true)
@@ -338,45 +234,19 @@ class DemucsModelImportController(private val host: AppCompatActivity) {
 
 
     private fun ensureModelStorageAccess(): Boolean {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (Environment.isExternalStorageManager()) return true
-            pendingGeneralModelDownload = true
-            val appIntent = Intent(
-                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                Uri.parse("package:${host.packageName}")
-            )
-            val opened = runCatching { manageStorageLauncher.launch(appIntent) }.isSuccess ||
-                runCatching {
-                    manageStorageLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                }.isSuccess
-            if (!opened) {
-                pendingGeneralModelDownload = false
-                OverwritingToast.makeText(host, "无法打开存储权限设置", Toast.LENGTH_LONG).show()
-            }
-            return false
-        }
-        if (ContextCompat.checkSelfPermission(host, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
-            PackageManager.PERMISSION_GRANTED) {
-            return true
-        }
+        if (hasModelStorageAccess(context)) return true
         pendingGeneralModelDownload = true
-        writeStoragePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        host.requestStorageAccess(StorageAccessRequester.DEMUCS_IMPORT)
         return false
     }
 
     private fun continuePendingGeneralModelDownload() {
         if (!pendingGeneralModelDownload) return
         pendingGeneralModelDownload = false
-        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Environment.isExternalStorageManager()
-        } else {
-            ContextCompat.checkSelfPermission(host, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
-                PackageManager.PERMISSION_GRANTED
-        }
-        if (granted) {
+        if (hasModelStorageAccess(context)) {
             startGeneralModelDownload()
         } else {
-            OverwritingToast.makeText(host, "需要存储权限才能保存下载的模型", Toast.LENGTH_LONG).show()
+            host.showToast(R.string.model_mgmt_storage_required_for_download, duration = Toast.LENGTH_LONG)
         }
     }
 
@@ -392,48 +262,45 @@ class DemucsModelImportController(private val host: AppCompatActivity) {
         val fileName = getFileName(uri)
         if (!fileName.endsWith(".onnx", ignoreCase = true) ||
             !fileName.contains(stem.fileSuffix, ignoreCase = true)) {
-            OverwritingToast.makeText(
-                host,
-                "请选择 ${stem.displayName} specialist ONNX 模型（文件名应包含 ${stem.fileSuffix}）",
-                Toast.LENGTH_LONG
-            ).show()
+            host.showToast(
+                R.string.model_mgmt_demucs_pick_specialist,
+                stem.displayName,
+                stem.fileSuffix,
+                duration = Toast.LENGTH_LONG
+            )
             return
         }
         try {
             persistAndVerifyModel(uri)
             settings.setDemixModelUri(stem.fileSuffix, uri.toString())
             updateModelUi(stem)
-            OverwritingToast.makeText(host, "已选择 ${stem.displayName} 模型", Toast.LENGTH_SHORT).show()
+            host.showToast(R.string.model_mgmt_demucs_stem_selected, stem.displayName)
         } catch (e: Exception) {
-            showError("选择 ${stem.displayName} 模型失败：${e.message}")
+            showError(host.text(R.string.model_mgmt_demucs_stem_select_failed, stem.displayName, e.message.toString()))
         }
     }
 
     private fun handleSelectedGeneralModel(uri: Uri) {
         val fileName = getFileName(uri)
         if (!fileName.endsWith(".onnx", ignoreCase = true) || fileName.contains("_ft_", ignoreCase = true)) {
-            OverwritingToast.makeText(
-                host,
-                "请选择通用四轨 HTDemucs ONNX 模型（例如 htdemucs_fp16weights.onnx）",
-                Toast.LENGTH_LONG
-            ).show()
+            host.showToast(R.string.model_mgmt_demucs_pick_general, duration = Toast.LENGTH_LONG)
             return
         }
         try {
             persistAndVerifyModel(uri)
             settings.setDemixModelUri("general", uri.toString())
             updateGeneralModelUi()
-            OverwritingToast.makeText(host, "已选择通用四轨模型", Toast.LENGTH_SHORT).show()
+            host.showToast(R.string.model_mgmt_demucs_general_selected)
         } catch (e: Exception) {
-            showError("选择通用模型失败：${e.message}")
+            showError(host.text(R.string.model_mgmt_demucs_general_select_failed, e.message.toString()))
         }
     }
 
     private fun persistAndVerifyModel(uri: Uri) {
-        host.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        host.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
-            if (descriptor.statSize == 0L) throw IllegalStateException("模型文件为空")
-        } ?: throw IllegalStateException("无法读取模型文件")
+        context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+            if (descriptor.statSize == 0L) throw IllegalStateException(host.text(R.string.model_mgmt_demucs_model_empty))
+        } ?: throw IllegalStateException(host.text(R.string.model_mgmt_demucs_model_unreadable))
     }
 
     private fun updateGeneralModelUi() {
@@ -456,9 +323,12 @@ class DemucsModelImportController(private val host: AppCompatActivity) {
     }
 
     private fun showDemixModelPicker() {
-        val labels = arrayOf("通用四轨模型", "FT 单音轨模型")
+        val labels = listOf(
+            host.text(R.string.model_mgmt_demucs_type_general),
+            host.text(R.string.model_mgmt_demucs_type_ft)
+        )
         val checked = if (modelType == SettingsManager.DEMIX_MODEL_FT) 1 else 0
-        showOptionsDialog("选择人声分离模型", labels.toList(), selectedIndex = checked) { which ->
+        showOptionsDialog(host.text(R.string.model_mgmt_demucs_select_type_title), labels, selectedIndex = checked) { which ->
             val selectedType = if (which == 1) {
                 SettingsManager.DEMIX_MODEL_FT
             } else {
@@ -489,7 +359,7 @@ class DemucsModelImportController(private val host: AppCompatActivity) {
         }
         if (discarded && !accessWarningShown) {
             accessWarningShown = true
-            OverwritingToast.makeText(host, "模型访问权限已失效，请重新选择模型文件", Toast.LENGTH_LONG).show()
+            host.showToast(R.string.model_mgmt_access_expired, duration = Toast.LENGTH_LONG)
         }
     }
 
@@ -498,43 +368,22 @@ class DemucsModelImportController(private val host: AppCompatActivity) {
         if (uri.scheme == "file") {
             uri.path?.let(::File)?.isFile == true
         } else {
-            host.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
         }
     }.getOrDefault(false)
 
-    private fun getFileName(uri: Uri): String = runCatching {
-        host.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-            if (cursor.moveToFirst() && index >= 0) return@runCatching cursor.getString(index)
-        }
-        uri.lastPathSegment ?: "unknown"
-    }.getOrElse { uri.lastPathSegment ?: "unknown" }
+    private fun getFileName(uri: Uri): String = UriDisplayName.of(context, uri)
 
     private fun showModelHelp() {
-        val message = """
-            模型分为两类：
-
-            1. 通用模型
-            htdemucs_fp16weights.onnx，一次推理可以输出 Vocals、Drums、Bass、Other 多个音轨。选择通用四轨模型后，单音轨和多音轨任务都会使用该模型。
-
-            可直接点击“选择通用四轨模型”右侧的蓝色下载按钮，应用会自动下载并选择模型。
-
-            下载地址：
-            https://huggingface.co/StemSplitio/htdemucs-onnx/tree/main
-
-            2. FT 单音轨模型
-            Vocals、Drums、Bass、Other 各有一个 specialist 模型。切换到 FT 单音轨模型后，单音轨任务优先使用对应 FT 模型；未配置对应 FT 时回退通用模型。多音轨任务仍必须使用通用模型。
-
-            下载地址：
-            https://huggingface.co/StemSplitio/htdemucs-ft-onnx/tree/main
-
-            手动选择的模型会直接从原文件位置读取；一键下载的通用模型保存在 Download/SubtitleEdit/models/separation。
-        """.trimIndent()
-        showMessageDialog("人声分离模型帮助", message, confirmLabel = "关闭")
+        showMessageDialog(
+            host.text(R.string.model_mgmt_demucs_help_title),
+            host.text(R.string.model_mgmt_demucs_help_message),
+            confirmLabel = host.text(R.string.model_mgmt_close)
+        )
     }
 
     private fun showError(message: String) {
-        showMessageDialog("人声分离设置失败", message)
+        showMessageDialog(host.text(R.string.model_mgmt_demucs_error_title), message)
     }
 
     fun refresh() {
@@ -543,18 +392,22 @@ class DemucsModelImportController(private val host: AppCompatActivity) {
 
     private fun showModelDownloadFailure(error: String) {
         showMessageDialog(
-            title = "人声分离模型下载失败",
-            message = "$error\n\n重试时会尝试从已保存的下载进度继续。",
-            confirmLabel = "重试",
-            dismissLabel = "关闭",
+            title = host.text(R.string.model_mgmt_demucs_download_failed_title),
+            message = host.text(R.string.model_mgmt_download_retry_hint, error),
+            confirmLabel = host.text(R.string.model_mgmt_retry),
+            dismissLabel = host.text(R.string.model_mgmt_close),
             onConfirm = ::startGeneralModelDownload,
             onDismiss = { modelDownloadWorkId = null }
         )
     }
 
+    /** Called from ViewModel.onCleared(): the page is finishing for real. */
     fun dispose() {
         modelDownloadJob?.cancel()
-        dialog = null
+        setDialog(null)
+    }
+
+    private companion object {
+        const val KEY_WORK_ID = "demix-model-download-work-id"
     }
 }
-

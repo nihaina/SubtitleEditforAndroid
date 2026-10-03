@@ -2,44 +2,31 @@ package com.subtitleedit
 
 import android.os.Bundle
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.ui.components.SettingsSwitchRow
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
-import com.subtitleedit.util.SettingsManager
 
 class FileManagementSettingsActivity : AppComposeActivity() {
+    private val viewModel: FileManagementSettingsViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val settings = SettingsManager.getInstance(this)
 
         setContent {
+            val state by viewModel.state.collectAsState()
             SubtitleEditComposeTheme {
-                var showAllFileTypes by rememberSaveable {
-                    mutableStateOf(settings.isShowAllFileTypesEnabled())
-                }
-                var showHiddenFiles by rememberSaveable {
-                    mutableStateOf(settings.isShowHiddenFilesEnabled())
-                }
-
                 FileManagementSettingsScreen(
-                    showAllFileTypes = showAllFileTypes,
-                    showHiddenFiles = showHiddenFiles,
+                    showAllFileTypes = state.showAllFileTypes,
+                    showHiddenFiles = state.showHiddenFiles,
                     onBack = { onBackPressedDispatcher.onBackPressed() },
-                    onShowAllFileTypesChanged = { enabled ->
-                        showAllFileTypes = enabled
-                        settings.setShowAllFileTypesEnabled(enabled)
-                    },
-                    onShowHiddenFilesChanged = { enabled ->
-                        showHiddenFiles = enabled
-                        settings.setShowHiddenFilesEnabled(enabled)
-                    }
+                    onShowAllFileTypesChanged = viewModel::setShowAllFileTypes,
+                    onShowHiddenFilesChanged = viewModel::setShowHiddenFiles
                 )
             }
         }

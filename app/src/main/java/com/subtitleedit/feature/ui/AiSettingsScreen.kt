@@ -175,7 +175,7 @@ fun AiSettingsScreen(
     state.modelChooser?.let { chooser ->
         AlertDialog(
             onDismissRequest = onDismissModelChooser,
-            title = { Text("选择模型（${chooser.models.size}）") },
+            title = { Text(stringResource(R.string.ai_settings_choose_model_title, chooser.models.size)) },
             text = {
                 LazyColumn(
                     modifier = Modifier
@@ -199,7 +199,7 @@ fun AiSettingsScreen(
             confirmButton = {},
             dismissButton = {
                 TextButton(onClick = onDismissModelChooser) {
-                    Text("取消")
+                    Text(stringResource(R.string.cancel))
                 }
             }
         )
@@ -269,7 +269,7 @@ private fun ProviderCard(
         }
         Text(
             text = buildAnnotatedString {
-                append("官网：")
+                append(stringResource(R.string.ai_settings_website_prefix))
                 withStyle(
                     SpanStyle(
                         color = MaterialTheme.colorScheme.primary,
@@ -291,7 +291,7 @@ private fun ProviderCard(
                 value = state.baseUrl,
                 onValueChange = onBaseUrlChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("API 请求地址（Base URL 或完整 Chat Completions 地址）") },
+                label = { Text(stringResource(R.string.ai_settings_base_url_label)) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
             )
@@ -313,7 +313,7 @@ private fun TranslationSettingsCard(
     AppSection {
         SectionHeader(stringResource(R.string.activity_ai_settings_translation_title))
         ProviderSelector(
-            label = "平台",
+            label = stringResource(R.string.activity_ai_settings_text_02),
             selectedProvider = state.translationProvider,
             onSelect = onSelectProvider
         )

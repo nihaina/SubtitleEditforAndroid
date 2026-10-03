@@ -218,7 +218,7 @@ fun Qwen3AsrSettingsScreen(
                             enabled = fixedGapEnabled,
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            suffix = { Text("毫秒", style = MaterialTheme.typography.bodySmall) },
+                            suffix = { Text(stringResource(R.string.unit_milliseconds), style = MaterialTheme.typography.bodySmall) },
                             textStyle = MaterialTheme.typography.bodyMedium.copy(
                                 textAlign = TextAlign.Center
                             ),
