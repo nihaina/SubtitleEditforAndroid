@@ -40,7 +40,7 @@ fun registerApkExport(
                 if (source.isFile) {
                     val suffix = artifactSuffix.takeIf { it.isNotBlank() }?.let { "-$it" } ?: ""
                     source.copyTo(
-                        exportDir.resolve("SubtitleEdit-release-$versionName-$architecture$suffix.apk"),
+                        exportDir.resolve("TsumugiSub-release-$versionName-$architecture$suffix.apk"),
                         overwrite = true
                     )
                 }
@@ -90,8 +90,8 @@ android {
         applicationId = "com.subtitleedit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "1.2.0"
+        versionCode = 11
+        versionName = "1.2.1"
 
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")

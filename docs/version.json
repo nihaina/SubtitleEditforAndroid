@@ -1,7 +1,7 @@
 {
-  "versionCode": 10,
-  "versionName": "1.2.0",
+  "versionCode": 11,
+  "versionName": "1.2.1",
   "downloadUrl": "https://github.com/nihaina/SubtitleEditforAndroid/releases/latest",
-  "releaseNotes": "为了庆祝中秋，临时更新一个版本，祝各位中秋快乐！\n\n1. 现在可以打开更多文本格式\n2. 简化语音转字幕配置，各模型配置相互独立\n3. 语义合并增加一定容错\n4. 适配 Qwen3-ASR 和 Qwen3-ForcedAligner，用更慢的速度带来更高的识别准确率",
+  "releaseNotes": "1. 大部分UI迁移为Compose\n2. 播放器统一换为mpv\n3. 新增文稿匹配工具，可以将txt文本转换为带时间的字幕\n4. 优化编辑器里的字幕合并功能，可以预览合并结果\n5. 新增快速切分工具，编辑器里可以迅速切分字幕\n6. 移除语义合并功能，在ASR配置里添加智能合并\n7. 优化语音转字幕流程，提升准确率\n8. 优化编辑器内时间冲突检测，添加向前后合并、向前后延伸功能\n9. 添加播放时选中当前字幕块\n10. 去除上下文上限参数\n11. 软件更名为TsumugiSub，更改软件目录，并支持自行修改相关文件存放目录\n\n从旧版本更新的用户，建议清除一遍应用数据，各项配置使用默认参数即可，模型文件存放在Download文件夹，清除数据时不会被删除\n\n使用语音转字幕功能推荐使用SenseVoice模型。qwen3asr的准确率虽然更高，但时间不准且速度极慢，主要用于文稿匹配功能。parakeet和whisper模型在准确率和速度上均无优势，不再进行维护",
   "forceUpdate": false
 }
