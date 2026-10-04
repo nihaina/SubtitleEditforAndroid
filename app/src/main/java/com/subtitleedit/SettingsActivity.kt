@@ -1,7 +1,9 @@
 package com.subtitleedit
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.runtime.collectAsState
@@ -13,6 +15,13 @@ import com.subtitleedit.util.FileUtils
 /** Settings screen host. Settings and cache operations live in [SettingsViewModel]. */
 class SettingsActivity : AppComposeActivity() {
     private val viewModel: SettingsViewModel by viewModels()
+    private var softwareDirectoryPickerActive = false
+    private val softwareDirectoryPicker = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        softwareDirectoryPickerActive = false
+        uri?.let(viewModel::selectSoftwareDirectory)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,6 +44,12 @@ class SettingsActivity : AppComposeActivity() {
                     onOpenTtsSettings = { open(TtsSettingsActivity::class.java) },
                     onOpenLogs = { open(LogActivity::class.java) },
                     onOpenAbout = { open(AboutActivity::class.java) },
+                    onSelectSoftwareDirectory = {
+                        softwareDirectoryPickerActive = true
+                        softwareDirectoryPicker.launch(null)
+                    },
+                    onConfirmSoftwareDirectory = viewModel::confirmSoftwareDirectory,
+                    onCancelSoftwareDirectory = viewModel::cancelSoftwareDirectory,
                     onCacheClear = viewModel::clearCache,
                     onEmptyCacheClear = viewModel::onEmptyCacheClear
                 )
@@ -44,7 +59,7 @@ class SettingsActivity : AppComposeActivity() {
 
     override fun onResume() {
         super.onResume()
-        viewModel.refresh()
+        if (!softwareDirectoryPickerActive) viewModel.refresh()
     }
 
     private fun open(activity: Class<*>) {

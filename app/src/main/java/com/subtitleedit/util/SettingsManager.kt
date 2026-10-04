@@ -2,6 +2,7 @@ package com.subtitleedit.util
 
 import android.content.Context
 import android.content.SharedPreferences
+import java.io.File
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 
@@ -20,6 +21,11 @@ class SettingsManager private constructor(context: Context) {
     init {
         migrateAiApiKeys()
         clearRemovedAiContextPreferences()
+        ModelDirectoryManager.setSoftwareDirectory(
+            prefs.getString(KEY_MODEL_DIRECTORY, null)
+                ?.takeIf { it.isNotBlank() }
+                ?.let(::File)
+        )
     }
     
     companion object {
@@ -43,6 +49,7 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_AI_PUNCTUATION_REASONING_LEVEL = "ai_punctuation_reasoning_level"
         private const val KEY_AI_PUNCTUATION_CUSTOM_PROMPT = "ai_punctuation_custom_prompt"
         private const val KEY_WAVEFORM_CACHE_LOCATION = "waveform_cache_location"
+        private const val KEY_MODEL_DIRECTORY = "model_directory"
         private const val KEY_LOOP_SELECTED_SUBTITLE = "loop_selected_subtitle"
         private const val KEY_SELECT_PLAYING_SUBTITLE = "select_playing_subtitle"
         private const val KEY_SHOW_ALL_FILE_TYPES = "show_all_file_types"
@@ -214,6 +221,54 @@ class SettingsManager private constructor(context: Context) {
      */
     fun setDefaultEncoding(charset: Charset) {
         prefs.edit().putString(KEY_DEFAULT_ENCODING, charset.name()).apply()
+    }
+
+    /** Root directory for application-owned files. Models are stored in its models child. */
+    fun getSoftwareDirectory(): File = ModelDirectoryManager.softwareDirectory()
+
+    fun getModelDirectory(): File = ModelDirectoryManager.modelsDirectory()
+
+    fun getSoftwareDirectoryPath(): String = getSoftwareDirectory().absolutePath
+
+    fun getModelDirectoryPath(): String = getModelDirectory().absolutePath
+
+    fun setModelDirectory(path: String) {
+        val normalized = path.trim()
+        require(normalized.isNotEmpty()) { "软件目录不能为空" }
+        val directory = File(normalized).absoluteFile
+        prefs.edit().putString(KEY_MODEL_DIRECTORY, directory.path).apply()
+        ModelDirectoryManager.setSoftwareDirectory(directory)
+    }
+
+    fun setSoftwareDirectory(path: String) = setModelDirectory(path)
+
+    fun resetModelDirectory() {
+        prefs.edit().remove(KEY_MODEL_DIRECTORY).apply()
+        ModelDirectoryManager.setSoftwareDirectory(null)
+    }
+
+    fun resetSoftwareDirectory() = resetModelDirectory()
+
+    /** Rewrites persisted file and file-URI model references after a directory move. */
+    fun rewriteModelDirectoryPaths(oldDirectory: File, newDirectory: File) {
+        val oldPath = oldDirectory.absoluteFile.path
+        val newPath = newDirectory.absoluteFile.path
+        if (oldPath == newPath) return
+        val editor = prefs.edit()
+        prefs.all.forEach { (key, value) ->
+            if (value is String && value.contains(oldPath)) {
+                editor.putString(key, value.replace(oldPath, newPath))
+            }
+        }
+        editor.apply()
+    }
+
+    /** Output folders under the previous software root must be recreated under the new root. */
+    fun clearPersistedOutputDirectories() {
+        val editor = prefs.edit()
+        prefs.all.keys.filter { it.startsWith(KEY_OUTPUT_DIRECTORY_PREFIX) }
+            .forEach(editor::remove)
+        editor.apply()
     }
     
     /**

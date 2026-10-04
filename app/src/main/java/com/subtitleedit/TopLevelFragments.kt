@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
@@ -30,8 +31,12 @@ import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.DraftManager
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.util.ModelDirectoryManager
+import com.subtitleedit.util.ModelDirectoryMigration
 import java.io.File
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /** State retained by the main Compose navigation while a top-level page is hidden. */
 internal class MainTopLevelPagesState {
@@ -59,11 +64,61 @@ internal fun MainTopLevelPages(
     val resources = LocalResources.current
     val preferences = context.getSharedPreferences(FAVORITES_PREFERENCES_NAME, Context.MODE_PRIVATE)
     val settings = SettingsManager.getInstance(context)
+    val settingsScope = rememberCoroutineScope()
     var previousSelectedPage by remember { mutableIntStateOf(R.id.nav_directory) }
     var previousSelectionVersion by remember { mutableIntStateOf(selectionVersion) }
 
+    fun switchSoftwareDirectory(targetRoot: File, migrateModels: Boolean) {
+        val currentModels = settings.getModelDirectory()
+        state.settingsPage = state.settingsPage.copy(isMigratingSoftwareDirectory = migrateModels)
+        settingsScope.launch {
+            runCatching {
+                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    val targetModels = File(targetRoot, ModelDirectoryManager.MODELS_DIRECTORY_NAME)
+                    if (migrateModels && currentModels.canonicalFile != targetModels.canonicalFile) {
+                        ModelDirectoryMigration.migrate(currentModels, targetModels)
+                        settings.rewriteModelDirectoryPaths(currentModels, targetModels)
+                        currentModels.parentFile?.let {
+                            settings.rewriteModelDirectoryPaths(it, targetRoot)
+                        }
+                    }
+                    settings.setSoftwareDirectory(targetRoot.path)
+                    settings.clearPersistedOutputDirectories()
+                    targetRoot.mkdirs()
+                    targetModels.mkdirs()
+                    listOf("Convert", "Translate", "Output", "TranscriptMatch").forEach {
+                        File(targetRoot, it).mkdirs()
+                    }
+                }
+            }.onFailure { error ->
+                Toast.makeText(
+                    context,
+                    "软件目录切换失败：${error.message ?: "未知错误"}",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            state.settingsPage = loadSettingsPage(context, settings)
+        }
+    }
+
     val directoryPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) addFavoriteDirectory(context, preferences, state, uri)
+    }
+    val softwareDirectoryPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            val target = File(DirectoryDisplayPath.fromUri(context, uri)).absoluteFile
+            if (target.canonicalFile != settings.getSoftwareDirectory().absoluteFile.canonicalFile) {
+                val modelCount = ModelDirectoryMigration.findRecognizedModels(settings.getModelDirectory()).size
+                if (modelCount == 0) {
+                    switchSoftwareDirectory(target, migrateModels = false)
+                } else {
+                    state.settingsPage = state.settingsPage.copy(
+                        pendingSoftwareDirectory = target.path,
+                        pendingSoftwareDirectoryModelCount = modelCount
+                    )
+                }
+            }
+        }
     }
     val draftExporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
         exportDraft(context, state, uri)
@@ -135,7 +190,20 @@ internal fun MainTopLevelPages(
                 loadDrafts()
                 updateDraftToolbar()
             }
-            R.id.nav_settings -> state.settingsPage = loadSettingsPage(context, settings)
+            R.id.nav_settings -> {
+                val pending = state.settingsPage
+                val loaded = loadSettingsPage(context, settings)
+                // MainActivity refreshes top-level pages when the folder picker
+                // returns. Keep a directory choice that is waiting for the
+                // migration confirmation across that reload.
+                state.settingsPage = loaded.copy(
+                    pendingSoftwareDirectory = pending.pendingSoftwareDirectory
+                        ?.takeUnless { pending.isMigratingSoftwareDirectory },
+                    pendingSoftwareDirectoryModelCount = pending.pendingSoftwareDirectoryModelCount
+                        .takeUnless { pending.isMigratingSoftwareDirectory } ?: 0,
+                    isMigratingSoftwareDirectory = pending.isMigratingSoftwareDirectory
+                )
+            }
         }
     }
 
@@ -258,6 +326,24 @@ internal fun MainTopLevelPages(
             onOpenTtsSettings = { context.openActivity(TtsSettingsActivity::class.java) },
             onOpenLogs = { context.openActivity(LogActivity::class.java) },
             onOpenAbout = { context.openActivity(AboutActivity::class.java) },
+            onSelectSoftwareDirectory = { softwareDirectoryPicker.launch(null) },
+            onConfirmSoftwareDirectory = {
+                val targetPath = state.settingsPage.pendingSoftwareDirectory
+                if (targetPath != null) {
+                    state.settingsPage = state.settingsPage.copy(
+                        pendingSoftwareDirectory = null,
+                        pendingSoftwareDirectoryModelCount = 0,
+                        isMigratingSoftwareDirectory = true
+                    )
+                    switchSoftwareDirectory(File(targetPath).absoluteFile, migrateModels = true)
+                }
+            },
+            onCancelSoftwareDirectory = {
+                state.settingsPage = state.settingsPage.copy(
+                    pendingSoftwareDirectory = null,
+                    pendingSoftwareDirectoryModelCount = 0
+                )
+            },
             // SettingsFragment's legacy cache dialog deleted the selected group
             // immediately and always used the generic result message.
             onCacheClear = { item -> clearSettingsCache(context, settings, state, item, false) },
@@ -355,6 +441,7 @@ private fun loadSettingsPage(context: Context, settings: SettingsManager): Setti
             SettingsManager.THEME_DARK -> context.getString(R.string.settings_theme_dark)
             else -> context.getString(R.string.settings_theme_system)
         },
+        softwareDirectory = settings.getSoftwareDirectoryPath(),
         cacheSize = if (cacheSize > 0) formatTopLevelSize(cacheSize) else "",
         checkUpdatesOnStartup = settings.shouldCheckUpdatesOnStartup(),
         preserveOutputDirectories = settings.isOutputDirectoryPersistenceEnabled(),

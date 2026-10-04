@@ -67,7 +67,7 @@
     <string name="model_mgmt_asr_aligner_found">已找到 ForcedAligner 模型，无需重新下载</string>
     <string name="model_mgmt_asr_aligner_already_imported">ForcedAligner 已导入，可在模型管理中查看或删除</string>
     <string name="model_mgmt_asr_aligner_download_title">一键下载导入 Qwen3 ForcedAligner</string>
-    <string name="model_mgmt_asr_aligner_download_message">从项目 Release 下载两卷压缩模型，约 1.38 GB；解压后模型约 3.67 GB。\n\n模型将保存至 Download/SubtitleEdit/models/%1$s。解压时还需约 5.2 GB 可用空间。\n\n离开页面后任务会继续运行，可从通知中取消。</string>
+    <string name="model_mgmt_asr_aligner_download_message">从项目 Release 下载两卷压缩模型，约 1.38 GB；解压后模型约 3.67 GB。\n\n模型将保存至软件目录/models/%1$s。解压时还需约 5.2 GB 可用空间。\n\n离开页面后任务会继续运行，可从通知中取消。</string>
     <string name="model_mgmt_asr_aligner_reset_title">重置强制对齐模型选择</string>
     <string name="model_mgmt_asr_aligner_reset_message">清除 ForcedAligner 模型选择？模型文件不会被删除，可再次选择使用。</string>
     <string name="model_mgmt_asr_npu_arm64_only">SenseVoice NPU 模型仅支持 arm64-v8a 骁龙设备</string>
@@ -126,7 +126,7 @@
 
     <!-- Vocal separation (Demucs) model import -->
     <string name="model_mgmt_demucs_download_title">一键下载导入</string>
-    <string name="model_mgmt_demucs_download_message">是否一键下载导入 HTDemucs 通用模型？\n\n文件存放至：\n/Download/SubtitleEdit/models/separation\n\n约占用 158 MB 存储空间。</string>
+    <string name="model_mgmt_demucs_download_message">是否一键下载导入 HTDemucs 通用模型？\n\n文件存放至：\n软件目录/models/separation\n\n约占用 158 MB 存储空间。</string>
     <string name="model_mgmt_demucs_reset_message">确定清除当前人声分离通用模型选择吗？\n\n模型文件不会被删除，重置后需要重新选择或导入。</string>
     <string name="model_mgmt_demucs_reset_done">已清除通用模型选择，请重新选择</string>
     <string name="model_mgmt_demucs_download_progress_title">下载人声分离模型</string>
@@ -143,7 +143,7 @@
     <string name="model_mgmt_demucs_type_ft">FT 单音轨模型</string>
     <string name="model_mgmt_demucs_select_type_title">选择人声分离模型</string>
     <string name="model_mgmt_demucs_help_title">人声分离模型帮助</string>
-    <string name="model_mgmt_demucs_help_message">模型分为两类：\n\n1. 通用模型\nhtdemucs_fp16weights.onnx，一次推理可以输出 Vocals、Drums、Bass、Other 多个音轨。选择通用四轨模型后，单音轨和多音轨任务都会使用该模型。\n\n可直接点击“选择通用四轨模型”右侧的蓝色下载按钮，应用会自动下载并选择模型。\n\n下载地址：\nhttps://huggingface.co/StemSplitio/htdemucs-onnx/tree/main\n\n2. FT 单音轨模型\nVocals、Drums、Bass、Other 各有一个 specialist 模型。切换到 FT 单音轨模型后，单音轨任务优先使用对应 FT 模型；未配置对应 FT 时回退通用模型。多音轨任务仍必须使用通用模型。\n\n下载地址：\nhttps://huggingface.co/StemSplitio/htdemucs-ft-onnx/tree/main\n\n手动选择的模型会直接从原文件位置读取；一键下载的通用模型保存在 Download/SubtitleEdit/models/separation。</string>
+    <string name="model_mgmt_demucs_help_message">模型分为两类：\n\n1. 通用模型\nhtdemucs_fp16weights.onnx，一次推理可以输出 Vocals、Drums、Bass、Other 多个音轨。选择通用四轨模型后，单音轨和多音轨任务都会使用该模型。\n\n可直接点击“选择通用四轨模型”右侧的蓝色下载按钮，应用会自动下载并选择模型。\n\n下载地址：\nhttps://huggingface.co/StemSplitio/htdemucs-onnx/tree/main\n\n2. FT 单音轨模型\nVocals、Drums、Bass、Other 各有一个 specialist 模型。切换到 FT 单音轨模型后，单音轨任务优先使用对应 FT 模型；未配置对应 FT 时回退通用模型。多音轨任务仍必须使用通用模型。\n\n下载地址：\nhttps://huggingface.co/StemSplitio/htdemucs-ft-onnx/tree/main\n\n手动选择的模型会直接从原文件位置读取；一键下载的通用模型保存在软件目录/models/separation。</string>
     <string name="model_mgmt_demucs_error_title">人声分离设置失败</string>
     <string name="model_mgmt_demucs_download_failed_title">人声分离模型下载失败</string>
 </resources>

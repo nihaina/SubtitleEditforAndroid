@@ -234,8 +234,8 @@ internal class SpeechToSubtitleViewModel(
 
         try {
             val defaultPath = File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                "SubtitleEdit/Convert"
+                com.subtitleedit.util.ModelDirectoryManager.softwareDirectory(),
+                "Convert"
             )
 
             if (!defaultPath.exists()) {

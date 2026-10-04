@@ -231,7 +231,7 @@ internal class MediaConvertViewModel(application: Application) :
             outputDirectoryUri = saved
             setState { copy(outputDirectory = DirectoryDisplayPath.fromUri(app, saved)) }
         } else {
-            val dir = File(FileUtils.getDownloadDirectory(), "SubtitleEdit/Convert").apply { mkdirs() }
+            val dir = File(com.subtitleedit.util.ModelDirectoryManager.softwareDirectory(), "Convert").apply { mkdirs() }
             outputDirectoryUri = Uri.fromFile(dir)
             setState { copy(outputDirectory = string(R.string.media_convert_output_directory, dir.absolutePath)) }
         }

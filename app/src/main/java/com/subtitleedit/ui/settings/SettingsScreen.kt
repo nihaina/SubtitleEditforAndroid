@@ -50,6 +50,11 @@ data class SettingsPageState(
     val themeMode: String = SettingsManager.THEME_SYSTEM,
     // Hosts fill this from the localized theme resources.
     val themeLabel: String = "",
+    /** User-selected application data directory, or an empty value for the default. */
+    val softwareDirectory: String = "",
+    val pendingSoftwareDirectory: String? = null,
+    val pendingSoftwareDirectoryModelCount: Int = 0,
+    val isMigratingSoftwareDirectory: Boolean = false,
     val cacheSize: String = "",
     val checkUpdatesOnStartup: Boolean = false,
     val preserveOutputDirectories: Boolean = true,
@@ -91,6 +96,9 @@ fun SettingsScreen(
     onOpenTtsSettings: () -> Unit,
     onOpenLogs: () -> Unit,
     onOpenAbout: () -> Unit,
+    onSelectSoftwareDirectory: () -> Unit,
+    onConfirmSoftwareDirectory: () -> Unit,
+    onCancelSoftwareDirectory: () -> Unit,
     onCacheClear: (SettingsCacheItem) -> Unit,
     onEmptyCacheClear: (SettingsCacheItem) -> Unit
 ) {
@@ -153,6 +161,16 @@ fun SettingsScreen(
                     iconRes = R.drawable.ic_info,
                     showArrow = true,
                     onClick = onOpenAbout
+                )
+                SettingsRow(
+                    title = stringResource(R.string.activity_settings_software_directory),
+                    value = state.softwareDirectory.ifBlank {
+                        stringResource(R.string.activity_settings_software_directory_default)
+                    },
+                    valueBelow = true,
+                    iconRes = R.drawable.ic_folder,
+                    showArrow = true,
+                    onClick = onSelectSoftwareDirectory
                 )
                 SharedSettingsSwitchRow(
                     title = stringResource(R.string.activity_settings_text_07),
@@ -252,6 +270,40 @@ fun SettingsScreen(
                 TextButton(onClick = { showCacheDialog = false }) {
                     Text(stringResource(R.string.cancel))
                 }
+            }
+        )
+    }
+
+    state.pendingSoftwareDirectory?.let { target ->
+        AlertDialog(
+            onDismissRequest = onCancelSoftwareDirectory,
+            shape = MaterialTheme.shapes.extraLarge,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            title = { Text(stringResource(R.string.activity_settings_software_directory_migrate_title)) },
+            text = {
+                Text(
+                    if (state.pendingSoftwareDirectoryModelCount > 0) {
+                        stringResource(
+                            R.string.activity_settings_software_directory_migrate_message,
+                            state.pendingSoftwareDirectoryModelCount,
+                            target
+                        )
+                    } else {
+                        stringResource(R.string.activity_settings_software_directory_change_message, target)
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = onConfirmSoftwareDirectory,
+                    enabled = !state.isMigratingSoftwareDirectory
+                ) { Text(stringResource(R.string.confirm)) }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = onCancelSoftwareDirectory,
+                    enabled = !state.isMigratingSoftwareDirectory
+                ) { Text(stringResource(R.string.cancel)) }
             }
         )
     }

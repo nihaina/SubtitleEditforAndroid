@@ -236,10 +236,19 @@ object ModelDownloader {
     )
 
     @Suppress("DEPRECATION")
-    fun modelsDirectory(): File = File(
-        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-        "SubtitleEdit/models"
-    )
+    fun modelsDirectory(): File = ModelDirectoryManager.modelsDirectory()
+
+    /** Validation entry points shared by model management and legacy-directory migration. */
+    internal fun hasSenseVoiceModel(root: File, architecture: SenseVoiceArchitecture): Boolean =
+        findSenseVoiceFiles(root, architecture) != null
+
+    internal fun hasWhisperModel(root: File, expectedStem: String): Boolean =
+        findWhisperFiles(root, expectedStem) != null
+
+    internal fun hasParakeetModel(root: File, architecture: ParakeetArchitecture): Boolean =
+        findParakeetFiles(root, architecture) != null
+
+    internal fun hasQwen3AsrModel(root: File): Boolean = findQwen3AsrFiles(root) != null
 
     suspend fun downloadSenseVoice(
         option: SenseVoiceModelOption = SENSEVOICE_CPU_MODEL,

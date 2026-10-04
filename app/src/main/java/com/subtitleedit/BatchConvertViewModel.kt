@@ -212,10 +212,9 @@ internal class BatchConvertViewModel(
         else -> "${size / (1024 * 1024 * 1024)} GB"
     }
 
-    /** 获取转换输出目录：Download/SubtitleEdit/Convert，如果目录不存在则创建。 */
+    /** 获取软件目录下的转换输出目录，如果目录不存在则创建。 */
     private fun getConvertOutputDirectory(): File {
-        val subtitleEditDir = File(FileUtils.getDownloadDirectory(), "SubtitleEdit")
-        val convertDir = File(subtitleEditDir, "Convert")
+        val convertDir = File(com.subtitleedit.util.ModelDirectoryManager.softwareDirectory(), "Convert")
         if (!convertDir.exists()) convertDir.mkdirs()
         return convertDir
     }

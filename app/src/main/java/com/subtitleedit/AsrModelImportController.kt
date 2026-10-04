@@ -18,6 +18,7 @@ import com.subtitleedit.task.TaskStatus
 import com.subtitleedit.usecase.DownloadAsrModelUseCase
 import com.subtitleedit.util.InternalModelExport
 import com.subtitleedit.util.ModelDownloader
+import com.subtitleedit.util.ModelDirectoryManager
 import com.subtitleedit.util.QnnRuntimeAvailability
 import com.subtitleedit.util.Qwen3ForcedAlignerModelFiles
 import com.subtitleedit.util.Qwen3ForcedAlignerPathResolver
@@ -188,7 +189,8 @@ internal class AsrModelImportController(
         updateVadModelUi()
     }
 
-    private fun downloadLocation(directoryName: String) = "/Download/SubtitleEdit/models/$directoryName"
+    private fun downloadLocation(directoryName: String) =
+        "${ModelDirectoryManager.modelsDirectory().path}/$directoryName"
 
     private fun optionLabel(displayName: String, sizeLabel: String) =
         host.text(R.string.model_mgmt_option_with_size, displayName, sizeLabel)

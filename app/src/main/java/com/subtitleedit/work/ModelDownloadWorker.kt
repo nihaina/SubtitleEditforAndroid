@@ -110,7 +110,7 @@ internal class ModelDownloadWorker(
             )
         }
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setContentTitle("Subtitle Edit")
+            .setContentTitle("TsumugiSub")
             .setContentText(message)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setOngoing(true)

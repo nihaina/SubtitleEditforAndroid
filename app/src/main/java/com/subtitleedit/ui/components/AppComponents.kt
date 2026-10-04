@@ -639,6 +639,7 @@ fun SettingsRow(
     modifier: Modifier = Modifier,
     iconRes: Int? = null,
     value: String? = null,
+    valueBelow: Boolean = false,
     onClick: (() -> Unit)? = null,
     showArrow: Boolean = false,
     content: (@Composable () -> Unit)? = null
@@ -646,7 +647,7 @@ fun SettingsRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(if (valueBelow) 72.dp else 56.dp)
             .clip(MaterialTheme.shapes.medium)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 16.dp),
@@ -661,16 +662,32 @@ fun SettingsRow(
             )
             Spacer(Modifier.width(12.dp))
         }
-        Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-        if (!value.isNullOrEmpty()) {
-            Text(
-                value,
-                modifier = Modifier.padding(start = 8.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+        if (valueBelow) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                if (!value.isNullOrEmpty()) {
+                    Text(
+                        value,
+                        modifier = Modifier.padding(top = 2.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        } else {
+            Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+            if (!value.isNullOrEmpty()) {
+                Text(
+                    value,
+                    modifier = Modifier.padding(start = 8.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
         content?.invoke()
         if (showArrow) {

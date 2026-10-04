@@ -1,11 +1,19 @@
 package com.subtitleedit
 
 import android.app.Application
+import android.net.Uri
 import com.subtitleedit.ui.settings.SettingsCacheItem
 import com.subtitleedit.ui.settings.SettingsPageState
 import com.subtitleedit.util.AppThemeMode
+import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.ModelDirectoryManager
+import com.subtitleedit.util.ModelDirectoryMigration
 import com.subtitleedit.util.SettingsManager
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 
@@ -28,6 +36,7 @@ internal class SettingsViewModel(
         val themeMode = settingsManager.getThemeMode()
         val cacheItems = cacheItems()
         val totalCacheSize = cacheItems.sumOf(SettingsCacheItem::sizeBytes)
+        val softwareDirectory = settingsManager.getSoftwareDirectoryPath()
         setState {
             SettingsPageState(
                 encoding = encoding,
@@ -39,6 +48,10 @@ internal class SettingsViewModel(
                         else -> R.string.settings_theme_system
                     }
                 ),
+                softwareDirectory = softwareDirectory,
+                pendingSoftwareDirectory = pendingSoftwareDirectory,
+                pendingSoftwareDirectoryModelCount = pendingSoftwareDirectoryModelCount,
+                isMigratingSoftwareDirectory = isMigratingSoftwareDirectory,
                 cacheSize = if (totalCacheSize > 0) formatSize(totalCacheSize) else "",
                 checkUpdatesOnStartup = settingsManager.shouldCheckUpdatesOnStartup(),
                 preserveOutputDirectories = settingsManager.isOutputDirectoryPersistenceEnabled(),
@@ -79,6 +92,84 @@ internal class SettingsViewModel(
     fun setSelectPlayingSubtitle(enabled: Boolean) {
         setState { copy(selectPlayingSubtitle = enabled) }
         settingsManager.setSelectPlayingSubtitleEnabled(enabled)
+    }
+
+    /** Receives a selected software root and opens the migration confirmation. */
+    fun selectSoftwareDirectory(uri: Uri) {
+        val displayPath = DirectoryDisplayPath.fromUri(app, uri)
+        requestSoftwareDirectory(displayPath)
+    }
+
+    private fun requestSoftwareDirectory(path: String) {
+        val target = File(path).absoluteFile
+        val currentRoot = settingsManager.getSoftwareDirectory().absoluteFile
+        if (target.canonicalFile == currentRoot.canonicalFile) return
+        val currentModels = settingsManager.getModelDirectory()
+        val modelCount = ModelDirectoryMigration.findRecognizedModels(currentModels).size
+        if (modelCount == 0) {
+            switchSoftwareDirectory(target, migrateModels = false)
+            return
+        }
+        setState {
+            copy(
+                pendingSoftwareDirectory = target.path,
+                pendingSoftwareDirectoryModelCount = modelCount
+            )
+        }
+    }
+
+    fun confirmSoftwareDirectory() {
+        val targetPath = currentState.pendingSoftwareDirectory ?: return
+        val targetRoot = File(targetPath).absoluteFile
+        setState {
+            copy(
+                pendingSoftwareDirectory = null,
+                pendingSoftwareDirectoryModelCount = 0,
+                isMigratingSoftwareDirectory = true
+            )
+        }
+        switchSoftwareDirectory(targetRoot, migrateModels = true)
+    }
+
+    fun cancelSoftwareDirectory() {
+        setState {
+            copy(pendingSoftwareDirectory = null, pendingSoftwareDirectoryModelCount = 0)
+        }
+    }
+
+    private fun switchSoftwareDirectory(targetRoot: File, migrateModels: Boolean) {
+        val currentModels = settingsManager.getModelDirectory()
+        viewModelScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val targetModels = File(targetRoot, ModelDirectoryManager.MODELS_DIRECTORY_NAME)
+                    if (migrateModels && currentModels.canonicalFile != targetModels.canonicalFile) {
+                        ModelDirectoryMigration.migrate(currentModels, targetModels)
+                        settingsManager.rewriteModelDirectoryPaths(currentModels, targetModels)
+                        currentModels.parentFile?.let {
+                            settingsManager.rewriteModelDirectoryPaths(it, targetRoot)
+                        }
+                    }
+                    settingsManager.setSoftwareDirectory(targetRoot.path)
+                    settingsManager.clearPersistedOutputDirectories()
+                    targetRoot.mkdirs()
+                    targetModels.mkdirs()
+                    listOf("Convert", "Translate", "Output", "TranscriptMatch").forEach {
+                        File(targetRoot, it).mkdirs()
+                    }
+                }
+            }.onFailure { error ->
+                toast("软件目录切换失败：${error.message ?: "未知错误"}")
+            }
+            setState {
+                copy(
+                    pendingSoftwareDirectory = null,
+                    pendingSoftwareDirectoryModelCount = 0,
+                    isMigratingSoftwareDirectory = false
+                )
+            }
+            refresh()
+        }
     }
 
     fun onEmptyCacheClear(item: SettingsCacheItem) = toast(item.emptyMessage)

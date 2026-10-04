@@ -140,7 +140,7 @@ internal class MpvPlaybackEngine(
             runCatching { MPVLib.command(arrayOf("sub-remove")) }
             if (file != null && file.isFile && file.length() > 0L) {
                 MPVLib.command(
-                    arrayOf("sub-add", file.absolutePath, "select", "SubtitleEdit live preview")
+                    arrayOf("sub-add", file.absolutePath, "select", "TsumugiSub live preview")
                 )
             }
         }

@@ -91,7 +91,7 @@ object RuntimeLogManager {
             if (shouldShowLine(line, mode)) collector.add(line)
         }
         val content = buildString {
-            appendLine("SubtitleEdit for Android 运行日志")
+            appendLine("TsumugiSub 运行日志")
             appendLine("包名：$packageName")
             appendLine("采集时间：${formatDisplayTime(now)}")
             appendLine("有效范围：本应用最近 1 小时，且不早于上次清空时间")
@@ -118,7 +118,7 @@ object RuntimeLogManager {
         flush()
 
         output.bufferedWriter(Charsets.UTF_8).use { writer ->
-            writer.appendLine("SubtitleEdit for Android 运行日志")
+            writer.appendLine("TsumugiSub 运行日志")
             writer.appendLine("包名：${appContext.packageName}")
             writer.appendLine("采集时间：${formatDisplayTime(now)}")
             writer.appendLine("有效范围：本应用最近 1 小时，且不早于上次清空时间")

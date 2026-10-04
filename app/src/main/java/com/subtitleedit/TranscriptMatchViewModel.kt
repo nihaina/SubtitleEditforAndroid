@@ -299,5 +299,5 @@ internal class TranscriptMatchViewModel(application: Application) :
         ?: uri.lastPathSegment ?: string(R.string.transcript_match_unknown_file)
 
     private fun defaultOutputDirectory(): File =
-        File(File(FileUtils.getDownloadDirectory(), "SubtitleEdit"), "TranscriptMatch")
+        File(com.subtitleedit.util.ModelDirectoryManager.softwareDirectory(), "TranscriptMatch")
 }

@@ -2,5 +2,5 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <external-path
         name="converted_media"
-        path="Download/SubtitleEdit/Convert/" />
+        path="Download/TsumugiSub/Convert/" />
 </paths>

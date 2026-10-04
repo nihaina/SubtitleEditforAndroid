@@ -11,7 +11,7 @@
     <string name="file_search_hint">搜索</string>
     <string name="file_searching">正在搜索子目录...</string>
     <string name="file_management_settings">文件管理设置</string>
-    <string name="app_name">SubtitleEdit</string>
+    <string name="app_name">TsumugiSub</string>
     <string name="mp3_file_warning_title">音视频文件可能存在问题</string>
     <string name="mp3_file_warning_message">该文件封装不规范\n\n%1$s\n\n往往不会产生问题，但如果你发现声音和字幕存在偏移,建议转换文件格式</string>
     <string name="mp3_file_issue_start_time">音频开始时间不为 0（%1$.6f 秒）</string>
@@ -186,7 +186,7 @@
     <string name="activity_auto_timestamp_text_04">未选择</string>
     <string name="activity_auto_timestamp_text_05">输出格式</string>
     <string name="activity_auto_timestamp_text_06">输出目录</string>
-    <string name="activity_auto_timestamp_text_07" translatable="false">Download/SubtitleEdit/Convert</string>
+    <string name="activity_auto_timestamp_text_07" translatable="false">软件目录/Convert</string>
     <string name="activity_auto_timestamp_text_08">选择目录</string>
     <string name="activity_auto_timestamp_text_09">生成时间轴</string>
     <string name="activity_auto_timestamp_text_10">运行日志与预览</string>
@@ -199,7 +199,7 @@
     <string name="activity_auto_timestamp_text_17">ASR 模型打轴开启时不可使用二次处理</string>
     <string name="activity_batch_convert_text_01">转换设置</string>
     <string name="activity_batch_convert_text_02">选择输出目录</string>
-    <string name="activity_batch_convert_text_03">输出目录：Download/SubtitleEdit/Convert（默认）</string>
+    <string name="activity_batch_convert_text_03">输出目录：软件目录/Convert（默认）</string>
     <string name="activity_batch_convert_text_04">待转换文件</string>
     <string name="activity_batch_convert_text_05">添加文件</string>
     <string name="batch_convert_select_subtitle_files">选择字幕文件（可多选）</string>
@@ -247,7 +247,7 @@
     <string name="activity_media_convert_text_01">源文件</string>
     <string name="activity_media_convert_text_02">选择音视频文件（可多选）</string>
     <string name="activity_media_convert_text_03">未选择文件</string>
-    <string name="activity_media_convert_text_04">输出目录：Download/SubtitleEdit/Convert</string>
+    <string name="activity_media_convert_text_04">输出目录：软件目录/Convert</string>
     <string name="activity_media_convert_text_05">视频格式</string>
     <string name="activity_media_convert_text_06">音频格式（视频转音频 / 纯音频）</string>
     <string name="activity_media_convert_text_07">▶ 高级选项</string>
@@ -296,6 +296,11 @@
     <string name="activity_settings_text_04">模型管理</string>
     <string name="activity_settings_text_05">清除缓存</string>
     <string name="activity_settings_text_06">运行日志</string>
+    <string name="activity_settings_software_directory">软件目录</string>
+    <string name="activity_settings_software_directory_default">默认目录</string>
+    <string name="activity_settings_software_directory_migrate_title">迁移模型文件</string>
+    <string name="activity_settings_software_directory_migrate_message">旧目录中发现 %1$d 个模型。是否迁移到新目录？ 新目录：%2$s</string>
+    <string name="activity_settings_software_directory_change_message">是否将软件目录切换为：%1$s</string>
     <string name="activity_settings_text_07">启动时检查更新</string>
     <string name="activity_settings_text_08">启动应用时自动检查是否有新版本</string>
     <string name="activity_settings_text_09">播放行为</string>
@@ -481,13 +486,13 @@
     <string name="auto_translate">AI字幕处理</string>
     <string name="activity_auto_translate_text_01">处理设置</string>
     <string name="activity_auto_translate_text_02">选择输出目录</string>
-    <string name="activity_auto_translate_text_03">输出目录：Download/SubtitleEdit/Translate（默认）</string>
+    <string name="activity_auto_translate_text_03">输出目录：软件目录/Translate（默认）</string>
     <string name="activity_auto_translate_text_04">待处理文件</string>
     <string name="activity_auto_translate_text_05">添加文件</string>
     <string name="activity_auto_translate_text_06">开始处理</string>
     <string name="activity_auto_translate_text_08">标点预测</string>
     <string name="activity_auto_translate_text_09">一键翻译</string>
-    <string name="auto_translate_default_output_directory" translatable="false">Download/SubtitleEdit/Translate</string>
+    <string name="auto_translate_default_output_directory" translatable="false">软件目录/Translate</string>
     <string name="ai_processing_configuration_required">请先在AI设置中完成相关配置</string>
     <string name="activity_vocal_separation_settings_text_01">通用四轨模型</string>
     <string name="activity_vocal_separation_settings_text_02">未选择通用四轨模型</string>
@@ -502,7 +507,7 @@
     <string name="activity_vocal_separation_settings_text_10">选择 Bass 模型</string>
     <string name="activity_vocal_separation_settings_text_11">未选择 Other 模型</string>
     <string name="activity_vocal_separation_settings_text_12">选择 Other 模型</string>
-    <string name="activity_vocal_separation_settings_text_13">手动选择的模型通过文档 URI 直接读取；一键下载的通用模型保存到 Download/SubtitleEdit/models/separation。</string>
+    <string name="activity_vocal_separation_settings_text_13">手动选择的模型通过文档 URI 直接读取；一键下载的通用模型保存到软件目录/models/separation。</string>
     <string name="activity_vocal_separation_settings_text_14" translatable="false">ONNX Runtime</string>
     <string name="activity_vocal_separation_settings_text_15">启用 ORT 图优化</string>
     <string name="activity_vocal_separation_settings_text_16">可能提高推理速度，但 HTDemucs 在模型加载时可能产生很高的内存峰值。</string>
@@ -528,7 +533,7 @@
     <string name="activity_vocal_separation_text_04" translatable="false">Drums</string>
     <string name="activity_vocal_separation_text_05" translatable="false">Bass</string>
     <string name="activity_vocal_separation_text_06" translatable="false">Other</string>
-    <string name="activity_vocal_separation_text_07" translatable="false">Download/SubtitleEdit/Output</string>
+    <string name="activity_vocal_separation_text_07" translatable="false">软件目录/Output</string>
     <string name="activity_vocal_separation_text_08">开始分离</string>
     <string name="activity_vocal_separation_text_09">正在准备...</string>
     <string name="activity_vocal_separation_text_10">提示：单轨优先使用对应 FT 模型，缺失时回退通用模型；选择两个及以上音轨时只使用通用模型并一次输出。取消会在当前分块结束后停止。</string>

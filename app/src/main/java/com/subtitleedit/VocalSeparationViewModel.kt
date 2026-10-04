@@ -412,8 +412,8 @@ internal class VocalSeparationViewModel(
             return
         }
         val path = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            "SubtitleEdit/Output"
+            com.subtitleedit.util.ModelDirectoryManager.softwareDirectory(),
+            "Output"
         )
         path.mkdirs()
         outputDirUri = Uri.fromFile(path)
