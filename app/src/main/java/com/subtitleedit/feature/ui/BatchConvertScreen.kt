@@ -53,7 +53,7 @@ fun BatchConvertScreen(
     files: List<BatchConvertFileUi>,
     formats: List<AppOption<SubtitleParser.SubtitleFormat>>,
     selectedFormat: SubtitleParser.SubtitleFormat,
-    outputDirectoryLabel: String?,
+    outputDirectoryLabel: String,
     dialog: BatchConvertDialogUi?,
     onNavigateBack: () -> Unit,
     onSelectFiles: () -> Unit,
@@ -130,8 +130,7 @@ fun BatchConvertScreen(
 
         AppSection(title = stringResource(R.string.activity_auto_timestamp_text_06)) {
             Text(
-                text = outputDirectoryLabel
-                    ?: stringResource(R.string.activity_auto_timestamp_text_07),
+                text = outputDirectoryLabel,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

@@ -50,7 +50,7 @@ data class AutoTranslateFileUi(
 
 data class AutoTranslateUiState(
     val files: List<AutoTranslateFileUi> = emptyList(),
-    val outputDirectory: String? = null,
+    val outputDirectory: String = "",
     val punctuationPredictionEnabled: Boolean = false,
     val translationEnabled: Boolean = true,
     val queueRunning: Boolean = false,
@@ -162,7 +162,7 @@ fun AutoTranslateScreen(
 
         AppSection(title = stringResource(R.string.activity_auto_timestamp_text_06)) {
             Text(
-                state.outputDirectory ?: stringResource(R.string.auto_translate_default_output_directory),
+                state.outputDirectory,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

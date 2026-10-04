@@ -18,7 +18,7 @@ import java.io.File
 internal data class BatchConvertUiState(
     val files: List<BatchConvertFileUi> = emptyList(),
     val targetFormat: SubtitleParser.SubtitleFormat = SubtitleParser.SubtitleFormat.LRC,
-    val outputDirectoryLabel: String? = null,
+    val outputDirectoryLabel: String = "",
     val dialog: BatchConvertDialogUi? = null
 )
 
@@ -41,6 +41,9 @@ internal class BatchConvertViewModel(
 
     init {
         restoreOutputDirectory()
+        if (outputDirectoryUri == null) {
+            setState { copy(outputDirectoryLabel = defaultConvertOutputDirectory().absolutePath) }
+        }
     }
 
     fun addFiles(uris: List<Uri>) {
@@ -193,7 +196,7 @@ internal class BatchConvertViewModel(
             appendFileList(R.string.batch_convert_result_failed_files, failFiles)
             val outputPath = outputDirectoryUri?.let {
                 DirectoryDisplayPath.fromUri(app, it)
-            } ?: getConvertOutputDirectory().absolutePath
+            } ?: defaultConvertOutputDirectory().absolutePath
             append('\n').appendLine(string(R.string.task_output_directory, outputPath))
         }
         setState { copy(dialog = BatchConvertDialogUi.Result(message)) }
@@ -212,9 +215,12 @@ internal class BatchConvertViewModel(
         else -> "${size / (1024 * 1024 * 1024)} GB"
     }
 
-    /** 获取软件目录下的转换输出目录，如果目录不存在则创建。 */
+    private fun defaultConvertOutputDirectory(): File =
+        File(com.subtitleedit.util.ModelDirectoryManager.softwareDirectory(), "Convert")
+
+    /** 获取转换输出目录，如果目录不存在则创建。 */
     private fun getConvertOutputDirectory(): File {
-        val convertDir = File(com.subtitleedit.util.ModelDirectoryManager.softwareDirectory(), "Convert")
+        val convertDir = defaultConvertOutputDirectory()
         if (!convertDir.exists()) convertDir.mkdirs()
         return convertDir
     }

@@ -1,9 +1,14 @@
 package com.subtitleedit
 
+import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.subtitleedit.util.ModelDirectoryManager
+import com.subtitleedit.util.SettingsManager
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -17,6 +22,32 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class RemainingRecreationTest {
+
+    @Test
+    fun subtitleToolsExposeResolvedDefaultOutputDirectories() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val settings = SettingsManager.getInstance(context)
+        val previousPersistenceSetting = settings.isOutputDirectoryPersistenceEnabled()
+        settings.setOutputDirectoryPersistenceEnabled(false)
+        try {
+            ActivityScenario.launch(BatchConvertActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val viewModel = ViewModelProvider(activity)[BatchConvertViewModel::class.java]
+                    val expected = File(ModelDirectoryManager.softwareDirectory(), "Convert").absolutePath
+                    assertEquals(expected, viewModel.state.value.outputDirectoryLabel)
+                }
+            }
+            ActivityScenario.launch(AutoTranslateActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val viewModel = ViewModelProvider(activity)[AutoTranslateViewModel::class.java]
+                    val expected = File(ModelDirectoryManager.softwareDirectory(), "Translate").absolutePath
+                    assertEquals(expected, viewModel.state.value.outputDirectory)
+                }
+            }
+        } finally {
+            settings.setOutputDirectoryPersistenceEnabled(previousPersistenceSetting)
+        }
+    }
 
     @Test
     fun mediaConvertSelectionSurvivesRecreation() {
