@@ -174,8 +174,7 @@ private fun ProgressDialog(dialog: ModelImportDialogUi.Progress) {
                 AppTaskProgress(
                     visible = true,
                     progress = dialog.progress,
-                    status = dialog.message,
-                    onCancel = dialog.onCancel
+                    status = dialog.message
                 )
             }
         },

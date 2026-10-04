@@ -4,8 +4,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-RUNTIME_VERSION="0.41.0-ffmpeg8.1.2-1"
+RUNTIME_VERSION="0.41.0-ffmpeg8.1.2-2"
 FFMPEG_VERSION="8.1.0-mpv1"
+APK_FLAVOR="${APK_FLAVOR:-standard}"
 RUNTIME_AAR="${PROJECT_ROOT}/app/libs/mpv-runtime-maven/com/subtitleedit/native/mpv-android-runtime/${RUNTIME_VERSION}/mpv-android-runtime-${RUNTIME_VERSION}.aar"
 FFMPEG_AAR="${PROJECT_ROOT}/app/libs/ffmpeg-kit-next-maven/com/arthenica/ffmpeg-kit-next/${FFMPEG_VERSION}/ffmpeg-kit-next-${FFMPEG_VERSION}.aar"
 
@@ -85,7 +86,7 @@ done < <(find \
     -type f -name '*.so' -print0)
 
 for variant in debug release; do
-    apk_dir="${PROJECT_ROOT}/app/build/outputs/apk/${variant}"
+    apk_dir="${PROJECT_ROOT}/app/build/outputs/apk/${APK_FLAVOR}/${variant}"
     universal_apks=("${apk_dir}"/*universal*.apk)
     [[ ${#universal_apks[@]} -eq 1 && -f "${universal_apks[0]}" ]] || {
         echo "error: expected one ${variant} universal APK in ${apk_dir}" >&2

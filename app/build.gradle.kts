@@ -220,7 +220,7 @@ dependencies {
 
     // FFmpegKitNext is built locally because upstream does not publish Android artifacts.
     implementation("com.arthenica:ffmpeg-kit-next:8.1.0-mpv1")
-    implementation("com.subtitleedit.native:mpv-android-runtime:0.41.0-ffmpeg8.1.2-1")
+    implementation("com.subtitleedit.native:mpv-android-runtime:0.41.0-ffmpeg8.1.2-2")
 
     // OkHttp
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

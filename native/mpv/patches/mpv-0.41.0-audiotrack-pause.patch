@@ -1,0 +1,181 @@
+diff --git a/audio/out/ao_audiotrack.c b/audio/out/ao_audiotrack.c
+index f483ccc..f09d0d4 100644
+--- a/audio/out/ao_audiotrack.c
++++ b/audio/out/ao_audiotrack.c
+@@ -21,6 +21,8 @@
+  * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
+  */
+ 
++#include <time.h>
++
+ #include "ao.h"
+ #include "internal.h"
+ #include "common/msg.h"
+@@ -42,6 +44,7 @@ struct priv {
+ 
+     jobject timestamp;
+     int64_t timestamp_fetched;
++    int64_t timestamp_min_ns;
+     bool timestamp_set;
+     int timestamp_stable;
+ 
+@@ -52,6 +55,7 @@ struct priv {
+ 
+     void *chunk;
+     int chunksize;
++    int pending_bytes;
+     jbyteArray bytearray;
+     jshortArray shortarray;
+     jfloatArray floatarray;
+@@ -379,6 +383,14 @@ static int AudioTrack_Recreate(struct ao *ao)
+     return AudioTrack_New(ao);
+ }
+ 
++static int64_t AudioTrack_time_ns(void)
++{
++    // AudioTimestamp.nanoTime uses CLOCK_MONOTONIC, not mpv's raw clock.
++    struct timespec ts;
++    clock_gettime(CLOCK_MONOTONIC, &ts);
++    return MP_TIME_S_TO_NS(ts.tv_sec) + ts.tv_nsec;
++}
++
+ static uint32_t AudioTrack_getPlaybackHeadPosition(struct ao *ao)
+ {
+     struct priv *p = ao->priv;
+@@ -386,7 +398,7 @@ static uint32_t AudioTrack_getPlaybackHeadPosition(struct ao *ao)
+         return 0;
+     JNIEnv *env = MP_JNI_GET_ENV(ao);
+     uint32_t pos = 0;
+-    int64_t now = mp_raw_time_ns();
++    int64_t now = AudioTrack_time_ns();
+     int state = MP_JNI_CALL_INT(p->audiotrack, AudioTrack.getPlayState);
+ 
+     int stable_count = 20;
+@@ -398,7 +410,8 @@ static uint32_t AudioTrack_getPlaybackHeadPosition(struct ao *ao)
+             p->timestamp_stable = 0;
+ 
+         int64_t time1 = MP_JNI_GET_LONG(p->timestamp, AudioTimestamp.nanoTime);
+-        if (MP_JNI_CALL_BOOL(p->audiotrack, AudioTrack.getTimestamp, p->timestamp)) {
++        if (MP_JNI_CALL_BOOL(p->audiotrack, AudioTrack.getTimestamp, p->timestamp) &&
++            MP_JNI_GET_LONG(p->timestamp, AudioTimestamp.nanoTime) >= p->timestamp_min_ns) {
+             p->timestamp_set = true;
+             p->timestamp_fetched = now;
+             if (p->timestamp_stable < stable_count) {
+@@ -579,14 +592,25 @@ static MP_THREAD_VOID ao_thread(void *arg)
+             state = MP_JNI_CALL_INT(p->audiotrack, AudioTrack.getPlayState);
+         }
+         if (state == AudioTrack.PLAYSTATE_PLAYING) {
+-            int read_samples = p->chunksize / ao->sstride;
+-            int64_t ts = mp_time_ns();
+-            ts += MP_TIME_S_TO_NS(read_samples / (double)(ao->samplerate));
+-            ts += MP_TIME_S_TO_NS(AudioTrack_getLatency(ao));
+-            int samples = ao_read_data(ao, &p->chunk, read_samples, ts, NULL, false, false);
+-            int ret = AudioTrack_write(ao, samples * ao->sstride);
++            if (!p->pending_bytes) {
++                int read_samples = p->chunksize / ao->sstride;
++                int64_t ts = mp_time_ns();
++                ts += MP_TIME_S_TO_NS(read_samples / (double)(ao->samplerate));
++                ts += MP_TIME_S_TO_NS(AudioTrack_getLatency(ao));
++                int samples = ao_read_data(ao, &p->chunk, read_samples, ts, NULL, false, false);
++                p->pending_bytes = samples * ao->sstride;
++            }
++            if (!p->pending_bytes) {
++                mp_cond_timedwait(&p->wakeup, &p->lock, MP_TIME_MS_TO_NS(10));
++                continue;
++            }
++            int ret = AudioTrack_write(ao, p->pending_bytes);
+             if (ret >= 0) {
+                 p->written_frames += ret / ao->sstride;
++                p->pending_bytes -= ret;
++                // pause() can interrupt a blocking write. Retry its tail first.
++                if (ret > 0 && p->pending_bytes)
++                    memmove(p->chunk, (char *)p->chunk + ret, p->pending_bytes);
+             } else if (ret == AudioManager.ERROR_DEAD_OBJECT) {
+                 MP_WARN(ao, "AudioTrack.write failed with ERROR_DEAD_OBJECT. Recreating AudioTrack...\n");
+                 if (AudioTrack_Recreate(ao) < 0) {
+@@ -595,6 +619,10 @@ static MP_THREAD_VOID ao_thread(void *arg)
+             } else {
+                 MP_ERR(ao, "AudioTrack.write failed with %d\n", ret);
+             }
++            if (ret <= 0)
++                mp_cond_timedwait(&p->wakeup, &p->lock, MP_TIME_MS_TO_NS(10));
++            mp_mutex_unlock(&p->lock);
++            mp_mutex_lock(&p->lock);
+         } else {
+             mp_cond_timedwait(&p->wakeup, &p->lock, MP_TIME_MS_TO_NS(300));
+         }
+@@ -809,14 +837,19 @@ static void stop(struct ao *ao)
+     JNIEnv *env = MP_JNI_GET_ENV(ao);
+     MP_JNI_CALL_VOID(p->audiotrack, AudioTrack.pause);
+     MP_JNI_EXCEPTION_LOG(ao);
++    // Interrupt a blocking write before waiting for the writer's lock.
++    mp_mutex_lock(&p->lock);
+     MP_JNI_CALL_VOID(p->audiotrack, AudioTrack.flush);
+     MP_JNI_EXCEPTION_LOG(ao);
+ 
+     p->playhead_offset = 0;
+     p->reset_pending = true;
+     p->written_frames = 0;
++    p->pending_bytes = 0;
+     p->timestamp_fetched = 0;
+     p->timestamp_set = false;
++    p->timestamp_stable = 0;
++    mp_mutex_unlock(&p->lock);
+ }
+ 
+ static void start(struct ao *ao)
+@@ -828,10 +861,46 @@ static void start(struct ao *ao)
+     }
+ 
+     JNIEnv *env = MP_JNI_GET_ENV(ao);
++    mp_mutex_lock(&p->lock);
++    p->timestamp_min_ns = AudioTrack_time_ns();
+     MP_JNI_CALL_VOID(p->audiotrack, AudioTrack.play);
+     MP_JNI_EXCEPTION_LOG(ao);
+ 
+     mp_cond_signal(&p->wakeup);
++    mp_mutex_unlock(&p->lock);
++}
++
++// subtitleedit-audiotrack-pause-v2: preserve queued and partially written PCM.
++static bool set_pause(struct ao *ao, bool paused)
++{
++    struct priv *p = ao->priv;
++    if (!p->audiotrack) {
++        MP_ERR(ao, "AudioTrack does not exist to %s!\n",
++               paused ? "pause" : "resume");
++        return false;
++    }
++
++    JNIEnv *env = MP_JNI_GET_ENV(ao);
++    if (paused) {
++        // Unblock the writer before taking its lock; retain both PCM queues.
++        MP_JNI_CALL_VOID(p->audiotrack, AudioTrack.pause);
++        if (MP_JNI_EXCEPTION_LOG(ao) < 0) return false;
++    }
++
++    mp_mutex_lock(&p->lock);
++    p->timestamp_fetched = 0;
++    p->timestamp_set = false;
++    p->timestamp_stable = 0;
++    bool success = true;
++    if (!paused) {
++        // Reject presentation timestamps from before this resume.
++        p->timestamp_min_ns = AudioTrack_time_ns();
++        MP_JNI_CALL_VOID(p->audiotrack, AudioTrack.play);
++        success = MP_JNI_EXCEPTION_LOG(ao) >= 0;
++        mp_cond_signal(&p->wakeup);
++    }
++    mp_mutex_unlock(&p->lock);
++    return success;
+ }
+ 
+ #define OPT_BASE_STRUCT struct priv
+@@ -843,6 +912,7 @@ const struct ao_driver audio_out_audiotrack = {
+     .uninit    = uninit,
+     .reset     = stop,
+     .start     = start,
++    .set_pause = set_pause,
+     .priv_size = sizeof(struct priv),
+     .priv_defaults = &(const OPT_BASE_STRUCT) {
+         .cfg_pcm_float = 1,

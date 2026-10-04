@@ -8,7 +8,7 @@ FFMPEG_KIT_DIR="${FFMPEG_KIT_DIR:-${HOME}/src/subtitleedit-ffmpeg-kit-next}"
 WORK_DIR="${SUBTITLEEDIT_MPV_WORK_DIR:-${HOME}/subtitleedit-mpv-build}"
 MPV_ANDROID_COMMIT="20a3fa526fac6d3fe267aee0d4c349893fee65a3"
 MPV_VERSION="0.41.0"
-RUNTIME_VERSION="0.41.0-ffmpeg8.1.2-1"
+RUNTIME_VERSION="0.41.0-ffmpeg8.1.2-2"
 FFMPEG_ARTIFACT_VERSION="8.1.0-mpv1"
 
 require_tool() {
@@ -18,7 +18,7 @@ require_tool() {
     }
 }
 
-for tool in curl tar sed meson ninja pkg-config zip unzip jar; do
+for tool in curl tar sed patch sha256sum meson ninja pkg-config zip unzip jar; do
     require_tool "$tool"
 done
 
@@ -111,6 +111,25 @@ link_dependency harfbuzz harfbuzz-14.2.1
 link_dependency unibreak libunibreak-7.0
 link_dependency libxml2 libxml2-2.15.3
 link_dependency fontconfig fontconfig-2.16.0
+
+MPV_SOURCE_DIR="${DEPS_DIR}/mpv"
+MPV_AUDIOTRACK_PATCH="${SCRIPT_DIR}/patches/mpv-0.41.0-audiotrack-pause.patch"
+MPV_PATCH_HASH="$(sha256sum "${MPV_AUDIOTRACK_PATCH}")"
+MPV_PATCH_FINGERPRINT="${MPV_VERSION}-${MPV_PATCH_HASH%% *}"
+MPV_SOURCE_PATCH_MARKER="${MPV_SOURCE_DIR}/.subtitleedit-audiotrack-patch"
+if [[ ! -f "${MPV_SOURCE_PATCH_MARKER}" ]] || \
+    [[ "$(<"${MPV_SOURCE_PATCH_MARKER}")" != "${MPV_PATCH_FINGERPRINT}" ]]; then
+    # Start from pinned, clean sources when a patch is added or updated.
+    rm -rf "${MPV_SOURCE_DIR:?}"
+    mkdir -p "${MPV_SOURCE_DIR}"
+    cp -a "${WORK_DIR}/sources/mpv-${MPV_VERSION}/." "${MPV_SOURCE_DIR}/"
+    patch -d "${MPV_SOURCE_DIR}" -p1 --forward --batch < "${MPV_AUDIOTRACK_PATCH}"
+    printf '%s' "mpv-${MPV_VERSION}" > "${MPV_SOURCE_DIR}/.subtitleedit-source"
+    printf '%s' "${MPV_PATCH_FINGERPRINT}" > "${MPV_SOURCE_PATCH_MARKER}"
+    for arch in armv7l arm64 x86 x86_64; do
+        rm -f "${BUILD_ROOT}/buildscripts/prefix/${arch}/.subtitleedit-audiotrack-patch"
+    done
+fi
 
 rm -rf "${DEPS_DIR}/libplacebo/3rdparty/glad" \
     "${DEPS_DIR}/libplacebo/3rdparty/jinja" \
@@ -205,10 +224,15 @@ stage_ffmpeg_prefix x86_64 x86_64
 
 cd "${BUILD_ROOT}/buildscripts"
 for arch in armv7l arm64 x86 x86_64; do
-    if [[ -f "${BUILD_ROOT}/buildscripts/prefix/${arch}/lib/libmpv.so" ]]; then
+    mpv_prefix="${BUILD_ROOT}/buildscripts/prefix/${arch}"
+    mpv_patch_marker="${mpv_prefix}/.subtitleedit-audiotrack-patch"
+    if [[ -f "${mpv_prefix}/lib/libmpv.so" && -f "${mpv_patch_marker}" ]] && \
+        [[ "$(<"${mpv_patch_marker}")" == "${MPV_PATCH_FINGERPRINT}" ]]; then
         echo "Reusing libmpv for ${arch}"
     else
+        rm -rf "${MPV_SOURCE_DIR}/_build_${arch}" "${mpv_prefix}/lib/libmpv.so"
         ./buildall.sh --arch "${arch}" mpv
+        printf '%s' "${MPV_PATCH_FINGERPRINT}" > "${mpv_patch_marker}"
     fi
 done
 
