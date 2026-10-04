@@ -20,4 +20,6 @@
     <string name="settings_cache_quick_transcribe_empty">暂无快速转录音频缓存可清除</string>
     <string name="settings_cache_quick_transcribe_confirm">将删除 %1$s 的快速转录音频缓存，下次快速转录时会重新生成。\n确定继续？</string>
     <string name="settings_cache_cleared">已清除 %1$d 个%2$s缓存文件</string>
+    <string name="settings_cache_cleared_generic">已清除 %1$d 个缓存文件</string>
+    <string name="asr_settings_no_configuration_page">当前模型没有配置页</string>
 </resources>

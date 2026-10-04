@@ -10,7 +10,7 @@ import java.io.File
 
 /** Owns archive password entry and password-book UI. */
 internal class ArchivePasswordDialogController(
-    private val activity: AppCompatActivity,
+    private val activityProvider: () -> AppCompatActivity?,
     private val showToast: (String) -> Unit
 ) {
     fun showPasswordDialog(
@@ -18,6 +18,10 @@ internal class ArchivePasswordDialogController(
         onPassword: (String) -> Unit,
         onCancelled: () -> Unit = {}
     ) {
+        val activity = activityProvider() ?: run {
+            onCancelled()
+            return
+        }
         val vault = ArchivePasswordVault(activity)
         ComposeDialogHost.show(activity) { dialog ->
             var password by remember { mutableStateOf("") }

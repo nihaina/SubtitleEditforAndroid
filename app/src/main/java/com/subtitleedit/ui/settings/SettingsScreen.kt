@@ -48,8 +48,8 @@ import java.util.Locale
 data class SettingsPageState(
     val encoding: String = "",
     val themeMode: String = SettingsManager.THEME_SYSTEM,
-    // Default only (no Context here); hosts fill it from R.string.settings_theme_system.
-    val themeLabel: String = "跟随系统",
+    // Hosts fill this from the localized theme resources.
+    val themeLabel: String = "",
     val cacheSize: String = "",
     val checkUpdatesOnStartup: Boolean = false,
     val preserveOutputDirectories: Boolean = true,
@@ -115,7 +115,7 @@ fun SettingsScreen(
                 )
                 SettingsRow(
                     title = stringResource(R.string.activity_settings_text_02),
-                    value = state.themeLabel,
+                    value = state.themeLabel.ifBlank { stringResource(R.string.settings_theme_system) },
                     iconRes = R.drawable.ic_theme_moon,
                     onClick = { showThemeDialog = true }
                 )

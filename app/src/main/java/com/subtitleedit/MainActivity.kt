@@ -20,6 +20,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.viewModelScope
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.feature.ui.ArchiveCreateSubmission
 import com.subtitleedit.feature.ui.ArchiveCreationDialogUi
@@ -66,6 +67,7 @@ import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleFormatConverter
 import com.subtitleedit.util.UpdateChecker
 import java.io.File
+import java.lang.ref.WeakReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -85,9 +87,14 @@ class MainActivity : AppComposeActivity() {
         get() = (application as SubtitleEditApplication).dependencies.archiveRepository
 
     private companion object {
+        // Long file tasks outlive configuration changes; UI callbacks resolve
+        // the Activity that is currently attached instead of retaining the old one.
+        var activeInstance: WeakReference<MainActivity>? = null
         const val CONFLICT_WAIT_INTERVAL_MS = 250L
         const val BACK_EXIT_CONFIRM_WINDOW_MS = 2_000L
     }
+
+    private fun isCurrentTaskHost(): Boolean = activeInstance?.get() === this
 
     private lateinit var filePropertiesDialogController: FilePropertiesDialogController
     private lateinit var topLevelNavigationCoordinator: MainTopLevelNavigationCoordinator
@@ -166,6 +173,7 @@ class MainActivity : AppComposeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val settingsManager = com.subtitleedit.util.SettingsManager.getInstance(this)
         super.onCreate(savedInstanceState)
+        activeInstance = WeakReference(this)
         screenState = MainActivityScreenState(
             selectedTopLevelItem = stateModel.documentState.selectedTopLevelItem
         )
@@ -173,29 +181,31 @@ class MainActivity : AppComposeActivity() {
             stateModel.documentState.searchQuery.isNotEmpty()
         filePropertiesDialogController = FilePropertiesDialogController(this, ::showShortToast)
         mediaOpenController = MediaOpenController(this, ::openMediaWithSubtitle)
-        archivePasswordDialogController = ArchivePasswordDialogController(this, ::showShortToast)
-        archiveConflictDialogController = ArchiveConflictDialogController(this)
-        archiveProgressDialogController = ArchiveProgressDialogController(this)
-        archiveActionDialogController = ArchiveActionDialogController(this)
+        archivePasswordDialogController = ArchivePasswordDialogController(
+            activityProvider = { activeInstance?.get() },
+            showToast = { message -> activeInstance?.get()?.showShortToast(message) }
+        )
+        archiveConflictDialogController = ArchiveConflictDialogController { activeInstance?.get() }
+        archiveProgressDialogController = ArchiveProgressDialogController { activeInstance?.get() }
+        archiveActionDialogController = ArchiveActionDialogController { activeInstance?.get() }
         archiveCompressionController = ArchiveCompressionController(
-            activity = this,
-            scope = lifecycleScope,
+            scope = stateModel.viewModelScope,
             repository = archiveRepository,
             progressController = archiveProgressDialogController,
-            onExitSelection = ::exitSelectionMode,
-            onRefreshDirectory = ::loadDirectory,
-            onToast = ::showShortToast,
-            onError = ::showOperationError,
-            onDeleteFailures = { output, count ->
-                mainDialog = MainActivityDialogUi.Message(
+            onExitSelection = { activeInstance?.get()?.exitSelectionMode() },
+            onRefreshDirectory = { directory -> activeInstance?.get()?.loadDirectory(directory) },
+            onToast = { message -> activeInstance?.get()?.showShortToast(message) },
+            onError = { title, error -> activeInstance?.get()?.showOperationError(title, error) },
+            onDeleteFailures = { output, count -> activeInstance?.get()?.let { current ->
+                current.mainDialog = MainActivityDialogUi.Message(
                     title = "压缩已完成",
                     message = "${output.name} 已创建，但有 $count 个源文件无法删除。"
                 )
             }
+            }
         )
         archiveExtractionRunner = ArchiveExtractionRunner(
-            activity = this,
-            scope = lifecycleScope,
+            scope = stateModel.viewModelScope,
             repository = archiveRepository,
             progressController = archiveProgressDialogController
         )
@@ -365,6 +375,7 @@ class MainActivity : AppComposeActivity() {
 
     override fun onDestroy() {
         if (::lifecycleCoordinator.isInitialized) lifecycleCoordinator.onDestroy()
+        if (activeInstance?.get() === this) activeInstance = null
         super.onDestroy()
     }
     
@@ -577,6 +588,7 @@ class MainActivity : AppComposeActivity() {
     }
     
     private fun loadDirectory(directory: File, restoreScrollPosition: Boolean = false): Boolean {
+        if (activeInstance?.get() !== this) return false
         if (!directory.exists() || !directory.canRead()) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "无法访问目录：${directory.name}", Toast.LENGTH_SHORT).show()
             return false
@@ -852,6 +864,7 @@ class MainActivity : AppComposeActivity() {
     private fun updateSelectionUi() = publishScreenState()
 
     private fun exitSelectionMode() {
+        if (activeInstance?.get() !== this) return
         stateModel.documentState.selectedPaths.clear()
         stateModel.documentState.pendingFileOperation = null
         stateModel.documentState.pendingArchiveFile = null
@@ -887,7 +900,7 @@ class MainActivity : AppComposeActivity() {
         if (operation == FileOperation.MOVE) {
             // 移动使用文件系统的重命名操作，启动后立即退出选择模式。
             exitSelectionMode()
-            lifecycleScope.launch {
+            stateModel.viewModelScope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
                         sources.forEach { source -> moveFile(source, destination) }
@@ -911,7 +924,7 @@ class MainActivity : AppComposeActivity() {
             showCancel = true
         )
         val cancelledByUser = AtomicBoolean(false)
-        fileCopyJob = lifecycleScope.launch {
+        fileCopyJob = stateModel.viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
                     copyFiles(
@@ -1008,7 +1021,7 @@ class MainActivity : AppComposeActivity() {
     private fun deleteConfirmedSelection() {
         val files = pendingDeleteFiles ?: return
         dismissMainDialog()
-        lifecycleScope.launch {
+        stateModel.viewModelScope.launch {
             val deleted = withContext(Dispatchers.IO) { files.all { it.deleteRecursively() } }
             if (deleted) {
                 exitSelectionMode()
@@ -1316,6 +1329,7 @@ class MainActivity : AppComposeActivity() {
         action: ArchiveAction,
         password: String? = null
     ) {
+        if (!isCurrentTaskHost()) return
         if (action == ArchiveAction.EXTRACT_CURRENT) {
             prepareArchiveExtraction(
                 archive = archive,
@@ -1327,7 +1341,7 @@ class MainActivity : AppComposeActivity() {
         }
         val title = ArchiveActionUiPolicy.progressTitle(action)
         val progress = showBlockingProgress(title, archive.name)
-        lifecycleScope.launch {
+        stateModel.viewModelScope.launch {
             val passwordChars = password?.toCharArray()
             val result = try {
                 withContext(Dispatchers.IO) {
@@ -1347,6 +1361,7 @@ class MainActivity : AppComposeActivity() {
                 progress.dismiss()
             }
             result.onSuccess { value ->
+                if (!isCurrentTaskHost()) return@onSuccess
                 when (action) {
                     ArchiveAction.PREVIEW -> startActivity(
                         ArchivePreviewActivity.createIntent(this@MainActivity, archive.name, value as File)
@@ -1401,6 +1416,7 @@ class MainActivity : AppComposeActivity() {
         onCompleted: () -> Unit,
         onCancelled: () -> Unit = {}
     ) {
+        if (!isCurrentTaskHost()) return
         if (archiveRepository.requiresStreamingConflictResolution(archive)) {
             executeArchiveExtraction(
                 archive = archive,
@@ -1418,7 +1434,7 @@ class MainActivity : AppComposeActivity() {
             "正在解压",
             "正在检查压缩包..."
         )
-        lifecycleScope.launch {
+        stateModel.viewModelScope.launch {
             val passwordChars = password?.toCharArray()
             val result = try {
                 withContext(Dispatchers.IO) {
@@ -1517,6 +1533,10 @@ class MainActivity : AppComposeActivity() {
         onCancelled: () -> Unit = {},
         onConflict: ((ArchiveManager.DestinationConflict) -> ArchiveManager.ConflictResolution)? = null
     ) {
+        if (!isCurrentTaskHost()) {
+            onCancelled()
+            return
+        }
         archiveExtractionRunner.run(
             archive = archive,
             destination = destination,
@@ -1590,9 +1610,16 @@ class MainActivity : AppComposeActivity() {
         conflict: ArchiveManager.DestinationConflict,
         onPolicySelected: (ArchiveManager.ConflictPolicy, Boolean) -> Unit,
         onCancelled: () -> Unit = {}
-    ) = archiveConflictDialogController.show(conflict, onPolicySelected, onCancelled)
+    ) {
+        if (!isCurrentTaskHost()) {
+            onCancelled()
+            return
+        }
+        archiveConflictDialogController.show(conflict, onPolicySelected, onCancelled)
+    }
 
     private fun showExtractionCompleted(result: ArchiveManager.ExtractResult) {
+        if (!isCurrentTaskHost()) return
         val message = if (result.skippedCount > 0) {
             "解压完成：${result.entryCount} 项，跳过 ${result.skippedCount} 项"
         } else {
@@ -1605,7 +1632,13 @@ class MainActivity : AppComposeActivity() {
         archive: File,
         onPassword: (String) -> Unit,
         onCancelled: () -> Unit = {}
-    ) = archivePasswordDialogController.showPasswordDialog(archive, onPassword, onCancelled)
+    ) {
+        if (!isCurrentTaskHost()) {
+            onCancelled()
+            return
+        }
+        archivePasswordDialogController.showPasswordDialog(archive, onPassword, onCancelled)
+    }
 
     private fun showBlockingProgress(title: String, message: String): ComposeDialogHandle =
         archiveActionDialogController.showBlockingProgress(title, message)
@@ -1624,14 +1657,18 @@ class MainActivity : AppComposeActivity() {
         total: Long
     ) = archiveProgressDialogController.updateArchive(progress, phase, completed, total)
 
-    private fun showOperationError(title: String, error: Throwable) =
-        archiveProgressDialogController.showError(title, error)
+    private fun showOperationError(title: String, error: Throwable) {
+        if (activeInstance?.get() === this) {
+            archiveProgressDialogController.showError(title, error)
+        }
+    }
 
     private fun showSelectedProperties() {
         filePropertiesDialogController.show(selectedFiles())
     }
 
     private fun showShortToast(message: String) {
+        if (activeInstance?.get() !== this) return
         com.subtitleedit.util.OverwritingToast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
     

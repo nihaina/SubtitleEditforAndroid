@@ -302,9 +302,9 @@ private fun exportDraft(context: Context, state: MainTopLevelPagesState, uri: Ur
             it.write(DraftManager.readDraft(context, draft.folderName, draft.fileName).toByteArray())
         }
     }.onSuccess {
-        showTopLevelToast(context, "导出成功")
+        showTopLevelToast(context, context.getString(R.string.drafts_export_success))
     }.onFailure {
-        showTopLevelToast(context, "导出失败：${it.message}")
+        showTopLevelToast(context, context.getString(R.string.drafts_export_failed, it.message.orEmpty()))
     }
     state.draftToExport = null
 }
@@ -314,7 +314,7 @@ private fun copyDraft(context: Context, item: DraftsActivity.DraftItem) {
     clipboard.setPrimaryClip(
         ClipData.newPlainText("draft", DraftManager.readDraft(context, item.folderName, item.fileName))
     )
-    showTopLevelToast(context, "已复制到剪贴板")
+    showTopLevelToast(context, context.getString(R.string.drafts_copied_to_clipboard))
 }
 
 private fun openTool(context: Context, destination: ToolDestination) {
@@ -351,9 +351,9 @@ private fun loadSettingsPage(context: Context, settings: SettingsManager): Setti
         encoding = encoding,
         themeMode = themeMode,
         themeLabel = when (themeMode) {
-            SettingsManager.THEME_LIGHT -> "亮色"
-            SettingsManager.THEME_DARK -> "深色"
-            else -> "跟随系统"
+            SettingsManager.THEME_LIGHT -> context.getString(R.string.settings_theme_light)
+            SettingsManager.THEME_DARK -> context.getString(R.string.settings_theme_dark)
+            else -> context.getString(R.string.settings_theme_system)
         },
         cacheSize = if (cacheSize > 0) formatTopLevelSize(cacheSize) else "",
         checkUpdatesOnStartup = settings.shouldCheckUpdatesOnStartup(),
@@ -374,16 +374,34 @@ private fun settingsCacheItems(context: Context): List<SettingsCacheItem> {
     }.toList()
     return listOf(
         SettingsCacheItem(
-            "waveform", "波形图缓存", waveform.sumOf(File::length), "暂无波形图缓存可清除",
-            "将删除 ${formatTopLevelSize(waveform.sumOf(File::length))} 的波形图缓存，下次打开音频时会重新生成。\n确定继续？"
+            "waveform",
+            context.getString(R.string.settings_cache_waveform_label),
+            waveform.sumOf(File::length),
+            context.getString(R.string.settings_cache_waveform_empty),
+            context.getString(
+                R.string.settings_cache_waveform_confirm,
+                formatTopLevelSize(waveform.sumOf(File::length))
+            )
         ),
         SettingsCacheItem(
-            "spectrogram", "频谱图缓存", spectrogram.sumOf(File::length), "暂无频谱图缓存可清除",
-            "将删除 ${formatTopLevelSize(spectrogram.sumOf(File::length))} 的频谱图缓存，下次查看频谱图时会重新生成。\n确定继续？"
+            "spectrogram",
+            context.getString(R.string.settings_cache_spectrogram_label),
+            spectrogram.sumOf(File::length),
+            context.getString(R.string.settings_cache_spectrogram_empty),
+            context.getString(
+                R.string.settings_cache_spectrogram_confirm,
+                formatTopLevelSize(spectrogram.sumOf(File::length))
+            )
         ),
         SettingsCacheItem(
-            "quick_transcribe", "快速转录音频缓存", audio.sumOf(File::length), "暂无快速转录音频缓存可清除",
-            "将删除 ${formatTopLevelSize(audio.sumOf(File::length))} 的快速转录音频缓存，下次快速转录时会重新生成。\n确定继续？"
+            "quick_transcribe",
+            context.getString(R.string.settings_cache_quick_transcribe_label),
+            audio.sumOf(File::length),
+            context.getString(R.string.settings_cache_quick_transcribe_empty),
+            context.getString(
+                R.string.settings_cache_quick_transcribe_confirm,
+                formatTopLevelSize(audio.sumOf(File::length))
+            )
         )
     )
 }
@@ -411,9 +429,9 @@ private fun clearSettingsCache(
     val count = files.count(File::delete)
     val message = if (includeCacheLabel) {
         val label = item.label.removeSuffix("缓存")
-        "已清除 $count 个${label}缓存文件"
+        context.getString(R.string.settings_cache_cleared, count, label)
     } else {
-        "已清除 $count 个缓存文件"
+        context.getString(R.string.settings_cache_cleared_generic, count)
     }
     showTopLevelToast(context, message)
     state.settingsPage = loadSettingsPage(context, settings)

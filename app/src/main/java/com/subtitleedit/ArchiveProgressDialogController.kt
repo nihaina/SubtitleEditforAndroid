@@ -12,7 +12,7 @@ import com.subtitleedit.util.FileUtils
 
 /** Owns archive, compression, and copy progress dialog presentation. */
 internal class ArchiveProgressDialogController(
-    private val activity: AppCompatActivity
+    private val activityProvider: () -> AppCompatActivity?
 ) {
     class ProgressUi internal constructor(
         val state: MutableState<ArchiveProgressDialogState>
@@ -52,6 +52,8 @@ internal class ArchiveProgressDialogController(
     }
 
     fun show(title: String, message: String, showCancel: Boolean = false): ProgressUi {
+        val activity = activityProvider()
+            ?: error("Archive progress UI is not attached to an Activity")
         val state = mutableStateOf(
             ArchiveProgressDialogState(
                 title = title,
@@ -66,13 +68,18 @@ internal class ArchiveProgressDialogController(
         return progress
     }
 
+    /** Runs a UI update against the currently attached Activity. */
+    fun runOnUiThread(action: () -> Unit) {
+        activityProvider()?.runOnUiThread(action)
+    }
+
     fun updateArchive(
         progress: ProgressUi,
         phase: ArchiveManager.ProgressPhase,
         completed: Long,
         total: Long
     ) {
-        activity.runOnUiThread {
+        runOnUiThread {
             if (!progress.dialog.isShowing) return@runOnUiThread
             val message = ArchiveProgressPolicy.phaseLabel(phase)
             if (total > 0L) {
@@ -109,7 +116,7 @@ internal class ArchiveProgressDialogController(
         progress: ProgressUi,
         compressionProgress: ArchiveManager.CompressionProgress
     ) {
-        activity.runOnUiThread {
+        runOnUiThread {
             if (!progress.dialog.isShowing) return@runOnUiThread
             val percent = compressionProgress.percent
             val oldState = progress.state.value
@@ -130,7 +137,7 @@ internal class ArchiveProgressDialogController(
     }
 
     fun updateFileCopy(progress: ProgressUi, message: String, completed: Long, total: Long) {
-        activity.runOnUiThread {
+        runOnUiThread {
             if (!progress.dialog.isShowing) return@runOnUiThread
             if (total > 0L) {
                 val ratio = completed.coerceIn(0L, total).toDouble() / total.toDouble()
@@ -153,6 +160,7 @@ internal class ArchiveProgressDialogController(
 
     fun showError(title: String, error: Throwable) {
         val message = error.message ?: "未知错误"
+        val activity = activityProvider() ?: return
         ComposeDialogHost.show(activity) { dialog ->
             AlertDialog(
                 onDismissRequest = dialog::dismiss,

@@ -7,13 +7,17 @@ import com.subtitleedit.util.ArchiveManager
 
 /** Owns the destination-conflict decision dialog used during extraction. */
 internal class ArchiveConflictDialogController(
-    private val activity: AppCompatActivity
+    private val activityProvider: () -> AppCompatActivity?
 ) {
     fun show(
         conflict: ArchiveManager.DestinationConflict,
         onPolicySelected: (ArchiveManager.ConflictPolicy, Boolean) -> Unit,
         onCancelled: () -> Unit = {}
     ) {
+        val activity = activityProvider() ?: run {
+            onCancelled()
+            return
+        }
         val model = ArchiveConflictDialogModel(
             entryName = conflict.entryName,
             source = ArchiveConflictFileMetadata(

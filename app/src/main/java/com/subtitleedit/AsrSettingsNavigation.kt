@@ -17,7 +17,11 @@ internal object AsrSettingsNavigation {
             else -> null
         }
         if (destination == null) {
-            OverwritingToast.makeText(context, "当前模型没有配置页", Toast.LENGTH_SHORT).show()
+            OverwritingToast.makeText(
+                context,
+                context.getString(R.string.asr_settings_no_configuration_page),
+                Toast.LENGTH_SHORT
+            ).show()
         } else {
             context.startActivity(Intent(context, destination))
         }

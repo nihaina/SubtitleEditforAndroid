@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Media conversion state, options and task log messages. -->
+<resources>
+    <string name="media_convert_codec_video_required">（请先选择视频格式）</string>
+    <string name="media_convert_codec_format_required">（请先选择格式）</string>
+    <string name="media_convert_reading_info">正在读取媒体信息...</string>
+    <string name="media_convert_resolution_original">原始分辨率</string>
+    <string name="media_convert_resolution_4k">3840x2160 (4K)</string>
+    <string name="media_convert_resolution_2k">2560x1440 (2K)</string>
+    <string name="media_convert_resolution_1080p">1920x1080 (1080p)</string>
+    <string name="media_convert_resolution_720p">1280x720 (720p)</string>
+    <string name="media_convert_resolution_480p">854x480 (480p)</string>
+    <string name="media_convert_resolution_360p">640x360 (360p)</string>
+    <string name="media_convert_resolution_240p">426x240 (240p)</string>
+    <string name="media_convert_sample_rate_original">原始采样率</string>
+    <string name="media_convert_channel_original">原始声道</string>
+    <string name="media_convert_channel_stereo">立体声 (2ch)</string>
+    <string name="media_convert_channel_mono">单声道 (1ch)</string>
+    <string name="media_convert_quality_original">原始质量</string>
+    <string name="media_convert_quality_high">高质量 (18)</string>
+    <string name="media_convert_quality_high_medium">较高质量 (23)</string>
+    <string name="media_convert_quality_medium">中等质量 (28)</string>
+    <string name="media_convert_quality_low">低质量 (33)</string>
+    <string name="media_convert_quality_custom">自定义</string>
+    <string name="media_convert_output_directory">输出目录：%1$s</string>
+    <string name="media_convert_probe_summary">媒体信息 %1$d/%2$d：%3$s&#10;</string>
+    <string name="media_convert_probe_failed">无法读取媒体信息：FFprobe 无法解析</string>
+    <string name="media_convert_probe_exception">无法读取媒体信息：%1$s</string>
+    <string name="media_convert_unknown">未知</string>
+    <string name="media_convert_duration">时长：%1$s</string>
+    <string name="media_convert_bitrate">比特率：%1$s kb/s</string>
+    <string name="media_convert_video_stream">视频：%1$s %2$sx%3$s @%4$s fps</string>
+    <string name="media_convert_audio_stream">音频：%1$s %2$s Hz %3$s</string>
+    <string name="media_convert_cancel_started">&#10;⚠️ 正在取消...&#10;</string>
+    <string name="media_convert_cancelled">&#10;⚠️ 已取消转换&#10;</string>
+    <string name="media_convert_summary">&#10;处理完成：成功 %1$d，失败 %2$d&#10;</string>
+    <string name="media_convert_failed_files">失败文件：%1$s&#10;</string>
+    <string name="media_convert_file_failed">&#10;❌ %1$s：%2$s&#10;</string>
+    <string name="media_convert_error">转换失败</string>
+    <string name="media_convert_start_file">&#10;%1$s 开始处理：%2$s&#10;</string>
+    <string name="media_convert_no_video_stream">%1$s 未检测到视频流，将生成黑色画面并保留音频。&#10;</string>
+    <string name="media_convert_converting">%1$s 正在转换...&#10;</string>
+    <string name="media_convert_ffmpeg_invalid_output">FFmpeg 未返回有效输出</string>
+    <string name="media_convert_output_write_failed">无法写入输出目录</string>
+    <string name="media_convert_file_completed">%1$s 完成：%2$s&#10;</string>
+    <string name="media_convert_execute_command">执行命令：ffmpeg %1$s&#10;</string>
+    <string name="media_convert_timeout">FFmpeg 超过 120 秒没有读取到有效媒体数据，可能是源文件损坏或无法 seek</string>
+    <string name="media_convert_invalid_output_directory">输出目录无效</string>
+    <string name="media_convert_create_output_directory_failed">无法创建输出目录</string>
+    <string name="media_convert_output_empty">输出文件为空</string>
+    <string name="media_convert_output_access_failed">无法访问输出目录</string>
+    <string name="media_convert_create_output_failed">无法创建输出文件：%1$s</string>
+    <string name="media_convert_write_output_failed">无法写入输出文件：%1$s</string>
+</resources>

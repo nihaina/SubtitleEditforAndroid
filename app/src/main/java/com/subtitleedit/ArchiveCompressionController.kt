@@ -1,12 +1,11 @@
 package com.subtitleedit
 
-import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.LifecycleCoroutineScope
 import com.subtitleedit.repository.ArchiveRepository
 import com.subtitleedit.util.ArchiveManager
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
@@ -14,8 +13,7 @@ import kotlinx.coroutines.withContext
 
 /** Executes archive creation while keeping coroutine and progress handling out of the Activity. */
 internal class ArchiveCompressionController(
-    private val activity: AppCompatActivity,
-    private val scope: LifecycleCoroutineScope,
+    private val scope: CoroutineScope,
     private val repository: ArchiveRepository,
     private val progressController: ArchiveProgressDialogController,
     private val onExitSelection: () -> Unit,
@@ -57,7 +55,7 @@ internal class ArchiveCompressionController(
                         onDetailedProgress = { progressController.updateCompression(progress, it) },
                         onCommitted = {
                             committed.set(true)
-                            activity.runOnUiThread {
+                            progressController.runOnUiThread {
                                 if (progress.dialog.isShowing) {
                                     progress.setCancelEnabled(false)
                                     if (deleteSources) progress.setMessage("正在删除源文件...")

@@ -1,12 +1,11 @@
 package com.subtitleedit
 
-import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.LifecycleCoroutineScope
 import com.subtitleedit.repository.ArchiveRepository
 import com.subtitleedit.util.ArchiveManager
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -15,8 +14,7 @@ import kotlinx.coroutines.withContext
 
 /** Runs one extraction attempt and reports its outcome to the orchestration layer. */
 internal class ArchiveExtractionRunner(
-    private val activity: AppCompatActivity,
-    private val scope: LifecycleCoroutineScope,
+    private val scope: CoroutineScope,
     private val repository: ArchiveRepository,
     private val progressController: ArchiveProgressDialogController,
 ) {

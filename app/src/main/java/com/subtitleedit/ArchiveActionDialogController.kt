@@ -7,13 +7,14 @@ import java.io.File
 
 /** Owns archive action selection and simple archive-operation progress dialogs. */
 internal class ArchiveActionDialogController(
-    private val activity: AppCompatActivity
+    private val activityProvider: () -> AppCompatActivity?
 ) {
     fun showActions(
         archive: File,
         onAction: (ArchiveAction) -> Unit,
         onExtractToDestination: () -> Unit
     ) {
+        val activity = activityProvider() ?: return
         ComposeDialogHost.show(activity) { dialog ->
             ArchiveActionsDialog(
                 archiveName = archive.name,
@@ -33,6 +34,8 @@ internal class ArchiveActionDialogController(
     }
 
     fun showBlockingProgress(title: String, message: String): ComposeDialogHandle {
+        val activity = activityProvider()
+            ?: error("Archive action UI is not attached to an Activity")
         return ComposeDialogHost.show(activity) { _ ->
             // The archive preview/test operation used a plain, non-cancelable
             // AlertDialog in the XML implementation. Keep that presentation
