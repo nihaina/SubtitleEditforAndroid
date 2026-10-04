@@ -17,9 +17,17 @@ internal class DefaultMediaRepository(
 ) : MediaRepository {
     private var temporaryPlaybackFile: File? = null
 
+    override suspend fun inspectMp3(audioFile: File): Mp3FileIssues = withContext(Dispatchers.IO) {
+        logDebug("MP3 规范检测开始：${audioFile.absolutePath}")
+        val issues = inspectMp3File(audioFile)
+        logDebug("MP3 规范检测完成：${audioFile.absolutePath}, hasIssues=${issues.hasIssues}")
+        issues
+    }
+
     override suspend fun prepareAudio(
         audioFile: File,
-        inspectVideoAudioTrack: Boolean
+        inspectVideoAudioTrack: Boolean,
+        forceMp3Preparation: Boolean
     ): PreparedAudioFile = withContext(Dispatchers.IO) {
         if (inspectVideoAudioTrack) {
             val mediaInformation = nativeMediaEngine.probe(audioFile, inspectVideoAudioTrack = true)
@@ -30,11 +38,11 @@ internal class DefaultMediaRepository(
             )
         }
 
-        if (!audioFile.extension.equals("mp3", ignoreCase = true)) {
+        val isMp3 = forceMp3Preparation || audioFile.extension.equals("mp3", ignoreCase = true)
+        if (!isMp3) {
             return@withContext PreparedAudioFile(audioFile, wasFixed = false)
         }
 
-        val issues = inspectMp3(audioFile)
         // MP3 即使从 0 开始，也可能因码率估算导致 MediaPlayer 跳转偏移。
         Log.d(TAG, "MP3 音频使用临时 WAV 播放：${audioFile.name}")
         val wavFile = try {
@@ -43,7 +51,7 @@ internal class DefaultMediaRepository(
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "创建临时 WAV 文件失败，使用原文件", e)
-            return@withContext PreparedAudioFile(audioFile, wasFixed = false, mp3Issues = issues)
+            return@withContext PreparedAudioFile(audioFile, wasFixed = false)
         }
 
         val operation = nativeMediaEngine.openOperation()
@@ -53,7 +61,7 @@ internal class DefaultMediaRepository(
             }
             replaceTemporaryPlaybackFile(wavFile)
             Log.d(TAG, "WAV 转换成功：${wavFile.absolutePath}")
-            PreparedAudioFile(wavFile, wasFixed = true, mp3Issues = issues)
+            PreparedAudioFile(wavFile, wasFixed = true)
         } catch (e: CancellationException) {
             operation.cancel()
             wavFile.delete()
@@ -62,33 +70,60 @@ internal class DefaultMediaRepository(
             operation.cancel()
             wavFile.delete()
             Log.e(TAG, "WAV 转换异常，使用原文件", e)
-            PreparedAudioFile(audioFile, wasFixed = false, mp3Issues = issues)
+            PreparedAudioFile(audioFile, wasFixed = false)
         } finally {
             operation.cancel()
         }
     }
 
-    private fun inspectMp3(file: File): Mp3FileIssues {
-        val probe = try {
-            nativeMediaEngine.probe(file, inspectVideoAudioTrack = false)
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            Log.w(TAG, "无法检测 MP3 起始时间和码率", error)
-            null
+    private fun inspectMp3File(file: File): Mp3FileIssues {
+        var probe: com.subtitleedit.nativebridge.MediaProbeResult? = null
+        var lastProbeError: Throwable? = null
+        repeat(MP3_PROBE_ATTEMPTS) { attempt ->
+            try {
+                val candidate = nativeMediaEngine.probe(file, inspectVideoAudioTrack = false)
+                // Preserve issue evidence if a later FFprobe invocation returns a weaker result.
+                if (probe == null || candidate.startTimeSeconds != null && candidate.startTimeSeconds != 0.0 ||
+                    probe?.audioBitrateBitsPerSecond == null && candidate.audioBitrateBitsPerSecond != null
+                ) {
+                    probe = candidate
+                }
+                logDebug(
+                    "MP3 规范检测 probe 第 ${attempt + 1}/$MP3_PROBE_ATTEMPTS 次：" +
+                        "start=${candidate.startTimeSeconds}, bitrate=${candidate.audioBitrateBitsPerSecond}"
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                lastProbeError = error
+                logWarn("MP3 规范检测 probe 第 ${attempt + 1} 次失败", error)
+            }
         }
-        val audioData = try {
-            Mp3FrameStats.read(file)
-        } catch (error: Exception) {
-            Log.w(TAG, "无法统计 MP3 音频帧", error)
-            null
+        var audioData: Mp3FrameStats.AudioData? = null
+        repeat(MP3_FRAME_ATTEMPTS) { attempt ->
+            if (audioData != null) return@repeat
+            try {
+                audioData = Mp3FrameStats.read(file)
+                logDebug(
+                    "MP3 规范检测帧统计第 ${attempt + 1}/$MP3_FRAME_ATTEMPTS 次：" +
+                        "bytes=${audioData?.byteCount}, duration=${audioData?.durationSeconds}"
+                )
+            } catch (error: Exception) {
+                logWarn("MP3 规范检测帧统计第 ${attempt + 1} 次失败", error)
+            }
         }
         return Mp3FileIssues.from(
             startTimeSeconds = probe?.startTimeSeconds,
             audioSizeBytes = audioData?.byteCount,
             durationSeconds = audioData?.durationSeconds,
             nominalBitrateBitsPerSecond = probe?.audioBitrateBitsPerSecond
-        )
+        ).copy(
+            inspectionIncomplete = probe == null || audioData == null
+        ).also {
+            if (it.inspectionIncomplete) {
+                logWarn("MP3 规范检测未获得完整结果", lastProbeError)
+            }
+        }
     }
 
     override suspend fun getCacheKey(file: File): String = withContext(Dispatchers.IO) {
@@ -118,7 +153,20 @@ internal class DefaultMediaRepository(
         temporaryPlaybackFile = file
     }
 
+    private fun logDebug(message: String) {
+        // Android's Log is unavailable in the JVM test runtime; inspection must remain testable.
+        runCatching { Log.d(TAG, message) }
+    }
+
+    private fun logWarn(message: String, error: Throwable? = null) {
+        runCatching {
+            if (error == null) Log.w(TAG, message) else Log.w(TAG, message, error)
+        }
+    }
+
     private companion object {
         const val TAG = "DefaultMediaRepository"
+        const val MP3_PROBE_ATTEMPTS = 2
+        const val MP3_FRAME_ATTEMPTS = 2
     }
 }

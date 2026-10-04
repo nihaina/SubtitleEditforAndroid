@@ -55,6 +55,11 @@ class Mp3FileIssuesTest {
     }
 
     @Test
+    fun incompleteInspectionIsReportedAsAnIssue() {
+        assertTrue(Mp3FileIssues(inspectionIncomplete = true).hasIssues)
+    }
+
+    @Test
     fun startTimeIssueCanOccurIndependentlyOrTogetherWithLowDataRate() {
         assertEquals(0.025, Mp3FileIssues.from(0.025, null, null, null).nonZeroStartTimeSeconds)
         assertEquals(-0.01, Mp3FileIssues.from(-0.01, null, null, null).nonZeroStartTimeSeconds)

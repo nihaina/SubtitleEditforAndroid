@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
@@ -66,6 +67,7 @@ import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleEntryOps
 import com.subtitleedit.util.SubtitleTextSplitOps
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.audio.Mp3FileIssues
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.SubtitleSourceSynchronizer
 import com.subtitleedit.util.TimeUtils
@@ -108,6 +110,11 @@ class EditorActivity : AppCompatActivity() {
         set(value) { sourceViewState.pendingEdits = value }
     private var sourceViewTransitionJob: Job? = null
     private var sourceListParseJob: Job? = null
+    /** Only the latest media selection may update playback and MP3 inspection state. */
+    private var mediaLoadJob: Job? = null
+    /** URI copies are asynchronous too; stale copies must not write a later selection's state. */
+    private var mediaOpenJob: Job? = null
+    private var mediaOpenGeneration = 0L
     private var suppressHistoryRecording = false
     private val cutPasteController = CutPasteController()
 
@@ -180,6 +187,8 @@ class EditorActivity : AppCompatActivity() {
         const val EXTRA_MEDIA_TYPE = "extra_media_type"
         const val EXTRA_AUDIO_ONLY_FROM_VIDEO = "extra_audio_only_from_video"
         const val EXTRA_SUBTITLE_FILE_PATH = "extra_subtitle_file_path"
+        const val EXTRA_INSPECT_MP3 = "extra_inspect_mp3"
+        private const val TAG = "EditorActivity"
         private const val BULK_NOTIFY_THRESHOLD = 200
         private const val LARGE_LIST_LOADING_THRESHOLD = 1_000
     }
@@ -248,6 +257,11 @@ class EditorActivity : AppCompatActivity() {
         setupAiControllers()
         setupMediaActions()
         setupVideoPanel()
+        val requestedMp3Inspection = if (intent.hasExtra(EXTRA_INSPECT_MP3)) {
+            intent.getBooleanExtra(EXTRA_INSPECT_MP3, false)
+        } else {
+            null
+        }
         val lifecycleCoordinator = EditorLifecycleCoordinator(
             binding = binding,
             subtitleAdapter = subtitleAdapter,
@@ -317,13 +331,20 @@ class EditorActivity : AppCompatActivity() {
         if (stateModel.documentLoaded) {
             restoreDocumentState()
             if (stateModel.mediaType.hasPlayableMedia && stateModel.filePath.isNotEmpty()) {
-                loadMediaFile(stateModel.subtitleFilePath, restoreDocument = true)
+                loadMediaFile(
+                    stateModel.subtitleFilePath,
+                    restoreDocument = true,
+                    inspectMp3 = requestedMp3Inspection
+                )
             }
         } else if (intent.action == Intent.ACTION_VIEW && intent.data != null) {
             openFileFromUri(requireNotNull(intent.data))
         } else if (stateModel.filePath.isNotEmpty()) {
             if (stateModel.mediaType.hasPlayableMedia) {
-                loadMediaFile(stateModel.subtitleFilePath)
+                loadMediaFile(
+                    stateModel.subtitleFilePath,
+                    inspectMp3 = requestedMp3Inspection
+                )
             } else {
                 loadFile()
             }
@@ -959,12 +980,28 @@ class EditorActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun copyOpenedUriToCache(uri: Uri, fileName: String): File =
+    private fun isMp3MimeType(mimeType: String?): Boolean {
+        val mime = mimeType?.substringBefore(';')?.trim()?.lowercase() ?: return false
+        return mime in setOf("audio/mpeg", "audio/mp3", "audio/x-mpeg", "audio/x-mp3", "audio/mpeg3")
+    }
+
+    private suspend fun copyOpenedUriToCache(
+        uri: Uri,
+        fileName: String,
+        ensureMp3Extension: Boolean = false
+    ): File =
         withContext(Dispatchers.IO) {
             val mediaDir = File(cacheDir, "editor_open_media").apply { mkdirs() }
             val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
                 .ifBlank { "media" }
-            val target = File(mediaDir, "${System.currentTimeMillis()}_$safeName")
+            val cacheName = if (ensureMp3Extension &&
+                !safeName.substringAfterLast('.', "").equals("mp3", ignoreCase = true)
+            ) {
+                "${safeName.substringBeforeLast('.', safeName)}.mp3"
+            } else {
+                safeName
+            }
+            val target = File(mediaDir, "${System.currentTimeMillis()}_$cacheName")
             val input = contentResolver.openInputStream(uri)
                 ?: throw IllegalStateException("无法读取文件")
             input.use { source ->
@@ -974,13 +1011,22 @@ class EditorActivity : AppCompatActivity() {
         }
 
     private fun openFileFromUri(uri: Uri) {
-        lifecycleScope.launch {
+        // Invalidate both the preparation and the URI-copy request. The copy runs in a separate
+        // coroutine, so cancelling only mediaLoadJob still lets a slow earlier open write
+        // currentFile after a newer file has been selected.
+        mediaOpenJob?.cancel()
+        mediaLoadJob?.cancel()
+        mediaLoadJob = null
+        val openGeneration = ++mediaOpenGeneration
+        mediaOpenJob = lifecycleScope.launch {
             try {
                 val fileName = withContext(Dispatchers.IO) { fileSessionController.fileName(uri) }
+                if (!isActive || openGeneration != mediaOpenGeneration) return@launch
                 val kind = classifyOpenedUri(uri, fileName)
                 when (kind) {
                     OpenedUriKind.SUBTITLE -> {
                         val content = withContext(Dispatchers.IO) { fileSessionController.readUri(uri) }
+                        if (!isActive || openGeneration != mediaOpenGeneration) return@launch
                         val mediaTitle = stateModel.documentTitle.takeIf {
                             stateModel.mediaType.hasPlayableMedia
                         }
@@ -999,7 +1045,15 @@ class EditorActivity : AppCompatActivity() {
                         } else {
                             EditorMediaType.VIDEO
                         }
-                        val mediaFile = copyOpenedUriToCache(uri, fileName)
+                        val isMp3Mime = isMp3MimeType(contentResolver.getType(uri))
+                        val isMp3Name = fileName.substringAfterLast('.', "")
+                            .equals("mp3", ignoreCase = true)
+                        val mediaFile = copyOpenedUriToCache(
+                            uri,
+                            fileName,
+                            ensureMp3Extension = isMp3Mime || isMp3Name
+                        )
+                        if (!isActive || openGeneration != mediaOpenGeneration) return@launch
                         // A subtitle-only document keeps its local file as the subtitle sidecar
                         // when media is added, so saving still updates the original subtitle.
                         if (!stateModel.mediaType.hasPlayableMedia && stateModel.documentUri == null) {
@@ -1013,7 +1067,11 @@ class EditorActivity : AppCompatActivity() {
                         stateModel.isAudioOnlyFromVideo = false
                         switchMediaType(openedType)
                         // Keep the current subtitle document and entries while replacing/adding media.
-                        loadMediaFile(stateModel.subtitleFilePath, restoreDocument = true)
+                        loadMediaFile(
+                            stateModel.subtitleFilePath,
+                            restoreDocument = true,
+                            inspectMp3 = isMp3Mime || isMp3Name
+                        )
                         setDocumentTitle(fileName)
                         stateModel.documentLoaded = true
                         showShortToast("文件已打开：$fileName")
@@ -1024,8 +1082,12 @@ class EditorActivity : AppCompatActivity() {
                         if (intent.action == Intent.ACTION_VIEW) finish()
                     }
                 }
+            } catch (error: CancellationException) {
+                throw error
             } catch (e: Exception) {
                 showShortToast("打开文件失败：${e.message ?: "未知错误"}")
+            } finally {
+                if (openGeneration == mediaOpenGeneration) mediaOpenJob = null
             }
         }
     }
@@ -3180,6 +3242,9 @@ class EditorActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         sourceViewTransitionJob?.cancel()
+        mediaOpenGeneration++
+        mediaOpenJob?.cancel()
+        mediaLoadJob?.cancel()
         editorCoordinator.onDestroy()
         super.onDestroy()
     }
@@ -3271,7 +3336,16 @@ class EditorActivity : AppCompatActivity() {
         ttsController.speak(texts)
     }
 
-    private fun loadMediaFile(subtitleFilePath: String?, restoreDocument: Boolean = false) {
+    private fun loadMediaFile(
+        subtitleFilePath: String?,
+        restoreDocument: Boolean = false,
+        inspectMp3: Boolean? = null
+    ) {
+        // Opening another file while a previous conversion/probe is still running must not let
+        // the old result replace the new media or consume the only visible warning dialog.
+        mediaLoadJob?.cancel()
+        mediaLoadJob = null
+
         if (stateModel.filePath.isEmpty() || stateModel.currentFile == null) {
             showShortToast("媒体文件路径无效")
             finish()
@@ -3297,56 +3371,84 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
+        val inspectVideoAudioTrack = stateModel.isAudioOnlyFromVideo
+        val shouldInspectMp3 = inspectMp3 ?: originalFile.extension.equals("mp3", ignoreCase = true)
+        val isMp3Open = !inspectVideoAudioTrack && shouldInspectMp3
         val checkingDialog = android.app.AlertDialog.Builder(this)
             .setMessage(
-                if (stateModel.isAudioOnlyFromVideo) "正在检测视频音轨..." else "正在准备音频文件..."
+                when {
+                    inspectVideoAudioTrack -> "正在检测视频音轨..."
+                    isMp3Open -> "正在检测 MP3 文件规范..."
+                    else -> "正在准备音频文件..."
+                }
             )
             .setCancelable(false)
             .create()
         checkingDialog.show()
 
-        lifecycleScope.launch {
-            val preparedAudio = try {
-                mediaRepository.prepareAudio(
-                    originalFile,
-                    inspectVideoAudioTrack = stateModel.isAudioOnlyFromVideo
-                )
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                checkingDialog.dismiss()
-                prepareMediaDocument(stateModel.subtitleFilePath, restoreDocument)
-                stateModel.documentLoaded = true
-                showShortToast(error.message ?: "加载音频失败")
-                return@launch
-            }
-            checkingDialog.dismiss()
+        mediaLoadJob = lifecycleScope.launch {
+            try {
+                val mp3Issues = if (isMp3Open) {
+                    mediaRepository.inspectMp3(originalFile)
+                } else {
+                    null
+                }
+                val preparedAudio = try {
+                    mediaRepository.prepareAudio(
+                        originalFile,
+                        inspectVideoAudioTrack = inspectVideoAudioTrack,
+                        forceMp3Preparation = isMp3Open
+                    )
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    prepareMediaDocument(subtitleFilePath, restoreDocument)
+                    stateModel.documentLoaded = true
+                    showShortToast(error.message ?: "加载音频失败")
+                    return@launch
+                }
 
-            doLoadMediaFile(
-                playbackFile = preparedAudio.playbackFile,
-                analysisFile = originalFile,
-                subtitleFilePath = subtitleFilePath,
-                restoreDocument = restoreDocument,
-                audioStreamIndex = preparedAudio.audioStreamIndex
-            )
-            val issues = preparedAudio.mp3Issues
-            if (issues.hasIssues && !isFinishing && !isDestroyed) {
-                val details = buildList {
-                    issues.nonZeroStartTimeSeconds?.let { startTime ->
-                        add(getString(R.string.mp3_file_issue_start_time, startTime))
-                    }
-                    if (issues.dataRateBelowNominalBitrate) {
-                        add(getString(R.string.mp3_file_issue_low_data_rate))
-                    }
-                    if (issues.dataRateAboveNominalBitrate) {
-                        add(getString(R.string.mp3_file_issue_high_data_rate))
-                    }
-                }.joinToString("\n") { "• $it" }
-                AlertDialog.Builder(this@EditorActivity)
-                    .setTitle(R.string.mp3_file_warning_title)
-                    .setMessage(getString(R.string.mp3_file_warning_message, details))
-                    .setPositiveButton(android.R.string.ok, null)
-                    .show()
+                // A newer open request may have superseded this one while preparation was in IO.
+                if (!isActive) return@launch
+
+                doLoadMediaFile(
+                    playbackFile = preparedAudio.playbackFile,
+                    analysisFile = originalFile,
+                    subtitleFilePath = subtitleFilePath,
+                    restoreDocument = restoreDocument,
+                    audioStreamIndex = preparedAudio.audioStreamIndex
+                )
+                val issues = mp3Issues ?: Mp3FileIssues()
+                Log.d(
+                    TAG,
+                    "MP3 规范提示：hasIssues=${issues.hasIssues}, " +
+                        "finishing=$isFinishing, destroyed=$isDestroyed"
+                )
+                if (issues.hasIssues && !isFinishing && !isDestroyed) {
+                    val details = buildList {
+                        issues.nonZeroStartTimeSeconds?.let { startTime ->
+                            add(getString(R.string.mp3_file_issue_start_time, startTime))
+                        }
+                        if (issues.dataRateBelowNominalBitrate) {
+                            add(getString(R.string.mp3_file_issue_low_data_rate))
+                        }
+                        if (issues.dataRateAboveNominalBitrate) {
+                            add(getString(R.string.mp3_file_issue_high_data_rate))
+                        }
+                        if (issues.inspectionIncomplete) {
+                            add(getString(R.string.mp3_file_issue_inspection_incomplete))
+                        }
+                    }.joinToString("\n") { "• $it" }
+                    AlertDialog.Builder(this@EditorActivity)
+                        .setTitle(R.string.mp3_file_warning_title)
+                        .setMessage(getString(R.string.mp3_file_warning_message, details))
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show()
+                }
+            } finally {
+                // Cancellation can happen while the system file picker is open. The dialog must
+                // not remain attached to the old request and block the next file selection.
+                checkingDialog.dismiss()
             }
         }
     }

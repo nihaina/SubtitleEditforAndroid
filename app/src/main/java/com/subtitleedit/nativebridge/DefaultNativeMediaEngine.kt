@@ -6,27 +6,45 @@ import android.util.Log
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFprobeKit
 import java.io.File
+import org.json.JSONObject
 
 internal class DefaultNativeMediaEngine : NativeMediaEngine {
     override fun probe(file: File, inspectVideoAudioTrack: Boolean): MediaProbeResult {
-        val mediaInformation = FFprobeKit.getMediaInformation(file.absolutePath)
-            .getMediaInformation()
+        val mediaInformation = probeJson(file)
         val audioStream = selectDefaultAudioStream(mediaInformation)
         val audioStreamIndex = if (inspectVideoAudioTrack) {
-            audioStream?.getIndex()?.toInt()
+            audioStream?.takeIf { it.has("index") }?.optInt("index")
                 ?: if (hasAudioTrack(file)) null
                 else throw IllegalStateException("视频没有可用音轨")
         } else {
             null
         }
         return MediaProbeResult(
-            startTimeSeconds = mediaInformation?.getStartTime()?.toDoubleOrNull() ?: 0.0,
+            startTimeSeconds = mediaInformation.optJSONObject("format")
+                ?.optString("start_time")?.toDoubleOrNull(),
             defaultAudioStreamIndex = audioStreamIndex,
             // MP3 duration may itself be estimated from this bitrate. The repository measures
             // real frame bytes and sample counts independently before comparing the rates.
-            audioBitrateBitsPerSecond = audioStream?.getAllProperties()
-                ?.optString("bit_rate")?.toDoubleOrNull()
+            audioBitrateBitsPerSecond = audioStream?.optString("bit_rate")?.toDoubleOrNull()
         )
+    }
+
+    /** Runs a fresh FFprobe process and parses its output directly, bypassing MediaInformationJsonParser. */
+    private fun probeJson(file: File): JSONObject {
+        val session = FFprobeKit.executeWithArguments(arrayOf(
+            "-v", "error", "-hide_banner", "-print_format", "json",
+            "-show_format", "-show_streams", "-show_chapters", "-i", file.absolutePath
+        ))
+        val output = session.getAllLogsAsString().trim()
+        if (output.isEmpty()) throw IllegalStateException("FFprobe 未返回媒体信息")
+        return try {
+            val start = output.indexOf('{')
+            val end = output.lastIndexOf('}')
+            if (start < 0 || end <= start) throw IllegalArgumentException("JSON 对象为空")
+            JSONObject(output.substring(start, end + 1))
+        } catch (error: Exception) {
+            throw IllegalStateException("FFprobe 返回的信息无效", error)
+        }
     }
 
     override fun openOperation(): NativeMediaOperation = Operation()
@@ -68,22 +86,16 @@ internal class DefaultNativeMediaEngine : NativeMediaEngine {
         override fun cancel() = commandOperation.cancel()
     }
 
-    private fun selectDefaultAudioStream(
-        mediaInformation: com.arthenica.ffmpegkit.MediaInformation?
-    ): com.arthenica.ffmpegkit.StreamInformation? {
-        val audioStreams = mediaInformation?.getStreams()
-            ?.filter { stream ->
-                stream.getType().equals("audio", ignoreCase = true) ||
-                    stream.getAllProperties()
-                        ?.optString("codec_type")
-                        .equals("audio", ignoreCase = true)
-            }
-            .orEmpty()
-        return audioStreams.firstOrNull { stream ->
-            stream.getAllProperties()
-                ?.optJSONObject("disposition")
-                ?.optInt("default", 0) == 1
-        } ?: audioStreams.firstOrNull()
+    private fun selectDefaultAudioStream(mediaInformation: JSONObject): JSONObject? {
+        val streams = mediaInformation.optJSONArray("streams") ?: return null
+        var firstAudio: JSONObject? = null
+        for (index in 0 until streams.length()) {
+            val stream = streams.optJSONObject(index) ?: continue
+            if (!stream.optString("codec_type").equals("audio", ignoreCase = true)) continue
+            if (firstAudio == null) firstAudio = stream
+            if (stream.optJSONObject("disposition")?.optInt("default", 0) == 1) return stream
+        }
+        return firstAudio
     }
 
     private fun hasAudioTrack(mediaFile: File): Boolean {

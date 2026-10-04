@@ -3,7 +3,7 @@ package com.subtitleedit.nativebridge
 import java.io.File
 
 internal data class MediaProbeResult(
-    val startTimeSeconds: Double,
+    val startTimeSeconds: Double?,
     val defaultAudioStreamIndex: Int?,
     val audioBitrateBitsPerSecond: Double? = null
 )

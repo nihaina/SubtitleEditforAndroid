@@ -1707,6 +1707,10 @@ class MainActivity : AppComposeActivity() {
         intent.putExtra(EditorActivity.EXTRA_MEDIA_TYPE, mediaType.name)
         intent.putExtra(EditorActivity.EXTRA_IS_AUDIO_FILE, mediaType == EditorMediaType.AUDIO)
         intent.putExtra(EditorActivity.EXTRA_AUDIO_ONLY_FROM_VIDEO, audioOnlyFromVideo)
+        intent.putExtra(
+            EditorActivity.EXTRA_INSPECT_MP3,
+            mediaType == EditorMediaType.AUDIO && mediaFile.extension.equals("mp3", ignoreCase = true)
+        )
         if (subtitleFile != null) {
             intent.putExtra(EditorActivity.EXTRA_SUBTITLE_FILE_PATH, subtitleFile.absolutePath)
         }

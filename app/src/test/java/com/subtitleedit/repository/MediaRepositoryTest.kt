@@ -104,12 +104,47 @@ class MediaRepositoryTest {
         repository.release()
     }
 
-    private class RecordingNativeMediaEngine : NativeMediaEngine {
+    @Test
+    fun mp3InspectionRunsFreshlyForEveryOpenRequest() = runBlocking {
+        val source = temporaryFolder.newFile("audio.mp3")
+        val engine = RecordingNativeMediaEngine()
+        val repository = DefaultMediaRepository(
+            cacheDir = temporaryFolder.newFolder("cache"),
+            nativeMediaEngine = engine
+        )
+
+        repository.inspectMp3(source)
+        repository.inspectMp3(source)
+
+        assertEquals(4, engine.probeCount)
+    }
+
+    @Test
+    fun mp3InspectionRetriesWhenTheFirstProbeFails() = runBlocking {
+        val source = temporaryFolder.newFile("retry.mp3")
+        val engine = RecordingNativeMediaEngine(failFirstProbe = true)
+        val repository = DefaultMediaRepository(
+            cacheDir = temporaryFolder.newFolder("cache"),
+            nativeMediaEngine = engine
+        )
+
+        val issues = repository.inspectMp3(source)
+
+        assertEquals(2, engine.probeCount)
+        assertTrue(issues.inspectionIncomplete)
+    }
+
+    private class RecordingNativeMediaEngine(
+        private val failFirstProbe: Boolean = false
+    ) : NativeMediaEngine {
         var probed = false
+        var probeCount = 0
         var converted = false
 
         override fun probe(file: File, inspectVideoAudioTrack: Boolean): MediaProbeResult {
             probed = true
+            probeCount++
+            if (failFirstProbe && probeCount == 1) throw IllegalStateException("probe failed")
             return MediaProbeResult(startTimeSeconds = 1.0, defaultAudioStreamIndex = 2)
         }
 

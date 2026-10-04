@@ -3,10 +3,13 @@ package com.subtitleedit.audio
 internal data class Mp3FileIssues(
     val nonZeroStartTimeSeconds: Double? = null,
     val dataRateBelowNominalBitrate: Boolean = false,
-    val dataRateAboveNominalBitrate: Boolean = false
+    val dataRateAboveNominalBitrate: Boolean = false,
+    /** The probe could not produce complete metadata for this inspection request. */
+    val inspectionIncomplete: Boolean = false
 ) {
     val hasIssues: Boolean
-        get() = nonZeroStartTimeSeconds != null || dataRateBelowNominalBitrate || dataRateAboveNominalBitrate
+        get() = nonZeroStartTimeSeconds != null || dataRateBelowNominalBitrate ||
+            dataRateAboveNominalBitrate || inspectionIncomplete
 
     companion object {
         fun from(

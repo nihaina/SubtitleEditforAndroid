@@ -302,7 +302,8 @@ private fun ParameterSlider(
                 value = value,
                 onValueChange = {
                     onValueChange(it)
-                    if (!editingText) valueText = formatSliderValue(it, unit, defaultText)
+                    // A slider interaction takes precedence over any in-progress text edit.
+                    valueText = formatSliderValue(it, unit, defaultText)
                 },
                 valueRange = valueRange,
                 steps = steps,
@@ -354,5 +355,7 @@ private fun formatSliderValue(value: Float, unit: ParameterUnit, fallback: Strin
     unit == ParameterUnit.MILLISECONDS -> value.roundToInt().toString()
     unit == ParameterUnit.SECONDS && value >= 1f -> value.roundToInt().toString()
     unit == ParameterUnit.SECONDS -> String.format(java.util.Locale.US, "%.2f", value)
-    else -> fallback
+    // Threshold sliders have no unit, but their displayed value still needs to
+    // follow the current slider position rather than the initial hint text.
+    else -> String.format(java.util.Locale.US, "%.2f", value)
 }
