@@ -1,5 +1,6 @@
 package com.subtitleedit.feature.ui
 
+import android.os.Process
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -325,7 +326,9 @@ private fun AsrModelImportCard(
             HelpLink(onClick = { onAction(AsrModelImportAction.ShowGuide) })
         }
 
-        LlmModelImportCard(llm, onLlmAction)
+        if (Process.is64Bit()) {
+            LlmModelImportCard(llm, onLlmAction)
+        }
 
         ModelImportCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
