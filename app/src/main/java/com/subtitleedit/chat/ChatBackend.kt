@@ -32,7 +32,10 @@ class ChatBackend(
         val reasoningContent: String = "",
         val toolCalls: List<ToolCall> = emptyList(),
         val toolCallId: String = "",
-        val toolName: String = ""
+        val toolName: String = "",
+        /** Generation metadata is only populated for completed assistant replies. */
+        val outputTokens: Int = 0,
+        val generationMs: Long = 0L
     )
 
     data class ToolCall(
@@ -60,7 +63,9 @@ class ChatBackend(
     data class SendResult(
         val text: String,
         val messages: List<ChatMessage>,
-        val isComplete: Boolean
+        val isComplete: Boolean,
+        val outputTokens: Int = 0,
+        val generationMs: Long = 0L,
     )
 
     private data class StreamingResponse(

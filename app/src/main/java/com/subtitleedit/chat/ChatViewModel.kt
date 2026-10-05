@@ -40,6 +40,8 @@ internal class ChatViewModel(
     private data class PendingAssistantCompletion(
         val assistantIndex: Int,
         val finalText: String,
+        val outputTokens: Int,
+        val generationMs: Long,
         val onFinished: () -> Unit
     )
 
@@ -114,7 +116,12 @@ internal class ChatViewModel(
             var waitingForVisualCompletion = false
             try {
                 val result = conversation.sendUserMessage(content, onEvent = ::handleBackendEvent)
-                finishAssistantResponse(assistantIndex, result.text) { setSending(false) }
+                finishAssistantResponse(
+                    assistantIndex = assistantIndex,
+                    finalText = result.text,
+                    outputTokens = result.outputTokens,
+                    generationMs = result.generationMs,
+                ) { setSending(false) }
                 waitingForVisualCompletion = true
                 saveCurrentConversation(content, result.messages)
             } catch (_: CancellationException) {
@@ -247,6 +254,8 @@ internal class ChatViewModel(
     private fun finishAssistantResponse(
         assistantIndex: Int,
         finalText: String,
+        outputTokens: Int,
+        generationMs: Long,
         onFinished: () -> Unit
     ) {
         val assistant = assistantAt(assistantIndex) ?: run {
@@ -265,6 +274,8 @@ internal class ChatViewModel(
             pendingAssistantCompletion = PendingAssistantCompletion(
                 assistantIndex = assistantIndex,
                 finalText = finalText,
+                outputTokens = outputTokens,
+                generationMs = generationMs,
                 onFinished = onFinished
             )
             if (!streamFlushScheduled) scheduleFlushLocked(0L)
@@ -277,6 +288,8 @@ internal class ChatViewModel(
         } ?: return
         assistantAt(completion.assistantIndex)?.let { assistant ->
             assistant.text = completion.finalText
+            assistant.outputTokens = completion.outputTokens
+            assistant.generationMs = completion.generationMs
             assistant.streaming = false
         }
         completion.onFinished()
@@ -315,7 +328,9 @@ internal class ChatViewModel(
                 "assistant" -> ChatUiMessage.Assistant(
                     text = message.content,
                     reasoning = message.reasoningContent,
-                    streaming = false
+                    streaming = false,
+                    outputTokens = message.outputTokens,
+                    generationMs = message.generationMs,
                 )
                 else -> null
             }

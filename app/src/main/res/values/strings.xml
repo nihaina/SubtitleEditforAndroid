@@ -676,7 +676,10 @@
     <string name="chat_title">AI 对话</string>
     <string name="chat_history">会话记录</string>
     <string name="chat_more_options">更多选项</string>
+    <string name="chat_new_conversation">新建对话</string>
     <string name="chat_clear_conversation">清空对话</string>
+    <string name="chat_copy_message">复制消息</string>
+    <string name="chat_generation_stats">%1$d tokens · %2$.1f tok/s</string>
     <string name="chat_input_hint">输入消息</string>
     <string name="chat_stop_generation">停止生成</string>
     <string name="chat_send_message">发送消息</string>

@@ -2,11 +2,13 @@
 
 #include "llama.h"
 #include "chat.h"
+#include "ggml-backend.h"
 
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <chrono>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -86,11 +88,13 @@ void callback_complete(
     jmethodID method,
     jint status,
     const std::string & response,
-    const std::string & error) {
+    const std::string & error,
+    jint output_tokens,
+    jlong generation_ms) {
     jstring output = env->NewStringUTF(response.c_str());
     jstring message = env->NewStringUTF(error.c_str());
     if (output != nullptr && message != nullptr) {
-        env->CallVoidMethod(callback, method, status, output, message);
+        env->CallVoidMethod(callback, method, status, output, message, output_tokens, generation_ms);
     }
     if (output != nullptr) env->DeleteLocalRef(output);
     if (message != nullptr) env->DeleteLocalRef(message);
@@ -115,8 +119,22 @@ bool model_load_progress(float progress, void * user_data) {
 
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_subtitleedit_localllm_LocalLlmNative_loadModelWithProgress(
-    JNIEnv * env, jobject, jstring path, jboolean disable_repack, jobject callback) {
-    std::call_once(backend_once, [] { llama_backend_init(); });
+    JNIEnv * env,
+    jobject,
+    jstring path,
+    jboolean disable_repack,
+    jstring backend_directory,
+    jobject callback) {
+    const std::string backend_path = jstring_to_string(env, backend_directory);
+    std::call_once(backend_once, [backend_path] {
+        if (!backend_path.empty()) {
+            // Android packages every CMake shared/module library in the
+            // process nativeLibraryDir. Enumerate that directory so ggml can
+            // score and load the best CPU variant for this device.
+            ggml_backend_load_all_from_path(backend_path.c_str());
+        }
+        llama_backend_init();
+    });
     const std::string model_path = jstring_to_string(env, path);
     if (model_path.empty()) return 0;
 
@@ -195,7 +213,7 @@ Java_com_subtitleedit_localllm_LocalLlmNative_generate(
     const jclass callback_class = env->GetObjectClass(callback);
     const jmethodID delta_method = env->GetMethodID(callback_class, "onDelta", "(Ljava/lang/String;)V");
     const jmethodID complete_method = env->GetMethodID(
-        callback_class, "onComplete", "(ILjava/lang/String;Ljava/lang/String;)V");
+        callback_class, "onComplete", "(ILjava/lang/String;Ljava/lang/String;IJ)V");
     if (delta_method == nullptr || complete_method == nullptr) return 1;
 
     std::lock_guard<std::mutex> lock(model->generation_mutex);
@@ -215,7 +233,7 @@ Java_com_subtitleedit_localllm_LocalLlmNative_generate(
     inputs.enable_thinking = thinking_enabled == JNI_TRUE;
     const auto rendered = common_chat_templates_apply(model->templates.get(), inputs);
     if (rendered.prompt.empty()) {
-        callback_complete(env, callback, complete_method, 1, "", "聊天模板渲染失败");
+        callback_complete(env, callback, complete_method, 1, "", "聊天模板渲染失败", 0, 0);
         return 0;
     }
 
@@ -234,13 +252,13 @@ Java_com_subtitleedit_localllm_LocalLlmNative_generate(
         vocab, rendered.prompt.c_str(), static_cast<int32_t>(rendered.prompt.size()),
         nullptr, 0, true, true);
     if (token_count <= 0) {
-        callback_complete(env, callback, complete_method, 1, "", "本地模型提示词编码失败");
+        callback_complete(env, callback, complete_method, 1, "", "本地模型提示词编码失败", 0, 0);
         return 0;
     }
     std::vector<llama_token> prompt_tokens(token_count);
     if (llama_tokenize(vocab, rendered.prompt.c_str(), static_cast<int32_t>(rendered.prompt.size()),
                        prompt_tokens.data(), token_count, true, true) < 0) {
-        callback_complete(env, callback, complete_method, 1, "", "本地模型提示词编码失败");
+        callback_complete(env, callback, complete_method, 1, "", "本地模型提示词编码失败", 0, 0);
         return 0;
     }
 
@@ -258,7 +276,7 @@ Java_com_subtitleedit_localllm_LocalLlmNative_generate(
     context_params.abort_callback_data = model;
     llama_context * context = llama_init_from_model(model->model, context_params);
     if (context == nullptr) {
-        callback_complete(env, callback, complete_method, 1, "", "本地模型上下文创建失败");
+        callback_complete(env, callback, complete_method, 1, "", "本地模型上下文创建失败", 0, 0);
         return 0;
     }
 
@@ -273,6 +291,8 @@ Java_com_subtitleedit_localllm_LocalLlmNative_generate(
     }
 
     int status = 0;
+    int output_tokens = 0;
+    auto generation_started = std::chrono::steady_clock::now();
     std::string response;
     std::string normalized_emitted;
     size_t emitted = 0;
@@ -327,6 +347,7 @@ Java_com_subtitleedit_localllm_LocalLlmNative_generate(
     }
 
     if (status == 0) {
+        generation_started = std::chrono::steady_clock::now();
         const size_t max_tokens = 2048;
         for (size_t generated = 0; generated < max_tokens; ++generated) {
             if (model->cancelled.load(std::memory_order_relaxed)) {
@@ -335,6 +356,7 @@ Java_com_subtitleedit_localllm_LocalLlmNative_generate(
             }
             const llama_token token = llama_sampler_sample(sampler, context, -1);
             if (llama_vocab_is_eog(vocab, token)) break;
+            ++output_tokens;
             char buffer[256];
             int piece_size = llama_token_to_piece(vocab, token, buffer, sizeof(buffer), 0, true);
             if (piece_size < 0) {
@@ -386,6 +408,9 @@ Java_com_subtitleedit_localllm_LocalLlmNative_generate(
     llama_free(context);
     callback_complete(
         env, callback, complete_method, status, final_response,
-        status == 2 ? "本地模型生成已取消" : (status == 0 ? "" : "本地模型解码失败"));
+        status == 2 ? "本地模型生成已取消" : (status == 0 ? "" : "本地模型解码失败"),
+        output_tokens,
+        std::max<jlong>(1, std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - generation_started).count()));
     return 0;
 }

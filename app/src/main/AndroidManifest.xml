@@ -287,7 +287,8 @@
         <activity
             android:name=".chat.ChatActivity"
             android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".TtsSettingsActivity"

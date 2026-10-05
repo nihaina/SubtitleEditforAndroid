@@ -3,8 +3,10 @@ package com.subtitleedit.chat.history;
 import androidx.annotation.NonNull;
 import androidx.room.Entity;
 import androidx.room.ForeignKey;
+import androidx.room.Ignore;
 import androidx.room.Index;
 import androidx.room.PrimaryKey;
+import androidx.room.ColumnInfo;
 
 @Entity(
         tableName = "chat_messages",
@@ -34,7 +36,12 @@ public class ChatHistoryMessageEntity {
     public String toolCallId;
     @NonNull
     public String toolName;
+    @ColumnInfo(defaultValue = "0")
+    public int outputTokens;
+    @ColumnInfo(defaultValue = "0")
+    public long generationMs;
 
+    @Ignore
     public ChatHistoryMessageEntity(
             @NonNull String sessionId,
             int position,
@@ -45,6 +52,21 @@ public class ChatHistoryMessageEntity {
             @NonNull String toolCallId,
             @NonNull String toolName
     ) {
+        this(sessionId, position, role, content, reasoningContent, toolCallsJson, toolCallId, toolName, 0, 0L);
+    }
+
+    public ChatHistoryMessageEntity(
+            @NonNull String sessionId,
+            int position,
+            @NonNull String role,
+            @NonNull String content,
+            @NonNull String reasoningContent,
+            @NonNull String toolCallsJson,
+            @NonNull String toolCallId,
+            @NonNull String toolName,
+            int outputTokens,
+            long generationMs
+    ) {
         this.sessionId = sessionId;
         this.position = position;
         this.role = role;
@@ -53,5 +75,7 @@ public class ChatHistoryMessageEntity {
         this.toolCallsJson = toolCallsJson;
         this.toolCallId = toolCallId;
         this.toolName = toolName;
+        this.outputTokens = outputTokens;
+        this.generationMs = generationMs;
     }
 }

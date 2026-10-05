@@ -22,6 +22,12 @@ import kotlin.coroutines.resumeWithException
  * conversation state and cancellation local to the caller.
  */
 object LocalLlmEngine {
+    data class GenerationResult(
+        val text: String,
+        val outputTokens: Int = 0,
+        val generationMs: Long = 0L,
+    )
+
     data class LoadResult(
         val loaded: Boolean,
         val memoryBytes: Long = 0L,
@@ -103,7 +109,7 @@ object LocalLlmEngine {
         conversation: List<LocalChatMessage>,
         onDelta: (String) -> Unit,
         isCancelled: () -> Boolean,
-    ): String {
+    ): GenerationResult {
         require(conversation.isNotEmpty()) { "本地模型对话不能为空" }
         check(!isCancelled()) { "本地模型生成已取消" }
 
@@ -126,10 +132,16 @@ object LocalLlmEngine {
                         onDelta(text)
                     }
 
-                    override fun onComplete(status: Int, response: String, error: String) {
+                    override fun onComplete(
+                        status: Int,
+                        response: String,
+                        error: String,
+                        outputTokens: Int,
+                        generationMs: Long,
+                    ) {
                         if (!continuation.isActive) return
                         if (status == 0) {
-                            continuation.resume(response)
+                            continuation.resume(GenerationResult(response, outputTokens, generationMs))
                         } else {
                             continuation.resumeWithException(
                                 IllegalStateException(error.ifBlank { "本地模型生成失败" }),

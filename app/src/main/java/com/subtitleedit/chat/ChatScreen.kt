@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,11 +29,13 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,9 +46,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
@@ -85,6 +90,7 @@ internal fun ChatScreen(
         onBack = onNavigateBack,
         scrollable = false,
         imePadding = true,
+        imePaddingContent = false,
         titleContent = {
             Column {
                 Text(stringResource(R.string.chat_title), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -119,7 +125,7 @@ internal fun ChatScreen(
                                 onDismissRequest = { overflowExpanded = false }
                             ) {
                                 DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.chat_clear_conversation)) },
+                                    text = { Text(stringResource(R.string.chat_new_conversation)) },
                                     onClick = {
                                         overflowExpanded = false
                                         onClearConversation()
@@ -130,9 +136,9 @@ internal fun ChatScreen(
                     } else {
                         IconButton(onClick = onClearConversation) {
                             Image(
-                                painter = painterResource(R.drawable.ic_delete),
-                                contentDescription = stringResource(R.string.chat_clear_conversation),
-                                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.error)
+                                painter = painterResource(R.drawable.ic_new_conversation),
+                                contentDescription = stringResource(R.string.chat_new_conversation),
+                                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurfaceVariant)
                             )
                         }
                     }
@@ -149,12 +155,14 @@ internal fun ChatScreen(
                     OutlinedTextField(
                         value = inputText,
                         onValueChange = onInputTextChange,
-                        modifier = Modifier.weight(1f),
                         enabled = !isSending,
-                        label = { Text(stringResource(R.string.chat_input_hint)) },
+                        placeholder = { Text(stringResource(R.string.chat_input_hint)) },
                         shape = MaterialTheme.shapes.small,
                         minLines = 1,
                         maxLines = 6,
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 56.dp, max = 168.dp),
                         keyboardOptions = KeyboardOptions(
                             capitalization = KeyboardCapitalization.Sentences,
                             imeAction = ImeAction.Send
@@ -231,27 +239,7 @@ internal fun ChatScreen(
 @Composable
 private fun ChatMessageRow(message: ChatUiMessage) {
     when (message) {
-        is ChatUiMessage.User -> {
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.End
-            ) {
-                Surface(
-                    modifier = Modifier.widthIn(min = 64.dp, max = 420.dp),
-                        shape = MaterialTheme.shapes.large,
-                        color = MaterialTheme.colorScheme.primaryContainer
-                ) {
-                    SelectionContainer {
-                        Text(
-                            text = message.text,
-                            modifier = Modifier.padding(12.dp),
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                    }
-                }
-            }
-        }
+        is ChatUiMessage.User -> UserMessage(message)
         is ChatUiMessage.Assistant -> AssistantMessage(message)
         is ChatUiMessage.Status -> Text(
             text = message.text,
@@ -265,6 +253,7 @@ private fun ChatMessageRow(message: ChatUiMessage) {
 
 @Composable
 private fun AssistantMessage(message: ChatUiMessage.Assistant) {
+    val clipboardManager = LocalClipboardManager.current
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(
             text = stringResource(R.string.chat_ai_conversation),
@@ -317,15 +306,88 @@ private fun AssistantMessage(message: ChatUiMessage.Assistant) {
             ) {
                 SelectionContainer {
                     Text(
-                            text = message.text.ifBlank {
-                                if (message.streaming) stringResource(R.string.chat_generating) else ""
-                            },
+                        text = message.text.ifBlank {
+                            if (message.streaming) stringResource(R.string.chat_generating) else ""
+                        },
                         modifier = Modifier.padding(12.dp),
                         color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.bodyLarge
                     )
                 }
             }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Start
+        ) {
+            CompactCopyButton(
+                text = message.text,
+                enabled = message.text.isNotBlank() && !message.streaming,
+                clipboardManager = clipboardManager
+            )
+            if (!message.streaming && message.outputTokens > 0 && message.generationMs > 0L) {
+                val tokensPerSecond = message.outputTokens * 1000f / message.generationMs
+                Text(
+                    text = stringResource(
+                        R.string.chat_generation_stats,
+                        message.outputTokens,
+                        tokensPerSecond
+                    ),
+                    modifier = Modifier.align(Alignment.CenterVertically),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun UserMessage(message: ChatUiMessage.User) {
+    val clipboardManager = LocalClipboardManager.current
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalAlignment = Alignment.End) {
+        Surface(
+            modifier = Modifier.widthIn(min = 64.dp, max = 420.dp),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.primaryContainer
+        ) {
+            SelectionContainer {
+                Text(
+                    text = message.text,
+                    modifier = Modifier.padding(12.dp),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
+        }
+        CompactCopyButton(
+            text = message.text,
+            enabled = message.text.isNotBlank(),
+            clipboardManager = clipboardManager
+        )
+    }
+}
+
+@Composable
+private fun CompactCopyButton(
+    text: String,
+    enabled: Boolean,
+    clipboardManager: androidx.compose.ui.platform.ClipboardManager
+) {
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+        IconButton(
+            onClick = { clipboardManager.setText(AnnotatedString(text)) },
+            enabled = enabled,
+            modifier = Modifier
+                .size(38.dp)
+                .padding(top = 2.dp)
+        ) {
+            Image(
+                painter = painterResource(R.drawable.ic_content_copy),
+                contentDescription = stringResource(R.string.chat_copy_message),
+                modifier = Modifier.size(20.dp),
+                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurfaceVariant)
+            )
         }
     }
 }
@@ -337,12 +399,16 @@ internal sealed class ChatUiMessage {
         text: String = "",
         reasoning: String = "",
         streaming: Boolean = true,
+        outputTokens: Int = 0,
+        generationMs: Long = 0L,
         reasoningExpanded: Boolean = false,
         val messageId: String = ""
     ) : ChatUiMessage() {
         var text by mutableStateOf(text)
         var reasoning by mutableStateOf(reasoning)
         var streaming by mutableStateOf(streaming)
+        var outputTokens by mutableStateOf(outputTokens)
+        var generationMs by mutableStateOf(generationMs)
         var reasoningExpanded by mutableStateOf(reasoningExpanded)
     }
 

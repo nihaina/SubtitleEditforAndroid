@@ -148,8 +148,10 @@ android {
 
     packaging {
         jniLibs {
-            // Keep native libraries uncompressed in the APK to minimize installed size.
-            // QNN HTP Skel libraries are extracted to codeCacheDir only while NPU is active.
+            // Keep native libraries uncompressed in the APK. The local llama
+            // runtime stages only CPU backend variants to its cache when an
+            // Android version does not expose uncompressed APK entries through
+            // nativeLibraryDir, avoiding extraction of the complete runtime.
             useLegacyPackaging = false
             keepDebugSymbols += setOf("**/libQnn*.so")
             // sherpa-onnx and the standalone demixing runtime both provide ORT/libc++.

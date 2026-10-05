@@ -288,6 +288,7 @@ fun AppToolScaffold(
     bottomBar: @Composable () -> Unit = {},
     scrollable: Boolean = true,
     imePadding: Boolean = false,
+    imePaddingContent: Boolean = imePadding,
     titleContent: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
@@ -320,7 +321,7 @@ fun AppToolScaffold(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .then(if (scrollable) Modifier.verticalScroll(rememberScrollState()) else Modifier)
-                .then(if (imePadding) Modifier.imePadding() else Modifier)
+                .then(if (imePaddingContent) Modifier.imePadding() else Modifier)
                 .padding(AppSpacing.Page),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.CardGap),
             content = content

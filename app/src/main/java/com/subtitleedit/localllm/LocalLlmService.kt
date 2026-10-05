@@ -39,6 +39,7 @@ class LocalLlmService : Service() {
             val loadId = nextRequestId.getAndIncrement().coerceAtLeast(1)
             executor.execute {
                 try {
+                    val backendDirectory = LocalLlmBackendStager.resolve(this@LocalLlmService)
                     synchronized(modelLock) {
                         if (
                             modelHandle != 0L &&
@@ -66,6 +67,7 @@ class LocalLlmService : Service() {
                         val handle = LocalLlmNative.loadModelWithProgress(
                             loadPath,
                             disableRepack = !repackEnabled,
+                            backendDirectory = backendDirectory,
                             callback = object : LocalLlmNative.LoadCallback {
                                 override fun onProgress(progress: Float) {
                                     reportLoadProgress(callback, progress)
@@ -124,7 +126,7 @@ class LocalLlmService : Service() {
             }
             if (handle == 0L) {
                 try {
-                    callback.onComplete(1, "", "本地模型未加载，请先在 AI 设置中点击“加载”")
+                    callback.onComplete(1, "", "本地模型未加载，请先在 AI 设置中点击“加载”", 0, 0L)
                 } catch (_: Throwable) {
                     // The caller may have gone away before the rejection arrived.
                 }
@@ -139,7 +141,7 @@ class LocalLlmService : Service() {
                     // concurrent request cannot free the backing model.
                     synchronized(modelLock) {
                         if (modelHandle != handle) {
-                            callback.onComplete(1, "", "本地模型已被另一请求替换")
+                            callback.onComplete(1, "", "本地模型已被另一请求替换", 0, 0L)
                             return@synchronized
                         }
                         LocalLlmNative.generate(
@@ -158,9 +160,21 @@ class LocalLlmService : Service() {
                                     }
                                 }
 
-                                override fun onComplete(status: Int, response: String, error: String) {
+                                override fun onComplete(
+                                    status: Int,
+                                    response: String,
+                                    error: String,
+                                    outputTokens: Int,
+                                    generationMs: Long,
+                                ) {
                                     try {
-                                        callback.onComplete(status, response, error)
+                                        callback.onComplete(
+                                            status,
+                                            response,
+                                            error,
+                                            outputTokens,
+                                            generationMs,
+                                        )
                                     } catch (_: Throwable) {
                                         // The client may have been cancelled.
                                     }
@@ -171,7 +185,7 @@ class LocalLlmService : Service() {
                 } catch (t: Throwable) {
                     Log.e(TAG, "Local generation failed", t)
                     try {
-                        callback.onComplete(1, "", t.message ?: "本地模型生成失败")
+                        callback.onComplete(1, "", t.message ?: "本地模型生成失败", 0, 0L)
                     } catch (_: Throwable) {
                         // The callback may have been disposed already.
                     }

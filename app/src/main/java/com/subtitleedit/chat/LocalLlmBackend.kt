@@ -17,7 +17,7 @@ class LocalLlmBackend(
     private val config: ChatBackendConfig,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    @Volatile private var activeRequest: kotlinx.coroutines.Deferred<String>? = null
+    @Volatile private var activeRequest: kotlinx.coroutines.Deferred<LocalLlmEngine.GenerationResult>? = null
 
     suspend fun send(
         conversation: List<ChatBackend.ChatMessage>,
@@ -70,16 +70,24 @@ class LocalLlmBackend(
         }
         activeRequest = deferred
         return try {
-            val raw = deferred.await()
+            val generation = deferred.await()
             if (isCancelled()) throw CancellationException("对话已取消")
-            val parsed = parseThinking(raw)
+            val parsed = parseThinking(generation.text)
             ChatBackend.SendResult(
                 text = parsed.visible,
                 messages = listOf(
                     ChatBackend.ChatMessage("user", userContent),
-                    ChatBackend.ChatMessage("assistant", parsed.visible, parsed.reasoning),
+                    ChatBackend.ChatMessage(
+                        role = "assistant",
+                        content = parsed.visible,
+                        reasoningContent = parsed.reasoning,
+                        outputTokens = generation.outputTokens,
+                        generationMs = generation.generationMs
+                    ),
                 ),
                 isComplete = true,
+                outputTokens = generation.outputTokens,
+                generationMs = generation.generationMs,
             )
         } finally {
             activeRequest = null

@@ -239,7 +239,9 @@ class ChatHistoryStore(context: Context) {
             }
         }.toString(),
         toolCallId,
-        toolName
+        toolName,
+        outputTokens,
+        generationMs
     )
 
     private fun messageFromEntity(entity: ChatHistoryMessageEntity): ChatBackend.ChatMessage =
@@ -249,7 +251,9 @@ class ChatHistoryStore(context: Context) {
             reasoningContent = entity.reasoningContent,
             toolCalls = toolCallsFromJson(entity.toolCallsJson),
             toolCallId = entity.toolCallId,
-            toolName = entity.toolName
+            toolName = entity.toolName,
+            outputTokens = entity.outputTokens,
+            generationMs = entity.generationMs
         )
 
     private fun messageFromJson(json: JSONObject): ChatBackend.ChatMessage? {
@@ -261,7 +265,9 @@ class ChatHistoryStore(context: Context) {
             reasoningContent = json.optString("reasoning"),
             toolCalls = toolCallsFromJson(json.optJSONArray("toolCalls")?.toString().orEmpty()),
             toolCallId = json.optString("toolCallId"),
-            toolName = json.optString("toolName")
+            toolName = json.optString("toolName"),
+            outputTokens = json.optInt("outputTokens", 0),
+            generationMs = json.optLong("generationMs", 0L)
         )
     }
 
