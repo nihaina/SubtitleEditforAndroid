@@ -1,0 +1,15 @@
+Vendored from https://github.com/mudler/parakeet.cpp
+Tag: v0.4.0
+Commit: e8acc6172a94e20a952cf1843decace5d771a94b
+License: MIT (see LICENSE)
+
+Changes from upstream:
+  - third_party/ggml dropped; the library links the in-tree ggml target instead
+    (single ggml per process, keeps GGML_BACKEND_DL CPU variants).
+  - CMakeLists.txt replaced with a minimal Android-oriented one (no CLI, server,
+    tests, ggml patch script, or -march=native forcing).
+  - parakeet_capi_set_num_threads() added to the C API, exposing the existing
+    pk::set_num_threads() override (upstream only reaches it via the CLI).
+
+Refresh procedure: re-copy src/, include/, third_party/dr_wav.h and LICENSE from
+the upstream tag, then re-apply the two source changes above.
