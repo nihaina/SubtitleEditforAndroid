@@ -173,6 +173,7 @@
     <string name="activity_ai_settings_punctuation_title">标点预测</string>
     <string name="activity_ai_settings_punctuation_prompt_hint">标点预测使用的 AI 平台和处理设置</string>
     <string name="activity_ai_settings_hint_04">目标语言</string>
+    <string name="activity_ai_settings_local_context_size">上下文长度</string>
     <string name="activity_ai_settings_local_model_label">当前模型</string>
     <string name="activity_ai_settings_local_model_none">未选择本地模型</string>
     <string name="activity_ai_settings_local_model_loading">正在加载本地模型</string>

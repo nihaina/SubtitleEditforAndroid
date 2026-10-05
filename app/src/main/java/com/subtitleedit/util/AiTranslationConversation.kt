@@ -61,7 +61,8 @@ class AiTranslationConversation(
             } else {
                 ""
             },
-            localRepackEnabled = SettingsManager.getInstance(context).isLlmRepackEnabled()
+            localRepackEnabled = SettingsManager.getInstance(context).isLlmRepackEnabled(),
+            localContextSize = SettingsManager.getInstance(context).getLlmContextSize()
         ),
         tools = if (provider == AiProviderConfig.LOCAL) emptyList() else ChatTools.create(context.applicationContext),
         context = context.applicationContext
@@ -120,7 +121,14 @@ class AiTranslationConversation(
         var activeBatchStart = startPosition
         val streamedContent = StringBuilder()
         try {
-            splitSubtitleTranslationBatches(subtitles).forEach { batch ->
+            splitSubtitleTranslationBatches(
+                subtitles,
+                maxSubtitlesPerBatch = if (localProvider) {
+                    LOCAL_AI_SUBTITLES_PER_REQUEST
+                } else {
+                    DEFAULT_AI_SUBTITLES_PER_REQUEST
+                }
+            ).forEach { batch ->
                 if (isCancelled()) throw CancellationException("翻译已取消")
                 if (localProvider) {
                     // Each batch contains its complete subtitle context. Keeping
@@ -135,7 +143,8 @@ class AiTranslationConversation(
                     targetLanguage = targetLanguage,
                     customPrompt = customPrompt,
                     startPosition = activeBatchStart,
-                    format = subtitleFormat
+                    format = subtitleFormat,
+                    sequenceOnly = localProvider
                 )
                 val result = conversation.sendUserMessage(
                     content = userContent,
@@ -159,7 +168,8 @@ class AiTranslationConversation(
                     content = result.text,
                     expectedSubtitles = batch,
                     format = subtitleFormat,
-                    expectedStartPosition = activeBatchStart
+                    expectedStartPosition = activeBatchStart,
+                    sequenceOnly = localProvider
                 )
                 translations += batchTranslations
                 progressCallback?.invoke(translations.size, subtitles.size)
@@ -184,7 +194,9 @@ class AiTranslationConversation(
     ): List<String> {
         if (content.isBlank() || expected.isEmpty()) return emptyList()
         return runCatching {
-            if (subtitleFormat == SubtitleFormat.SRT) {
+            if (localProvider) {
+                parseCompletedSequenceTranslationPrefix(content, expected, startPosition)
+            } else if (subtitleFormat == SubtitleFormat.SRT) {
                 parseCompletedTimedTranslationPrefix(content, expected)
             } else {
                 parseCompletedIndexedTranslationPrefix(content, expected, subtitleFormat, startPosition)

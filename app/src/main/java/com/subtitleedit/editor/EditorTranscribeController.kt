@@ -2,6 +2,7 @@ package com.subtitleedit.editor
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.util.Log
 import android.widget.ArrayAdapter
 import android.widget.LinearLayout
@@ -9,6 +10,7 @@ import android.widget.Spinner
 import android.widget.TextView
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegSession
+import com.subtitleedit.ModelManagementActivity
 import com.subtitleedit.adapter.TranslationPreviewItem
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.repository.DefaultSpeechRecognitionService
@@ -132,6 +134,9 @@ internal class EditorTranscribeController(
                     audioCacheKey,
                     audioStreamIndex
                 )
+            }
+            .setNeutralButton("模型管理") { _, _ ->
+                activity.startActivity(Intent(activity, ModelManagementActivity::class.java))
             }
             .setNegativeButton("取消", null)
             .show()

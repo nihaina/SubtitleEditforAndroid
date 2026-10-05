@@ -62,6 +62,10 @@
 - **服务配置**:支持配置 AI 平台、API Key、模型和语言
 - **流式翻译**:字幕顺序发送，并在同一对话上下文中继续翻译
 
+### 文稿匹配
+
+- **文本转字幕**:提供txt文本和对应音频文件,可以一键输出带准确时间戳的字幕文件
+
 ### 文件管理
 
 - 内置文件浏览器，方便查找文件
@@ -154,11 +158,9 @@
 
 人声分离：[github.com/demixr/demixr-app](https://github.com/demixr/demixr-app)
 
+本地llm：[github.com/andriydruk/LMPlayground](https://github.com/andriydruk/LMPlayground)
+
 ## ~~画饼~~后续更新规划
-
-重做UI
-
-本地翻译
 
 播放器模式，定时播放，定时关闭等功能
 

@@ -2,7 +2,9 @@ package com.subtitleedit.editor
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.widget.Toast
+import com.subtitleedit.AiSettingsActivity
 import com.subtitleedit.adapter.TranslationPreviewItem
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.repository.AiTranslationService
@@ -96,6 +98,9 @@ internal class EditorTranslationController(
                     reasoningLevel,
                     settingsManager.isAiLocalTranslationThinkingEnabled()
                 )
+            }
+            .setNeutralButton("AI 设置") { _, _ ->
+                activity.startActivity(Intent(activity, AiSettingsActivity::class.java))
             }
             .setNegativeButton("取消", null)
             .show()

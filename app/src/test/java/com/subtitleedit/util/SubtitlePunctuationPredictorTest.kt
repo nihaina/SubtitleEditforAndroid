@@ -42,6 +42,25 @@ class SubtitlePunctuationPredictorTest {
     }
 
     @Test
+    fun localModelSession_usesThirtyEntriesPerRequest() = runBlocking {
+        val requests = mutableListOf<String>()
+        val source = subtitleEntries(61)
+
+        val result = SubtitlePunctuationPredictor.Session(
+            source,
+            entriesPerBatch = LOCAL_AI_SUBTITLES_PER_REQUEST
+        ).run(requestPrediction = { text ->
+            requests += text
+            punctuateRequest(text, "。")
+        })
+
+        assertEquals(listOf(30, 30, 1), requests.map { text ->
+            text.lines().count { it.startsWith("第") }
+        })
+        assertEquals(source.map { it.copy(text = "${it.text}。") }, result)
+    }
+
+    @Test
     fun formattingAndResponseExtractionKeepPunctuationPredictionIndependent() = runBlocking {
         val source = subtitleEntries(301).flatMap { entry ->
             listOf(entry.copy(text = "，${entry.text}！"), entry.copy(text = "。”"))

@@ -187,6 +187,9 @@ internal class AiSettingsViewModel(
     }
 
     private fun persistChangedFields(current: AiSettingsScreenState, next: AiSettingsScreenState) {
+        if (current.localContextSize != next.localContextSize) {
+            settingsManager.setLlmContextSize(next.localContextSize)
+        }
         if (current.provider == next.provider) {
             if (current.apiKey != next.apiKey) {
                 settingsManager.setAiApiKey(current.provider, next.apiKey.trim())
@@ -495,7 +498,8 @@ internal class AiSettingsViewModel(
                         } else {
                             ""
                         },
-                        localRepackEnabled = settingsManager.isLlmRepackEnabled()
+                        localRepackEnabled = settingsManager.isLlmRepackEnabled(),
+                        localContextSize = settingsManager.getLlmContextSize()
                     )
                 )
             )

@@ -90,6 +90,7 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_VAD_USE_BUILT_IN_MODEL = "vad_use_built_in_model"
         private const val KEY_LLM_MODEL_PATH = "llm_model_path"
         private const val KEY_LLM_REPACK_ENABLED = "llm_repack_enabled"
+        private const val KEY_LLM_CONTEXT_SIZE = "llm_context_size"
         private const val KEY_VAD_THRESHOLD = "vad_threshold"
         private const val KEY_VAD_MIN_SILENCE_DURATION = "vad_min_silence_duration"
         private const val KEY_VAD_MIN_SPEECH_DURATION = "vad_min_speech_duration"
@@ -789,6 +790,13 @@ class SettingsManager private constructor(context: Context) {
 
     fun setLlmRepackEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_LLM_REPACK_ENABLED, enabled).apply()
+    }
+
+    fun getLlmContextSize(): Int = prefs.getInt(KEY_LLM_CONTEXT_SIZE, 2048)
+        .coerceIn(1024, 32768)
+
+    fun setLlmContextSize(size: Int) {
+        prefs.edit().putInt(KEY_LLM_CONTEXT_SIZE, size.coerceIn(1024, 32768)).apply()
     }
 
     /**

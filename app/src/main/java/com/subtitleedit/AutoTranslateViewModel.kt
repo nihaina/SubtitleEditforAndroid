@@ -12,8 +12,10 @@ import com.subtitleedit.feature.ui.AutoTranslateUiState
 import com.subtitleedit.repository.AiTranslationService
 import com.subtitleedit.util.AiProviderConfig
 import com.subtitleedit.util.AiTranslationConversation
+import com.subtitleedit.util.DEFAULT_AI_SUBTITLES_PER_REQUEST
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.LOCAL_AI_SUBTITLES_PER_REQUEST
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleParser
@@ -234,10 +236,18 @@ internal class AutoTranslateViewModel(application: Application) :
     }
 
     private suspend fun applyPunctuationPrediction(file: AutoTranslateFile, document: SubtitleDocument): SubtitleDocument {
-        val session = file.punctuationSession ?: SubtitlePunctuationPredictor.Session(SubtitlePunctuationPredictor.prepareEntries(document.entries)).also { file.punctuationSession = it }
+        val provider = settingsManager.getAiPunctuationProvider()
+        val entriesPerBatch = if (provider == AiProviderConfig.LOCAL) {
+            LOCAL_AI_SUBTITLES_PER_REQUEST
+        } else {
+            DEFAULT_AI_SUBTITLES_PER_REQUEST
+        }
+        val session = file.punctuationSession ?: SubtitlePunctuationPredictor.Session(
+            SubtitlePunctuationPredictor.prepareEntries(document.entries),
+            entriesPerBatch = entriesPerBatch
+        ).also { file.punctuationSession = it }
         updateProcessingStage(file, ProcessingStage.PUNCTUATION_PREDICTION, session.processedCount, session.totalCount)
         if (session.totalCount == 0) return document
-        val provider = settingsManager.getAiPunctuationProvider()
         val apiKey = settingsManager.getAiApiKey(provider); val model = settingsManager.getAiPunctuationModel(provider); val baseUrl = settingsManager.getAiBaseUrl(provider)
         if (provider == AiProviderConfig.LOCAL) {
             if (settingsManager.getLlmModelPath().isBlank()) {

@@ -17,9 +17,9 @@ import kotlin.coroutines.resumeWithException
 /**
  * App-facing local text generation entry point.
  *
- * The service connection is shared so the model stays resident between
- * subtitle lines. A request still creates a fresh native context, which keeps
- * conversation state and cancellation local to the caller.
+ * The service connection and native model/session are shared so the model and
+ * KV cache stay resident between turns. Native compacts the session when its
+ * context window is full.
  */
 object LocalLlmEngine {
     data class GenerationResult(
@@ -105,6 +105,7 @@ object LocalLlmEngine {
         context: Context,
         modelPath: String,
         repackEnabled: Boolean,
+        contextSize: Int,
         thinkingEnabled: Boolean,
         conversation: List<LocalChatMessage>,
         onDelta: (String) -> Unit,
@@ -156,7 +157,7 @@ object LocalLlmEngine {
                         "",
                         null,
                         repackEnabled,
-                        DEFAULT_CONTEXT_SIZE,
+                        contextSize.coerceIn(MIN_CONTEXT, MAX_CONTEXT),
                         DEFAULT_TEMPERATURE,
                         conversation.map { it.role }.toTypedArray(),
                         conversation.map { it.content }.toTypedArray(),
@@ -271,6 +272,7 @@ object LocalLlmEngine {
         }
     }
 
-    private const val DEFAULT_CONTEXT_SIZE = 4096
     private const val DEFAULT_TEMPERATURE = 0f
+    private const val MIN_CONTEXT = 1024
+    private const val MAX_CONTEXT = 32768
 }

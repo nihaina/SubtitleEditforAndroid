@@ -49,6 +49,7 @@ class LocalLlmBackend(
                 context = context,
                 modelPath = config.localModelPath,
                 repackEnabled = config.localRepackEnabled,
+                contextSize = config.localContextSize,
                 thinkingEnabled = config.thinkingEnabled,
                 conversation = requestMessages,
                 onDelta = { delta ->

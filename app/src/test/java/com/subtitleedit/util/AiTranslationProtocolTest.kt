@@ -21,6 +21,16 @@ class AiTranslationProtocolTest {
     }
 
     @Test
+    fun localModelBatches_areSplitAtThirtySubtitles() {
+        val batches = splitSubtitleTranslationBatches(
+            List(61) { index -> testSubtitle(index + 1, "字幕${index + 1}") },
+            maxSubtitlesPerBatch = LOCAL_AI_SUBTITLES_PER_REQUEST
+        )
+
+        assertEquals(listOf(30, 30, 1), batches.map { it.size })
+    }
+
+    @Test
     fun timedInput_usesSrtBlocksWithoutSequenceNumbersAndPreservesEmbeddedLines() {
         val content = buildTimedSubtitleContent(
             listOf(
@@ -69,6 +79,40 @@ class AiTranslationProtocolTest {
             "帮我翻译成中文，以原格式输出\n请使用正式语气\n\n" +
                 "start\n1\n00:00:02,000 --> 00:00:03,500\nhello\nend",
             buildTranslationUserContent(subtitles, "中文", "请使用正式语气")
+        )
+    }
+
+    @Test
+    fun localUserContent_usesSequenceAndTextWithoutTimestamps() {
+        val subtitles = listOf(
+            testSubtitle(1, "字幕1"),
+            testSubtitle(2, "字幕2")
+        )
+
+        assertEquals(
+            "帮我翻译成中文，以原格式输出\n\n" +
+                "start\n1\n字幕1\n\n2\n字幕2\nend",
+            buildTranslationUserContent(
+                subtitles,
+                "中文",
+                sequenceOnly = true
+            )
+        )
+    }
+
+    @Test
+    fun sequenceOnlyParser_matchesBySequenceAndPreservesMultilineText() {
+        val expected = listOf(
+            SubtitleEntry(index = 7, startTime = 1_000, endTime = 2_000, text = "source one"),
+            SubtitleEntry(index = 8, startTime = 3_000, endTime = 4_000, text = "source two")
+        )
+
+        assertEquals(
+            listOf("译文一\n第二行", "译文二"),
+            parseSequenceSubtitleTranslation(
+                "start\n8\n译文二\n\n7\n译文一\n第二行\nend",
+                expected
+            )
         )
     }
 

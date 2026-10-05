@@ -7,7 +7,6 @@ internal const val PUNCTUATION_PREDICTION_PROMPT =
     "以下为换行分离的字幕文本，帮我逐行添加标点符号，不修改原文，不做额外说明，以原格式输出"
 
 object SubtitlePunctuationPredictor {
-    private const val ENTRIES_PER_BATCH = 150
     private val matchingIgnoredCharacters = Regex("""[\p{P}\p{Z}\p{Cc}\p{Cf}\s]""")
     private val punctuationOnlyText = Regex("""[\p{P}\p{Z}\p{Cc}\p{Cf}\s]*""")
 
@@ -25,7 +24,14 @@ object SubtitlePunctuationPredictor {
         }
     }
 
-    class Session(private val entries: List<SubtitleEntry>) {
+    class Session(
+        private val entries: List<SubtitleEntry>,
+        private val entriesPerBatch: Int = DEFAULT_AI_SUBTITLES_PER_REQUEST
+    ) {
+        init {
+            require(entriesPerBatch > 0) { "每批字幕数量必须大于 0" }
+        }
+
         val totalCount: Int get() = entries.size
         var processedCount: Int = 0
             private set
@@ -37,7 +43,7 @@ object SubtitlePunctuationPredictor {
         ): List<SubtitleEntry> {
             onProgress(processedCount, totalCount)
             while (processedCount < entries.size) {
-                val end = (processedCount + ENTRIES_PER_BATCH).coerceAtMost(entries.size)
+                val end = (processedCount + entriesPerBatch).coerceAtMost(entries.size)
                 val batch = entries.subList(processedCount, end)
                 val response = requestPrediction(buildTimedSubtitleContent(
                     batch,
@@ -53,11 +59,12 @@ object SubtitlePunctuationPredictor {
         }
     }
 
-    /** Each batch contains only the next 150 prepared cues, without carrying any previous cue. */
+    /** Each batch contains only the next configured cues, without carrying any previous cue. */
     suspend fun predictSubtitleEntriesInBatches(
         entries: List<SubtitleEntry>,
+        entriesPerBatch: Int = DEFAULT_AI_SUBTITLES_PER_REQUEST,
         requestPrediction: suspend (String) -> String
-    ): List<SubtitleEntry> = Session(entries).run(requestPrediction = requestPrediction)
+    ): List<SubtitleEntry> = Session(entries, entriesPerBatch).run(requestPrediction = requestPrediction)
 
     fun matchSubtitleEntries(
         entries: List<SubtitleEntry>,

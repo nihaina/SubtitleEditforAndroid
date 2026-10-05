@@ -1,8 +1,28 @@
 # Third-Party Notices
 
-SubtitleEdit for Android includes the following archive-related components.
+SubtitleEdit for Android includes the following third-party components.
 Their licenses apply to those components independently of the project's
 GPL-3.0 license.
+
+## llama.cpp and ggml
+
+The local LLM runtime includes source from [llama.cpp](https://github.com/ggml-org/llama.cpp),
+including its in-tree [ggml](https://github.com/ggml-org/ggml) library. The
+llama.cpp and ggml sources are Copyright (c) 2023-2026 The ggml authors and
+are distributed under the MIT License.
+
+The vendored copy is based on the
+[llama.cpp-android](https://github.com/andriydruk/llama.cpp-android)
+`android-b11200` branch at commit `f825a61c7f0c99402fc06c1c0113ffcb6da1c3a4`.
+It contains Android-specific changes, including SAF file-descriptor loading
+(`fd:N`) and Android backend integration. The source is included in
+`app/src/main/cpp/llama.cpp`; the complete upstream MIT license and copyright
+notice are retained in `app/src/main/cpp/llama.cpp/LICENSE`.
+
+The llama.cpp tree also contains separately licensed vendored dependencies.
+Their license files remain in that tree and apply to the corresponding files,
+including `app/src/main/cpp/llama.cpp/licenses/` and the individual dependency
+directories under `app/src/main/cpp/llama.cpp/vendor/`.
 
 ## Nagisa 0.3.0
 

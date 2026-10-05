@@ -5,7 +5,8 @@ import com.subtitleedit.util.SubtitleParser.SubtitleFormat
 import java.io.IOException
 import java.util.Locale
 
-private const val MAX_SUBTITLES_PER_TRANSLATION_REQUEST = 150
+internal const val DEFAULT_AI_SUBTITLES_PER_REQUEST = 150
+internal const val LOCAL_AI_SUBTITLES_PER_REQUEST = 30
 private const val TRANSLATION_BLOCK_START = "start"
 private const val TRANSLATION_BLOCK_END = "end"
 private val TIMED_SUBTITLE_LINE = Regex(
@@ -76,11 +77,18 @@ internal fun buildTranslationUserContent(
     targetLanguage: String,
     customPrompt: String = "",
     startPosition: Int = 1,
-    format: SubtitleFormat = SubtitleFormat.SRT
+    format: SubtitleFormat = SubtitleFormat.SRT,
+    sequenceOnly: Boolean = false
 ): String = buildString {
     append(buildTranslationInstruction(targetLanguage, customPrompt))
     append("\n\n")
-    append(buildSubtitleTranslationContent(subtitles, format, startPosition))
+    append(
+        if (sequenceOnly) {
+            buildTimedSubtitleContent(subtitles, startPosition, includeTimestamps = false)
+        } else {
+            buildSubtitleTranslationContent(subtitles, format, startPosition)
+        }
+    )
 }
 
 internal fun buildSubtitleTranslationContent(
@@ -127,8 +135,12 @@ internal fun buildSubtitleTranslationContent(
 }
 
 internal fun splitSubtitleTranslationBatches(
-    subtitles: List<SubtitleEntry>
-): List<List<SubtitleEntry>> = subtitles.chunked(MAX_SUBTITLES_PER_TRANSLATION_REQUEST)
+    subtitles: List<SubtitleEntry>,
+    maxSubtitlesPerBatch: Int = DEFAULT_AI_SUBTITLES_PER_REQUEST
+): List<List<SubtitleEntry>> {
+    require(maxSubtitlesPerBatch > 0) { "每批字幕数量必须大于 0" }
+    return subtitles.chunked(maxSubtitlesPerBatch)
+}
 
 internal fun parseTimedSubtitleTranslation(
     content: String,
@@ -188,17 +200,90 @@ internal fun parseSubtitleTranslation(
     content: String,
     expectedSubtitles: List<SubtitleEntry>,
     format: SubtitleFormat,
-    expectedStartPosition: Int = 1
-): List<String> = when (format) {
-    SubtitleFormat.LRC,
-    SubtitleFormat.VTT -> parseIndexedSubtitleTranslation(
-        content,
-        expectedSubtitles,
-        format,
-        expectedStartPosition
-    )
+    expectedStartPosition: Int = 1,
+    sequenceOnly: Boolean = false
+): List<String> = if (sequenceOnly) {
+    parseSequenceSubtitleTranslation(content, expectedSubtitles, expectedStartPosition)
+} else {
+    when (format) {
+        SubtitleFormat.LRC,
+        SubtitleFormat.VTT -> parseIndexedSubtitleTranslation(
+            content,
+            expectedSubtitles,
+            format,
+            expectedStartPosition
+        )
 
-    else -> parseTimedSubtitleTranslation(content, expectedSubtitles)
+        else -> parseTimedSubtitleTranslation(content, expectedSubtitles)
+    }
+}
+
+private data class SequenceSubtitleBlock(
+    val sequence: Int,
+    val text: String
+)
+
+internal fun parseSequenceSubtitleTranslation(
+    content: String,
+    expectedSubtitles: List<SubtitleEntry>,
+    expectedStartPosition: Int = 1
+): List<String> {
+    val expectedSequences = expectedSubtitles.mapIndexed { offset, subtitle ->
+        subtitle.index.takeIf { it > 0 } ?: (expectedStartPosition + offset)
+    }
+    if (expectedSequences.toSet().size != expectedSequences.size) {
+        throw IOException("AI 翻译序号匹配失败：原字幕序号重复")
+    }
+    val expectedBySequence = expectedSubtitles.mapIndexed { index, subtitle ->
+        expectedSequences[index] to subtitle
+    }.toMap()
+    val blocks = extractSequenceSubtitleBlocks(content)
+    if (blocks.isEmpty()) {
+        throw IOException("AI 未返回带序号的字幕块")
+    }
+
+    val unexpected = blocks.firstOrNull { it.sequence !in expectedBySequence }
+    if (unexpected != null) {
+        throw IOException("AI 返回了非本批次序号 ${unexpected.sequence}")
+    }
+    val duplicate = blocks.groupingBy { it.sequence }.eachCount()
+        .entries.firstOrNull { it.value > 1 }
+    if (duplicate != null) {
+        throw IOException("翻译结果包含重复字幕序号：${duplicate.key}")
+    }
+    val blocksBySequence = blocks.associateBy { it.sequence }
+    val missing = expectedSequences.filter { it !in blocksBySequence }
+    if (missing.isNotEmpty()) {
+        val preview = missing.take(10).joinToString("、") { "原字幕 $it" }
+        val suffix = if (missing.size > 10) "等 ${missing.size} 条" else ""
+        throw IOException("AI 返回 ${blocks.size}/${expectedSequences.size} 个匹配字幕；缺少：$preview$suffix")
+    }
+    return expectedSequences.map { blocksBySequence.getValue(it).text }
+}
+
+private fun extractSequenceSubtitleBlocks(content: String): List<SequenceSubtitleBlock> {
+    val normalizedContent = markedTranslationContent(content)
+        ?: limitToSequenceCodeBlock(normalizeSubtitleText(content))
+    val sequenceMatches = SUBTITLE_SEQUENCE_LINE.findAll(normalizedContent).toList()
+    return sequenceMatches.mapIndexedNotNull { index, match ->
+        val sequence = match.groupValues[1].toIntOrNull() ?: return@mapIndexedNotNull null
+        val nextSequence = sequenceMatches.getOrNull(index + 1)
+        val blockEnd = nextSequence?.range?.first ?: normalizedContent.length
+        val text = normalizedContent.substring(match.range.last + 1, blockEnd)
+            .trim('\n', '\r')
+            .removeTrailingMarkdownFence()
+            .trim('\n', '\r')
+        SequenceSubtitleBlock(sequence, text)
+    }
+}
+
+private fun limitToSequenceCodeBlock(content: String): String {
+    val fences = MARKDOWN_FENCE_LINE.findAll(content).toList()
+    if (fences.size < 2) return content
+    val openingFence = fences.first()
+    val closingFence = fences.firstOrNull { it.range.first > openingFence.range.last }
+        ?: return content
+    return content.substring(openingFence.range.last + 1, closingFence.range.first)
 }
 
 private data class IndexedSubtitleKey(
@@ -481,6 +566,30 @@ internal fun parseCompletedIndexedTranslationPrefix(
     return buildList {
         for (key in expectedKeys) {
             val block = completedBlocks[key.sequence] ?: break
+            add(block.text)
+        }
+    }
+}
+
+internal fun parseCompletedSequenceTranslationPrefix(
+    content: String,
+    expectedSubtitles: List<SubtitleEntry>,
+    expectedStartPosition: Int
+): List<String> {
+    val expectedSequences = expectedSubtitles.mapIndexed { offset, subtitle ->
+        subtitle.index.takeIf { it > 0 } ?: (expectedStartPosition + offset)
+    }
+    val extractedBlocks = extractSequenceSubtitleBlocks(content)
+    val completedBlocks = if (hasCompleteTranslationBlock(content)) {
+        extractedBlocks
+    } else {
+        extractedBlocks.dropLast(1)
+    }.filter { it.sequence in expectedSequences }
+        .associateBy { it.sequence }
+
+    return buildList {
+        for (sequence in expectedSequences) {
+            val block = completedBlocks[sequence] ?: break
             add(block.text)
         }
     }
