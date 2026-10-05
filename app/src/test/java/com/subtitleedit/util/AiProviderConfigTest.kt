@@ -14,7 +14,8 @@ class AiProviderConfigTest {
                 AiProviderConfig.SILICONFLOW,
                 AiProviderConfig.DEEPSEEK,
                 AiProviderConfig.OPENAI,
-                AiProviderConfig.CUSTOM
+                AiProviderConfig.CUSTOM,
+                AiProviderConfig.LOCAL
             ),
             AiProviderConfig.providers.map { it.id }
         )
@@ -24,6 +25,7 @@ class AiProviderConfigTest {
     fun providers_haveDisplayNameUrlAndDefaultModel() {
         AiProviderConfig.providers.forEach { provider ->
             assertTrue("${provider.id} 缺少显示名", provider.displayName.isNotBlank())
+            if (provider.id == AiProviderConfig.LOCAL) return@forEach
             if (!provider.customEndpoint) {
                 assertTrue("${provider.id} 的 baseUrl 应为 https", provider.baseUrl.startsWith("https://"))
             }

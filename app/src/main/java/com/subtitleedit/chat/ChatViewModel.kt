@@ -357,11 +357,26 @@ internal class ChatViewModel(
     private fun newConversation(
         config: ChatLaunchConfiguration,
         initialMessages: List<ChatBackend.ChatMessage> = emptyList()
-    ) = ChatConversation(
-        config = config.backendConfig,
-        tools = ChatTools.create(app),
-        initialMessages = initialMessages
-    )
+    ): ChatConversation {
+        val isLocal = config.backendConfig.providerId == com.subtitleedit.util.AiProviderConfig.LOCAL
+        val safeInitialMessages = if (isLocal) {
+            initialMessages
+                .filter { it.role == "system" || it.role == "user" || it.role == "assistant" }
+                .map { it.copy(toolCalls = emptyList(), toolCallId = "", toolName = "") }
+        } else {
+            initialMessages
+        }
+        return ChatConversation(
+            config = config.backendConfig,
+            tools = if (isLocal) {
+                emptyList()
+            } else {
+                ChatTools.create(app)
+            },
+            initialMessages = safeInitialMessages,
+            context = app
+        )
+    }
 
     override fun onCleared() {
         // Page is finishing for real (not a configuration change).

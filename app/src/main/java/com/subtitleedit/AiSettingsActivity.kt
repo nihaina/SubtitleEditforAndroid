@@ -49,6 +49,8 @@ class AiSettingsActivity : AppComposeActivity() {
                     onSelectPunctuationProvider = viewModel::selectPunctuationProvider,
                     onRevealApiKey = viewModel::revealApiKey,
                     onCopyApiKey = viewModel::requestCopyApiKey,
+                    onLoadLocalModel = viewModel::loadLocalModel,
+                    onUnloadLocalModel = viewModel::unloadLocalModel,
                     onFetchModels = viewModel::fetchModels,
                     onChooseModel = viewModel::chooseModel,
                     onDismissModelChooser = viewModel::dismissModelChooser,
@@ -66,6 +68,11 @@ class AiSettingsActivity : AppComposeActivity() {
                     startActivity(ChatActivity.createIntent(this, event.configuration))
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.onResume()
     }
 
     override fun onStop() {

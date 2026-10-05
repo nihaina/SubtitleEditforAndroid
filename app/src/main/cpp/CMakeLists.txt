@@ -2,11 +2,88 @@ cmake_minimum_required(VERSION 3.22.1)
 
 # Some Windows NDK installations include a Unix shell script named `ld.lld`
 # next to the actual `ld.lld.exe`. Point Clang at the executable explicitly.
-if (WIN32 AND ANDROID_NDK)
+if (CMAKE_HOST_WIN32 AND ANDROID_NDK)
     set(SEVENZIP_LLD "${ANDROID_NDK}/toolchains/llvm/prebuilt/windows-x86_64/bin/ld.lld.exe")
+    set(CMAKE_LINKER "${SEVENZIP_LLD}" CACHE FILEPATH "" FORCE)
+    # The Android toolchain rewrites the *_INIT variables during its compiler
+    # probe. Set the cache flags as well so a fresh Release configure uses the
+    # executable linker instead of the extensionless ld.lld helper script.
+    # The compiler probe itself consumes the *_INIT variables before the
+    # project cache entries are available, so include the flag there too.
+    set(CMAKE_C_FLAGS_INIT "-fuse-ld=${SEVENZIP_LLD}" CACHE STRING "" FORCE)
+    set(CMAKE_CXX_FLAGS_INIT "-fuse-ld=${SEVENZIP_LLD}" CACHE STRING "" FORCE)
+    set(CMAKE_EXE_LINKER_FLAGS "-fuse-ld=${SEVENZIP_LLD}" CACHE STRING "" FORCE)
+    set(CMAKE_SHARED_LINKER_FLAGS "-fuse-ld=${SEVENZIP_LLD}" CACHE STRING "" FORCE)
+    set(CMAKE_MODULE_LINKER_FLAGS "-fuse-ld=${SEVENZIP_LLD}" CACHE STRING "" FORCE)
+    set(CMAKE_C_LINK_EXECUTABLE "<CMAKE_C_COMPILER> <FLAGS> <CMAKE_C_LINK_FLAGS> <LINK_FLAGS> -fuse-ld=${SEVENZIP_LLD} <OBJECTS> -o <TARGET> <LINK_LIBRARIES>" CACHE STRING "" FORCE)
+    set(CMAKE_CXX_LINK_EXECUTABLE "<CMAKE_CXX_COMPILER> <FLAGS> <CMAKE_CXX_LINK_FLAGS> <LINK_FLAGS> -fuse-ld=${SEVENZIP_LLD} <OBJECTS> -o <TARGET> <LINK_LIBRARIES>" CACHE STRING "" FORCE)
 endif()
 
 project(subtitleedit_archive LANGUAGES C CXX)
+
+# CMake's Android toolchain can accidentally prefer the extensionless helper
+# script shipped beside ld.lld.exe on Windows. Force the real executable for
+# every target, including llama.cpp's Threads probe.
+
+# Text-only local LLM runtime. Keep llama.cpp CPU-only and static so the
+# existing archive/ASR native libraries retain their current packaging. The
+# submodule is pinned to the LMPlayground Android fork; SAF descriptors are
+# exposed to llama.cpp as /proc/self/fd/N paths by the bound service.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_UI OFF CACHE BOOL "" FORCE)
+set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
+set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
+set(LLAMA_LLGUIDANCE OFF CACHE BOOL "" FORCE)
+set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
+set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+
+# Match LMPlayground's arm64 CPU path. KleidiAI provides runtime-selected
+# NEON dot-product/i8mm kernels while retaining the generic fallback on
+# devices that do not expose those instructions.
+if (ANDROID_ABI STREQUAL "arm64-v8a")
+    set(GGML_CPU_KLEIDIAI ON CACHE BOOL "" FORCE)
+else()
+    set(GGML_CPU_KLEIDIAI OFF CACHE BOOL "" FORCE)
+endif()
+
+set(LLAMA_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llama.cpp")
+if (EXISTS "${LLAMA_SOURCE_DIR}/CMakeLists.txt" AND
+    (ANDROID_ABI STREQUAL "arm64-v8a" OR ANDROID_ABI STREQUAL "x86_64"))
+    add_subdirectory("${LLAMA_SOURCE_DIR}")
+
+    # Keep the local runtime optimized even if a stale/debug native cache is
+    # selected by AGP; an unoptimized ggml build makes token generation much
+    # slower than the Release build used by LMPlayground.
+    if (ANDROID_ABI STREQUAL "arm64-v8a")
+        foreach (LLAMA_PERF_TARGET ggml-base ggml-cpu ggml llama llama-common llama-common-base kleidiai)
+            if (TARGET ${LLAMA_PERF_TARGET})
+                target_compile_options(${LLAMA_PERF_TARGET} PRIVATE "$<$<CONFIG:Debug>:-O2>")
+            endif()
+        endforeach()
+    endif()
+
+    add_library(subtitleedit_llama SHARED local_llama_jni.cpp)
+    target_include_directories(subtitleedit_llama PRIVATE
+        "${LLAMA_SOURCE_DIR}/include"
+        "${LLAMA_SOURCE_DIR}/common")
+    target_compile_options(subtitleedit_llama PRIVATE -fexceptions -frtti)
+    target_link_options(subtitleedit_llama PRIVATE "-Wl,-z,max-page-size=16384")
+    target_link_libraries(subtitleedit_llama PRIVATE llama-common llama log android)
+else()
+    # Keep the Gradle native target available on legacy 32-bit splits. The
+    # local model UI can still be installed there, but inference reports an
+    # unavailable runtime instead of making the whole APK variant fail.
+    add_library(subtitleedit_llama SHARED local_llama_stub.cpp)
+    target_link_libraries(subtitleedit_llama PRIVATE log)
+endif()
 
 set(SEVENZIP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/7zip")
 file(GLOB SEVENZIP_C CONFIGURE_DEPENDS "${SEVENZIP_DIR}/C/*.c")

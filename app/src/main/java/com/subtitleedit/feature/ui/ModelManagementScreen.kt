@@ -60,6 +60,7 @@ sealed interface ModelManagementDialogUi {
 @Composable
 fun ModelManagementScreen(
     asrImport: AsrModelImportUiState,
+    llmImport: LlmModelImportUiState,
     demucsImport: DemucsModelImportUiState,
     selectedPage: Int,
     models: List<ModelManagementItemUi>,
@@ -70,12 +71,14 @@ fun ModelManagementScreen(
     isExporting: Boolean,
     deletingModelKey: String?,
     asrDialog: ModelImportDialogUi?,
+    llmDialog: ModelImportDialogUi?,
     demucsDialog: ModelImportDialogUi?,
     exportDialog: ModelImportDialogUi?,
     dialog: ModelManagementDialogUi?,
     onPageSelected: (Int) -> Unit,
     onAsrImportAction: (AsrModelImportAction) -> Unit,
     onBuiltInVadChanged: (Boolean) -> Unit,
+    onLlmImportAction: (LlmModelImportAction) -> Unit,
     onDemucsImportAction: (DemucsModelImportAction) -> Unit,
     onNavigateBack: () -> Unit,
     onExport: (ModelManagementItemUi) -> Unit,
@@ -122,9 +125,11 @@ fun ModelManagementScreen(
             if (page == 0) {
                 ImportPage(
                     asrImport = asrImport,
+                    llmImport = llmImport,
                     demucsImport = demucsImport,
                     onAsrAction = onAsrImportAction,
                     onBuiltInVadChanged = onBuiltInVadChanged,
+                    onLlmAction = onLlmImportAction,
                     onDemucsAction = onDemucsImportAction
                 )
             } else {
@@ -145,6 +150,7 @@ fun ModelManagementScreen(
 
     ModelImportDialogs(
         asrDialog = asrDialog,
+        llmDialog = llmDialog,
         demucsDialog = demucsDialog,
         exportDialog = exportDialog
     )
@@ -200,9 +206,11 @@ fun ModelManagementScreen(
 @Composable
 private fun ImportPage(
     asrImport: AsrModelImportUiState,
+    llmImport: LlmModelImportUiState,
     demucsImport: DemucsModelImportUiState,
     onAsrAction: (AsrModelImportAction) -> Unit,
     onBuiltInVadChanged: (Boolean) -> Unit,
+    onLlmAction: (LlmModelImportAction) -> Unit,
     onDemucsAction: (DemucsModelImportAction) -> Unit
 ) {
     Column(
@@ -218,9 +226,11 @@ private fun ImportPage(
         )
         ModelManagementImportContent(
             asr = asrImport,
+            llm = llmImport,
             demucs = demucsImport,
             onAsrAction = onAsrAction,
             onBuiltInVadChanged = onBuiltInVadChanged,
+            onLlmAction = onLlmAction,
             onDemucsAction = onDemucsAction
         )
     }

@@ -60,7 +60,8 @@ internal class AutoTranslateViewModel(application: Application) :
 
     private data class TranslationConfig(
         val provider: String, val apiKey: String, val model: String, val targetLanguage: String,
-        val customPrompt: String, val baseUrl: String, val reasoningLevel: AiProviderConfig.ReasoningLevel
+        val customPrompt: String, val baseUrl: String, val reasoningLevel: AiProviderConfig.ReasoningLevel,
+        val thinkingEnabled: Boolean
     )
     private enum class FileStatus { WAITING, RUNNING, COMPLETED, STOPPED }
     private enum class ProcessingStage(@StringRes val displayNameRes: Int, @StringRes val progressLabelRes: Int? = null) {
@@ -125,6 +126,28 @@ internal class AutoTranslateViewModel(application: Application) :
 
     fun startQueuedFiles() {
         if (files.isEmpty()) return toast(R.string.auto_translate_no_files)
+        val needsLocalModel =
+            (currentState.translationEnabled && settingsManager.getAiTranslationProvider() == AiProviderConfig.LOCAL) ||
+                (currentState.punctuationPredictionEnabled && settingsManager.getAiPunctuationProvider() == AiProviderConfig.LOCAL)
+        if (needsLocalModel) {
+            val modelPath = settingsManager.getLlmModelPath()
+            val repackEnabled = settingsManager.isLlmRepackEnabled()
+            viewModelScope.launch(Dispatchers.IO) {
+                val loaded = com.subtitleedit.localllm.LocalLlmEngine.isModelLoaded(app, modelPath, repackEnabled)
+                withContext(Dispatchers.Main) {
+                    if (!loaded) {
+                        toast(R.string.ai_local_model_not_loaded)
+                    } else {
+                        startQueuedFilesValidated()
+                    }
+                }
+            }
+            return
+        }
+        startQueuedFilesValidated()
+    }
+
+    private fun startQueuedFilesValidated() {
         val config = if (currentState.translationEnabled) readTranslationConfig() else null
         if (!validateSelectedFeatures(config)) return
         val outputUri = outputDirectoryUri ?: Uri.fromFile(getTranslateOutputDirectory())
@@ -216,8 +239,14 @@ internal class AutoTranslateViewModel(application: Application) :
         if (session.totalCount == 0) return document
         val provider = settingsManager.getAiPunctuationProvider()
         val apiKey = settingsManager.getAiApiKey(provider); val model = settingsManager.getAiPunctuationModel(provider); val baseUrl = settingsManager.getAiBaseUrl(provider)
-        if (apiKey.isBlank() || model.isBlank() || baseUrl.isBlank()) throw IllegalArgumentException(string(R.string.ai_processing_configuration_required))
-        val conversation = aiTranslationService.createConversation(app, provider, apiKey, model, "", settingsManager.getAiPunctuationCustomPrompt(), baseUrl, document.format, settingsManager.getAiPunctuationReasoningLevel(provider), "punctuation_${file.sessionId}", string(R.string.auto_translate_punctuation_history_title, file.fileName))
+        if (provider == AiProviderConfig.LOCAL) {
+            if (settingsManager.getLlmModelPath().isBlank()) {
+                throw IllegalArgumentException(string(R.string.ai_processing_configuration_required))
+            }
+        } else if (apiKey.isBlank() || model.isBlank() || baseUrl.isBlank()) {
+            throw IllegalArgumentException(string(R.string.ai_processing_configuration_required))
+        }
+        val conversation = aiTranslationService.createConversation(app, provider, apiKey, model, "", settingsManager.getAiPunctuationCustomPrompt(), baseUrl, document.format, settingsManager.getAiPunctuationReasoningLevel(provider), "punctuation_${file.sessionId}", string(R.string.auto_translate_punctuation_history_title, file.fileName), settingsManager.isAiLocalPunctuationThinkingEnabled())
         file.activeConversation = conversation
         val punctuated = session.run(onProgress = { done, total -> file.processedLines = done; file.totalLines = total; publish() }) { text ->
             currentCoroutineContext().ensureActive()
@@ -230,7 +259,7 @@ internal class AutoTranslateViewModel(application: Application) :
     private suspend fun translateDocument(file: AutoTranslateFile, document: SubtitleDocument, config: TranslationConfig): SubtitleDocument {
         val entries = document.entries
         updateProcessingStage(file, ProcessingStage.TRANSLATION, file.translatedTexts.size, entries.size)
-        val translator = aiTranslationService.createConversation(app, config.provider, config.apiKey, config.model, config.targetLanguage, config.customPrompt, config.baseUrl, document.format, config.reasoningLevel, file.sessionId, string(R.string.auto_translate_translation_history_title, file.fileName, config.targetLanguage))
+        val translator = aiTranslationService.createConversation(app, config.provider, config.apiKey, config.model, config.targetLanguage, config.customPrompt, config.baseUrl, document.format, config.reasoningLevel, file.sessionId, string(R.string.auto_translate_translation_history_title, file.fileName, config.targetLanguage), config.thinkingEnabled)
         file.activeConversation = translator
         var consecutiveErrors = 0
         while (file.translatedTexts.size < entries.size) {
@@ -264,10 +293,21 @@ internal class AutoTranslateViewModel(application: Application) :
     }
     private fun readTranslationConfig(): TranslationConfig? {
         val provider = settingsManager.getAiTranslationProvider(); val apiKey = settingsManager.getAiApiKey(provider); val model = settingsManager.getAiModel(provider); val target = settingsManager.getAiTargetLanguage(); val base = settingsManager.getAiBaseUrl(provider)
-        if (apiKey.isBlank() || model.isBlank() || target.isBlank() || base.isBlank()) return null
-        return TranslationConfig(provider, apiKey, model, target, settingsManager.getAiCustomPrompt(), base, settingsManager.getAiReasoningLevel(provider))
+        if (provider == AiProviderConfig.LOCAL) {
+            if (settingsManager.getLlmModelPath().isBlank() || target.isBlank()) return null
+        } else if (apiKey.isBlank() || model.isBlank() || target.isBlank() || base.isBlank()) {
+            return null
+        }
+        return TranslationConfig(provider, apiKey, model, target, settingsManager.getAiCustomPrompt(), base, settingsManager.getAiReasoningLevel(provider), settingsManager.isAiLocalTranslationThinkingEnabled())
     }
-    private fun isPunctuationAiConfigured(): Boolean { val provider = settingsManager.getAiPunctuationProvider(); return settingsManager.getAiApiKey(provider).isNotBlank() && settingsManager.getAiPunctuationModel(provider).isNotBlank() && settingsManager.getAiBaseUrl(provider).isNotBlank() }
+    private fun isPunctuationAiConfigured(): Boolean {
+        val provider = settingsManager.getAiPunctuationProvider()
+        return if (provider == AiProviderConfig.LOCAL) {
+            settingsManager.getLlmModelPath().isNotBlank()
+        } else {
+            settingsManager.getAiApiKey(provider).isNotBlank() && settingsManager.getAiPunctuationModel(provider).isNotBlank() && settingsManager.getAiBaseUrl(provider).isNotBlank()
+        }
+    }
 
     private suspend fun updateProcessingStage(file: AutoTranslateFile, stage: ProcessingStage, processedLines: Int = 0, totalLines: Int = 0) {
         file.processingStage = stage; file.message = ""

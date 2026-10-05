@@ -36,7 +36,7 @@ internal interface ModelImportHost {
 internal fun ModelImportHost.showToast(@StringRes id: Int, vararg args: Any, duration: Int = Toast.LENGTH_SHORT) =
     showToast(text(id, *args), duration)
 
-internal enum class StorageAccessRequester { MODEL_LIST, ASR_IMPORT, DEMUCS_IMPORT }
+internal enum class StorageAccessRequester { MODEL_LIST, ASR_IMPORT, LLM_IMPORT, DEMUCS_IMPORT }
 
 /** Single-document pickers; each has its own launcher in the Activity. */
 internal enum class ModelPickTarget(val mimeTypes: Array<String>) {
@@ -45,6 +45,7 @@ internal enum class ModelPickTarget(val mimeTypes: Array<String>) {
     ASR_JOINER(arrayOf("*/*")),
     ASR_TOKENS(arrayOf("*/*")),
     ASR_VAD(arrayOf("*/*")),
+    LLM_MODEL(arrayOf("application/octet-stream", "*/*")),
     DEMUCS_GENERAL(DEMUCS_MODEL_MIME_TYPES),
     DEMUCS_VOCALS(DEMUCS_MODEL_MIME_TYPES),
     DEMUCS_DRUMS(DEMUCS_MODEL_MIME_TYPES),
@@ -63,6 +64,7 @@ internal sealed interface ModelManagementEvent {
     data object RequestNotificationPermission : ModelManagementEvent
     data class OpenScreen(val activity: Class<out android.app.Activity>) : ModelManagementEvent
     data object OpenAsrSettings : ModelManagementEvent
+    data object OpenLlmSettings : ModelManagementEvent
 
     /** Opens [url]; when [failureMessage] is set, a missing handler shows it instead of crashing. */
     data class OpenUrl(val url: String, val failureMessage: String? = null) : ModelManagementEvent

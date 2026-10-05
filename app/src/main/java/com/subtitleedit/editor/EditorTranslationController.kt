@@ -51,7 +51,11 @@ internal class EditorTranslationController(
         val provider = settingsManager.getAiTranslationProvider()
         val providerName = AiProviderConfig.getProvider(provider).displayName
         val apiKey = settingsManager.getAiApiKey(provider)
-        if (apiKey.isEmpty()) {
+        if (provider == AiProviderConfig.LOCAL && settingsManager.getLlmModelPath().isBlank()) {
+            showTranslationError("请先在模型管理中导入本地 LLM 模型")
+            return
+        }
+        if (provider != AiProviderConfig.LOCAL && apiKey.isEmpty()) {
             OverwritingToast.makeText(
                 activity,
                 "请先在设置中配置 $providerName API Key",
@@ -69,7 +73,7 @@ internal class EditorTranslationController(
         }
         val baseUrl = settingsManager.getAiBaseUrl(provider)
         val reasoningLevel = settingsManager.getAiReasoningLevel(provider)
-        if (baseUrl.isBlank()) {
+        if (provider != AiProviderConfig.LOCAL && baseUrl.isBlank()) {
             showTranslationError("请先在设置中填写自定义 API 请求地址")
             return
         }
@@ -89,7 +93,8 @@ internal class EditorTranslationController(
                     targetLanguage,
                     customPrompt,
                     baseUrl,
-                    reasoningLevel
+                    reasoningLevel,
+                    settingsManager.isAiLocalTranslationThinkingEnabled()
                 )
             }
             .setNegativeButton("取消", null)
@@ -113,7 +118,8 @@ internal class EditorTranslationController(
         targetLanguage: String,
         customPrompt: String,
         baseUrl: String,
-        reasoningLevel: AiProviderConfig.ReasoningLevel
+        reasoningLevel: AiProviderConfig.ReasoningLevel,
+        thinkingEnabled: Boolean
     ) {
         // One editor action owns one history record; all subtitle batches and retries share it.
         val historySessionId = UUID.randomUUID().toString()
@@ -127,6 +133,7 @@ internal class EditorTranslationController(
             baseUrl = baseUrl,
             subtitleFormat = subtitleFormatProvider(),
             reasoningLevel = reasoningLevel,
+            thinkingEnabled = thinkingEnabled,
             historySessionId = historySessionId
         )
         continueTranslation(TranslationSession(selectedEntries, translator))

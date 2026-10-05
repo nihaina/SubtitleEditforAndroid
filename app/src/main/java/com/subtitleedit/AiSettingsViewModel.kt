@@ -12,10 +12,12 @@ import com.subtitleedit.feature.ui.AiModelChooserUi
 import com.subtitleedit.feature.ui.AiModelTarget
 import com.subtitleedit.feature.ui.AiSettingsScreenState
 import com.subtitleedit.repository.AiTranslationService
+import com.subtitleedit.localllm.LocalLlmEngine
 import com.subtitleedit.util.AiKeyAccessSession
 import com.subtitleedit.util.AiProviderConfig
 import com.subtitleedit.util.SettingsManager
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 
 internal sealed interface AiSettingsEvent {
     /** Ask the Activity to show the biometric / device credential prompt. */
@@ -35,6 +37,7 @@ internal class AiSettingsViewModel(
     private val aiTranslationService: AiTranslationService get() = dependencies.aiTranslationService
     private var authenticationInProgress = false
     private var pendingSensitiveAction: SensitiveAction? = null
+    @Volatile private var localModelOperation = 0L
 
     /** Applies [transform] and persists the fields it changed. */
     fun updateScreenState(transform: (AiSettingsScreenState) -> AiSettingsScreenState) {
@@ -48,6 +51,139 @@ internal class AiSettingsViewModel(
     fun onStop() {
         updateScreenState { it.copy(apiKeyVisible = false) }
         AiKeyAccessSession.reset()
+    }
+
+    /** Refresh the model label after returning from model management. */
+    fun onResume() {
+        val modelName = settingsManager.getLlmModelDisplayName()
+        val modelPath = settingsManager.getLlmModelPath()
+        val modelChanged = modelName != currentState.localModelName
+        if (modelChanged) {
+            ++localModelOperation
+            setState {
+                copy(
+                    localModelName = modelName,
+                    localModelLoaded = false,
+                    localModelLoading = false,
+                    localModelLoadProgress = null,
+                    localModelMemoryBytes = 0L,
+                    localModelStatus = ""
+                )
+            }
+            // A newly selected or removed file must not leave the previous
+            // resident model consuming memory under a stale configuration.
+            if (modelPath.isNotBlank()) {
+                viewModelScope.launch(Dispatchers.IO) { LocalLlmEngine.unload(app) }
+            }
+        }
+        refreshLocalModelState()
+    }
+
+    private fun refreshLocalModelState() {
+        val modelPath = settingsManager.getLlmModelPath()
+        if (modelPath.isBlank()) {
+            viewModelScope.launch(Dispatchers.IO) { LocalLlmEngine.unload(app) }
+            setState {
+                copy(
+                    localModelLoaded = false,
+                    localModelLoading = false,
+                    localModelLoadProgress = null,
+                    localModelMemoryBytes = 0L
+                )
+            }
+            return
+        }
+        val repackEnabled = settingsManager.isLlmRepackEnabled()
+        viewModelScope.launch(Dispatchers.IO) {
+            val loaded = LocalLlmEngine.isModelLoaded(app, modelPath, repackEnabled)
+            val memory = if (loaded) LocalLlmEngine.memoryBytes(app) else 0L
+            if (currentState.localModelLoading) return@launch
+            if (!loaded) LocalLlmEngine.unload(app)
+            setState {
+                copy(
+                    localModelLoaded = loaded,
+                    localModelLoading = false,
+                    localModelLoadProgress = if (loaded) 100 else null,
+                    localModelMemoryBytes = memory,
+                    localModelStatus = ""
+                )
+            }
+        }
+    }
+
+    fun loadLocalModel() {
+        val modelPath = settingsManager.getLlmModelPath()
+        if (modelPath.isBlank()) {
+            toast(R.string.ai_local_model_required)
+            return
+        }
+        if (currentState.localModelLoading) return
+        val repackEnabled = settingsManager.isLlmRepackEnabled()
+        val operation = ++localModelOperation
+        setState {
+            copy(
+                localModelLoading = true,
+                localModelLoaded = false,
+                localModelLoadProgress = 0,
+                localModelMemoryBytes = 0L,
+                localModelStatus = ""
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = try {
+                LocalLlmEngine.load(app, modelPath, repackEnabled) { progress ->
+                    if (operation != localModelOperation) return@load
+                    setState {
+                        copy(
+                            localModelLoading = true,
+                            localModelLoadProgress = (progress * 100f).toInt().coerceIn(0, 100)
+                        )
+                    }
+                }
+            } catch (error: Throwable) {
+                LocalLlmEngine.LoadResult(false, error = error.message ?: "无法加载本地模型")
+            }
+            if (operation != localModelOperation) return@launch
+            if (result.loaded) {
+                setState {
+                    copy(
+                        localModelLoading = false,
+                        localModelLoaded = true,
+                        localModelLoadProgress = 100,
+                        localModelMemoryBytes = result.memoryBytes,
+                        localModelStatus = ""
+                    )
+                }
+            } else {
+                setState {
+                    copy(
+                        localModelLoading = false,
+                        localModelLoaded = false,
+                        localModelLoadProgress = null,
+                        localModelMemoryBytes = 0L,
+                        localModelStatus = result.error
+                    )
+                }
+                if (result.error.isNotBlank()) toast(result.error)
+            }
+        }
+    }
+
+    fun unloadLocalModel() {
+        if (!currentState.localModelLoaded && !currentState.localModelLoading) return
+        ++localModelOperation
+        viewModelScope.launch(Dispatchers.IO) {
+            LocalLlmEngine.unload(app)
+            setState {
+                copy(
+                    localModelLoading = false,
+                    localModelLoaded = false,
+                    localModelLoadProgress = null,
+                    localModelMemoryBytes = 0L,
+                    localModelStatus = ""
+                )
+            }
+        }
     }
 
     private fun persistChangedFields(current: AiSettingsScreenState, next: AiSettingsScreenState) {
@@ -74,6 +210,9 @@ internal class AiSettingsViewModel(
             if (current.translationPrompt != next.translationPrompt) {
                 settingsManager.setAiCustomPrompt(next.translationPrompt)
             }
+            if (current.translationLocalThinkingEnabled != next.translationLocalThinkingEnabled) {
+                settingsManager.setAiLocalTranslationThinkingEnabled(next.translationLocalThinkingEnabled)
+            }
         }
 
         if (current.punctuationProvider == next.punctuationProvider) {
@@ -86,6 +225,9 @@ internal class AiSettingsViewModel(
             }
             if (current.punctuationPrompt != next.punctuationPrompt) {
                 settingsManager.setAiPunctuationCustomPrompt(next.punctuationPrompt)
+            }
+            if (current.punctuationLocalThinkingEnabled != next.punctuationLocalThinkingEnabled) {
+                settingsManager.setAiLocalPunctuationThinkingEnabled(next.punctuationLocalThinkingEnabled)
             }
         }
     }
@@ -120,6 +262,7 @@ internal class AiSettingsViewModel(
                 translationProvider = provider,
                 translationModel = settingsManager.getAiModel(provider),
                 translationReasoning = settingsManager.getAiReasoningLevel(provider),
+                translationLocalThinkingEnabled = settingsManager.isAiLocalTranslationThinkingEnabled(),
                 targetLanguage = settingsManager.getAiTargetLanguage(),
                 translationPrompt = settingsManager.getAiCustomPrompt(),
                 modelChooser = null
@@ -137,6 +280,7 @@ internal class AiSettingsViewModel(
                 punctuationProvider = provider,
                 punctuationModel = settingsManager.getAiPunctuationModel(provider),
                 punctuationReasoning = settingsManager.getAiPunctuationReasoningLevel(provider),
+                punctuationLocalThinkingEnabled = settingsManager.isAiLocalPunctuationThinkingEnabled(),
                 punctuationPrompt = settingsManager.getAiPunctuationCustomPrompt(),
                 modelChooser = null
             )
@@ -150,6 +294,7 @@ internal class AiSettingsViewModel(
         }
         settingsManager.setAiTargetLanguage(state.targetLanguage.trim())
         settingsManager.setAiReasoningLevel(state.translationReasoning, translationProvider)
+        settingsManager.setAiLocalTranslationThinkingEnabled(state.translationLocalThinkingEnabled)
         settingsManager.setAiCustomPrompt(state.translationPrompt)
 
         val punctuationProvider = state.punctuationProvider
@@ -157,6 +302,7 @@ internal class AiSettingsViewModel(
             settingsManager.setAiPunctuationModel(punctuationProvider, state.punctuationModel.trim())
         }
         settingsManager.setAiPunctuationReasoningLevel(state.punctuationReasoning, punctuationProvider)
+        settingsManager.setAiLocalPunctuationThinkingEnabled(state.punctuationLocalThinkingEnabled)
         settingsManager.setAiPunctuationCustomPrompt(state.punctuationPrompt)
     }
 
@@ -302,17 +448,25 @@ internal class AiSettingsViewModel(
         val chatProvider = settingsManager.getAiTranslationProvider()
         val config = AiProviderConfig.getProvider(chatProvider)
         val apiKey = settingsManager.getAiApiKey(chatProvider)
-        if (apiKey.isBlank()) {
+        if (chatProvider != AiProviderConfig.LOCAL && apiKey.isBlank()) {
             toast(R.string.ai_api_key_empty)
             return
         }
         val baseUrl = settingsManager.getAiBaseUrl(chatProvider)
-        if (baseUrl.isBlank()) {
+        if (chatProvider != AiProviderConfig.LOCAL && baseUrl.isBlank()) {
             toast(R.string.ai_base_url_required)
             return
         }
         val model = settingsManager.getAiModel(chatProvider)
-        if (model.isBlank()) {
+        if (chatProvider == AiProviderConfig.LOCAL && settingsManager.getLlmModelPath().isBlank()) {
+            toast(R.string.ai_local_model_required)
+            return
+        }
+        if (chatProvider == AiProviderConfig.LOCAL && !currentState.localModelLoaded) {
+            toast(R.string.ai_local_model_not_loaded)
+            return
+        }
+        if (chatProvider != AiProviderConfig.LOCAL && model.isBlank()) {
             toast(R.string.ai_model_name_required)
             return
         }
@@ -330,7 +484,18 @@ internal class AiSettingsViewModel(
                         ),
                         modelSupportsReasoning = AiProviderConfig
                             .modelCapabilities(chatProvider, model)
-                            .reasoning
+                            .reasoning,
+                        thinkingEnabled = if (chatProvider == AiProviderConfig.LOCAL) {
+                            settingsManager.isAiLocalTranslationThinkingEnabled()
+                        } else {
+                            settingsManager.getAiReasoningLevel(chatProvider) != AiProviderConfig.ReasoningLevel.OFF
+                        },
+                        localModelPath = if (chatProvider == AiProviderConfig.LOCAL) {
+                            settingsManager.getLlmModelPath()
+                        } else {
+                            ""
+                        },
+                        localRepackEnabled = settingsManager.isLlmRepackEnabled()
                     )
                 )
             )

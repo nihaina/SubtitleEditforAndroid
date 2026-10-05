@@ -47,6 +47,13 @@
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
 
+        <!-- Keep llama.cpp in its own process so a native model failure cannot
+             terminate the subtitle editor UI process. -->
+        <service
+            android:name=".localllm.LocalLlmService"
+            android:exported="false"
+            android:process=":llama" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"
@@ -256,6 +263,10 @@
              android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
           <activity
              android:name=".Qwen3AsrSettingsActivity"
+             android:exported="false"
+             android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
+          <activity
+             android:name=".LlmSettingsActivity"
              android:exported="false"
              android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
           <activity

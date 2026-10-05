@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -24,6 +25,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -54,6 +56,7 @@ import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.components.AppSection
 import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.ui.components.SectionHeader
+import com.subtitleedit.ui.components.SettingsSwitchRow
 import com.subtitleedit.util.SettingsManager
 
 enum class AiModelTarget {
@@ -69,6 +72,13 @@ data class AiModelChooserUi(
 
 data class AiSettingsScreenState(
     val provider: String,
+    val localModelName: String,
+    /** Runtime state is deliberately separate from the imported model path. */
+    val localModelLoaded: Boolean = false,
+    val localModelLoading: Boolean = false,
+    val localModelLoadProgress: Int? = null,
+    val localModelMemoryBytes: Long = 0L,
+    val localModelStatus: String = "",
     val apiKey: String,
     val baseUrl: String,
     val apiKeyVisible: Boolean,
@@ -76,10 +86,12 @@ data class AiSettingsScreenState(
     val translationModel: String,
     val targetLanguage: String,
     val translationReasoning: AiProviderConfig.ReasoningLevel,
+    val translationLocalThinkingEnabled: Boolean,
     val translationPrompt: String,
     val punctuationProvider: String,
     val punctuationModel: String,
     val punctuationReasoning: AiProviderConfig.ReasoningLevel,
+    val punctuationLocalThinkingEnabled: Boolean,
     val punctuationPrompt: String,
     val fetchingTranslationModels: Boolean = false,
     val fetchingPunctuationModels: Boolean = false,
@@ -92,6 +104,7 @@ data class AiSettingsScreenState(
             val punctuationProvider = settings.getAiPunctuationProvider()
             return AiSettingsScreenState(
                 provider = provider,
+                localModelName = settings.getLlmModelDisplayName(),
                 apiKey = settings.getAiApiKey(provider),
                 baseUrl = if (AiProviderConfig.getProvider(provider).customEndpoint) {
                     settings.getAiBaseUrl(provider)
@@ -103,10 +116,12 @@ data class AiSettingsScreenState(
                 translationModel = settings.getAiModel(translationProvider),
                 targetLanguage = settings.getAiTargetLanguage(),
                 translationReasoning = settings.getAiReasoningLevel(translationProvider),
+                translationLocalThinkingEnabled = settings.isAiLocalTranslationThinkingEnabled(),
                 translationPrompt = settings.getAiCustomPrompt(),
                 punctuationProvider = punctuationProvider,
                 punctuationModel = settings.getAiPunctuationModel(punctuationProvider),
                 punctuationReasoning = settings.getAiPunctuationReasoningLevel(punctuationProvider),
+                punctuationLocalThinkingEnabled = settings.isAiLocalPunctuationThinkingEnabled(),
                 punctuationPrompt = settings.getAiPunctuationCustomPrompt()
             )
         }
@@ -124,6 +139,8 @@ fun AiSettingsScreen(
     onSelectPunctuationProvider: (String) -> Unit,
     onRevealApiKey: () -> Unit,
     onCopyApiKey: () -> Unit,
+    onLoadLocalModel: () -> Unit = {},
+    onUnloadLocalModel: () -> Unit = {},
     onFetchModels: (AiModelTarget) -> Unit,
     onChooseModel: (String) -> Unit,
     onDismissModelChooser: () -> Unit,
@@ -151,7 +168,9 @@ fun AiSettingsScreen(
                 onBaseUrlChange = { value -> onStateChange { it.copy(baseUrl = value) } },
                 onRevealApiKey = onRevealApiKey,
                 onHideApiKey = { onStateChange { it.copy(apiKeyVisible = false) } },
-                onCopyApiKey = onCopyApiKey
+                onCopyApiKey = onCopyApiKey,
+                onLoadLocalModel = onLoadLocalModel,
+                onUnloadLocalModel = onUnloadLocalModel
             )
             TranslationSettingsCard(
                 state = state,
@@ -159,6 +178,7 @@ fun AiSettingsScreen(
                 onModelChange = { value -> onStateChange { it.copy(translationModel = value) } },
                 onTargetLanguageChange = { value -> onStateChange { it.copy(targetLanguage = value) } },
                 onReasoningChange = { value -> onStateChange { it.copy(translationReasoning = value) } },
+                onLocalThinkingChange = { value -> onStateChange { it.copy(translationLocalThinkingEnabled = value) } },
                 onPromptChange = { value -> onStateChange { it.copy(translationPrompt = value) } },
                 onFetchModels = { onFetchModels(AiModelTarget.TRANSLATION) }
             )
@@ -167,6 +187,7 @@ fun AiSettingsScreen(
                 onSelectProvider = onSelectPunctuationProvider,
                 onModelChange = { value -> onStateChange { it.copy(punctuationModel = value) } },
                 onReasoningChange = { value -> onStateChange { it.copy(punctuationReasoning = value) } },
+                onLocalThinkingChange = { value -> onStateChange { it.copy(punctuationLocalThinkingEnabled = value) } },
                 onPromptChange = { value -> onStateChange { it.copy(punctuationPrompt = value) } },
                 onFetchModels = { onFetchModels(AiModelTarget.PUNCTUATION) }
             )
@@ -214,7 +235,9 @@ private fun ProviderCard(
     onBaseUrlChange: (String) -> Unit,
     onRevealApiKey: () -> Unit,
     onHideApiKey: () -> Unit,
-    onCopyApiKey: () -> Unit
+    onCopyApiKey: () -> Unit,
+    onLoadLocalModel: () -> Unit,
+    onUnloadLocalModel: () -> Unit
 ) {
     val provider = AiProviderConfig.getProvider(state.provider)
     val uriHandler = LocalUriHandler.current
@@ -225,77 +248,214 @@ private fun ProviderCard(
             selectedProvider = state.provider,
             onSelect = onSelectProvider
         )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = state.apiKey,
-                onValueChange = onApiKeyChange,
-                modifier = Modifier.weight(1f),
-                label = { Text("${provider.displayName} API Key") },
-                singleLine = true,
-                visualTransformation = if (state.apiKeyVisible) {
-                    VisualTransformation.None
-                } else {
-                    PasswordVisualTransformation()
-                },
-                trailingIcon = {
-                    IconButton(
-                        onClick = if (state.apiKeyVisible) onHideApiKey else onRevealApiKey
-                    ) {
-                        Icon(
-                            painter = painterResource(
-                                if (state.apiKeyVisible) R.drawable.ic_visibility_off else R.drawable.ic_visibility
-                            ),
-                            contentDescription = stringResource(
-                                if (state.apiKeyVisible) R.string.ai_api_key_hide else R.string.ai_api_key_show
-                            ),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+        if (provider.id == AiProviderConfig.LOCAL) {
+            Text(
+                text = stringResource(R.string.activity_ai_settings_local_model_label),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp)
             )
-            IconButton(
-                onClick = onCopyApiKey,
-                modifier = Modifier.padding(start = 4.dp)
+            Text(
+                text = state.localModelName.ifBlank {
+                    stringResource(R.string.activity_ai_settings_local_model_none)
+                },
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+            LocalModelRuntimeControls(
+                state = state,
+                onLoad = onLoadLocalModel,
+                onUnload = onUnloadLocalModel
+            )
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_content_copy),
-                    contentDescription = stringResource(R.string.ai_api_key_copy),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                OutlinedTextField(
+                    value = state.apiKey,
+                    onValueChange = onApiKeyChange,
+                    modifier = Modifier.weight(1f),
+                    label = { Text("${provider.displayName} API Key") },
+                    singleLine = true,
+                    visualTransformation = if (state.apiKeyVisible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    trailingIcon = {
+                        IconButton(
+                            onClick = if (state.apiKeyVisible) onHideApiKey else onRevealApiKey
+                        ) {
+                            Icon(
+                                painter = painterResource(
+                                    if (state.apiKeyVisible) R.drawable.ic_visibility_off else R.drawable.ic_visibility
+                                ),
+                                contentDescription = stringResource(
+                                    if (state.apiKeyVisible) R.string.ai_api_key_hide else R.string.ai_api_key_show
+                                ),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                )
+                IconButton(
+                    onClick = onCopyApiKey,
+                    modifier = Modifier.padding(start = 4.dp)
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_content_copy),
+                        contentDescription = stringResource(R.string.ai_api_key_copy),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            if (provider.websiteUrl.isNotBlank()) {
+                Text(
+                    text = buildAnnotatedString {
+                        append(stringResource(R.string.ai_settings_website_prefix))
+                        withStyle(
+                            SpanStyle(
+                                color = MaterialTheme.colorScheme.primary,
+                                textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
+                            )
+                        ) {
+                            append(provider.websiteUrl)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(role = Role.Button) { runCatching { uriHandler.openUri(provider.websiteUrl) } }
+                        .padding(vertical = 4.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            if (provider.customEndpoint) {
+                OutlinedTextField(
+                    value = state.baseUrl,
+                    onValueChange = onBaseUrlChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.ai_settings_base_url_label)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
                 )
             }
         }
-        Text(
-            text = buildAnnotatedString {
-                append(stringResource(R.string.ai_settings_website_prefix))
-                withStyle(
-                    SpanStyle(
-                        color = MaterialTheme.colorScheme.primary,
-                        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
-                    )
-                ) {
-                    append(provider.websiteUrl)
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(role = Role.Button) { runCatching { uriHandler.openUri(provider.websiteUrl) } }
-                .padding(vertical = 4.dp),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.primary
-        )
-        if (provider.customEndpoint) {
-            OutlinedTextField(
-                value = state.baseUrl,
-                onValueChange = onBaseUrlChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.ai_settings_base_url_label)) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
+    }
+}
+
+@Composable
+private fun LocalModelRuntimeControls(
+    state: AiSettingsScreenState,
+    onLoad: () -> Unit,
+    onUnload: () -> Unit
+) {
+    val hasModel = state.localModelName.isNotBlank()
+    val status = when {
+        state.localModelLoading -> stringResource(R.string.activity_ai_settings_local_model_loading)
+        state.localModelLoaded -> stringResource(R.string.activity_ai_settings_local_model_loaded)
+        else -> stringResource(R.string.activity_ai_settings_local_model_not_loaded)
+    }
+    Text(
+        text = status,
+        style = MaterialTheme.typography.bodySmall,
+        color = if (state.localModelLoaded) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        modifier = Modifier.padding(top = 8.dp)
+    )
+    if (state.localModelLoading) {
+        val progress = state.localModelLoadProgress?.coerceIn(0, 100)
+        if (progress == null) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp)
+            )
+        } else {
+            LinearProgressIndicator(
+                progress = { progress / 100f },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp)
             )
         }
+        Text(
+            text = progress?.let {
+                stringResource(R.string.activity_ai_settings_local_model_load_progress, it)
+            } ?: stringResource(R.string.activity_ai_settings_local_model_load_progress_unknown),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp)
+        )
+    }
+    if (state.localModelMemoryBytes > 0L) {
+        Text(
+            text = stringResource(
+                R.string.activity_ai_settings_local_model_memory,
+                formatMemoryBytes(state.localModelMemoryBytes)
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp)
+        )
+    }
+    if (state.localModelStatus.isNotBlank()) {
+        Text(
+            text = state.localModelStatus,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp)
+        )
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Button(
+            onClick = onLoad,
+            enabled = hasModel && !state.localModelLoaded && !state.localModelLoading,
+            modifier = Modifier.weight(1f)
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_download),
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+            )
+            Text(
+                text = stringResource(R.string.activity_ai_settings_local_model_load),
+                modifier = Modifier.padding(start = 6.dp)
+            )
+        }
+        Button(
+            onClick = onUnload,
+            enabled = state.localModelLoaded || state.localModelLoading,
+            modifier = Modifier.weight(1f)
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_stop),
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+            )
+            Text(
+                text = stringResource(R.string.activity_ai_settings_local_model_unload),
+                modifier = Modifier.padding(start = 6.dp)
+            )
+        }
+    }
+}
+
+private fun formatMemoryBytes(bytes: Long): String {
+    val mebibytes = bytes / (1024.0 * 1024.0)
+    return if (mebibytes >= 1024.0) {
+        String.format(java.util.Locale.getDefault(), "%.2f GB", mebibytes / 1024.0)
+    } else {
+        String.format(java.util.Locale.getDefault(), "%.0f MB", mebibytes)
     }
 }
 
@@ -306,6 +466,7 @@ private fun TranslationSettingsCard(
     onModelChange: (String) -> Unit,
     onTargetLanguageChange: (String) -> Unit,
     onReasoningChange: (AiProviderConfig.ReasoningLevel) -> Unit,
+    onLocalThinkingChange: (Boolean) -> Unit,
     onPromptChange: (String) -> Unit,
     onFetchModels: () -> Unit
 ) {
@@ -317,17 +478,19 @@ private fun TranslationSettingsCard(
             selectedProvider = state.translationProvider,
             onSelect = onSelectProvider
         )
-        ModelField(
-            label = stringResource(R.string.activity_ai_settings_hint_02),
-            provider = provider,
-            model = state.translationModel,
-            onModelChange = onModelChange
-        )
-        FetchModelsButton(
-            visible = provider.customEndpoint,
-            loading = state.fetchingTranslationModels,
-            onClick = onFetchModels
-        )
+        if (provider.id != AiProviderConfig.LOCAL) {
+            ModelField(
+                label = stringResource(R.string.activity_ai_settings_hint_02),
+                provider = provider,
+                model = state.translationModel,
+                onModelChange = onModelChange
+            )
+            FetchModelsButton(
+                visible = provider.customEndpoint,
+                loading = state.fetchingTranslationModels,
+                onClick = onFetchModels
+            )
+        }
         OutlinedTextField(
             value = state.targetLanguage,
             onValueChange = onTargetLanguageChange,
@@ -335,10 +498,19 @@ private fun TranslationSettingsCard(
             label = { Text(stringResource(R.string.activity_ai_settings_hint_04)) },
             singleLine = true
         )
-        ReasoningSelector(
-            level = state.translationReasoning,
-            onSelect = onReasoningChange
-        )
+        if (provider.id == AiProviderConfig.LOCAL) {
+            SettingsSwitchRow(
+                title = stringResource(R.string.activity_ai_settings_local_thinking_title),
+                checked = state.translationLocalThinkingEnabled,
+                onCheckedChange = onLocalThinkingChange,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        } else {
+            ReasoningSelector(
+                level = state.translationReasoning,
+                onSelect = onReasoningChange
+            )
+        }
         OutlinedTextField(
             value = state.translationPrompt,
             onValueChange = onPromptChange,
@@ -355,6 +527,7 @@ private fun PunctuationSettingsCard(
     onSelectProvider: (String) -> Unit,
     onModelChange: (String) -> Unit,
     onReasoningChange: (AiProviderConfig.ReasoningLevel) -> Unit,
+    onLocalThinkingChange: (Boolean) -> Unit,
     onPromptChange: (String) -> Unit,
     onFetchModels: () -> Unit
 ) {
@@ -371,21 +544,30 @@ private fun PunctuationSettingsCard(
             selectedProvider = state.punctuationProvider,
             onSelect = onSelectProvider
         )
-        ModelField(
-            label = stringResource(R.string.activity_ai_settings_hint_02),
-            provider = provider,
-            model = state.punctuationModel,
-            onModelChange = onModelChange
-        )
-        FetchModelsButton(
-            visible = provider.customEndpoint,
-            loading = state.fetchingPunctuationModels,
-            onClick = onFetchModels
-        )
-        ReasoningSelector(
-            level = state.punctuationReasoning,
-            onSelect = onReasoningChange
-        )
+        if (provider.id != AiProviderConfig.LOCAL) {
+            ModelField(
+                label = stringResource(R.string.activity_ai_settings_hint_02),
+                provider = provider,
+                model = state.punctuationModel,
+                onModelChange = onModelChange
+            )
+            FetchModelsButton(
+                visible = provider.customEndpoint,
+                loading = state.fetchingPunctuationModels,
+                onClick = onFetchModels
+            )
+            ReasoningSelector(
+                level = state.punctuationReasoning,
+                onSelect = onReasoningChange
+            )
+        } else {
+            SettingsSwitchRow(
+                title = stringResource(R.string.activity_ai_settings_local_thinking_title),
+                checked = state.punctuationLocalThinkingEnabled,
+                onCheckedChange = onLocalThinkingChange,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
         OutlinedTextField(
             value = state.punctuationPrompt,
             onValueChange = onPromptChange,

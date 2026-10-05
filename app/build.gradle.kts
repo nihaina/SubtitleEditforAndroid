@@ -94,15 +94,24 @@ android {
         versionName = "1.2.1"
 
         ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            // llama.cpp's Android build targets ARM phones. Keeping the APK
+            // ARM-only also avoids shipping an unusable x86 local-runtime ABI.
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
         }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         externalNativeBuild {
             cmake {
-                targets("subtitleedit_7zip")
-                arguments("-DANDROID_STL=c++_static")
+                targets("subtitleedit_7zip", "subtitleedit_llama")
+                // Keep native inference optimized even when the Android
+                // debug variant is used for UI iteration. LMPlayground uses
+                // the same policy; an unoptimized ggml build can be an order
+                // of magnitude slower on-device.
+                arguments(
+                    "-DANDROID_STL=c++_static",
+                    "-DCMAKE_BUILD_TYPE=Release",
+                )
             }
         }
     }
@@ -123,6 +132,7 @@ android {
     buildFeatures {
         viewBinding = true
         compose = true
+        aidl = true
     }
 
     sourceSets.getByName("main").assets.srcDir(archiveLicenseAssetsDir.get().asFile)
@@ -131,7 +141,7 @@ android {
         abi {
             isEnable = true
             reset()
-            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            include("armeabi-v7a", "arm64-v8a")
             isUniversalApk = true
         }
     }

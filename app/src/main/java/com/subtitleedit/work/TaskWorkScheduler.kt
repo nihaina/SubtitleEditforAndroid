@@ -40,6 +40,11 @@ internal class TaskWorkScheduler(
         return enqueueModelDownload(ASR_MODEL_WORK, kind, optionId)
     }
 
+    suspend fun enqueueLlmModelDownload(optionId: String): UUID {
+        require(optionId.isNotBlank()) { "未指定 LLM 模型版本" }
+        return enqueueModelDownload("$LLM_MODEL_WORK_PREFIX-$optionId", ModelDownloadWorker.KIND_LLM, optionId)
+    }
+
     suspend fun enqueueQwen3ForcedAlignerDownload(): UUID = enqueueModelDownload(
         ASR_MODEL_WORK, ModelDownloadWorker.KIND_QWEN3_FORCED_ALIGNER
     )
@@ -60,6 +65,7 @@ internal class TaskWorkScheduler(
         val optionId = previous.outputData.getString(ModelDownloadWorker.KEY_MODEL_OPTION)
             ?: previous.tags.firstOrNull { it.startsWith(MODEL_OPTION_TAG_PREFIX) }?.removePrefix(MODEL_OPTION_TAG_PREFIX)
         requireNotNull(optionId) { "下载任务缺少模型版本，请重新选择模型下载" }
+        if (kind == ModelDownloadWorker.KIND_LLM) return enqueueLlmModelDownload(optionId)
         return enqueueAsrModelDownload(kind, optionId)
     }
 
@@ -109,6 +115,9 @@ internal class TaskWorkScheduler(
 
     suspend fun findActiveAsrModelDownload(preferredId: UUID? = null): UUID? =
         findModelDownload(ASR_MODEL_WORK, preferredId)
+
+    suspend fun findActiveLlmModelDownload(optionId: String, preferredId: UUID? = null): UUID? =
+        findModelDownload("$LLM_MODEL_WORK_PREFIX-$optionId", preferredId)
 
     private suspend fun findModelDownload(uniqueName: String, preferredId: UUID? = null): UUID? =
         withContext(Dispatchers.IO) {
@@ -163,6 +172,7 @@ internal class TaskWorkScheduler(
     companion object {
         private const val GENERAL_MODEL_WORK = "download-demix-general"
         private const val ASR_MODEL_WORK = "download-asr-model"
+        private const val LLM_MODEL_WORK_PREFIX = "download-llm-model"
         private const val MODEL_KIND_TAG_PREFIX = "model-kind:"
         private const val MODEL_OPTION_TAG_PREFIX = "model-option:"
         fun progressData(message: String, current: Long, total: Long): Data = Data.Builder()

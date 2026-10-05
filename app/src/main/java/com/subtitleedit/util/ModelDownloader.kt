@@ -26,6 +26,7 @@ object ModelDownloader {
     const val SENSEVOICE_DIRECTORY_NAME =
         "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17"
     const val SEPARATION_DIRECTORY_NAME = "separation"
+    const val LLM_DIRECTORY_NAME = "llm"
     private const val DEMIX_MODEL_NAME = "htdemucs_fp16weights.onnx"
     private const val MIN_ONNX_SIZE = 1024L * 1024L
     private const val MAX_ARCHIVE_ENTRIES = 10_000
@@ -44,6 +45,35 @@ object ModelDownloader {
     private val parakeetMutex = Mutex()
     private val qwen3AsrMutex = Mutex()
     private val demixMutex = Mutex()
+    private val llmMutex = Mutex()
+
+    data class LlmModelOption(
+        val id: String,
+        val displayName: String,
+        val fileName: String,
+        val url: String,
+        val sizeLabel: String,
+        val minimumSizeBytes: Long
+    )
+
+    val LLM_MODELS = listOf(
+        LlmModelOption(
+            id = "index-translate-2b-q4_k_m",
+            displayName = "Index-Translate 2B Q4_K_M",
+            fileName = "Index-Translate-2B.Q4_K_M.gguf",
+            url = "https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q4_K_M.gguf",
+            sizeLabel = "约 1.31 GB",
+            minimumSizeBytes = 1_000_000_000L
+        ),
+        LlmModelOption(
+            id = "index-translate-9b-q4_k_m",
+            displayName = "Index-Translate 9B Q4_K_M",
+            fileName = "Index-Translate-9B.Q4_K_M.gguf",
+            url = "https://huggingface.co/IndexTeam/Index-Translate-9B-GGUF/resolve/main/Index-Translate-9B.Q4_K_M.gguf",
+            sizeLabel = "约 5.78 GB",
+            minimumSizeBytes = 5_000_000_000L
+        )
+    )
 
     data class Progress(
         val message: String,
@@ -547,6 +577,41 @@ object ModelDownloader {
             }
             onProgress(Progress("人声分离模型下载完成"))
             target
+        }
+    }
+
+    suspend fun downloadLlmModel(
+        optionId: String,
+        onProgress: (Progress) -> Unit
+    ): File = llmMutex.withLock {
+        withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val option = LLM_MODELS.firstOrNull { it.id == optionId }
+                ?: throw IllegalArgumentException("不支持的 LLM 模型规格")
+            val directory = File(requireModelsDirectory(), LLM_DIRECTORY_NAME)
+            if (!directory.exists() && !directory.mkdirs()) {
+                throw IOException("无法创建 ${directory.absolutePath}")
+            }
+            if (!directory.isDirectory || !directory.canWrite()) {
+                throw IOException("模型目录不可写：${directory.absolutePath}")
+            }
+
+            val destination = File(directory, option.fileName)
+            if (destination.isFile && destination.length() >= option.minimumSizeBytes) {
+                onProgress(Progress("检测到本地 ${option.displayName} 模型，跳过下载并直接导入"))
+                return@withContext destination
+            }
+
+            downloadFile(
+                option.url,
+                destination,
+                "正在下载 ${option.displayName} 模型",
+                onProgress,
+                option.minimumSizeBytes
+            )
+            if (!destination.isFile || destination.length() < option.minimumSizeBytes) {
+                throw IOException("${option.displayName} 文件不完整")
+            }
+            destination
         }
     }
 

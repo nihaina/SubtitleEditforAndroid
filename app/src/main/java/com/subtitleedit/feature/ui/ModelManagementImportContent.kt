@@ -77,6 +77,12 @@ data class DemucsModelImportUiState(
     val actionsEnabled: Boolean = true
 )
 
+data class LlmModelImportUiState(
+    val modelValue: String = "",
+    val hasModel: Boolean = false,
+    val actionsEnabled: Boolean = true
+)
+
 enum class ForcedAlignerImportStatus {
     NOT_CONFIGURED,
     LOCAL_MODEL_AVAILABLE,
@@ -124,12 +130,21 @@ enum class DemucsModelImportAction {
     ShowGuide
 }
 
+enum class LlmModelImportAction {
+    Configure,
+    SelectModel,
+    DownloadModel,
+    ResetModel
+}
+
 @Composable
 fun ModelManagementImportContent(
     asr: AsrModelImportUiState,
+    llm: LlmModelImportUiState,
     demucs: DemucsModelImportUiState,
     onAsrAction: (AsrModelImportAction) -> Unit,
     onBuiltInVadChanged: (Boolean) -> Unit,
+    onLlmAction: (LlmModelImportAction) -> Unit,
     onDemucsAction: (DemucsModelImportAction) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -137,6 +152,8 @@ fun ModelManagementImportContent(
             asr,
             onAsrAction,
             onBuiltInVadChanged,
+            llm,
+            onLlmAction,
             modifier = Modifier.padding(top = 16.dp)
         )
         DemucsModelImportCard(demucs, onDemucsAction)
@@ -148,6 +165,8 @@ private fun AsrModelImportCard(
     state: AsrModelImportUiState,
     onAction: (AsrModelImportAction) -> Unit,
     onBuiltInVadChanged: (Boolean) -> Unit,
+    llm: LlmModelImportUiState,
+    onLlmAction: (LlmModelImportAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -306,6 +325,8 @@ private fun AsrModelImportCard(
             HelpLink(onClick = { onAction(AsrModelImportAction.ShowGuide) })
         }
 
+        LlmModelImportCard(llm, onLlmAction)
+
         ModelImportCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -350,6 +371,47 @@ private fun AsrModelImportCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun LlmModelImportCard(
+    state: LlmModelImportUiState,
+    onAction: (LlmModelImportAction) -> Unit
+) {
+    ModelImportCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(R.string.model_mgmt_llm_title),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleMedium
+            )
+            TextButton(
+                onClick = { onAction(LlmModelImportAction.Configure) },
+                enabled = state.actionsEnabled,
+                modifier = Modifier.height(36.dp)
+            ) { Text(stringResource(R.string.activity_model_settings_text_08)) }
+        }
+        ModelFileControl(
+            label = stringResource(R.string.model_mgmt_llm_file_label),
+            value = state.modelValue.ifBlank { stringResource(R.string.model_import_not_selected) },
+            selectLabel = stringResource(R.string.model_mgmt_llm_select_file),
+            onSelect = { onAction(LlmModelImportAction.SelectModel) },
+            enabled = state.actionsEnabled,
+            fillSelectButton = true,
+            showDownload = !state.hasModel,
+            showReset = state.hasModel,
+            downloadDescription = stringResource(R.string.model_mgmt_llm_download_title),
+            onDownload = { onAction(LlmModelImportAction.DownloadModel) },
+            onReset = { onAction(LlmModelImportAction.ResetModel) },
+            modifier = Modifier.padding(top = 8.dp)
+        )
+        Text(
+            text = stringResource(R.string.model_mgmt_llm_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp)
+        )
     }
 }
 

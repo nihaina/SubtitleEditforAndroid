@@ -5,6 +5,7 @@ object AiProviderConfig {
     const val DEEPSEEK = "deepseek"
     const val OPENAI = "openai"
     const val CUSTOM = "custom"
+    const val LOCAL = "local"
 
     enum class ReasoningLevel(val displayName: String, val effort: String, val budgetTokens: Int) {
         OFF("关闭", "none", 0),
@@ -62,6 +63,13 @@ object AiProviderConfig {
             websiteUrl = "https://docs.newapi.pro/",
             defaultModel = "gemini-3.8-flash",
             customEndpoint = true
+        ),
+        Provider(
+            id = LOCAL,
+            displayName = "本地",
+            baseUrl = "",
+            websiteUrl = "",
+            defaultModel = ""
         )
     )
 
@@ -69,8 +77,11 @@ object AiProviderConfig {
         return providers.firstOrNull { it.id == id } ?: providers.first()
     }
 
-    fun defaultReasoningLevel(provider: String): ReasoningLevel =
-        if (provider == DEEPSEEK) ReasoningLevel.MEDIUM else ReasoningLevel.AUTO
+    fun defaultReasoningLevel(provider: String): ReasoningLevel = when (provider) {
+        DEEPSEEK -> ReasoningLevel.MEDIUM
+        LOCAL -> ReasoningLevel.OFF
+        else -> ReasoningLevel.AUTO
+    }
 
     fun indexOf(id: String): Int {
         return providers.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: 0

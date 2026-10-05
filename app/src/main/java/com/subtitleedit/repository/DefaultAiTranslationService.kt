@@ -21,7 +21,8 @@ internal class DefaultAiTranslationService : AiTranslationService {
         subtitleFormat: SubtitleParser.SubtitleFormat,
         reasoningLevel: AiProviderConfig.ReasoningLevel,
         historySessionId: String,
-        historyTitle: String?
+        historyTitle: String?,
+        thinkingEnabled: Boolean
     ) = AiTranslationConversation(
         context = context,
         provider = provider,
@@ -32,6 +33,7 @@ internal class DefaultAiTranslationService : AiTranslationService {
         baseUrl = baseUrl,
         subtitleFormat = subtitleFormat,
         reasoningLevel = reasoningLevel,
+        thinkingEnabled = thinkingEnabled,
         historySessionId = historySessionId,
         historyTitle = historyTitle
     )

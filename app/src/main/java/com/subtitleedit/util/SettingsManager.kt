@@ -10,6 +10,8 @@ import java.nio.charset.StandardCharsets
  * 设置管理器 - 保存和读取用户设置
  */
 class SettingsManager private constructor(context: Context) {
+
+    private val appContext: Context = context.applicationContext
     
     private val prefs: SharedPreferences = context.getSharedPreferences(
         PREFS_NAME, Context.MODE_PRIVATE
@@ -48,6 +50,8 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_AI_PUNCTUATION_MODEL = "ai_punctuation_model"
         private const val KEY_AI_PUNCTUATION_REASONING_LEVEL = "ai_punctuation_reasoning_level"
         private const val KEY_AI_PUNCTUATION_CUSTOM_PROMPT = "ai_punctuation_custom_prompt"
+        private const val KEY_AI_LOCAL_TRANSLATION_THINKING = "ai_local_translation_thinking"
+        private const val KEY_AI_LOCAL_PUNCTUATION_THINKING = "ai_local_punctuation_thinking"
         private const val KEY_WAVEFORM_CACHE_LOCATION = "waveform_cache_location"
         private const val KEY_MODEL_DIRECTORY = "model_directory"
         private const val KEY_LOOP_SELECTED_SUBTITLE = "loop_selected_subtitle"
@@ -84,6 +88,8 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_QWEN3_FORCED_ALIGNER_PATH = "qwen3_forced_aligner_path"
         private const val KEY_VAD_MODEL_PATH = "vad_model_path"
         private const val KEY_VAD_USE_BUILT_IN_MODEL = "vad_use_built_in_model"
+        private const val KEY_LLM_MODEL_PATH = "llm_model_path"
+        private const val KEY_LLM_REPACK_ENABLED = "llm_repack_enabled"
         private const val KEY_VAD_THRESHOLD = "vad_threshold"
         private const val KEY_VAD_MIN_SILENCE_DURATION = "vad_min_silence_duration"
         private const val KEY_VAD_MIN_SPEECH_DURATION = "vad_min_speech_duration"
@@ -342,6 +348,9 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun getAiModel(provider: String): String {
+        if (provider == AiProviderConfig.LOCAL) {
+            return getLlmModelDisplayName()
+        }
         val defaultModel = AiProviderConfig.getProvider(provider).defaultModel
         val stored = prefs.getString(providerKey(KEY_AI_MODEL, provider), null)
             ?: if (provider == AiProviderConfig.SILICONFLOW) {
@@ -362,6 +371,7 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun setAiModel(provider: String, model: String) {
+        if (provider == AiProviderConfig.LOCAL) return
         prefs.edit().putString(providerKey(KEY_AI_MODEL, provider), model).apply()
     }
 
@@ -399,6 +409,20 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putString(KEY_AI_PUNCTUATION_CUSTOM_PROMPT, prompt).apply()
     }
 
+    fun isAiLocalTranslationThinkingEnabled(): Boolean =
+        prefs.getBoolean(KEY_AI_LOCAL_TRANSLATION_THINKING, false)
+
+    fun setAiLocalTranslationThinkingEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AI_LOCAL_TRANSLATION_THINKING, enabled).apply()
+    }
+
+    fun isAiLocalPunctuationThinkingEnabled(): Boolean =
+        prefs.getBoolean(KEY_AI_LOCAL_PUNCTUATION_THINKING, false)
+
+    fun setAiLocalPunctuationThinkingEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AI_LOCAL_PUNCTUATION_THINKING, enabled).apply()
+    }
+
     fun getAiReasoningLevel(provider: String = getAiProvider()): AiProviderConfig.ReasoningLevel =
         prefs.getString(
             providerKey(KEY_AI_REASONING_LEVEL, provider),
@@ -413,16 +437,21 @@ class SettingsManager private constructor(context: Context) {
         level: AiProviderConfig.ReasoningLevel,
         provider: String = getAiProvider()
     ) {
+        if (provider == AiProviderConfig.LOCAL) return
         prefs.edit().putString(providerKey(KEY_AI_REASONING_LEVEL, provider), level.name).apply()
     }
 
     fun getAiPunctuationModel(provider: String = getAiPunctuationProvider()): String {
+        if (provider == AiProviderConfig.LOCAL) {
+            return getLlmModelDisplayName()
+        }
         val defaultModel = AiProviderConfig.getProvider(provider).defaultModel
         return prefs.getString(providerKey(KEY_AI_PUNCTUATION_MODEL, provider), null)
             ?.takeIf { it.isNotBlank() } ?: defaultModel
     }
 
     fun setAiPunctuationModel(provider: String, model: String) {
+        if (provider == AiProviderConfig.LOCAL) return
         prefs.edit().putString(providerKey(KEY_AI_PUNCTUATION_MODEL, provider), model).apply()
     }
 
@@ -432,11 +461,13 @@ class SettingsManager private constructor(context: Context) {
             ?: AiProviderConfig.defaultReasoningLevel(provider)
 
     fun setAiPunctuationReasoningLevel(level: AiProviderConfig.ReasoningLevel, provider: String = getAiPunctuationProvider()) {
+        if (provider == AiProviderConfig.LOCAL) return
         prefs.edit().putString(providerKey(KEY_AI_PUNCTUATION_REASONING_LEVEL, provider), level.name).apply()
     }
 
     fun getAiBaseUrl(provider: String = getAiProvider()): String {
         val config = AiProviderConfig.getProvider(provider)
+        if (provider == AiProviderConfig.LOCAL) return ""
         return if (config.customEndpoint) {
             prefs.getString(KEY_AI_CUSTOM_BASE_URL, "") ?: ""
         } else {
@@ -736,6 +767,28 @@ class SettingsManager private constructor(context: Context) {
      */
     fun setVadModelPath(path: String) {
         prefs.edit().putString(KEY_VAD_MODEL_PATH, path).apply()
+    }
+
+    fun getLlmModelPath(): String = prefs.getString(KEY_LLM_MODEL_PATH, "") ?: ""
+
+    /** User-visible name of the currently selected local LLM model. */
+    fun getLlmModelDisplayName(): String {
+        val path = getLlmModelPath().takeIf(String::isNotBlank) ?: return ""
+        return UriDisplayName.of(appContext, android.net.Uri.parse(path))
+    }
+
+    fun setLlmModelPath(path: String) {
+        prefs.edit().putString(KEY_LLM_MODEL_PATH, path).apply()
+    }
+
+    fun clearLlmModelPath() {
+        prefs.edit().remove(KEY_LLM_MODEL_PATH).apply()
+    }
+
+    fun isLlmRepackEnabled(): Boolean = prefs.getBoolean(KEY_LLM_REPACK_ENABLED, true)
+
+    fun setLlmRepackEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_LLM_REPACK_ENABLED, enabled).apply()
     }
 
     /**

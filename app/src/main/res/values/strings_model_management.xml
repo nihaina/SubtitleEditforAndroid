@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Model management page, ASR model import and vocal separation model import. -->
+<!-- Model management page, ASR/LLM model import and vocal separation model import. -->
 <resources>
     <!-- Shared dialog / progress wording -->
     <string name="model_mgmt_ok">确定</string>
@@ -37,6 +37,7 @@
     <string name="model_mgmt_category_parakeet">Parakeet 模型</string>
     <string name="model_mgmt_category_qwen3_asr">Qwen3-ASR 模型</string>
     <string name="model_mgmt_category_qwen3_aligner">Qwen3 强制对齐模型</string>
+    <string name="model_mgmt_category_llm">LLM 模型</string>
     <string name="model_mgmt_category_separation">人声分离模型</string>
     <string name="model_mgmt_category_other">其他模型文件</string>
     <string name="model_mgmt_item_aligner_incomplete">Qwen3 ForcedAligner（文件不完整）</string>
@@ -123,6 +124,29 @@
     <string name="model_mgmt_asr_qnn_required_message">当前安装包不包含 Qualcomm QNN 运行库，无法使用 SenseVoice NPU 模型。\n\n请前往项目发布页下载相同版本或更新版本的 arm64 QNN 安装包，并直接覆盖安装。已有模型和软件数据不会被清除。</string>
     <string name="model_mgmt_asr_open_download_page">打开下载页</string>
     <string name="model_mgmt_asr_name_parakeet_ctc_ja">Parakeet CTC 0.6B 日语</string>
+
+    <!-- Local LLM model import -->
+    <string name="model_mgmt_llm_title">LLM 模型</string>
+    <string name="model_mgmt_llm_file_label">模型文件</string>
+    <string name="model_mgmt_llm_select_file">选择 GGUF 模型</string>
+    <string name="model_mgmt_llm_hint">支持手动导入其他 GGUF 文件；选择本地平台后可用于聊天、翻译和标点预测。</string>
+    <string name="model_mgmt_llm_download_title">一键下载 Index-Translate 模型</string>
+    <string name="model_mgmt_llm_download_message">将下载并导入 %1$s。
+
+文件存放至：
+%2$s
+
+约占用 %3$s 存储空间。</string>
+    <string name="model_mgmt_llm_pick_gguf">请选择以 .gguf 结尾的 LLM 模型文件</string>
+    <string name="model_mgmt_llm_model_empty">LLM 模型文件为空</string>
+    <string name="model_mgmt_llm_model_unreadable">无法读取 LLM 模型文件</string>
+    <string name="model_mgmt_llm_model_selected">LLM 模型已选择</string>
+    <string name="model_mgmt_llm_downloaded">LLM 模型已下载并自动选择</string>
+    <string name="model_mgmt_llm_download_failed">LLM 模型下载失败</string>
+    <string name="model_mgmt_llm_reset_message">确定清除当前 LLM 模型选择吗？
+
+模型文件不会被删除，重置后需要重新选择或导入。</string>
+    <string name="model_mgmt_llm_reset_done">已清除当前 LLM 模型选择，请重新选择</string>
 
     <!-- Vocal separation (Demucs) model import -->
     <string name="model_mgmt_demucs_download_title">一键下载导入</string>

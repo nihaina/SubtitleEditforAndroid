@@ -52,12 +52,15 @@ class ModelManagementActivity : AppComposeActivity() {
             val state by viewModel.state.collectAsState()
             val asrImport by viewModel.asrImport.state.collectAsState()
             val asrDialog by viewModel.asrImport.dialog.collectAsState()
+            val llmImport by viewModel.llmImport.state.collectAsState()
+            val llmDialog by viewModel.llmImport.dialog.collectAsState()
             val demucsImport by viewModel.demucsImport.state.collectAsState()
             val demucsDialog by viewModel.demucsImport.dialog.collectAsState()
             val exportDialog by viewModel.exportDialog.collectAsState()
             SubtitleEditComposeTheme {
                 ModelManagementScreen(
                     asrImport = asrImport,
+                    llmImport = llmImport,
                     demucsImport = demucsImport,
                     selectedPage = state.selectedPage,
                     models = state.models,
@@ -68,12 +71,14 @@ class ModelManagementActivity : AppComposeActivity() {
                     isExporting = state.isExporting,
                     deletingModelKey = state.deletingModelKey,
                     asrDialog = asrDialog,
+                    llmDialog = llmDialog,
                     demucsDialog = demucsDialog,
                     exportDialog = exportDialog,
                     dialog = state.dialog,
                     onPageSelected = viewModel::onPageSelected,
                     onAsrImportAction = viewModel.asrImport::onAction,
                     onBuiltInVadChanged = viewModel.asrImport::onBuiltInVadChanged,
+                    onLlmImportAction = viewModel.llmImport::onAction,
                     onDemucsImportAction = viewModel.demucsImport::onAction,
                     onNavigateBack = { onBackPressedDispatcher.onBackPressed() },
                     onExport = viewModel::onExportRequested,
@@ -104,6 +109,7 @@ class ModelManagementActivity : AppComposeActivity() {
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             is ModelManagementEvent.OpenScreen -> startActivity(Intent(this, event.activity))
             ModelManagementEvent.OpenAsrSettings -> AsrSettingsNavigation.open(this)
+            ModelManagementEvent.OpenLlmSettings -> startActivity(Intent(this, LlmSettingsActivity::class.java))
             is ModelManagementEvent.OpenUrl -> {
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(event.url))
                 val failure = event.failureMessage

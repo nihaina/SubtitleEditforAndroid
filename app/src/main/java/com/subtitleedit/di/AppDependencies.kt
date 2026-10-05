@@ -69,6 +69,14 @@ internal class AppDependencies(application: Application) {
                 .selectDownloadedDemixModel(Uri.fromFile(file).toString())
         }
     }
+
+    suspend fun downloadLlmModel(
+        optionId: String,
+        onProgress: (ModelDownloader.Progress) -> Unit
+    ): File = ModelDownloader.downloadLlmModel(optionId, onProgress).also { file ->
+        SettingsManager.getInstance(appContext).setLlmModelPath(Uri.fromFile(file).toString())
+    }
+
     suspend fun downloadQwen3ForcedAligner(onProgress: (ModelDownloader.Progress) -> Unit): File {
         val settings = SettingsManager.getInstance(appContext)
         return Qwen3ForcedAlignerReleaseDownloader.downloadAndInstall(

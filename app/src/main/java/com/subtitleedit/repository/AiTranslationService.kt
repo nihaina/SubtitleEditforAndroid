@@ -19,6 +19,7 @@ internal interface AiTranslationService {
         subtitleFormat: SubtitleParser.SubtitleFormat,
         reasoningLevel: AiProviderConfig.ReasoningLevel,
         historySessionId: String,
-        historyTitle: String? = null
+        historyTitle: String? = null,
+        thinkingEnabled: Boolean = reasoningLevel != AiProviderConfig.ReasoningLevel.OFF
     ): AiTranslationConversation
 }

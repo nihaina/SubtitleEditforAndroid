@@ -76,6 +76,7 @@ internal class ModelManagementViewModel(
     }
 
     val asrImport = AsrModelImportController(importHost, savedState) { loadModels() }
+    val llmImport = LlmModelImportController(importHost, savedState) { loadModels() }
     val demucsImport = DemucsModelImportController(importHost, savedState)
     private val exportDialogs = ModelImportDialogState(importHost)
     val exportDialog: StateFlow<ModelImportDialogUi?> get() = exportDialogs.dialog
@@ -96,6 +97,7 @@ internal class ModelManagementViewModel(
     /** Called from Activity.onResume, matching the previous onResume reloads. */
     fun refresh() {
         asrImport.refresh()
+        llmImport.refresh()
         demucsImport.refresh()
         if (currentState.selectedPage == 1) loadModels()
     }
@@ -106,6 +108,7 @@ internal class ModelManagementViewModel(
         savedState[KEY_SELECTED_PAGE] = position
         if (position == 0) {
             asrImport.refresh()
+            llmImport.refresh()
         } else {
             loadModels()
             if (!hasStorageAccess() && !requestedStorageAccess) requestModelListStorageAccess()
@@ -128,6 +131,7 @@ internal class ModelManagementViewModel(
         when (requester) {
             StorageAccessRequester.MODEL_LIST -> handleStorageAccessResult()
             StorageAccessRequester.ASR_IMPORT -> asrImport.onStorageAccessResult()
+            StorageAccessRequester.LLM_IMPORT -> llmImport.onStorageAccessResult()
             StorageAccessRequester.DEMUCS_IMPORT -> demucsImport.onStorageAccessResult()
         }
     }
@@ -140,6 +144,7 @@ internal class ModelManagementViewModel(
                 loadModels()
             }
             StorageAccessRequester.ASR_IMPORT -> asrImport.onStorageAccessUnavailable()
+            StorageAccessRequester.LLM_IMPORT -> llmImport.onStorageAccessUnavailable()
             StorageAccessRequester.DEMUCS_IMPORT -> demucsImport.onStorageAccessUnavailable()
         }
     }
@@ -154,11 +159,13 @@ internal class ModelManagementViewModel(
         app.getSharedPreferences("task_notifications", android.content.Context.MODE_PRIVATE)
             .edit().putBoolean("requested", true).apply()
         asrImport.onNotificationPermissionResult(granted)
+        llmImport.onNotificationPermissionResult(granted)
         demucsImport.onNotificationPermissionResult(granted)
     }
 
     fun onDocumentPicked(target: ModelPickTarget, uri: Uri) {
         asrImport.onDocumentPicked(target, uri)
+        llmImport.onDocumentPicked(target, uri)
         demucsImport.onDocumentPicked(target, uri)
     }
 
@@ -248,6 +255,7 @@ internal class ModelManagementViewModel(
         val parakeet = string(R.string.model_mgmt_category_parakeet)
         val qwen3Asr = string(R.string.model_mgmt_category_qwen3_asr)
         val qwen3Aligner = string(R.string.model_mgmt_category_qwen3_aligner)
+        val llm = string(R.string.model_mgmt_category_llm)
         val separation = string(R.string.model_mgmt_category_separation)
         val other = string(R.string.model_mgmt_category_other)
         val items = mutableListOf<ModelItem>()
@@ -330,6 +338,12 @@ internal class ModelManagementViewModel(
                                 items += ModelItem(separation, model.name, model, calculateSize(model))
                             }
                         }
+                        file.isDirectory && file.name == ModelDownloader.LLM_DIRECTORY_NAME -> {
+                            file.listFiles().orEmpty().filter { it.isFile && it.extension.equals("gguf", ignoreCase = true) }
+                                .forEach { model ->
+                                    items += ModelItem(llm, model.name, model, calculateSize(model))
+                                }
+                        }
                         else -> {
                             items += ModelItem(other, file.name, file, calculateSize(file))
                         }
@@ -372,8 +386,9 @@ internal class ModelManagementViewModel(
             parakeet to 2,
             qwen3Asr to 3,
             qwen3Aligner to 4,
-            separation to 5,
-            other to 6
+            llm to 5,
+            separation to 6,
+            other to 7
         )
         return items.sortedWith(
             compareBy<ModelItem> { categoryOrder[it.category] ?: Int.MAX_VALUE }
@@ -452,6 +467,8 @@ internal class ModelManagementViewModel(
     }
 
     private fun clearSettingsReferencing(target: File) {
+        val llmPath = settingsManager.getLlmModelPath()
+        if (pointsInsideTarget(llmPath, target)) settingsManager.clearLlmModelPath()
         val whisperPaths = listOf(
             settingsManager.getWhisperEncoderPath(),
             settingsManager.getWhisperDecoderPath(),
@@ -542,6 +559,7 @@ internal class ModelManagementViewModel(
     override fun onCleared() {
         // Page is finishing for real (not a configuration change).
         asrImport.dispose()
+        llmImport.dispose()
         demucsImport.dispose()
         exportJob?.cancel()
         super.onCleared()

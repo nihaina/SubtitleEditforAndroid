@@ -64,10 +64,12 @@ sealed interface ModelImportDialogUi {
 @Composable
 fun ModelImportDialogs(
     asrDialog: ModelImportDialogUi?,
+    llmDialog: ModelImportDialogUi?,
     demucsDialog: ModelImportDialogUi?,
     exportDialog: ModelImportDialogUi?
 ) {
     asrDialog?.let { ModelImportDialog(it) }
+    llmDialog?.let { ModelImportDialog(it) }
     demucsDialog?.let { ModelImportDialog(it) }
     exportDialog?.let { ModelImportDialog(it) }
 }

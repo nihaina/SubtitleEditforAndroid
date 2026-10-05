@@ -27,10 +27,13 @@ class AiTranslationConversation(
     baseUrl: String,
     private val subtitleFormat: SubtitleFormat = SubtitleFormat.SRT,
     reasoningLevel: AiProviderConfig.ReasoningLevel = AiProviderConfig.defaultReasoningLevel(provider),
+    private val thinkingEnabled: Boolean = reasoningLevel != AiProviderConfig.ReasoningLevel.OFF,
     /** Stable ID for one editor translation operation, including all split batches and retries. */
     private val historySessionId: String = UUID.randomUUID().toString(),
     private val historyTitle: String? = null
 ) {
+    private val localProvider = provider == AiProviderConfig.LOCAL
+
     data class TranslationRunResult(
         val translations: List<String>,
         val error: Throwable? = null
@@ -51,9 +54,17 @@ class AiTranslationConversation(
             model = model,
             baseUrl = baseUrl,
             reasoningLevel = ChatReasoningLevel.valueOf(reasoningLevel.name),
-            modelSupportsReasoning = AiProviderConfig.modelCapabilities(provider, model).reasoning
+            modelSupportsReasoning = AiProviderConfig.modelCapabilities(provider, model).reasoning,
+            thinkingEnabled = thinkingEnabled,
+            localModelPath = if (provider == AiProviderConfig.LOCAL) {
+                SettingsManager.getInstance(context).getLlmModelPath()
+            } else {
+                ""
+            },
+            localRepackEnabled = SettingsManager.getInstance(context).isLlmRepackEnabled()
         ),
-        tools = ChatTools.create(context.applicationContext)
+        tools = if (provider == AiProviderConfig.LOCAL) emptyList() else ChatTools.create(context.applicationContext),
+        context = context.applicationContext
     )
     private val historyStore = ChatHistoryStore(context)
 
@@ -111,6 +122,11 @@ class AiTranslationConversation(
         try {
             splitSubtitleTranslationBatches(subtitles).forEach { batch ->
                 if (isCancelled()) throw CancellationException("翻译已取消")
+                if (localProvider) {
+                    // Each batch contains its complete subtitle context. Keeping
+                    // prior batches would eventually exceed the native context.
+                    conversation.clear()
+                }
                 activeBatch = batch
                 activeBatchStart = startPosition + translations.size
                 streamedContent.setLength(0)

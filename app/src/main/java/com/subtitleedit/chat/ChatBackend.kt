@@ -17,6 +17,7 @@ import okhttp3.ResponseBody
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONArray
 import org.json.JSONObject
+import com.subtitleedit.util.AiProviderConfig
 
 /**
  * An OpenAI-compatible conversation backend. It owns request generation, stream decoding and
@@ -121,6 +122,11 @@ class ChatBackend(
 
     private class NonRetryableApiException(message: String) : IOException(message)
 
+    /** Marker used until the llama.cpp/LMPlayground runtime is linked into this app. */
+    class LocalLlmBackendUnavailableException : IOException(
+        "本地 LLM 请通过 ChatConversation 使用"
+    )
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.MINUTES)
@@ -128,7 +134,11 @@ class ChatBackend(
         .retryOnConnectionFailure(true)
         .build()
     private val sendMutex = Mutex()
-    private val apiUrl = chatCompletionsUrl(config.baseUrl)
+    private val apiUrl = if (config.providerId == AiProviderConfig.LOCAL) {
+        ""
+    } else {
+        chatCompletionsUrl(config.baseUrl)
+    }
 
     @Volatile
     private var activeCall: Call? = null
@@ -146,6 +156,9 @@ class ChatBackend(
         isCancelled: () -> Boolean = { false }
     ): SendResult = sendMutex.withLock {
         withContext(Dispatchers.IO) {
+            if (config.providerId == AiProviderConfig.LOCAL) {
+                throw LocalLlmBackendUnavailableException()
+            }
             require(userContent.isNotBlank()) { "消息不能为空" }
             val toolRegistry = ToolRegistry(tools)
             var requestMessages = conversation +
@@ -450,6 +463,12 @@ class ChatBackend(
     }
 
     private fun addReasoningParameters(body: JSONObject) {
+        if (config.providerId == AiProviderConfig.LOCAL) {
+            // Index/Qwen GGUF chat templates use this flag; the native runtime
+            // will consume the same value when the LMPlayground backend lands.
+            body.put("enable_thinking", config.thinkingEnabled)
+            return
+        }
         val level = config.reasoningLevel
         if (level == ChatReasoningLevel.AUTO && !config.modelSupportsReasoning) return
         when (apiUrl.toHttpUrlOrNull()?.host.orEmpty().lowercase()) {
@@ -598,7 +617,12 @@ data class ChatBackendConfig(
     val model: String,
     val baseUrl: String,
     val reasoningLevel: ChatReasoningLevel = ChatReasoningLevel.AUTO,
-    val modelSupportsReasoning: Boolean = false
+    val modelSupportsReasoning: Boolean = false,
+    /** Local Qwen/Index runtimes map this to the model's enable_thinking template flag. */
+    val thinkingEnabled: Boolean = true,
+    /** GGUF path and repack preference consumed by LocalLlmBackend. */
+    val localModelPath: String = "",
+    val localRepackEnabled: Boolean = true
 )
 
 enum class ChatReasoningLevel(val effort: String) {

@@ -41,6 +41,7 @@ internal class ModelDownloadWorker(
         try {
             val kind = inputData.getString(KEY_MODEL_KIND)
             require(kind == KIND_DEMIX_GENERAL || kind == KIND_QWEN3_FORCED_ALIGNER ||
+                kind == KIND_LLM ||
                 kind in DownloadAsrModelUseCase.KINDS) { "不支持的模型任务" }
             setForeground(getForegroundInfo())
             setProgress(TaskWorkScheduler.progressData("正在准备模型下载", 0L, -1L))
@@ -64,6 +65,10 @@ internal class ModelDownloadWorker(
             val modelFile = when (kind) {
                 KIND_DEMIX_GENERAL -> application.dependencies.downloadGeneralModel(onProgress)
                 KIND_QWEN3_FORCED_ALIGNER -> application.dependencies.downloadQwen3ForcedAligner(onProgress)
+                KIND_LLM -> application.dependencies.downloadLlmModel(
+                    requireNotNull(inputData.getString(KEY_MODEL_OPTION)) { "未指定 LLM 模型版本" },
+                    onProgress
+                )
                 else -> application.dependencies.downloadAsrModel(
                     requireNotNull(kind),
                     requireNotNull(inputData.getString(KEY_MODEL_OPTION)) { "未指定模型版本" },
@@ -145,6 +150,7 @@ internal class ModelDownloadWorker(
         const val TAG_MODEL_DOWNLOAD = "model-download"
         const val KIND_DEMIX_GENERAL = "demix-general"
         const val KIND_QWEN3_FORCED_ALIGNER = "qwen3-forced-aligner"
+        const val KIND_LLM = "llm"
         const val KEY_MODEL_KIND = "model_kind"
         const val KEY_MODEL_OPTION = "model_option"
         const val KEY_MESSAGE = "message"
