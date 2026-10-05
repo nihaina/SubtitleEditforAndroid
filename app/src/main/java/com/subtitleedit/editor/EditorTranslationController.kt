@@ -3,6 +3,7 @@ package com.subtitleedit.editor
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.os.SystemClock
 import android.widget.Toast
 import com.subtitleedit.AiSettingsActivity
 import com.subtitleedit.adapter.TranslationPreviewItem
@@ -160,13 +161,56 @@ internal class EditorTranslationController(
             .map { it.first }
 
         translateJob = scope.launch(Dispatchers.Main) {
+            var lastStreamUpdateAt = 0L
+            var streamingProgressCount = completedBeforeRun
+            var latestStreamPreview = ""
             try {
                 val result = session.translator.translateSubtitles(
                     subtitles = subtitlesToTranslate,
                     startPosition = completedBeforeRun + 1,
                     progressCallback = { current, _ ->
+                        streamingProgressCount = completedBeforeRun + current
+                        latestStreamPreview = ""
                         if (activeTranslationDialog === dialog && dialog.isShowing) {
-                            dialog.setMessage("正在翻译 ${completedBeforeRun + current}/$totalCount 条")
+                            dialog.setMessage(
+                                translationProgressMessage(
+                                    count = streamingProgressCount,
+                                    total = totalCount,
+                                    preview = latestStreamPreview
+                                )
+                            )
+                        }
+                    },
+                    streamCallback = { content ->
+                        latestStreamPreview = content.streamPreview()
+                        val now = SystemClock.uptimeMillis()
+                        if (now - lastStreamUpdateAt < STREAM_UI_UPDATE_INTERVAL_MS) return@translateSubtitles
+                        lastStreamUpdateAt = now
+                        if (latestStreamPreview.isBlank()) return@translateSubtitles
+                        activity.runOnUiThread {
+                            if (activeTranslationDialog === dialog && dialog.isShowing) {
+                                dialog.setMessage(
+                                    translationProgressMessage(
+                                        count = streamingProgressCount,
+                                        total = totalCount,
+                                        preview = latestStreamPreview
+                                    )
+                                )
+                            }
+                        }
+                    },
+                    streamProgressCallback = { current, _ ->
+                        streamingProgressCount = completedBeforeRun + current
+                        activity.runOnUiThread {
+                            if (activeTranslationDialog === dialog && dialog.isShowing) {
+                                dialog.setMessage(
+                                    translationProgressMessage(
+                                        count = streamingProgressCount,
+                                        total = totalCount,
+                                        preview = latestStreamPreview
+                                    )
+                                )
+                            }
                         }
                     },
                     isCancelled = { translateCancelled }
@@ -279,6 +323,29 @@ internal class EditorTranslationController(
 
     private fun showTranslationError(message: String) {
         OverwritingToast.makeText(activity, "翻译失败：$message", Toast.LENGTH_LONG).show()
+    }
+
+    private fun String.streamPreview(): String {
+        val normalized = replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .trim()
+        return if (normalized.length <= STREAM_PREVIEW_MAX_CHARS) {
+            normalized
+        } else {
+            "…" + normalized.takeLast(STREAM_PREVIEW_MAX_CHARS)
+        }
+    }
+
+    private fun translationProgressMessage(count: Int, total: Int, preview: String): String =
+        if (preview.isBlank()) {
+            "正在翻译 $count/$total 条"
+        } else {
+            "正在翻译 $count/$total 条\n\nAI 输出：$preview"
+        }
+
+    private companion object {
+        const val STREAM_UI_UPDATE_INTERVAL_MS = 120L
+        const val STREAM_PREVIEW_MAX_CHARS = 240
     }
 }
 

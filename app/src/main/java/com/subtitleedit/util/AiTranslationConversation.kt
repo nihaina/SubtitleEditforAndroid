@@ -73,13 +73,21 @@ class AiTranslationConversation(
 
     suspend fun predictPunctuation(
         text: String,
+        streamCallback: ((String) -> Unit)? = null,
         isCancelled: () -> Boolean = { false }
-    ): Result<String> = processSubtitleText(text, PUNCTUATION_PREDICTION_PROMPT, "标点预测", isCancelled)
+    ): Result<String> = processSubtitleText(
+        text = text,
+        instruction = PUNCTUATION_PREDICTION_PROMPT,
+        defaultHistoryTitle = "标点预测",
+        streamCallback = streamCallback,
+        isCancelled = isCancelled
+    )
 
     private suspend fun processSubtitleText(
         text: String,
         instruction: String,
         defaultHistoryTitle: String,
+        streamCallback: ((String) -> Unit)?,
         isCancelled: () -> Boolean
     ): Result<String> {
         if (text.isBlank()) return Result.success(text)
@@ -96,7 +104,20 @@ class AiTranslationConversation(
             // The caller provides all context needed for this batch. Earlier batches
             // stay in the history archive, but must not enter this AI request.
             conversation.clear()
-            val result = conversation.sendUserMessage(prompt, isCancelled = isCancelled)
+            val streamedContent = StringBuilder()
+            val result = conversation.sendUserMessage(
+                content = prompt,
+                onEvent = { event ->
+                    if (event is ChatBackend.Event.TextDelta) {
+                        streamedContent.append(event.text)
+                        runCatching { streamCallback?.invoke(streamedContent.toString()) }
+                    }
+                },
+                isCancelled = isCancelled
+            )
+            if (streamedContent.isEmpty()) {
+                runCatching { streamCallback?.invoke(result.text) }
+            }
             historyStore.append(
                 id = historySessionId,
                 title = historyTitle ?: defaultHistoryTitle,
@@ -111,6 +132,8 @@ class AiTranslationConversation(
         subtitles: List<SubtitleEntry>,
         startPosition: Int = 1,
         progressCallback: ((Int, Int) -> Unit)? = null,
+        streamCallback: ((String) -> Unit)? = null,
+        streamProgressCallback: ((Int, Int) -> Unit)? = null,
         isCancelled: () -> Boolean = { false }
     ): TranslationRunResult {
         require(startPosition > 0) { "字幕起始位置必须大于 0" }
@@ -138,6 +161,7 @@ class AiTranslationConversation(
                 activeBatch = batch
                 activeBatchStart = startPosition + translations.size
                 streamedContent.setLength(0)
+                var streamedBatchCount = 0
                 val userContent = buildTranslationUserContent(
                     subtitles = batch,
                     targetLanguage = targetLanguage,
@@ -151,12 +175,42 @@ class AiTranslationConversation(
                     onEvent = { event ->
                         if (event is ChatBackend.Event.TextDelta) {
                             streamedContent.append(event.text)
+                            runCatching { streamCallback?.invoke(streamedContent.toString()) }
+                            val completedPrefix = completedBatchPrefix(
+                                content = streamedContent.toString(),
+                                expected = batch,
+                                startPosition = activeBatchStart
+                            ).size
+                            if (completedPrefix > streamedBatchCount) {
+                                streamedBatchCount = completedPrefix
+                                runCatching {
+                                    streamProgressCallback?.invoke(
+                                        translations.size + streamedBatchCount,
+                                        subtitles.size
+                                    )
+                                }
+                            }
                         }
                     },
                     isCancelled = isCancelled
                 )
                 if (streamedContent.isEmpty()) {
                     streamedContent.append(result.text)
+                    runCatching { streamCallback?.invoke(streamedContent.toString()) }
+                    val completedPrefix = completedBatchPrefix(
+                        content = streamedContent.toString(),
+                        expected = batch,
+                        startPosition = activeBatchStart
+                    ).size
+                    if (completedPrefix > streamedBatchCount) {
+                        streamedBatchCount = completedPrefix
+                        runCatching {
+                            streamProgressCallback?.invoke(
+                                translations.size + streamedBatchCount,
+                                subtitles.size
+                            )
+                        }
+                    }
                 }
                 historyStore.append(
                     id = historySessionId,

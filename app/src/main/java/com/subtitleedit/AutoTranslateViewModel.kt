@@ -3,6 +3,7 @@ package com.subtitleedit
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import androidx.annotation.StringRes
 import androidx.documentfile.provider.DocumentFile
@@ -46,6 +47,8 @@ internal class AutoTranslateViewModel(application: Application) :
     companion object {
         private const val OUTPUT_DIRECTORY_KEY = "auto_translate"
         private const val MAX_CONSECUTIVE_ERRORS = 5
+        private const val STREAM_UI_UPDATE_INTERVAL_MS = 120L
+        private const val STREAM_PREVIEW_MAX_CHARS = 180
     }
 
     private lateinit var settingsManager: SettingsManager
@@ -86,6 +89,8 @@ internal class AutoTranslateViewModel(application: Application) :
         @Volatile var activeConversation: AiTranslationConversation? = null
         val translatedTexts = mutableListOf<String>()
         var overwriteOutput = false
+        var lastStreamPublishedAt = 0L
+        var lastStreamPreview = ""
     }
 
     init {
@@ -261,7 +266,16 @@ internal class AutoTranslateViewModel(application: Application) :
         val punctuated = session.run(onProgress = { done, total -> file.processedLines = done; file.totalLines = total; publish() }) { text ->
             currentCoroutineContext().ensureActive()
             if (file.cancellationRequested) throw CancellationException(string(R.string.auto_translate_punctuation_cancelled))
-            conversation.predictPunctuation(text) { file.cancellationRequested }.getOrElse { throw it }
+            resetAiStream(file)
+            conversation.predictPunctuation(
+                text = text,
+                streamCallback = { content -> publishAiStream(file, content) },
+                isCancelled = { file.cancellationRequested }
+            ).getOrElse { throw it }
+                .also {
+                    file.message = ""
+                    publish()
+                }
         }
         return document.copy(entries = punctuated)
     }
@@ -274,9 +288,24 @@ internal class AutoTranslateViewModel(application: Application) :
         var consecutiveErrors = 0
         while (file.translatedTexts.size < entries.size) {
             currentCoroutineContext().ensureActive()
-            file.message = ""; publish()
+            resetAiStream(file)
+            publish()
             val completed = file.translatedTexts.size
-            val result = translator.translateSubtitles(entries.drop(completed), completed + 1, { current, _ -> file.processedLines = completed + current; publish() }, { file.cancellationRequested })
+            val result = translator.translateSubtitles(
+                subtitles = entries.drop(completed),
+                startPosition = completed + 1,
+                progressCallback = { current, _ ->
+                    file.processedLines = completed + current
+                    publish()
+                },
+                streamCallback = { content -> publishAiStream(file, content) },
+                streamProgressCallback = { current, _ ->
+                    file.processedLines = completed + current
+                    publish()
+                },
+                isCancelled = { file.cancellationRequested }
+            )
+            file.message = ""
             file.translatedTexts += result.translations; file.processedLines = file.translatedTexts.size; publish()
             if (result.isComplete && result.translations.isNotEmpty()) { consecutiveErrors = 0; continue }
             if (result.error != null) {
@@ -317,6 +346,29 @@ internal class AutoTranslateViewModel(application: Application) :
         } else {
             settingsManager.getAiApiKey(provider).isNotBlank() && settingsManager.getAiPunctuationModel(provider).isNotBlank() && settingsManager.getAiBaseUrl(provider).isNotBlank()
         }
+    }
+
+    private fun publishAiStream(file: AutoTranslateFile, content: String) {
+        val normalized = content.replace("\r\n", "\n").replace('\r', '\n').trim()
+        if (normalized.isBlank()) return
+        val preview = if (normalized.length <= STREAM_PREVIEW_MAX_CHARS) {
+            normalized
+        } else {
+            "…" + normalized.takeLast(STREAM_PREVIEW_MAX_CHARS)
+        }
+        val now = SystemClock.uptimeMillis()
+        if (now - file.lastStreamPublishedAt < STREAM_UI_UPDATE_INTERVAL_MS) return
+        if (preview == file.lastStreamPreview) return
+        file.lastStreamPublishedAt = now
+        file.lastStreamPreview = preview
+        file.message = "AI 输出：$preview"
+        publish()
+    }
+
+    private fun resetAiStream(file: AutoTranslateFile) {
+        file.lastStreamPublishedAt = 0L
+        file.lastStreamPreview = ""
+        file.message = ""
     }
 
     private suspend fun updateProcessingStage(file: AutoTranslateFile, stage: ProcessingStage, processedLines: Int = 0, totalLines: Int = 0) {
