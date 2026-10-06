@@ -141,8 +141,8 @@
     <string name="model_mgmt_llm_select_type_title">选择 LLM 模型</string>
     <string name="model_mgmt_llm_title_custom">自定义 LLM 模型</string>
     <string name="model_mgmt_llm_help_title">LLM 模型说明</string>
-    <string name="model_mgmt_llm_help_index_translate">Index-Translate 2B 适用于快速翻译场景，速度快，稳定性较差，建议用于编辑字幕时的临时翻译。\n\nIndex-Translate 4B 适用于大规模稳定翻译，速度较慢，稳定性高，指令约束效果好，建议用于一键翻译。\n\n注意：该模型只适用于翻译，不适用于标点预测。\n\n模型项目地址：\nhttps://index-translate.bilibili.com/?p=/site/home.html</string>
-    <string name="model_mgmt_llm_help_gemma4">Gemma4 E2B 兼顾速度和质量，适用于大多数场景。\n\nGemma4 E4B 速度较慢、质量较高，翻译效果很好。\n\nGemma4 的翻译效果很好，但指令遵循较弱。如果用于标点预测和一键翻译，建议开启思考模式。\n\n模型地址：\nhttps://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf\nhttps://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf</string>
+    <string name="model_mgmt_llm_help_index_translate">注意：该系列模型只适用于翻译，不适用于标点预测。\n\nIndex-Translate 2B 适用于快速翻译场景，速度快，稳定性较差，适用于编辑字幕时的临时翻译。用于批量翻译时需要开启思考模式\n\nIndex-Translate 4B 适用于大规模稳定翻译，速度较慢，稳定性高，指令约束效果好，适用于一键翻译。\n\n模型项目地址：\nhttps://index-translate.bilibili.com/?p=/site/home.html</string>
+    <string name="model_mgmt_llm_help_gemma4">Gemma4 的翻译效果很好，但指令遵循较弱。如果用于标点预测和一键翻译，建议开启思考模式。\n\nGemma4 E2B 兼顾速度和质量，适用于大多数场景。\n\nGemma4 E4B 速度较慢、质量较高，翻译效果很好。\n\n模型地址：\nhttps://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf\nhttps://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf</string>
     <string name="model_mgmt_llm_help_custom">自定义模型由用户自行导入。模型的能力、速度和兼容性取决于所选 GGUF 模型。</string>
     <string name="model_mgmt_llm_custom_select_title">选择本地 LLM 模型</string>
     <string name="model_mgmt_llm_custom_empty">软件目录内无模型文件。

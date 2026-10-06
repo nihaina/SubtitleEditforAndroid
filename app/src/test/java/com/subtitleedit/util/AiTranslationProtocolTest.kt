@@ -83,6 +83,22 @@ class AiTranslationProtocolTest {
     }
 
     @Test
+    fun indexTranslateUserContent_omitsFormatSuffix() {
+        val subtitles = listOf(testSubtitle(1, "hello"))
+
+        assertEquals(
+            "帮我翻译成中文\n\n" +
+                "start\n[1]hello\nend",
+            buildTranslationUserContent(
+                subtitles,
+                "中文",
+                sequenceOnly = true,
+                indexTranslate = true
+            )
+        )
+    }
+
+    @Test
     fun localUserContent_usesSequenceAndTextWithoutTimestamps() {
         val subtitles = listOf(
             testSubtitle(1, "字幕1"),
@@ -91,7 +107,7 @@ class AiTranslationProtocolTest {
 
         assertEquals(
             "帮我翻译成中文，以原格式输出\n\n" +
-                "start\n1\n字幕1\n\n2\n字幕2\nend",
+                "start\n[1]字幕1\n\n[2]字幕2\nend",
             buildTranslationUserContent(
                 subtitles,
                 "中文",
@@ -109,7 +125,7 @@ class AiTranslationProtocolTest {
 
         assertEquals(
             "帮我翻译成中文，以原格式输出\n\n" +
-                "1\n字幕1\n\n2\n字幕2",
+                "[1]字幕1\n\n[2]字幕2",
             buildTranslationUserContent(
                 subtitles,
                 "中文",
@@ -129,8 +145,25 @@ class AiTranslationProtocolTest {
         assertEquals(
             listOf("译文一\n第二行", "译文二"),
             parseSequenceSubtitleTranslation(
-                "start\n8\n译文二\n\n7\n译文一\n第二行\nend",
+                "start\n[8]译文二\n\n[7]译文一\n第二行\nend",
                 expected
+            )
+        )
+    }
+
+    @Test
+    fun inlineSequenceStreamingPrefix_acceptsTrailingCueDelimiter() {
+        val expected = listOf(
+            testSubtitle(1, "source one"),
+            testSubtitle(2, "source two")
+        )
+
+        assertEquals(
+            listOf("译文一"),
+            parseCompletedSequenceTranslationPrefix(
+                "[1]译文一\n\n",
+                expected,
+                expectedStartPosition = 1
             )
         )
     }

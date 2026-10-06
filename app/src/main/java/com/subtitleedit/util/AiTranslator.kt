@@ -18,6 +18,8 @@ private val TRANSLATION_TIMESTAMP =
 private val SRT_SEQUENCE_BEFORE_CUE = Regex("""\n[ \t]*\d+[ \t]*\n[ \t]*$""")
 private val MARKDOWN_FENCE_LINE = Regex("""(?m)^[ \t]*```[^\r\n]*\r?$""")
 private val SUBTITLE_SEQUENCE_LINE = Regex("""^[ \t]*(\d+)[ \t]*\r?$""", RegexOption.MULTILINE)
+private val INLINE_SUBTITLE_SEQUENCE_LINE =
+    Regex("""^[ \t]*\[([0-9]+)](.*)$""", RegexOption.MULTILINE)
 private val LRC_TIME_TAG = Regex("""\[-?\d{1,4}:\d{1,2}(?:[.:]\d{1,3})?]""")
 private val LRC_TIMED_LINE = Regex(
     """^\s*(?:\[-?\d{1,4}:\d{1,2}(?:[.:]\d{1,3})?])+""",
@@ -36,9 +38,14 @@ private val MARKED_TRANSLATION_BLOCK = Regex(
     RegexOption.IGNORE_CASE
 )
 
-private fun buildTranslationInstruction(targetLanguage: String, customPrompt: String): String =
+private fun buildTranslationInstruction(
+    targetLanguage: String,
+    customPrompt: String,
+    indexTranslate: Boolean
+): String =
     buildString {
-        append("帮我翻译成${targetLanguage}，以原格式输出")
+        append("帮我翻译成${targetLanguage}")
+        if (!indexTranslate) append("，以原格式输出")
         customPrompt.trim().takeIf { it.isNotEmpty() }?.let {
             append('\n')
             append(it)
@@ -57,18 +64,26 @@ internal fun buildTimedSubtitleContent(
     subtitles: List<SubtitleEntry>,
     startPosition: Int = 1,
     includeTimestamps: Boolean = true,
-    includeBlockMarkers: Boolean = true
+    includeBlockMarkers: Boolean = true,
+    inlineSequence: Boolean = false
 ): String {
     val content = subtitles.mapIndexed { offset, subtitle ->
         val sequence = subtitle.index.takeIf { it > 0 } ?: (startPosition + offset)
         buildString {
-            append(sequence)
-            append('\n')
-            if (includeTimestamps) {
-                append(subtitle.getTimeAxisSRT())
+            if (inlineSequence) {
+                append('[')
+                append(sequence)
+                append(']')
+                append(normalizeSubtitleText(subtitle.text))
+            } else {
+                append(sequence)
                 append('\n')
+                if (includeTimestamps) {
+                    append(subtitle.getTimeAxisSRT())
+                    append('\n')
+                }
+                append(normalizeSubtitleText(subtitle.text))
             }
-            append(normalizeSubtitleText(subtitle.text))
         }
     }.joinToString("\n\n")
     return if (includeBlockMarkers) wrapTranslationBlock(content) else content
@@ -81,9 +96,10 @@ internal fun buildTranslationUserContent(
     startPosition: Int = 1,
     format: SubtitleFormat = SubtitleFormat.SRT,
     sequenceOnly: Boolean = false,
-    includeBlockMarkers: Boolean = true
+    includeBlockMarkers: Boolean = true,
+    indexTranslate: Boolean = false
 ): String = buildString {
-    append(buildTranslationInstruction(targetLanguage, customPrompt))
+    append(buildTranslationInstruction(targetLanguage, customPrompt, indexTranslate))
     append("\n\n")
     append(
         if (sequenceOnly) {
@@ -91,6 +107,7 @@ internal fun buildTranslationUserContent(
                 subtitles,
                 startPosition,
                 includeTimestamps = false,
+                inlineSequence = true,
                 includeBlockMarkers = includeBlockMarkers
             )
         } else {
@@ -272,6 +289,26 @@ internal fun parseSequenceSubtitleTranslation(
 private fun extractSequenceSubtitleBlocks(content: String): List<SequenceSubtitleBlock> {
     val normalizedContent = markedTranslationContent(content)
         ?: limitToSequenceCodeBlock(normalizeSubtitleText(content))
+    val inlineMatches = INLINE_SUBTITLE_SEQUENCE_LINE.findAll(normalizedContent).toList()
+    if (inlineMatches.isNotEmpty()) {
+        return inlineMatches.mapIndexed { index, match ->
+            val sequence = match.groupValues[1].toInt()
+            val nextSequence = inlineMatches.getOrNull(index + 1)
+            val blockEnd = nextSequence?.range?.first ?: normalizedContent.length
+            val firstLine = match.groupValues[2].trimEnd('\r')
+            val continuation = normalizedContent.substring(match.range.last + 1, blockEnd)
+                .trim('\n', '\r')
+            val text = when {
+                continuation.isEmpty() -> firstLine
+                firstLine.isEmpty() -> continuation
+                else -> "$firstLine\n$continuation"
+            }
+            SequenceSubtitleBlock(
+                sequence,
+                text.removeTrailingMarkdownFence().trim('\n', '\r')
+            )
+        }
+    }
     val sequenceMatches = SUBTITLE_SEQUENCE_LINE.findAll(normalizedContent).toList()
     return sequenceMatches.mapIndexedNotNull { index, match ->
         val sequence = match.groupValues[1].toIntOrNull() ?: return@mapIndexedNotNull null
@@ -588,7 +625,9 @@ internal fun parseCompletedSequenceTranslationPrefix(
         subtitle.index.takeIf { it > 0 } ?: (expectedStartPosition + offset)
     }
     val extractedBlocks = extractSequenceSubtitleBlocks(content)
-    val completedBlocks = if (hasCompleteTranslationBlock(content)) {
+    val completedBlocks = if (hasCompleteTranslationBlock(content) ||
+        hasCompleteInlineSequenceBlock(content)
+    ) {
         extractedBlocks
     } else {
         extractedBlocks.dropLast(1)
@@ -601,6 +640,17 @@ internal fun parseCompletedSequenceTranslationPrefix(
             add(block.text)
         }
     }
+}
+
+/**
+ * In the marker-free local protocol, a blank line terminates an inline cue.
+ * Treat that trailing delimiter as completion so streaming progress can advance
+ * before the next sequence marker arrives.
+ */
+private fun hasCompleteInlineSequenceBlock(content: String): Boolean {
+    val normalized = normalizeSubtitleText(content)
+    return INLINE_SUBTITLE_SEQUENCE_LINE.containsMatchIn(normalized) &&
+        Regex("""\n[ \t]*\n[ \t]*$""").containsMatchIn(normalized)
 }
 
 private data class TranslationTimeRange(val startTimeMs: Long, val endTimeMs: Long) {

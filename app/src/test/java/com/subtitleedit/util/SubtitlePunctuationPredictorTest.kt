@@ -67,13 +67,14 @@ class SubtitlePunctuationPredictorTest {
 
         SubtitlePunctuationPredictor.Session(
             source,
-            includeBlockMarkers = false
+            includeBlockMarkers = false,
+            bracketSequence = true
         ).run(requestPrediction = { text ->
             requests += text
             punctuateRequest(text, "。")
         })
 
-        assertEquals("1001\n第1条\n\n1002\n第2条", requests.single())
+        assertEquals("[1001]第1条\n\n[1002]第2条", requests.single())
     }
 
     @Test
@@ -376,6 +377,32 @@ class SubtitlePunctuationPredictorTest {
         val source = listOf(SubtitleEntry(text = "123"), SubtitleEntry(text = "456"))
 
         assertEquals(source, SubtitlePunctuationPredictor.matchSubtitleEntries(source, "1\n123\n\n2\n456"))
+    }
+
+    @Test
+    fun bracketRepliesKeepInlineFirstLinesAndMultilineText() {
+        val source = listOf(
+            SubtitleEntry(index = 7, text = "你好\n世界"),
+            SubtitleEntry(index = 9, text = "结束")
+        )
+
+        assertEquals(
+            listOf(
+                source[0].copy(text = "你好！\n世界。"),
+                source[1].copy(text = "结束！")
+            ),
+            SubtitlePunctuationPredictor.matchSubtitleEntries(
+                source,
+                "[9]结束！\n\n[7]你好！\n世界。"
+            )
+        )
+        assertEquals(
+            2,
+            SubtitlePunctuationPredictor.completedPrefixCount(
+                source,
+                "[7]你好！\n世界。\n\n[9]结束！"
+            )
+        )
     }
 
     @Test

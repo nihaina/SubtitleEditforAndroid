@@ -253,7 +253,8 @@ internal class AutoTranslateViewModel(application: Application) :
         val session = file.punctuationSession ?: SubtitlePunctuationPredictor.Session(
             SubtitlePunctuationPredictor.prepareEntries(document.entries),
             entriesPerBatch = entriesPerBatch,
-            includeBlockMarkers = provider != AiProviderConfig.LOCAL
+            includeBlockMarkers = provider != AiProviderConfig.LOCAL,
+            bracketSequence = provider == AiProviderConfig.LOCAL
         ).also { file.punctuationSession = it }
         updateProcessingStage(file, ProcessingStage.PUNCTUATION_PREDICTION, session.processedCount, session.totalCount)
         if (session.totalCount == 0) return document

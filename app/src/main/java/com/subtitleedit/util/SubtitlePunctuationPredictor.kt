@@ -7,6 +7,7 @@ internal const val PUNCTUATION_PREDICTION_PROMPT =
     "以下为换行分离的字幕文本，帮我逐行添加标点符号，不修改原文，不做额外说明，以原格式输出"
 
 object SubtitlePunctuationPredictor {
+    private val INLINE_SEQUENCE_LINE = Regex("""^[ \t]*\[([0-9]+)](.*)$""")
     private val matchingIgnoredCharacters = Regex("""[\p{P}\p{Z}\p{Cc}\p{Cf}\s]""")
     private val punctuationOnlyText = Regex("""[\p{P}\p{Z}\p{Cc}\p{Cf}\s]*""")
 
@@ -27,7 +28,8 @@ object SubtitlePunctuationPredictor {
     class Session(
         private val entries: List<SubtitleEntry>,
         private val entriesPerBatch: Int = DEFAULT_AI_SUBTITLES_PER_REQUEST,
-        private val includeBlockMarkers: Boolean = true
+        private val includeBlockMarkers: Boolean = true,
+        private val bracketSequence: Boolean = false
     ) {
         init {
             require(entriesPerBatch > 0) { "每批字幕数量必须大于 0" }
@@ -52,7 +54,8 @@ object SubtitlePunctuationPredictor {
                     batch,
                     startPosition = processedCount + 1,
                     includeTimestamps = false,
-                    includeBlockMarkers = includeBlockMarkers
+                    includeBlockMarkers = includeBlockMarkers,
+                    inlineSequence = bracketSequence
                 )
                 var streamedBatchCount = 0
                 val response = requestStreamingPrediction?.invoke(request) { partialResponse ->
@@ -100,6 +103,7 @@ object SubtitlePunctuationPredictor {
             throw IOException("标点预测文本匹配失败：原字幕序号重复")
         }
         val lines = (markedTranslationContent(content) ?: content).lines()
+        val inlineSequence = lines.any { INLINE_SEQUENCE_LINE.matches(it.trimEnd('\r')) }
         val returnedBySequence = mutableMapOf<Int, String>()
         var cursor = 0
         while (cursor < lines.size) {
@@ -107,8 +111,23 @@ object SubtitlePunctuationPredictor {
                 cursor++
                 continue
             }
-            val sequence = lines[cursor++].trim().toIntOrNull()
-                ?: throw IOException("标点预测文本匹配失败：缺少有效序号")
+            val inlineMatch = if (inlineSequence) {
+                INLINE_SEQUENCE_LINE.matchEntire(lines[cursor].trimEnd('\r'))
+            } else {
+                null
+            }
+            val sequence: Int
+            val firstReturnedLine: String?
+            if (inlineMatch != null) {
+                sequence = inlineMatch.groupValues[1].toIntOrNull()
+                    ?: throw IOException("标点预测文本匹配失败：缺少有效序号")
+                firstReturnedLine = inlineMatch.groupValues[2]
+                cursor++
+            } else {
+                sequence = lines[cursor++].trim().toIntOrNull()
+                    ?: throw IOException("标点预测文本匹配失败：缺少有效序号")
+                firstReturnedLine = null
+            }
             val entry = expectedBySequence[sequence]
                 ?: throw IOException("标点预测文本匹配失败：返回了多余序号 $sequence")
             if (sequence in returnedBySequence) {
@@ -116,11 +135,16 @@ object SubtitlePunctuationPredictor {
             }
             // Consume exactly this cue's lines, so numeric subtitle text is never a header.
             val expectedLines = entry.text.lines()
-            val end = cursor + expectedLines.size
+            val inlineTextPresent = firstReturnedLine != null && firstReturnedLine.isNotEmpty()
+            val continuationCount = expectedLines.size - if (inlineTextPresent) 1 else 0
+            val end = cursor + continuationCount
             if (end > lines.size) {
                 throw IOException("标点预测文本匹配失败：序号 $sequence 的行数不匹配")
             }
-            val returnedLines = lines.subList(cursor, end)
+            val returnedLines = buildList {
+                if (inlineTextPresent) add(firstReturnedLine!!)
+                addAll(lines.subList(cursor, end))
+            }
             expectedLines.zip(returnedLines).forEachIndexed { index, (original, returned) ->
                 if (matchingText(original) != matchingText(returned)) {
                     throw IOException("标点预测文本匹配失败：序号 $sequence 的第 ${index + 1} 行不匹配")
@@ -165,13 +189,25 @@ object SubtitlePunctuationPredictor {
         var completed = 0
         while (completed < sequences.size) {
             while (cursor < normalized.size && normalized[cursor].isBlank()) cursor++
-            val sequence = normalized.getOrNull(cursor)?.trim()?.toIntOrNull() ?: break
+            val inlineMatch = normalized.getOrNull(cursor)
+                ?.trimEnd('\r')
+                ?.let(INLINE_SEQUENCE_LINE::matchEntire)
+            val sequence = if (inlineMatch != null) {
+                inlineMatch.groupValues[1].toIntOrNull() ?: break
+            } else {
+                normalized.getOrNull(cursor)?.trim()?.toIntOrNull() ?: break
+            }
             val entry = expectedBySequence[sequence] ?: break
             cursor++
             val expectedLines = entry.text.lines()
-            val end = cursor + expectedLines.size
+            val inlineTextPresent = inlineMatch != null && inlineMatch.groupValues[2].isNotEmpty()
+            val continuationCount = expectedLines.size - if (inlineTextPresent) 1 else 0
+            val end = cursor + continuationCount
             if (end > normalized.size) break
-            val returnedLines = normalized.subList(cursor, end)
+            val returnedLines = buildList {
+                if (inlineTextPresent) add(inlineMatch!!.groupValues[2])
+                addAll(normalized.subList(cursor, end))
+            }
             if (expectedLines.zip(returnedLines).any { (original, returned) ->
                     matchingText(original) != matchingText(returned)
                 }) break

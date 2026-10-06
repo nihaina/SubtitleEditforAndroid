@@ -33,6 +33,8 @@ class AiTranslationConversation(
     private val historyTitle: String? = null
 ) {
     private val localProvider = provider == AiProviderConfig.LOCAL
+    private val indexTranslateModel = localProvider &&
+        SettingsManager.getInstance(context).getLlmModelFamily() == SettingsManager.LLM_MODEL_INDEX_TRANSLATE
 
     data class TranslationRunResult(
         val translations: List<String>,
@@ -169,7 +171,8 @@ class AiTranslationConversation(
                     startPosition = activeBatchStart,
                     format = subtitleFormat,
                     sequenceOnly = localProvider,
-                    includeBlockMarkers = !localProvider
+                    includeBlockMarkers = !localProvider,
+                    indexTranslate = indexTranslateModel
                 )
                 val result = conversation.sendUserMessage(
                     content = userContent,
