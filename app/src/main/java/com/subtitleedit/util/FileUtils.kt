@@ -64,7 +64,7 @@ object FileUtils {
     
     /**
      * 检测文件编码
-     * 使用简单启发式方法检测常见编码
+     * 先处理 BOM 和 UTF-8，再使用 Android ICU 统计检测，最后使用 JVM 可用的启发式回退。
      */
     fun detectEncoding(file: File, context: Context? = null): Charset {
         // A manually selected encoding always wins. Automatic mode is represented by a
@@ -115,32 +115,87 @@ object FileUtils {
         // UTF-8 is preferred for valid Unicode text. For legacy files, strict decoding
         // rejects malformed byte sequences before trying the common regional encodings.
         if (canDecode(bytes, StandardCharsets.UTF_8)) return StandardCharsets.UTF_8
-        return listOf(
-            "GBK",
-            "GB2312",
-            "BIG5",
-            "Shift_JIS",
-            "EUC-JP",
-            "EUC-KR",
-            "windows-1252",
-            "ISO-8859-1"
-        )
-            .asSequence()
-            .map(Charset::forName)
-            .firstOrNull { canDecode(bytes, it) }
-            ?: StandardCharsets.UTF_8
+
+        // Android ships ICU's statistical detector. Use it when available because strict
+        // decoding alone cannot distinguish encodings that accept the same byte sequences
+        // (for example GBK and Shift_JIS). Reflection keeps JVM unit tests independent of
+        // the Android runtime, where this API is always available from minSdk 26 onward.
+        detectWithAndroidIcu(bytes)?.let { return it }
+
+        return detectLegacyEncoding(bytes)
     }
 
     private fun ByteArray.hasPrefix(prefix: ByteArray): Boolean =
         size >= prefix.size && prefix.indices.all { this[it] == prefix[it] }
 
-    private fun canDecode(bytes: ByteArray, charset: Charset): Boolean = runCatching {
+    private fun canDecode(bytes: ByteArray, charset: Charset): Boolean =
+        decodeStrict(bytes, charset) != null
+
+    private fun decodeStrict(bytes: ByteArray, charset: Charset): String? = runCatching {
         charset.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
             .onUnmappableCharacter(CodingErrorAction.REPORT)
             .decode(java.nio.ByteBuffer.wrap(bytes))
-        true
-    }.getOrDefault(false)
+            .toString()
+    }.getOrNull()
+
+    private fun detectLegacyEncoding(bytes: ByteArray): Charset {
+        data class Candidate(val charset: Charset, val name: String)
+        val candidates = listOf(
+            Candidate(Charset.forName("GBK"), "GBK"),
+            Candidate(Charset.forName("GB2312"), "GB2312"),
+            Candidate(Charset.forName("BIG5"), "BIG5"),
+            Candidate(Charset.forName("Shift_JIS"), "SHIFT_JIS"),
+            Candidate(Charset.forName("EUC-JP"), "EUC-JP"),
+            Candidate(Charset.forName("EUC-KR"), "EUC-KR"),
+            Candidate(Charset.forName("windows-1252"), "WINDOWS-1252"),
+            Candidate(Charset.forName("ISO-8859-1"), "ISO-8859-1")
+        )
+        return candidates.asSequence()
+            .mapNotNull { candidate ->
+                decodeStrict(bytes, candidate.charset)?.let { text ->
+                    candidate.charset to scoreDecodedText(text, candidate.name)
+                }
+            }
+            .maxByOrNull { it.second }
+            ?.first
+            ?: StandardCharsets.UTF_8
+    }
+
+    private fun scoreDecodedText(text: String, encodingName: String): Int {
+        val controls = text.count { it.isISOControl() && it !in "\r\n\t" }
+        val letters = text.count { it.isLetter() }
+        val cjk = text.count { it in '\u3400'..'\u9fff' }
+        val kana = text.count { it in '\u3040'..'\u30ff' }
+        val hangul = text.count { it in '\uac00'..'\ud7af' }
+        val scriptBonus = when {
+            encodingName.contains("SHIFT_JIS") || encodingName.contains("EUC-JP") -> kana * 20
+            encodingName == "EUC-KR" -> hangul * 12
+            encodingName == "GBK" || encodingName == "GB2312" || encodingName == "BIG5" -> cjk * 6
+            else -> 0
+        }
+        // Give common Chinese encodings a small prior. Other multibyte decoders can produce
+        // plausible CJK/Hangul characters from GBK bytes, so script counts alone are not enough.
+        val prior = when (encodingName) {
+            "GBK" -> 24
+            "GB2312" -> 20
+            "BIG5" -> 16
+            "SHIFT_JIS", "EUC-JP" -> 16
+            else -> 8
+        }
+        return letters * 2 + cjk * 4 + kana * 4 + hangul * 4 + scriptBonus + prior - controls * 20
+    }
+
+    private fun detectWithAndroidIcu(bytes: ByteArray): Charset? = runCatching {
+        val detectorClass = Class.forName("android.icu.text.CharsetDetector")
+        val detector = detectorClass.getDeclaredConstructor().newInstance()
+        detectorClass.getMethod("setText", ByteArray::class.java).invoke(detector, bytes)
+        val match = detectorClass.getMethod("detect").invoke(detector) ?: return@runCatching null
+        val confidence = match.javaClass.getMethod("getConfidence").invoke(match) as? Int ?: 0
+        if (confidence < 50) return@runCatching null
+        val name = match.javaClass.getMethod("getName").invoke(match) as? String ?: return@runCatching null
+        Charset.forName(name)
+    }.getOrNull()
 
     private fun InputStream.readSample(maxBytes: Int = 64 * 1024): ByteArray {
         val sample = ByteArray(maxBytes)

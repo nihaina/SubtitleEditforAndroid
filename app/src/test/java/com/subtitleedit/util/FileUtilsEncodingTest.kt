@@ -56,6 +56,48 @@ class FileUtilsEncodingTest {
         }
     }
 
+    @Test
+    fun detectsShiftJisWhenLegacyBytesAreAmbiguous() {
+        val expected = "\u65e5\u672c\u8a9e\u30c6\u30b9\u30c8"
+        val file = temporaryFile(expected.toByteArray(Charset.forName("Shift_JIS")))
+
+        try {
+            assertEquals(Charset.forName("Shift_JIS"), FileUtils.detectEncoding(file))
+            assertEquals(expected, FileUtils.readFile(file, charset = null))
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun detectsBig5TraditionalChinese() {
+        val expected = "\u7e41\u9ad4\u4e2d\u6587"
+        val file = temporaryFile(expected.toByteArray(Charset.forName("BIG5")))
+
+        try {
+            assertEquals(Charset.forName("BIG5"), FileUtils.detectEncoding(file))
+            assertEquals(expected, FileUtils.readFile(file, charset = null))
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun detectsEucJpAndEucKr() {
+        val japanese = "\u65e5\u672c\u8a9e\u30c6\u30b9\u30c8"
+        val korean = "\ud55c\uad6d\uc5b4 \ud14c\uc2a4\ud2b8"
+        val japaneseFile = temporaryFile(japanese.toByteArray(Charset.forName("EUC-JP")))
+        val koreanFile = temporaryFile(korean.toByteArray(Charset.forName("EUC-KR")))
+
+        try {
+            assertEquals(Charset.forName("EUC-JP"), FileUtils.detectEncoding(japaneseFile))
+            assertEquals(Charset.forName("EUC-KR"), FileUtils.detectEncoding(koreanFile))
+        } finally {
+            japaneseFile.delete()
+            koreanFile.delete()
+        }
+    }
+
     private fun temporaryFile(bytes: ByteArray): File =
         File.createTempFile("subtitle-edit-encoding-", ".txt").apply {
             writeBytes(bytes)
