@@ -26,7 +26,7 @@ object SubtitleFormatConverter {
     fun readFile(context: Context, file: File): Source {
         val content = subtitleRepository.readFile(
             file,
-            charset = SettingsManager.getInstance(context).getDefaultEncoding()
+            charset = SettingsManager.getInstance(context).getConfiguredEncoding()
         )
         return source(content, file.name)
     }
@@ -35,7 +35,7 @@ object SubtitleFormatConverter {
         val content = subtitleRepository.readUri(
             context,
             uri,
-            charset = SettingsManager.getInstance(context).getDefaultEncoding()
+            charset = SettingsManager.getInstance(context).getConfiguredEncoding()
         )
         return source(content, fileName)
     }

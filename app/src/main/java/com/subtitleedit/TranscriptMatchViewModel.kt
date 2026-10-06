@@ -166,7 +166,7 @@ internal class TranscriptMatchViewModel(application: Application) :
             try {
                 updateProgress(1, string(R.string.transcript_match_reading_document))
                 val transcript = withContext(Dispatchers.IO) {
-                    DefaultSubtitleRepository().readUri(app, selectedText, settings.getDefaultEncoding())
+                    DefaultSubtitleRepository().readUri(app, selectedText, settings.getConfiguredEncoding())
                         .trim().trimStart('\uFEFF')
                 }
                 require(transcript.isNotBlank()) { string(R.string.transcript_match_empty_document) }

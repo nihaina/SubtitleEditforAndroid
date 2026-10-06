@@ -933,9 +933,10 @@ class EditorActivity : AppCompatActivity() {
         }
 
         setDocumentTitle(file.name)
-        // 使用用户设置的默认编码
+        // Automatic mode inspects the file bytes before decoding the document.
         val settingsManager = SettingsManager.getInstance(this)
-        stateModel.currentCharset = settingsManager.getDefaultEncoding()
+        stateModel.currentCharset = settingsManager.getConfiguredEncoding()
+            ?: FileUtils.detectEncoding(file)
         val charset = stateModel.currentCharset
 
         lifecycleScope.launch {
@@ -955,7 +956,7 @@ class EditorActivity : AppCompatActivity() {
 
     private enum class OpenedUriKind { SUBTITLE, AUDIO, VIDEO, UNSUPPORTED }
 
-    private val subtitleOpenExtensions = FileUtils.SUBTITLE_EXTENSIONS - "txt"
+    private val subtitleOpenExtensions = FileUtils.SUBTITLE_EXTENSIONS + FileTypePolicy.textExtensions
     private val subtitleOpenMimeTypes = setOf(
         "text/vtt",
         "text/srt",
@@ -963,7 +964,8 @@ class EditorActivity : AppCompatActivity() {
         "text/ssa",
         "application/x-subrip",
         "application/srt",
-        "application/ttml+xml"
+        "application/ttml+xml",
+        "text/plain"
     )
 
     private fun classifyOpenedUri(uri: Uri, fileName: String): OpenedUriKind {
@@ -1025,7 +1027,15 @@ class EditorActivity : AppCompatActivity() {
                 val kind = classifyOpenedUri(uri, fileName)
                 when (kind) {
                     OpenedUriKind.SUBTITLE -> {
-                        val content = withContext(Dispatchers.IO) { fileSessionController.readUri(uri) }
+                        val settingsManager = SettingsManager.getInstance(this@EditorActivity)
+                        val configuredCharset = settingsManager.getConfiguredEncoding()
+                        val detectedCharset = configuredCharset ?: withContext(Dispatchers.IO) {
+                            FileUtils.detectEncoding(this@EditorActivity, uri)
+                        }
+                        stateModel.currentCharset = detectedCharset
+                        val content = withContext(Dispatchers.IO) {
+                            fileSessionController.readUri(uri, detectedCharset)
+                        }
                         if (!isActive || openGeneration != mediaOpenGeneration) return@launch
                         val mediaTitle = stateModel.documentTitle.takeIf {
                             stateModel.mediaType.hasPlayableMedia
@@ -1116,7 +1126,9 @@ class EditorActivity : AppCompatActivity() {
             }
             parseContent(content, targetFile.name)
             stateModel.hasUnsavedChanges = false
-            showShortToast("已切换编码为：${FileUtils.SUPPORTED_ENCODINGS.find { it.charset == stateModel.currentCharset }?.displayName}")
+            showShortToast("已切换编码为：${FileUtils.SUPPORTED_ENCODINGS.find {
+                !it.isAuto && it.charset == stateModel.currentCharset
+            }?.displayName ?: stateModel.currentCharset.name()}")
         }
     }
     
@@ -2534,13 +2546,13 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun showEncodingDialog() {
-        val encodings = FileUtils.SUPPORTED_ENCODINGS.map { it.displayName }
-        val currentIndex = FileUtils.SUPPORTED_ENCODINGS.indexOfFirst { it.charset == stateModel.currentCharset }
+        val encodings = FileUtils.SUPPORTED_ENCODINGS.filterNot { it.isAuto }
+        val currentIndex = encodings.indexOfFirst { it.charset == stateModel.currentCharset }
         
         AlertDialog.Builder(this)
             .setTitle("选择编码")
-            .setSingleChoiceItems(encodings.toTypedArray(), currentIndex) { dialog, which ->
-                val newCharset = FileUtils.SUPPORTED_ENCODINGS[which].charset
+            .setSingleChoiceItems(encodings.map { it.displayName }.toTypedArray(), currentIndex) { dialog, which ->
+                val newCharset = encodings[which].charset
                 if (newCharset != stateModel.currentCharset) {
                     dialog.dismiss()
                     AlertDialog.Builder(this)
@@ -3502,7 +3514,8 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun loadSubtitleFile(subtitleFile: File) {
         val settingsManager = SettingsManager.getInstance(this)
-        stateModel.currentCharset = settingsManager.getDefaultEncoding()
+        stateModel.currentCharset = settingsManager.getConfiguredEncoding()
+            ?: FileUtils.detectEncoding(subtitleFile)
         val charset = stateModel.currentCharset
 
         lifecycleScope.launch {

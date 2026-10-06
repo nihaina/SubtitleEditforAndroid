@@ -32,7 +32,11 @@ internal class SettingsViewModel(
 
     /** Re-reads settings and cache sizes; called on every resume. */
     fun refresh() {
-        val encoding = settingsManager.getDefaultEncoding().name()
+        val encoding = if (settingsManager.isDefaultEncodingAutomatic()) {
+            SettingsManager.AUTO_ENCODING
+        } else {
+            settingsManager.getDefaultEncoding().name()
+        }
         val themeMode = settingsManager.getThemeMode()
         val cacheItems = cacheItems()
         val totalCacheSize = cacheItems.sumOf(SettingsCacheItem::sizeBytes)
@@ -63,7 +67,8 @@ internal class SettingsViewModel(
     }
 
     fun selectEncoding(encoding: FileUtils.EncodingInfo) {
-        settingsManager.setDefaultEncoding(encoding.charset)
+        if (encoding.isAuto) settingsManager.setDefaultEncodingAutomatic()
+        else settingsManager.setDefaultEncoding(encoding.charset)
         refresh()
     }
 

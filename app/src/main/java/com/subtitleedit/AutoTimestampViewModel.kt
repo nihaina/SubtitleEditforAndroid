@@ -610,7 +610,8 @@ internal class AutoTimestampViewModel(
 
     private fun loadSubtitleEntries(file: SelectedMediaFile): Result<List<SubtitleEntry>> {
         return try {
-            val charset = settingsManager.getDefaultEncoding()
+            val charset = settingsManager.getConfiguredEncoding()
+                ?: FileUtils.detectEncoding(app, file.uri)
             val content = FileUtils.readUri(app, file.uri, charset)
             val detectedFormat = SubtitleParser.detectFormat(content)
             if (

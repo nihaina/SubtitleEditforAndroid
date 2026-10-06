@@ -353,7 +353,8 @@ internal class AutoTranslateViewModel(application: Application) :
     }
 
     private suspend fun loadDocument(file: AutoTranslateFile): SubtitleDocument {
-        val content = app.contentResolver.openInputStream(file.uri)?.use { it.bufferedReader(settingsManager.getDefaultEncoding()).readText() } ?: throw IllegalArgumentException(string(R.string.auto_translate_read_failed))
+        val content = FileUtils.readUri(app, file.uri, settingsManager.getConfiguredEncoding())
+            .ifEmpty { throw IllegalArgumentException(string(R.string.auto_translate_read_failed)) }
         return SubtitleParser.parseDocument(content, file.fileName, SubtitleParser.detectFormat(content, file.fileName))
     }
 

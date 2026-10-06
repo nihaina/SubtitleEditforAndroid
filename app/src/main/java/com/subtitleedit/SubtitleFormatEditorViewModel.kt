@@ -56,7 +56,9 @@ internal class SubtitleFormatEditorViewModel(
         initialized = true
         sourceUri = Uri.parse(uriText)
         fileName = fileNameExtra.orEmpty().ifBlank { string(R.string.format_editor_default_file_name) }
-        charset = SettingsManager.getInstance(app).getDefaultEncoding()
+        val settings = SettingsManager.getInstance(app)
+        charset = settings.getConfiguredEncoding()
+            ?: FileUtils.detectEncoding(app, sourceUri)
         setState { copy(fileName = fileName) }
         loadSubtitle()
         return true
@@ -210,7 +212,7 @@ internal class SubtitleFormatEditorViewModel(
                 SubtitleParser.SubtitleFormat.TXT -> SubtitleParser.toTXT(outputEntries)
                 SubtitleParser.SubtitleFormat.VTT -> {
                     val document = SubtitleParser.parseDocument(
-                        FileUtils.readUri(app, sourceUri, charset),
+                    FileUtils.readUri(app, sourceUri, charset),
                         fileName,
                         SubtitleParser.SubtitleFormat.VTT
                     )

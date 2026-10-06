@@ -116,7 +116,7 @@ fun SettingsScreen(
             SettingsGroup {
                 SettingsRow(
                     title = stringResource(R.string.activity_settings_text_01),
-                    value = encodings.firstOrNull { it.charset.name() == state.encoding }?.displayName
+                    value = encodings.firstOrNull { it.id == state.encoding }?.displayName
                         ?: state.encoding,
                     showArrow = true,
                     onClick = { showEncodingDialog = true }
@@ -209,13 +209,13 @@ fun SettingsScreen(
     if (showEncodingDialog) {
         ChoiceDialog(
             title = stringResource(R.string.activity_settings_text_01),
-            choices = encodings.map { AppOption(it.charset.name(), it.displayName) },
+            choices = encodings.map { AppOption(it.id, it.displayName) },
             selected = state.encoding,
             showCancel = true,
             onDismiss = { showEncodingDialog = false },
             onSelect = { charset ->
                 showEncodingDialog = false
-                encodings.firstOrNull { it.charset.name() == charset }?.let(onEncodingSelected)
+                encodings.firstOrNull { it.id == charset }?.let(onEncodingSelected)
             }
         )
     }

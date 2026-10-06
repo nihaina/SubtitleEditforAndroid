@@ -31,6 +31,8 @@ class SettingsManager private constructor(context: Context) {
     }
     
     companion object {
+        /** Value persisted when the user asks the editor to detect text encoding. */
+        const val AUTO_ENCODING = "auto"
         private const val PREFS_NAME = "subtitle_edit_settings"
         private const val CREDENTIAL_PREFS_NAME = "subtitle_edit_credentials"
         
@@ -229,20 +231,40 @@ class SettingsManager private constructor(context: Context) {
      * 获取默认编码
      */
     fun getDefaultEncoding(): Charset {
-        val encodingName = prefs.getString(KEY_DEFAULT_ENCODING, StandardCharsets.UTF_8.name())
+        val encodingName = prefs.getString(KEY_DEFAULT_ENCODING, AUTO_ENCODING)
+        if (encodingName.equals(AUTO_ENCODING, ignoreCase = true)) {
+            // Keep this getter non-null for existing callers that use UTF-8 as a fallback
+            // outside the editor's file-open path. Automatic reads check the flag below.
+            return StandardCharsets.UTF_8
+        }
         return try {
             Charset.forName(encodingName ?: StandardCharsets.UTF_8.name())
         } catch (e: Exception) {
             StandardCharsets.UTF_8
         }
     }
-    
+
     /**
      * 设置默认编码
      */
     fun setDefaultEncoding(charset: Charset) {
         prefs.edit().putString(KEY_DEFAULT_ENCODING, charset.name()).apply()
     }
+
+    fun isDefaultEncodingAutomatic(): Boolean =
+        prefs.getString(KEY_DEFAULT_ENCODING, AUTO_ENCODING)
+            .equals(AUTO_ENCODING, ignoreCase = true)
+
+    fun setDefaultEncodingAutomatic() {
+        prefs.edit().putString(KEY_DEFAULT_ENCODING, AUTO_ENCODING).apply()
+    }
+
+    /** Returns the configured charset, or null when automatic detection is enabled. */
+    fun getDefaultEncodingOrNull(): Charset? =
+        if (isDefaultEncodingAutomatic()) null else getDefaultEncoding()
+
+    /** Alias used by file-open flows to make the automatic/null contract explicit. */
+    fun getConfiguredEncoding(): Charset? = getDefaultEncodingOrNull()
 
     /** Root directory for application-owned files. Models are stored in its models child. */
     fun getSoftwareDirectory(): File = ModelDirectoryManager.softwareDirectory()

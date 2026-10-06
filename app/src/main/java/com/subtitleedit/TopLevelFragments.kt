@@ -297,7 +297,8 @@ internal fun MainTopLevelPages(
             confirmCacheClear = false,
             onBack = {},
             onEncodingSelected = { encoding ->
-                settings.setDefaultEncoding(encoding.charset)
+                if (encoding.isAuto) settings.setDefaultEncodingAutomatic()
+                else settings.setDefaultEncoding(encoding.charset)
                 state.settingsPage = loadSettingsPage(context, settings)
             },
             onThemeSelected = { mode ->
@@ -427,9 +428,13 @@ private fun Context.openActivity(activity: Class<*>) {
 
 private fun loadSettingsPage(context: Context, settings: SettingsManager): SettingsPageState {
     val encodings = FileUtils.SUPPORTED_ENCODINGS
-    val currentEncoding = settings.getDefaultEncoding()
-    val encoding = encodings.firstOrNull { it.charset == currentEncoding }
-        ?.displayName ?: currentEncoding.displayName()
+    val encoding = if (settings.isDefaultEncodingAutomatic()) {
+        SettingsManager.AUTO_ENCODING
+    } else {
+        val currentEncoding = settings.getDefaultEncoding()
+        encodings.firstOrNull { it.charset == currentEncoding && !it.isAuto }
+            ?.id ?: currentEncoding.name()
+    }
     val themeMode = settings.getThemeMode()
     val cacheItems = settingsCacheItems(context)
     val cacheSize = cacheItems.sumOf(SettingsCacheItem::sizeBytes)

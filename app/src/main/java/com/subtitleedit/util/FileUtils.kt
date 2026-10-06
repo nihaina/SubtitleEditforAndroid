@@ -7,7 +7,9 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.nio.charset.Charset
+import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
@@ -36,9 +38,18 @@ object FileUtils {
     val AUDIO_EXTENSIONS = setOf("mp3", "wav", "flac", "aac", "ogg", "m4a", "wma", "ape")
     
     // 常见的编码方式 - 使用带显示名称的数据类
-    data class EncodingInfo(val charset: Charset, val displayName: String)
+    data class EncodingInfo(
+        val charset: Charset,
+        val displayName: String,
+        val isAuto: Boolean = false
+    ) {
+        /** Stable value used by settings state and choice dialogs. */
+        val id: String
+            get() = if (isAuto) SettingsManager.AUTO_ENCODING else charset.name()
+    }
     
     val SUPPORTED_ENCODINGS = listOf(
+        EncodingInfo(StandardCharsets.UTF_8, "自动", isAuto = true),
         EncodingInfo(StandardCharsets.UTF_8, "UTF-8"),
         EncodingInfo(StandardCharsets.UTF_16, "UTF-16"),
         EncodingInfo(StandardCharsets.ISO_8859_1, "ISO-8859-1"),
@@ -56,51 +67,90 @@ object FileUtils {
      * 使用简单启发式方法检测常见编码
      */
     fun detectEncoding(file: File, context: Context? = null): Charset {
-        // 首先检查用户设置的默认编码
+        // A manually selected encoding always wins. Automatic mode is represented by a
+        // separate setting and falls through to byte-level detection below.
         if (context != null) {
             val settingsManager = getSettingsManager(context)
-            return settingsManager.getDefaultEncoding()
-        }
-        try {
-            FileInputStream(file).use { fis ->
-                val bytes = ByteArray(minOf(4096, file.length().toInt()))
-                val read = fis.read(bytes)
-                if (read > 0) {
-                    // 检查 BOM
-                    if (bytes.size >= 3 && 
-                        bytes[0].toInt() == 0xEF && 
-                        bytes[1].toInt() == 0xBB && 
-                        bytes[2].toInt() == 0xBF) {
-                        return StandardCharsets.UTF_8
-                    }
-                    if (bytes.size >= 2 && 
-                        bytes[0].toInt() == 0xFE && 
-                        bytes[1].toInt() == 0xFF) {
-                        return StandardCharsets.UTF_16BE
-                    }
-                    if (bytes.size >= 2 && 
-                        bytes[0].toInt() == 0xFF && 
-                        bytes[1].toInt() == 0xFE) {
-                        return StandardCharsets.UTF_16LE
-                    }
-                    
-                    // 简单检测 GBK/GB2312
-                    val content = String(bytes, 0, read, StandardCharsets.UTF_8)
-                    if (content.contains(Regex("[\\u4e00-\\u9fa5]"))) {
-                        // 包含中文字符，尝试 GBK
-                        try {
-                            String(bytes, 0, read, Charset.forName("GBK"))
-                            return Charset.forName("GBK")
-                        } catch (e: Exception) {
-                            // 如果 GBK 失败，使用 UTF-8
-                        }
-                    }
-                }
+            if (!settingsManager.isDefaultEncodingAutomatic()) {
+                return settingsManager.getDefaultEncoding()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
-        return StandardCharsets.UTF_8
+        return runCatching {
+            FileInputStream(file).use { detectEncoding(it) }
+        }.getOrDefault(StandardCharsets.UTF_8)
+    }
+
+    /** Detect the encoding of a content URI without requiring a temporary local file. */
+    fun detectEncoding(context: Context, uri: Uri): Charset = runCatching {
+        context.contentResolver.openInputStream(uri)?.use { detectEncoding(it) }
+            ?: StandardCharsets.UTF_8
+    }.getOrDefault(StandardCharsets.UTF_8)
+
+    private fun detectEncoding(input: InputStream): Charset {
+        val bytes = input.readSample()
+        return detectEncoding(bytes)
+    }
+
+    private fun detectEncoding(bytes: ByteArray): Charset {
+        if (bytes.hasPrefix(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()))) {
+            return StandardCharsets.UTF_8
+        }
+        if (bytes.hasPrefix(byteArrayOf(0xFE.toByte(), 0xFF.toByte()))) {
+            return StandardCharsets.UTF_16BE
+        }
+        if (bytes.hasPrefix(byteArrayOf(0xFF.toByte(), 0xFE.toByte()))) {
+            return StandardCharsets.UTF_16LE
+        }
+
+        // UTF-16 files without a BOM still have a strong zero-byte pattern for ordinary
+        // Latin and CJK text. Check this before UTF-8 because NUL bytes are legal UTF-8.
+        if (bytes.size >= 4 && bytes.size % 2 == 0) {
+            val evenZeroes = bytes.indices.step(2).count { bytes[it].toInt() == 0 }
+            val oddZeroes = (1 until bytes.size step 2).count { bytes[it].toInt() == 0 }
+            val threshold = bytes.size / 4
+            if (oddZeroes >= threshold && oddZeroes > evenZeroes) return StandardCharsets.UTF_16LE
+            if (evenZeroes >= threshold && evenZeroes > oddZeroes) return StandardCharsets.UTF_16BE
+        }
+
+        // UTF-8 is preferred for valid Unicode text. For legacy files, strict decoding
+        // rejects malformed byte sequences before trying the common regional encodings.
+        if (canDecode(bytes, StandardCharsets.UTF_8)) return StandardCharsets.UTF_8
+        return listOf(
+            "GBK",
+            "GB2312",
+            "BIG5",
+            "Shift_JIS",
+            "EUC-JP",
+            "EUC-KR",
+            "windows-1252",
+            "ISO-8859-1"
+        )
+            .asSequence()
+            .map(Charset::forName)
+            .firstOrNull { canDecode(bytes, it) }
+            ?: StandardCharsets.UTF_8
+    }
+
+    private fun ByteArray.hasPrefix(prefix: ByteArray): Boolean =
+        size >= prefix.size && prefix.indices.all { this[it] == prefix[it] }
+
+    private fun canDecode(bytes: ByteArray, charset: Charset): Boolean = runCatching {
+        charset.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(java.nio.ByteBuffer.wrap(bytes))
+        true
+    }.getOrDefault(false)
+
+    private fun InputStream.readSample(maxBytes: Int = 64 * 1024): ByteArray {
+        val sample = ByteArray(maxBytes)
+        var offset = 0
+        while (offset < sample.size) {
+            val count = read(sample, offset, sample.size - offset)
+            if (count <= 0) break
+            offset += count
+        }
+        return if (offset == sample.size) sample else sample.copyOf(offset)
     }
     
     /**
@@ -117,9 +167,15 @@ object FileUtils {
      * 读取 URI 内容
      */
     fun readUri(context: Context, uri: Uri, charset: Charset? = null): String {
-        val encoding = charset ?: StandardCharsets.UTF_8
         return context.contentResolver.openInputStream(uri)?.use { inputStream ->
-            inputStream.bufferedReader(encoding).readText()
+            if (charset != null) {
+                inputStream.bufferedReader(charset).readText()
+            } else {
+                // A null charset means automatic detection. Decode the same bytes that were
+                // inspected so content providers with one-shot streams are handled safely.
+                val bytes = inputStream.readBytes()
+                String(bytes, detectEncoding(bytes))
+            }
         } ?: ""
     }
     
