@@ -61,6 +61,59 @@ class SubtitlePunctuationPredictorTest {
     }
 
     @Test
+    fun localModelSession_omitsTranslationBlockMarkers() = runBlocking {
+        val source = subtitleEntries(2)
+        val requests = mutableListOf<String>()
+
+        SubtitlePunctuationPredictor.Session(
+            source,
+            includeBlockMarkers = false
+        ).run(requestPrediction = { text ->
+            requests += text
+            punctuateRequest(text, "。")
+        })
+
+        assertEquals("1001\n第1条\n\n1002\n第2条", requests.single())
+    }
+
+    @Test
+    fun streamingProgressKeepsMarkerFreeCueTextThatIsEnd() {
+        val source = listOf(subtitleEntries(1).single().copy(text = "end"))
+
+        assertEquals(
+            1,
+            SubtitlePunctuationPredictor.completedPrefixCount(
+                entries = source,
+                response = "1001\nend。",
+                startPosition = 1
+            )
+        )
+    }
+
+    @Test
+    fun streamingSessionReportsCompletedCueProgressBeforeBatchCommit() = runBlocking {
+        val source = subtitleEntries(3)
+        val streamProgress = mutableListOf<Pair<Int, Int>>()
+
+        val result = SubtitlePunctuationPredictor.Session(
+            source,
+            entriesPerBatch = 2
+        ).run(
+            onStreamProgress = { done, total -> streamProgress += done to total },
+            requestStreamingPrediction = { text, emit ->
+                val response = punctuateRequest(text, "。")
+                emit(response.lines().take(3).joinToString("\n"))
+                emit(response)
+                response
+            },
+            requestPrediction = { error("streaming request should be used") }
+        )
+
+        assertEquals(listOf(1 to 3, 2 to 3, 3 to 3), streamProgress)
+        assertEquals(source.map { it.copy(text = "${it.text}。") }, result)
+    }
+
+    @Test
     fun formattingAndResponseExtractionKeepPunctuationPredictionIndependent() = runBlocking {
         val source = subtitleEntries(301).flatMap { entry ->
             listOf(entry.copy(text = "，${entry.text}！"), entry.copy(text = "。”"))

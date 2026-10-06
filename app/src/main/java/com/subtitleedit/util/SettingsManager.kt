@@ -89,6 +89,7 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_VAD_MODEL_PATH = "vad_model_path"
         private const val KEY_VAD_USE_BUILT_IN_MODEL = "vad_use_built_in_model"
         private const val KEY_LLM_MODEL_PATH = "llm_model_path"
+        private const val KEY_LLM_MODEL_FAMILY = "llm_model_family"
         private const val KEY_LLM_REPACK_ENABLED = "llm_repack_enabled"
         private const val KEY_LLM_CONTEXT_SIZE = "llm_context_size"
         private const val KEY_VAD_THRESHOLD = "vad_threshold"
@@ -147,6 +148,15 @@ class SettingsManager private constructor(context: Context) {
         const val ASR_MODEL_PARAKEET_TDT = "parakeet_tdt"
         const val ASR_MODEL_PARAKEET_CTC_JA = "parakeet_ctc_ja"
         const val ASR_MODEL_QWEN3_ASR = "qwen3_asr"
+
+        /** Built-in local LLM model families available from the model manager. */
+        const val LLM_MODEL_INDEX_TRANSLATE = "index_translate"
+        const val LLM_MODEL_GEMMA4 = "gemma4"
+
+        val LLM_MODEL_FAMILIES = setOf(
+            LLM_MODEL_INDEX_TRANSLATE,
+            LLM_MODEL_GEMMA4
+        )
 
         const val SENSEVOICE_PROVIDER_CPU = "cpu"
         const val SENSEVOICE_PROVIDER_NPU = "npu"
@@ -771,6 +781,35 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun getLlmModelPath(): String = prefs.getString(KEY_LLM_MODEL_PATH, "") ?: ""
+
+    /** Returns the selected local LLM family, migrating older installs from the model filename. */
+    fun getLlmModelFamily(): String {
+        val stored = prefs.getString(KEY_LLM_MODEL_FAMILY, null)
+            ?.takeIf(LLM_MODEL_FAMILIES::contains)
+        if (stored != null) return stored
+
+        // Migrate installations that predate the family preference from the selected filename.
+        val inferred = inferLlmModelFamily(getLlmModelPath()) ?: LLM_MODEL_INDEX_TRANSLATE
+        prefs.edit().putString(KEY_LLM_MODEL_FAMILY, inferred).apply()
+        return inferred
+    }
+
+    fun setLlmModelFamily(family: String) {
+        val normalized = family.trim().lowercase()
+        require(normalized in LLM_MODEL_FAMILIES) { "不支持的 LLM 模型类型" }
+        prefs.edit().putString(KEY_LLM_MODEL_FAMILY, normalized).apply()
+    }
+
+    /** Infers a model family from a persisted file/content URI, when the name is recognizable. */
+    fun inferLlmModelFamily(path: String): String? {
+        val normalized = path.lowercase()
+        return when {
+            normalized.contains("gemma-4") || normalized.contains("gemma4") -> LLM_MODEL_GEMMA4
+            normalized.contains("index-translate") || normalized.contains("index_translate") ->
+                LLM_MODEL_INDEX_TRANSLATE
+            else -> null
+        }
+    }
 
     /** User-visible name of the currently selected local LLM model. */
     fun getLlmModelDisplayName(): String {

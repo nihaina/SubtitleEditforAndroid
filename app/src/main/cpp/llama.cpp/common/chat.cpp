@@ -1099,6 +1099,15 @@ std::optional<common_chat_params> common_chat_try_specialized_template(
         return common_chat_params_init_ministral_3(tmpl, params);
     }
 
+    // Gemma/Gamma thought channels use a different delimiter shape from GPT-OSS
+    // (<|channel>thought ... <channel|>). Some model templates omit tool-call
+    // syntax, so detect the reasoning markers directly as well.
+    if (src.find("<|channel>thought") != std::string::npos &&
+        src.find("<channel|>") != std::string::npos) {
+        LOG_DBG("Using specialized template: Gemma4 thought channels\n");
+        return common_chat_params_init_gemma4(tmpl, params);
+    }
+
     // GPT-OSS - has unique channel-based structure that needs dedicated handler
     if (src.find("<|channel|>") != std::string::npos) {
         LOG_DBG("Using specialized template: GPT-OSS\n");

@@ -168,7 +168,8 @@ class AiTranslationConversation(
                     customPrompt = customPrompt,
                     startPosition = activeBatchStart,
                     format = subtitleFormat,
-                    sequenceOnly = localProvider
+                    sequenceOnly = localProvider,
+                    includeBlockMarkers = !localProvider
                 )
                 val result = conversation.sendUserMessage(
                     content = userContent,

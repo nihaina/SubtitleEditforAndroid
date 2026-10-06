@@ -130,7 +130,11 @@
     <string name="model_mgmt_llm_file_label">模型文件</string>
     <string name="model_mgmt_llm_select_file">选择 GGUF 模型</string>
     <string name="model_mgmt_llm_hint">支持手动导入其他 GGUF 文件；选择本地平台后可用于聊天、翻译和标点预测。</string>
-    <string name="model_mgmt_llm_download_title">一键下载 Index-Translate 模型</string>
+    <string name="model_mgmt_llm_switch_type">切换模型</string>
+    <string name="model_mgmt_llm_type_index_translate">Index-Translate</string>
+    <string name="model_mgmt_llm_type_gemma4">Gemma4</string>
+    <string name="model_mgmt_llm_select_type_title">选择 LLM 模型</string>
+    <string name="model_mgmt_llm_download_title">一键下载 LLM 模型</string>
     <string name="model_mgmt_llm_download_message">将下载并导入 %1$s。
 
 文件存放至：

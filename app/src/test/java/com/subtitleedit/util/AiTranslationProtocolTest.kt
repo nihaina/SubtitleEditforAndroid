@@ -101,6 +101,25 @@ class AiTranslationProtocolTest {
     }
 
     @Test
+    fun localUserContent_omitsTranslationBlockMarkers() {
+        val subtitles = listOf(
+            testSubtitle(1, "字幕1"),
+            testSubtitle(2, "字幕2")
+        )
+
+        assertEquals(
+            "帮我翻译成中文，以原格式输出\n\n" +
+                "1\n字幕1\n\n2\n字幕2",
+            buildTranslationUserContent(
+                subtitles,
+                "中文",
+                sequenceOnly = true,
+                includeBlockMarkers = false
+            )
+        )
+    }
+
+    @Test
     fun sequenceOnlyParser_matchesBySequenceAndPreservesMultilineText() {
         val expected = listOf(
             SubtitleEntry(index = 7, startTime = 1_000, endTime = 2_000, text = "source one"),

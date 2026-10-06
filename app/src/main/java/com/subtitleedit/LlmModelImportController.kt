@@ -10,6 +10,7 @@ import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.SavedStateHandle
 import com.subtitleedit.feature.ui.LlmModelImportAction
+import com.subtitleedit.feature.ui.LlmModelFamily
 import com.subtitleedit.feature.ui.LlmModelImportUiState
 import com.subtitleedit.task.TaskStatus
 import com.subtitleedit.util.ModelDownloader
@@ -61,9 +62,16 @@ internal class LlmModelImportController(
     fun refresh() {
         val path = settings.getLlmModelPath()
         val uri = path.takeIf(String::isNotBlank)?.let(Uri::parse)
+        val familyId = settings.getLlmModelFamily()
+        val family = familyFromId(familyId)
+        val detectedFamily = settings.inferLlmModelFamily(path)
+        val modelMatchesFamily = detectedFamily == null || detectedFamily == familyId
         _state.value = _state.value.copy(
             modelValue = uri?.let(::displayName).orEmpty(),
-            hasModel = uri != null
+            hasModel = uri != null,
+            modelFamily = family,
+            showModelDownload = uri == null || !modelMatchesFamily,
+            showModelReset = uri != null
         )
     }
 
@@ -80,6 +88,7 @@ internal class LlmModelImportController(
                 check(descriptor.statSize != 0L) { host.text(R.string.model_mgmt_llm_model_empty) }
             } ?: error(host.text(R.string.model_mgmt_llm_model_unreadable))
             settings.setLlmModelPath(uri.toString())
+            settings.inferLlmModelFamily(name)?.let(settings::setLlmModelFamily)
             refresh()
             host.showToast(R.string.model_mgmt_llm_model_selected)
         } catch (error: Exception) {
@@ -93,6 +102,7 @@ internal class LlmModelImportController(
 
     fun onAction(action: LlmModelImportAction) {
         when (action) {
+            LlmModelImportAction.SelectModelType -> showLlmModelPicker()
             LlmModelImportAction.SelectModel -> host.sendEvent(
                 ModelManagementEvent.PickDocument(ModelPickTarget.LLM_MODEL)
             )
@@ -123,7 +133,9 @@ internal class LlmModelImportController(
 
     private fun showDownloadOptions() {
         if (downloadJob?.isActive == true) return
-        val labels = ModelDownloader.LLM_MODELS.map { option ->
+        val options = currentModelOptions()
+        if (options.isEmpty()) return
+        val labels = options.map { option ->
             host.text(
                 R.string.model_mgmt_option_with_size,
                 option.displayName,
@@ -131,8 +143,41 @@ internal class LlmModelImportController(
             )
         }
         showOptionsDialog(host.text(R.string.model_mgmt_llm_download_title), labels) { index ->
-            ModelDownloader.LLM_MODELS.getOrNull(index)?.let(::confirmDownload)
+            options.getOrNull(index)?.let(::confirmDownload)
         }
+    }
+
+    private fun showLlmModelPicker() {
+        val families = LlmModelFamily.entries
+        val labels = families.map { host.text(it.labelRes) }
+        val selected = families.indexOf(_state.value.modelFamily).coerceAtLeast(0)
+        showOptionsDialog(
+            host.text(R.string.model_mgmt_llm_select_type_title),
+            labels,
+            selectedIndex = selected
+        ) { index ->
+            families.getOrNull(index)?.let { family ->
+                if (family != _state.value.modelFamily) {
+                    settings.setLlmModelFamily(family.toSettingsId())
+                    refresh()
+                }
+            }
+        }
+    }
+
+    private fun currentModelOptions(): List<ModelDownloader.LlmModelOption> {
+        val familyId = settings.getLlmModelFamily()
+        return ModelDownloader.LLM_MODELS.filter { it.familyId == familyId }
+    }
+
+    private fun familyFromId(id: String): LlmModelFamily = when (id) {
+        SettingsManager.LLM_MODEL_GEMMA4 -> LlmModelFamily.GEMMA4
+        else -> LlmModelFamily.INDEX_TRANSLATE
+    }
+
+    private fun LlmModelFamily.toSettingsId(): String = when (this) {
+        LlmModelFamily.GEMMA4 -> SettingsManager.LLM_MODEL_GEMMA4
+        LlmModelFamily.INDEX_TRANSLATE -> SettingsManager.LLM_MODEL_INDEX_TRANSLATE
     }
 
     private fun confirmDownload(option: ModelDownloader.LlmModelOption) {

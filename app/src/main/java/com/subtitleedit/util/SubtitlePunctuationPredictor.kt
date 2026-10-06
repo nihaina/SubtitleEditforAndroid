@@ -26,7 +26,8 @@ object SubtitlePunctuationPredictor {
 
     class Session(
         private val entries: List<SubtitleEntry>,
-        private val entriesPerBatch: Int = DEFAULT_AI_SUBTITLES_PER_REQUEST
+        private val entriesPerBatch: Int = DEFAULT_AI_SUBTITLES_PER_REQUEST,
+        private val includeBlockMarkers: Boolean = true
     ) {
         init {
             require(entriesPerBatch > 0) { "每批字幕数量必须大于 0" }
@@ -39,17 +40,35 @@ object SubtitlePunctuationPredictor {
 
         suspend fun run(
             onProgress: (Int, Int) -> Unit = { _, _ -> },
+            onStreamProgress: (Int, Int) -> Unit = { _, _ -> },
+            requestStreamingPrediction: (suspend (String, (String) -> Unit) -> String)? = null,
             requestPrediction: suspend (String) -> String
         ): List<SubtitleEntry> {
             onProgress(processedCount, totalCount)
             while (processedCount < entries.size) {
                 val end = (processedCount + entriesPerBatch).coerceAtMost(entries.size)
                 val batch = entries.subList(processedCount, end)
-                val response = requestPrediction(buildTimedSubtitleContent(
+                val request = buildTimedSubtitleContent(
                     batch,
                     startPosition = processedCount + 1,
-                    includeTimestamps = false
-                ))
+                    includeTimestamps = false,
+                    includeBlockMarkers = includeBlockMarkers
+                )
+                var streamedBatchCount = 0
+                val response = requestStreamingPrediction?.invoke(request) { partialResponse ->
+                    val completedInBatch = completedPrefixCount(
+                        entries = batch,
+                        response = partialResponse,
+                        startPosition = processedCount + 1
+                    )
+                    if (completedInBatch > streamedBatchCount) {
+                        streamedBatchCount = completedInBatch
+                        onStreamProgress(
+                            (processedCount + streamedBatchCount).coerceAtMost(totalCount),
+                            totalCount
+                        )
+                    }
+                } ?: requestPrediction(request)
                 val punctuated = matchSubtitleEntries(batch, response, startPosition = processedCount + 1)
                 completed += punctuated
                 processedCount = end
@@ -115,6 +134,51 @@ object SubtitlePunctuationPredictor {
             entry.copy(text = returnedBySequence[sequence]
                 ?: throw IOException("标点预测文本匹配失败：缺少序号 $sequence"))
         }
+    }
+
+    /** Counts only complete consecutive cues from an in-flight response. */
+    fun completedPrefixCount(
+        entries: List<SubtitleEntry>,
+        response: String,
+        startPosition: Int = 1
+    ): Int {
+        if (entries.isEmpty() || response.isBlank()) return 0
+        val normalizedLines = extractSubtitleAiResponse(response)
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .lines()
+        // Strip the protocol markers only for a marked response. In the local
+        // marker-free protocol, a cue's actual text may itself be "end".
+        val hasBlockStart = normalizedLines.firstOrNull { it.isNotBlank() }
+            ?.trim()
+            ?.equals("start", ignoreCase = true) == true
+        val normalized = normalizedLines
+            .let { lines -> if (hasBlockStart) lines.dropWhile { it.trim().equals("start", ignoreCase = true) } else lines }
+            .let { lines -> if (hasBlockStart) lines.dropLastWhile { it.trim().equals("end", ignoreCase = true) } else lines }
+        val sequences = entries.mapIndexed { offset, entry ->
+            entry.index.takeIf { it > 0 } ?: (startPosition + offset)
+        }
+        val expectedBySequence = sequences.zip(entries).toMap()
+        if (expectedBySequence.size != entries.size) return 0
+
+        var cursor = 0
+        var completed = 0
+        while (completed < sequences.size) {
+            while (cursor < normalized.size && normalized[cursor].isBlank()) cursor++
+            val sequence = normalized.getOrNull(cursor)?.trim()?.toIntOrNull() ?: break
+            val entry = expectedBySequence[sequence] ?: break
+            cursor++
+            val expectedLines = entry.text.lines()
+            val end = cursor + expectedLines.size
+            if (end > normalized.size) break
+            val returnedLines = normalized.subList(cursor, end)
+            if (expectedLines.zip(returnedLines).any { (original, returned) ->
+                    matchingText(original) != matchingText(returned)
+                }) break
+            cursor = end
+            completed++
+        }
+        return completed
     }
 
     private fun matchingText(text: String): String = text.replace(matchingIgnoredCharacters, "")

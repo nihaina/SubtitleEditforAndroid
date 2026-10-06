@@ -56,9 +56,10 @@ private fun wrapTranslationBlock(content: String): String = buildString {
 internal fun buildTimedSubtitleContent(
     subtitles: List<SubtitleEntry>,
     startPosition: Int = 1,
-    includeTimestamps: Boolean = true
-): String = wrapTranslationBlock(
-    subtitles.mapIndexed { offset, subtitle ->
+    includeTimestamps: Boolean = true,
+    includeBlockMarkers: Boolean = true
+): String {
+    val content = subtitles.mapIndexed { offset, subtitle ->
         val sequence = subtitle.index.takeIf { it > 0 } ?: (startPosition + offset)
         buildString {
             append(sequence)
@@ -70,7 +71,8 @@ internal fun buildTimedSubtitleContent(
             append(normalizeSubtitleText(subtitle.text))
         }
     }.joinToString("\n\n")
-)
+    return if (includeBlockMarkers) wrapTranslationBlock(content) else content
+}
 
 internal fun buildTranslationUserContent(
     subtitles: List<SubtitleEntry>,
@@ -78,13 +80,19 @@ internal fun buildTranslationUserContent(
     customPrompt: String = "",
     startPosition: Int = 1,
     format: SubtitleFormat = SubtitleFormat.SRT,
-    sequenceOnly: Boolean = false
+    sequenceOnly: Boolean = false,
+    includeBlockMarkers: Boolean = true
 ): String = buildString {
     append(buildTranslationInstruction(targetLanguage, customPrompt))
     append("\n\n")
     append(
         if (sequenceOnly) {
-            buildTimedSubtitleContent(subtitles, startPosition, includeTimestamps = false)
+            buildTimedSubtitleContent(
+                subtitles,
+                startPosition,
+                includeTimestamps = false,
+                includeBlockMarkers = includeBlockMarkers
+            )
         } else {
             buildSubtitleTranslationContent(subtitles, format, startPosition)
         }

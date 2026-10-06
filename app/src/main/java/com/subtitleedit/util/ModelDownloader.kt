@@ -47,13 +47,18 @@ object ModelDownloader {
     private val demixMutex = Mutex()
     private val llmMutex = Mutex()
 
+    /** Identifiers shared with SettingsManager for filtering the built-in LLM choices. */
+    const val INDEX_TRANSLATE_FAMILY = "index_translate"
+    const val GEMMA4_FAMILY = "gemma4"
+
     data class LlmModelOption(
         val id: String,
         val displayName: String,
         val fileName: String,
         val url: String,
         val sizeLabel: String,
-        val minimumSizeBytes: Long
+        val minimumSizeBytes: Long,
+        val familyId: String = INDEX_TRANSLATE_FAMILY
     )
 
     val LLM_MODELS = listOf(
@@ -63,7 +68,8 @@ object ModelDownloader {
             fileName = "Index-Translate-2B.Q4_K_M.gguf",
             url = "https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q4_K_M.gguf",
             sizeLabel = "约 1.31 GB",
-            minimumSizeBytes = 1_000_000_000L
+            minimumSizeBytes = 1_000_000_000L,
+            familyId = INDEX_TRANSLATE_FAMILY
         ),
         LlmModelOption(
             id = "index-translate-9b-q4_k_m",
@@ -71,7 +77,26 @@ object ModelDownloader {
             fileName = "Index-Translate-9B.Q4_K_M.gguf",
             url = "https://huggingface.co/IndexTeam/Index-Translate-9B-GGUF/resolve/main/Index-Translate-9B.Q4_K_M.gguf",
             sizeLabel = "约 5.78 GB",
-            minimumSizeBytes = 5_000_000_000L
+            minimumSizeBytes = 5_000_000_000L,
+            familyId = INDEX_TRANSLATE_FAMILY
+        ),
+        LlmModelOption(
+            id = "gemma4-e2b-q4_0",
+            displayName = "Gemma 4 E2B Q4_0",
+            fileName = "gemma-4-E2B_q4_0-it.gguf",
+            url = "https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/resolve/main/gemma-4-E2B_q4_0-it.gguf",
+            sizeLabel = "约 3.35 GB",
+            minimumSizeBytes = 3_000_000_000L,
+            familyId = GEMMA4_FAMILY
+        ),
+        LlmModelOption(
+            id = "gemma4-e4b-q4_0",
+            displayName = "Gemma 4 E4B Q4_0",
+            fileName = "gemma-4-E4B_q4_0-it.gguf",
+            url = "https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/resolve/main/gemma-4-E4B_q4_0-it.gguf",
+            sizeLabel = "约 5.15 GB",
+            minimumSizeBytes = 5_000_000_000L,
+            familyId = GEMMA4_FAMILY
         )
     )
 

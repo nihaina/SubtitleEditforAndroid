@@ -81,8 +81,17 @@ data class DemucsModelImportUiState(
 data class LlmModelImportUiState(
     val modelValue: String = "",
     val hasModel: Boolean = false,
+    val modelFamily: LlmModelFamily = LlmModelFamily.INDEX_TRANSLATE,
+    val showModelDownload: Boolean = true,
+    val showModelReset: Boolean = false,
     val actionsEnabled: Boolean = true
 )
+
+/** Model family used to select one-click download variants for local LLMs. */
+enum class LlmModelFamily(val labelRes: Int) {
+    INDEX_TRANSLATE(R.string.model_mgmt_llm_type_index_translate),
+    GEMMA4(R.string.model_mgmt_llm_type_gemma4)
+}
 
 enum class ForcedAlignerImportStatus {
     NOT_CONFIGURED,
@@ -133,6 +142,7 @@ enum class DemucsModelImportAction {
 
 enum class LlmModelImportAction {
     Configure,
+    SelectModelType,
     SelectModel,
     DownloadModel,
     ResetModel
@@ -215,8 +225,15 @@ private fun AsrModelImportCard(
                     OutlinedButton(
                         onClick = { onAction(AsrModelImportAction.SelectModelType) },
                         enabled = state.actionsEnabled,
-                        modifier = Modifier.height(36.dp)
-                    ) { Text(stringResource(R.string.activity_model_settings_text_09), maxLines = 1) }
+                        modifier = Modifier.height(36.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) {
+                        Text(
+                            stringResource(R.string.activity_model_settings_text_09),
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
                     if (state.showSenseVoiceProvider) {
                         ChoiceOptions(
                             options = listOf(
@@ -383,32 +400,68 @@ private fun LlmModelImportCard(
     onAction: (LlmModelImportAction) -> Unit
 ) {
     ModelImportCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = stringResource(R.string.model_mgmt_llm_title),
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.titleMedium
-            )
-            TextButton(
-                onClick = { onAction(LlmModelImportAction.Configure) },
-                enabled = state.actionsEnabled,
-                modifier = Modifier.height(36.dp)
-            ) { Text(stringResource(R.string.activity_model_settings_text_08)) }
+        Row(verticalAlignment = Alignment.Top) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.model_mgmt_llm_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = stringResource(state.modelFamily.labelRes),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 12.dp)
+                )
+                ModelFileControl(
+                    label = stringResource(R.string.model_mgmt_llm_file_label),
+                    value = state.modelValue.ifBlank { stringResource(R.string.model_import_not_selected) },
+                    selectLabel = stringResource(R.string.model_mgmt_llm_select_file),
+                    onSelect = { onAction(LlmModelImportAction.SelectModel) },
+                    enabled = state.actionsEnabled,
+                    fillSelectButton = true,
+                    showDownload = state.showModelDownload,
+                    showReset = state.showModelReset,
+                    downloadDescription = stringResource(R.string.model_mgmt_llm_download_title),
+                    onDownload = { onAction(LlmModelImportAction.DownloadModel) },
+                    onReset = { onAction(LlmModelImportAction.ResetModel) },
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+            Column(
+                modifier = Modifier.padding(start = 12.dp),
+                horizontalAlignment = Alignment.End
+            ) {
+                TextButton(
+                    onClick = { onAction(LlmModelImportAction.Configure) },
+                    enabled = state.actionsEnabled,
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Text(
+                        stringResource(R.string.activity_model_settings_text_08),
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+                OutlinedButton(
+                    onClick = { onAction(LlmModelImportAction.SelectModelType) },
+                    enabled = state.actionsEnabled,
+                    modifier = Modifier.height(36.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp)
+                ) {
+                    Text(
+                        stringResource(R.string.model_mgmt_llm_switch_type),
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
         }
-        ModelFileControl(
-            label = stringResource(R.string.model_mgmt_llm_file_label),
-            value = state.modelValue.ifBlank { stringResource(R.string.model_import_not_selected) },
-            selectLabel = stringResource(R.string.model_mgmt_llm_select_file),
-            onSelect = { onAction(LlmModelImportAction.SelectModel) },
-            enabled = state.actionsEnabled,
-            fillSelectButton = true,
-            showDownload = !state.hasModel,
-            showReset = state.hasModel,
-            downloadDescription = stringResource(R.string.model_mgmt_llm_download_title),
-            onDownload = { onAction(LlmModelImportAction.DownloadModel) },
-            onReset = { onAction(LlmModelImportAction.ResetModel) },
-            modifier = Modifier.padding(top = 8.dp)
-        )
         Text(
             text = stringResource(R.string.model_mgmt_llm_hint),
             style = MaterialTheme.typography.bodySmall,
@@ -584,7 +637,13 @@ private fun ModelFileControl(
     onReset: () -> Unit = {}
 ) {
     Column(modifier = modifier) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis
+        )
         Text(
             text = value,
             style = MaterialTheme.typography.bodySmall,

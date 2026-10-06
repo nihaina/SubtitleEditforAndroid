@@ -102,42 +102,6 @@ class LocalLlmBackend(
 
     fun close() = scope.cancel()
 
-    private data class ParsedThinking(val visible: String, val reasoning: String)
-
-    private fun parseThinking(text: String): ParsedThinking {
-        val reasoning = StringBuilder()
-        val visible = StringBuilder()
-        var inThinking = false
-        var cursor = 0
-        while (cursor < text.length) {
-            val marker = if (inThinking) "</think>" else "<think>"
-            if (text.regionMatches(cursor, marker, 0, marker.length, ignoreCase = true)) {
-                inThinking = !inThinking
-                cursor += marker.length
-                continue
-            }
-            if (inThinking) reasoning.append(text[cursor]) else visible.append(text[cursor])
-            cursor++
-        }
-
-        // A streamed marker can be split across two native callbacks. Keep the
-        // possible marker prefix out of the UI until the next callback confirms it.
-        val pendingMarker = if (inThinking) "</think>" else "<think>"
-        val pendingLength = partialMarkerLength(text, pendingMarker)
-        if (pendingLength > 0) {
-            val target = if (inThinking) reasoning else visible
-            repeat(pendingLength) { target.deleteAt(target.length - 1) }
-        }
-        return ParsedThinking(visible.toString(), reasoning.toString())
-    }
-
-    private fun partialMarkerLength(text: String, marker: String): Int {
-        val max = minOf(marker.length - 1, text.length)
-        for (length in max downTo 1) {
-            if (text.regionMatches(text.length - length, marker, 0, length, ignoreCase = true)) {
-                return length
-            }
-        }
-        return 0
-    }
+    private fun parseThinking(text: String): LocalLlmResponseParser.Parsed =
+        LocalLlmResponseParser.parse(text)
 }

@@ -74,7 +74,12 @@ internal class AppDependencies(application: Application) {
         optionId: String,
         onProgress: (ModelDownloader.Progress) -> Unit
     ): File = ModelDownloader.downloadLlmModel(optionId, onProgress).also { file ->
-        SettingsManager.getInstance(appContext).setLlmModelPath(Uri.fromFile(file).toString())
+        val settings = SettingsManager.getInstance(appContext)
+        settings.setLlmModelPath(Uri.fromFile(file).toString())
+        ModelDownloader.LLM_MODELS
+            .firstOrNull { it.id == optionId }
+            ?.familyId
+            ?.let(settings::setLlmModelFamily)
     }
 
     suspend fun downloadQwen3ForcedAligner(onProgress: (ModelDownloader.Progress) -> Unit): File {

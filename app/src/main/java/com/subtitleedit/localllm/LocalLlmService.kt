@@ -23,9 +23,9 @@ class LocalLlmService : Service() {
     private val requests = ConcurrentHashMap<Int, Long>()
     private val nextRequestId = AtomicInteger(1)
     private val modelLock = Any()
-    private var modelHandle = 0L
-    private var modelKey: String? = null
-    private var modelRepackEnabled = false
+    @Volatile private var modelHandle = 0L
+    @Volatile private var modelKey: String? = null
+    @Volatile private var modelRepackEnabled = false
     private var modelFd: ParcelFileDescriptor? = null
 
     private val binder = object : ILocalLlmService.Stub() {
@@ -200,12 +200,14 @@ class LocalLlmService : Service() {
             requests[requestId]?.let(LocalLlmNative::cancel)
         }
 
-        override fun isModelLoaded(requestedModelKey: String, repackEnabled: Boolean): Boolean =
-            synchronized(modelLock) {
-                modelHandle != 0L &&
-                    modelKey == requestedModelKey &&
-                    modelRepackEnabled == repackEnabled
-            }
+        override fun isModelLoaded(requestedModelKey: String, repackEnabled: Boolean): Boolean {
+            // Generation holds modelLock for the native call. This status query must stay
+            // lock-free so the settings screen can observe the resident model while a
+            // request is running instead of showing the initial "not loaded" state.
+            return modelHandle != 0L &&
+                modelKey == requestedModelKey &&
+                modelRepackEnabled == repackEnabled
+        }
 
         override fun memoryBytes(): Long = memoryBytesLocked()
 
