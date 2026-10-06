@@ -88,9 +88,19 @@ data class LlmModelImportUiState(
 )
 
 /** Model family used to select one-click download variants for local LLMs. */
-enum class LlmModelFamily(val labelRes: Int) {
-    INDEX_TRANSLATE(R.string.model_mgmt_llm_type_index_translate),
-    GEMMA4(R.string.model_mgmt_llm_type_gemma4)
+enum class LlmModelFamily(val labelRes: Int, val titleRes: Int) {
+    INDEX_TRANSLATE(
+        R.string.model_mgmt_llm_type_index_translate,
+        R.string.model_mgmt_llm_title_index_translate
+    ),
+    GEMMA4(
+        R.string.model_mgmt_llm_type_gemma4,
+        R.string.model_mgmt_llm_title_gemma4
+    ),
+    CUSTOM(
+        R.string.model_mgmt_llm_type_custom,
+        R.string.model_mgmt_llm_title_custom
+    )
 }
 
 enum class ForcedAlignerImportStatus {
@@ -145,7 +155,8 @@ enum class LlmModelImportAction {
     SelectModelType,
     SelectModel,
     DownloadModel,
-    ResetModel
+    ResetModel,
+    ShowGuide
 }
 
 @Composable
@@ -167,7 +178,10 @@ fun ModelManagementImportContent(
             onLlmAction,
             modifier = Modifier.padding(top = 16.dp)
         )
-        DemucsModelImportCard(demucs, onDemucsAction)
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            ModelSectionLabel(R.string.model_mgmt_demucs_section_label)
+            DemucsModelImportCard(demucs, onDemucsAction)
+        }
     }
 }
 
@@ -181,7 +195,9 @@ private fun AsrModelImportCard(
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        ModelImportCard {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            ModelSectionLabel(R.string.model_mgmt_asr_section_label)
+            ModelImportCard {
             Row(verticalAlignment = Alignment.Top) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -341,10 +357,14 @@ private fun AsrModelImportCard(
                 }
             }
             HelpLink(onClick = { onAction(AsrModelImportAction.ShowGuide) })
+            }
         }
 
         if (Process.is64Bit()) {
-            LlmModelImportCard(llm, onLlmAction)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                ModelSectionLabel(R.string.model_mgmt_llm_section_label)
+                LlmModelImportCard(llm, onLlmAction)
+            }
         }
 
         ModelImportCard {
@@ -395,6 +415,16 @@ private fun AsrModelImportCard(
 }
 
 @Composable
+private fun ModelSectionLabel(labelRes: Int) {
+    Text(
+        text = stringResource(labelRes),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(horizontal = 16.dp)
+    )
+}
+
+@Composable
 private fun LlmModelImportCard(
     state: LlmModelImportUiState,
     onAction: (LlmModelImportAction) -> Unit
@@ -403,20 +433,11 @@ private fun LlmModelImportCard(
         Row(verticalAlignment = Alignment.Top) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = stringResource(R.string.model_mgmt_llm_title),
+                    text = stringResource(state.modelFamily.titleRes),
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     softWrap = false,
                     overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = stringResource(state.modelFamily.labelRes),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 12.dp)
                 )
                 ModelFileControl(
                     label = stringResource(R.string.model_mgmt_llm_file_label),
@@ -430,7 +451,7 @@ private fun LlmModelImportCard(
                     downloadDescription = stringResource(R.string.model_mgmt_llm_download_title),
                     onDownload = { onAction(LlmModelImportAction.DownloadModel) },
                     onReset = { onAction(LlmModelImportAction.ResetModel) },
-                    modifier = Modifier.padding(top = 8.dp)
+                    modifier = Modifier.padding(top = 12.dp)
                 )
             }
             Column(
@@ -468,6 +489,7 @@ private fun LlmModelImportCard(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp)
         )
+        HelpLink(onClick = { onAction(LlmModelImportAction.ShowGuide) })
     }
 }
 
@@ -477,7 +499,7 @@ private fun DemucsModelImportCard(
     onAction: (DemucsModelImportAction) -> Unit
 ) {
     ModelImportCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.Top) {
             Text(
                 text = stringResource(
                     if (state.useFtModels) R.string.model_import_demucs_ft
@@ -490,15 +512,21 @@ private fun DemucsModelImportCard(
             )
             TextButton(
                 onClick = { onAction(DemucsModelImportAction.Configure) },
-                modifier = Modifier.height(36.dp)
-            ) { Text(stringResource(R.string.activity_model_settings_text_08)) }
+                modifier = Modifier.padding(start = 12.dp).height(36.dp)
+            ) {
+                Text(
+                    stringResource(R.string.activity_model_settings_text_08),
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
         }
         if (!state.useFtModels) {
             DemucsValueWithSwitch(
                 value = state.generalModelValue ?: stringResource(R.string.model_import_general_not_selected),
                 enabled = state.actionsEnabled,
                 onSwitch = { onAction(DemucsModelImportAction.SelectModelType) },
-                modifier = Modifier.padding(top = 12.dp)
+                modifier = Modifier.padding(top = 8.dp)
             )
             ModelSelectRow(
                 selectLabel = stringResource(R.string.activity_vocal_separation_settings_text_03),
@@ -509,7 +537,8 @@ private fun DemucsModelImportCard(
                 showReset = state.hasGeneralModel,
                 downloadDescription = stringResource(R.string.activity_vocal_separation_settings_contentdescription_01),
                 onDownload = { onAction(DemucsModelImportAction.DownloadGeneralModel) },
-                onReset = { onAction(DemucsModelImportAction.ResetGeneralModel) }
+                onReset = { onAction(DemucsModelImportAction.ResetGeneralModel) },
+                modifier = Modifier.padding(top = 8.dp)
             )
             Text(
                 text = stringResource(R.string.activity_vocal_separation_settings_text_04),
@@ -518,35 +547,31 @@ private fun DemucsModelImportCard(
                 modifier = Modifier.padding(top = 8.dp)
             )
         } else {
-            DemucsValueWithSwitch(
+            DemucsSpecialistModelRow(
                 value = state.ftModelValues["vocals"]
                     ?: stringResource(R.string.model_import_ft_not_selected, "Vocals"),
+                selectLabel = stringResource(R.string.activity_vocal_separation_settings_text_06),
                 enabled = state.actionsEnabled,
+                onSelect = { onAction(DemucsModelImportAction.SelectVocalsModel) },
                 onSwitch = { onAction(DemucsModelImportAction.SelectModelType) },
-                modifier = Modifier.padding(top = 12.dp)
+                modifier = Modifier.padding(top = 8.dp)
             )
-            OutlinedButton(
-                onClick = { onAction(DemucsModelImportAction.SelectVocalsModel) }
-            ) { Text(stringResource(R.string.activity_vocal_separation_settings_text_06)) }
             listOf(
                 Triple("drums", R.string.activity_vocal_separation_settings_text_08, DemucsModelImportAction.SelectDrumsModel),
                 Triple("bass", R.string.activity_vocal_separation_settings_text_10, DemucsModelImportAction.SelectBassModel),
                 Triple("other", R.string.activity_vocal_separation_settings_text_12, DemucsModelImportAction.SelectOtherModel)
             ).forEach { (key, label, action) ->
-                SelectionContainer(modifier = Modifier.padding(top = 10.dp)) {
-                    Text(
-                        text = state.ftModelValues[key]
-                            ?: stringResource(
-                                R.string.model_import_ft_not_selected,
-                                key.replaceFirstChar(Char::uppercase)
-                            ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                OutlinedButton(onClick = { onAction(action) }) {
-                    Text(stringResource(label))
-                }
+                DemucsSpecialistModelRow(
+                    value = state.ftModelValues[key]
+                        ?: stringResource(
+                            R.string.model_import_ft_not_selected,
+                            key.replaceFirstChar(Char::uppercase)
+                        ),
+                    selectLabel = stringResource(label),
+                    enabled = state.actionsEnabled,
+                    onSelect = { onAction(action) },
+                    modifier = Modifier.padding(top = 8.dp)
+                )
             }
         }
         Text(
@@ -761,14 +786,70 @@ private fun DemucsValueWithSwitch(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
+                softWrap = false,
                 overflow = TextOverflow.MiddleEllipsis
             )
         }
         OutlinedButton(
             onClick = onSwitch,
             enabled = enabled,
-            modifier = Modifier.padding(start = 12.dp).height(36.dp)
-        ) { Text(stringResource(R.string.activity_model_settings_text_09), maxLines = 1) }
+            modifier = Modifier.padding(start = 12.dp).height(36.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp)
+        ) {
+            Text(
+                stringResource(R.string.activity_model_settings_text_09),
+                maxLines = 1,
+                softWrap = false
+            )
+        }
+    }
+}
+
+@Composable
+private fun DemucsSpecialistModelRow(
+    value: String,
+    selectLabel: String,
+    enabled: Boolean,
+    onSelect: () -> Unit,
+    onSwitch: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        SelectionContainer(modifier = Modifier.weight(1f)) {
+            Text(
+                text = value.substringBefore('\n'),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.MiddleEllipsis
+            )
+        }
+        onSwitch?.let { switch ->
+            OutlinedButton(
+                onClick = switch,
+                enabled = enabled,
+                modifier = Modifier.padding(start = 8.dp).height(36.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp)
+            ) {
+                Text(
+                    stringResource(R.string.activity_model_settings_text_09),
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
+        OutlinedButton(
+            onClick = onSelect,
+            enabled = enabled,
+            modifier = Modifier.padding(start = 12.dp).height(36.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp)
+        ) {
+            Text(selectLabel, maxLines = 1, softWrap = false)
+        }
     }
 }
 

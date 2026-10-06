@@ -88,7 +88,9 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_QWEN3_FORCED_ALIGNER_PATH = "qwen3_forced_aligner_path"
         private const val KEY_VAD_MODEL_PATH = "vad_model_path"
         private const val KEY_VAD_USE_BUILT_IN_MODEL = "vad_use_built_in_model"
-        private const val KEY_LLM_MODEL_PATH = "llm_model_path"
+        private const val KEY_LLM_MODEL_PATH_INDEX_TRANSLATE = "llm_model_path_index_translate"
+        private const val KEY_LLM_MODEL_PATH_GEMMA4 = "llm_model_path_gemma4"
+        private const val KEY_LLM_MODEL_PATH_CUSTOM = "llm_model_path_custom"
         private const val KEY_LLM_MODEL_FAMILY = "llm_model_family"
         private const val KEY_LLM_REPACK_ENABLED = "llm_repack_enabled"
         private const val KEY_LLM_CONTEXT_SIZE = "llm_context_size"
@@ -149,13 +151,15 @@ class SettingsManager private constructor(context: Context) {
         const val ASR_MODEL_PARAKEET_CTC_JA = "parakeet_ctc_ja"
         const val ASR_MODEL_QWEN3_ASR = "qwen3_asr"
 
-        /** Built-in local LLM model families available from the model manager. */
+        /** Local LLM model families available from the model manager. */
         const val LLM_MODEL_INDEX_TRANSLATE = "index_translate"
         const val LLM_MODEL_GEMMA4 = "gemma4"
+        const val LLM_MODEL_CUSTOM = "custom"
 
         val LLM_MODEL_FAMILIES = setOf(
             LLM_MODEL_INDEX_TRANSLATE,
-            LLM_MODEL_GEMMA4
+            LLM_MODEL_GEMMA4,
+            LLM_MODEL_CUSTOM
         )
 
         const val SENSEVOICE_PROVIDER_CPU = "cpu"
@@ -780,18 +784,21 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putString(KEY_VAD_MODEL_PATH, path).apply()
     }
 
-    fun getLlmModelPath(): String = prefs.getString(KEY_LLM_MODEL_PATH, "") ?: ""
+    fun getLlmModelPath(): String = getLlmModelPath(getLlmModelFamily())
 
-    /** Returns the selected local LLM family, migrating older installs from the model filename. */
+    /** Returns the selected path for a specific local LLM family. */
+    fun getLlmModelPath(family: String): String {
+        val key = llmModelPathKey(family) ?: return ""
+        return prefs.getString(key, "") ?: ""
+    }
+
+    /** Returns the selected local LLM family. */
     fun getLlmModelFamily(): String {
         val stored = prefs.getString(KEY_LLM_MODEL_FAMILY, null)
             ?.takeIf(LLM_MODEL_FAMILIES::contains)
         if (stored != null) return stored
 
-        // Migrate installations that predate the family preference from the selected filename.
-        val inferred = inferLlmModelFamily(getLlmModelPath()) ?: LLM_MODEL_INDEX_TRANSLATE
-        prefs.edit().putString(KEY_LLM_MODEL_FAMILY, inferred).apply()
-        return inferred
+        return LLM_MODEL_INDEX_TRANSLATE
     }
 
     fun setLlmModelFamily(family: String) {
@@ -817,12 +824,24 @@ class SettingsManager private constructor(context: Context) {
         return UriDisplayName.of(appContext, android.net.Uri.parse(path))
     }
 
-    fun setLlmModelPath(path: String) {
-        prefs.edit().putString(KEY_LLM_MODEL_PATH, path).apply()
+    fun setLlmModelPath(path: String) = setLlmModelPath(getLlmModelFamily(), path)
+
+    fun setLlmModelPath(family: String, path: String) {
+        val key = llmModelPathKey(family) ?: return
+        prefs.edit().putString(key, path).apply()
     }
 
-    fun clearLlmModelPath() {
-        prefs.edit().remove(KEY_LLM_MODEL_PATH).apply()
+    fun clearLlmModelPath() = clearLlmModelPath(getLlmModelFamily())
+
+    fun clearLlmModelPath(family: String) {
+        llmModelPathKey(family)?.let { key -> prefs.edit().remove(key).apply() }
+    }
+
+    private fun llmModelPathKey(family: String): String? = when (family) {
+        LLM_MODEL_INDEX_TRANSLATE -> KEY_LLM_MODEL_PATH_INDEX_TRANSLATE
+        LLM_MODEL_GEMMA4 -> KEY_LLM_MODEL_PATH_GEMMA4
+        LLM_MODEL_CUSTOM -> KEY_LLM_MODEL_PATH_CUSTOM
+        else -> null
     }
 
     fun isLlmRepackEnabled(): Boolean = prefs.getBoolean(KEY_LLM_REPACK_ENABLED, true)

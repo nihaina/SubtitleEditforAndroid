@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.UUID
 
 /** LLM file selection and download UI; inference is handled by the chat/translation backend. */
@@ -65,7 +66,8 @@ internal class LlmModelImportController(
         val familyId = settings.getLlmModelFamily()
         val family = familyFromId(familyId)
         val detectedFamily = settings.inferLlmModelFamily(path)
-        val modelMatchesFamily = detectedFamily == null || detectedFamily == familyId
+        val modelMatchesFamily = familyId == SettingsManager.LLM_MODEL_CUSTOM ||
+            detectedFamily == null || detectedFamily == familyId
         _state.value = _state.value.copy(
             modelValue = uri?.let(::displayName).orEmpty(),
             hasModel = uri != null,
@@ -88,7 +90,6 @@ internal class LlmModelImportController(
                 check(descriptor.statSize != 0L) { host.text(R.string.model_mgmt_llm_model_empty) }
             } ?: error(host.text(R.string.model_mgmt_llm_model_unreadable))
             settings.setLlmModelPath(uri.toString())
-            settings.inferLlmModelFamily(name)?.let(settings::setLlmModelFamily)
             refresh()
             host.showToast(R.string.model_mgmt_llm_model_selected)
         } catch (error: Exception) {
@@ -109,7 +110,21 @@ internal class LlmModelImportController(
             LlmModelImportAction.DownloadModel -> showDownloadOptions()
             LlmModelImportAction.ResetModel -> confirmResetModel()
             LlmModelImportAction.Configure -> host.sendEvent(ModelManagementEvent.OpenLlmSettings)
+            LlmModelImportAction.ShowGuide -> showModelGuide()
         }
+    }
+
+    private fun showModelGuide() {
+        val messageRes = when (settings.getLlmModelFamily()) {
+            SettingsManager.LLM_MODEL_INDEX_TRANSLATE -> R.string.model_mgmt_llm_help_index_translate
+            SettingsManager.LLM_MODEL_GEMMA4 -> R.string.model_mgmt_llm_help_gemma4
+            else -> R.string.model_mgmt_llm_help_custom
+        }
+        showMessageDialog(
+            title = host.text(R.string.model_mgmt_llm_help_title),
+            message = host.text(messageRes),
+            confirmLabel = host.text(R.string.model_mgmt_ok)
+        )
     }
 
     fun onStorageAccessResult() {
@@ -133,6 +148,10 @@ internal class LlmModelImportController(
 
     private fun showDownloadOptions() {
         if (downloadJob?.isActive == true) return
+        if (settings.getLlmModelFamily() == SettingsManager.LLM_MODEL_CUSTOM) {
+            showCustomModelOptions()
+            return
+        }
         val options = currentModelOptions()
         if (options.isEmpty()) return
         val labels = options.map { option ->
@@ -145,6 +164,57 @@ internal class LlmModelImportController(
         showOptionsDialog(host.text(R.string.model_mgmt_llm_download_title), labels) { index ->
             options.getOrNull(index)?.let(::confirmDownload)
         }
+    }
+
+    private fun showCustomModelOptions() {
+        val directory = File(ModelDownloader.modelsDirectory(), ModelDownloader.LLM_DIRECTORY_NAME)
+        val files = directory.listFiles()
+            ?.filter { it.isFile && it.extension.equals("gguf", ignoreCase = true) && it.length() > 0L }
+            ?.sortedBy { it.name.lowercase() }
+            .orEmpty()
+        if (files.isEmpty()) {
+            showMessageDialog(
+                title = host.text(R.string.model_mgmt_llm_custom_select_title),
+                message = host.text(
+                    R.string.model_mgmt_llm_custom_empty,
+                    directory.absolutePath
+                ),
+                confirmLabel = host.text(R.string.model_mgmt_ok),
+                dismissLabel = host.text(R.string.cancel),
+                auxiliaryLabel = host.text(R.string.model_mgmt_llm_select_file),
+                onAuxiliary = {
+                    host.sendEvent(ModelManagementEvent.PickDocument(ModelPickTarget.LLM_MODEL))
+                }
+            )
+            return
+        }
+        val labels = files.map { file ->
+            host.text(
+                R.string.model_mgmt_option_with_size,
+                file.name,
+                formatModelSize(file.length())
+            )
+        }
+        showOptionsDialog(
+            host.text(R.string.model_mgmt_llm_custom_select_title),
+            labels
+        ) { index -> files.getOrNull(index)?.let(::importCustomModel) }
+    }
+
+    private fun importCustomModel(file: File) {
+        if (!file.isFile || file.length() <= 0L) {
+            showMessageDialog(
+                title = host.text(R.string.model_mgmt_llm_custom_select_title),
+                message = host.text(R.string.model_mgmt_llm_custom_file_unavailable),
+                confirmLabel = host.text(R.string.model_mgmt_ok)
+            )
+            return
+        }
+        settings.setLlmModelFamily(SettingsManager.LLM_MODEL_CUSTOM)
+        settings.setLlmModelPath(Uri.fromFile(file).toString())
+        refresh()
+        onModelsChanged()
+        host.showToast(R.string.model_mgmt_llm_model_selected)
     }
 
     private fun showLlmModelPicker() {
@@ -172,11 +242,13 @@ internal class LlmModelImportController(
 
     private fun familyFromId(id: String): LlmModelFamily = when (id) {
         SettingsManager.LLM_MODEL_GEMMA4 -> LlmModelFamily.GEMMA4
+        SettingsManager.LLM_MODEL_CUSTOM -> LlmModelFamily.CUSTOM
         else -> LlmModelFamily.INDEX_TRANSLATE
     }
 
     private fun LlmModelFamily.toSettingsId(): String = when (this) {
         LlmModelFamily.GEMMA4 -> SettingsManager.LLM_MODEL_GEMMA4
+        LlmModelFamily.CUSTOM -> SettingsManager.LLM_MODEL_CUSTOM
         LlmModelFamily.INDEX_TRANSLATE -> SettingsManager.LLM_MODEL_INDEX_TRANSLATE
     }
 

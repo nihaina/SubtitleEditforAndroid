@@ -467,8 +467,10 @@ internal class ModelManagementViewModel(
     }
 
     private fun clearSettingsReferencing(target: File) {
-        val llmPath = settingsManager.getLlmModelPath()
-        if (pointsInsideTarget(llmPath, target)) settingsManager.clearLlmModelPath()
+        SettingsManager.LLM_MODEL_FAMILIES.forEach { family ->
+            val llmPath = settingsManager.getLlmModelPath(family)
+            if (pointsInsideTarget(llmPath, target)) settingsManager.clearLlmModelPath(family)
+        }
         val whisperPaths = listOf(
             settingsManager.getWhisperEncoderPath(),
             settingsManager.getWhisperDecoderPath(),
