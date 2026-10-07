@@ -26,6 +26,7 @@ import com.subtitleedit.ui.components.SectionHeader
 import com.subtitleedit.ui.components.SettingsSwitchRow
 
 data class WhisperSettingsState(
+    val dynamicPaddingEnabled: Boolean = true,
     val threads: Int = 4,
     val hotwordsEnabled: Boolean = false,
     val hotwords: String = "",
@@ -37,6 +38,7 @@ fun WhisperSettingsScreen(
     state: WhisperSettingsState,
     onBack: () -> Unit,
     onOpenVadSettings: () -> Unit,
+    onDynamicPaddingEnabledChanged: (Boolean) -> Unit,
     onThreadsChanged: (Float) -> Unit,
     onHotwordsEnabledChanged: (Boolean) -> Unit,
     onHotwordsChanged: (String) -> Unit,
@@ -53,6 +55,13 @@ fun WhisperSettingsScreen(
                 Text(
                     text = stringResource(R.string.activity_whisper_settings_vad_title),
                     style = MaterialTheme.typography.titleMedium
+                )
+                SettingsSwitchRow(
+                    title = stringResource(R.string.activity_speech_to_subtitle_settings_text_14),
+                    description = stringResource(R.string.activity_speech_to_subtitle_settings_text_15),
+                    checked = state.dynamicPaddingEnabled,
+                    onCheckedChange = onDynamicPaddingEnabledChanged,
+                    modifier = Modifier.padding(top = 8.dp)
                 )
                 OutlinedButton(
                     onClick = onOpenVadSettings,

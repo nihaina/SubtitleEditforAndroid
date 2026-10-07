@@ -28,6 +28,7 @@ import com.subtitleedit.ui.components.SettingsSwitchRow
 
 data class AsrTimelineSettingsState(
     val useVadTimestamp: Boolean = false,
+    val dynamicPaddingEnabled: Boolean = true,
     val fixedSegmentSeconds: Int = 10,
     val fixedSegmentSecondsText: String = "10",
     val fixedVadSegmentation: Boolean = true,
@@ -48,6 +49,7 @@ fun AsrTimelineSettingsScreen(
     onBack: () -> Unit,
     onOpenVadSettings: () -> Unit,
     onUseVadTimestampChanged: (Boolean) -> Unit,
+    onDynamicPaddingEnabledChanged: (Boolean) -> Unit,
     onFixedSegmentSecondsChanged: (Float) -> Unit,
     onFixedSegmentSecondsTextChanged: (String) -> Unit,
     onFixedVadSegmentationChanged: (Boolean) -> Unit,
@@ -70,6 +72,13 @@ fun AsrTimelineSettingsScreen(
                     title = stringResource(R.string.qwen3_asr_vad_switch),
                     checked = state.useVadTimestamp,
                     onCheckedChange = onUseVadTimestampChanged
+                )
+                SettingsSwitchRow(
+                    title = stringResource(R.string.activity_speech_to_subtitle_settings_text_14),
+                    description = stringResource(R.string.activity_speech_to_subtitle_settings_text_15),
+                    checked = state.dynamicPaddingEnabled,
+                    onCheckedChange = onDynamicPaddingEnabledChanged,
+                    modifier = Modifier.padding(top = 8.dp)
                 )
                 Text(
                     text = stringResource(R.string.asr_timeline_vad_hint),

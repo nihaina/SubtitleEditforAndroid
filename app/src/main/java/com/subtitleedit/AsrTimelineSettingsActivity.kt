@@ -39,6 +39,7 @@ abstract class AsrTimelineSettingsActivity : AppComposeActivity() {
                         startActivity(Intent(this, VadModelSettingsActivity::class.java))
                     },
                     onUseVadTimestampChanged = viewModel::setUseVadTimestamp,
+                    onDynamicPaddingEnabledChanged = viewModel::setDynamicPaddingEnabled,
                     onFixedSegmentSecondsChanged = viewModel::setFixedSegmentSeconds,
                     onFixedSegmentSecondsTextChanged = viewModel::setFixedSegmentSecondsText,
                     onFixedVadSegmentationChanged = viewModel::setFixedVadSegmentation,

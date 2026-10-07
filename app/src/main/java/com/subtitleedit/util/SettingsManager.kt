@@ -1050,12 +1050,26 @@ class SettingsManager private constructor(context: Context) {
         }
     }
 
-    fun isSpeechVadDynamicPaddingEnabled(): Boolean {
-        return prefs.getBoolean(KEY_STT_VAD_DYNAMIC_PADDING_ENABLED, true)
+    fun isSpeechVadDynamicPaddingEnabled(type: String = getAsrModelType()): Boolean {
+        val key = when (type) {
+            ASR_MODEL_WHISPER -> "${KEY_ASR_TIMELINE_PREFIX}${ASR_MODEL_WHISPER}_dynamic_padding_enabled"
+            else -> timelineKey("dynamic_padding_enabled", type)
+        } ?: return prefs.getBoolean(KEY_STT_VAD_DYNAMIC_PADDING_ENABLED, true)
+        return prefs.getBoolean(
+            key,
+            prefs.getBoolean(KEY_STT_VAD_DYNAMIC_PADDING_ENABLED, true)
+        )
     }
 
-    fun setSpeechVadDynamicPaddingEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_STT_VAD_DYNAMIC_PADDING_ENABLED, enabled).apply()
+    fun setSpeechVadDynamicPaddingEnabled(
+        enabled: Boolean,
+        type: String = getAsrModelType()
+    ) {
+        val key = when (type) {
+            ASR_MODEL_WHISPER -> "${KEY_ASR_TIMELINE_PREFIX}${ASR_MODEL_WHISPER}_dynamic_padding_enabled"
+            else -> timelineKey("dynamic_padding_enabled", type)
+        } ?: return
+        prefs.edit().putBoolean(key, enabled).apply()
     }
 
     fun isSpeechVadMergeEnabled(): Boolean {

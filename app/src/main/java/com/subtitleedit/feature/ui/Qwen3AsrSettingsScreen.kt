@@ -50,6 +50,9 @@ fun Qwen3AsrSettingsScreen(
         val gap = ((settingsManager.getSpeechTokenTimestampMergeGapMs() + 25) / 50) * 50
         Qwen3AsrSettingsValues(
             useVadTimestamp = settingsManager.isAsrVadTimestampEnabled(SettingsManager.ASR_MODEL_QWEN3_ASR),
+            dynamicPaddingEnabled = settingsManager.isSpeechVadDynamicPaddingEnabled(
+                SettingsManager.ASR_MODEL_QWEN3_ASR
+            ),
             forcedAlignment = forcedAlignmentAvailable && settingsManager.isSpeechTokenTimestampEnabled(),
             mergeSegments = settingsManager.isSpeechTokenTimestampMergeEnabled(),
             smartMerge = settingsManager.isSpeechTokenTimestampSmartMergeEnabled(),
@@ -60,6 +63,7 @@ fun Qwen3AsrSettingsScreen(
     }
 
     var useVadTimestamp by rememberSaveable(refreshKey) { mutableStateOf(initial.useVadTimestamp) }
+    var dynamicPaddingEnabled by rememberSaveable(refreshKey) { mutableStateOf(initial.dynamicPaddingEnabled) }
     var forcedAlignment by rememberSaveable(refreshKey) { mutableStateOf(initial.forcedAlignment) }
     var mergeSegments by rememberSaveable(refreshKey) { mutableStateOf(initial.mergeSegments) }
     var smartMerge by rememberSaveable(refreshKey) { mutableStateOf(initial.smartMerge) }
@@ -95,6 +99,19 @@ fun Qwen3AsrSettingsScreen(
                         }
                     },
                     modifier = Modifier.padding(top = 12.dp)
+                )
+                SettingsSwitchRow(
+                    title = stringResource(R.string.activity_speech_to_subtitle_settings_text_14),
+                    description = stringResource(R.string.activity_speech_to_subtitle_settings_text_15),
+                    checked = dynamicPaddingEnabled,
+                    onCheckedChange = { enabled ->
+                        dynamicPaddingEnabled = enabled
+                        settingsManager.setSpeechVadDynamicPaddingEnabled(
+                            enabled,
+                            SettingsManager.ASR_MODEL_QWEN3_ASR
+                        )
+                    },
+                    modifier = Modifier.padding(top = 8.dp)
                 )
                 SupportingText(
                     text = stringResource(R.string.qwen3_asr_vad_hint),
@@ -285,6 +302,7 @@ private fun SupportingText(text: String, modifier: Modifier = Modifier) {
 
 private data class Qwen3AsrSettingsValues(
     val useVadTimestamp: Boolean,
+    val dynamicPaddingEnabled: Boolean,
     val forcedAlignment: Boolean,
     val mergeSegments: Boolean,
     val smartMerge: Boolean,

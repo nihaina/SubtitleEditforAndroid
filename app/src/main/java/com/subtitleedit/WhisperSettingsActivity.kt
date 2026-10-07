@@ -25,6 +25,7 @@ class WhisperSettingsActivity : AppComposeActivity() {
                     onOpenVadSettings = {
                         startActivity(Intent(this, VadModelSettingsActivity::class.java))
                     },
+                    onDynamicPaddingEnabledChanged = viewModel::setDynamicPaddingEnabled,
                     onThreadsChanged = viewModel::setThreads,
                     onHotwordsEnabledChanged = viewModel::setHotwordsEnabled,
                     onHotwordsChanged = viewModel::setHotwords,

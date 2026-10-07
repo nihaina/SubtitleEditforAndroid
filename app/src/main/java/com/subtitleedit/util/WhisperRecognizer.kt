@@ -1450,7 +1450,7 @@ class WhisperRecognizer(
                 TokenTimestampGenerator.isQwen3ForcedAlignerConfigured(context, settingsManager()))
 
     private fun shouldUseDynamicPadding(): Boolean =
-        settingsManager().isSpeechVadDynamicPaddingEnabled()
+        settingsManager().isSpeechVadDynamicPaddingEnabled(modelType)
 
     private fun isSingleFileModel(): Boolean = isSenseVoice() || isParakeetCtc()
 

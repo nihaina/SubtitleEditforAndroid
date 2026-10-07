@@ -25,6 +25,7 @@ internal class AsrTimelineSettingsViewModel(
         val mergeGapMs = settingsManager.getSpeechTokenTimestampMergeGapMs()
         return AsrTimelineSettingsState(
             useVadTimestamp = settingsManager.isAsrVadTimestampEnabled(modelType),
+            dynamicPaddingEnabled = settingsManager.isSpeechVadDynamicPaddingEnabled(modelType),
             fixedSegmentSeconds = fixedSegmentSeconds,
             fixedSegmentSecondsText = String.format(Locale.US, "%d", fixedSegmentSeconds),
             fixedVadSegmentation = settingsManager.isSpeechFixedVadSegmentationEnabled(modelType),
@@ -52,6 +53,11 @@ internal class AsrTimelineSettingsViewModel(
                 }
             )
         }
+    }
+
+    fun setDynamicPaddingEnabled(enabled: Boolean) {
+        settingsManager.setSpeechVadDynamicPaddingEnabled(enabled, modelType)
+        setState { copy(dynamicPaddingEnabled = enabled) }
     }
 
     fun setFixedSegmentSeconds(value: Float) {

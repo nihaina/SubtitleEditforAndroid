@@ -13,12 +13,20 @@ internal class WhisperSettingsViewModel(
     init {
         setState {
             WhisperSettingsState(
+                dynamicPaddingEnabled = settings.isSpeechVadDynamicPaddingEnabled(
+                    SettingsManager.ASR_MODEL_WHISPER
+                ),
                 threads = settings.getSpeechWhisperThreads(),
                 hotwordsEnabled = settings.isSpeechHotwordsEnabled(),
                 hotwords = settings.getSpeechHotwords(),
                 hotwordsScore = settings.getSpeechHotwordsScore()
             )
         }
+    }
+
+    fun setDynamicPaddingEnabled(enabled: Boolean) {
+        settings.setSpeechVadDynamicPaddingEnabled(enabled, SettingsManager.ASR_MODEL_WHISPER)
+        setState { copy(dynamicPaddingEnabled = enabled) }
     }
 
     fun setThreads(value: Float) {
