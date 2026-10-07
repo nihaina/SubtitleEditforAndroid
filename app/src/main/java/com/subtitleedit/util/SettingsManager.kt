@@ -96,6 +96,8 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_LLM_MODEL_FAMILY = "llm_model_family"
         private const val KEY_LLM_REPACK_ENABLED = "llm_repack_enabled"
         private const val KEY_LLM_CONTEXT_SIZE = "llm_context_size"
+        private const val KEY_LLM_SUBTITLES_PER_REQUEST = "llm_subtitles_per_request"
+        private const val KEY_AI_SUBTITLES_PER_REQUEST = "ai_subtitles_per_request"
         private const val KEY_VAD_THRESHOLD = "vad_threshold"
         private const val KEY_VAD_MIN_SILENCE_DURATION = "vad_min_silence_duration"
         private const val KEY_VAD_MIN_SPEECH_DURATION = "vad_min_speech_duration"
@@ -877,6 +879,27 @@ class SettingsManager private constructor(context: Context) {
 
     fun setLlmContextSize(size: Int) {
         prefs.edit().putInt(KEY_LLM_CONTEXT_SIZE, size.coerceIn(1024, 32768)).apply()
+    }
+
+    fun getAiSubtitlesPerRequest(provider: String): Int {
+        val key = if (provider == AiProviderConfig.LOCAL) {
+            KEY_LLM_SUBTITLES_PER_REQUEST
+        } else {
+            providerKey(KEY_AI_SUBTITLES_PER_REQUEST, provider)
+        }
+        return normalizeAiSubtitlesPerRequest(
+            provider,
+            prefs.getInt(key, defaultAiSubtitlesPerRequest(provider))
+        )
+    }
+
+    fun setAiSubtitlesPerRequest(provider: String, count: Int) {
+        val key = if (provider == AiProviderConfig.LOCAL) {
+            KEY_LLM_SUBTITLES_PER_REQUEST
+        } else {
+            providerKey(KEY_AI_SUBTITLES_PER_REQUEST, provider)
+        }
+        prefs.edit().putInt(key, normalizeAiSubtitlesPerRequest(provider, count)).apply()
     }
 
     /**

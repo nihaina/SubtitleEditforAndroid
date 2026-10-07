@@ -50,6 +50,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
+import com.subtitleedit.util.defaultAiSubtitlesPerRequest
 import com.subtitleedit.util.AiProviderConfig
 import com.subtitleedit.ui.components.AppCard
 import com.subtitleedit.ui.components.AppOption
@@ -74,6 +75,7 @@ data class AiSettingsScreenState(
     val provider: String,
     val localModelName: String,
     val localContextSize: Int = 2048,
+    val subtitlesPerRequest: Int = 200,
     /** Runtime state is deliberately separate from the imported model path. */
     val localModelLoaded: Boolean = false,
     val localModelLoading: Boolean = false,
@@ -107,6 +109,7 @@ data class AiSettingsScreenState(
                 provider = provider,
                 localModelName = settings.getLlmModelDisplayName(),
                 localContextSize = settings.getLlmContextSize(),
+                subtitlesPerRequest = settings.getAiSubtitlesPerRequest(provider),
                 apiKey = settings.getAiApiKey(provider),
                 baseUrl = if (AiProviderConfig.getProvider(provider).customEndpoint) {
                     settings.getAiBaseUrl(provider)
@@ -173,6 +176,9 @@ fun AiSettingsScreen(
                 onCopyApiKey = onCopyApiKey,
                 onContextSizeChange = { value ->
                     onStateChange { it.copy(localContextSize = value) }
+                },
+                onSubtitlesPerRequestChange = { value ->
+                    onStateChange { it.copy(subtitlesPerRequest = value) }
                 },
                 onLoadLocalModel = onLoadLocalModel,
                 onUnloadLocalModel = onUnloadLocalModel
@@ -242,6 +248,7 @@ private fun ProviderCard(
     onHideApiKey: () -> Unit,
     onCopyApiKey: () -> Unit,
     onContextSizeChange: (Int) -> Unit,
+    onSubtitlesPerRequestChange: (Int) -> Unit,
     onLoadLocalModel: () -> Unit,
     onUnloadLocalModel: () -> Unit
 ) {
@@ -253,6 +260,39 @@ private fun ProviderCard(
             label = stringResource(R.string.activity_ai_settings_text_02),
             selectedProvider = state.provider,
             onSelect = onSelectProvider
+        )
+        val maxSubtitlesPerRequest = if (provider.id == AiProviderConfig.LOCAL) 100 else 1000
+        var subtitlesPerRequestText by remember(state.subtitlesPerRequest) {
+            mutableStateOf(state.subtitlesPerRequest.toString())
+        }
+        OutlinedTextField(
+            value = subtitlesPerRequestText,
+            onValueChange = { value ->
+                val digits = value.filter(Char::isDigit).take(4)
+                subtitlesPerRequestText = digits
+                digits.toIntOrNull()
+                    ?.let { it.coerceIn(1, maxSubtitlesPerRequest) }
+                    ?.let { bounded ->
+                        subtitlesPerRequestText = bounded.toString()
+                        onSubtitlesPerRequestChange(bounded)
+                    }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            label = { Text(stringResource(R.string.activity_ai_settings_subtitles_per_request)) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+        )
+        Text(
+            text = stringResource(
+                R.string.activity_ai_settings_subtitles_per_request_hint,
+                maxSubtitlesPerRequest,
+                defaultAiSubtitlesPerRequest(provider.id)
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp)
         )
         if (provider.id == AiProviderConfig.LOCAL) {
             var contextSizeText by remember(state.localContextSize) {

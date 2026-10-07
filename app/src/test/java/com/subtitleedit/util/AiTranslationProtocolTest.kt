@@ -12,22 +12,40 @@ import java.io.IOException
 class AiTranslationProtocolTest {
 
     @Test
-    fun batches_areAlwaysSplitAtOneHundredFiftySubtitles() {
+    fun batches_defaultToTwoHundredSubtitles() {
         val batches = splitSubtitleTranslationBatches(
-            List(301) { index -> testSubtitle(index + 1, "字幕${index + 1}") }
+            List(401) { index -> testSubtitle(index + 1, "字幕${index + 1}") }
         )
 
-        assertEquals(listOf(150, 150, 1), batches.map { it.size })
+        assertEquals(listOf(200, 200, 1), batches.map { it.size })
     }
 
     @Test
-    fun localModelBatches_areSplitAtThirtySubtitles() {
+    fun localModelBatches_useConfiguredSubtitleCount() {
         val batches = splitSubtitleTranslationBatches(
             List(61) { index -> testSubtitle(index + 1, "字幕${index + 1}") },
-            maxSubtitlesPerBatch = LOCAL_AI_SUBTITLES_PER_REQUEST
+            maxSubtitlesPerBatch = DEFAULT_LOCAL_AI_SUBTITLES_PER_REQUEST
         )
 
-        assertEquals(listOf(30, 30, 1), batches.map { it.size })
+        assertEquals(listOf(20, 20, 20, 1), batches.map { it.size })
+    }
+
+    @Test
+    fun modelBatchSize_usesProviderSpecificDefaultsAndRanges() {
+        assertEquals(20, DEFAULT_LOCAL_AI_SUBTITLES_PER_REQUEST)
+        assertEquals(200, DEFAULT_REMOTE_AI_SUBTITLES_PER_REQUEST)
+        assertEquals(20, defaultAiSubtitlesPerRequest(AiProviderConfig.LOCAL))
+        assertEquals(200, defaultAiSubtitlesPerRequest(AiProviderConfig.OPENAI))
+        assertEquals(1, normalizeAiSubtitlesPerRequest(AiProviderConfig.LOCAL, 0))
+        assertEquals(100, normalizeAiSubtitlesPerRequest(AiProviderConfig.LOCAL, 101))
+        assertEquals(1, normalizeAiSubtitlesPerRequest(AiProviderConfig.OPENAI, 0))
+        assertEquals(1000, normalizeAiSubtitlesPerRequest(AiProviderConfig.OPENAI, 1001))
+
+        val batches = splitSubtitleTranslationBatches(
+            List(2001) { index -> testSubtitle(index + 1, "字幕${index + 1}") },
+            maxSubtitlesPerBatch = normalizeAiSubtitlesPerRequest(AiProviderConfig.OPENAI, 1000)
+        )
+        assertEquals(listOf(1000, 1000, 1), batches.map { it.size })
     }
 
     @Test

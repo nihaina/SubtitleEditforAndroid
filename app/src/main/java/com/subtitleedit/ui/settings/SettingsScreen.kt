@@ -131,14 +131,14 @@ fun SettingsScreen(
             Spacer(Modifier.height(20.dp))
             SettingsGroup {
                 SettingsRow(
-                    title = stringResource(R.string.activity_settings_ai_entry),
-                    iconRes = R.drawable.ic_ai_translate,
-                    onClick = onOpenAiSettings
-                )
-                SettingsRow(
                     title = stringResource(R.string.activity_settings_text_04),
                     iconRes = R.drawable.ic_model,
                     onClick = onOpenModelManagement
+                )
+                SettingsRow(
+                    title = stringResource(R.string.activity_settings_ai_entry),
+                    iconRes = R.drawable.ic_ai_translate,
+                    onClick = onOpenAiSettings
                 )
                 SettingsRow(
                     title = stringResource(R.string.tts_settings),

@@ -5,8 +5,28 @@ import com.subtitleedit.util.SubtitleParser.SubtitleFormat
 import java.io.IOException
 import java.util.Locale
 
-internal const val DEFAULT_AI_SUBTITLES_PER_REQUEST = 150
-internal const val LOCAL_AI_SUBTITLES_PER_REQUEST = 30
+internal const val DEFAULT_LOCAL_AI_SUBTITLES_PER_REQUEST = 20
+internal const val MAX_LOCAL_AI_SUBTITLES_PER_REQUEST = 100
+internal const val DEFAULT_REMOTE_AI_SUBTITLES_PER_REQUEST = 200
+internal const val MAX_REMOTE_AI_SUBTITLES_PER_REQUEST = 1000
+internal const val DEFAULT_AI_SUBTITLES_PER_REQUEST = DEFAULT_REMOTE_AI_SUBTITLES_PER_REQUEST
+
+internal fun defaultAiSubtitlesPerRequest(provider: String): Int =
+    if (provider == AiProviderConfig.LOCAL) {
+        DEFAULT_LOCAL_AI_SUBTITLES_PER_REQUEST
+    } else {
+        DEFAULT_REMOTE_AI_SUBTITLES_PER_REQUEST
+    }
+
+internal fun normalizeAiSubtitlesPerRequest(provider: String, value: Int): Int =
+    value.coerceIn(
+        1,
+        if (provider == AiProviderConfig.LOCAL) {
+            MAX_LOCAL_AI_SUBTITLES_PER_REQUEST
+        } else {
+            MAX_REMOTE_AI_SUBTITLES_PER_REQUEST
+        }
+    )
 private const val TRANSLATION_BLOCK_START = "start"
 private const val TRANSLATION_BLOCK_END = "end"
 private val TIMED_SUBTITLE_LINE = Regex(

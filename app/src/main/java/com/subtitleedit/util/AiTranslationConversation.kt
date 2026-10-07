@@ -19,7 +19,7 @@ import java.util.UUID
  */
 class AiTranslationConversation(
     context: Context,
-    provider: String,
+    private val provider: String,
     apiKey: String,
     model: String,
     private val targetLanguage: String,
@@ -33,8 +33,10 @@ class AiTranslationConversation(
     private val historyTitle: String? = null
 ) {
     private val localProvider = provider == AiProviderConfig.LOCAL
-    private val indexTranslateModel = localProvider &&
-        SettingsManager.getInstance(context).getLlmModelFamily() == SettingsManager.LLM_MODEL_INDEX_TRANSLATE
+    private val settingsManager = SettingsManager.getInstance(context)
+    private val indexTranslate2bModel = localProvider &&
+        settingsManager.getLlmModelFamily() == SettingsManager.LLM_MODEL_INDEX_TRANSLATE &&
+        isIndexTranslate2b(settingsManager)
 
     data class TranslationRunResult(
         val translations: List<String>,
@@ -59,17 +61,25 @@ class AiTranslationConversation(
             modelSupportsReasoning = AiProviderConfig.modelCapabilities(provider, model).reasoning,
             thinkingEnabled = thinkingEnabled,
             localModelPath = if (provider == AiProviderConfig.LOCAL) {
-                SettingsManager.getInstance(context).getLlmModelPath()
+                settingsManager.getLlmModelPath()
             } else {
                 ""
             },
-            localRepackEnabled = SettingsManager.getInstance(context).isLlmRepackEnabled(),
-            localContextSize = SettingsManager.getInstance(context).getLlmContextSize()
+            localRepackEnabled = settingsManager.isLlmRepackEnabled(),
+            localContextSize = settingsManager.getLlmContextSize()
         ),
         tools = if (provider == AiProviderConfig.LOCAL) emptyList() else ChatTools.create(context.applicationContext),
         context = context.applicationContext
     )
     private val historyStore = ChatHistoryStore(context)
+
+    private fun isIndexTranslate2b(settings: SettingsManager): Boolean {
+        // Downloaded and manually selected Index GGUF files expose their size in the
+        // display name. Only an explicit 2B match opts into the short prompt.
+        val model2bPattern = Regex("(?i)(^|[^a-z0-9])2b([^a-z0-9]|$)")
+        return model2bPattern.containsMatchIn(settings.getLlmModelDisplayName()) ||
+            model2bPattern.containsMatchIn(settings.getLlmModelPath())
+    }
 
     fun cancel() = conversation.cancel()
 
@@ -148,11 +158,7 @@ class AiTranslationConversation(
         try {
             splitSubtitleTranslationBatches(
                 subtitles,
-                maxSubtitlesPerBatch = if (localProvider) {
-                    LOCAL_AI_SUBTITLES_PER_REQUEST
-                } else {
-                    DEFAULT_AI_SUBTITLES_PER_REQUEST
-                }
+                maxSubtitlesPerBatch = settingsManager.getAiSubtitlesPerRequest(provider)
             ).forEach { batch ->
                 if (isCancelled()) throw CancellationException("翻译已取消")
                 if (localProvider) {
@@ -172,7 +178,7 @@ class AiTranslationConversation(
                     format = subtitleFormat,
                     sequenceOnly = localProvider,
                     includeBlockMarkers = !localProvider,
-                    indexTranslate = indexTranslateModel
+                    indexTranslate = indexTranslate2bModel
                 )
                 val result = conversation.sendUserMessage(
                     content = userContent,

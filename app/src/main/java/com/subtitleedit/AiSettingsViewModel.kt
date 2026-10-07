@@ -187,6 +187,9 @@ internal class AiSettingsViewModel(
     }
 
     private fun persistChangedFields(current: AiSettingsScreenState, next: AiSettingsScreenState) {
+        if (current.subtitlesPerRequest != next.subtitlesPerRequest) {
+            settingsManager.setAiSubtitlesPerRequest(current.provider, next.subtitlesPerRequest)
+        }
         if (current.localContextSize != next.localContextSize) {
             settingsManager.setLlmContextSize(next.localContextSize)
         }
@@ -245,6 +248,7 @@ internal class AiSettingsViewModel(
             current.copy(
                 provider = provider,
                 apiKey = settingsManager.getAiApiKey(provider),
+                subtitlesPerRequest = settingsManager.getAiSubtitlesPerRequest(provider),
                 baseUrl = if (AiProviderConfig.getProvider(provider).customEndpoint) {
                     settingsManager.getAiBaseUrl(provider)
                 } else {

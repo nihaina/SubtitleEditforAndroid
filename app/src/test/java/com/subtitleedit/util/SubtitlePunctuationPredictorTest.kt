@@ -15,15 +15,15 @@ import java.io.IOException
 
 class SubtitlePunctuationPredictorTest {
     @Test
-    fun batchesContinueWithTheNext150EntriesWithoutRepeatingThePreviousTail() = runBlocking {
+    fun batchesContinueWithTheNext200EntriesWithoutRepeatingThePreviousTail() = runBlocking {
         val cases = mapOf(
             0 to emptyList(),
             1 to listOf(1..1),
-            150 to listOf(1..150),
-            151 to listOf(1..150, 151..151),
-            300 to listOf(1..150, 151..300),
-            301 to listOf(1..150, 151..300, 301..301),
-            450 to listOf(1..150, 151..300, 301..450)
+            200 to listOf(1..200),
+            201 to listOf(1..200, 201..201),
+            400 to listOf(1..200, 201..400),
+            401 to listOf(1..200, 201..400, 401..401),
+            600 to listOf(1..200, 201..400, 401..600)
         )
         for ((count, ranges) in cases) {
             val source = subtitleEntries(count)
@@ -42,19 +42,39 @@ class SubtitlePunctuationPredictorTest {
     }
 
     @Test
-    fun localModelSession_usesThirtyEntriesPerRequest() = runBlocking {
+    fun localModelSession_usesConfiguredEntriesPerRequest() = runBlocking {
         val requests = mutableListOf<String>()
         val source = subtitleEntries(61)
 
         val result = SubtitlePunctuationPredictor.Session(
             source,
-            entriesPerBatch = LOCAL_AI_SUBTITLES_PER_REQUEST
+            entriesPerBatch = DEFAULT_LOCAL_AI_SUBTITLES_PER_REQUEST
         ).run(requestPrediction = { text ->
             requests += text
             punctuateRequest(text, "。")
         })
 
-        assertEquals(listOf(30, 30, 1), requests.map { text ->
+        assertEquals(listOf(20, 20, 20, 1), requests.map { text ->
+            text.lines().count { it.startsWith("第") }
+        })
+        assertEquals(source.map { it.copy(text = "${it.text}。") }, result)
+    }
+
+    @Test
+    fun remoteModelSession_usesMaximumConfiguredBatchSize() = runBlocking {
+        val source = subtitleEntries(2001)
+        val requests = mutableListOf<String>()
+        val batchSize = normalizeAiSubtitlesPerRequest(AiProviderConfig.OPENAI, 1000)
+
+        val result = SubtitlePunctuationPredictor.Session(
+            source,
+            entriesPerBatch = batchSize
+        ).run(requestPrediction = { text ->
+            requests += text
+            punctuateRequest(text, "。")
+        })
+
+        assertEquals(listOf(1000, 1000, 1), requests.map { text ->
             text.lines().count { it.startsWith("第") }
         })
         assertEquals(source.map { it.copy(text = "${it.text}。") }, result)
@@ -132,8 +152,8 @@ class SubtitlePunctuationPredictorTest {
             extractSubtitleAiResponse(reply)
         }
 
-        assertEquals(listOf(150, 150, 1), requests.map { text -> text.lines().count { it.startsWith("第") } })
-        assertEquals("start\n1301\n第301条\nend", requests.last())
+        assertEquals(listOf(200, 101), requests.map { text -> text.lines().count { it.startsWith("第") } })
+        assertEquals("start\n1201\n第201条", requests.last().lines().take(3).joinToString("\n"))
         assertEquals(prepared.map { it.copy(text = "${it.text}。") }, result)
     }
 
@@ -295,19 +315,18 @@ class SubtitlePunctuationPredictorTest {
         }.exceptionOrNull()
 
         assertTrue(error is IOException)
-        assertEquals(150, session.processedCount)
-        assertEquals(listOf(0 to 301, 150 to 301), progress)
+        assertEquals(200, session.processedCount)
+        assertEquals(listOf(0 to 301, 200 to 301), progress)
         val result = session.run(onProgress = { count, total -> progress += count to total }) { text ->
             requests += text
             punctuateRequest(text, "？")
         }
 
         assertEquals(requests[1], requests[2])
-        assertEquals(listOf("start", "1151", "第151条"), requests[2].lines().take(3))
-        assertEquals("start\n1301\n第301条\nend", requests[3])
-        assertEquals(listOf(0 to 301, 150 to 301, 150 to 301, 300 to 301, 301 to 301), progress)
+        assertEquals(listOf("start", "1201", "第201条"), requests[2].lines().take(3))
+        assertEquals(listOf(0 to 301, 200 to 301, 200 to 301, 301 to 301), progress)
         assertEquals(source.mapIndexed { index, entry ->
-            entry.copy(text = entry.text + if (index < 150) "！" else "？")
+            entry.copy(text = entry.text + if (index < 200) "！" else "？")
         }, result)
         assertEquals(result, session.run { throw AssertionError("Completed session must not send again") })
     }
@@ -326,11 +345,11 @@ class SubtitlePunctuationPredictorTest {
             }.exceptionOrNull()
 
             assertSame(failure, error)
-            assertEquals(150, session.processedCount)
+            assertEquals(200, session.processedCount)
             val requests = mutableListOf<String>()
             val result = session.run { text -> requests += text; text }
-            assertEquals(listOf("start", "1151", "第151条"), requests.first().lines().take(3))
-            assertEquals(2, requests.size)
+            assertEquals(listOf("start", "1201", "第201条"), requests.first().lines().take(3))
+            assertEquals(1, requests.size)
             assertEquals(source, result)
         }
     }
@@ -360,7 +379,7 @@ class SubtitlePunctuationPredictorTest {
 
     @Test
     fun fallbackSequenceNumbersContinueAcrossBatches() = runBlocking {
-        val source = subtitleEntries(151).map { it.copy(index = 0) }
+        val source = subtitleEntries(201).map { it.copy(index = 0) }
         val requests = mutableListOf<String>()
 
         val result = SubtitlePunctuationPredictor.predictSubtitleEntriesInBatches(source) { text ->
@@ -369,7 +388,7 @@ class SubtitlePunctuationPredictorTest {
         }
 
         assertEquals(source, result)
-        assertEquals("start\n151\n第151条\nend", requests.last())
+        assertEquals("start\n201\n第201条\nend", requests.last())
     }
 
     @Test
