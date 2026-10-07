@@ -2,6 +2,7 @@ package com.subtitleedit.util
 
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.subtitle.LrcSubtitleFormatHandler
+import com.subtitleedit.util.subtitle.LrcVariant
 import com.subtitleedit.util.subtitle.SrtSubtitleFormatHandler
 import com.subtitleedit.util.subtitle.SubtitleDocument
 import com.subtitleedit.util.subtitle.SubtitleFormatHandler
@@ -110,8 +111,13 @@ object SubtitleParser {
     fun toSRT(entries: List<SubtitleEntry>): String =
         SrtSubtitleFormatHandler.write(SubtitleDocument(SubtitleFormat.SRT, entries))
 
-    fun toLRC(entries: List<SubtitleEntry>, header: String = ""): String =
-        LrcSubtitleFormatHandler.write(SubtitleDocument(SubtitleFormat.LRC, entries, header))
+    fun toLRC(
+        entries: List<SubtitleEntry>,
+        header: String = "",
+        lrcVariant: LrcVariant = LrcVariant.CENTISECONDS
+    ): String = LrcSubtitleFormatHandler.write(
+        SubtitleDocument(SubtitleFormat.LRC, entries, header, lrcVariant = lrcVariant)
+    )
 
     fun toVTT(
         entries: List<SubtitleEntry>,

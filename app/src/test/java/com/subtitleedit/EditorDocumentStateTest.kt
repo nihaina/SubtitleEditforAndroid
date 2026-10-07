@@ -2,6 +2,8 @@ package com.subtitleedit
 
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.util.SubtitleParser
+import com.subtitleedit.util.subtitle.LrcVariant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -66,5 +68,18 @@ class EditorDocumentStateTest {
 
         assertEquals(listOf(entry), viewModel.documentState.subtitleEntries)
         assertEquals("sample.srt", viewModel.documentState.documentTitle)
+    }
+
+    @Test
+    fun lrcVariantSurvivesEditorDocumentRoundTrip() {
+        val state = EditorDocumentState()
+        val source = SubtitleParser.parseDocument(
+            "[00:01.234]First\n[00:03.500]Second",
+            "sample.lrc"
+        )
+
+        state.replaceDocument(source)
+
+        assertEquals(LrcVariant.MILLISECONDS, state.subtitleDocument.lrcVariant)
     }
 }

@@ -1,6 +1,7 @@
 package com.subtitleedit.util
 
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.util.subtitle.LrcVariant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -37,6 +38,26 @@ class SubtitleParserTest {
         assertEquals(
             SubtitleParser.SubtitleFormat.LRC,
             SubtitleParser.detectFormat("[ti:title]\n[00:01.00]hi")
+        )
+    }
+
+    @Test
+    fun detectFormat_lrcRequiresTimeTagAtLineStart() {
+        assertEquals(
+            SubtitleParser.SubtitleFormat.TXT,
+            SubtitleParser.detectFormat("log message [00:01.00] is not a cue")
+        )
+        assertEquals(
+            SubtitleParser.SubtitleFormat.TXT,
+            SubtitleParser.detectFormat("[00:01.00]\n")
+        )
+    }
+
+    @Test
+    fun detectFormat_noEndTimeHeaderIdentifiesLrcWithoutCues() {
+        assertEquals(
+            SubtitleParser.SubtitleFormat.LRC,
+            SubtitleParser.detectFormat("[re: Subtitle Edit - LRC No End Time]\n", "empty.lrc")
         )
     }
 
@@ -251,6 +272,28 @@ class SubtitleParserTest {
     fun parseLRC_twoAndThreeDigitMillis() {
         assertEquals(1230L, SubtitleParser.parseLRC("[00:01.23]X")[0].startTime)
         assertEquals(1234L, SubtitleParser.parseLRC("[00:01.234]X")[0].startTime)
+    }
+
+    @Test
+    fun parseLRC_threeDigitVariantRoundTripsWithMillisecondPrecision() {
+        val document = SubtitleParser.parseDocument("[00:01.234]A\n[00:03.000]B", "song.lrc")
+        assertEquals(LrcVariant.MILLISECONDS, document.lrcVariant)
+        val serialized = SubtitleParser.serialize(document)
+        assertTrue(serialized.contains("[00:01.234]A"))
+        assertTrue(serialized.contains("[00:03.000]B"))
+    }
+
+    @Test
+    fun parseLRC_noEndTimeVariantDoesNotWriteTerminators() {
+        val document = SubtitleParser.parseDocument(
+            "[re: Subtitle Edit - LRC No End Time]\n[00:01.00]A\n[00:03.50]B",
+            "song.lrc"
+        )
+        assertEquals(LrcVariant.NO_END_TIME, document.lrcVariant)
+        val serialized = SubtitleParser.serialize(document)
+        assertTrue(serialized.contains("[00:01.00]A"))
+        assertTrue(serialized.contains("[00:03.50]B"))
+        assertFalse(serialized.contains("[00:05.50]"))
     }
 
     @Test
@@ -473,14 +516,14 @@ class SubtitleParserTest {
     }
 
     @Test
-    fun toLRC_keepsTerminatorUntilCuesExactlyTouch() {
+    fun toLRC_omitsTerminatorWhenGapIsUnderSubtitleEditThreshold() {
         val content = SubtitleParser.toLRC(
             listOf(
                 SubtitleEntry(startTime = 1000, endTime = 2950, text = "A"),
                 SubtitleEntry(startTime = 3000, endTime = 4000, text = "B")
             )
         )
-        assertEquals("[00:01.00]A\n[00:02.95]\n[00:03.00]B\n[00:04.00]\n", content)
+        assertEquals("[00:01.00]A\n[00:03.00]B\n[00:04.00]\n", content)
     }
 
     @Test

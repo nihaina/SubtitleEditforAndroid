@@ -784,6 +784,9 @@ class EditorActivity : AppCompatActivity() {
             sourceSnapshot.isBlank() ||
             !sourceContainsSubtitleMarker(sourceSnapshot)
         if (canApplyEntries) {
+            if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.LRC) {
+                stateModel.documentState.documentLrcVariant = parsedDocument.lrcVariant
+            }
             applySourceViewEntries(normalizeSourceViewEntries(parsedDocument.entries))
             stateModel.updateLatestSourceHistory(sourceSnapshot, stateModel.subtitleEntries)
             stateModel.documentState.sourceViewEntriesGeneration = editGeneration
@@ -1414,6 +1417,9 @@ class EditorActivity : AppCompatActivity() {
         if (deferLargeListEdit(document.entries.size) {
                 applyParsedListSourceDocument(document, content, generation)
             }) return
+        if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.LRC) {
+            stateModel.documentState.documentLrcVariant = document.lrcVariant
+        }
         applySourceViewEntries(normalizeSourceViewEntries(document.entries))
         stateModel.documentState.sourceViewEntriesGeneration = generation
         stateModel.sourceViewNeedsListSync = false

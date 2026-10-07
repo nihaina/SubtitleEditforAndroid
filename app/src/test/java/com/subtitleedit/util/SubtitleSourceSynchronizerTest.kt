@@ -118,6 +118,69 @@ Second
     }
 
     @Test
+    fun lrcTimestampInsideCueTextIsNotParsedAsAnotherCue() {
+        val source = "[00:01.00]A [00:02.00]\n[00:03.00]B\n"
+        val old = SubtitleParser.parseLRC(source)
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            old,
+            listOf(old[0], old[1].copy(text = "Changed"))
+        )
+
+        assertEquals("[00:01.00]A [00:02.00]\n[00:03.00]Changed\n", updated)
+    }
+
+    @Test
+    fun lrcMillisecondSourceKeepsThreeDigitPrecisionWhenTimingChanges() {
+        val source = "[00:01.234]Old\n[00:03.500]Next\n"
+        val old = SubtitleParser.parseDocument(source, format = SubtitleParser.SubtitleFormat.LRC).entries
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            old,
+            listOf(old[0].copy(startTime = 2_234L, text = "New"), old[1])
+        )
+
+        assertTrue(updated.contains("[00:02.234]New"))
+        assertTrue(updated.contains("[00:03.500]Next"))
+    }
+
+    @Test
+    fun lrcNoEndTimeSourceDoesNotGainSyntheticTerminatorsAfterTimingChanges() {
+        val source = "[re: Subtitle Edit - LRC No End Time]\n[00:01.00]Old\n[00:03.50]Next\n"
+        val old = SubtitleParser.parseDocument(source, format = SubtitleParser.SubtitleFormat.LRC).entries
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            old,
+            listOf(old[0].copy(startTime = 2_000L, text = "New"), old[1])
+        )
+
+        assertEquals(
+            "[re: Subtitle Edit - LRC No End Time]\n[00:02.00]New\n[00:03.50]Next\n",
+            updated
+        )
+    }
+
+    @Test
+    fun lrcSourceSynchronizerIgnoresInlineTimeTagsInPlainText() {
+        val source = "[00:01.00]Old\nA note [00:02.00] remains text\n[00:03.00]Next\n"
+        val old = SubtitleParser.parseDocument(source, format = SubtitleParser.SubtitleFormat.LRC).entries
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            old,
+            listOf(old[0].copy(text = "Changed"), old[1])
+        )
+
+        assertEquals(
+            "[00:01.00]Changed\nA note [00:02.00] remains text\n[00:03.00]Next\n",
+            updated
+        )
+    }
+
+    @Test
     fun lrcContiguousCuesKeepMissingTerminatorWhenTextChanges() {
         val source = "[00:01.00]A\n[00:02.00]B\n"
         val old = SubtitleParser.parseLRC(source)
