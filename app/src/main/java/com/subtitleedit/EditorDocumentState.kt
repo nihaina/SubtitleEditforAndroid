@@ -62,6 +62,13 @@ internal class EditorDocumentState {
         subtitleEntries = document.entries.map { it.copy() }.toMutableList()
     }
 
+    fun restoreVttMetadata(content: String) {
+        if (currentFormat != SubtitleParser.SubtitleFormat.VTT) return
+        val document = SubtitleParser.parseDocument(content, format = currentFormat)
+        documentHeader = document.header
+        documentFooter = document.footer
+    }
+
     fun startNewSubtitleDocument() {
         clearSubtitleDocumentReference()
         documentLrcVariant = LrcVariant.CENTISECONDS

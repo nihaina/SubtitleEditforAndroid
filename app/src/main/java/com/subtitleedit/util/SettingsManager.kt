@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import java.io.File
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
+import org.json.JSONArray
 
 /**
  * 设置管理器 - 保存和读取用户设置
@@ -58,6 +59,12 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_MODEL_DIRECTORY = "model_directory"
         private const val KEY_LOOP_SELECTED_SUBTITLE = "loop_selected_subtitle"
         private const val KEY_SELECT_PLAYING_SUBTITLE = "select_playing_subtitle"
+        private const val KEY_SUBTITLE_COLOR = "subtitle_color"
+        private const val KEY_RECENT_SUBTITLE_COLORS = "recent_subtitle_colors"
+        private val DEFAULT_SUBTITLE_COLORS = listOf(
+            0xFFFFFF00.toInt(), 0xFFFF0000.toInt(), 0xFF008000.toInt(), 0xFF0000FF.toInt(),
+            0xFFFFFFFF.toInt(), 0xFF000000.toInt(), 0xFF00FFFF.toInt(), 0xFFFFA500.toInt()
+        )
         private const val KEY_SHOW_ALL_FILE_TYPES = "show_all_file_types"
         private const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
         private const val KEY_FILE_SORT_FIELD = "file_sort_field"
@@ -548,6 +555,24 @@ class SettingsManager private constructor(context: Context) {
     /** 设置播放时是否自动选中播放头经过的字幕。 */
     fun setSelectPlayingSubtitleEnabled(enabled: Boolean) =
         prefs.edit().putBoolean(KEY_SELECT_PLAYING_SUBTITLE, enabled).apply()
+
+    fun getSubtitleColor(): Int = prefs.getInt(KEY_SUBTITLE_COLOR, DEFAULT_SUBTITLE_COLORS.first())
+
+    fun getRecentSubtitleColors(): List<Int> {
+        val saved = runCatching {
+            val values = JSONArray(prefs.getString(KEY_RECENT_SUBTITLE_COLORS, "[]"))
+            List(values.length()) { values.getInt(it) }
+        }.getOrDefault(emptyList())
+        return (saved + DEFAULT_SUBTITLE_COLORS).distinct().take(8)
+    }
+
+    fun rememberSubtitleColor(color: Int) {
+        val recent = (listOf(color) + getRecentSubtitleColors()).distinct().take(8)
+        prefs.edit()
+            .putInt(KEY_SUBTITLE_COLOR, color)
+            .putString(KEY_RECENT_SUBTITLE_COLORS, JSONArray(recent).toString())
+            .apply()
+    }
 
     /**
      * 获取 Whisper Encoder 文件路径

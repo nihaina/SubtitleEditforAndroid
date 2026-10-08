@@ -20,7 +20,9 @@ internal class EditorEditHistory {
             val after: ListState,
             override val description: String,
             val beforeSourceText: String? = null,
-            val afterSourceText: String? = null
+            val afterSourceText: String? = null,
+            val beforeHeader: String? = null,
+            val afterHeader: String? = null
         ) : Operation()
 
         data class SourceChange(
@@ -34,7 +36,8 @@ internal class EditorEditHistory {
         ) : Operation()
 
         override fun isSelectionOnly(): Boolean = when (this) {
-            is ListChange -> haveSameEditableEntries(before.entries, after.entries)
+            is ListChange -> beforeHeader == afterHeader &&
+                haveSameEditableEntries(before.entries, after.entries)
             is SourceChange -> false
         }
 
@@ -46,6 +49,7 @@ internal class EditorEditHistory {
                 is ListChange -> {
                     val target = if (undo) before else after
                     val targetSource = if (undo) beforeSourceText else afterSourceText
+                    val targetHeader = if (undo) beforeHeader else afterHeader
                     val entries = target.entries.map { it.copy() }
                     val previousEntries = state.subtitleEntries.toList()
                     val contentChanged = !haveSameEditableEntries(previousEntries, entries)
@@ -83,6 +87,7 @@ internal class EditorEditHistory {
                     state.sourceViewContent = source
                     state.sourceHistoryTextSnapshot = source
                     state.sourceViewNeedsListSync = false
+                    targetHeader?.let { state.documentHeader = it }
                     EditorHistoryCommandResult(
                         entries = state.subtitleEntries.map { it.copy() },
                         sourceText = source,
@@ -113,6 +118,7 @@ internal class EditorEditHistory {
                         )
                     state.originalFileContent = targetText
                     state.sourceViewContent = targetText
+                    if (cachedEntries != null) state.restoreVttMetadata(targetText)
                     state.sourceHistoryTextSnapshot = targetText
                     state.sourceViewNeedsListSync = cachedEntries == null
                     if (cachedEntries != null) {
@@ -256,7 +262,7 @@ internal class EditorEditHistory {
     }
 
     private fun Operation.isNoOp(): Boolean = when (this) {
-        is Operation.ListChange -> difference(before, after).isEmpty
+        is Operation.ListChange -> beforeHeader == afterHeader && difference(before, after).isEmpty
         is Operation.SourceChange -> beforeText == afterText
     }
 

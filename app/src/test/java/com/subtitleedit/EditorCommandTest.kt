@@ -3,6 +3,7 @@ package com.subtitleedit
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -73,6 +74,27 @@ class EditorCommandTest {
         assertEquals(1, result.removedCount)
         assertEquals(listOf("第一", "更新"), viewModel.subtitleDocument.entries.map { it.text })
         assertEquals(listOf(1, 2), viewModel.subtitleDocument.entries.map { it.index })
+    }
+
+    @Test
+    fun bulkTextCommandCanPreserveBlankRows() {
+        val viewModel = EditorViewModel()
+        viewModel.subtitleEntries = mutableListOf(
+            SubtitleEntry(index = 1, text = "第一"),
+            SubtitleEntry(index = 2, text = "<b></b>"),
+            SubtitleEntry(index = 3, text = "第三")
+        )
+
+        val result = viewModel.execute(
+            EditorCommand.UpdateTexts(
+                listOf(1 to "", 2 to "更新"),
+                removeBlankEntries = false
+            )
+        )
+
+        assertFalse(result.structureChanged)
+        assertEquals(listOf("第一", "", "更新"), viewModel.subtitleDocument.entries.map { it.text })
+        assertEquals(listOf(1, 2, 3), viewModel.subtitleDocument.entries.map { it.index })
     }
 
     @Test

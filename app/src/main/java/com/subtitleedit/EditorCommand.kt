@@ -88,7 +88,8 @@ internal sealed interface EditorCommand {
     }
 
     data class UpdateTexts(
-        val updates: List<Pair<Int, String>>
+        val updates: List<Pair<Int, String>>,
+        val removeBlankEntries: Boolean = true
     ) : EditorCommand {
         override fun execute(state: EditorDocumentState): EditorCommandResult {
             val validUpdates = linkedMapOf<Int, String>()
@@ -97,12 +98,13 @@ internal sealed interface EditorCommand {
             }
             if (validUpdates.isEmpty()) return EditorCommandResult()
 
-            val removedPositions = validUpdates
-                .filterValues { it.isBlank() }
-                .keys
-                .sortedDescending()
+            val removedPositions = if (removeBlankEntries) {
+                validUpdates.filterValues { it.isBlank() }.keys.sortedDescending()
+            } else {
+                emptyList()
+            }
             validUpdates
-                .filterValues { it.isNotBlank() }
+                .filter { (_, text) -> !removeBlankEntries || text.isNotBlank() }
                 .forEach { (position, text) -> state.subtitleEntries[position].text = text }
             removedPositions.forEach { state.subtitleEntries.removeAt(it) }
             if (removedPositions.isNotEmpty()) {

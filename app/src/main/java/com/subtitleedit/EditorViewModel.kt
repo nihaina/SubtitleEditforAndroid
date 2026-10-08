@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
+import com.subtitleedit.util.SubtitleColorOps
 import com.subtitleedit.util.subtitle.SubtitleDocument
 import com.subtitleedit.repository.DefaultSubtitleRepository
 import com.subtitleedit.repository.SubtitleRepository
@@ -228,17 +229,21 @@ internal class EditorViewModel(
         after: EditorEditHistory.ListState,
         description: String,
         beforeSourceText: String?,
-        afterSourceText: String?
+        afterSourceText: String?,
+        beforeHeader: String? = null,
+        afterHeader: String? = null
     ): Boolean {
         val difference = EditorEditHistory.difference(before, after)
-        if (difference.isEmpty) return false
+        if (difference.isEmpty && beforeHeader == afterHeader) return false
         editHistory.record(
             EditorEditHistory.Operation.ListChange(
                 before = before,
                 after = after,
                 description = description,
                 beforeSourceText = beforeSourceText,
-                afterSourceText = afterSourceText
+                afterSourceText = afterSourceText,
+                beforeHeader = beforeHeader,
+                afterHeader = afterHeader
             )
         )
         documentState.historyEntriesSnapshot = after.entries
@@ -309,6 +314,41 @@ internal class EditorViewModel(
         val result = applySubtitleEdit(documentState, command)
         if (result.changedPositions.isNotEmpty() || result.structureChanged) publishDocument()
         return result
+    }
+
+    /** Color may add WebVTT CSS, so source, header and text share one history record. */
+    fun applySubtitleColor(positions: Set<Int>, argb: Int, selectedIds: Set<Long>): EditorCommandResult {
+        val beforeDocument = documentState.subtitleDocument
+        val updated = SubtitleColorOps.apply(beforeDocument, positions, argb)
+        val updates = updated.entries.mapIndexedNotNull { index, entry ->
+            (index to entry.text).takeIf { entry.text != beforeDocument.entries[index].text }
+        }
+        val headerChanged = updated.header != beforeDocument.header
+        if (updates.isEmpty() && !headerChanged) return EditorCommandResult()
+        val beforeSource = documentState.originalFileContent
+        val result = applySubtitleEdit(documentState, EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
+        var source = syncSourceDocument(beforeSource, currentFormat, beforeDocument.entries, updated.entries)
+        if (currentFormat == SubtitleParser.SubtitleFormat.VTT && headerChanged) {
+            source = SubtitleColorOps.syncVttHeader(source, beforeDocument.header, updated.header)
+        }
+        documentState.documentHeader = updated.header
+        documentState.originalFileContent = source
+        documentState.sourceViewContent = source
+        documentState.sourceViewNeedsListSync = false
+        documentState.sourceHistoryTextSnapshot = source
+        recordListHistory(
+            before = EditorEditHistory.ListState(beforeDocument.entries, selectedIds),
+            after = EditorEditHistory.ListState(documentState.subtitleEntries.map { it.copy() }, selectedIds),
+            description = "颜色",
+            beforeSourceText = beforeSource,
+            afterSourceText = source,
+            beforeHeader = beforeDocument.header,
+            afterHeader = updated.header
+        )
+        publishDocument()
+        return if (headerChanged && result.changedPositions.isEmpty()) {
+            result.copy(changedPositions = positions.filterTo(mutableSetOf()) { it in updated.entries.indices })
+        } else result
     }
 
     fun executeHistoryCommand(

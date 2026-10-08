@@ -6,12 +6,16 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import android.view.Gravity
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -40,6 +44,7 @@ import com.subtitleedit.editor.EditorSourceWaveformSyncController
 import com.subtitleedit.editor.EditorSubtitleDialogController
 import com.subtitleedit.editor.EditorConfirmationDialogController
 import com.subtitleedit.editor.EditorHistoryCoordinator
+import com.subtitleedit.editor.EditorColorPickerDialog
 import com.subtitleedit.editor.EditorFileSessionController
 import com.subtitleedit.editor.EditorListOperationsController
 import com.subtitleedit.editor.EditorSourceViewState
@@ -66,6 +71,8 @@ import com.subtitleedit.util.SubtitlePasteOps
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleEntryOps
 import com.subtitleedit.util.SubtitleTextSplitOps
+import com.subtitleedit.util.SubtitleFormattingTagOps
+import com.subtitleedit.util.SubtitleStyleOps
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.audio.Mp3FileIssues
 import com.subtitleedit.util.SubtitleParser
@@ -784,6 +791,10 @@ class EditorActivity : AppCompatActivity() {
             sourceSnapshot.isBlank() ||
             !sourceContainsSubtitleMarker(sourceSnapshot)
         if (canApplyEntries) {
+            if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.VTT) {
+                stateModel.documentState.documentHeader = parsedDocument.header
+                stateModel.documentState.documentFooter = parsedDocument.footer
+            }
             if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.LRC) {
                 stateModel.documentState.documentLrcVariant = parsedDocument.lrcVariant
             }
@@ -1417,6 +1428,10 @@ class EditorActivity : AppCompatActivity() {
         if (deferLargeListEdit(document.entries.size) {
                 applyParsedListSourceDocument(document, content, generation)
             }) return
+        if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.VTT) {
+            stateModel.documentState.documentHeader = document.header
+            stateModel.documentState.documentFooter = document.footer
+        }
         if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.LRC) {
             stateModel.documentState.documentLrcVariant = document.lrcVariant
         }
@@ -1549,26 +1564,288 @@ class EditorActivity : AppCompatActivity() {
         }
         regularActions.add("删除" to { deleteSingleSubtitle(position) })
 
-        val itemsList = mutableListOf<String>()
-        if (hasSelection) {
-            itemsList.add("对勾选字幕操作 (${selectedCount}项)")
-        }
-        itemsList.addAll(regularActions.map { it.first })
-        
-        val items = itemsList.toTypedArray()
-        
-        AlertDialog.Builder(this)
-            .setItems(items) { _, which ->
-                if (hasSelection && which == 0) {
-                    // 用户选择了"只对勾选字幕生效"，显示针对选中项的操作菜单
+        val leftActions = buildList {
+            if (hasSelection) {
+                add("对勾选字幕操作\n(${selectedCount}项)" to {
                     showSelectionContextMenu(hasClipboard)
-                } else {
-                    val actualWhich = if (hasSelection) which - 1 else which
-                    regularActions.getOrNull(actualWhich)?.second?.invoke()
-                }
+                })
             }
-            .show()
+            addAll(regularActions)
+        }
+        showSplitContextMenu("字幕操作", leftActions, setOf(position))
     }
+
+    private fun showSplitContextMenu(
+        title: String,
+        leftActions: List<Pair<String, () -> Unit>>,
+        positions: Set<Int>
+    ) {
+        lateinit var dialog: AlertDialog
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            val horizontalPadding = menuDp(8)
+            setPadding(horizontalPadding, menuDp(4), horizontalPadding, menuDp(4))
+        }
+        val leftColumn = menuColumn(leftActions) { dialog.dismiss() }
+        val formattingButton = menuActionView(
+            "删除格式化标签",
+            { showFormattingTagMenu(positions, dialog) },
+            trailingChevron = true
+        ) {}
+        val rightColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(formattingButton, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            listOf(
+                "斜体" to SubtitleStyleOps.Style.ITALIC,
+                "粗体" to SubtitleStyleOps.Style.BOLD
+            ).forEach { (label, style) ->
+                addView(
+                    menuActionView(label, { toggleSubtitleStyle(positions, style) }, trailingChevron = false) {
+                        dialog.dismiss()
+                    },
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    )
+                )
+            }
+            addView(
+                menuActionView("颜色", { showSubtitleColorPicker(positions, dialog) }, trailingChevron = true) {},
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
+        val leftWidth = measureMenuWidth(leftColumn)
+        val rightWidth = measureMenuWidth(rightColumn)
+        val rightLabel = formattingButton.getChildAt(0) as TextView
+        val rightDecorationWidth = rightWidth - rightLabel.measuredWidth
+        content.addView(leftColumn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val divider = View(this).apply {
+            setBackgroundColor(ContextCompat.getColor(this@EditorActivity, R.color.outline_variant))
+        }
+        val dividerParams = LinearLayout.LayoutParams(menuDp(1), ViewGroup.LayoutParams.MATCH_PARENT).apply {
+            marginStart = menuDp(4)
+            marginEnd = menuDp(4)
+        }
+        content.addView(divider, dividerParams)
+        content.addView(rightColumn, LinearLayout.LayoutParams(rightWidth, ViewGroup.LayoutParams.WRAP_CONTENT))
+        val scrollContent = menuScrollContent(content)
+        dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(scrollContent)
+            .show()
+        val columnSpacing = content.paddingLeft + content.paddingRight +
+            dividerParams.width + dividerParams.marginStart + dividerParams.marginEnd
+        sizeMenuDialog(dialog, scrollContent) { availableWidth ->
+            val maxRightWidth = (availableWidth - columnSpacing - menuDp(80)).coerceAtLeast(1)
+            val fittedRightWidth = minOf(rightWidth, maxRightWidth)
+            if (fittedRightWidth < rightWidth) {
+                // Keep both columns readable in narrow windows or with a large system font.
+                val availableLabelWidth = (fittedRightWidth - rightDecorationWidth - 2).coerceAtLeast(1)
+                val labelWidth = rightLabel.paint.measureText(rightLabel.text.toString())
+                if (labelWidth > availableLabelWidth) {
+                    rightLabel.setTextSize(
+                        android.util.TypedValue.COMPLEX_UNIT_PX,
+                        rightLabel.textSize * availableLabelWidth / labelWidth
+                    )
+                }
+                rightColumn.layoutParams = rightColumn.layoutParams.apply { width = fittedRightWidth }
+            }
+            leftWidth + fittedRightWidth + columnSpacing
+        }
+    }
+
+    /** Displays the formatting submenu; its first row returns to the parent menu. */
+    private fun showFormattingTagMenu(positions: Set<Int>, parentDialog: AlertDialog) {
+        val actions = listOf(
+            "取消" to {},
+            "移除所有格式" to { removeFormattingTagsAndClose(positions, SubtitleFormattingTagOps.Kind.ALL, parentDialog) },
+            "移除斜体" to { removeFormattingTagsAndClose(positions, SubtitleFormattingTagOps.Kind.ITALIC, parentDialog) },
+            "移除粗体" to { removeFormattingTagsAndClose(positions, SubtitleFormattingTagOps.Kind.BOLD, parentDialog) },
+            "移除下划线" to { removeFormattingTagsAndClose(positions, SubtitleFormattingTagOps.Kind.UNDERLINE, parentDialog) },
+            "移除字体名称" to { removeFormattingTagsAndClose(positions, SubtitleFormattingTagOps.Kind.FONT_NAME, parentDialog) },
+            "移除对齐方式" to { removeFormattingTagsAndClose(positions, SubtitleFormattingTagOps.Kind.ALIGNMENT, parentDialog) },
+            "移除颜色" to { removeFormattingTagsAndClose(positions, SubtitleFormattingTagOps.Kind.COLOR, parentDialog) }
+        )
+        lateinit var dialog: AlertDialog
+        val content = menuColumn(actions) { dialog.dismiss() }
+        content.setPadding(menuDp(8), menuDp(4), menuDp(8), menuDp(4))
+        val preferredWidth = measureMenuWidth(content).coerceAtLeast(menuDp(200))
+        val scrollContent = menuScrollContent(content)
+        dialog = AlertDialog.Builder(this)
+            .setView(scrollContent)
+            .show()
+        sizeMenuDialog(dialog, scrollContent, maxWidthDp = 420) { preferredWidth }
+    }
+
+    private fun removeFormattingTagsAndClose(
+        positions: Set<Int>,
+        kind: SubtitleFormattingTagOps.Kind,
+        parentDialog: AlertDialog
+    ) {
+        parentDialog.dismiss()
+        removeFormattingTags(positions, kind)
+    }
+
+    private fun removeFormattingTags(positions: Set<Int>, kind: SubtitleFormattingTagOps.Kind) {
+        if (!ensureListMode()) return
+        val updates = positions.sorted().mapNotNull { position ->
+            val entry = stateModel.subtitleEntries.getOrNull(position) ?: return@mapNotNull null
+            val updatedText = SubtitleFormattingTagOps.remove(entry.text, kind)
+            (position to updatedText).takeIf { updatedText != entry.text }
+        }
+        if (updates.isEmpty()) {
+            showShortToast("没有可删除的格式化标签")
+            return
+        }
+        val result = stateModel.execute(
+            EditorCommand.UpdateTexts(updates, removeBlankEntries = false)
+        )
+        if (result.changedPositions.isNotEmpty()) {
+            notifyEntriesChanged(result.changedPositions)
+            showShortToast("已删除格式化标签")
+        }
+    }
+
+    private fun toggleSubtitleStyle(positions: Set<Int>, style: SubtitleStyleOps.Style) {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size) {
+                toggleSubtitleStyle(positions, style)
+            }) return
+        if (!ensureListMode()) return
+        val targets = positions.sorted().mapNotNull { position ->
+            stateModel.subtitleEntries.getOrNull(position)?.let { position to it.text }
+        }
+        val updatedTexts = SubtitleStyleOps.toggle(targets.map { it.second }, style)
+        val updates = targets.zip(updatedTexts).mapNotNull { (target, updatedText) ->
+            (target.first to updatedText).takeIf { updatedText != target.second }
+        }
+        if (updates.isEmpty()) return
+        val result = stateModel.execute(EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
+        if (result.changedPositions.isNotEmpty()) {
+            notifyEntriesChanged(result.changedPositions)
+        }
+    }
+
+    private fun showSubtitleColorPicker(positions: Set<Int>, parentDialog: AlertDialog) {
+        val settings = SettingsManager.getInstance(this)
+        EditorColorPickerDialog(this).show(settings.getSubtitleColor(), settings.getRecentSubtitleColors()) { color ->
+            settings.rememberSubtitleColor(color)
+            parentDialog.dismiss()
+            applySubtitleColor(positions, color)
+        }
+    }
+
+    private fun applySubtitleColor(positions: Set<Int>, color: Int) {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size) {
+                applySubtitleColor(positions, color)
+            }) return
+        if (!ensureListMode()) return
+        val result = stateModel.applySubtitleColor(positions, color, currentHistoryListState().selectedIds)
+        if (result.changedPositions.isNotEmpty()) {
+            notifyEntriesChanged(result.changedPositions, markChanged = false)
+            markAsChanged()
+            invalidateOptionsMenu()
+        }
+    }
+
+    private fun menuColumn(
+        actions: List<Pair<String, () -> Unit>>,
+        dismiss: () -> Unit
+    ): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        actions.forEach { (label, action) ->
+            addView(
+                menuActionView(label, action, trailingChevron = false, dismiss = dismiss),
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
+    }
+
+    private fun menuScrollContent(content: View): ScrollView = ScrollView(this).apply {
+        addView(
+            content,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+    }
+
+    private fun menuActionView(
+        label: String,
+        action: () -> Unit,
+        trailingChevron: Boolean,
+        dismiss: () -> Unit
+    ): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = menuDp(40)
+        setPadding(menuDp(10), menuDp(3), menuDp(10), menuDp(3))
+        isClickable = true
+        isFocusable = true
+        contentDescription = if (trailingChevron) "$label, 子菜单" else label
+        addView(TextView(this@EditorActivity).apply {
+            text = label
+            textSize = 15f
+            gravity = Gravity.CENTER_VERTICAL
+            if (trailingChevron) setSingleLine(true)
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        if (trailingChevron) {
+            addView(ImageView(this@EditorActivity).apply {
+                setImageResource(R.drawable.ic_arrow_right)
+                imageTintList = ContextCompat.getColorStateList(this@EditorActivity, R.color.on_surface_variant)
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(
+                menuDp(22),
+                menuDp(22)
+            ).apply { marginStart = menuDp(8) })
+        }
+        setOnClickListener {
+            dismiss()
+            action()
+        }
+        val selectableBackground = android.util.TypedValue()
+        if (theme.resolveAttribute(android.R.attr.selectableItemBackground, selectableBackground, true)) {
+            setBackgroundResource(selectableBackground.resourceId)
+        }
+    }
+
+    private fun measureMenuWidth(menu: View): Int {
+        menu.measure(
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        return menu.measuredWidth
+    }
+
+    private fun sizeMenuDialog(
+        dialog: AlertDialog,
+        content: View,
+        maxWidthDp: Int = 640,
+        preferredContentWidth: (availableWidth: Int) -> Int
+    ) {
+        val window = dialog.window ?: return
+        val maximumWidth = minOf(resources.displayMetrics.widthPixels - menuDp(16), menuDp(maxWidthDp))
+        window.setLayout(maximumWidth, ViewGroup.LayoutParams.WRAP_CONTENT)
+        content.doOnPreDraw {
+            // Include the actual themed dialog insets instead of guessing its padding.
+            val horizontalInsets = (window.decorView.width - content.width).coerceAtLeast(0)
+            val preferredWidth = preferredContentWidth(content.width) + horizontalInsets
+            window.setLayout(minOf(preferredWidth, maximumWidth), ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+    }
+
+    private fun menuDp(value: Int): Int =
+        (value * resources.displayMetrics.density + 0.5f).toInt()
     
     /**
      * 显示针对选中项的操作菜单
@@ -1579,64 +1856,34 @@ class EditorActivity : AppCompatActivity() {
         val selectedPositions = subtitleAdapter.getSelectedPositions().sorted()
         val canMergeSelected = selectedPositions.size > 1 &&
             selectedPositions.zipWithNext().all { (left, right) -> right == left + 1 }
-        val itemsList = mutableListOf<String>()
-        itemsList.add("时间偏移")
-        itemsList.add("AI 翻译")
-        itemsList.add("复制")
-        itemsList.add("剪切 (粘贴后删除)")
-        if (hasClipboard) {
-            itemsList.add("粘贴 (${stateModel.clipboardTexts.size}项)")
-        } else {
-            itemsList.add("粘贴")
-        }
-        var mergeIndex = -1
+        val actions = mutableListOf<Pair<String, () -> Unit>>()
+        actions.add("时间偏移" to { showOffsetDialogForSelection() })
+        actions.add("AI 翻译" to { showAiTranslate() })
+        actions.add("复制" to { copySelected() })
+        actions.add("剪切 (粘贴后删除)" to { cutSelected() })
+        actions.add((if (hasClipboard) "粘贴 (${stateModel.clipboardTexts.size}项)" else "粘贴") to {
+            if (hasClipboard) pasteToSelected() else ensureClipboardNotEmpty()
+        })
         if (canMergeSelected) {
-            mergeIndex = itemsList.size
-            itemsList.add("合并所选行")
+            actions.add("合并所选行" to { mergeSubtitlePositions(selectedPositions) })
         }
         val canExtendSelectedToPrevious = selectedPositions.any { it > 0 }
         val canExtendSelectedToNext = selectedPositions.any {
             it + 1 < stateModel.subtitleEntries.size
         }
-        var extendPreviousIndex = -1
-        var extendNextIndex = -1
         if (canExtendSelectedToPrevious) {
-            extendPreviousIndex = itemsList.size
-            itemsList.add("向前延伸至上一行")
+            actions.add("向前延伸至上一行" to {
+                extendSubtitleToAdjacent(selectedPositions.toSet(), towardPrevious = true)
+            })
         }
         if (canExtendSelectedToNext) {
-            extendNextIndex = itemsList.size
-            itemsList.add("向后延伸至下一行")
+            actions.add("向后延伸至下一行" to {
+                extendSubtitleToAdjacent(selectedPositions.toSet(), towardPrevious = false)
+            })
         }
-        val deleteIndex = itemsList.size
-        itemsList.add("删除选中")
-        
-        val items = itemsList.toTypedArray()
-        
-        AlertDialog.Builder(this)
-            .setTitle("对勾选字幕操作")
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> showOffsetDialogForSelection()
-                    1 -> showAiTranslate()
-                    2 -> copySelected()
-                    3 -> cutSelected()
-                    4 -> if (hasClipboard) pasteToSelected() else {
-                        ensureClipboardNotEmpty()
-                    }
-                    else -> when {
-                        which == mergeIndex -> mergeSubtitlePositions(selectedPositions)
-                        which == extendPreviousIndex -> extendSubtitleToAdjacent(
-                            selectedPositions.toSet(), towardPrevious = true
-                        )
-                        which == extendNextIndex -> extendSubtitleToAdjacent(
-                            selectedPositions.toSet(), towardPrevious = false
-                        )
-                        which == deleteIndex -> deleteSelectedSubtitles()
-                    }
-                }
-            }
-            .show()
+        actions.add("删除选中" to { deleteSelectedSubtitles() })
+
+        showSplitContextMenu("对勾选字幕操作", actions, selectedPositions.toSet())
     }
 
     private fun extendSubtitleToAdjacent(positions: Set<Int>, towardPrevious: Boolean) {
@@ -2057,6 +2304,9 @@ class EditorActivity : AppCompatActivity() {
                 } else {
                     operation.afterSourceText
                 }
+                (if (undo) operation.beforeHeader else operation.afterHeader)?.let {
+                    stateModel.documentHeader = it
+                }
                 if (stateModel.isSourceViewMode) {
                     applyListHistoryInSourceView(target.entries, targetSourceText)
                 } else {
@@ -2215,6 +2465,7 @@ class EditorActivity : AppCompatActivity() {
         stateModel.originalFileContent = targetText
         stateModel.sourceViewContent = targetText
         stateModel.sourceHistoryTextSnapshot = targetText
+        if (cachedEntries != null) stateModel.documentState.restoreVttMetadata(targetText)
         if (stateModel.isSourceViewMode) {
             sourcePreviewController.cancel()
             stateModel.documentState.sourceViewEditGeneration++
