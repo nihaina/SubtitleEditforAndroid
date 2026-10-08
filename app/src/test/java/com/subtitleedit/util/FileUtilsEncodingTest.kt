@@ -34,6 +34,19 @@ class FileUtilsEncodingTest {
     }
 
     @Test
+    fun detectsUtf8WhenSampleBoundarySplitsMultibyteCharacter() {
+        val expected = "a".repeat(64 * 1024 - 1) + "\u65e5\u672c\u8a9e"
+        val file = temporaryFile(expected.toByteArray(StandardCharsets.UTF_8))
+
+        try {
+            assertEquals(StandardCharsets.UTF_8, FileUtils.detectEncoding(file))
+            assertEquals(expected, FileUtils.readFile(file, charset = null))
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
     fun detectsGbkWhenUtf8DecodingIsInvalid() {
         val file = temporaryFile("字幕".toByteArray(Charset.forName("GBK")))
 
@@ -64,6 +77,18 @@ class FileUtilsEncodingTest {
         try {
             assertEquals(Charset.forName("Shift_JIS"), FileUtils.detectEncoding(file))
             assertEquals(expected, FileUtils.readFile(file, charset = null))
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun usesChardetForLongLegacyText() {
+        val expected = "\u65e5\u672c\u8a9e\u306e\u5b57\u5e55\u30c6\u30b9\u30c8\u3002".repeat(20)
+        val file = temporaryFile(expected.toByteArray(Charset.forName("Shift_JIS")))
+
+        try {
+            assertEquals(Charset.forName("Shift_JIS"), FileUtils.detectEncoding(file))
         } finally {
             file.delete()
         }

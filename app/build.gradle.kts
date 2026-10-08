@@ -68,6 +68,10 @@ val generateArchiveLicenseAssets by tasks.registering(Sync::class) {
     from(rootProject.file("native/qwen-tokenizer/assets/NAGISA_LICENSE.txt")) {
         into("licenses")
     }
+    from(rootProject.file("native/chardet4j/LICENSE-2.0.txt")) {
+        into("licenses")
+        rename { "chardet4j-LICENSE-2.0.txt" }
+    }
     from(rootProject.file("THIRD_PARTY_NOTICES.md")) {
         into("licenses")
     }
@@ -195,6 +199,9 @@ tasks.named("preBuild").configure {
 }
 
 dependencies {
+    // Compact ICU-derived automatic charset detection for subtitle files.
+    implementation("com.sigpwned:chardet4j:78.1.0")
+
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.ui:ui")

@@ -163,6 +163,9 @@ target/
 # Version control
 *.orig
 
+# Temporary upstream reference checkout
+subtitleedit-upstream/
+
 # Kotlin
 *.kotlin_module
 

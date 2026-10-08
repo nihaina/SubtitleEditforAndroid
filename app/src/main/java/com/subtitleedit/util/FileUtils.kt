@@ -3,11 +3,14 @@ package com.subtitleedit.util
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
+import com.sigpwned.chardet4j.Chardet
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.nio.ByteBuffer
+import java.nio.CharBuffer
 import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
@@ -30,6 +33,9 @@ private fun getSettingsManager(context: Context): SettingsManager {
  * 文件工具类
  */
 object FileUtils {
+    private const val MIN_CHARDET_SAMPLE_BYTES = 32
+    private const val UTF8_MAX_BYTES_PER_CODE_POINT = 4
+    private const val ENCODING_SAMPLE_BYTES = 64 * 1024
     
     // 常见的字幕文件扩展名
     val SUBTITLE_EXTENSIONS = setOf("srt", "lrc", "ass", "ssa", "sub", "txt", "vtt")
@@ -64,7 +70,8 @@ object FileUtils {
     
     /**
      * 检测文件编码
-     * 先处理 BOM 和 UTF-8，再使用 Android ICU 统计检测，最后使用 JVM 可用的启发式回退。
+     * 手动编码设置由调用方优先处理；自动模式使用 chardet4j，并用严格解码校验
+     * 处理短字幕样本中统计结果不稳定的情况。
      */
     fun detectEncoding(file: File, context: Context? = null): Charset {
         // A manually selected encoding always wins. Automatic mode is represented by a
@@ -88,19 +95,19 @@ object FileUtils {
 
     private fun detectEncoding(input: InputStream): Charset {
         val bytes = input.readSample()
-        return detectEncoding(bytes)
+        val sampleWasTruncated = bytes.size == ENCODING_SAMPLE_BYTES + UTF8_MAX_BYTES_PER_CODE_POINT &&
+            input.read() != -1
+        return detectEncoding(bytes, sampleWasTruncated)
     }
 
-    private fun detectEncoding(bytes: ByteArray): Charset {
-        if (bytes.hasPrefix(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()))) {
-            return StandardCharsets.UTF_8
-        }
-        if (bytes.hasPrefix(byteArrayOf(0xFE.toByte(), 0xFF.toByte()))) {
-            return StandardCharsets.UTF_16BE
-        }
-        if (bytes.hasPrefix(byteArrayOf(0xFF.toByte(), 0xFE.toByte()))) {
-            return StandardCharsets.UTF_16LE
-        }
+    private fun detectEncoding(bytes: ByteArray, allowIncompleteUtf8AtEnd: Boolean = false): Charset {
+        val detected = runCatching {
+            Chardet.detectCharset(bytes).orElse(null)
+        }.getOrNull()
+
+        // A BOM is authoritative. chardet4j recognizes UTF-8/16/32 and other BOMs;
+        // return that result before considering statistical candidates.
+        if (detected != null && bytes.hasKnownBom()) return detected
 
         // UTF-16 files without a BOM still have a strong zero-byte pattern for ordinary
         // Latin and CJK text. Check this before UTF-8 because NUL bytes are legal UTF-8.
@@ -114,22 +121,56 @@ object FileUtils {
 
         // UTF-8 is preferred for valid Unicode text. For legacy files, strict decoding
         // rejects malformed byte sequences before trying the common regional encodings.
-        if (canDecode(bytes, StandardCharsets.UTF_8)) return StandardCharsets.UTF_8
+        if (canDecode(bytes, StandardCharsets.UTF_8) ||
+            (allowIncompleteUtf8AtEnd && isValidUtf8Prefix(bytes))
+        ) {
+            return StandardCharsets.UTF_8
+        }
 
-        // Android ships ICU's statistical detector. Use it when available because strict
-        // decoding alone cannot distinguish encodings that accept the same byte sequences
-        // (for example GBK and Shift_JIS). Reflection keeps JVM unit tests independent of
-        // the Android runtime, where this API is always available from minSdk 26 onward.
-        detectWithAndroidIcu(bytes)?.let { return it }
-
-        return detectLegacyEncoding(bytes)
+        // chardet4j handles BOMs and the ICU charset recognizers without pulling the
+        // considerably larger ICU4J dependency into the application. Its result is a
+        // candidate rather than a guarantee: very short CJK samples can have ambiguous
+        // byte distributions, so compare it with strict-decoding candidates below.
+        // chardet4j is most useful once there is enough text for its statistical model.
+        // Keep the compatibility scorer for tiny subtitle snippets, where several legacy
+        // encodings can decode the same bytes and no detector can be reliable.
+        if (bytes.size >= MIN_CHARDET_SAMPLE_BYTES && detected != null &&
+            decodeStrict(bytes, detected) != null
+        ) {
+            return detected
+        }
+        val candidates = legacyCandidates() + listOfNotNull(detected)
+        return candidates.asSequence()
+            .distinctBy { it.name() }
+            .mapNotNull { charset ->
+                decodeStrict(bytes, charset)?.let { text ->
+                    charset to scoreDecodedText(text, charset.name())
+                }
+            }
+            .maxByOrNull { it.second }
+            ?.first
+            ?: StandardCharsets.UTF_8
     }
 
-    private fun ByteArray.hasPrefix(prefix: ByteArray): Boolean =
+    private fun ByteArray.hasKnownBom(): Boolean =
+        startsWith(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())) ||
+            startsWith(byteArrayOf(0xFE.toByte(), 0xFF.toByte())) ||
+            startsWith(byteArrayOf(0xFF.toByte(), 0xFE.toByte())) ||
+            startsWith(byteArrayOf(0x00, 0x00, 0xFE.toByte(), 0xFF.toByte())) ||
+            startsWith(byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0x00, 0x00))
+
+    private fun ByteArray.startsWith(prefix: ByteArray): Boolean =
         size >= prefix.size && prefix.indices.all { this[it] == prefix[it] }
 
     private fun canDecode(bytes: ByteArray, charset: Charset): Boolean =
         decodeStrict(bytes, charset) != null
+
+    private fun isValidUtf8Prefix(bytes: ByteArray): Boolean = runCatching {
+        val decoder = StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+        decoder.decode(ByteBuffer.wrap(bytes), CharBuffer.allocate(bytes.size), false).isUnderflow
+    }.getOrDefault(false)
 
     private fun decodeStrict(bytes: ByteArray, charset: Charset): String? = runCatching {
         charset.newDecoder()
@@ -139,44 +180,33 @@ object FileUtils {
             .toString()
     }.getOrNull()
 
-    private fun detectLegacyEncoding(bytes: ByteArray): Charset {
-        data class Candidate(val charset: Charset, val name: String)
-        val candidates = listOf(
-            Candidate(Charset.forName("GBK"), "GBK"),
-            Candidate(Charset.forName("GB2312"), "GB2312"),
-            Candidate(Charset.forName("BIG5"), "BIG5"),
-            Candidate(Charset.forName("Shift_JIS"), "SHIFT_JIS"),
-            Candidate(Charset.forName("EUC-JP"), "EUC-JP"),
-            Candidate(Charset.forName("EUC-KR"), "EUC-KR"),
-            Candidate(Charset.forName("windows-1252"), "WINDOWS-1252"),
-            Candidate(Charset.forName("ISO-8859-1"), "ISO-8859-1")
-        )
-        return candidates.asSequence()
-            .mapNotNull { candidate ->
-                decodeStrict(bytes, candidate.charset)?.let { text ->
-                    candidate.charset to scoreDecodedText(text, candidate.name)
-                }
-            }
-            .maxByOrNull { it.second }
-            ?.first
-            ?: StandardCharsets.UTF_8
-    }
+    private fun legacyCandidates(): List<Charset> = listOf(
+        Charset.forName("GBK"),
+        Charset.forName("GB2312"),
+        Charset.forName("BIG5"),
+        Charset.forName("Shift_JIS"),
+        Charset.forName("EUC-JP"),
+        Charset.forName("EUC-KR"),
+        Charset.forName("windows-1252"),
+        Charset.forName("ISO-8859-1")
+    )
 
     private fun scoreDecodedText(text: String, encodingName: String): Int {
+        val normalizedName = encodingName.uppercase()
         val controls = text.count { it.isISOControl() && it !in "\r\n\t" }
         val letters = text.count { it.isLetter() }
         val cjk = text.count { it in '\u3400'..'\u9fff' }
         val kana = text.count { it in '\u3040'..'\u30ff' }
         val hangul = text.count { it in '\uac00'..'\ud7af' }
         val scriptBonus = when {
-            encodingName.contains("SHIFT_JIS") || encodingName.contains("EUC-JP") -> kana * 20
-            encodingName == "EUC-KR" -> hangul * 12
-            encodingName == "GBK" || encodingName == "GB2312" || encodingName == "BIG5" -> cjk * 6
+            normalizedName.contains("SHIFT_JIS") || normalizedName.contains("EUC-JP") -> kana * 20
+            normalizedName == "EUC-KR" -> hangul * 12
+            normalizedName == "GBK" || normalizedName == "GB2312" || normalizedName == "BIG5" -> cjk * 6
             else -> 0
         }
         // Give common Chinese encodings a small prior. Other multibyte decoders can produce
         // plausible CJK/Hangul characters from GBK bytes, so script counts alone are not enough.
-        val prior = when (encodingName) {
+        val prior = when (normalizedName) {
             "GBK" -> 24
             "GB2312" -> 20
             "BIG5" -> 16
@@ -186,19 +216,10 @@ object FileUtils {
         return letters * 2 + cjk * 4 + kana * 4 + hangul * 4 + scriptBonus + prior - controls * 20
     }
 
-    private fun detectWithAndroidIcu(bytes: ByteArray): Charset? = runCatching {
-        val detectorClass = Class.forName("android.icu.text.CharsetDetector")
-        val detector = detectorClass.getDeclaredConstructor().newInstance()
-        detectorClass.getMethod("setText", ByteArray::class.java).invoke(detector, bytes)
-        val match = detectorClass.getMethod("detect").invoke(detector) ?: return@runCatching null
-        val confidence = match.javaClass.getMethod("getConfidence").invoke(match) as? Int ?: 0
-        if (confidence < 50) return@runCatching null
-        val name = match.javaClass.getMethod("getName").invoke(match) as? String ?: return@runCatching null
-        Charset.forName(name)
-    }.getOrNull()
-
-    private fun InputStream.readSample(maxBytes: Int = 64 * 1024): ByteArray {
-        val sample = ByteArray(maxBytes)
+    private fun InputStream.readSample(maxBytes: Int = ENCODING_SAMPLE_BYTES): ByteArray {
+        // Read a few bytes beyond the detector window so a UTF-8 code point split at
+        // the nominal boundary is still complete when strict UTF-8 validation runs.
+        val sample = ByteArray(maxBytes + UTF8_MAX_BYTES_PER_CODE_POINT)
         var offset = 0
         while (offset < sample.size) {
             val count = read(sample, offset, sample.size - offset)

@@ -4,6 +4,12 @@ SubtitleEdit for Android includes the following third-party components.
 Their licenses apply to those components independently of the project's
 GPL-3.0 license.
 
+## chardet4j 78.1.0
+
+Automatic subtitle charset detection uses [chardet4j](https://github.com/sigpwned/chardet4j),
+copyright 2022 Andy Boothe, under the Apache License 2.0. The dependency is
+resolved from Maven Central (`com.sigpwned:chardet4j:78.1.0`).
+
 ## llama.cpp and ggml
 
 The local LLM runtime includes source from [llama.cpp](https://github.com/ggml-org/llama.cpp),
