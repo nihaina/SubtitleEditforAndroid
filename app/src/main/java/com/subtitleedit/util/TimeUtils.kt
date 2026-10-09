@@ -1,6 +1,7 @@
 package com.subtitleedit.util
 
 import java.util.Locale
+import kotlin.math.absoluteValue
 import kotlin.math.roundToLong
 
 /**
@@ -13,11 +14,16 @@ object TimeUtils {
      * 将毫秒时间转换为 SRT 格式字符串 (HH:MM:SS,mmm)
      */
     fun formatSRT(timeMs: Long): String {
-        val hours = timeMs / 3600000
-        val minutes = (timeMs % 3600000) / 60000
-        val seconds = (timeMs % 60000) / 1000
-        val millis = timeMs % 1000
-        return String.format(Locale.US, "%02d:%02d:%02d,%03d", hours, minutes, seconds, millis)
+        val negative = timeMs < 0
+        // Take absolute components separately to avoid overflow at Long.MIN_VALUE.
+        val hours = (timeMs / 3600000).absoluteValue
+        val minutes = ((timeMs % 3600000) / 60000).absoluteValue
+        val seconds = ((timeMs % 60000) / 1000).absoluteValue
+        val millis = (timeMs % 1000).absoluteValue
+        return String.format(
+            Locale.US, "%s%02d:%02d:%02d,%03d",
+            if (negative) "-" else "", hours, minutes, seconds, millis
+        )
     }
     
     /**
@@ -41,7 +47,8 @@ object TimeUtils {
         
         if (parts.size < 3) return 0L
         
-        val hours = parts[0].toLongOrNull() ?: 0L
+        val negative = cleanTime.startsWith('-')
+        val hours = parts[0].removePrefix("-").toLongOrNull() ?: 0L
         val minutes = parts[1].toLongOrNull() ?: 0L
         
         val secondsParts = parts[2].split(".")
@@ -51,7 +58,8 @@ object TimeUtils {
         val millis = if (millisPart.isEmpty()) 0L
             else (millisPart.take(3).padEnd(3, '0').toLongOrNull() ?: 0L)
 
-        return hours * 3600000 + minutes * 60000 + seconds * 1000 + millis
+        val result = hours * 3600000 + minutes * 60000 + seconds * 1000 + millis
+        return if (negative) -result else result
     }
     
     /**

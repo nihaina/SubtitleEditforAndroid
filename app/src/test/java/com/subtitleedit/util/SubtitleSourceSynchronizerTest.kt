@@ -7,6 +7,108 @@ import org.junit.Test
 
 class SubtitleSourceSynchronizerTest {
     @Test
+    fun srtBomAndCrOnlyLinesRemainEditable() {
+        val source = "\uFEFF7\r00:00:01,000 --> 00:00:02,000\rA\r\r9\r00:00:03,000 --> 00:00:04,000\rB\r\r"
+        val old = SubtitleParser.parseSRT(source)
+        assertEquals(SubtitleParser.SubtitleFormat.SRT, SubtitleParser.detectFormat(source))
+        val changed = listOf(old[0].copy(index = 1, text = "Changed"), old[1])
+        val updated = SubtitleSourceSynchronizer.apply(source, SubtitleParser.SubtitleFormat.SRT, old, changed)
+        assertEquals(source.replace("\uFEFF7", "\uFEFF1").replace("\rA\r", "\rChanged\r"), updated)
+        assertEquals(changed.map { it.text }, SubtitleParser.parseSRT(updated).map { it.text })
+    }
+
+    @Test
+    fun srtNonstandardTimesRemainEditableWithSuffixAndCrLf() {
+        val source = "7\r\n00:04:48\u060C460 -- > 00:04:52\u060C364  X1:100 X2:100\r\nText\r\n\r\n"
+        val old = SubtitleParser.parseSRT(source)
+        val changed = old.single().copy(startTime = 289000L, endTime = 293000L)
+        val updated = SubtitleSourceSynchronizer.apply(source, SubtitleParser.SubtitleFormat.SRT, old, listOf(changed))
+
+        assertTrue(updated.contains("00:04:49,000 -- > 00:04:53,000  X1:100 X2:100\r\n"))
+        assertEquals(changed.startTime, SubtitleParser.parseSRT(updated).single().startTime)
+        assertTrue(updated.startsWith("7\r\n"))
+        assertTrue(updated.endsWith("Text\r\n\r\n"))
+    }
+
+    @Test
+    fun srtMissingHourTimesCanBePatched() {
+        val source = "7\n04:48,460 --> 04:52,364\nText\n\n"
+        val old = SubtitleParser.parseSRT(source)
+        val updated = SubtitleSourceSynchronizer.apply(
+            source, SubtitleParser.SubtitleFormat.SRT, old,
+            listOf(old.single().copy(startTime = 289000L))
+        )
+        assertTrue(updated.contains("00:04:49,000 --> 00:04:52,364"))
+        assertEquals(289000L, SubtitleParser.parseSRT(updated).single().startTime)
+    }
+
+    @Test
+    fun srtNumberSeparatedFromTimelineCanBeUpdatedAndDeleted() {
+        val source = "5\n\n00:00:01,000 --> 00:00:02,000\nA\n\n9\n00:00:03,000 --> 00:00:04,000\nB\n\n"
+        val old = SubtitleParser.parseSRT(source)
+        val changed = listOf(old[0].copy(index = 1, text = "Changed"), old[1])
+        val updated = SubtitleSourceSynchronizer.apply(source, SubtitleParser.SubtitleFormat.SRT, old, changed)
+        assertTrue(updated.startsWith("1\n\n00:00:01,000"))
+        assertEquals(changed.map { it.text }, SubtitleParser.parseSRT(updated).map { it.text })
+
+        val deleted = SubtitleSourceSynchronizer.apply(source, SubtitleParser.SubtitleFormat.SRT, old, listOf(old[1]))
+        assertEquals("9\n00:00:03,000 --> 00:00:04,000\nB\n\n", deleted)
+    }
+
+    @Test
+    fun srtNegativeTimeEditsAreNotClamped() {
+        val source = "7\n00:00:01,000 --> 00:00:02,000\nA\n\n"
+        val old = SubtitleParser.parseSRT(source)
+        val updated = SubtitleSourceSynchronizer.apply(
+            source, SubtitleParser.SubtitleFormat.SRT, old,
+            listOf(old.single().copy(startTime = -1250L))
+        )
+        assertTrue(updated.contains("-00:00:01,250 --> 00:00:02,000"))
+        assertEquals(-1250L, SubtitleParser.parseSRT(updated).single().startTime)
+    }
+
+    @Test
+    fun srtFrameTimesStayRawForTextEditsAndStableForTimeEdits() {
+        val source = "5\r\n00:00:01,12 --> 00:00:02,20\r\nA\r\n\r\n9\r\n00:00:03,06 --> 00:00:04,24\r\nB\r\n\r\n"
+        val old = SubtitleParser.parseSRT(source)
+        val textOnly = SubtitleSourceSynchronizer.apply(
+            source, SubtitleParser.SubtitleFormat.SRT, old,
+            listOf(old[0].copy(text = "Changed"), old[1])
+        )
+        assertEquals(source.replace("\r\nA\r\n", "\r\nChanged\r\n"), textOnly)
+
+        val changed = listOf(old[0].copy(startTime = old[0].startTime + 100), old[1])
+        val updated = SubtitleSourceSynchronizer.apply(source, SubtitleParser.SubtitleFormat.SRT, old, changed)
+        val reparsed = SubtitleParser.parseSRT(updated)
+        assertEquals(changed.map { it.startTime to it.endTime }, reparsed.map { it.startTime to it.endTime })
+        assertTrue(updated.contains("00:00:03,250 --> 00:00:04,999\r\n"))
+    }
+
+    @Test
+    fun srtInsertionDoesNotChangeUneditedFrameTimes() {
+        val source = "5\n00:00:01,12 --> 00:00:02,20\nA\n\n9\n00:00:03,06 --> 00:00:04,24\nB\n\n"
+        val old = SubtitleParser.parseSRT(source)
+        val inserted = SubtitleEntry(index = 6, startTime = 2900L, endTime = 3000L, text = "New")
+        val changed = listOf(old[0], inserted, old[1])
+        val updated = SubtitleSourceSynchronizer.apply(source, SubtitleParser.SubtitleFormat.SRT, old, changed)
+        val reparsed = SubtitleParser.parseSRT(updated)
+        assertEquals(changed.map { it.startTime to it.endTime }, reparsed.map { it.startTime to it.endTime })
+        assertEquals(changed.map { it.text }, reparsed.map { it.text })
+    }
+
+    @Test
+    fun srtDeletingMillisecondCueDoesNotReinterpretRemainingTwoDigitTimes() {
+        val source = "5\n00:00:01,12 --> 00:00:02,20\nA\n\n9\n00:00:03,500 --> 00:00:04,500\nB\n\n"
+        val old = SubtitleParser.parseSRT(source)
+        assertEquals(1012L, old[0].startTime)
+        val updated = SubtitleSourceSynchronizer.apply(source, SubtitleParser.SubtitleFormat.SRT, old, listOf(old[0]))
+        val reparsed = SubtitleParser.parseSRT(updated).single()
+        assertEquals(old[0].startTime, reparsed.startTime)
+        assertEquals(old[0].endTime, reparsed.endTime)
+        assertTrue(updated.contains("00:00:01,012 --> 00:00:02,020"))
+    }
+
+    @Test
     fun manyInsertedSrtRowsKeepTheirOrderAndOriginalRows() {
         val source = "1\n00:00:01,000 --> 00:00:02,000\nOriginal\n\n"
         val original = SubtitleParser.parseSRT(source).single()

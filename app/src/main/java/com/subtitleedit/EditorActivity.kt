@@ -1660,10 +1660,9 @@ class EditorActivity : AppCompatActivity() {
         }
     }
 
-    /** Displays the formatting submenu; its first row returns to the parent menu. */
+    /** Displays the formatting submenu. */
     private fun showFormattingTagMenu(positions: Set<Int>, parentDialog: AlertDialog) {
         val actions = listOf(
-            "取消" to {},
             "移除所有格式" to { removeFormattingTagsAndClose(positions, SubtitleFormattingTagOps.Kind.ALL, parentDialog) },
             "移除斜体" to { removeFormattingTagsAndClose(positions, SubtitleFormattingTagOps.Kind.ITALIC, parentDialog) },
             "移除粗体" to { removeFormattingTagsAndClose(positions, SubtitleFormattingTagOps.Kind.BOLD, parentDialog) },
@@ -1679,8 +1678,18 @@ class EditorActivity : AppCompatActivity() {
         val scrollContent = menuScrollContent(content)
         dialog = AlertDialog.Builder(this)
             .setView(scrollContent)
-            .show()
-        sizeMenuDialog(dialog, scrollContent, maxWidthDp = 420) { preferredWidth }
+            .create()
+        dialog.window?.decorView?.alpha = 0f
+        dialog.setOnShowListener {
+            sizeMenuDialog(dialog, scrollContent, maxWidthDp = 420) { preferredWidth }
+            scrollContent.doOnPreDraw {
+                // Reveal only after the final width is applied, so the centered dialog never flashes elsewhere.
+                dialog.window?.decorView?.postOnAnimation {
+                    dialog.window?.decorView?.alpha = 1f
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun removeFormattingTagsAndClose(

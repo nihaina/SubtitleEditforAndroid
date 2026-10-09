@@ -2,6 +2,9 @@ package com.subtitleedit.util
 
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.subtitle.LrcVariant
+import com.subtitleedit.util.subtitle.SrtParseResult
+import com.subtitleedit.util.subtitle.SrtSubtitleFormatHandler
+import com.subtitleedit.util.subtitle.toSubtitleLines
 import java.util.Locale
 import kotlin.math.roundToLong
 
@@ -65,24 +68,34 @@ object SubtitleSourceSynchronizer {
         oldEntries: List<SubtitleEntry>,
         newEntries: List<SubtitleEntry>
     ): String {
-        val lines = splitLines(content)
-        val timeLines = lines.indices.filter { isSrtTimeLine(lines[it].text) }
-        val spans = timeLines.mapIndexed { position, timeLine ->
-            val start = if (
-                timeLine > 0 && lines[timeLine - 1].text.trim().toIntOrNull() != null
-            ) timeLine - 1 else timeLine
-            val nextTimeLine = timeLines.getOrNull(position + 1)
-            val end = when {
-                nextTimeLine == null -> lines.size
-                nextTimeLine > 0 && lines[nextTimeLine - 1].text.trim().toIntOrNull() != null ->
-                    nextTimeLine - 1
-                else -> nextTimeLine
+        val parsed = SrtSubtitleFormatHandler.parse(content.toSubtitleLines())
+        fun patchSource(source: String, sourceParsed: SrtParseResult): String {
+            val lines = splitLines(source)
+            val spans = sourceParsed.cues.map { cue ->
+                var end = cue.endExclusive.coerceAtMost(lines.size)
+                while (end < lines.size && lines[end].text.isBlank()) end++
+                CueSpan(cue.numberLineIndex ?: cue.timeLineIndex, end, cue.timeLineIndex)
             }
-            CueSpan(start, end, timeLine)
+            return patchCueSpans(
+                source, lines, spans, oldEntries, newEntries, ::patchSrtCue, ::appendSrtCue
+            )
         }
-        return patchCueSpans(
-            content, lines, spans, oldEntries, newEntries, ::patchSrtCue, ::appendSrtCue
-        )
+        val updated = patchSource(content, parsed)
+        val updatedParsed = SrtSubtitleFormatHandler.parse(updated.toSubtitleLines())
+        if (parsed.usesFrameTiming == updatedParsed.usesFrameTiming || newEntries.isEmpty()) return updated
+
+        // Frame interpretation is a whole-file decision. Inserting a millisecond
+        // cue or removing the last such cue must not reinterpret untouched rows.
+        val lines = splitLines(content).toMutableList()
+        parsed.cues.zip(parsed.document.entries).forEach { (cue, entry) ->
+            val line = lines[cue.timeLineIndex]
+            lines[cue.timeLineIndex] = line.copy(
+                text = SrtSubtitleFormatHandler.rewriteTimeLine(line.text, entry.startTime, entry.endTime)
+                    ?: "${TimeUtils.formatSRT(entry.startTime)} --> ${TimeUtils.formatSRT(entry.endTime)}"
+            )
+        }
+        val canonicalTimes = lines.joinToString("") { it.serialized }
+        return patchSource(canonicalTimes, SrtSubtitleFormatHandler.parse(canonicalTimes.toSubtitleLines()))
     }
 
     private fun patchVtt(
@@ -218,8 +231,8 @@ object SubtitleSourceSynchronizer {
     ): String {
         if (timeLineOffset !in block.indices) return block.joinToString("") { it.serialized }
         val ending = preferredEnding(block)
-        val prefix = block.take(timeLineOffset).mapIndexed { index, line ->
-            if (index == timeLineOffset - 1 && line.text.trim().toIntOrNull() != null) {
+        val prefix = block.take(timeLineOffset).map { line ->
+            if (old.index != new.index && line.text.trimStart('\uFEFF').trim().toIntOrNull() != null) {
                 line.copy(text = replaceSrtSequenceNumber(line.text, new.index))
             } else {
                 line
@@ -618,7 +631,7 @@ object SubtitleSourceSynchronizer {
     }
 
     private fun appendSrtCue(entry: SubtitleEntry, ending: String): String = buildString {
-        append(entry.index.coerceAtLeast(1)).append(ending)
+        append(entry.index).append(ending)
         append(formatTimestamp(entry.startTime, vtt = false)).append(" --> ")
             .append(formatTimestamp(entry.endTime, vtt = false)).append(ending)
         if (entry.text.isNotEmpty()) append(normalizeText(entry.text, ending)).append(ending)
@@ -626,9 +639,9 @@ object SubtitleSourceSynchronizer {
     }
 
     private fun replaceSrtSequenceNumber(original: String, index: Int): String {
-        val leading = original.takeWhile { it.isWhitespace() }
+        val leading = original.takeWhile { it.isWhitespace() || it == '\uFEFF' }
         val trailing = original.takeLastWhile { it.isWhitespace() }
-        return leading + index.coerceAtLeast(1) + trailing
+        return leading + index + trailing
     }
 
     private fun appendLrcEntry(
@@ -694,6 +707,10 @@ object SubtitleSourceSynchronizer {
         vtt: Boolean,
         settings: String = ""
     ): String {
+        if (!vtt) {
+            return SrtSubtitleFormatHandler.rewriteTimeLine(original, startTime, endTime)
+                ?: (formatTimestamp(startTime, false) + " --> " + formatTimestamp(endTime, false))
+        }
         val arrow = original.indexOf("-->")
         if (arrow < 0) {
             return formatTimestamp(startTime, vtt) + " --> " + formatTimestamp(endTime, vtt)
@@ -715,24 +732,22 @@ object SubtitleSourceSynchronizer {
             formatTimestamp(endTime, vtt) + suffix
     }
 
-    private fun isSrtTimeLine(line: String): Boolean = SRT_TIME_LINE.matches(line)
-
     private fun splitLines(content: String): List<RawLine> {
         if (content.isEmpty()) return emptyList()
         val result = mutableListOf<RawLine>()
         var offset = 0
         while (offset < content.length) {
-            val newline = content.indexOf('\n', offset)
+            val newline = content.indexOfAny(charArrayOf('\r', '\n'), offset)
             if (newline < 0) {
                 result += RawLine(content.substring(offset), "")
                 break
             }
-            val crlf = newline > offset && content[newline - 1] == '\r'
+            val endingLength = if (content[newline] == '\r' && content.getOrNull(newline + 1) == '\n') 2 else 1
             result += RawLine(
-                content.substring(offset, if (crlf) newline - 1 else newline),
-                if (crlf) "\r\n" else "\n"
+                content.substring(offset, newline),
+                content.substring(newline, newline + endingLength)
             )
-            offset = newline + 1
+            offset = newline + endingLength
         }
         return result
     }
@@ -744,6 +759,7 @@ object SubtitleSourceSynchronizer {
         text.replace("\r\n", "\n").replace('\r', '\n').replace("\n", ending)
 
     private fun formatTimestamp(timeMs: Long, vtt: Boolean): String {
+        if (!vtt) return TimeUtils.formatSRT(timeMs)
         val safe = timeMs.coerceAtLeast(0L)
         return String.format(
             Locale.US,
@@ -827,12 +843,6 @@ object SubtitleSourceSynchronizer {
                 ?.toDoubleOrNull()?.roundToLong()
         }
         .lastOrNull() ?: 0L
-
-    private val SRT_TIME_LINE = Regex(
-        "^\\s*-?\\d{1,3}[:.]\\d{1,2}[:.]\\d{1,2}(?:[,.;:]\\d{1,4})?" +
-            "\\s*(?:-->|->|—>|——>|-+\\s*>)\\s*" +
-            "-?\\d{1,3}[:.]\\d{1,2}[:.]\\d{1,2}(?:[,.;:]\\d{1,4})?(?:\\s+.*)?$"
-    )
 
     private val lrcMillisecondsTagPattern = Regex("^\\[\\d+:\\d{2}\\.\\d{3}]")
     private val lrcOffsetPattern = Regex(

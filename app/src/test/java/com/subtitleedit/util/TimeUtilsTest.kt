@@ -28,6 +28,14 @@ class TimeUtilsTest {
         assertEquals("100:00:00,000", TimeUtils.formatSRT(360000000))
     }
 
+    @Test
+    fun negativeTimesUseSingleSignAndRemainEditable() {
+        assertEquals("-00:00:01,250", TimeUtils.formatSRT(-1250))
+        assertEquals("-01:01:01,234", TimeUtils.formatSRT(-3661234))
+        assertEquals(-1250L, TimeUtils.parseFromInput(TimeUtils.formatForInput(-1250)))
+        assertEquals(-3661234L, TimeUtils.parseFromInput(TimeUtils.formatForInput(-3661234)))
+    }
+
     // ==================== formatLRC ====================
 
     @Test

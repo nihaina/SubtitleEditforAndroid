@@ -144,10 +144,10 @@ class SubtitleParserTest {
     }
 
     @Test
-    fun parseSRT_renumbersEntries() {
+    fun parseSRT_preservesSuppliedNumbers() {
         val content = "5\n00:00:01,000 --> 00:00:02,000\nA\n\n9\n00:00:03,000 --> 00:00:04,000\nB"
         val entries = SubtitleParser.parseSRT(content)
-        assertEquals(listOf(1, 2), entries.map { it.index })
+        assertEquals(listOf(5, 9), entries.map { it.index })
     }
 
     @Test
@@ -486,11 +486,11 @@ class SubtitleParserTest {
     }
 
     @Test
-    fun toSRT_renumbersFromOne() {
+    fun toSRT_preservesEntryNumber() {
         val content = SubtitleParser.toSRT(
             listOf(SubtitleEntry(index = 99, startTime = 0, endTime = 1000, text = "A"))
         )
-        assertTrue(content.startsWith("1\n"))
+        assertTrue(content.startsWith("99\n"))
     }
 
     @Test
