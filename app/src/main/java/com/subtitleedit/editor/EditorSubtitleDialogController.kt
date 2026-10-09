@@ -11,6 +11,7 @@ import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.TimeUtils
 import com.subtitleedit.util.WebVttCuePolicy
+import com.subtitleedit.util.subtitle.WebVttSubtitleFormatHandler
 
 /** Owns the small dialogs used to edit one subtitle row. */
 internal class EditorSubtitleDialogController(
@@ -76,7 +77,7 @@ internal class EditorSubtitleDialogController(
         }
         val settings = EditText(context).apply {
             hint = "例如：line:90% position:50% align:start"
-            setText(entry.cueSettings)
+            setText(WebVttSubtitleFormatHandler.getCueSettings(entry))
             isSingleLine = true
         }
         layout.addView(TextView(context).apply { text = "Cue identifier" })

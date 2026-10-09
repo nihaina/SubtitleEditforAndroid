@@ -112,17 +112,17 @@ class SubtitleParserTest {
             SubtitleParser.SubtitleFormat.VTT,
             SubtitleParser.detectFormat(content, "wrong.srt")
         )
-        assertEquals(SubtitleParser.SubtitleFormat.VTT, SubtitleParser.detectFormat("WEBVTT\n", "empty.vtt"))
+        assertEquals(SubtitleParser.SubtitleFormat.TXT, SubtitleParser.detectFormat("WEBVTT\n", "empty.vtt"))
     }
 
     @Test
-    fun detectFormat_headerlessVttRequiresVttExtension() {
+    fun detectFormat_headerlessVttUsesContent() {
         val content = "00:01.000 --> 00:02.000\nHello"
         assertEquals(
             SubtitleParser.SubtitleFormat.VTT,
             SubtitleParser.detectFormat(content, "sample.vtt")
         )
-        assertEquals(SubtitleParser.SubtitleFormat.TXT, SubtitleParser.detectFormat(content))
+        assertEquals(SubtitleParser.SubtitleFormat.VTT, SubtitleParser.detectFormat(content))
     }
 
     // ==================== parseSRT ====================

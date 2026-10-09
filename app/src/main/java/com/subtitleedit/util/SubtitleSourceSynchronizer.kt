@@ -4,6 +4,9 @@ import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.subtitle.LrcVariant
 import com.subtitleedit.util.subtitle.SrtParseResult
 import com.subtitleedit.util.subtitle.SrtSubtitleFormatHandler
+import com.subtitleedit.util.subtitle.WebVttParseResult
+import com.subtitleedit.util.subtitle.WebVttSubtitleFormatHandler
+import com.subtitleedit.util.subtitle.WebVttTextFormatting
 import com.subtitleedit.util.subtitle.toSubtitleLines
 import java.util.Locale
 import kotlin.math.roundToLong
@@ -103,35 +106,105 @@ object SubtitleSourceSynchronizer {
         oldEntries: List<SubtitleEntry>,
         newEntries: List<SubtitleEntry>
     ): String {
-        val lines = splitLines(content)
-        val spans = mutableListOf<CueSpan>()
-        var blockStart = 0
-        while (blockStart < lines.size) {
-            while (blockStart < lines.size && lines[blockStart].text.isBlank()) blockStart++
-            if (blockStart >= lines.size) break
-            var blockEnd = blockStart
-            while (blockEnd < lines.size && lines[blockEnd].text.isNotBlank()) blockEnd++
-            val first = lines[blockStart].text.trim()
-            val isMetadata = first == "NOTE" || first.startsWith("NOTE ") ||
-                first == "STYLE" || first.startsWith("STYLE ") ||
-                first == "REGION" || first.startsWith("REGION ")
-            if (!isMetadata) {
-                val timeLine = (blockStart until blockEnd).firstOrNull {
-                    lines[it].text.contains("-->")
-                }
-                if (timeLine != null && timeLine - blockStart <= 1) {
-                    var endWithSeparator = blockEnd
-                    while (endWithSeparator < lines.size && lines[endWithSeparator].text.isBlank()) {
-                        endWithSeparator++
-                    }
-                    spans += CueSpan(blockStart, endWithSeparator, timeLine)
-                }
-            }
-            blockStart = (blockEnd + 1).coerceAtMost(lines.size)
+        val parsed = WebVttSubtitleFormatHandler.parse(content.toSubtitleLines())
+        if (parsed.hasTextTransformations || parsed.cues.any { it.size != 1 } ||
+            parsed.cues.size != parsed.rawCues.size || parsed.cues.size != oldEntries.size
+        ) {
+            return rebuildVttCues(content, parsed, newEntries)
         }
-        return patchCueSpans(
-            content, lines, spans, oldEntries, newEntries, ::patchVttCue, ::appendVttCue
-        )
+
+        fun patchSource(source: String, sourceParsed: WebVttParseResult): String {
+            val lines = splitLines(source)
+            val locations = sourceParsed.cues.map { it.single() }
+            val spans = locations.map { cue ->
+                var end = cue.endExclusive.coerceAtMost(lines.size)
+                while (end < lines.size && lines[end].text.isBlank()) end++
+                CueSpan(cue.identifierLineIndex ?: cue.timeLineIndex, end, cue.timeLineIndex)
+            }
+            val offsetByInsertionLine = spans.zip(locations)
+                .associate { (span, cue) -> span.start to cue.timestampOffsetMs }
+            return patchCueSpans(
+                source, lines, spans, oldEntries, newEntries, ::patchVttCue, ::appendVttCue,
+                appendAt = { entry, ending, lineIndex ->
+                    val offset = offsetByInsertionLine[lineIndex] ?: sourceParsed.finalTimestampOffsetMs
+                    val previousLine = lines.getOrNull(lineIndex - 1)
+                    val separator = if (previousLine != null && previousLine.text.isNotBlank()) {
+                        if (previousLine.ending.isEmpty()) ending + ending else ending
+                    } else ""
+                    separator + appendVttCue(
+                        entry.copy(startTime = entry.startTime - offset, endTime = entry.endTime - offset),
+                        ending
+                    )
+                }
+            )
+        }
+
+        val oldIndexById = oldEntries.mapIndexed { index, entry -> entry.stableId to index }.toMap()
+        var followingOldIndex: Int? = null
+        val requiresAbsoluteTimes = newEntries.asReversed().any { entry ->
+            val oldIndex = oldIndexById[entry.stableId]
+            val offset = when {
+                oldIndex != null -> parsed.cues[oldIndex].single().timestampOffsetMs
+                followingOldIndex != null -> parsed.cues[followingOldIndex!!].single().timestampOffsetMs
+                else -> parsed.finalTimestampOffsetMs
+            }
+            if (oldIndex != null) followingOldIndex = oldIndex
+            offset > 0L && (entry.startTime < offset || entry.endTime < offset)
+        }
+        if (!requiresAbsoluteTimes) return patchSource(content, parsed)
+
+        // Move edits before a map's local origin to absolute media time.
+        val absoluteSource = removeVttTimestampMaps(content, parsed)
+        return patchSource(absoluteSource, WebVttSubtitleFormatHandler.parse(absoluteSource.toSubtitleLines()))
+    }
+
+    private fun removeVttTimestampMaps(content: String, parsed: WebVttParseResult): String {
+        val lines = splitLines(content)
+        val cueByTimeLine = parsed.rawCues.associateBy { it.timeLineIndex }
+        val mapLines = parsed.timestampMapLineIndices.toHashSet()
+        return buildString(content.length) {
+            lines.forEachIndexed { lineIndex, line ->
+                if (lineIndex in mapLines) return@forEachIndexed
+                val cue = cueByTimeLine[lineIndex]
+                val times = cue?.let { WebVttSubtitleFormatHandler.parseTimeLine(line.text) }
+                append(if (cue != null && times != null && cue.timestampOffsetMs != 0L) {
+                    WebVttSubtitleFormatHandler.rewriteTimeLine(
+                        line.text, times.startTime + cue.timestampOffsetMs, times.endTime + cue.timestampOffsetMs
+                    ) ?: line.text
+                } else line.text)
+                append(line.ending)
+            }
+        }
+    }
+
+    private fun rebuildVttCues(
+        content: String,
+        parsed: WebVttParseResult,
+        newEntries: List<SubtitleEntry>
+    ): String {
+        val absoluteSource = removeVttTimestampMaps(content, parsed)
+        val absoluteParsed = WebVttSubtitleFormatHandler.parse(absoluteSource.toSubtitleLines())
+        val lines = splitLines(absoluteSource)
+        val ending = preferredEnding(lines)
+        val locations = absoluteParsed.rawCues.sortedBy { it.timeLineIndex }
+        if (locations.isEmpty()) {
+            return appendEntries(absoluteSource, lines, newEntries) { entry, lineEnding ->
+                lineEnding + appendVttCue(entry, lineEnding)
+            }
+        }
+
+        // Merged/roll-up cues no longer map one-to-one to the original blocks.
+        // Replace those blocks while retaining unrelated source sections in place.
+        return buildString(content.length) {
+            var cursor = 0
+            locations.forEachIndexed { index, cue ->
+                val start = cue.identifierLineIndex ?: cue.timeLineIndex
+                append(lines.subList(cursor, start).joinToString("") { it.serialized })
+                if (index == 0) newEntries.forEach { append(appendVttCue(it, ending)) }
+                cursor = cue.endExclusive.coerceAtMost(lines.size)
+            }
+            append(lines.drop(cursor).joinToString("") { it.serialized })
+        }
     }
 
     private fun patchCueSpans(
@@ -141,11 +214,14 @@ object SubtitleSourceSynchronizer {
         oldEntries: List<SubtitleEntry>,
         newEntries: List<SubtitleEntry>,
         patch: (List<RawLine>, Int, SubtitleEntry, SubtitleEntry) -> String,
-        appendCue: (SubtitleEntry, String) -> String
+        appendCue: (SubtitleEntry, String) -> String,
+        appendAt: (SubtitleEntry, String, Int) -> String = { entry, ending, _ -> appendCue(entry, ending) }
     ): String {
         if (spans.isEmpty()) {
             return if (newEntries.isEmpty()) content
-            else appendEntries(content, lines, newEntries, appendCue)
+            else appendEntries(content, lines, newEntries) { entry, ending ->
+                appendAt(entry, ending, lines.size)
+            }
         }
 
         // When callers have associated parsed rows with the in-memory stable IDs, use those
@@ -182,7 +258,7 @@ object SubtitleSourceSynchronizer {
             var cursor = 0
             spans.forEachIndexed { oldIndex, span ->
                 output.append(lines.subList(cursor, span.start).joinToString("") { it.serialized })
-                insertionsBeforeOld[oldIndex].forEach { output.append(appendCue(it, ending)) }
+                insertionsBeforeOld[oldIndex].forEach { output.append(appendAt(it, ending, span.start)) }
                 val oldEntry = oldEntries[oldIndex]
                 val newEntry = newIndexById[oldEntry.stableId]?.let { newEntries[it] }
                 if (newEntry != null) {
@@ -198,7 +274,7 @@ object SubtitleSourceSynchronizer {
                 cursor = span.endExclusive
             }
             output.append(lines.drop(cursor).joinToString("") { it.serialized })
-            trailingInsertions.forEach { output.append(appendCue(it, ending)) }
+            trailingInsertions.forEach { output.append(appendAt(it, ending, lines.size)) }
             return output.toString()
         }
 
@@ -220,7 +296,9 @@ object SubtitleSourceSynchronizer {
             cursor = span.endExclusive
         }
         output.append(lines.drop(cursor).joinToString("") { it.serialized })
-        return appendEntries(output.toString(), lines, newEntries.drop(mappedCount), appendCue)
+        return appendEntries(output.toString(), lines, newEntries.drop(mappedCount)) { entry, ending ->
+            appendAt(entry, ending, lines.size)
+        }
     }
 
     private fun patchSrtCue(
@@ -271,19 +349,21 @@ object SubtitleSourceSynchronizer {
             else -> new.cueIdentifier + ending
         }
         val timeline = block[timeLineOffset]
+        val settings = WebVttSubtitleFormatHandler.getCueSettings(new)
+        val oldSettings = WebVttSubtitleFormatHandler.getCueSettings(old)
         val timeText = if (
             old.startTime == new.startTime && old.endTime == new.endTime &&
-            old.cueSettings == new.cueSettings
+            oldSettings == settings
         ) {
             timeline.text
         } else {
-            val rawTimes = parseArrowTimes(timeline.text, vtt = true)
+            val rawTimes = WebVttSubtitleFormatHandler.parseTimeLine(timeline.text)
             patchTimeLine(
                 timeline.text,
-                rawTimes?.first?.plus(new.startTime - old.startTime) ?: new.startTime,
-                rawTimes?.second?.plus(new.endTime - old.endTime) ?: new.endTime,
+                rawTimes?.startTime?.plus(new.startTime - old.startTime) ?: new.startTime,
+                rawTimes?.endTime?.plus(new.endTime - old.endTime) ?: new.endTime,
                 vtt = true,
-                settings = new.cueSettings
+                settings = settings.takeIf { it != oldSettings }
             )
         }
         val trailing = block.drop(timeLineOffset + 1).takeLastWhile { it.text.isBlank() }
@@ -292,7 +372,7 @@ object SubtitleSourceSynchronizer {
         val body = when {
             old.text == new.text -> originalBody
             new.text.isEmpty() -> ""
-            else -> normalizeText(new.text, ending) + ending
+            else -> normalizeText(WebVttTextFormatting.writeText(new.text), ending) + ending
         }
         return identifier + timeText + timeline.ending.ifEmpty { ending } + body +
             trailing.joinToString("") { it.serialized }
@@ -694,9 +774,12 @@ object SubtitleSourceSynchronizer {
         if (entry.cueIdentifier.isNotBlank()) append(entry.cueIdentifier).append(ending)
         append(formatTimestamp(entry.startTime, vtt = true)).append(" --> ")
             .append(formatTimestamp(entry.endTime, vtt = true))
-        if (entry.cueSettings.isNotBlank()) append(' ').append(entry.cueSettings.trim())
+        val settings = WebVttSubtitleFormatHandler.getCueSettings(entry)
+        if (settings.isNotBlank()) append(' ').append(settings.trim())
         append(ending)
-        if (entry.text.isNotEmpty()) append(normalizeText(entry.text, ending)).append(ending)
+        if (entry.text.isNotEmpty()) {
+            append(normalizeText(WebVttTextFormatting.writeText(entry.text), ending)).append(ending)
+        }
         append(ending)
     }
 
@@ -705,31 +788,18 @@ object SubtitleSourceSynchronizer {
         startTime: Long,
         endTime: Long,
         vtt: Boolean,
-        settings: String = ""
+        settings: String? = null
     ): String {
         if (!vtt) {
             return SrtSubtitleFormatHandler.rewriteTimeLine(original, startTime, endTime)
                 ?: (formatTimestamp(startTime, false) + " --> " + formatTimestamp(endTime, false))
         }
-        val arrow = original.indexOf("-->")
-        if (arrow < 0) {
-            return formatTimestamp(startTime, vtt) + " --> " + formatTimestamp(endTime, vtt)
-        }
-        val leading = original.takeWhile { it.isWhitespace() }
-        val beforeArrow = original.substring(0, arrow)
-        val leftSpacing = beforeArrow.takeLastWhile { it.isWhitespace() }
-        val afterArrow = original.substring(arrow + 3)
-        val rightSpacing = afterArrow.takeWhile { it.isWhitespace() }
-        val endAndSuffix = afterArrow.drop(rightSpacing.length)
-        val endTokenLength = endAndSuffix.indexOfFirst { it.isWhitespace() }
-            .let { if (it < 0) endAndSuffix.length else it }
-        val suffix = if (vtt) {
+        val rewritten = WebVttSubtitleFormatHandler.rewriteTimeLine(original, startTime, endTime)
+            ?: (formatTimestamp(startTime, true) + " --> " + formatTimestamp(endTime, true))
+        if (settings == null) return rewritten
+        val timeline = WebVttSubtitleFormatHandler.parseTimeLine(rewritten) ?: return rewritten
+        return rewritten.take(timeline.endRange.last + 1) +
             if (settings.isBlank()) "" else " ${settings.trim()}"
-        } else {
-            endAndSuffix.drop(endTokenLength)
-        }
-        return leading + formatTimestamp(startTime, vtt) + leftSpacing + "-->" + rightSpacing +
-            formatTimestamp(endTime, vtt) + suffix
     }
 
     private fun splitLines(content: String): List<RawLine> {
@@ -760,15 +830,7 @@ object SubtitleSourceSynchronizer {
 
     private fun formatTimestamp(timeMs: Long, vtt: Boolean): String {
         if (!vtt) return TimeUtils.formatSRT(timeMs)
-        val safe = timeMs.coerceAtLeast(0L)
-        return String.format(
-            Locale.US,
-            if (vtt) "%02d:%02d:%02d.%03d" else "%02d:%02d:%02d,%03d",
-            safe / 3_600_000,
-            safe % 3_600_000 / 60_000,
-            safe % 60_000 / 1_000,
-            safe % 1_000
-        )
+        return WebVttSubtitleFormatHandler.formatTimestamp(timeMs)
     }
 
     private fun formatLrcTag(
@@ -785,29 +847,6 @@ object SubtitleSourceSynchronizer {
             safe % 60_000 / 1_000,
             safe % 1_000
         )
-    }
-
-    private fun parseArrowTimes(line: String, vtt: Boolean): Pair<Long, Long>? {
-        val arrow = line.indexOf("-->")
-        if (arrow < 0) return null
-        val start = parseTimestamp(line.substring(0, arrow).trim(), vtt) ?: return null
-        val end = parseTimestamp(
-            line.substring(arrow + 3).trimStart().takeWhile { !it.isWhitespace() },
-            vtt
-        ) ?: return null
-        return start to end
-    }
-
-    private fun parseTimestamp(value: String, vtt: Boolean): Long? {
-        val normalized = if (vtt) value else value.replace(',', '.')
-        val parts = normalized.split(':')
-        if (parts.size !in 2..3) return null
-        val hours = if (parts.size == 3) parts[0].toLongOrNull() ?: return null else 0L
-        val minutes = parts[parts.size - 2].toLongOrNull() ?: return null
-        val secondParts = parts.last().split('.', limit = 2)
-        val seconds = secondParts[0].toLongOrNull() ?: return null
-        val millis = secondParts.getOrNull(1)?.take(3)?.padEnd(3, '0')?.toLongOrNull() ?: 0L
-        return hours * 3_600_000 + minutes * 60_000 + seconds * 1_000 + millis
     }
 
     private fun parseLrcTag(value: String): Long? {

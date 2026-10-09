@@ -280,4 +280,26 @@ class SubtitleColorOpsTest {
         assertEquals(source.replace("cue-id\n", addition + "\n\ncue-id\n"), result)
         assertEquals(1, SubtitleParser.parseDocument(result, "test.vtt").entries.size)
     }
+
+    @Test
+    fun syncVttHeaderSupportsSignedUnspacedTimelinesDirectlyAfterTheSignature() {
+        val source = "WEBVTT\n00:00:-1.-250-->00:00:02.000\nHello\n"
+        val result = SubtitleColorOps.syncVttHeader(source, "WEBVTT", "WEBVTT\n\nSTYLE\n::cue(.red) { color:red; }")
+        assertTrue(result.startsWith("WEBVTT\n\nSTYLE\n"))
+        assertTrue(result.contains("}\n\n00:00:-1.-250-->00:00:02.000"))
+        assertEquals(-1250L, SubtitleParser.parseVTT(result).single().startTime)
+    }
+
+    @Test
+    fun applyingVttColorPreservesTheCuePositionOnSave() {
+        val document = SubtitleParser.parseDocument(
+            "WEBVTT\n\n00:01.000 --> 00:02.000 line:10% position:20% region:r1\nHello",
+            format = SubtitleFormat.VTT
+        )
+        val colored = SubtitleColorOps.apply(document, setOf(0), 0xFFFF0000.toInt())
+        val restored = SubtitleParser.parseVTT(SubtitleParser.serialize(colored)).single()
+        assertEquals("line:10% position:20% region:r1", restored.cueSettings)
+        assertTrue(restored.text.startsWith("{\\an7}"))
+        assertTrue(restored.text.contains("<c."))
+    }
 }

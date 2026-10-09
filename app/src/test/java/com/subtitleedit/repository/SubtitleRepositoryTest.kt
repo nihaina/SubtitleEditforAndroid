@@ -40,7 +40,7 @@ class SubtitleRepositoryTest {
             index = 1,
             startTime = 1_000L,
             endTime = 2_000L,
-            text = "first\nsecond",
+            text = "{\\an1}first\nsecond",
             cueIdentifier = "cue-one",
             cueSettings = "align:start position:10%"
         )

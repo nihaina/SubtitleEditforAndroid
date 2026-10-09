@@ -201,6 +201,7 @@ tasks.named("preBuild").configure {
 dependencies {
     // Compact ICU-derived automatic charset detection for subtitle files.
     implementation("com.sigpwned:chardet4j:78.1.0")
+    implementation("org.jsoup:jsoup:1.21.2")
 
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.activity:activity-compose:1.13.0")

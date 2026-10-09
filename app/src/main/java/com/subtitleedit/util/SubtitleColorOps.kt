@@ -1,6 +1,8 @@
 package com.subtitleedit.util
 
 import com.subtitleedit.util.subtitle.SubtitleDocument
+import com.subtitleedit.util.subtitle.WebVttSubtitleFormatHandler
+import com.subtitleedit.util.subtitle.toSubtitleLines
 import com.subtitleedit.util.SubtitleParser.SubtitleFormat
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -54,31 +56,9 @@ object SubtitleColorOps {
         val addition = newHeader.removePrefix(oldHeader).removePrefix("WEBVTT").trim()
         if (!addition.startsWith("STYLE")) return content
         val lines = Regex("[^\\r\\n]*(?:\\r\\n|\\r|\\n|$)").findAll(content).filter { it.value.isNotEmpty() }.toList()
-        val timeLinePattern = Regex("^\\uFEFF?[ \\t]*(?:\\d+:)?\\d{1,2}:\\d{1,2}[.]\\d{1,4}[ \\t]+-->")
-        var blockStart = 0
-        var cueStart: Int? = null
-        while (blockStart < lines.size) {
-            while (blockStart < lines.size && lines[blockStart].value.isBlank()) blockStart++
-            if (blockStart >= lines.size) break
-            var blockEnd = blockStart
-            while (blockEnd < lines.size && lines[blockEnd].value.isNotBlank()) blockEnd++
-            val first = lines[blockStart].value.trim().trimStart('\uFEFF')
-            val metadata = listOf("NOTE", "STYLE", "REGION").any { first == it || first.startsWith("$it ") }
-            if (!metadata) {
-                val signedHeader = first.startsWith("WEBVTT", ignoreCase = true)
-                val candidates = if (signedHeader) (blockStart + 1 until blockEnd)
-                    else (blockStart until minOf(blockStart + 2, blockEnd))
-                val timeLine = candidates.firstOrNull { timeLinePattern.containsMatchIn(lines[it].value) }
-                if (timeLine != null) {
-                    // Keep cue identifiers and their timing line together. STYLE must be
-                    // inserted before the complete cue block, never between those lines.
-                    cueStart = blockStart
-                    break
-                }
-            }
-            blockStart = blockEnd
-        }
-        var insertAt = lines[cueStart ?: return content].range.first
+        val cue = WebVttSubtitleFormatHandler.parse(content.toSubtitleLines()).rawCues.firstOrNull() ?: return content
+        val cueStart = cue.identifierLineIndex ?: cue.timeLineIndex
+        var insertAt = lines.getOrNull(cueStart)?.range?.first ?: return content
         if (insertAt == 0 && content.startsWith('\uFEFF')) insertAt = 1
         val newline = if ("\r\n" in content) "\r\n" else if ('\r' in content && '\n' !in content) "\r" else "\n"
         val prefix = content.substring(0, insertAt)

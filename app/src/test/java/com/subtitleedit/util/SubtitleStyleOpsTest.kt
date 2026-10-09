@@ -154,4 +154,19 @@ class SubtitleStyleOpsTest {
         assertEquals(document.entries.single().startTime, reloaded.entries.single().startTime)
         assertEquals(document.entries.single().endTime, reloaded.entries.single().endTime)
     }
+
+    @Test
+    fun styleWrappersPreserveVttAlignmentOnSave() {
+        val document = SubtitleParser.parseDocument(
+            "WEBVTT\n\n00:01.000 --> 00:02.000 line:10% position:20%\nHello",
+            format = SubtitleParser.SubtitleFormat.VTT
+        )
+        val text = SubtitleStyleOps.toggle(
+            SubtitleStyleOps.toggle(document.entries.map { it.text }, Style.ITALIC), Style.BOLD
+        ).single()
+        val styled = document.copy(entries = listOf(document.entries.single().copy(text = text)))
+        val restored = SubtitleParser.parseVTT(SubtitleParser.serialize(styled)).single()
+        assertEquals("line:10% position:20%", restored.cueSettings)
+        assertEquals("{\\an7}<b><i>Hello</i></b>", restored.text)
+    }
 }

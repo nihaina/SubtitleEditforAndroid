@@ -20,6 +20,9 @@ internal class EditorSourceLineEditController(
     }
 
     fun resolve(startLine: Int, oldLineCount: Int, newLineCount: Int): Update? {
+        // VTT timestamp maps and merged/roll-up cue groups depend on the whole document.
+        // Let the existing debounced source parser resolve these edits with that context.
+        if (currentFormat() == SubtitleParser.SubtitleFormat.VTT) return null
         if (oldLineCount != newLineCount) return null
         val count = lineCount()
         if (startLine !in 0 until count) return null

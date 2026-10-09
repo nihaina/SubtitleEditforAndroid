@@ -7,6 +7,7 @@ import com.subtitleedit.util.subtitle.SrtSubtitleFormatHandler
 import com.subtitleedit.util.subtitle.SubtitleDocument
 import com.subtitleedit.util.subtitle.SubtitleFormatHandler
 import com.subtitleedit.util.subtitle.WebVttSubtitleFormatHandler
+import com.subtitleedit.util.subtitle.WebVttTextFormatting
 import com.subtitleedit.util.subtitle.toSubtitleLines
 import java.io.BufferedReader
 import java.io.StringReader
@@ -164,8 +165,15 @@ object SubtitleParser {
         if (targetHandler == null && to != SubtitleFormat.TXT) return content
 
         val source = parseDocument(content, format = from)
+        val entries = if (from == SubtitleFormat.VTT && from != to) {
+            val texts = WebVttTextFormatting.removeNativeFormatting(source.entries.map { it.text }, source.header)
+            source.entries.mapIndexed { index, entry -> entry.copy(text = texts[index]) }
+        } else {
+            source.entries
+        }
         val converted = source.copy(
             format = to,
+            entries = entries,
             header = if (from == to) source.header else "",
             footer = if (from == to) source.footer else ""
         )

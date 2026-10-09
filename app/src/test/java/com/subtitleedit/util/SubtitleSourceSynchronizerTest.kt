@@ -205,6 +205,170 @@ Second
     }
 
     @Test
+    fun vttArrowTextIsNotMistakenForCueTiming() {
+        val source = "WEBVTT\n\njunk --> text\nmetadata\n\ncue-1\n00:01.000 --> 00:02.000\nOld\n"
+        val old = SubtitleParser.parseVTT(source)
+        val updated = SubtitleSourceSynchronizer.apply(
+            source, SubtitleParser.SubtitleFormat.VTT, old,
+            listOf(old.single().copy(text = "Changed"))
+        )
+        assertTrue(updated.contains("junk --> text\nmetadata"))
+        assertEquals("Changed", SubtitleParser.parseVTT(updated).single().text)
+    }
+
+    @Test
+    fun vttRemovingAlignmentAlsoRemovesItsSourcePositionSettings() {
+        val source = "WEBVTT\n\ncue\n00:01.000 --> 00:02.000 line:10% position:20% region:r1\nHello\n"
+        val old = SubtitleParser.parseVTT(source)
+        val updated = SubtitleSourceSynchronizer.apply(
+            source, SubtitleParser.SubtitleFormat.VTT, old,
+            listOf(old.single().copy(text = "Hello"))
+        )
+        val entry = SubtitleParser.parseVTT(updated).single()
+        assertEquals("Hello", entry.text)
+        assertEquals("region:r1", entry.cueSettings)
+        assertEquals("cue", entry.cueIdentifier)
+    }
+
+    @Test
+    fun vttDeletingCueDirectlyAfterSignatureRetainsSignature() {
+        val source = "WEBVTT\n00:01.000 --> 00:02.000\nOld\n"
+        val old = SubtitleParser.parseVTT(source)
+        val updated = SubtitleSourceSynchronizer.apply(
+            source, SubtitleParser.SubtitleFormat.VTT, old, emptyList()
+        )
+        assertEquals("WEBVTT\n", updated)
+    }
+
+    @Test
+    fun vttMissingBlankSeparatorsUseParserCueLocations() {
+        val source = "WEBVTT\n\n00:01.000 --> 00:02.000\nFirst\n00:03.000 --> 00:04.000\nSecond\n"
+        val old = SubtitleParser.parseVTT(source)
+        val updated = SubtitleSourceSynchronizer.apply(
+            source, SubtitleParser.SubtitleFormat.VTT, old,
+            listOf(old[0], old[1].copy(text = "Changed"))
+        )
+        assertEquals(listOf("First", "Changed"), SubtitleParser.parseVTT(updated).map { it.text })
+        val deleted = SubtitleSourceSynchronizer.apply(
+            source, SubtitleParser.SubtitleFormat.VTT, old, listOf(old[1])
+        )
+        assertEquals("Second", SubtitleParser.parseVTT(deleted).single().text)
+    }
+
+    @Test
+    fun vttIntegerMillisecondsStayConsistentDuringTimeEdits() {
+        val source = "WEBVTT\n\ncue-1\n  00:01.5   -->   00:02.1234  align:center\nOld\n"
+        val old = SubtitleParser.parseVTT(source)
+        val changed = listOf(old.single().copy(startTime = old.single().startTime + 100L))
+        val updated = SubtitleSourceSynchronizer.apply(source, SubtitleParser.SubtitleFormat.VTT, old, changed)
+        assertTrue(updated.contains("00:00:01.105   -->   00:00:03.234  align:center"))
+        assertEquals(changed.single().startTime, SubtitleParser.parseVTT(updated).single().startTime)
+    }
+
+    @Test
+    fun vttInsertedCueDoesNotApplyTimestampMapTwice() {
+        val source = "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000\n\n00:01.000 --> 00:02.000\nOld\n"
+        val old = SubtitleParser.parseVTT(source)
+        val inserted = SubtitleEntry(startTime = 13_000L, endTime = 14_000L, text = "New")
+        val changed = old + inserted
+        val updated = SubtitleSourceSynchronizer.apply(source, SubtitleParser.SubtitleFormat.VTT, old, changed)
+        assertTrue(updated.contains("X-TIMESTAMP-MAP"))
+        assertEquals(changed.map { it.startTime to it.endTime }, SubtitleParser.parseVTT(updated).map { it.startTime to it.endTime })
+        assertEquals(listOf("Old", "New"), SubtitleParser.parseVTT(updated).map { it.text })
+    }
+
+    @Test
+    fun vttInsertingBeforeCueUsesThatCuesTimestampMap() {
+        val source = "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000\n\n00:01.000 --> 00:02.000\nFirst\n\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:1800000\n\n00:01.000 --> 00:02.000\nLast\n"
+        val old = SubtitleParser.parseVTT(source)
+        val inserted = SubtitleEntry(startTime = 20_000L, endTime = 20_500L, text = "New")
+        val changed = listOf(old[0], inserted, old[1])
+        val updated = SubtitleSourceSynchronizer.apply(source, SubtitleParser.SubtitleFormat.VTT, old, changed)
+        assertTrue(updated.contains("X-TIMESTAMP-MAP"))
+        assertEquals(changed.map { it.startTime to it.endTime }, SubtitleParser.parseVTT(updated).map { it.startTime to it.endTime })
+    }
+
+    @Test
+    fun vttEditingBeforeMapOriginConsumesMapsAndKeepsOtherCueTimes() {
+        val source = "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000\n\ncue-1\n00:01.000 --> 00:02.000 align:center\nFirst\n\nNOTE middle\nkeep me\n\ncue-2\n00:03.000 --> 00:04.000\nLast\n"
+        val old = SubtitleParser.parseVTT(source)
+        val changed = listOf(old[0].copy(startTime = 1_000L, endTime = 2_000L), old[1])
+        val updated = SubtitleSourceSynchronizer.apply(source, SubtitleParser.SubtitleFormat.VTT, old, changed)
+        assertTrue(!updated.contains("X-TIMESTAMP-MAP"))
+        assertTrue(updated.contains("NOTE middle\nkeep me"))
+        val reparsed = SubtitleParser.parseVTT(updated)
+        assertEquals(changed.map { it.startTime to it.endTime }, reparsed.map { it.startTime to it.endTime })
+        assertEquals(listOf("cue-1", "cue-2"), reparsed.map { it.cueIdentifier })
+    }
+
+    @Test
+    fun vttInsertedCueBeforeMapOriginKeepsAbsoluteTimes() {
+        val source = "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000\n\n00:01.000 --> 00:02.000\nOld\n"
+        val old = SubtitleParser.parseVTT(source)
+        val inserted = SubtitleEntry(startTime = 1_000L, endTime = 2_000L, text = "New")
+        val changed = listOf(inserted, old.single())
+        val updated = SubtitleSourceSynchronizer.apply(source, SubtitleParser.SubtitleFormat.VTT, old, changed)
+        assertTrue(!updated.contains("X-TIMESTAMP-MAP"))
+        assertEquals(changed.map { it.startTime to it.endTime }, SubtitleParser.parseVTT(updated).map { it.startTime to it.endTime })
+    }
+
+    @Test
+    fun vttAppendingAfterFooterNoteDoesNotMakeNewCuePartOfNote() {
+        val source = "WEBVTT\n\n00:01.000 --> 00:02.000\nOld\n\nNOTE footer\nkeep me"
+        val old = SubtitleParser.parseVTT(source)
+        val inserted = SubtitleEntry(startTime = 3_000L, endTime = 4_000L, text = "New")
+        val updated = SubtitleSourceSynchronizer.apply(
+            source, SubtitleParser.SubtitleFormat.VTT, old, old + inserted
+        )
+        assertTrue(updated.contains("NOTE footer\nkeep me"))
+        assertEquals(listOf("Old", "New"), SubtitleParser.parseVTT(updated).map { it.text })
+    }
+
+    @Test
+    fun vttEditedDecodedTextIsEscapedForReload() {
+        val source = "WEBVTT\n\n00:01.000 --> 00:02.000\nA &amp; B &lt; C\n"
+        val old = SubtitleParser.parseVTT(source)
+        val changed = listOf(old.single().copy(text = "Changed & B < C"))
+        val updated = SubtitleSourceSynchronizer.apply(source, SubtitleParser.SubtitleFormat.VTT, old, changed)
+        assertTrue(updated.contains("Changed &amp; B &lt; C"))
+        assertEquals(changed.single().text, SubtitleParser.parseVTT(updated).single().text)
+    }
+
+    @Test
+    fun vttNegativeTimeEditsReloadWithoutClamping() {
+        val source = "WEBVTT\n\n00:01.000 --> 00:02.000\nOld\n"
+        val old = SubtitleParser.parseVTT(source)
+        val changed = listOf(old.single().copy(startTime = -1_250L))
+        val updated = SubtitleSourceSynchronizer.apply(source, SubtitleParser.SubtitleFormat.VTT, old, changed)
+        assertEquals(-1_250L, SubtitleParser.parseVTT(updated).single().startTime)
+    }
+
+    @Test
+    fun vttDeletingEarlierMapSegmentKeepsFollowingMapInPlace() {
+        val source = "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000\n\n00:01.000 --> 00:02.000\nFirst\n\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:1800000\n\n00:01.000 --> 00:02.000\nLast\n"
+        val old = SubtitleParser.parseVTT(source)
+        val updated = SubtitleSourceSynchronizer.apply(
+            source, SubtitleParser.SubtitleFormat.VTT, old, listOf(old[1])
+        )
+        val reparsed = SubtitleParser.parseVTT(updated).single()
+        assertEquals(old[1].startTime, reparsed.startTime)
+        assertEquals(old[1].endTime, reparsed.endTime)
+        assertEquals("Last", reparsed.text)
+    }
+
+    @Test
+    fun vttEditingMergedCuesPreservesMetadataWithoutRestoringDuplicates() {
+        val source = "WEBVTT\n\nSTYLE\n::cue { color: red; }\n\n00:01.000 --> 00:02.000\nFirst\n\n00:01.000 --> 00:02.000\nSecond\n\nNOTE footer\nkeep me\n"
+        val old = SubtitleParser.parseVTT(source)
+        val changed = listOf(old.single().copy(text = "Changed"))
+        val updated = SubtitleSourceSynchronizer.apply(source, SubtitleParser.SubtitleFormat.VTT, old, changed)
+        assertTrue(updated.contains("STYLE\n::cue { color: red; }"))
+        assertTrue(updated.contains("NOTE footer\nkeep me"))
+        assertEquals("Changed", SubtitleParser.parseVTT(updated).single().text)
+        assertTrue(!updated.contains("Second"))
+    }
+
+    @Test
     fun lrcChangesPatchTimedLineInPlace() {
         val source = "[ti:Demo]\n[00:01.00]Old\n[00:03.00]Next\n"
         val old = SubtitleParser.parseDocument(source, format = SubtitleParser.SubtitleFormat.LRC).entries

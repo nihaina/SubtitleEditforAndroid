@@ -2,224 +2,245 @@ package com.subtitleedit.util.subtitle
 
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
-import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.roundToLong
+
+internal data class WebVttTimeLine(
+    val startTime: Long,
+    val endTime: Long,
+    val settings: String,
+    val startRange: IntRange,
+    val endRange: IntRange
+)
+
+internal data class WebVttCueLocation(
+    val identifierLineIndex: Int?,
+    val timeLineIndex: Int,
+    val endExclusive: Int,
+    val timestampOffsetMs: Long
+)
+
+internal data class WebVttParseResult(
+    val document: SubtitleDocument,
+    val errorCount: Int,
+    val cues: List<List<WebVttCueLocation>>,
+    val rawCues: List<WebVttCueLocation>,
+    val finalTimestampOffsetMs: Long,
+    val timestampMapLineIndices: List<Int>,
+    val hasTextTransformations: Boolean
+)
 
 object WebVttSubtitleFormatHandler : SubtitleFormatHandler {
     override val format = SubtitleParser.SubtitleFormat.VTT
     override val extensions = setOf("vtt", "webvtt")
 
-    private val timestampPattern = Regex("""^(?:(\d+):)?(\d{1,2}):(\d{1,2})[.](\d{1,4})$""")
+    private const val timestampToken = """-?\d+:-?\d+(?::-?\d+)?\.-?\d+"""
+    private val timelinePattern = Regex("""^\s*($timestampToken)\s*-->\s*($timestampToken)(.*)$""")
+    private val timestampPattern = Regex("""^(?:(-?\d+):)?(-?\d+):(-?\d+)\.(-?\d+)$""")
     private val timestampMapPattern = Regex("""^X-TIMESTAMP-MAP\s*=\s*(.+)$""", RegexOption.IGNORE_CASE)
     private val localTimestampPattern = Regex("""LOCAL\s*:\s*([0-9:.]+)""", RegexOption.IGNORE_CASE)
     private val mpegTsPattern = Regex("""MPEGTS\s*:\s*(\d+)""", RegexOption.IGNORE_CASE)
+    private val mpegTsKey = Regex("""MPEGTS\s*:""", RegexOption.IGNORE_CASE)
+    private val numericIdentifier = Regex("""\d+(?:x\d+)?""")
 
     override fun isMine(lines: List<String>, fileName: String?): Boolean {
-        if (hasWebVttSignature(lines)) return true
-
-        val extension = fileName?.substringAfterLast('.', "")?.lowercase().orEmpty()
-        return extension in extensions && lines.any { parseTimeLine(it) != null }
+        val parsed = parse(lines)
+        return parsed.document.entries.size > parsed.errorCount
     }
 
-    override fun load(lines: List<String>, fileName: String?): SubtitleDocument {
-        val entries = mutableListOf<SubtitleEntry>()
+    override fun load(lines: List<String>, fileName: String?): SubtitleDocument = parse(lines).document
+
+    internal fun parse(lines: List<String>): WebVttParseResult {
+        val prepared = lines.mapIndexed { index, line -> if (index == 0) line.removePrefix("\uFEFF") else line }
         val header = mutableListOf<String>()
         val footer = mutableListOf<String>()
+        val rows = mutableListOf<WebVttParsedCue>()
+        val rawCues = mutableListOf<WebVttCueLocation>()
+        val maps = mutableListOf<Int>()
+        var offset = 0L
+        var errors = 0
+        var current: SubtitleEntry? = null
+        var identifierLine: Int? = null
+        var pendingIdentifier: Int? = null
+        var timeLineIndex = -1
+        var cueOffset = 0L
+        val text = mutableListOf<String>()
         var index = 0
-        var timestampOffsetMs = 0L
 
-        if (hasWebVttSignature(lines)) {
-            header += lines.first().trimStart('\uFEFF')
-            index = 1
+        if (prepared.firstOrNull()?.startsWith("WEBVTT", ignoreCase = true) == true) {
+            header += prepared.first()
+            index++
+        } else header += "WEBVTT"
 
-            // The signature may be followed by header metadata without a blank separator.
-            while (index < lines.size && lines[index].isNotBlank()) {
-                if (parseTimeLine(lines[index]) != null) break
-                updateTimestampOffset(lines[index])?.let { timestampOffsetMs = it }
-                    ?: header.add(lines[index])
+        fun finish(at: Int) {
+            val entry = current ?: return
+            val location = WebVttCueLocation(identifierLine, timeLineIndex, at, cueOffset)
+            val cueText = text.joinToString("\n").trimEnd()
+            entry.text = WebVttCueProcessing.removeRepeatingHeader(WebVttTextFormatting.decode(cueText))
+            rows += WebVttParsedCue(entry, mutableListOf(location))
+            rawCues += location
+            current = null
+            identifierLine = null
+            text.clear()
+        }
+
+        while (index < prepared.size) {
+            val line = prepared[index]
+            val trimmed = line.trim()
+            val previousBlank = index == 0 || prepared[index - 1].isBlank()
+            val nextTimeLine = prepared.getOrNull(index + 1)?.let(::parseTimeLine)
+
+            if (isMetadataStart(trimmed) && (previousBlank || current == null)) {
+                finish(index)
+                val start = index
+                while (index < prepared.size && prepared[index].isNotBlank()) index++
+                appendBlock(if (rows.isEmpty()) header else footer, prepared.subList(start, index))
+                pendingIdentifier = null
+                continue
+            }
+
+            if (isTimestampMap(trimmed)) {
+                finish(index)
+                offset = timestampOffset(trimmed)
+                maps += index
+                pendingIdentifier = null
                 index++
-            }
-        } else {
-            // Subtitle Edit also loads headerless WebVTT when the file extension selected
-            // this handler. Add the required signature only when serializing it again.
-            header += "WEBVTT"
-        }
-        while (index < lines.size && lines[index].isBlank()) index++
-
-        var hasSeenCue = false
-        splitBlocks(lines, index).forEach { block ->
-            if (block.isEmpty()) return@forEach
-
-            if (isMetadataBlock(block)) {
-                val destination = if (hasSeenCue) footer else header
-                appendBlock(destination, block)
-                return@forEach
+                continue
             }
 
-            // Subtitle Edit consumes X-TIMESTAMP-MAP as a time-base conversion. Keeping it
-            // after converting the cue times would apply the offset twice on the next load.
-            if (block.size == 1 && updateTimestampOffset(block.first())?.also {
-                    timestampOffsetMs = it
-                } != null
+            if (trimmed == "WEBVTT") {
+                index++
+                continue
+            }
+
+            val timeLine = parseTimeLine(line)
+            if (timeLine != null) {
+                finish(pendingIdentifier ?: index)
+                identifierLine = pendingIdentifier
+                pendingIdentifier = null
+                timeLineIndex = index
+                cueOffset = offset
+                current = SubtitleEntry(
+                    startTime = timeLine.startTime + offset,
+                    endTime = timeLine.endTime + offset,
+                    cueIdentifier = identifierLine?.let { prepared[it] }.orEmpty(),
+                    cueSettings = timeLine.settings
+                )
+            } else if (timelinePattern.containsMatchIn(line)) {
+                // Count recognized time codes that fail integer parsing, as Subtitle Edit
+                // does; an arbitrary arrow in caption text is not a parse error.
+                finish(index)
+                pendingIdentifier = null
+                errors++
+            } else if (nextTimeLine != null && line.isNotBlank() &&
+                (current == null || previousBlank ||
+                    numericIdentifier.matches(trimmed.trim('$', '\u00A3', '\u00A5', '%', '*')) && text.isNotEmpty())
             ) {
-                return@forEach
+                finish(index)
+                pendingIdentifier = index
+            } else if (current != null) {
+                val prefix = if (text.isEmpty()) WebVttCueProcessing.positionInfo(current!!.cueSettings) else ""
+                text += prefix + trimmed
+            } else if (line.isNotBlank()) {
+                appendBlock(if (rows.isEmpty()) header else footer, listOf(line))
             }
-
-            val cue = parseCueBlock(block, timestampOffsetMs)
-            if (cue != null) {
-                entries += cue.copy(index = entries.size + 1)
-                hasSeenCue = true
-            } else {
-                val destination = if (hasSeenCue) footer else header
-                appendBlock(destination, block)
-            }
+            index++
         }
+        finish(prepared.size)
 
-        return SubtitleDocument(
-            format = format,
-            entries = entries,
-            header = normalizeHeader(header),
-            footer = normalizeSection(footer)
+        val processed = WebVttCueProcessing.process(rows)
+        val document = SubtitleDocument(
+            format,
+            processed.mapIndexed { cueIndex, row -> row.entry.copy(index = cueIndex + 1) },
+            normalizeHeader(header),
+            normalizeSection(footer)
+        )
+        return WebVttParseResult(
+            document, errors, processed.map { it.locations.toList() }, rawCues,
+            offset, maps, processed.size != rawCues.size || processed.any { it.textTransformed }
         )
     }
 
     override fun write(document: SubtitleDocument): String = buildString {
-        val header = normalizeHeader(document.header.toSubtitleLines())
-        appendLine(header)
+        appendLine(normalizeHeader(document.header.toSubtitleLines()))
         appendLine()
-
         document.entries.forEach { entry ->
             if (entry.cueIdentifier.isNotBlank()) appendLine(entry.cueIdentifier)
-            append(formatTimestamp(entry.startTime))
-            append(" --> ")
-            append(formatTimestamp(entry.endTime))
-            if (entry.cueSettings.isNotBlank()) {
-                append(' ')
-                append(entry.cueSettings.trim())
-            }
+            append(formatTimestamp(entry.startTime)).append(" --> ").append(formatTimestamp(entry.endTime))
+            val settings = getCueSettings(entry)
+            if (settings.isNotBlank()) append(' ').append(settings)
             appendLine()
-            appendLine(entry.text)
+            appendLine(WebVttTextFormatting.writeText(entry.text))
             appendLine()
         }
-
         val footer = normalizeSection(document.footer.toSubtitleLines())
         if (footer.isNotBlank()) appendLine(footer)
-    }.trimEnd() + "\n"
+    }.trim()
 
-    private data class TimeLine(val startTime: Long, val endTime: Long, val settings: String)
+    internal fun getCueSettings(entry: SubtitleEntry): String = WebVttCueProcessing.settingsFor(entry)
 
-    private fun parseTimeLine(line: String): TimeLine? {
-        val arrowIndex = line.indexOf("-->")
-        if (arrowIndex < 0) return null
-        val startText = line.substring(0, arrowIndex).trim()
-        val remainder = line.substring(arrowIndex + 3).trim()
-        val settingsStart = remainder.indexOfFirst { it.isWhitespace() }
-        val endText = if (settingsStart < 0) remainder else remainder.substring(0, settingsStart)
-        val settings = if (settingsStart < 0) "" else remainder.substring(settingsStart + 1).trim()
-        val start = parseTimestamp(startText) ?: return null
-        val end = parseTimestamp(endText) ?: return null
-        return TimeLine(start, end, settings)
+    internal fun updateCueSettings(entry: SubtitleEntry, settings: String) = WebVttCueProcessing.updateSettings(entry, settings)
+
+    internal fun parseTimeLine(line: String): WebVttTimeLine? {
+        val match = timelinePattern.matchEntire(line) ?: return null
+        val suffix = match.groupValues[3]
+        if (suffix.isNotEmpty() && !suffix.first().isWhitespace()) return null
+        return WebVttTimeLine(
+            parseTimestamp(match.groupValues[1]) ?: return null,
+            parseTimestamp(match.groupValues[2]) ?: return null,
+            suffix.trim(), match.groups[1]!!.range, match.groups[2]!!.range
+        )
+    }
+
+    internal fun rewriteTimeLine(line: String, startTime: Long, endTime: Long): String? {
+        val parsed = parseTimeLine(line) ?: return null
+        return line.substring(0, parsed.startRange.first) + formatTimestamp(startTime) +
+            line.substring(parsed.startRange.last + 1, parsed.endRange.first) + formatTimestamp(endTime) +
+            line.substring(parsed.endRange.last + 1)
     }
 
     private fun parseTimestamp(value: String): Long? {
         val match = timestampPattern.matchEntire(value) ?: return null
-        val hours = match.groupValues[1].ifEmpty { "0" }.toLongOrNull() ?: return null
-        val minutes = match.groupValues[2].toLongOrNull() ?: return null
-        val seconds = match.groupValues[3].toLongOrNull() ?: return null
-        val millis = match.groupValues[4].take(3).padEnd(3, '0').toLongOrNull() ?: return null
-        if (minutes !in 0..59 || seconds !in 0..59) return null
-        return (hours * 3_600_000 + minutes * 60_000 + seconds * 1_000 + millis)
-            .coerceAtLeast(0L)
+        val hours = match.groupValues[1].ifEmpty { "0" }.toIntOrNull() ?: return null
+        val minutes = match.groupValues[2].toIntOrNull() ?: return null
+        val seconds = match.groupValues[3].toIntOrNull() ?: return null
+        val millis = match.groupValues[4].toIntOrNull() ?: return null
+        return hours * 3_600_000L + minutes * 60_000L + seconds * 1_000L + millis
     }
 
-    private fun parseCueBlock(block: List<String>, timestampOffsetMs: Long): SubtitleEntry? {
-        var identifier = ""
-        var timeLine = parseTimeLine(block.first())
-        var textStartIndex = 1
-        if (timeLine == null && block.size >= 2) {
-            timeLine = parseTimeLine(block[1])
-            if (timeLine != null) {
-                identifier = block.first()
-                textStartIndex = 2
-            }
-        }
-        val parsedTimeLine = timeLine ?: return null
-        return SubtitleEntry(
-            startTime = (parsedTimeLine.startTime + timestampOffsetMs).coerceAtLeast(0L),
-            endTime = (parsedTimeLine.endTime + timestampOffsetMs).coerceAtLeast(0L),
-            text = block.drop(textStartIndex).joinToString("\n") { it.trimEnd() },
-            cueIdentifier = identifier,
-            cueSettings = parsedTimeLine.settings
-        )
+    private fun timestampOffset(line: String): Long {
+        val compact = line.replace(" ", "")
+        val local = localTimestampPattern.find(compact)?.groupValues?.get(1)?.let(::parseTimestamp) ?: 0L
+        val mpegTs = mpegTsPattern.find(compact)?.groupValues?.get(1)?.toLongOrNull() ?: return 0L
+        val offset = mpegTs.toDouble() * 1_000 / 90_000 - local
+        return if (offset > 0 && offset < 90_000_000) offset.roundToLong() else 0L
     }
 
-    private fun splitBlocks(lines: List<String>, startIndex: Int): List<List<String>> {
-        val blocks = mutableListOf<List<String>>()
-        val current = mutableListOf<String>()
-        for (index in startIndex until lines.size) {
-            val line = lines[index]
-            if (line.isBlank()) {
-                if (current.isNotEmpty()) {
-                    blocks += current.toList()
-                    current.clear()
-                }
-            } else {
-                current += line
-            }
-        }
-        if (current.isNotEmpty()) blocks += current
-        return blocks
+    internal fun formatTimestamp(timeMs: Long): String {
+        fun component(value: Long, digits: Int): String =
+            (if (value < 0) "-" else "") + abs(value).toString().padStart(digits, '0')
+        return component(timeMs / 3_600_000, 2) + ":" + component(timeMs % 3_600_000 / 60_000, 2) +
+            ":" + component(timeMs % 60_000 / 1_000, 2) + "." + component(timeMs % 1_000, 3)
     }
 
-    private fun isMetadataBlock(block: List<String>): Boolean {
-        val first = block.firstOrNull()?.trim().orEmpty()
-        return first == "NOTE" || first.startsWith("NOTE ") ||
-            first == "STYLE" || first.startsWith("STYLE ") ||
-            first == "REGION" || first.startsWith("REGION ")
+    private fun isMetadataStart(line: String): Boolean = listOf("NOTE", "STYLE", "REGION").any {
+        line == it || line.startsWith("$it ")
     }
+
+    private fun isTimestampMap(line: String): Boolean =
+        timestampMapPattern.matches(line) && mpegTsKey.containsMatchIn(line)
 
     private fun appendBlock(destination: MutableList<String>, block: List<String>) {
         if (destination.isNotEmpty() && destination.last().isNotEmpty()) destination += ""
         destination += block
     }
 
-    private fun updateTimestampOffset(line: String): Long? {
-        if (!timestampMapPattern.matches(line.trim())) return null
-        val local = localTimestampPattern.find(line)?.groupValues?.getOrNull(1)
-            ?.let(::parseTimestamp) ?: return null
-        val mpegTs = mpegTsPattern.find(line)?.groupValues?.getOrNull(1)?.toLongOrNull()
-            ?: return null
-        val offset = mpegTs * 1_000L / 90_000L - local
-        // Match Subtitle Edit's protective range: accept only a plausible positive media offset.
-        return offset.takeIf { it in 0 until 90_000_000L }
-    }
-
-    private fun formatTimestamp(timeMs: Long): String {
-        val safeTime = timeMs.coerceAtLeast(0L)
-        val hours = safeTime / 3_600_000
-        val minutes = safeTime % 3_600_000 / 60_000
-        val seconds = safeTime % 60_000 / 1_000
-        val millis = safeTime % 1_000
-        return String.format(Locale.US, "%02d:%02d:%02d.%03d", hours, minutes, seconds, millis)
-    }
-
     private fun normalizeHeader(lines: List<String>): String {
-        val result = lines
-            .filterNot { timestampMapPattern.matches(it.trim()) }
-            .dropLastWhile { it.isBlank() }
-            .toMutableList()
-        if (result.isEmpty() || !result.first().startsWith("WEBVTT", ignoreCase = true)) {
-            result.add(0, "WEBVTT")
-        }
-        return result.joinToString("\n")
+        val result = lines.filterNot { isTimestampMap(it.trim()) }.toMutableList()
+        if (result.firstOrNull()?.startsWith("WEBVTT", ignoreCase = true) != true) result.add(0, "WEBVTT")
+        return result.joinToString("\n").trimEnd()
     }
 
     private fun normalizeSection(lines: List<String>): String = lines
-        .filterNot { timestampMapPattern.matches(it.trim()) }
-        .dropWhile { it.isBlank() }
-        .dropLastWhile { it.isBlank() }
-        .joinToString("\n")
-
-    private fun hasWebVttSignature(lines: List<String>): Boolean =
-        lines.firstOrNull()?.trimStart('\uFEFF')
-            ?.startsWith("WEBVTT", ignoreCase = true) == true
+        .filterNot { isTimestampMap(it.trim()) }.joinToString("\n").trim()
 }

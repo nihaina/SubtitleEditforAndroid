@@ -76,6 +76,7 @@ import com.subtitleedit.util.SubtitleStyleOps
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.audio.Mp3FileIssues
 import com.subtitleedit.util.SubtitleParser
+import com.subtitleedit.util.subtitle.WebVttSubtitleFormatHandler
 import com.subtitleedit.util.SubtitleSourceSynchronizer
 import com.subtitleedit.util.TimeUtils
 import com.subtitleedit.util.subtitle.SubtitleDocument
@@ -510,7 +511,7 @@ class EditorActivity : AppCompatActivity() {
             updateCue = { position, identifier, settings ->
                 stateModel.subtitleEntries.getOrNull(position)?.apply {
                     cueIdentifier = identifier
-                    cueSettings = settings
+                    WebVttSubtitleFormatHandler.updateCueSettings(this, settings)
                 }
             },
             onUpdated = ::onEntryUpdated,
