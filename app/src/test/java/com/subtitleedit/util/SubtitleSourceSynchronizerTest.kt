@@ -461,6 +461,104 @@ Second
     }
 
     @Test
+    fun lrcFormattedTextUsesTheWriterCleanupAndKeepsRawTimingAndMetadata() {
+        val source = "[ti:<b>Demo</b>]\r\n[offset:500]\r\n[00:01.234]Old\r\n[00:02.567]\r\n"
+        val old = SubtitleParser.parseLRC(source)
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            old,
+            listOf(old.single().copy(text = "<i><b><font color=red>New\r\nsecond</font></b></i>"))
+        )
+
+        assertEquals("[ti:<b>Demo</b>]\r\n[offset:500]\r\n[00:01.234]New second\r\n[00:02.567]\r\n", updated)
+        val entry = SubtitleParser.parseLRC(updated).single()
+        assertEquals("New second", entry.text)
+        assertEquals(old.single().startTime, entry.startTime)
+        assertEquals(old.single().endTime, entry.endTime)
+    }
+
+    @Test
+    fun lrcMultiTimeTagLineStaysGroupedWhenOnlyTheFormattingDiffers() {
+        val source = "[00:01.234][00:03.500]Old\n[00:04.000]\n"
+        val old = SubtitleParser.parseLRC(source)
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            old,
+            listOf(old[0].copy(text = "<i>Hello</i>"), old[1].copy(text = "<b>Hello</b>"))
+        )
+
+        assertEquals("[00:01.234][00:03.500]Hello\n[00:04.000]\n", updated)
+        assertEquals(listOf("Hello", "Hello"), SubtitleParser.parseLRC(updated).map { it.text })
+    }
+
+    @Test
+    fun lrcMultiTimeTagLineSplitsDifferentLyricsWithoutLeakingTagsOrNewlines() {
+        val source = "[00:01.234][00:03.500]Old\n[00:04.000]\n"
+        val old = SubtitleParser.parseLRC(source)
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            old,
+            listOf(old[0].copy(text = "<i>Hello\nthere</i>"), old[1].copy(text = "<font color=red>World</font>"))
+        )
+
+        assertEquals("[00:01.234]Hello there\n[00:03.500]World\n[00:04.000]\n", updated)
+        assertEquals(listOf("Hello there", "World"), SubtitleParser.parseLRC(updated).map { it.text })
+    }
+
+    @Test
+    fun lrcInsertedAndPartiallyDeletedMultiTagCuesUseTheSameTextCleanup() {
+        val source = "[00:01.000][00:02.000]Shared\n[00:03.000]\n"
+        val old = SubtitleParser.parseLRC(source)
+        val inserted = SubtitleEntry(startTime = 4_000L, endTime = 5_000L, text = "<b>Added\nline</b>")
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            old,
+            listOf(old[1].copy(text = "<i>Remaining</i>"), inserted)
+        )
+
+        assertEquals("[00:02.000]Remaining\n[00:03.000]\n[00:04.000]Added line\n[00:05.000]\n", updated)
+        assertEquals(listOf("Remaining", "Added line"), SubtitleParser.parseLRC(updated).map { it.text })
+    }
+
+    @Test
+    fun lrcNoEndTimeInsertedCueCleansFormattingWithoutAddingTerminators() {
+        val source = "[re: Subtitle Edit - LRC No End Time]\n[offset:500]\n[00:01.234]First\n"
+        val old = SubtitleParser.parseLRC(source)
+        val inserted = SubtitleEntry(startTime = 3_000L, endTime = 4_000L, text = "<font color=red><i>Added\nline</i></font>")
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            old,
+            listOf(old.single(), inserted)
+        )
+
+        assertEquals("[re: Subtitle Edit - LRC No End Time]\n[offset:500]\n[00:01.234]First\n[00:02.50]Added line\n", updated)
+        assertEquals(listOf("First", "Added line"), SubtitleParser.parseLRC(updated).map { it.text })
+    }
+
+    @Test
+    fun lrcAppendingToMetadataOnlySourceCleansLyricsAndKeepsTheOffset() {
+        val source = "[ti:<i>Title</i>]\r\n[offset:500]\r\n"
+        val inserted = SubtitleEntry(startTime = 1_500L, endTime = 2_500L, text = "<b>Added\r\nline</b>")
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            emptyList(),
+            listOf(inserted)
+        )
+
+        assertEquals("[ti:<i>Title</i>]\r\n[offset:500]\r\n[00:01.00]Added line\r\n[00:02.00]\r\n", updated)
+        val restored = SubtitleParser.parseLRC(updated).single()
+        assertEquals("Added line", restored.text)
+        assertEquals(inserted.startTime, restored.startTime)
+        assertEquals(inserted.endTime, restored.endTime)
+    }
+
+    @Test
     fun lrcContiguousCuesDoNotInsertTerminatorWhenEndIsSetToNextStart() {
         val source = "[00:01.00]A\n[00:02.00]B\n"
         val old = SubtitleParser.parseLRC(source)

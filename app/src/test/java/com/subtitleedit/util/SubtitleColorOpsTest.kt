@@ -226,6 +226,74 @@ class SubtitleColorOpsTest {
     }
 
     @Test
+    fun webVttIgnoresOversizedRgbComponentsWithoutThrowing() {
+        val huge = "9".repeat(400)
+        listOf(
+            "rgb($huge,0,0)",
+            "rgb(255,$huge,0)",
+            "rgb(255,0,$huge)",
+            "rgba($huge,0,0,0.5)",
+            "rgba(255,$huge,0,0.5)",
+            "rgba(255,0,$huge,0.5)"
+        ).forEach { value ->
+            assertCssColorIsNotReused(value, 0xFFFF0000.toInt(), "ff0000ff")
+        }
+    }
+
+    @Test
+    fun webVttDoesNotReuseOutOfRangeRgbComponentsAsDifferentColors() {
+        listOf(
+            Triple("rgb(256,0,0)", 0xFF000000.toInt(), "000000ff"),
+            Triple("rgb(255,256,0)", 0xFFFF0000.toInt(), "ff0000ff"),
+            Triple("rgb(0,0,256)", 0xFF000100.toInt(), "000100ff"),
+            Triple("rgba(256,0,0,1)", 0xFF000000.toInt(), "000000ff"),
+            Triple("rgba(255,256,0,0.5)", 0x80FF0000.toInt(), "ff000080"),
+            Triple("rgba(0,0,256,1)", 0xFF000100.toInt(), "000100ff")
+        ).forEach { (value, color, expectedClass) ->
+            assertCssColorIsNotReused(value, color, expectedClass)
+        }
+    }
+
+    @Test
+    fun webVttIgnoresMalformedNonFiniteAndOutOfRangeAlpha() {
+        listOf("1.001", "1.5", "-0.1", "0..5", ".", "NaN", "Infinity", "9".repeat(400)).forEach { alpha ->
+            assertCssColorIsNotReused("rgba(255,0,0,$alpha)", 0xFFFF0000.toInt(), "ff0000ff")
+        }
+    }
+
+    @Test
+    fun webVttReusesValidAlphaBoundaryAndFractionalRules() {
+        listOf(
+            "0" to 0x00FF0000,
+            ".25" to 0x40FF0000,
+            "0.5" to 0x80FF0000.toInt(),
+            "0.5019607843137255" to 0x80FF0000.toInt(),
+            "1" to 0xFFFF0000.toInt()
+        ).forEach { (alpha, color) ->
+            val document = SubtitleDocument(
+                SubtitleFormat.VTT,
+                listOf(SubtitleEntry(text = "text")),
+                header = "WEBVTT\n\nSTYLE\n::cue(.existing) { color:rgba(255,0,0,$alpha); }"
+            )
+            val result = SubtitleColorOps.apply(document, setOf(0), color)
+            assertEquals(alpha, document.header, result.header)
+            assertEquals(alpha, "<c.existing>text</c>", result.entries.single().text)
+        }
+    }
+
+    private fun assertCssColorIsNotReused(value: String, color: Int, expectedClass: String) {
+        val document = SubtitleDocument(
+            SubtitleFormat.VTT,
+            listOf(SubtitleEntry(text = "text")),
+            header = "WEBVTT\n\nSTYLE\n::cue(.invalid) { color:$value; }"
+        )
+        val result = SubtitleColorOps.apply(document, setOf(0), color)
+        assertTrue(value, result.header.startsWith(document.header))
+        assertTrue(value, result.header != document.header)
+        assertEquals(value, "<c.$expectedClass>text</c>", result.entries.single().text)
+    }
+
+    @Test
     fun webVttDefaultColorClassesAreRemovedWhenReplacingColor() {
         val document = SubtitleDocument(
             SubtitleFormat.VTT,

@@ -23,7 +23,7 @@ object LrcSubtitleFormatHandler : SubtitleFormatHandler {
     )
 
     private data class TimedText(val timeMs: Long, val text: String)
-    private data class ParsedLine(val tags: List<ParsedTag>, val text: String)
+    private data class ParsedLine(val tags: List<ParsedTag>, val text: String, val textStart: Int)
     private data class ParsedTag(val timeMs: Long, val fractionDigits: Int)
 
     override fun isMine(lines: List<String>, fileName: String?): Boolean {
@@ -180,18 +180,46 @@ object LrcSubtitleFormatHandler : SubtitleFormatHandler {
             if (cursor >= line.length || line[cursor] != '[') break
         }
         if (tags.isEmpty()) return null
-        return ParsedLine(tags, line.substring(cursor).trim())
+        return ParsedLine(tags, line.substring(cursor).trim(), cursor)
     }
 
     private fun isNoEndTimeHeader(metadata: List<String>): Boolean = metadata.any {
         it.equals("[re: Subtitle Edit - LRC No End Time]", ignoreCase = true)
     }
 
-    private fun normalizeLrcText(text: String): String =
+    /** The same lyric text is written by list serialization and raw source synchronization. */
+    internal fun normalizeLrcText(text: String): String =
         stripHtmlTags(text)
             .replace("\r\n", "\n")
             .replace('\r', '\n')
             .replace('\n', ' ')
+
+    /** Clean timed lyric text without rebuilding timestamps, metadata, or physical line endings. */
+    internal fun normalizeSourceForWrite(content: String): String {
+        if ('<' !in content) return content
+        return buildString(content.length) {
+            val newlineChars = charArrayOf('\r', '\n')
+            var cursor = 0
+            while (cursor < content.length) {
+                val newline = content.indexOfAny(newlineChars, cursor)
+                val end = if (newline < 0) content.length else newline
+                val line = content.substring(cursor, end)
+                val bomLength = line.takeWhile { it == '\uFEFF' }.length
+                val parsed = if ('<' in line) parseLeadingTags(line.substring(bomLength)) else null
+                if (parsed == null) {
+                    append(line)
+                } else {
+                    val textStart = bomLength + parsed.textStart
+                    append(line, 0, textStart)
+                    append(normalizeLrcText(line.substring(textStart)))
+                }
+                if (newline < 0) break
+                val endingLength = if (content[newline] == '\r' && content.getOrNull(newline + 1) == '\n') 2 else 1
+                append(content, newline, newline + endingLength)
+                cursor = newline + endingLength
+            }
+        }
+    }
 
     private fun stripHtmlTags(text: String): String = buildString(text.length) {
         var index = 0

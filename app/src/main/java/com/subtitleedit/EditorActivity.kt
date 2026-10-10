@@ -1524,9 +1524,6 @@ class EditorActivity : AppCompatActivity() {
         val hasClipboard = stateModel.clipboardTexts.isNotEmpty()
         
         val regularActions = mutableListOf<Pair<String, () -> Unit>>()
-        if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.VTT) {
-            regularActions.add("WebVTT Cue 属性" to { showWebVttCueDialog(position) })
-        }
         regularActions.add("时间偏移" to { showOffsetDialog(position) })
         if (hasClipboard) {
             regularActions.add("向前粘贴 (${stateModel.clipboardTexts.size}项)" to {

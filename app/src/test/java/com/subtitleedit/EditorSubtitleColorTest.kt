@@ -9,6 +9,86 @@ import org.junit.Test
 
 class EditorSubtitleColorTest {
     @Test
+    fun colorPreservesPendingTextAndTimeEditsAndUndoOnlyRemovesColor() {
+        val sources = listOf(
+            "test.srt" to "1\n00:00:01,000 --> 00:00:02,000\nA\n\n" +
+                "2\n00:00:03,000 --> 00:00:04,000\nB\n",
+            "test.vtt" to "WEBVTT\n\nfirst\n00:00:01.000 --> 00:00:02.000 align:start\nA\n\n" +
+                "NOTE keep\n\nsecond\n00:00:03.000 --> 00:00:04.000\nB\n"
+        )
+        for ((fileName, source) in sources) {
+            val model = EditorViewModel()
+            model.loadSubtitleContent(source, fileName)
+            model.execute(EditorCommand.UpdateText(0, "<b><i>Edited A</i></b>"))
+            model.execute(EditorCommand.UpdateTime(0, startTime = 1_250, endTime = 2_500))
+            model.sourceViewNeedsListSync = true
+            val beforeColor = model.subtitleDocument
+            val selected = setOf(beforeColor.entries[1].stableId)
+
+            model.applySubtitleColor(setOf(1), 0xFF123456.toInt(), selected)
+
+            val coloredSource = model.sourceViewContent
+            val sourceEntries = SubtitleParser.parseDocument(coloredSource, fileName).entries
+            assertEquals(beforeColor.entries[0].text, sourceEntries[0].text)
+            assertEquals(1_250L, sourceEntries[0].startTime)
+            assertEquals(2_500L, sourceEntries[0].endTime)
+            assertEquals(beforeColor.entries[0], model.subtitleEntries[0])
+            assertFalse(model.sourceViewNeedsListSync)
+            if (fileName.endsWith("vtt")) assertTrue(coloredSource.contains("NOTE keep"))
+
+            assertTrue(model.undo(true) { command, undo -> model.executeHistoryCommand(command, undo) })
+            assertEquals(beforeColor, model.subtitleDocument)
+            val undoEntries = SubtitleParser.parseDocument(model.sourceViewContent, fileName).entries
+            assertEquals(beforeColor.entries[0].text, undoEntries[0].text)
+            assertEquals(1_250L, undoEntries[0].startTime)
+            assertEquals("B", undoEntries[1].text)
+            model.isSourceViewMode = true
+            assertTrue(model.buildSaveContent()!!.contains("<b><i>Edited A</i></b>"))
+
+            assertTrue(model.redo(true) { command, undo -> model.executeHistoryCommand(command, undo) })
+            assertEquals(coloredSource, model.sourceViewContent)
+        }
+    }
+
+    @Test
+    fun colorPreservesPendingDeletionAndTheSurvivingCueMetadata() {
+        val source = "WEBVTT\n\nfirst\n00:00:01.000 --> 00:00:02.000\nA\n\n" +
+            "NOTE keep\n\nsecond\n00:00:03.000 --> 00:00:04.000 align:start\nB\n\n" +
+            "third\n00:00:05.000 --> 00:00:06.000 line:85%\nC\n"
+        val model = EditorViewModel()
+        model.loadSubtitleContent(source, "test.vtt")
+        model.execute(EditorCommand.Delete(setOf(0)))
+        model.subtitleEntries.forEachIndexed { index, entry -> entry.index = index + 1 }
+        model.sourceViewNeedsListSync = true
+
+        model.applySubtitleColor(setOf(1), 0xFFFF0000.toInt(), emptySet())
+
+        val reloaded = SubtitleParser.parseDocument(model.sourceViewContent, "test.vtt")
+        assertEquals(listOf("second", "third"), reloaded.entries.map { it.cueIdentifier })
+        assertEquals(listOf("align:start", "line:85%"), reloaded.entries.map { it.cueSettings })
+        assertEquals("B", reloaded.entries[0].text)
+        assertTrue(reloaded.entries[1].text.contains("<c.ff0000ff>C</c>"))
+        assertTrue(model.sourceViewContent.contains("NOTE keep"))
+    }
+
+    @Test
+    fun lrcColorPreservesPendingLyricEditsWithoutWritingTheirHtmlTags() {
+        val model = EditorViewModel()
+        model.loadSubtitleContent("[00:01.00]A\n[00:03.00]B\n", "test.lrc")
+        model.execute(EditorCommand.UpdateText(0, "<b><i>Edited A</i></b>"))
+        model.sourceViewNeedsListSync = true
+
+        model.applySubtitleColor(setOf(1), 0xFFFF0000.toInt(), emptySet())
+
+        assertEquals("<b><i>Edited A</i></b>", model.subtitleEntries[0].text)
+        assertTrue(model.sourceViewContent.contains("[00:01.00]Edited A"))
+        assertFalse(model.sourceViewContent.contains('<'))
+        assertFalse(model.sourceViewNeedsListSync)
+        model.isSourceViewMode = true
+        assertTrue(model.buildSaveContent()!!.contains("Edited A"))
+    }
+
+    @Test
     fun vttColorSynchronizesRawSourceAndRestoresHeaderInOneUndo() {
         val source = "\uFEFFWEBVTT\r\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:90000\r\n\r\n" +
             "NOTE keep this\r\nmetadata\r\n\r\n" +

@@ -243,7 +243,7 @@ object SubtitleColorOps {
     }
 
     /** Parses CSS colors into Android ARGB, accepting the forms emitted by Subtitle Edit. */
-    private fun parseCssColor(value: String): Int? {
+    internal fun parseCssColor(value: String): Int? {
         val normalized = value.trim().lowercase(Locale.US).replace(" ", "")
         if (normalized.startsWith("#")) {
             val hex = normalized.substring(1)
@@ -261,14 +261,20 @@ object SubtitleColorOps {
         val rgb = Regex("^rgb\\((\\d+),(\\d+),(\\d+)\\)$").matchEntire(normalized)
         if (rgb != null) {
             val (r, g, b) = rgb.destructured
-            return (0xFF shl 24) or (r.toInt() shl 16) or (g.toInt() shl 8) or b.toInt()
+            val red = r.toIntOrNull()?.takeIf { it in 0..255 } ?: return null
+            val green = g.toIntOrNull()?.takeIf { it in 0..255 } ?: return null
+            val blue = b.toIntOrNull()?.takeIf { it in 0..255 } ?: return null
+            return (0xFF shl 24) or (red shl 16) or (green shl 8) or blue
         }
         val rgba = Regex("^rgba\\((\\d+),(\\d+),(\\d+),([0-9.]+)\\)$").matchEntire(normalized)
         if (rgba != null) {
             val (r, g, b, alphaText) = rgba.destructured
-            val alpha = alphaText.toDoubleOrNull()?.let { (it * 255.0).roundToInt() } ?: return null
-            if (alpha !in 0..255) return null
-            return (alpha shl 24) or (r.toInt() shl 16) or (g.toInt() shl 8) or b.toInt()
+            val red = r.toIntOrNull()?.takeIf { it in 0..255 } ?: return null
+            val green = g.toIntOrNull()?.takeIf { it in 0..255 } ?: return null
+            val blue = b.toIntOrNull()?.takeIf { it in 0..255 } ?: return null
+            val opacity = alphaText.toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.0..1.0 } ?: return null
+            val alpha = (opacity * 255.0).roundToInt()
+            return (alpha shl 24) or (red shl 16) or (green shl 8) or blue
         }
         return null
     }

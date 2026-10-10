@@ -1,6 +1,7 @@
 package com.subtitleedit.util
 
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.util.subtitle.LrcSubtitleFormatHandler
 import com.subtitleedit.util.subtitle.LrcVariant
 import com.subtitleedit.util.subtitle.SrtParseResult
 import com.subtitleedit.util.subtitle.SrtSubtitleFormatHandler
@@ -593,7 +594,10 @@ object SubtitleSourceSynchronizer {
                 )
             } else {
                 mappedEntries.forEach { entry ->
-                    appendLine(formatLrcTag(entry.startTime, lrcVariant, lrcOffsetMs) + entry.text)
+                    appendLine(
+                        formatLrcTag(entry.startTime, lrcVariant, lrcOffsetMs) +
+                            LrcSubtitleFormatHandler.normalizeLrcText(entry.text)
+                    )
                 }
             }
 
@@ -643,7 +647,8 @@ object SubtitleSourceSynchronizer {
         lrcVariant: LrcVariant,
         lrcOffsetMs: Long
     ): String {
-        if (newSlice.map { it.text }.distinct().size == 1) {
+        val texts = newSlice.map { LrcSubtitleFormatHandler.normalizeLrcText(it.text) }
+        if (texts.distinct().size == 1) {
             return buildString(line.text.length + line.ending.length) {
                 newSlice.forEachIndexed { offset, entry ->
                     val old = oldSlice.getOrNull(offset)
@@ -659,13 +664,13 @@ object SubtitleSourceSynchronizer {
                         }
                     )
                 }
-                append(newSlice.first().text).append(line.ending)
+                append(texts.first()).append(line.ending)
             }
         }
         return buildString(newSlice.sumOf { it.text.length + 16 }) {
-            newSlice.forEach { entry ->
+            newSlice.forEachIndexed { index, entry ->
                 append(formatLrcTag(entry.startTime, lrcVariant, lrcOffsetMs))
-                    .append(entry.text)
+                    .append(texts[index])
                     .append(line.ending)
             }
         }
@@ -685,7 +690,7 @@ object SubtitleSourceSynchronizer {
             if (isNotEmpty() && !endsWith("\n")) append(ending)
             entries.forEachIndexed { offset, entry ->
                 append(formatLrcTag(entry.startTime, lrcVariant, lrcOffsetMs))
-                    .append(entry.text)
+                    .append(LrcSubtitleFormatHandler.normalizeLrcText(entry.text))
                     .append(ending)
                 val next = entries.getOrNull(offset + 1)
                 if (lrcNeedsTerminator(entry, next, lrcVariant)) {
@@ -731,7 +736,10 @@ object SubtitleSourceSynchronizer {
         lrcOffsetMs: Long,
         appendLine: (String) -> Unit
     ) {
-        appendLine(formatLrcTag(entry.startTime, lrcVariant, lrcOffsetMs) + entry.text)
+        appendLine(
+            formatLrcTag(entry.startTime, lrcVariant, lrcOffsetMs) +
+                LrcSubtitleFormatHandler.normalizeLrcText(entry.text)
+        )
         if (lrcNeedsTerminator(entry, next, lrcVariant)) {
             appendLine(formatLrcTag(entry.endTime, lrcVariant, lrcOffsetMs))
         }

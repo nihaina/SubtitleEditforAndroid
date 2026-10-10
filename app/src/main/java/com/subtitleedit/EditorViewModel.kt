@@ -325,7 +325,15 @@ internal class EditorViewModel(
         }
         val headerChanged = updated.header != beforeDocument.header
         if (updates.isEmpty() && !headerChanged) return EditorCommandResult()
-        val beforeSource = documentState.originalFileContent
+        val rawSource = documentState.originalFileContent
+        val beforeSource = if (documentState.sourceViewNeedsListSync) {
+            // Pending list edits must be present in both the color result and its undo
+            // snapshot. The current list is not the baseline of the still-older source.
+            val sourceEntries = SubtitleParser.parseDocument(rawSource, format = currentFormat).entries
+            syncSourceDocument(rawSource, currentFormat, sourceEntries, beforeDocument.entries)
+        } else {
+            rawSource
+        }
         val result = applySubtitleEdit(documentState, EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
         var source = syncSourceDocument(beforeSource, currentFormat, beforeDocument.entries, updated.entries)
         if (currentFormat == SubtitleParser.SubtitleFormat.VTT && headerChanged) {

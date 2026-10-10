@@ -50,7 +50,7 @@ object WebVttSubtitleFormatHandler : SubtitleFormatHandler {
 
     override fun load(lines: List<String>, fileName: String?): SubtitleDocument = parse(lines).document
 
-    internal fun parse(lines: List<String>): WebVttParseResult {
+    internal fun parse(lines: List<String>, decodeEntities: Boolean = true): WebVttParseResult {
         val prepared = lines.mapIndexed { index, line -> if (index == 0) line.removePrefix("\uFEFF") else line }
         val header = mutableListOf<String>()
         val footer = mutableListOf<String>()
@@ -76,7 +76,9 @@ object WebVttSubtitleFormatHandler : SubtitleFormatHandler {
             val entry = current ?: return
             val location = WebVttCueLocation(identifierLine, timeLineIndex, at, cueOffset)
             val cueText = text.joinToString("\n").trimEnd()
-            entry.text = WebVttCueProcessing.removeRepeatingHeader(WebVttTextFormatting.decode(cueText))
+            entry.text = WebVttCueProcessing.removeRepeatingHeader(
+                if (decodeEntities) WebVttTextFormatting.decode(cueText) else cueText
+            )
             rows += WebVttParsedCue(entry, mutableListOf(location))
             rawCues += location
             current = null
@@ -161,21 +163,24 @@ object WebVttSubtitleFormatHandler : SubtitleFormatHandler {
         )
     }
 
-    override fun write(document: SubtitleDocument): String = buildString {
-        appendLine(normalizeHeader(document.header.toSubtitleLines()))
-        appendLine()
-        document.entries.forEach { entry ->
-            if (entry.cueIdentifier.isNotBlank()) appendLine(entry.cueIdentifier)
-            append(formatTimestamp(entry.startTime)).append(" --> ").append(formatTimestamp(entry.endTime))
-            val settings = getCueSettings(entry)
-            if (settings.isNotBlank()) append(' ').append(settings)
+    override fun write(document: SubtitleDocument): String {
+        val prepared = WebVttTextFormatting.prepareDocument(document)
+        return buildString {
+            appendLine(normalizeHeader(prepared.header.toSubtitleLines()))
             appendLine()
-            appendLine(WebVttTextFormatting.writeText(entry.text))
-            appendLine()
-        }
-        val footer = normalizeSection(document.footer.toSubtitleLines())
-        if (footer.isNotBlank()) appendLine(footer)
-    }.trim()
+            prepared.entries.forEach { entry ->
+                if (entry.cueIdentifier.isNotBlank()) appendLine(entry.cueIdentifier)
+                append(formatTimestamp(entry.startTime)).append(" --> ").append(formatTimestamp(entry.endTime))
+                val settings = getCueSettings(entry)
+                if (settings.isNotBlank()) append(' ').append(settings)
+                appendLine()
+                appendLine(WebVttTextFormatting.writeText(entry.text))
+                appendLine()
+            }
+            val footer = normalizeSection(prepared.footer.toSubtitleLines())
+            if (footer.isNotBlank()) appendLine(footer)
+        }.trim()
+    }
 
     internal fun getCueSettings(entry: SubtitleEntry): String = WebVttCueProcessing.settingsFor(entry)
 
