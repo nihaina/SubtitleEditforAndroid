@@ -94,6 +94,12 @@ internal object WebVttPreviewWriter {
     private fun StringBuilder.appendChange(from: State, to: State) {
         if (from == to) return
         append('{')
+        if (from.fontFamily != to.fontFamily) {
+            append("\\fn").append(assFontName(to.fontFamily))
+        }
+        if (from.fontSize != to.fontSize) {
+            append("\\fs").append(formatAssNumber(to.fontSize))
+        }
         if (from.color != to.color) {
             append("\\1c&H").append("%02X%02X%02X".format(
                 Locale.US, to.color and 0xFF, to.color ushr 8 and 0xFF, to.color ushr 16 and 0xFF
@@ -103,6 +109,25 @@ internal object WebVttPreviewWriter {
         if (from.bold != to.bold) append("\\b").append(if (to.bold) 1 else 0)
         if (from.italic != to.italic) append("\\i").append(if (to.italic) 1 else 0)
         if (from.underline != to.underline) append("\\u").append(if (to.underline) 1 else 0)
+        if (from.strikeout != to.strikeout) append("\\s").append(if (to.strikeout) 1 else 0)
+        if (from.backgroundColor != to.backgroundColor) {
+            val background = to.backgroundColor ?: 0x00000000
+            append("\\3c&H").append(assColor(background)).append('&')
+            append("\\3a&H").append(assAlpha(background)).append('&')
+        }
+        if (from.borderWidth != to.borderWidth) {
+            // ASS has no cue-box background override. A wide outline gives the same
+            // readable approximation around a single-line cue while preserving the
+            // native WebVTT CSS in the saved document.
+            append("\\bord").append(formatAssNumber(to.borderWidth))
+        }
+        if (from.shadowColor != to.shadowColor) {
+            append("\\4c&H").append(assColor(to.shadowColor)).append('&')
+            append("\\4a&H").append(assAlpha(to.shadowColor)).append('&')
+        }
+        if (from.shadowWidth != to.shadowWidth) {
+            append("\\shad").append(formatAssNumber(to.shadowWidth))
+        }
         append('}')
     }
 
@@ -154,12 +179,17 @@ internal object WebVttPreviewWriter {
 
     private fun parseDeclarations(body: String): Delta {
         var delta = Delta()
-        body.split(';').forEach { declaration ->
+        declarationParts(body).forEach { declaration ->
             if (':' !in declaration) return@forEach
             val name = declaration.substringBefore(':').trim().lowercase(Locale.US)
-            val value = declaration.substringAfter(':').substringBefore('!').trim().lowercase(Locale.US)
+            val rawValue = declaration.substringAfter(':').substringBefore('!').trim().trimEnd(';').trim()
+            val value = rawValue.lowercase(Locale.US)
             delta = when (name) {
                 "color" -> delta.copy(color = WebVttTextFormatting.parseHtmlColor(value) ?: delta.color)
+                "background-color" -> delta.copy(backgroundColor = parseColor(value) ?: delta.backgroundColor)
+                "font-family" -> delta.copy(fontFamily = rawValue.split(',').firstOrNull()
+                    ?.trim()?.trim('"', '\'')?.takeIf(String::isNotBlank) ?: delta.fontFamily)
+                "font-size" -> delta.copy(fontSize = parseCssPixels(value) ?: delta.fontSize)
                 "font-weight" -> when {
                     value == "bold" -> delta.copy(bold = true)
                     value == "normal" -> delta.copy(bold = false)
@@ -171,12 +201,81 @@ internal object WebVttPreviewWriter {
                     "normal" -> delta.copy(italic = false)
                     else -> delta
                 }
-                "text-decoration", "text-decoration-line" -> delta.copy(underline = "underline" in value)
+                "text-decoration", "text-decoration-line" -> {
+                    val tokens = value.split(Regex("\\s+"))
+                    when {
+                        "none" in tokens -> delta.copy(underline = false, strikeout = false)
+                        else -> delta.copy(
+                            underline = if ("underline" in tokens) true else delta.underline ?: false,
+                            strikeout = if ("line-through" in tokens) true else delta.strikeout ?: false
+                        )
+                    }
+                }
+                "text-shadow" -> parseShadow(value)?.let { (color, width) ->
+                    delta.copy(shadowColor = color, shadowWidth = width)
+                } ?: if (value == "none") delta.copy(shadowWidth = 0f) else delta
                 else -> delta
             }
         }
         return delta
     }
+
+    private fun declarationParts(body: String): List<String> {
+        val parts = mutableListOf<String>()
+        var start = 0
+        var quote: Char? = null
+        var escaped = false
+        var depth = 0
+        body.forEachIndexed { index, character ->
+            when {
+                escaped -> escaped = false
+                character == '\\' -> escaped = true
+                quote != null -> if (character == quote) quote = null
+                character == '\'' || character == '"' -> quote = character
+                character == '(' -> depth++
+                character == ')' -> depth = (depth - 1).coerceAtLeast(0)
+                character == ';' && depth == 0 -> {
+                    parts += body.substring(start, index + 1)
+                    start = index + 1
+                }
+            }
+        }
+        parts += body.substring(start)
+        return parts
+    }
+
+    private fun parseColor(value: String): Int? = when {
+        value == "transparent" -> 0
+        else -> WebVttTextFormatting.parseHtmlColor(value)
+    }
+
+    private fun parseCssPixels(value: String): Float? =
+        Regex("^([+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+))px$").matchEntire(value)
+            ?.groupValues?.get(1)?.toFloatOrNull()?.takeIf { it.isFinite() && it > 0f }
+
+    private fun parseShadow(value: String): Pair<Int, Float>? {
+        val parts = value.trim().split(Regex("\\s+"))
+        val width = parts.lastOrNull()?.removeSuffix("px")?.toFloatOrNull()
+            ?.takeIf { it.isFinite() && it > 0f } ?: return null
+        val color = parseColor(parts.dropLast(1).joinToString(" ")) ?: return null
+        return color to width
+    }
+
+    private fun assFontName(value: String): String = value
+        .replace("\\", "")
+        .replace("{", "")
+        .replace("}", "")
+        .trim()
+        .ifBlank { "sans-serif" }
+
+    private fun assColor(argb: Int): String = "%02X%02X%02X".format(
+        Locale.US, argb and 0xFF, argb ushr 8 and 0xFF, argb ushr 16 and 0xFF
+    )
+
+    private fun assAlpha(argb: Int): String = "%02X".format(Locale.US, 255 - (argb ushr 24 and 0xFF))
+
+    private fun formatAssNumber(value: Float): String =
+        "%.2f".format(Locale.US, value).trimEnd('0').trimEnd('.')
 
     private fun formatTime(milliseconds: Long): String {
         val centiseconds = milliseconds.coerceAtLeast(0L) / 10
@@ -201,20 +300,50 @@ internal object WebVttPreviewWriter {
     private data class Styles(val global: Delta, val classes: Map<String, Delta>)
 
     private data class Delta(
+        val fontFamily: String? = null, val fontSize: Float? = null,
         val color: Int? = null, val bold: Boolean? = null,
-        val italic: Boolean? = null, val underline: Boolean? = null
+        val italic: Boolean? = null, val underline: Boolean? = null,
+        val strikeout: Boolean? = null, val backgroundColor: Int? = null,
+        val shadowColor: Int? = null, val shadowWidth: Float? = null
     ) {
         fun merge(other: Delta): Delta = Delta(
-            other.color ?: color, other.bold ?: bold, other.italic ?: italic, other.underline ?: underline
+            other.fontFamily ?: fontFamily,
+            other.fontSize ?: fontSize,
+            other.color ?: color,
+            other.bold ?: bold,
+            other.italic ?: italic,
+            other.underline ?: underline,
+            other.strikeout ?: strikeout,
+            other.backgroundColor ?: backgroundColor,
+            other.shadowColor ?: shadowColor,
+            other.shadowWidth ?: shadowWidth
         )
     }
 
     private data class State(
+        val fontFamily: String = "sans-serif", val fontSize: Float = 15.2f,
         val color: Int = 0xFFFFFFFF.toInt(), val bold: Boolean = false,
-        val italic: Boolean = false, val underline: Boolean = false
+        val italic: Boolean = false, val underline: Boolean = false,
+        val strikeout: Boolean = false, val backgroundColor: Int? = null,
+        val borderWidth: Float = 0.66f,
+        val shadowColor: Int = 0xFF000000.toInt(), val shadowWidth: Float = 0f
     ) {
         fun apply(delta: Delta): State = State(
-            delta.color ?: color, delta.bold ?: bold, delta.italic ?: italic, delta.underline ?: underline
+            fontFamily = delta.fontFamily ?: fontFamily,
+            fontSize = delta.fontSize ?: fontSize,
+            color = delta.color ?: color,
+            bold = delta.bold ?: bold,
+            italic = delta.italic ?: italic,
+            underline = delta.underline ?: underline,
+            strikeout = delta.strikeout ?: strikeout,
+            backgroundColor = delta.backgroundColor ?: backgroundColor,
+            borderWidth = if (delta.backgroundColor != null) {
+                maxOf(borderWidth, 4f)
+            } else {
+                borderWidth
+            },
+            shadowColor = delta.shadowColor ?: shadowColor,
+            shadowWidth = delta.shadowWidth ?: shadowWidth
         )
     }
 }

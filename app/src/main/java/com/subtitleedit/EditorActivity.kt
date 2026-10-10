@@ -1,6 +1,7 @@
 package com.subtitleedit
 
 import android.app.AlertDialog
+import android.content.ClipData
 import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
@@ -22,6 +23,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.view.doOnPreDraw
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -45,6 +47,7 @@ import com.subtitleedit.editor.EditorSubtitleDialogController
 import com.subtitleedit.editor.EditorConfirmationDialogController
 import com.subtitleedit.editor.EditorHistoryCoordinator
 import com.subtitleedit.editor.EditorColorPickerDialog
+import com.subtitleedit.editor.EditorWebVttStyleDialog
 import com.subtitleedit.editor.EditorFileSessionController
 import com.subtitleedit.editor.EditorListOperationsController
 import com.subtitleedit.editor.EditorSourceViewState
@@ -77,6 +80,9 @@ import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.audio.Mp3FileIssues
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.subtitle.WebVttSubtitleFormatHandler
+import com.subtitleedit.util.subtitle.WebVttBrowserPreview
+import com.subtitleedit.util.subtitle.WebVttStyleOps
+import com.subtitleedit.util.subtitle.WebVttVoiceOps
 import com.subtitleedit.util.SubtitleSourceSynchronizer
 import com.subtitleedit.util.TimeUtils
 import com.subtitleedit.util.subtitle.SubtitleDocument
@@ -1512,6 +1518,247 @@ class EditorActivity : AppCompatActivity() {
             .setNegativeButton("取消", null)
             .show()
     }
+
+    /**
+     * Opens the current VTT and video in a real browser WebVTT renderer. This mirrors Subtitle
+     * Edit's browser preview: the edited VTT is embedded in the temporary page as a data URI,
+     * while the video and page are exposed through FileProvider for Android browsers.
+     */
+    private fun showVttBrowserPreview() {
+        if (stateModel.currentFormat != SubtitleParser.SubtitleFormat.VTT) return
+        if (stateModel.mediaType != EditorMediaType.VIDEO) {
+            showShortToast("浏览器预览需要打开视频")
+            return
+        }
+
+        val videoFile = stateModel.currentFile?.takeIf { it.isFile } ?: run {
+            showShortToast("请先打开视频文件")
+            return
+        }
+        if (!WebVttBrowserPreview.isSupportedVideoFile(videoFile.name)) {
+            showShortToast("当前视频格式不支持浏览器预览")
+            return
+        }
+        val vttText = getCurrentEditableContent(requireNonEmptyList = true) ?: return
+        val previewDirectory = File(cacheDir, "webvtt_browser_preview").apply { mkdirs() }
+        val htmlFile = File(previewDirectory, "WebVttPreview_${System.currentTimeMillis()}.html")
+        try {
+            val videoUri = runCatching {
+                FileProvider.getUriForFile(this, "$packageName.provider", videoFile)
+            }.getOrNull()
+            val videoUrl = videoUri?.toString() ?: WebVttBrowserPreview.fileUri(videoFile)
+            htmlFile.writeText(
+                WebVttBrowserPreview.generateHtml(vttText, videoUrl, videoFile.name),
+                Charsets.UTF_8
+            )
+            val htmlUri = FileProvider.getUriForFile(this, "$packageName.provider", htmlFile)
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+            val browserIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(htmlUri, "text/html")
+                addFlags(flags)
+                // Include the nested video URI in the grant payload. This is required on
+                // Android 11+ when package visibility prevents queryIntentActivities() from
+                // enumerating every browser before the intent is dispatched.
+                clipData = ClipData.newUri(contentResolver, "WebVTT preview", htmlUri).apply {
+                    videoUri?.let { addItem(ClipData.Item(it)) }
+                }
+            }
+            // The video URI is nested in the HTML document, so grant it explicitly to the same
+            // browser packages receiving the temporary HTML URI.
+            packageManager.queryIntentActivities(browserIntent, 0).forEach { resolveInfo ->
+                val packageName = resolveInfo.activityInfo?.packageName ?: return@forEach
+                runCatching { grantUriPermission(packageName, htmlUri, flags) }
+                videoUri?.let { uri -> runCatching { grantUriPermission(packageName, uri, flags) } }
+            }
+            startActivity(browserIntent)
+            lifecycleScope.launch {
+                delay(60_000L)
+                runCatching { htmlFile.delete() }
+            }
+        } catch (error: Exception) {
+            runCatching { htmlFile.delete() }
+            showShortToast("无法打开浏览器预览：${error.message ?: "没有可用的浏览器"}")
+        }
+    }
+
+    private fun canShowVttBrowserPreview(): Boolean =
+        stateModel.currentFormat == SubtitleParser.SubtitleFormat.VTT &&
+            stateModel.mediaType == EditorMediaType.VIDEO &&
+            WebVttBrowserPreview.isSupportedVideoFile(stateModel.currentFile?.name)
+
+    private fun vttTargetPositions(): Set<Int> {
+        val selected = if (::subtitleAdapter.isInitialized) {
+            subtitleAdapter.getSelectedPositions().toSet()
+        } else emptySet()
+        return selected.takeIf { it.isNotEmpty() }
+            ?: longClickPosition.takeIf { it in stateModel.subtitleEntries.indices }?.let(::setOf)
+            ?: emptySet()
+    }
+
+    /** Subtitle Edit's VTT style manager, scoped to CSS ::cue(.class) rules. */
+    private fun showVttStyleDialog() {
+        if (!ensureListMode() || stateModel.currentFormat != SubtitleParser.SubtitleFormat.VTT) return
+        val rows = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(menuDp(8), menuDp(2), menuDp(8), menuDp(2))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("VTT 样式")
+            .setView(ScrollView(this).apply { addView(rows) })
+            .setNegativeButton("关闭", null)
+            .create()
+
+        var refreshStyles: (() -> Unit)? = null
+        fun showStyleEditor(existing: com.subtitleedit.util.subtitle.WebVttStyleDefinition? = null) {
+            val usedNames = WebVttStyleOps.list(stateModel.subtitleDocument).map { it.name }
+            var nextName = "new"
+            var suffix = 2
+            while (usedNames.any { it.equals(nextName, true) }) nextName = "new${suffix++}"
+            var savedName = existing?.name
+            EditorWebVttStyleDialog(this).show(
+                existing = existing,
+                initialName = existing?.name ?: nextName,
+                onSave = { styleName, declarations ->
+                    val current = stateModel.subtitleDocument
+                    if (WebVttStyleOps.list(current).any {
+                            it.name.equals(styleName, true) && !it.name.equals(savedName, true)
+                        }) {
+                        showShortToast(getString(R.string.vtt_style_duplicate_name))
+                        false
+                    } else {
+                        val renamed = savedName?.let { WebVttStyleOps.rename(current, it, styleName) } ?: current
+                        applyVttDocumentChanges(WebVttStyleOps.upsert(renamed, styleName, declarations), "编辑 VTT 样式")
+                        savedName = styleName
+                        refreshStyles?.invoke()
+                        true
+                    }
+                },
+                onClosed = { refreshStyles?.invoke() }
+            )
+        }
+
+        fun rebuild() {
+            rows.removeAllViews()
+            val styles = WebVttStyleOps.list(stateModel.subtitleDocument)
+            if (styles.isEmpty()) {
+                rows.addView(TextView(this).apply {
+                    text = "暂无样式"
+                    setPadding(menuDp(12), menuDp(12), menuDp(12), menuDp(12))
+                })
+            }
+            styles.forEach { style ->
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(menuDp(8), menuDp(6), menuDp(4), menuDp(6))
+                }
+                row.addView(TextView(this).apply {
+                    text = "${style.name}  (${style.usageCount})"
+                    setTextSize(16f)
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                row.addView(TextView(this).apply {
+                    text = "应用"
+                    setPadding(menuDp(10), menuDp(8), menuDp(10), menuDp(8))
+                    setOnClickListener {
+                        val positions = vttTargetPositions()
+                        applyVttDocumentChanges(WebVttStyleOps.apply(stateModel.subtitleDocument, positions, style.name), "应用 VTT 样式")
+                        dialog.dismiss()
+                    }
+                })
+                row.addView(TextView(this).apply {
+                    text = "删除"
+                    setPadding(menuDp(10), menuDp(8), menuDp(10), menuDp(8))
+                    setOnClickListener {
+                        applyVttDocumentChanges(WebVttStyleOps.delete(stateModel.subtitleDocument, style.name, true), "删除 VTT 样式")
+                        rebuild()
+                    }
+                })
+                row.setOnClickListener { showStyleEditor(style) }
+                rows.addView(row)
+            }
+            rows.addView(TextView(this).apply {
+                text = "新建样式"
+                setTextColor(ContextCompat.getColor(this@EditorActivity, R.color.primary))
+                setPadding(menuDp(12), menuDp(12), menuDp(12), menuDp(12))
+                setOnClickListener { showStyleEditor() }
+            })
+        }
+        refreshStyles = ::rebuild
+        rebuild()
+        dialog.show()
+    }
+
+    /** Subtitle Edit's VTT voice list manages native <v Name> cue wrappers. */
+    private fun showVttSpeakerListDialog() {
+        if (!ensureListMode() || stateModel.currentFormat != SubtitleParser.SubtitleFormat.VTT) return
+        val rows = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(menuDp(8), menuDp(2), menuDp(8), menuDp(2))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("说话人列表")
+            .setView(ScrollView(this).apply { addView(rows) })
+            .setNegativeButton("关闭", null)
+            .create()
+
+        fun applyVoice(voice: String?) {
+            val updated = WebVttVoiceOps.set(stateModel.subtitleDocument, vttTargetPositions(), voice)
+            applyVttDocumentChanges(updated, "设置说话人")
+            dialog.dismiss()
+        }
+        fun addVoice() {
+            val input = EditText(this).apply { hint = "说话人名称"; setSingleLine(true) }
+            AlertDialog.Builder(this)
+                .setTitle("新建说话人")
+                .setView(input)
+                .setPositiveButton("确定") { _, _ ->
+                    input.text?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let(::applyVoice)
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        }
+        rows.addView(TextView(this).apply {
+            text = "移除说话人"
+            setPadding(menuDp(12), menuDp(12), menuDp(12), menuDp(12))
+            setOnClickListener { applyVoice(null) }
+        })
+        WebVttVoiceOps.list(stateModel.subtitleDocument).forEach { voice ->
+            rows.addView(TextView(this).apply {
+                text = voice
+                setPadding(menuDp(12), menuDp(12), menuDp(12), menuDp(12))
+                setOnClickListener { applyVoice(voice) }
+            })
+        }
+        rows.addView(TextView(this).apply {
+            text = "新建说话人"
+            setTextColor(ContextCompat.getColor(this@EditorActivity, R.color.primary))
+            setPadding(menuDp(12), menuDp(12), menuDp(12), menuDp(12))
+            setOnClickListener { addVoice() }
+        })
+        dialog.show()
+    }
+
+    private fun applyVttDocumentChanges(updated: SubtitleDocument, description: String) {
+        val beforeHeader = stateModel.documentHeader
+        val result = stateModel.applyVttDocument(
+            updated,
+            currentHistoryListState().selectedIds,
+            description
+        )
+        if (result.changedPositions.isNotEmpty()) {
+            notifyEntriesChanged(result.changedPositions, markChanged = false)
+        }
+        if (result.changedPositions.isNotEmpty() || updated.header != beforeHeader) {
+            markAsChanged()
+            updateFormatInfo()
+            invalidateOptionsMenu()
+            if (result.changedPositions.isEmpty()) {
+                stateModel.refreshDocument()
+                if (::searchController.isInitialized) searchController.onDocumentChanged()
+                scheduleSubtitlePreview()
+            }
+        }
+    }
     
     private fun showContextMenu(position: Int) {
         if (!ensureListMode()) return
@@ -1562,7 +1809,21 @@ class EditorActivity : AppCompatActivity() {
         }
         regularActions.add("删除" to { deleteSingleSubtitle(position) })
 
+        // Subtitle Edit exposes VTT-specific tools at the top of the main operations menu.
+        // Keep these actions format-scoped so SRT/LRC retain the existing menu order.
+        val vttActions = if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.VTT) {
+            buildList {
+                add("样式" to { showVttStyleDialog() })
+                add("说话人列表" to { showVttSpeakerListDialog() })
+                if (canShowVttBrowserPreview()) {
+                    add("浏览器预览" to { showVttBrowserPreview() })
+                }
+            }
+        } else {
+            emptyList()
+        }
         val leftActions = buildList {
+            addAll(vttActions)
             if (hasSelection) {
                 add("对勾选字幕操作\n(${selectedCount}项)" to {
                     showSelectionContextMenu(hasClipboard)
@@ -1618,20 +1879,25 @@ class EditorActivity : AppCompatActivity() {
                 )
             )
         }
-        val leftWidth = measureMenuWidth(leftColumn)
-        val rightWidth = measureMenuWidth(rightColumn)
+        val columnWidth = maxOf(measureMenuWidth(leftColumn), measureMenuWidth(rightColumn))
         val rightLabel = formattingButton.getChildAt(0) as TextView
-        val rightDecorationWidth = rightWidth - rightLabel.measuredWidth
-        content.addView(leftColumn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val rightDecorationWidth = columnWidth - rightLabel.measuredWidth
+        content.addView(
+            leftColumn,
+            LinearLayout.LayoutParams(columnWidth, ViewGroup.LayoutParams.WRAP_CONTENT)
+        )
         val divider = View(this).apply {
             setBackgroundColor(ContextCompat.getColor(this@EditorActivity, R.color.outline_variant))
         }
         val dividerParams = LinearLayout.LayoutParams(menuDp(1), ViewGroup.LayoutParams.MATCH_PARENT).apply {
-            marginStart = menuDp(4)
-            marginEnd = menuDp(4)
+            marginStart = menuDp(3)
+            marginEnd = menuDp(3)
         }
         content.addView(divider, dividerParams)
-        content.addView(rightColumn, LinearLayout.LayoutParams(rightWidth, ViewGroup.LayoutParams.WRAP_CONTENT))
+        content.addView(
+            rightColumn,
+            LinearLayout.LayoutParams(columnWidth, ViewGroup.LayoutParams.WRAP_CONTENT)
+        )
         val scrollContent = menuScrollContent(content)
         dialog = AlertDialog.Builder(this)
             .setTitle(title)
@@ -1640,11 +1906,11 @@ class EditorActivity : AppCompatActivity() {
         val columnSpacing = content.paddingLeft + content.paddingRight +
             dividerParams.width + dividerParams.marginStart + dividerParams.marginEnd
         sizeMenuDialog(dialog, scrollContent) { availableWidth ->
-            val maxRightWidth = (availableWidth - columnSpacing - menuDp(80)).coerceAtLeast(1)
-            val fittedRightWidth = minOf(rightWidth, maxRightWidth)
-            if (fittedRightWidth < rightWidth) {
-                // Keep both columns readable in narrow windows or with a large system font.
-                val availableLabelWidth = (fittedRightWidth - rightDecorationWidth - 2).coerceAtLeast(1)
+            val availableColumnWidth = ((availableWidth - columnSpacing) / 2).coerceAtLeast(1)
+            val fittedColumnWidth = minOf(columnWidth, availableColumnWidth)
+            if (fittedColumnWidth < columnWidth) {
+                // Keep both columns the same width in narrow windows or with a large system font.
+                val availableLabelWidth = (fittedColumnWidth - rightDecorationWidth - 2).coerceAtLeast(1)
                 val labelWidth = rightLabel.paint.measureText(rightLabel.text.toString())
                 if (labelWidth > availableLabelWidth) {
                     rightLabel.setTextSize(
@@ -1652,9 +1918,10 @@ class EditorActivity : AppCompatActivity() {
                         rightLabel.textSize * availableLabelWidth / labelWidth
                     )
                 }
-                rightColumn.layoutParams = rightColumn.layoutParams.apply { width = fittedRightWidth }
+                leftColumn.layoutParams = leftColumn.layoutParams.apply { width = fittedColumnWidth }
+                rightColumn.layoutParams = rightColumn.layoutParams.apply { width = fittedColumnWidth }
             }
-            leftWidth + fittedRightWidth + columnSpacing
+            2 * fittedColumnWidth + columnSpacing
         }
     }
 
@@ -1864,6 +2131,13 @@ class EditorActivity : AppCompatActivity() {
         val canMergeSelected = selectedPositions.size > 1 &&
             selectedPositions.zipWithNext().all { (left, right) -> right == left + 1 }
         val actions = mutableListOf<Pair<String, () -> Unit>>()
+        if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.VTT) {
+            actions += "样式" to { showVttStyleDialog() }
+            actions += "说话人列表" to { showVttSpeakerListDialog() }
+            if (canShowVttBrowserPreview()) {
+                actions += "浏览器预览" to { showVttBrowserPreview() }
+            }
+        }
         actions.add("时间偏移" to { showOffsetDialogForSelection() })
         actions.add("AI 翻译" to { showAiTranslate() })
         actions.add("复制" to { copySelected() })

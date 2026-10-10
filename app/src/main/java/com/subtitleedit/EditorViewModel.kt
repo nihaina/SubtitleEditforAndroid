@@ -7,6 +7,7 @@ import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.SubtitleColorOps
 import com.subtitleedit.util.subtitle.SubtitleDocument
+import com.subtitleedit.util.subtitle.toSubtitleLines
 import com.subtitleedit.repository.DefaultSubtitleRepository
 import com.subtitleedit.repository.SubtitleRepository
 import com.subtitleedit.usecase.ApplySubtitleEditUseCase
@@ -357,6 +358,71 @@ internal class EditorViewModel(
         return if (headerChanged && result.changedPositions.isEmpty()) {
             result.copy(changedPositions = positions.filterTo(mutableSetOf()) { it in updated.entries.indices })
         } else result
+    }
+
+    /** Applies a VTT-specific header/text edit as one undoable document operation. */
+    fun applyVttDocument(
+        updated: SubtitleDocument,
+        selectedIds: Set<Long>,
+        description: String
+    ): EditorCommandResult {
+        if (currentFormat != SubtitleParser.SubtitleFormat.VTT) return EditorCommandResult()
+        val beforeDocument = documentState.subtitleDocument
+        if (beforeDocument == updated) return EditorCommandResult()
+        val updates = updated.entries.mapIndexedNotNull { index, entry ->
+            (index to entry.text).takeIf { entry.text != beforeDocument.entries.getOrNull(index)?.text }
+        }
+        val beforeSource = if (documentState.sourceViewNeedsListSync) {
+            val sourceEntries = SubtitleParser.parseDocument(
+                documentState.originalFileContent,
+                format = currentFormat
+            ).entries
+            syncSourceDocument(documentState.originalFileContent, currentFormat, sourceEntries, beforeDocument.entries)
+        } else documentState.originalFileContent
+        val result = applySubtitleEdit(
+            documentState,
+            EditorCommand.UpdateTexts(updates, removeBlankEntries = false)
+        )
+        var source = syncSourceDocument(beforeSource, currentFormat, beforeDocument.entries, updated.entries)
+        if (updated.header != beforeDocument.header) {
+            source = replaceVttSourceHeader(source, updated.header)
+        }
+        documentState.documentHeader = updated.header
+        documentState.documentFooter = updated.footer
+        documentState.originalFileContent = source
+        documentState.sourceViewContent = source
+        documentState.sourceViewNeedsListSync = false
+        documentState.sourceHistoryTextSnapshot = source
+        recordListHistory(
+            before = EditorEditHistory.ListState(beforeDocument.entries, selectedIds),
+            after = EditorEditHistory.ListState(documentState.subtitleEntries.map { it.copy() }, selectedIds),
+            description = description,
+            beforeSourceText = beforeSource,
+            afterSourceText = source,
+            beforeHeader = beforeDocument.header,
+            afterHeader = updated.header
+        )
+        publishDocument()
+        return if (updated.header != beforeDocument.header && result.changedPositions.isEmpty()) {
+            result.copy(changedPositions = updated.entries.indices.toSet())
+        } else result
+    }
+
+    private fun replaceVttSourceHeader(source: String, header: String): String {
+        val parsed = com.subtitleedit.util.subtitle.WebVttSubtitleFormatHandler.parse(
+            source.toSubtitleLines()
+        )
+        val firstCue = parsed.rawCues.firstOrNull()
+        if (firstCue == null) return header.trimEnd()
+        val lines = Regex("[^\\r\\n]*(?:\\r\\n|\\r|\\n|$)").findAll(source)
+            .filter { it.value.isNotEmpty() }
+            .toList()
+        val cueStart = firstCue.identifierLineIndex ?: firstCue.timeLineIndex
+        val insertAt = lines.getOrNull(cueStart)?.range?.first ?: return source
+        val newline = if ("\r\n" in source) "\r\n" else if ('\r' in source && '\n' !in source) "\r" else "\n"
+        val bom = if (source.startsWith('\uFEFF')) "\uFEFF" else ""
+        val cleanHeader = header.removePrefix("\uFEFF").trimEnd().replace("\n", newline)
+        return bom + cleanHeader + newline + newline + source.substring(insertAt)
     }
 
     fun executeHistoryCommand(

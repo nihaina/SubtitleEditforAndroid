@@ -87,6 +87,30 @@ class WebVttPreviewWriterTest {
     }
 
     @Test
+    fun styleEditorPropertiesAreMappedToTemporaryAssPreview() {
+        val preview = text(document(
+            "<c.editorStyle>styled</c>",
+            "STYLE\n" +
+                "::cue(.editorStyle) { font-family:\"Noto Sans\"; font-size:40px; " +
+                "font-weight:bold; font-style:italic; text-decoration:underline line-through; " +
+                "color:rgb(255,0,0); background-color:rgba(0,0,0,0.5); " +
+                "text-shadow:#0000ffff 3px; }"
+        ))
+
+        assertTrue(preview.contains("\\fnNoto Sans"))
+        assertTrue(preview.contains("\\fs40"))
+        assertTrue(preview.contains("\\b1"))
+        assertTrue(preview.contains("\\i1"))
+        assertTrue(preview.contains("\\u1"))
+        assertTrue(preview.contains("\\s1"))
+        assertTrue(preview.contains("\\1c&H0000FF&"))
+        assertTrue(preview.contains("\\3c&H000000&"))
+        assertTrue(preview.contains("\\bord4"))
+        assertTrue(preview.contains("\\4c&HFF0000&"))
+        assertTrue(preview.contains("\\shad3"))
+    }
+
+    @Test
     fun ordinaryAssOverridesAndLiteralControlSequencesNeverExecute() {
         val output = text(document("{\\pos(0,0)} literal\\N &lt;i&gt; &nbsp; <br>next"))
 

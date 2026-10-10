@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="vtt_style_new">新建样式</string>
+    <string name="vtt_style_edit">编辑样式</string>
+    <string name="vtt_style_name">名称</string>
+    <string name="vtt_style_font_name">字体名称</string>
+    <string name="vtt_style_font_hint">未设置</string>
+    <string name="vtt_style_font_size">字体大小</string>
+    <string name="vtt_style_bold">粗体</string>
+    <string name="vtt_style_italic">斜体</string>
+    <string name="vtt_style_underline">下划线</string>
+    <string name="vtt_style_strikeout">删除线</string>
+    <string name="vtt_style_color">文字颜色</string>
+    <string name="vtt_style_background">背景</string>
+    <string name="vtt_style_shadow">阴影</string>
+    <string name="vtt_style_shadow_width">阴影宽度</string>
+    <string name="vtt_style_preview">预览</string>
+    <string name="vtt_style_sample">This is a test</string>
+    <string name="vtt_style_before">之前</string>
+    <string name="vtt_style_after">之后</string>
+    <string name="vtt_style_apply">应用</string>
+    <string name="vtt_style_choose_font">选择字体</string>
+    <string name="vtt_style_choose_color">选择%1$s</string>
+    <string name="vtt_style_decrease">减小%1$s</string>
+    <string name="vtt_style_increase">增大%1$s</string>
+    <string name="vtt_style_number_range">请输入 0–%1$d 的数值，最多一位小数</string>
+    <string name="vtt_style_invalid_name">名称不能为空，只能包含字母、数字、下划线、连字符和 #</string>
+    <string name="vtt_style_duplicate_name">样式名称已存在</string>
+</resources>
