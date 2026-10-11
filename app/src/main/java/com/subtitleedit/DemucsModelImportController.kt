@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.widget.Toast
 import androidx.core.content.ContextCompat
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.SavedStateHandle
 import com.subtitleedit.demix.VocalSeparationEngine
 import com.subtitleedit.feature.ui.DemucsModelImportAction
@@ -365,10 +366,13 @@ internal class DemucsModelImportController(
 
     private fun isSavedUriReadable(uriString: String): Boolean = runCatching {
         val uri = Uri.parse(uriString)
-        if (uri.scheme == "file") {
-            uri.path?.let(::File)?.isFile == true
-        } else {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
+        when (uri.scheme?.lowercase()) {
+            null, "" -> File(uriString).isFile
+            "file" -> uri.path?.let(::File)?.isFile == true
+            "content" -> DocumentFile.fromSingleUri(context, uri)?.isFile == true ||
+                context.contentResolver.openFileDescriptor(uri, "r")?.use { true } == true ||
+                context.contentResolver.openInputStream(uri)?.use { true } == true
+            else -> false
         }
     }.getOrDefault(false)
 

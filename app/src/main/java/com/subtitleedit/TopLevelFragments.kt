@@ -31,9 +31,11 @@ import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.DraftManager
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.util.SettingsBackupManager
 import com.subtitleedit.util.ModelDirectoryManager
 import com.subtitleedit.util.ModelDirectoryMigration
 import java.io.File
+import java.nio.charset.StandardCharsets
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -130,6 +132,45 @@ internal fun MainTopLevelPages(
             .orEmpty()
             .map(::File)
             .sortedBy { it.name.lowercase(Locale.getDefault()) }
+    }
+
+    val backupExporter = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    output.write(SettingsBackupManager.export(context).toByteArray(StandardCharsets.UTF_8))
+                } ?: error("无法打开备份文件")
+            }.onSuccess { showTopLevelToast(context, context.getString(R.string.settings_backup_saved)) }
+                .onFailure { showTopLevelToast(context, "配置备份失败：${it.message ?: "未知错误"}") }
+        }
+    }
+    val backupImporter = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                val json = context.contentResolver.openInputStream(uri)?.use { input ->
+                    input.readBytes().toString(StandardCharsets.UTF_8)
+                } ?: error("无法读取备份文件")
+                SettingsBackupManager.restore(context, json)
+            }.onSuccess { result ->
+                state.settingsPage = loadSettingsPage(context, settings)
+                loadFavoriteDirectories()
+                AppThemeMode.apply(context, settings.getThemeMode())
+                showTopLevelToast(
+                    context,
+                    if (result.skippedCount > 0) {
+                        context.getString(R.string.settings_restore_success_skipped, result.skippedCount)
+                    } else {
+                        context.getString(R.string.settings_restore_success)
+                    }
+                )
+            }.onFailure {
+                showTopLevelToast(context, context.getString(R.string.settings_backup_invalid))
+            }
+        }
     }
 
     fun loadDrafts() {
@@ -348,7 +389,9 @@ internal fun MainTopLevelPages(
             // SettingsFragment's legacy cache dialog deleted the selected group
             // immediately and always used the generic result message.
             onCacheClear = { item -> clearSettingsCache(context, settings, state, item, false) },
-            onEmptyCacheClear = { item -> clearSettingsCache(context, settings, state, item, false) }
+            onEmptyCacheClear = { item -> clearSettingsCache(context, settings, state, item, false) },
+            onBackup = { backupExporter.launch(context.getString(R.string.app_name) + ".json") },
+            onRestore = { backupImporter.launch(arrayOf("application/json", "text/plain", "*/*")) }
         )
     }
     }

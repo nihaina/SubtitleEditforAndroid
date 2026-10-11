@@ -1181,11 +1181,31 @@ internal class AsrModelImportController(
 
     private fun canReadSavedUri(uriString: String): Boolean = runCatching {
         val uri = Uri.parse(uriString)
-        if (uri.scheme == "file") {
-            val file = uri.path?.let(::File) ?: return false
-            file.isFile || (isQwen3Asr() && uriString == tokensPath && file.isDirectory)
-        } else {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
+        when (uri.scheme?.lowercase(Locale.ROOT)) {
+            null, "" -> {
+                val file = File(uriString)
+                file.isFile || (isQwen3Asr() && uriString == tokensPath && file.isDirectory)
+            }
+            "file" -> {
+                val file = uri.path?.let(::File) ?: return false
+                file.isFile || (isQwen3Asr() && uriString == tokensPath && file.isDirectory)
+            }
+            "content" -> {
+                val isQwenTokenizer = isQwen3Asr() && uriString == tokensPath
+                val document = if (isQwenTokenizer) {
+                    DocumentFile.fromTreeUri(context, uri)
+                        ?: DocumentFile.fromSingleUri(context, uri)
+                } else {
+                    DocumentFile.fromSingleUri(context, uri)
+                }
+                (isQwenTokenizer && document?.isDirectory == true) ||
+                    document?.isFile == true ||
+                    context.contentResolver.openFileDescriptor(uri, "r")
+                        ?.use { true }
+                        ?: context.contentResolver.openInputStream(uri)?.use { true }
+                        ?: false
+            }
+            else -> false
         }
     }.getOrDefault(false)
 

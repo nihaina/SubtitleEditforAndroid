@@ -10,11 +10,13 @@ import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.ModelDirectoryManager
 import com.subtitleedit.util.ModelDirectoryMigration
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.util.SettingsBackupManager
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.nio.charset.StandardCharsets
 import java.util.Locale
 
 /**
@@ -97,6 +99,35 @@ internal class SettingsViewModel(
     fun setSelectPlayingSubtitle(enabled: Boolean) {
         setState { copy(selectPlayingSubtitle = enabled) }
         settingsManager.setSelectPlayingSubtitleEnabled(enabled)
+    }
+
+    fun exportBackup(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                app.contentResolver.openOutputStream(uri)?.use { output ->
+                    output.write(SettingsBackupManager.export(app).toByteArray(StandardCharsets.UTF_8))
+                } ?: error("无法打开备份文件")
+            }.onSuccess { toast(R.string.settings_backup_saved) }
+                .onFailure { toast("配置备份失败：${it.message ?: "未知错误"}") }
+        }
+    }
+
+    fun restoreBackup(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val json = app.contentResolver.openInputStream(uri)?.use { input ->
+                    input.readBytes().toString(StandardCharsets.UTF_8)
+                } ?: error("无法读取备份文件")
+                SettingsBackupManager.restore(app, json)
+            }.onSuccess { result ->
+                refresh()
+                if (result.skippedCount > 0) {
+                    toast(R.string.settings_restore_success_skipped, result.skippedCount)
+                } else {
+                    toast(R.string.settings_restore_success)
+                }
+            }.onFailure { toast(R.string.settings_backup_invalid) }
+        }
     }
 
     /** Receives a selected software root and opens the migration confirmation. */

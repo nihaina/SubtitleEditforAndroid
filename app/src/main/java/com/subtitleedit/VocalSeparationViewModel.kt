@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.widget.Toast
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.viewModelScope
 import com.subtitleedit.demix.DemixOutputWriter
 import com.subtitleedit.demix.VocalSeparationEngine
@@ -384,16 +385,19 @@ internal class VocalSeparationViewModel(
 
     private fun isSavedUriReadable(uriString: String): Boolean = runCatching {
         val uri = Uri.parse(uriString)
-        if (uri.scheme == "file") {
-            uri.path?.let(::File)?.isFile == true
-        } else {
-            app.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
+        when (uri.scheme?.lowercase()) {
+            null, "" -> File(uriString).isFile
+            "file" -> uri.path?.let(::File)?.isFile == true
+            "content" -> DocumentFile.fromSingleUri(app, uri)?.isFile == true ||
+                app.contentResolver.openFileDescriptor(uri, "r")?.use { true } == true ||
+                app.contentResolver.openInputStream(uri)?.use { true } == true
+            else -> false
         }
     }.getOrDefault(false)
 
     private fun <T> withDirectModelPath(uri: Uri, block: (path: String, size: Long?) -> T): T {
-        if (uri.scheme == "file") {
-            val file = File(requireNotNull(uri.path))
+        if (uri.scheme.isNullOrEmpty() || uri.scheme == "file") {
+            val file = File(uri.path ?: uri.toString())
             return block(file.absolutePath, file.length())
         }
         val descriptor = app.contentResolver.openFileDescriptor(uri, "r")

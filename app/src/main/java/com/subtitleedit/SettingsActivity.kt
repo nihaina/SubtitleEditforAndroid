@@ -51,11 +51,21 @@ class SettingsActivity : AppComposeActivity() {
                     onConfirmSoftwareDirectory = viewModel::confirmSoftwareDirectory,
                     onCancelSoftwareDirectory = viewModel::cancelSoftwareDirectory,
                     onCacheClear = viewModel::clearCache,
-                    onEmptyCacheClear = viewModel::onEmptyCacheClear
+                    onEmptyCacheClear = viewModel::onEmptyCacheClear,
+                    onBackup = { backupExporter.launch(getString(R.string.app_name) + ".json") },
+                    onRestore = { backupImporter.launch(arrayOf("application/json", "text/plain", "*/*")) }
                 )
             }
         }
     }
+
+    private val backupExporter = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri -> uri?.let(viewModel::exportBackup) }
+
+    private val backupImporter = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let(viewModel::restoreBackup) }
 
     override fun onResume() {
         super.onResume()

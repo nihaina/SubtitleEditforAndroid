@@ -294,6 +294,56 @@ class SettingsManager private constructor(context: Context) {
 
     fun setSoftwareDirectory(path: String) = setModelDirectory(path)
 
+    /** Snapshot all persisted user settings, including dynamically named keys. */
+    fun exportSettingsSnapshot(): Map<String, Any?> {
+        val snapshot = prefs.all.toMutableMap()
+        // Dynamic Padding defaults to enabled and therefore may not have a
+        // persisted key until the user changes it. Export the effective value
+        // for every ASR timeline so the backup is complete even in that case.
+        listOf(
+            ASR_MODEL_WHISPER,
+            ASR_MODEL_SENSEVOICE,
+            ASR_MODEL_PARAKEET_TDT,
+            ASR_MODEL_PARAKEET_CTC_JA,
+            ASR_MODEL_QWEN3_ASR
+        ).forEach { type ->
+            speechVadDynamicPaddingKey(type)?.let { key ->
+                snapshot[key] = isSpeechVadDynamicPaddingEnabled(type)
+            }
+        }
+        return snapshot
+    }
+
+    /** Restore primitive settings after the caller has filtered path-like values. */
+    fun restoreSettingsSnapshot(values: Map<String, Any?>) {
+        val editor = prefs.edit()
+        values.forEach { (key, value) ->
+            when (value) {
+                null -> editor.remove(key)
+                is String -> editor.putString(key, value)
+                is Boolean -> editor.putBoolean(key, value)
+                is Int -> editor.putInt(key, value)
+                is Long -> editor.putLong(key, value)
+                is Float -> editor.putFloat(key, value)
+                is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+            }
+        }
+        editor.apply()
+    }
+
+    /** Export decrypted provider API keys so a backup can be restored on another install. */
+    fun exportAiApiKeys(): Map<String, String> = AiProviderConfig.providers
+        .mapNotNull { provider ->
+            getAiApiKey(provider.id).takeIf { it.isNotBlank() }?.let { provider.id to it }
+        }
+        .toMap()
+
+    fun restoreAiApiKeys(keys: Map<String, String>) {
+        keys.forEach { (provider, key) ->
+            if (AiProviderConfig.providers.any { it.id == provider }) setAiApiKey(provider, key)
+        }
+    }
+
     fun resetModelDirectory() {
         prefs.edit().remove(KEY_MODEL_DIRECTORY).apply()
         ModelDirectoryManager.setSoftwareDirectory(null)
@@ -1076,10 +1126,8 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun isSpeechVadDynamicPaddingEnabled(type: String = getAsrModelType()): Boolean {
-        val key = when (type) {
-            ASR_MODEL_WHISPER -> "${KEY_ASR_TIMELINE_PREFIX}${ASR_MODEL_WHISPER}_dynamic_padding_enabled"
-            else -> timelineKey("dynamic_padding_enabled", type)
-        } ?: return prefs.getBoolean(KEY_STT_VAD_DYNAMIC_PADDING_ENABLED, true)
+        val key = speechVadDynamicPaddingKey(type)
+            ?: return prefs.getBoolean(KEY_STT_VAD_DYNAMIC_PADDING_ENABLED, true)
         return prefs.getBoolean(
             key,
             prefs.getBoolean(KEY_STT_VAD_DYNAMIC_PADDING_ENABLED, true)
@@ -1090,11 +1138,13 @@ class SettingsManager private constructor(context: Context) {
         enabled: Boolean,
         type: String = getAsrModelType()
     ) {
-        val key = when (type) {
-            ASR_MODEL_WHISPER -> "${KEY_ASR_TIMELINE_PREFIX}${ASR_MODEL_WHISPER}_dynamic_padding_enabled"
-            else -> timelineKey("dynamic_padding_enabled", type)
-        } ?: return
+        val key = speechVadDynamicPaddingKey(type) ?: return
         prefs.edit().putBoolean(key, enabled).apply()
+    }
+
+    private fun speechVadDynamicPaddingKey(type: String): String? = when (type) {
+        ASR_MODEL_WHISPER -> "${KEY_ASR_TIMELINE_PREFIX}${ASR_MODEL_WHISPER}_dynamic_padding_enabled"
+        else -> timelineKey("dynamic_padding_enabled", type)
     }
 
     fun isSpeechVadMergeEnabled(): Boolean {

@@ -2,6 +2,7 @@ package com.subtitleedit.ui.settings
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,6 +16,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -100,11 +103,14 @@ fun SettingsScreen(
     onConfirmSoftwareDirectory: () -> Unit,
     onCancelSoftwareDirectory: () -> Unit,
     onCacheClear: (SettingsCacheItem) -> Unit,
-    onEmptyCacheClear: (SettingsCacheItem) -> Unit
+    onEmptyCacheClear: (SettingsCacheItem) -> Unit,
+    onBackup: () -> Unit,
+    onRestore: () -> Unit
 ) {
     var showEncodingDialog by rememberSaveable { mutableStateOf(false) }
     var showThemeDialog by rememberSaveable { mutableStateOf(false) }
     var showCacheDialog by rememberSaveable { mutableStateOf(false) }
+    var showBackupWarning by rememberSaveable { mutableStateOf(false) }
     var pendingCacheKey by rememberSaveable { mutableStateOf<String?>(null) }
 
     AppToolScaffold(
@@ -204,6 +210,73 @@ fun SettingsScreen(
                     onCheckedChange = onSelectPlayingChanged
                 )
             }
+            Spacer(Modifier.height(20.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = { showBackupWarning = true },
+                    modifier = Modifier.weight(1f).height(56.dp),
+                    shape = MaterialTheme.shapes.large,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.White,
+                        contentColor = MaterialTheme.colorScheme.primary
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp)
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_download),
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.settings_backup))
+                }
+                Button(
+                    onClick = onRestore,
+                    modifier = Modifier.weight(1f).height(56.dp),
+                    shape = MaterialTheme.shapes.large,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.White,
+                        contentColor = MaterialTheme.colorScheme.primary
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp)
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_restore),
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.settings_restore))
+                }
+            }
+    }
+
+    if (showBackupWarning) {
+        AlertDialog(
+            onDismissRequest = { showBackupWarning = false },
+            shape = MaterialTheme.shapes.extraLarge,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            title = { Text(stringResource(R.string.settings_backup_warning_title)) },
+            text = { Text(stringResource(R.string.settings_backup_warning_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showBackupWarning = false
+                        onBackup()
+                    }
+                ) { Text(stringResource(R.string.settings_backup_continue)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBackupWarning = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
     }
 
     if (showEncodingDialog) {
