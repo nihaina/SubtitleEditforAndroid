@@ -654,6 +654,9 @@ class EditorActivity : AppCompatActivity() {
                 }
             },
             onTimestampInserted = ::insertSubtitleFromTimestamp,
+            onCollapsed = {
+                if (::videoFullscreenController.isInitialized) videoFullscreenController.resetMixedDisplay()
+            },
             showMessage = ::showShortToast
         )
         waveformController.bind()
@@ -682,6 +685,9 @@ class EditorActivity : AppCompatActivity() {
             setFullscreen = { stateModel.isVideoFullscreen = it },
             isCollapsed = { stateModel.isVideoCollapsed },
             setCollapsed = { stateModel.isVideoCollapsed = it },
+            isMixed = { stateModel.isVideoMixed },
+            setMixed = { stateModel.isVideoMixed = it },
+            expandWaveform = waveformController::expand,
             onControlsPinnedChanged = playbackController::setVideoControlsPinned,
             inlineViewportIndex = { stateModel.videoViewportInlineIndex },
             previousOrientation = { stateModel.previousRequestedOrientation },
@@ -704,6 +710,9 @@ class EditorActivity : AppCompatActivity() {
         if (stateModel.mediaType == type) {
             updateMediaTypeViews()
             return
+        }
+        if (type != EditorMediaType.VIDEO && ::videoFullscreenController.isInitialized) {
+            videoFullscreenController.resetMixedDisplay()
         }
         stateModel.mediaType = type
         playbackController.setMediaType(type)

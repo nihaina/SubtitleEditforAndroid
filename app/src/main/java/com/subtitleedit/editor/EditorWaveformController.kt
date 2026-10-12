@@ -46,6 +46,7 @@ internal class EditorWaveformController(
     private val onSubtitleChanged: (Int, SubtitleEntry, Long, Boolean) -> Unit,
     private val onSelectedIndexChanged: (Int) -> Unit,
     private val onTimestampInserted: (Long, Long) -> Unit,
+    private val onCollapsed: () -> Unit,
     private val showMessage: (String) -> Unit
 ) {
     private var chunkLoader: FfmpegWaveformChunkLoader? = null
@@ -88,12 +89,7 @@ internal class EditorWaveformController(
         }
 
         binding.btnToggleWaveform.setOnClickListener {
-            isWaveformExpanded = !isWaveformExpanded
-            binding.timelineContainer.visibility =
-                if (isWaveformExpanded) View.VISIBLE else View.GONE
-            binding.btnToggleWaveform.text = if (isWaveformExpanded) "▼" else "▶"
-            updateGenerateButton()
-            refreshWaveformToolbarState()
+            setExpanded(!isWaveformExpanded)
         }
 
         binding.btnToggleDisplayMode.setOnClickListener {
@@ -169,6 +165,20 @@ internal class EditorWaveformController(
             }
             false
         }
+    }
+
+    fun expand() {
+        setExpanded(true)
+    }
+
+    private fun setExpanded(expanded: Boolean) {
+        if (isWaveformExpanded == expanded) return
+        if (!expanded) onCollapsed()
+        isWaveformExpanded = expanded
+        binding.timelineContainer.visibility = if (expanded) View.VISIBLE else View.GONE
+        binding.btnToggleWaveform.text = if (expanded) "▼" else "▶"
+        updateGenerateButton()
+        refreshWaveformToolbarState()
     }
 
     /** Makes the waveform/media panel available after opening media in subtitle-only mode. */

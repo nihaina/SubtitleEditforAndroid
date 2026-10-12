@@ -222,10 +222,9 @@ internal class EditorPlaybackController(
     }
 
     fun setVideoControlsPinned(pinned: Boolean) {
+        if (videoControlsPinned == pinned) return
         videoControlsPinned = pinned
-        if (pinned) {
-            showVideoControls(scheduleAutoHide = false)
-        }
+        showVideoControls(scheduleAutoHide = !pinned && isPlaying)
     }
 
     private fun onProgressFrame() {

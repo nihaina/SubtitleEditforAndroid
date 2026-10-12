@@ -159,6 +159,9 @@ internal class EditorViewModel(
     var isVideoCollapsed: Boolean
         get() = uiState.value.isVideoCollapsed
         set(value) { onEvent(EditorEvent.SetVideoCollapsed(value)) }
+    var isVideoMixed: Boolean
+        get() = uiState.value.isVideoMixed
+        set(value) { onEvent(EditorEvent.SetVideoMixed(value)) }
     var previousRequestedOrientation: Int
         get() = uiState.value.previousRequestedOrientation
         set(value) { onEvent(EditorEvent.SetPreviousRequestedOrientation(value)) }
@@ -500,7 +503,13 @@ internal class EditorViewModel(
             is EditorEvent.SetVideoFullscreen ->
                 updateUiState { copy(isVideoFullscreen = event.value) }
             is EditorEvent.SetVideoCollapsed ->
-                updateUiState { copy(isVideoCollapsed = event.value) }
+                updateUiState {
+                    copy(isVideoCollapsed = event.value, isVideoMixed = isVideoMixed && event.value)
+                }
+            is EditorEvent.SetVideoMixed ->
+                updateUiState {
+                    copy(isVideoMixed = event.value, isVideoCollapsed = isVideoCollapsed || event.value)
+                }
             is EditorEvent.SetPreviousRequestedOrientation ->
                 updateUiState { copy(previousRequestedOrientation = event.value) }
             is EditorEvent.SetVideoViewportInlineIndex ->

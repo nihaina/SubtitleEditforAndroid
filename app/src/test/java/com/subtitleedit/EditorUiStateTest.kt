@@ -56,6 +56,30 @@ class EditorUiStateTest {
     }
 
     @Test
+    fun mixedVideoDisplayKeepsInlineVideoCollapsedUntilExpanded() {
+        val viewModel = EditorViewModel()
+        viewModel.playbackPositionMs = 2500L
+        viewModel.playbackSpeed = 1.5f
+
+        viewModel.isVideoMixed = true
+        assertTrue(viewModel.isVideoCollapsed)
+
+        viewModel.isVideoFullscreen = true
+        viewModel.isVideoFullscreen = false
+        assertTrue(viewModel.isVideoMixed)
+
+        viewModel.isVideoMixed = false
+        assertTrue(viewModel.isVideoCollapsed)
+
+        viewModel.isVideoMixed = true
+        viewModel.isVideoCollapsed = false
+        assertFalse(viewModel.isVideoMixed)
+        assertFalse(viewModel.isVideoCollapsed)
+        assertEquals(2500L, viewModel.playbackPositionMs)
+        assertEquals(1.5f, viewModel.playbackSpeed)
+    }
+
+    @Test
     fun menuRefreshEventEmitsAnEffect() = runBlocking {
         val viewModel = EditorViewModel()
         val received = CompletableDeferred<EditorEffect>()

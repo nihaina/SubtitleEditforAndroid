@@ -558,6 +558,15 @@
                             android:layout_height="match_parent"
                             android:background="@drawable/bg_waveform_placeholder" />
 
+                        <FrameLayout
+                            android:id="@+id/waveformVideoOverlay"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:clickable="false"
+                            android:focusable="false"
+                            android:importantForAccessibility="noHideDescendants"
+                            android:visibility="gone" />
+
                         <!-- 手动生成按钮，叠在波形图正中间 -->
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnGenerateCache"

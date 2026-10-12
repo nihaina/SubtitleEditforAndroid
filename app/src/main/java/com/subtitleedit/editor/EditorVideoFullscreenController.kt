@@ -22,11 +22,16 @@ internal class EditorVideoFullscreenController(
     private val setFullscreen: (Boolean) -> Unit,
     private val isCollapsed: () -> Boolean,
     private val setCollapsed: (Boolean) -> Unit,
+    private val isMixed: () -> Boolean,
+    private val setMixed: (Boolean) -> Unit,
+    private val expandWaveform: () -> Unit,
     private val onControlsPinnedChanged: (Boolean) -> Unit,
     private val inlineViewportIndex: () -> Int,
     private val previousOrientation: () -> Int,
     private val setPreviousOrientation: (Int) -> Unit
 ) {
+    private var isMoreMenuOpen = false
+
     fun bind(onInteraction: () -> Unit) {
         if (!isVideo) return
         binding.btnVideoFullscreen.setOnClickListener {
@@ -56,6 +61,12 @@ internal class EditorVideoFullscreenController(
 
     fun exitIfActive() {
         if (isFullscreen()) exit()
+    }
+
+    fun resetMixedDisplay() {
+        if (!isMixed()) return
+        setMixed(false)
+        renderCollapsed()
     }
 
     fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -103,7 +114,6 @@ internal class EditorVideoFullscreenController(
             createInlineVideoLayoutParams()
         )
         binding.videoFullscreenHost.visibility = View.GONE
-        onControlsPinnedChanged(isCollapsed())
         binding.editorAppBar.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
         binding.editorContent.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
         showSystemBars()
@@ -115,20 +125,32 @@ internal class EditorVideoFullscreenController(
 
     private fun showMoreMenu() {
         if (!isVideo) return
-        onControlsPinnedChanged(true)
+        isMoreMenuOpen = true
+        updateControlsPinned()
         val popup = PopupMenu(activity, binding.btnVideoMore)
         popup.menu.add(
             if (isCollapsed() && !isFullscreen()) R.string.editor_video_expand
             else R.string.editor_video_collapse
         ).setOnMenuItemClickListener {
             val collapse = !(isCollapsed() && !isFullscreen())
+            setMixed(false)
             setCollapsed(collapse)
             if (isFullscreen()) exit()
             else renderCollapsed()
             true
         }
+        if (!isMixed() || isFullscreen()) {
+            popup.menu.add(R.string.editor_video_mixed_display).setOnMenuItemClickListener {
+                expandWaveform()
+                setMixed(true)
+                if (isFullscreen()) exit()
+                else renderCollapsed()
+                true
+            }
+        }
         popup.setOnDismissListener {
-            onControlsPinnedChanged(isCollapsed() && !isFullscreen())
+            isMoreMenuOpen = false
+            updateControlsPinned()
         }
         popup.show()
     }
@@ -149,7 +171,34 @@ internal class EditorVideoFullscreenController(
             binding.videoViewportContainer.layoutParams = params
         }
         binding.videoControlsOverlay.setBackgroundColor(if (collapsed) Color.BLACK else Color.TRANSPARENT)
-        onControlsPinnedChanged(collapsed)
+        renderVideoOutput()
+        updateControlsPinned()
+    }
+
+    private fun renderVideoOutput() {
+        val mixed = isMixed() && !isFullscreen()
+        val video = binding.mpvView
+        val host = if (mixed) binding.waveformVideoOverlay else binding.videoViewportContainer
+        binding.waveformVideoOverlay.visibility = if (mixed) View.VISIBLE else View.GONE
+        if (video.parent !== host) {
+            (video.parent as? ViewGroup)?.removeView(video)
+            host.addView(
+                video,
+                0,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+        video.alpha = if (mixed) 0.5f else 1f
+        // The decorative video layer must let waveform gestures reach the timeline below it.
+        video.isClickable = !mixed
+        video.isFocusable = false
+    }
+
+    private fun updateControlsPinned() {
+        onControlsPinnedChanged(isMoreMenuOpen || (isCollapsed() && !isFullscreen()))
     }
 
     private fun renderButton() {
