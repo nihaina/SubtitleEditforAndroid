@@ -337,19 +337,19 @@
                                     android:fontFamily="monospace"
                                     android:gravity="center_vertical"
                                     android:maxLines="1"
-                                    android:paddingStart="12dp"
+                                    android:paddingStart="8dp"
                                     android:paddingEnd="4dp"
                                     android:textColor="#CCFFFFFF"
-                                    android:textSize="12sp"
+                                    android:textSize="11sp"
                                     tools:text="00:19:37.000 / 00:38:37.000" />
 
                                 <ImageButton
                                     android:id="@+id/btnVideoMore"
-                                    android:layout_width="48dp"
+                                    android:layout_width="@dimen/editor_video_controls_height"
                                     android:layout_height="match_parent"
                                     android:background="?attr/selectableItemBackgroundBorderless"
                                     android:contentDescription="@string/editor_video_more"
-                                    android:padding="12dp"
+                                    android:padding="6dp"
                                     android:src="@drawable/ic_more"
                                     app:tint="#FFFFFFFF" />
 
@@ -361,33 +361,37 @@
                                 android:layout_gravity="bottom"
                                 android:background="#26000000"
                                 android:gravity="center_vertical"
-                                android:orientation="horizontal"
-                                android:paddingStart="4dp">
+                                android:orientation="horizontal">
 
                                 <ImageButton
                                     android:id="@+id/btnVideoPlayPause"
-                                    android:layout_width="48dp"
-                                    android:layout_height="48dp"
+                                    android:layout_width="@dimen/editor_video_controls_height"
+                                    android:layout_height="match_parent"
                                     android:background="?attr/selectableItemBackgroundBorderless"
                                     android:contentDescription="@string/editor_video_play"
-                                    android:padding="12dp"
+                                    android:padding="6dp"
                                     android:src="@drawable/ic_video_play"
                                     app:tint="#FFFFFFFF" />
 
                                 <SeekBar
                                     android:id="@+id/videoSeekBar"
                                     android:layout_width="0dp"
-                                    android:layout_height="48dp"
+                                    android:layout_height="match_parent"
                                     android:layout_weight="1"
+                                    android:minHeight="0dp"
                                     android:minWidth="0dp"
+                                    android:paddingStart="8dp"
+                                    android:paddingEnd="8dp"
+                                    android:paddingTop="0dp"
+                                    android:paddingBottom="0dp"
                                     android:progressBackgroundTint="#66FFFFFF"
                                     android:progressTint="#FFFFFFFF"
                                     android:thumbTint="#FFFFFFFF" />
 
                                 <TextView
                                     android:id="@+id/tvVideoPlaybackSpeed"
-                                    android:layout_width="48dp"
-                                    android:layout_height="48dp"
+                                    android:layout_width="40dp"
+                                    android:layout_height="match_parent"
                                     android:background="?attr/selectableItemBackgroundBorderless"
                                     android:clickable="true"
                                     android:contentDescription="@string/editor_video_speed"
@@ -395,15 +399,15 @@
                                     android:gravity="center"
                                     android:text="@string/activity_editor_text_08"
                                     android:textColor="#FFFFFFFF"
-                                    android:textSize="14sp" />
+                                    android:textSize="12sp" />
 
                                 <ImageButton
                                     android:id="@+id/btnVideoFullscreen"
-                                    android:layout_width="48dp"
-                                    android:layout_height="48dp"
+                                    android:layout_width="@dimen/editor_video_controls_height"
+                                    android:layout_height="match_parent"
                                     android:background="?attr/selectableItemBackgroundBorderless"
                                     android:contentDescription="@string/editor_video_fullscreen"
-                                    android:padding="10dp"
+                                    android:padding="6dp"
                                     android:src="@drawable/ic_video_fullscreen"
                                     app:tint="#FFFFFFFF" />
 
