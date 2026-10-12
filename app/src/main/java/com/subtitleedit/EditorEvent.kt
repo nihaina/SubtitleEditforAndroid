@@ -18,7 +18,6 @@ internal sealed interface EditorEvent {
     data class SetPlaybackPositionMs(val value: Long) : EditorEvent
     data class SetPlaybackSpeed(val value: Float) : EditorEvent
     data class SetSelectedAudioStreamIndex(val value: Int?) : EditorEvent
-    data class SetAudioOnlyFromVideo(val value: Boolean) : EditorEvent
     data class ExecuteCommand(val command: EditorCommand) : EditorEvent
     data object RequestOptionsMenuRefresh : EditorEvent
 }

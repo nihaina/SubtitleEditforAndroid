@@ -180,9 +180,6 @@ internal class EditorViewModel(
     var selectedAudioStreamIndex: Int?
         get() = uiState.value.selectedAudioStreamIndex
         set(value) { onEvent(EditorEvent.SetSelectedAudioStreamIndex(value)) }
-    var isAudioOnlyFromVideo: Boolean
-        get() = uiState.value.isAudioOnlyFromVideo
-        set(value) { onEvent(EditorEvent.SetAudioOnlyFromVideo(value)) }
     val saveCoordinator = EditorSaveCoordinator()
     private val editHistory = EditorEditHistory()
     private val editHistoryController = EditorHistoryController(editHistory)
@@ -520,8 +517,6 @@ internal class EditorViewModel(
             is EditorEvent.SetPlaybackSpeed -> updateUiState { copy(playbackSpeed = event.value) }
             is EditorEvent.SetSelectedAudioStreamIndex ->
                 updateUiState { copy(selectedAudioStreamIndex = event.value) }
-            is EditorEvent.SetAudioOnlyFromVideo ->
-                updateUiState { copy(isAudioOnlyFromVideo = event.value) }
             is EditorEvent.ExecuteCommand -> execute(event.command)
             EditorEvent.RequestOptionsMenuRefresh ->
                 _effects.tryEmit(EditorEffect.InvalidateOptionsMenu)

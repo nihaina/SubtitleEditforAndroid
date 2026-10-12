@@ -5,38 +5,21 @@ import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.util.FileUtils
 import java.io.File
 
-/** Coordinates media open mode and same-directory subtitle selection dialogs. */
+/** Coordinates same-directory subtitle selection when opening media. */
 internal class MediaOpenController(
     private val activity: AppCompatActivity,
-    private val openEditor: (File, EditorMediaType, File?, Boolean) -> Unit
+    private val openEditor: (File, EditorMediaType, File?) -> Unit
 ) {
-    fun open(mediaFile: File, mediaType: EditorMediaType, audioOnlyFromVideo: Boolean = false) {
+    fun open(mediaFile: File, mediaType: EditorMediaType) {
         val subtitles = FileUtils.getPossibleSubtitleFiles(mediaFile)
-        if (subtitles.size > 1) showSubtitlePicker(mediaFile, mediaType, subtitles, audioOnlyFromVideo)
-        else openEditor(mediaFile, mediaType, subtitles.firstOrNull(), audioOnlyFromVideo)
-    }
-
-    fun showVideoModePicker(videoFile: File) {
-        ComposeDialogHost.show(activity) { dialog ->
-            VideoModeDialog(
-                onDismiss = dialog::dismiss,
-                onOpenVideo = {
-                    dialog.dismiss()
-                    open(videoFile, EditorMediaType.VIDEO)
-                },
-                onOpenAudioOnly = {
-                    dialog.dismiss()
-                    open(videoFile, EditorMediaType.AUDIO, audioOnlyFromVideo = true)
-                }
-            )
-        }
+        if (subtitles.size > 1) showSubtitlePicker(mediaFile, mediaType, subtitles)
+        else openEditor(mediaFile, mediaType, subtitles.firstOrNull())
     }
 
     private fun showSubtitlePicker(
         mediaFile: File,
         mediaType: EditorMediaType,
-        subtitleFiles: List<File>,
-        audioOnlyFromVideo: Boolean
+        subtitleFiles: List<File>
     ) {
         val fileNames = subtitleFiles.map { "${it.name}  (${FileUtils.formatFileSize(it.length())})" }
         val typeLabel = if (mediaType == EditorMediaType.VIDEO) "视频" else "音频"
@@ -48,7 +31,7 @@ internal class MediaOpenController(
                 onDismiss = dialog::dismiss,
                 onSelect = { which ->
                     dialog.dismiss()
-                    openEditor(mediaFile, mediaType, subtitleFiles[which], audioOnlyFromVideo)
+                    openEditor(mediaFile, mediaType, subtitleFiles[which])
                 }
             )
         }

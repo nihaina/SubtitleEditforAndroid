@@ -1,28 +1,17 @@
 package com.subtitleedit.nativebridge
 
-import android.media.MediaExtractor
-import android.media.MediaFormat
-import android.util.Log
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFprobeKit
 import java.io.File
 import org.json.JSONObject
 
 internal class DefaultNativeMediaEngine : NativeMediaEngine {
-    override fun probe(file: File, inspectVideoAudioTrack: Boolean): MediaProbeResult {
+    override fun probe(file: File): MediaProbeResult {
         val mediaInformation = probeJson(file)
         val audioStream = selectDefaultAudioStream(mediaInformation)
-        val audioStreamIndex = if (inspectVideoAudioTrack) {
-            audioStream?.takeIf { it.has("index") }?.optInt("index")
-                ?: if (hasAudioTrack(file)) null
-                else throw IllegalStateException("视频没有可用音轨")
-        } else {
-            null
-        }
         return MediaProbeResult(
             startTimeSeconds = mediaInformation.optJSONObject("format")
                 ?.optString("start_time")?.toDoubleOrNull(),
-            defaultAudioStreamIndex = audioStreamIndex,
             // MP3 duration may itself be estimated from this bitrate. The repository measures
             // real frame bytes and sample counts independently before comparing the rates.
             audioBitrateBitsPerSecond = audioStream?.optString("bit_rate")?.toDoubleOrNull()
@@ -96,26 +85,5 @@ internal class DefaultNativeMediaEngine : NativeMediaEngine {
             if (stream.optJSONObject("disposition")?.optInt("default", 0) == 1) return stream
         }
         return firstAudio
-    }
-
-    private fun hasAudioTrack(mediaFile: File): Boolean {
-        val extractor = MediaExtractor()
-        return try {
-            extractor.setDataSource(mediaFile.absolutePath)
-            (0 until extractor.trackCount).any { index ->
-                extractor.getTrackFormat(index)
-                    .getString(MediaFormat.KEY_MIME)
-                    ?.startsWith("audio/") == true
-            }
-        } catch (error: Exception) {
-            Log.w(TAG, "无法通过 MediaExtractor 检测视频音轨", error)
-            false
-        } finally {
-            extractor.release()
-        }
-    }
-
-    private companion object {
-        const val TAG = "DefaultNativeMediaEngine"
     }
 }

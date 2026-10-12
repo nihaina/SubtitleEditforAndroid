@@ -162,7 +162,6 @@ class EditorActivity : AppCompatActivity() {
     private lateinit var subtitlePreviewController: EditorSubtitlePreviewController
     private var longClickPosition: Int = -1
     private var waveformMediaFile: File? = null
-    private var waveformAudioStreamIndex: Int? = null
 
     // 文件选择器
     private val openFileLauncher = registerForActivityResult(
@@ -199,7 +198,6 @@ class EditorActivity : AppCompatActivity() {
         const val EXTRA_FILE_PATH = "extra_file_path"
         const val EXTRA_IS_AUDIO_FILE = "extra_is_audio_file"
         const val EXTRA_MEDIA_TYPE = "extra_media_type"
-        const val EXTRA_AUDIO_ONLY_FROM_VIDEO = "extra_audio_only_from_video"
         const val EXTRA_SUBTITLE_FILE_PATH = "extra_subtitle_file_path"
         const val EXTRA_INSPECT_MP3 = "extra_inspect_mp3"
         private const val TAG = "EditorActivity"
@@ -222,7 +220,6 @@ class EditorActivity : AppCompatActivity() {
             } else {
                 EditorMediaType.SUBTITLE_ONLY
             }
-            stateModel.isAudioOnlyFromVideo = intent.getBooleanExtra(EXTRA_AUDIO_ONLY_FROM_VIDEO, false)
             stateModel.subtitleFilePath = intent.getStringExtra(EXTRA_SUBTITLE_FILE_PATH) ?: ""
 
             if (stateModel.filePath.isNotEmpty()) {
@@ -731,7 +728,6 @@ class EditorActivity : AppCompatActivity() {
 
     private fun onMediaReady(durationMs: Long, audioStreamIndex: Int?) {
         val ffmpegAudioStreamIndex = audioStreamIndex?.takeIf { it >= 0 }
-            ?: waveformAudioStreamIndex
         stateModel.selectedAudioStreamIndex = ffmpegAudioStreamIndex
         if (stateModel.playbackSpeed != 1.0f) {
             playbackController.applyPlaybackSpeed(stateModel.playbackSpeed, showConfirmation = false)
@@ -1107,7 +1103,6 @@ class EditorActivity : AppCompatActivity() {
                         }
                         stateModel.filePath = mediaFile.absolutePath
                         stateModel.currentFile = mediaFile
-                        stateModel.isAudioOnlyFromVideo = false
                         switchMediaType(openedType)
                         // Keep the current subtitle document and entries while replacing/adding media.
                         loadMediaFile(
@@ -3933,13 +3928,10 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
-        val inspectVideoAudioTrack = stateModel.isAudioOnlyFromVideo
-        val shouldInspectMp3 = inspectMp3 ?: originalFile.extension.equals("mp3", ignoreCase = true)
-        val isMp3Open = !inspectVideoAudioTrack && shouldInspectMp3
+        val isMp3Open = inspectMp3 ?: originalFile.extension.equals("mp3", ignoreCase = true)
         val checkingDialog = android.app.AlertDialog.Builder(this)
             .setMessage(
                 when {
-                    inspectVideoAudioTrack -> "正在检测视频音轨..."
                     isMp3Open -> "正在检测 MP3 文件规范..."
                     else -> "正在准备音频文件..."
                 }
@@ -3958,7 +3950,6 @@ class EditorActivity : AppCompatActivity() {
                 val preparedAudio = try {
                     mediaRepository.prepareAudio(
                         originalFile,
-                        inspectVideoAudioTrack = inspectVideoAudioTrack,
                         forceMp3Preparation = isMp3Open
                     )
                 } catch (error: CancellationException) {
@@ -3977,8 +3968,7 @@ class EditorActivity : AppCompatActivity() {
                     playbackFile = preparedAudio.playbackFile,
                     analysisFile = originalFile,
                     subtitleFilePath = subtitleFilePath,
-                    restoreDocument = restoreDocument,
-                    audioStreamIndex = preparedAudio.audioStreamIndex
+                    restoreDocument = restoreDocument
                 )
                 val issues = mp3Issues ?: Mp3FileIssues()
                 Log.d(
@@ -4019,11 +4009,9 @@ class EditorActivity : AppCompatActivity() {
         playbackFile: File,
         analysisFile: File,
         subtitleFilePath: String?,
-        restoreDocument: Boolean,
-        audioStreamIndex: Int? = null
+        restoreDocument: Boolean
     ) {
         waveformMediaFile = analysisFile
-        waveformAudioStreamIndex = audioStreamIndex
         prepareMediaDocument(subtitleFilePath, restoreDocument)
         stateModel.documentLoaded = true
         playbackController.prepare(playbackFile)

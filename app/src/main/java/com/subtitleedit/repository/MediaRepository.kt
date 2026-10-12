@@ -5,8 +5,7 @@ import java.io.File
 
 internal data class PreparedAudioFile(
     val playbackFile: File,
-    val wasFixed: Boolean,
-    val audioStreamIndex: Int? = null
+    val wasFixed: Boolean
 )
 
 internal interface MediaRepository {
@@ -15,7 +14,6 @@ internal interface MediaRepository {
 
     suspend fun prepareAudio(
         audioFile: File,
-        inspectVideoAudioTrack: Boolean = false,
         forceMp3Preparation: Boolean = false
     ): PreparedAudioFile
 

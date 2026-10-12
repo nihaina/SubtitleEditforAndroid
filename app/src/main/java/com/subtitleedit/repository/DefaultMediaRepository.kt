@@ -26,18 +26,8 @@ internal class DefaultMediaRepository(
 
     override suspend fun prepareAudio(
         audioFile: File,
-        inspectVideoAudioTrack: Boolean,
         forceMp3Preparation: Boolean
     ): PreparedAudioFile = withContext(Dispatchers.IO) {
-        if (inspectVideoAudioTrack) {
-            val mediaInformation = nativeMediaEngine.probe(audioFile, inspectVideoAudioTrack = true)
-            return@withContext PreparedAudioFile(
-                playbackFile = audioFile,
-                wasFixed = false,
-                audioStreamIndex = mediaInformation.defaultAudioStreamIndex
-            )
-        }
-
         val isMp3 = forceMp3Preparation || audioFile.extension.equals("mp3", ignoreCase = true)
         if (!isMp3) {
             return@withContext PreparedAudioFile(audioFile, wasFixed = false)
@@ -81,7 +71,7 @@ internal class DefaultMediaRepository(
         var lastProbeError: Throwable? = null
         repeat(MP3_PROBE_ATTEMPTS) { attempt ->
             try {
-                val candidate = nativeMediaEngine.probe(file, inspectVideoAudioTrack = false)
+                val candidate = nativeMediaEngine.probe(file)
                 // Preserve issue evidence if a later FFprobe invocation returns a weaker result.
                 if (probe == null || candidate.startTimeSeconds != null && candidate.startTimeSeconds != 0.0 ||
                     probe?.audioBitrateBitsPerSecond == null && candidate.audioBitrateBitsPerSecond != null

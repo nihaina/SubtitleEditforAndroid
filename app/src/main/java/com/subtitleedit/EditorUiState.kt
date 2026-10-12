@@ -17,6 +17,5 @@ internal data class EditorUiState(
     val selectedIndices: Set<Int> = emptySet(),
     val playbackPositionMs: Long = 0L,
     val playbackSpeed: Float = 1.0f,
-    val selectedAudioStreamIndex: Int? = null,
-    val isAudioOnlyFromVideo: Boolean = false
+    val selectedAudioStreamIndex: Int? = null
 )

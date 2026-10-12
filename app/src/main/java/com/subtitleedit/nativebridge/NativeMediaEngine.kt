@@ -4,12 +4,11 @@ import java.io.File
 
 internal data class MediaProbeResult(
     val startTimeSeconds: Double?,
-    val defaultAudioStreamIndex: Int?,
     val audioBitrateBitsPerSecond: Double? = null
 )
 
 internal interface NativeMediaEngine {
-    fun probe(file: File, inspectVideoAudioTrack: Boolean): MediaProbeResult
+    fun probe(file: File): MediaProbeResult
     fun openOperation(): NativeMediaOperation
 }
 

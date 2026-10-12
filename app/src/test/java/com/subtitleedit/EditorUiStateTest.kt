@@ -28,7 +28,6 @@ class EditorUiStateTest {
         viewModel.playbackPositionMs = 2500L
         viewModel.playbackSpeed = 1.5f
         viewModel.selectedAudioStreamIndex = 2
-        viewModel.isAudioOnlyFromVideo = true
 
         assertTrue(viewModel.uiState.value.initialized)
         assertTrue(viewModel.uiState.value.documentLoaded)
@@ -43,7 +42,6 @@ class EditorUiStateTest {
         assertEquals(2500L, viewModel.uiState.value.playbackPositionMs)
         assertEquals(1.5f, viewModel.uiState.value.playbackSpeed)
         assertEquals(2, viewModel.uiState.value.selectedAudioStreamIndex)
-        assertTrue(viewModel.uiState.value.isAudioOnlyFromVideo)
     }
 
     @Test

@@ -18,33 +18,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import com.subtitleedit.ui.components.AppCard
 
 @Composable
-internal fun VideoModeDialog(
-    onDismiss: () -> Unit,
-    onOpenVideo: () -> Unit,
-    onOpenAudioOnly: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = MaterialTheme.shapes.extraLarge,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        title = { Text("打开视频文件") },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                DialogOption("加载视频", onOpenVideo)
-                DialogOption("仅加载音频", onOpenAudioOnly)
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
-        }
-    )
-}
-
-@Composable
 internal fun SubtitleFilePickerDialog(
     mediaLabel: String,
     mediaFileName: String,

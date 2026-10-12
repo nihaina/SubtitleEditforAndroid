@@ -780,7 +780,7 @@ class MainActivity : AppComposeActivity() {
         } else if (FileUtils.isAudioFile(file)) {
             openMediaFileForEdit(file, EditorMediaType.AUDIO)
         } else if (FileTypePolicy.isVideo(file)) {
-            showVideoOpenModePicker(file)
+            openMediaFileForEdit(file, EditorMediaType.VIDEO)
         } else {
             com.subtitleedit.util.OverwritingToast.makeText(this, "不支持的文件格式", Toast.LENGTH_SHORT).show()
         }
@@ -1674,9 +1674,8 @@ class MainActivity : AppComposeActivity() {
     
     private fun openMediaFileForEdit(
         mediaFile: File,
-        mediaType: EditorMediaType,
-        audioOnlyFromVideo: Boolean = false
-    ) = mediaOpenController.open(mediaFile, mediaType, audioOnlyFromVideo)
+        mediaType: EditorMediaType
+    ) = mediaOpenController.open(mediaFile, mediaType)
 
     private fun updateCompressionProgress(
         progress: ArchiveProgressDialogController.ProgressUi,
@@ -1690,23 +1689,18 @@ class MainActivity : AppComposeActivity() {
         total: Long
     ) = archiveProgressDialogController.updateFileCopy(progress, message, completed, total)
 
-    private fun showVideoOpenModePicker(videoFile: File) =
-        mediaOpenController.showVideoModePicker(videoFile)
-
     /**
      * 当存在多个同名字幕文件时，弹出选择对话框
      */
     private fun openMediaWithSubtitle(
         mediaFile: File,
         mediaType: EditorMediaType,
-        subtitleFile: File?,
-        audioOnlyFromVideo: Boolean
+        subtitleFile: File?
     ) {
         val intent = Intent(this, EditorActivity::class.java)
         intent.putExtra(EditorActivity.EXTRA_FILE_PATH, mediaFile.absolutePath)
         intent.putExtra(EditorActivity.EXTRA_MEDIA_TYPE, mediaType.name)
         intent.putExtra(EditorActivity.EXTRA_IS_AUDIO_FILE, mediaType == EditorMediaType.AUDIO)
-        intent.putExtra(EditorActivity.EXTRA_AUDIO_ONLY_FROM_VIDEO, audioOnlyFromVideo)
         intent.putExtra(
             EditorActivity.EXTRA_INSPECT_MP3,
             mediaType == EditorMediaType.AUDIO && mediaFile.extension.equals("mp3", ignoreCase = true)

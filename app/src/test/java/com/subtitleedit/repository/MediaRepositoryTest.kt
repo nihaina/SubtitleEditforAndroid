@@ -9,7 +9,6 @@ import com.subtitleedit.nativebridge.NativeMediaOperation
 import com.subtitleedit.nativebridge.PcmFormat
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -86,25 +85,6 @@ class MediaRepositoryTest {
     }
 
     @Test
-    fun audioPreparationUsesInjectedNativeEngineForVideoProbe() = runBlocking {
-        val source = temporaryFolder.newFile("offset.mp3")
-        val engine = RecordingNativeMediaEngine()
-        val repository = DefaultMediaRepository(
-            cacheDir = temporaryFolder.newFolder("cache"),
-            nativeMediaEngine = engine
-        )
-
-        val prepared = repository.prepareAudio(source, inspectVideoAudioTrack = true)
-
-        assertTrue(engine.probed)
-        assertFalse(engine.converted)
-        assertFalse(prepared.wasFixed)
-        assertEquals(2, prepared.audioStreamIndex)
-        assertEquals(source, prepared.playbackFile)
-        repository.release()
-    }
-
-    @Test
     fun mp3InspectionRunsFreshlyForEveryOpenRequest() = runBlocking {
         val source = temporaryFolder.newFile("audio.mp3")
         val engine = RecordingNativeMediaEngine()
@@ -137,20 +117,16 @@ class MediaRepositoryTest {
     private class RecordingNativeMediaEngine(
         private val failFirstProbe: Boolean = false
     ) : NativeMediaEngine {
-        var probed = false
         var probeCount = 0
-        var converted = false
 
-        override fun probe(file: File, inspectVideoAudioTrack: Boolean): MediaProbeResult {
-            probed = true
+        override fun probe(file: File): MediaProbeResult {
             probeCount++
             if (failFirstProbe && probeCount == 1) throw IllegalStateException("probe failed")
-            return MediaProbeResult(startTimeSeconds = 1.0, defaultAudioStreamIndex = 2)
+            return MediaProbeResult(startTimeSeconds = 1.0)
         }
 
         override fun openOperation(): NativeMediaOperation = object : NativeMediaOperation {
             override suspend fun convertToWav(inputFile: File, outputFile: File): Boolean {
-                converted = true
                 outputFile.writeBytes(ByteArray(45))
                 return true
             }
