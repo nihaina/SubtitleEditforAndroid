@@ -10,6 +10,7 @@ internal sealed interface EditorEvent {
     data class SetSavedScrollPosition(val value: Int) : EditorEvent
     data class SetSavedFirstVisibleItemPosition(val value: Int) : EditorEvent
     data class SetVideoFullscreen(val value: Boolean) : EditorEvent
+    data class SetVideoCollapsed(val value: Boolean) : EditorEvent
     data class SetPreviousRequestedOrientation(val value: Int) : EditorEvent
     data class SetVideoViewportInlineIndex(val value: Int) : EditorEvent
     data class SetSelectedIndices(val value: Set<Int>) : EditorEvent

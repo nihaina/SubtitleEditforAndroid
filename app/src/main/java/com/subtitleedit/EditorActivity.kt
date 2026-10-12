@@ -680,6 +680,9 @@ class EditorActivity : AppCompatActivity() {
             isVideo = isVideo,
             isFullscreen = { stateModel.isVideoFullscreen },
             setFullscreen = { stateModel.isVideoFullscreen = it },
+            isCollapsed = { stateModel.isVideoCollapsed },
+            setCollapsed = { stateModel.isVideoCollapsed = it },
+            onControlsPinnedChanged = playbackController::setVideoControlsPinned,
             inlineViewportIndex = { stateModel.videoViewportInlineIndex },
             previousOrientation = { stateModel.previousRequestedOrientation },
             setPreviousOrientation = { stateModel.previousRequestedOrientation = it }

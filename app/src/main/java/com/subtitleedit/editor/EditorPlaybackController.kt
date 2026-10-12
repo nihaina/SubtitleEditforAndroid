@@ -58,6 +58,7 @@ internal class EditorPlaybackController(
     private var lastSeekBarProgress: Int? = null
     private val videoControlsHandler = Handler(Looper.getMainLooper())
     private var videoControlsVisible = true
+    private var videoControlsPinned = false
     private val hideVideoControlsRunnable = Runnable {
         setVideoControlsVisible(visible = false, animate = true)
     }
@@ -218,6 +219,13 @@ internal class EditorPlaybackController(
 
     fun showVideoControlsForInteraction() {
         showVideoControls(scheduleAutoHide = isPlaying)
+    }
+
+    fun setVideoControlsPinned(pinned: Boolean) {
+        videoControlsPinned = pinned
+        if (pinned) {
+            showVideoControls(scheduleAutoHide = false)
+        }
     }
 
     private fun onProgressFrame() {
@@ -602,13 +610,14 @@ internal class EditorPlaybackController(
     }
 
     private fun scheduleVideoControlsAutoHide() {
-        if (mediaType != EditorMediaType.VIDEO || isUserSeeking || !isPlaying) return
+        if (mediaType != EditorMediaType.VIDEO || videoControlsPinned || isUserSeeking || !isPlaying) return
         videoControlsHandler.removeCallbacks(hideVideoControlsRunnable)
         videoControlsHandler.postDelayed(hideVideoControlsRunnable, VIDEO_CONTROLS_HIDE_DELAY_MS)
     }
 
     private fun setVideoControlsVisible(visible: Boolean, animate: Boolean) {
         if (mediaType != EditorMediaType.VIDEO) return
+        if (!visible && videoControlsPinned) return
         videoControlsHandler.removeCallbacks(hideVideoControlsRunnable)
         videoControlsVisible = visible
         binding.videoControlsOverlay.animate().cancel()

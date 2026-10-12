@@ -21,6 +21,7 @@ class EditorUiStateTest {
         viewModel.isSourceViewTransitioning = true
         viewModel.sourceViewEntryCount = 42
         viewModel.isVideoFullscreen = true
+        viewModel.isVideoCollapsed = true
         viewModel.previousRequestedOrientation = 1
         viewModel.videoViewportInlineIndex = 2
         viewModel.selectedIndices = setOf(1, 3)
@@ -35,6 +36,7 @@ class EditorUiStateTest {
         assertTrue(viewModel.uiState.value.isSourceViewTransitioning)
         assertEquals(42, viewModel.uiState.value.sourceViewEntryCount)
         assertTrue(viewModel.uiState.value.isVideoFullscreen)
+        assertTrue(viewModel.uiState.value.isVideoCollapsed)
         assertEquals(1, viewModel.uiState.value.previousRequestedOrientation)
         assertEquals(2, viewModel.uiState.value.videoViewportInlineIndex)
         assertEquals(setOf(1, 3), viewModel.uiState.value.selectedIndices)

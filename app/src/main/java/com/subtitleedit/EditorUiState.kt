@@ -10,6 +10,7 @@ internal data class EditorUiState(
     val savedScrollPosition: Int = 0,
     val savedFirstVisibleItemPosition: Int = 0,
     val isVideoFullscreen: Boolean = false,
+    val isVideoCollapsed: Boolean = false,
     val previousRequestedOrientation: Int = -1,
     val videoViewportInlineIndex: Int = 0,
     val selectedIndices: Set<Int> = emptySet(),

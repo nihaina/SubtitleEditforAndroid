@@ -1,9 +1,11 @@
 package com.subtitleedit.editor
 
 import android.content.pm.ActivityInfo
+import android.graphics.Color
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.PopupMenu
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -18,6 +20,9 @@ internal class EditorVideoFullscreenController(
     private val isVideo: Boolean,
     private val isFullscreen: () -> Boolean,
     private val setFullscreen: (Boolean) -> Unit,
+    private val isCollapsed: () -> Boolean,
+    private val setCollapsed: (Boolean) -> Unit,
+    private val onControlsPinnedChanged: (Boolean) -> Unit,
     private val inlineViewportIndex: () -> Int,
     private val previousOrientation: () -> Int,
     private val setPreviousOrientation: (Int) -> Unit
@@ -28,6 +33,7 @@ internal class EditorVideoFullscreenController(
             onInteraction()
             toggle()
         }
+        binding.btnVideoMore.setOnClickListener { showMoreMenu() }
         ViewCompat.setOnApplyWindowInsetsListener(binding.videoControlsOverlay) { view, insets ->
             val safeArea = if (isFullscreen()) {
                 insets.getInsets(
@@ -41,6 +47,7 @@ internal class EditorVideoFullscreenController(
             insets
         }
         renderButton()
+        renderCollapsed()
     }
 
     fun toggle() {
@@ -59,6 +66,7 @@ internal class EditorVideoFullscreenController(
         if (isVideo && !isFullscreen()) {
             binding.videoViewportContainer.layoutParams = createInlineVideoLayoutParams()
         }
+        renderCollapsed()
     }
 
     private fun enter() {
@@ -81,25 +89,67 @@ internal class EditorVideoFullscreenController(
         hideSystemBars()
         ViewCompat.requestApplyInsets(binding.videoControlsOverlay)
         renderButton()
+        renderCollapsed()
     }
 
     private fun exit() {
         if (!isFullscreen()) return
         val viewport = binding.videoViewportContainer
         binding.videoFullscreenHost.removeView(viewport)
+        setFullscreen(false)
         binding.videoSection.addView(
             viewport,
             inlineViewportIndex().coerceAtMost(binding.videoSection.childCount),
             createInlineVideoLayoutParams()
         )
         binding.videoFullscreenHost.visibility = View.GONE
-        setFullscreen(false)
+        onControlsPinnedChanged(isCollapsed())
         binding.editorAppBar.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
         binding.editorContent.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
         showSystemBars()
         activity.requestedOrientation = previousOrientation()
         ViewCompat.requestApplyInsets(binding.videoControlsOverlay)
         renderButton()
+        renderCollapsed()
+    }
+
+    private fun showMoreMenu() {
+        if (!isVideo) return
+        onControlsPinnedChanged(true)
+        val popup = PopupMenu(activity, binding.btnVideoMore)
+        popup.menu.add(
+            if (isCollapsed() && !isFullscreen()) R.string.editor_video_expand
+            else R.string.editor_video_collapse
+        ).setOnMenuItemClickListener {
+            val collapse = !(isCollapsed() && !isFullscreen())
+            setCollapsed(collapse)
+            if (isFullscreen()) exit()
+            else renderCollapsed()
+            true
+        }
+        popup.setOnDismissListener {
+            onControlsPinnedChanged(isCollapsed() && !isFullscreen())
+        }
+        popup.show()
+    }
+
+    private fun renderCollapsed() {
+        if (!isVideo) return
+        val collapsed = isCollapsed() && !isFullscreen()
+        val params = binding.videoViewportContainer.layoutParams
+        val height = if (collapsed) {
+            activity.resources.getDimensionPixelSize(R.dimen.editor_video_controls_height) * 2
+        } else if (!isFullscreen()) {
+            activity.resources.getDimensionPixelSize(R.dimen.editor_video_height)
+        } else {
+            ViewGroup.LayoutParams.MATCH_PARENT
+        }
+        if (!isFullscreen() && params.height != height) {
+            params.height = height
+            binding.videoViewportContainer.layoutParams = params
+        }
+        binding.videoControlsOverlay.setBackgroundColor(if (collapsed) Color.BLACK else Color.TRANSPARENT)
+        onControlsPinnedChanged(collapsed)
     }
 
     private fun renderButton() {
@@ -137,6 +187,10 @@ internal class EditorVideoFullscreenController(
     private fun createInlineVideoLayoutParams() =
         android.widget.LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
-            activity.resources.getDimensionPixelSize(R.dimen.editor_video_height)
+            if (isCollapsed()) {
+                activity.resources.getDimensionPixelSize(R.dimen.editor_video_controls_height) * 2
+            } else {
+                activity.resources.getDimensionPixelSize(R.dimen.editor_video_height)
+            }
         )
 }
