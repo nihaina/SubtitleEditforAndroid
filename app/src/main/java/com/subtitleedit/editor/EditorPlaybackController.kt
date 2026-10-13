@@ -16,6 +16,7 @@ import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.mpv.EditorMpvAudioPlayer
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleHighlightCursor
+import com.subtitleedit.util.SubtitleFontManager
 import com.subtitleedit.util.SubtitlePlaybackSelectionTracker
 import com.subtitleedit.util.TimeUtils
 import java.io.File
@@ -200,7 +201,10 @@ internal class EditorPlaybackController(
 
     fun replaceVideoSubtitleTrack(file: File?) {
         if (mediaType == EditorMediaType.VIDEO) {
-            (engine as? MpvPlaybackEngine)?.replaceSubtitleTrack(file)
+            val player = engine as? MpvPlaybackEngine ?: return
+            if (!player.phase.canAccessPlayer) return
+            val fontsDir = file?.let { SubtitleFontManager.writeFontConfig(context) }
+            player.replaceSubtitleTrack(file, fontsDir)
         }
     }
 

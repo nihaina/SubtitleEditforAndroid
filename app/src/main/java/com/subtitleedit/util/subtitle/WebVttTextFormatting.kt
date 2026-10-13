@@ -214,23 +214,41 @@ internal object WebVttTextFormatting {
     }
 
     private fun rewriteFontColors(text: String, classFor: (String) -> String?): String = buildString(text.length) {
-        val endings = mutableListOf<Boolean>()
+        val endings = mutableListOf<String>()
         var offset = 0
         fontTag.findAll(text).forEach { match ->
             append(text, offset, match.range.first)
             if (match.value.startsWith("</")) {
-                val converted = if (endings.isNotEmpty()) endings.removeAt(endings.lastIndex) else false
-                append(if (converted) "</c>" else match.value)
+                val ending = if (endings.isNotEmpty()) endings.removeAt(endings.lastIndex) else ""
+                append(if (ending.isNotEmpty()) ending else match.value)
             } else {
                 val element = Parser.parseFragment(match.value, Element("body"), "").filterIsInstance<Element>()
                     .firstOrNull { it.normalName() == "font" }
                 val name = element?.attr("color")?.takeIf { it.isNotEmpty() }?.let(classFor)
-                endings += name != null
-                append(if (name == null) match.value else "<c.$name>")
+                if (name == null) {
+                    endings += ""
+                    append(match.value)
+                } else {
+                    // Keep the font family while moving the WebVTT color to a cue class.
+                    // Dropping the opening <font> here made a VTT font+color edit render
+                    // with the default family after serialization.
+                    val withoutColor = removeFontColorAttribute(match.value)
+                    val hasFontAttributes = withoutColor != "<font>" && withoutColor != "<font />"
+                    endings += if (hasFontAttributes) "</c></font>" else "</c>"
+                    append(if (hasFontAttributes) "$withoutColor<c.$name>" else "<c.$name>")
+                }
             }
             offset = match.range.last + 1
         }
         append(text, offset, text.length)
+    }
+
+    private fun removeFontColorAttribute(opening: String): String {
+        val withoutColor = opening.replace(
+            Regex("\\s+color\\s*=\\s*(?:\"[^\"]*\"|'[^']*'|[^\\s>]+)", RegexOption.IGNORE_CASE),
+            ""
+        )
+        return withoutColor.replace(Regex("\\s+/>$"), ">")
     }
 
     private data class ColorRule(val colorOnly: Boolean, val color: Int?)

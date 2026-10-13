@@ -1,6 +1,7 @@
 package com.subtitleedit.mpv
 
 import android.content.Context
+import com.subtitleedit.util.SubtitleFontManager
 
 /** Runs libmpv for audio without creating or waiting for an Android video surface. */
 internal class EditorMpvAudioPlayer(private val context: Context) : MpvPlayerHost {
@@ -12,6 +13,9 @@ internal class EditorMpvAudioPlayer(private val context: Context) : MpvPlayerHos
         try {
             MPVLib.setOptionString("config", "no")
             MPVLib.setOptionString("config-dir", configDir)
+            val fontDir = SubtitleFontManager.writeFontConfig(context)
+            MPVLib.setOptionString("sub-font-provider", "fontconfig")
+            MPVLib.setOptionString("sub-fonts-dir", fontDir.absolutePath)
             MPVLib.setOptionString("gpu-shader-cache-dir", cacheDir)
             MPVLib.setOptionString("icc-cache-dir", cacheDir)
             EditorMpvPlaybackOptions.configure()

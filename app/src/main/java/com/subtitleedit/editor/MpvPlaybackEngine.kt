@@ -134,9 +134,20 @@ internal class MpvPlaybackEngine(
         postMpvAccess { MPVLib.setPropertyDouble("speed", speed.toDouble()) }
     }
 
-    fun replaceSubtitleTrack(file: File?) {
+    fun replaceSubtitleTrack(file: File?, fontsDir: File? = null) {
         if (!phase.canAccessPlayer) return
         postMpvAccess {
+            if (fontsDir != null) {
+                // Set the current shared directory before creating the new libass
+                // renderer. This also picks up newly imported font files.
+                val result = MPVLib.setOptionString("sub-fonts-dir", fontsDir.absolutePath)
+                if (result < 0) Log.w(TAG, "Updating subtitle font directory failed: $result")
+                runCatching {
+                    MPVLib.setPropertyString("sub-fonts-dir", fontsDir.absolutePath)
+                }.onFailure { error ->
+                    Log.w(TAG, "Updating subtitle font property failed", error)
+                }
+            }
             runCatching { MPVLib.command(arrayOf("sub-remove")) }
             if (file != null && file.isFile && file.length() > 0L) {
                 MPVLib.command(
@@ -289,7 +300,7 @@ internal class MpvPlaybackEngine(
         if (!initialized || playbackPhase == PlaybackPhase.RELEASED) return false
         return mpvAccessHandler.post {
             synchronized(mpvAccessLock) {
-                if (initialized && playbackPhase != PlaybackPhase.RELEASED) action()
+                if (initialized && playbackPhase.canAccessPlayer) action()
             }
         }
     }

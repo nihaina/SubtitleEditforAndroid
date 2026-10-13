@@ -2,14 +2,17 @@ package com.subtitleedit.mpv
 
 import android.content.Context
 import android.util.AttributeSet
-import java.io.File
+import com.subtitleedit.util.SubtitleFontManager
 
 internal class EditorMpvView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
 ) : BaseMPVView(context, attrs) {
     override fun initOptions() {
-        writeFontConfig()
+        val fontDir = writeFontConfig()
+        // Use the same system and shared local font files as the font picker.
+        MPVLib.setOptionString("sub-font-provider", "fontconfig")
+        MPVLib.setOptionString("sub-fonts-dir", fontDir.absolutePath)
         EditorMpvPlaybackOptions.configure()
         MPVLib.setOptionString("hr-seek-framedrop", "yes")
         setVo("gpu-next")
@@ -27,20 +30,5 @@ internal class EditorMpvView @JvmOverloads constructor(
         EditorMpvPlaybackOptions.observe()
     }
 
-    private fun writeFontConfig() {
-        val config = File(context.filesDir, "fonts.conf")
-        val content = """
-            <fontconfig>
-              <dir>/system/fonts/</dir>
-              <dir>/product/fonts/</dir>
-              <cachedir>${context.cacheDir.absolutePath}</cachedir>
-              <alias><family>sans-serif</family><prefer><family>Roboto</family><family>Noto Sans</family></prefer></alias>
-              <alias><family>serif</family><prefer><family>Noto Serif</family></prefer></alias>
-              <alias><family>monospace</family><prefer><family>Droid Sans Mono</family></prefer></alias>
-            </fontconfig>
-        """.trimIndent()
-        if (!config.isFile || config.readText() != content) {
-            config.writeText(content)
-        }
-    }
+    private fun writeFontConfig() = SubtitleFontManager.writeFontConfig(context)
 }

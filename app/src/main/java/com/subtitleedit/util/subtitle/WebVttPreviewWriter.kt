@@ -80,8 +80,16 @@ internal object WebVttPreviewWriter {
                     "i" -> next.copy(italic = true)
                     "b" -> next.copy(bold = true)
                     "u" -> next.copy(underline = true)
-                    "font" -> WebVttTextFormatting.parseHtmlColor(node.attr("color"))
-                        ?.let { next.copy(color = it) } ?: next
+                    "font" -> {
+                        var updated = next
+                        WebVttTextFormatting.parseHtmlColor(node.attr("color"))?.let {
+                            updated = updated.copy(color = it)
+                        }
+                        val face = node.attr("face").trim().takeIf { it.isNotEmpty() }
+                            ?: node.attr("font-family").trim().takeIf { it.isNotEmpty() }
+                        if (face != null) updated = updated.copy(fontFamily = face)
+                        updated
+                    }
                     else -> next
                 }
                 appendChange(parent, next)

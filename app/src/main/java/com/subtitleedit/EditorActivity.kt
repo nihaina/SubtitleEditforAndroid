@@ -47,6 +47,7 @@ import com.subtitleedit.editor.EditorSubtitleDialogController
 import com.subtitleedit.editor.EditorConfirmationDialogController
 import com.subtitleedit.editor.EditorHistoryCoordinator
 import com.subtitleedit.editor.EditorColorPickerDialog
+import com.subtitleedit.editor.EditorFontPickerDialog
 import com.subtitleedit.editor.EditorWebVttStyleDialog
 import com.subtitleedit.editor.EditorFileSessionController
 import com.subtitleedit.editor.EditorListOperationsController
@@ -76,6 +77,8 @@ import com.subtitleedit.util.SubtitleEntryOps
 import com.subtitleedit.util.SubtitleTextSplitOps
 import com.subtitleedit.util.SubtitleFormattingTagOps
 import com.subtitleedit.util.SubtitleStyleOps
+import com.subtitleedit.util.SubtitleFontOps
+import com.subtitleedit.util.SubtitleFontManager
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.audio.Mp3FileIssues
 import com.subtitleedit.util.SubtitleParser
@@ -162,6 +165,50 @@ class EditorActivity : AppCompatActivity() {
     private lateinit var subtitlePreviewController: EditorSubtitlePreviewController
     private var longClickPosition: Int = -1
     private var waveformMediaFile: File? = null
+    private var pendingFontPositions: Set<Int>? = null
+    private var pendingFontName: String = ""
+    private var pendingFontParentDialog: AlertDialog? = null
+    private var pendingStyleFontName: String = ""
+    private var pendingStyleFontSelection: ((String) -> Unit)? = null
+
+    private val fontFileLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        val positions = pendingFontPositions
+        val name = pendingFontName
+        val parentDialog = pendingFontParentDialog
+        pendingFontPositions = null
+        pendingFontName = ""
+        pendingFontParentDialog = null
+        if (uri != null) {
+            val imported = SubtitleFontManager.importFile(this, uri)
+            if (imported != null) {
+                showSubtitleFontPicker(positions ?: emptySet(), name, parentDialog)
+                scheduleSubtitlePreview()
+            } else {
+                showShortToast("请选择有效的字体文件（TTF、OTF 或 TTC）")
+            }
+        }
+    }
+
+    private val styleFontFileLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        val name = pendingStyleFontName
+        val onSelected = pendingStyleFontSelection
+        pendingStyleFontName = ""
+        pendingStyleFontSelection = null
+        if (uri != null) {
+            val imported = SubtitleFontManager.importFile(this, uri)
+            if (imported != null && onSelected != null) {
+                // Reopen the shared font picker with the newly imported local font
+                // selected. The style dialog remains underneath and keeps its state.
+                showStyleFontPicker(imported.name, onSelected)
+            } else if (imported == null) {
+                showShortToast("请选择有效的字体文件（TTF、OTF 或 TTC）")
+            }
+        }
+    }
 
     // 文件选择器
     private val openFileLauncher = registerForActivityResult(
@@ -1640,7 +1687,10 @@ class EditorActivity : AppCompatActivity() {
                         true
                     }
                 },
-                onClosed = { refreshStyles?.invoke() }
+                onClosed = { refreshStyles?.invoke() },
+                onChooseFont = { currentName, onSelected ->
+                    showStyleFontPicker(currentName, onSelected)
+                }
             )
         }
 
@@ -1766,6 +1816,21 @@ class EditorActivity : AppCompatActivity() {
             }
         }
     }
+
+    private fun showStyleFontPicker(currentName: String, onSelected: (String) -> Unit) {
+        var picker: AlertDialog? = null
+        picker = EditorFontPickerDialog(this).show(
+            initialName = currentName,
+            localDir = SubtitleFontManager.fontDirectory(this),
+            onChooseFile = {
+                pendingStyleFontName = currentName
+                pendingStyleFontSelection = onSelected
+                picker?.dismiss()
+                styleFontFileLauncher.launch(arrayOf("*/*"))
+            },
+            onConfirm = { choice -> onSelected(choice.name) }
+        )
+    }
     
     private fun showContextMenu(position: Int) {
         if (!ensureListMode()) return
@@ -1880,6 +1945,13 @@ class EditorActivity : AppCompatActivity() {
             }
             addView(
                 menuActionView("颜色", { showSubtitleColorPicker(positions, dialog) }, trailingChevron = true) {},
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+            addView(
+                menuActionView("字体", { showSubtitleFontPicker(positions, "", dialog) }, trailingChevron = true) {},
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
@@ -2032,6 +2104,66 @@ class EditorActivity : AppCompatActivity() {
             markAsChanged()
             invalidateOptionsMenu()
         }
+    }
+
+    private fun showSubtitleFontPicker(
+        positions: Set<Int>,
+        requestedName: String,
+        parentDialog: AlertDialog? = null
+    ) {
+        if (!ensureListMode() || positions.isEmpty()) return
+        val currentName = requestedName.ifBlank {
+            positions.sorted().firstNotNullOfOrNull { position ->
+                stateModel.subtitleEntries.getOrNull(position)?.text?.let(::fontNameFromText)
+            }.orEmpty()
+        }
+        var picker: AlertDialog? = null
+        picker = com.subtitleedit.editor.EditorFontPickerDialog(this).show(
+            initialName = currentName,
+            localDir = SubtitleFontManager.fontDirectory(this),
+            onChooseFile = {
+                pendingFontPositions = positions
+                pendingFontName = currentName
+                pendingFontParentDialog = parentDialog
+                picker?.dismiss()
+                fontFileLauncher.launch(arrayOf("*/*"))
+            },
+            onConfirm = { choice ->
+                picker?.dismiss()
+                applySubtitleFont(positions, choice.name)
+                scheduleSubtitlePreview()
+                parentDialog?.dismiss()
+            }
+        )
+    }
+
+    private fun applySubtitleFont(positions: Set<Int>, fontName: String) {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size) {
+                applySubtitleFont(positions, fontName)
+            }) return
+        if (!ensureListMode() || fontName.isBlank()) return
+        val targets = positions.sorted().mapNotNull { position ->
+            stateModel.subtitleEntries.getOrNull(position)?.let { position to it.text }
+        }
+        val updatedTexts = targets.map { (_, text) ->
+            SubtitleFontOps.setFontName(text, fontName, stateModel.currentFormat)
+        }
+        val updates = targets.zip(updatedTexts).mapNotNull { (target, updatedText) ->
+            (target.first to updatedText).takeIf { updatedText != target.second }
+        }
+        if (updates.isEmpty()) return
+        val result = stateModel.execute(EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
+        if (result.changedPositions.isNotEmpty()) {
+            notifyEntriesChanged(result.changedPositions)
+        }
+    }
+
+    private fun fontNameFromText(text: String): String? {
+        val match = Regex(
+            "<font\\b[^>]*\\b(?:face|font-family)\\s*=\\s*(['\"])(.*?)\\1",
+            RegexOption.IGNORE_CASE
+        ).find(text) ?: return null
+        return match.groupValues[2].trim().takeIf { it.isNotEmpty() }
     }
 
     private fun menuColumn(
@@ -3798,6 +3930,9 @@ class EditorActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        pendingFontParentDialog = null
+        pendingStyleFontName = ""
+        pendingStyleFontSelection = null
         sourceViewTransitionJob?.cancel()
         mediaOpenGeneration++
         mediaOpenJob?.cancel()

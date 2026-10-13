@@ -11,6 +11,7 @@ import com.subtitleedit.util.ModelDirectoryManager
 import com.subtitleedit.util.ModelDirectoryMigration
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SettingsBackupManager
+import com.subtitleedit.util.SubtitleFontManager
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -174,6 +175,7 @@ internal class SettingsViewModel(
     }
 
     private fun switchSoftwareDirectory(targetRoot: File, migrateModels: Boolean) {
+        val currentRoot = settingsManager.getSoftwareDirectory().absoluteFile
         val currentModels = settingsManager.getModelDirectory()
         viewModelScope.launch {
             runCatching {
@@ -193,6 +195,7 @@ internal class SettingsViewModel(
                     listOf("Convert", "Translate", "Output", "TranscriptMatch").forEach {
                         File(targetRoot, it).mkdirs()
                     }
+                    SubtitleFontManager.synchronizeSoftwareDirectory(currentRoot, targetRoot)
                 }
             }.onFailure { error ->
                 toast("软件目录切换失败：${error.message ?: "未知错误"}")

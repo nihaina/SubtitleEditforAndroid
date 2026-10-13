@@ -10,6 +10,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WebVttColorConversionTest {
+    @Test
+    fun fontFamilySurvivesVttColorClassConversion() {
+        val document = SubtitleDocument(
+            SubtitleFormat.VTT,
+            listOf(SubtitleEntry(startTime = 0, endTime = 1_000, text = "<font face=\"Noto Sans\" color=\"red\">Hello</font>")),
+            header = "WEBVTT"
+        )
+
+        val serialized = SubtitleParser.serialize(document)
+
+        assertTrue(serialized.contains("<font face=\"Noto Sans\"><c."))
+        assertTrue(serialized.contains("Hello</c></font>"))
+    }
     private fun convertSrt(text: String): String = SubtitleParser.convertFormat(
         "1\n00:00:01,000 --> 00:00:02,000\n$text\n", SubtitleFormat.SRT, SubtitleFormat.VTT
     )
@@ -48,10 +61,10 @@ class WebVttColorConversionTest {
             "<font face='Arial' color='#123456'>Outer <b><font color='#654321'>Inner</font></b> Outer</font>"
         )
         assertEquals(
-            "<c.123456ff>Outer <b><c.654321ff>Inner</c></b> Outer</c>",
+            "<font face='Arial'><c.123456ff>Outer <b><c.654321ff>Inner</c></b> Outer</c></font>",
             SubtitleParser.parseVTT(converted).single().text
         )
-        assertFalse(converted.contains("</font>"))
+        assertTrue(converted.contains("</font>"))
     }
 
     @Test

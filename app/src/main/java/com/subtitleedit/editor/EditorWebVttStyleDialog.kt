@@ -6,14 +6,11 @@ import android.graphics.Typeface
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
-import android.util.Xml
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.view.WindowManager
-import android.widget.ArrayAdapter
-import android.widget.AutoCompleteTextView
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -27,8 +24,6 @@ import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.subtitle.WebVttStyleDefinition
 import com.subtitleedit.util.subtitle.WebVttStyleSettings
 import java.math.BigDecimal
-import java.io.File
-import org.xmlpull.v1.XmlPullParser
 
 /** Optional CSS properties, live preview and before/after CSS, as in Subtitle Edit. */
 internal class EditorWebVttStyleDialog(private val activity: AppCompatActivity) {
@@ -36,21 +31,21 @@ internal class EditorWebVttStyleDialog(private val activity: AppCompatActivity) 
         existing: WebVttStyleDefinition?,
         initialName: String,
         onSave: (String, Map<String, String>) -> Boolean,
-        onClosed: () -> Unit
+        onClosed: () -> Unit,
+        onChooseFont: ((currentName: String, onSelected: (String) -> Unit) -> Unit)? = null
     ): AlertDialog {
         val initial = WebVttStyleSettings.fromDefinition(existing)
         var color = initial.color
         var backgroundColor = initial.backgroundColor
         var shadowColor = initial.shadowColor
         val name = input(initialName).apply { contentDescription = text(R.string.vtt_style_name) }
-        val fontName = AutoCompleteTextView(activity).apply {
+        val fontName = EditText(activity).apply {
             setSingleLine(true)
             textSize = 15f
             hint = text(R.string.vtt_style_font_hint)
             contentDescription = text(R.string.vtt_style_font_name)
-            threshold = 0
-            setAdapter(ArrayAdapter(activity, android.R.layout.simple_dropdown_item_1line, fontFamilies(initial.fontName)))
-            setText(initial.fontName, false)
+            setText(initial.fontName)
+            setSelectAllOnFocus(true)
         }
         val fontSize = input(formatNumber(initial.fontSize ?: 0.0), numeric = true)
         val shadowWidth = input(formatNumber(initial.shadowWidth), numeric = true)
@@ -122,12 +117,18 @@ internal class EditorWebVttStyleDialog(private val activity: AppCompatActivity) 
                 gravity = Gravity.CENTER_VERTICAL
                 addView(fontName, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 addView(Button(activity).apply {
-                    text = "▾"
+                    text = "+"
                     contentDescription = text(R.string.vtt_style_choose_font)
                     minWidth = 0
                     minimumWidth = 0
                     setPadding(0, 0, 0, 0)
-                    setOnClickListener { fontName.showDropDown() }
+                    setOnClickListener {
+                        onChooseFont?.invoke(fontName.text.toString().trim()) { selected ->
+                            fontName.setText(selected)
+                            fontName.setSelection(fontName.text.length)
+                            refresh()
+                        }
+                    }
                 }, LinearLayout.LayoutParams(dp(40), dp(48)))
             }))
             addView(fieldRow(R.string.vtt_style_font_size, numberControl(fontSize, 500, R.string.vtt_style_font_size)))
@@ -298,25 +299,6 @@ internal class EditorWebVttStyleDialog(private val activity: AppCompatActivity) 
         }
     }
 
-    private fun fontFamilies(existingName: String): List<String> {
-        val names = linkedSetOf("sans-serif", "serif", "monospace", "sans-serif-condensed", "sans-serif-medium", "cursive", "sans-serif-thin")
-        // Named families/aliases are supported by Typeface.create; retain an imported font too.
-        runCatching {
-            File("/system/etc/fonts.xml").inputStream().use { stream ->
-                val parser = Xml.newPullParser()
-                parser.setInput(stream, null)
-                while (parser.eventType != XmlPullParser.END_DOCUMENT) {
-                    if (parser.eventType == XmlPullParser.START_TAG && parser.name in listOf("family", "alias")) {
-                        parser.getAttributeValue(null, "name")?.takeIf { it.isNotBlank() }?.let(names::add)
-                    }
-                    parser.next()
-                }
-            }
-        }
-        if (existingName.isNotBlank()) names += existingName
-        return names.sortedWith(String.CASE_INSENSITIVE_ORDER)
-    }
-
     private fun number(input: EditText): Double? = input.text.toString().trim().replace(',', '.').let {
         if (it.isEmpty()) 0.0 else it.toDoubleOrNull()?.takeIf(Double::isFinite)
     }
@@ -326,7 +308,10 @@ internal class EditorWebVttStyleDialog(private val activity: AppCompatActivity) 
     private fun dp(value: Int) = (value * activity.resources.displayMetrics.density + 0.5f).toInt()
 
     private inner class BoundedScrollView : ScrollView(activity) {
-        var maximumHeight = (activity.resources.displayMetrics.heightPixels * 0.72f).toInt()
+        // Keep the style editor tall enough to show the live preview when it opens.
+        // The global-layout listener still reduces this when the IME is visible, so
+        // the dialog remains usable on smaller screens and while editing a field.
+        var maximumHeight = (activity.resources.displayMetrics.heightPixels * 0.9f).toInt()
             set(value) { if (field != value) { field = value; requestLayout() } }
 
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {

@@ -34,6 +34,7 @@ import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SettingsBackupManager
 import com.subtitleedit.util.ModelDirectoryManager
 import com.subtitleedit.util.ModelDirectoryMigration
+import com.subtitleedit.util.SubtitleFontManager
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.Locale
@@ -71,6 +72,7 @@ internal fun MainTopLevelPages(
     var previousSelectionVersion by remember { mutableIntStateOf(selectionVersion) }
 
     fun switchSoftwareDirectory(targetRoot: File, migrateModels: Boolean) {
+        val currentRoot = settings.getSoftwareDirectory().absoluteFile
         val currentModels = settings.getModelDirectory()
         state.settingsPage = state.settingsPage.copy(isMigratingSoftwareDirectory = migrateModels)
         settingsScope.launch {
@@ -91,6 +93,7 @@ internal fun MainTopLevelPages(
                     listOf("Convert", "Translate", "Output", "TranscriptMatch").forEach {
                         File(targetRoot, it).mkdirs()
                     }
+                    SubtitleFontManager.synchronizeSoftwareDirectory(currentRoot, targetRoot)
                 }
             }.onFailure { error ->
                 Toast.makeText(
