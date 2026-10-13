@@ -37,6 +37,7 @@ data class AsrTimelineSettingsState(
     val tokenTimestampMerge: Boolean = true,
     val smartMerge: Boolean = true,
     val filterLongMerge: Boolean = true,
+    val punctuationSplit: Boolean = true,
     val mergeMaxCharacters: Int = 25,
     val mergeGapMs: Int = 150,
     val mergeGapText: String = "150"
@@ -57,6 +58,7 @@ fun AsrTimelineSettingsScreen(
     onTokenTimestampMergeChanged: (Boolean) -> Unit,
     onSmartMergeChanged: (Boolean) -> Unit,
     onFilterLongMergeChanged: (Boolean) -> Unit,
+    onPunctuationSplitChanged: (Boolean) -> Unit,
     onMergeMaxCharactersChanged: (Float) -> Unit,
     onMergeGapChanged: (Float) -> Unit,
     onMergeGapTextChanged: (String) -> Unit
@@ -183,14 +185,15 @@ fun AsrTimelineSettingsScreen(
                         SettingsSwitchRow(
                             title = stringResource(R.string.speech_merge_filter_long),
                             checked = state.filterLongMerge,
-                            enabled = mergeEnabled,
+                            enabled = mergeEnabled && state.smartMerge,
+                            opacity = if (mergeEnabled && state.smartMerge) 1f else 0.5f,
                             onCheckedChange = onFilterLongMergeChanged,
                             modifier = Modifier.padding(top = 8.dp)
                         )
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .alpha(if (mergeEnabled && state.filterLongMerge) 1f else 0.5f),
+                                .alpha(if (mergeEnabled && state.smartMerge && state.filterLongMerge) 1f else 0.5f),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
@@ -205,7 +208,7 @@ fun AsrTimelineSettingsScreen(
                                 onValueChange = onMergeMaxCharactersChanged,
                                 valueRange = 15f..50f,
                                 steps = 34,
-                                enabled = mergeEnabled && state.filterLongMerge,
+                                enabled = mergeEnabled && state.smartMerge && state.filterLongMerge,
                                 modifier = Modifier.weight(1f)
                             )
                             Text(
@@ -215,6 +218,15 @@ fun AsrTimelineSettingsScreen(
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
                         }
+                        SettingsSwitchRow(
+                            title = stringResource(R.string.speech_merge_punctuation_split),
+                            description = stringResource(R.string.speech_merge_punctuation_split_hint),
+                            checked = state.punctuationSplit,
+                            enabled = mergeEnabled && state.smartMerge,
+                            opacity = if (mergeEnabled && state.smartMerge) 1f else 0.5f,
+                            onCheckedChange = onPunctuationSplitChanged,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
                     }
                     SettingsSwitchRow(
                     title = stringResource(R.string.asr_timeline_fixed_vad_title),

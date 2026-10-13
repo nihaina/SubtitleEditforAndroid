@@ -23,6 +23,7 @@ internal object ForcedAlignmentSegmenter {
         val hardBoundaryBefore: Boolean = false,
         val alignedStartTimeMs: Long = startTimeMs,
         val alignedEndTimeMs: Long = endTimeMs,
+        val parts: List<TimedTextPart> = emptyList(),
     )
 
     fun split(
@@ -47,13 +48,22 @@ internal object ForcedAlignmentSegmenter {
         val contextMs = (gapThreshold / 2L).coerceIn(100L, 500L)
         val output = mutableListOf<Segment>()
         var currentText = StringBuilder()
+        var currentParts = mutableListOf<TimedTextPart>()
         var segmentStart = max(0L, normalized.first().startTimeMs - contextMs)
         var alignedSegmentStart = normalized.first().startTimeMs
         var hardBoundaryBefore = false
 
         normalized.forEachIndexed { index, unit ->
-            if (currentText.isNotEmpty()) currentText.append(joiner(currentText.last(), unit.text.first()))
+            val separator = if (currentText.isNotEmpty()) joiner(currentText.last(), unit.text.first()) else ""
+            currentText.append(separator)
             currentText.append(unit.text)
+            currentParts += TimedTextPart(
+                text = separator + unit.text,
+                startTimeMs = if (currentParts.isEmpty()) segmentStart else unit.startTimeMs,
+                endTimeMs = unit.endTimeMs,
+                alignedStartTimeMs = unit.startTimeMs,
+                alignedEndTimeMs = unit.endTimeMs,
+            )
 
             val next = normalized.getOrNull(index + 1)
             val gap = next?.let { it.startTimeMs - unit.endTimeMs }
@@ -69,8 +79,10 @@ internal object ForcedAlignmentSegmenter {
                     alignedEndTimeMs = unit.endTimeMs,
                     text = currentText.toString(),
                     hardBoundaryBefore = hardBoundaryBefore,
+                    parts = currentParts,
                 )
                 currentText = StringBuilder()
+                currentParts = mutableListOf()
                 segmentStart = next.startTimeMs - extension
                 alignedSegmentStart = next.startTimeMs
                 hardBoundaryBefore = true
@@ -86,6 +98,7 @@ internal object ForcedAlignmentSegmenter {
             alignedEndTimeMs = normalized.last().endTimeMs,
             text = currentText.toString(),
             hardBoundaryBefore = hardBoundaryBefore,
+            parts = currentParts,
         )
         return output
     }
@@ -94,17 +107,41 @@ internal object ForcedAlignmentSegmenter {
         segments: List<Segment>,
         maxGapMs: Int,
         smart: Boolean = false,
-        maxCharacters: Int? = null
+        maxCharacters: Int? = null,
+        splitOnPunctuation: Boolean = true
     ): List<Segment> = TimedTextMergePolicy.merge(
         segments, maxGapMs, smart, maxCharacters,
         start = { it.alignedStartTimeMs },
         end = { it.alignedEndTimeMs },
         text = { it.text },
-        combine = { current, next -> current.copy(
-            endTimeMs = max(current.endTimeMs, next.endTimeMs),
-            alignedEndTimeMs = max(current.alignedEndTimeMs, next.alignedEndTimeMs),
-            text = current.text + mergeJoiner(current.text.last(), next.text.first()) + next.text,
-        ) }
+        combine = { current, next ->
+            val separator = mergeJoiner(current.text.last(), next.text.first())
+            current.copy(
+                endTimeMs = max(current.endTimeMs, next.endTimeMs),
+                alignedEndTimeMs = max(current.alignedEndTimeMs, next.alignedEndTimeMs),
+                text = current.text + separator + next.text,
+                parts = TimedTextSplitter.join(sourceParts(current), sourceParts(next), separator),
+            )
+        },
+        split = { segment, index ->
+            val (left, right) = TimedTextSplitter.split(sourceParts(segment), index)
+            segment.copy(
+                startTimeMs = left.startTimeMs, endTimeMs = left.endTimeMs, text = left.text,
+                alignedStartTimeMs = left.alignedStartTimeMs, alignedEndTimeMs = left.alignedEndTimeMs,
+                parts = left.parts,
+            ) to segment.copy(
+                startTimeMs = right.startTimeMs, endTimeMs = right.endTimeMs, text = right.text,
+                hardBoundaryBefore = true,
+                alignedStartTimeMs = right.alignedStartTimeMs, alignedEndTimeMs = right.alignedEndTimeMs,
+                parts = right.parts,
+            )
+        },
+        splitOnPunctuation = splitOnPunctuation,
+    )
+
+    private fun sourceParts(segment: Segment): List<TimedTextPart> = TimedTextSplitter.sourceParts(
+        segment.text, segment.startTimeMs, segment.endTimeMs,
+        segment.alignedStartTimeMs, segment.alignedEndTimeMs, segment.parts,
     )
 
     private fun addSegment(
@@ -116,6 +153,7 @@ internal object ForcedAlignmentSegmenter {
         alignedEndTimeMs: Long,
         text: String,
         hardBoundaryBefore: Boolean,
+        parts: List<TimedTextPart>,
     ) {
         val normalizedText = text.trim()
         if (normalizedText.isEmpty()) return
@@ -128,6 +166,14 @@ internal object ForcedAlignmentSegmenter {
             hardBoundaryBefore,
             audioStartTimeMs + alignedStartTimeMs,
             audioStartTimeMs + alignedEndTimeMs,
+            TimedTextSplitter.trim(parts.mapIndexed { index, part ->
+                part.copy(
+                    startTimeMs = audioStartTimeMs + part.startTimeMs,
+                    endTimeMs = audioStartTimeMs + if (index == parts.lastIndex) endTimeMs else part.endTimeMs,
+                    alignedStartTimeMs = audioStartTimeMs + part.alignedStartTimeMs,
+                    alignedEndTimeMs = audioStartTimeMs + part.alignedEndTimeMs,
+                )
+            }),
         )
     }
 

@@ -47,6 +47,7 @@ abstract class AsrTimelineSettingsActivity : AppComposeActivity() {
                     onTokenTimestampMergeChanged = viewModel::setTokenTimestampMerge,
                     onSmartMergeChanged = viewModel::setSmartMerge,
                     onFilterLongMergeChanged = viewModel::setFilterLongMerge,
+                    onPunctuationSplitChanged = viewModel::setPunctuationSplit,
                     onMergeMaxCharactersChanged = viewModel::setMergeMaxCharacters,
                     onMergeGapChanged = viewModel::setMergeGap,
                     onMergeGapTextChanged = viewModel::setMergeGapText

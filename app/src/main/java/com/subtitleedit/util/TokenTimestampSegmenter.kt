@@ -7,7 +7,8 @@ internal object TokenTimestampSegmenter {
     data class Segment(
         val startTimeMs: Long,
         val endTimeMs: Long,
-        val text: String
+        val text: String,
+        val parts: List<TimedTextPart> = emptyList(),
     )
 
     fun fromTokens(
@@ -62,9 +63,17 @@ internal object TokenTimestampSegmenter {
         var segmentStartTimeMs = audioStartTimeMs +
             (normalizedTokens.first().startTimeMs - boundaryContextMs).coerceAtLeast(0L)
         var currentText = StringBuilder()
+        var currentParts = mutableListOf<TimedTextPart>()
 
         normalizedTokens.forEachIndexed { index, token ->
             currentText.append(token.text)
+            currentParts += TimedTextPart(
+                text = token.text,
+                startTimeMs = if (currentParts.isEmpty()) segmentStartTimeMs else audioStartTimeMs + token.startTimeMs,
+                endTimeMs = audioStartTimeMs + token.endTimeMs,
+                alignedStartTimeMs = audioStartTimeMs + token.startTimeMs,
+                alignedEndTimeMs = audioStartTimeMs + token.endTimeMs,
+            )
             val next = normalizedTokens.getOrNull(index + 1)
             val blankGapMs = next?.let { it.startTimeMs - token.endTimeMs }
             if (next != null && blankGapMs != null && blankGapMs >= 0L) {
@@ -73,9 +82,11 @@ internal object TokenTimestampSegmenter {
                     output = segments,
                     startTimeMs = segmentStartTimeMs,
                     endTimeMs = audioStartTimeMs + token.endTimeMs + boundaryExtensionMs,
-                    text = currentText.toString()
+                    text = currentText.toString(),
+                    parts = currentParts,
                 )
                 currentText = StringBuilder()
+                currentParts = mutableListOf()
                 segmentStartTimeMs = audioStartTimeMs + next.startTimeMs - boundaryExtensionMs
             }
         }
@@ -87,7 +98,8 @@ internal object TokenTimestampSegmenter {
                 maxLocalTimeMs,
                 normalizedTokens.last().endTimeMs + boundaryContextMs
             ),
-            text = currentText.toString()
+            text = currentText.toString(),
+            parts = currentParts,
         )
         return segments
     }
@@ -96,30 +108,57 @@ internal object TokenTimestampSegmenter {
         segments: List<Segment>,
         maxGapMs: Int,
         smart: Boolean = false,
-        maxCharacters: Int? = null
+        maxCharacters: Int? = null,
+        splitOnPunctuation: Boolean = true
     ): List<Segment> = TimedTextMergePolicy.merge(
         segments, maxGapMs, smart, maxCharacters,
         start = { it.startTimeMs },
         end = { it.endTimeMs },
         text = { it.text },
-        combine = { current, next -> current.copy(
-            endTimeMs = maxOf(current.endTimeMs, next.endTimeMs),
-            text = joinText(current.text, next.text)
-        ) }
+        combine = { current, next ->
+            val mergedText = joinText(current.text, next.text)
+            current.copy(
+                endTimeMs = maxOf(current.endTimeMs, next.endTimeMs),
+                text = mergedText,
+                parts = TimedTextSplitter.join(
+                    sourceParts(current), sourceParts(next),
+                    mergedText.substring(current.text.length, mergedText.length - next.text.length),
+                ),
+            )
+        },
+        split = { segment, index ->
+            val (left, right) = TimedTextSplitter.split(sourceParts(segment), index)
+            segment.copy(startTimeMs = left.startTimeMs, endTimeMs = left.endTimeMs, text = left.text, parts = left.parts) to
+                segment.copy(startTimeMs = right.startTimeMs, endTimeMs = right.endTimeMs, text = right.text, parts = right.parts)
+        },
+        splitOnPunctuation = splitOnPunctuation,
+    )
+
+    private fun sourceParts(segment: Segment): List<TimedTextPart> = TimedTextSplitter.sourceParts(
+        segment.text, segment.startTimeMs, segment.endTimeMs, parts = segment.parts,
     )
 
     private fun addSegment(
         output: MutableList<Segment>,
         startTimeMs: Long,
         endTimeMs: Long,
-        text: String
+        text: String,
+        parts: List<TimedTextPart>,
     ) {
         val normalizedText = text.trim()
         if (normalizedText.isEmpty()) return
         output += Segment(
             startTimeMs = startTimeMs,
             endTimeMs = endTimeMs.coerceAtLeast(startTimeMs + 1L),
-            text = normalizedText
+            text = normalizedText,
+            parts = TimedTextSplitter.trim(parts).let { trimmed ->
+                trimmed.mapIndexed { index, part ->
+                    part.copy(
+                        startTimeMs = if (index == 0) startTimeMs else part.startTimeMs,
+                        endTimeMs = if (index == trimmed.lastIndex) endTimeMs else part.endTimeMs,
+                    )
+                }
+            },
         )
     }
 

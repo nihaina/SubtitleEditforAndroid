@@ -55,9 +55,18 @@ fun Qwen3AsrSettingsScreen(
             ),
             forcedAlignment = forcedAlignmentAvailable && settingsManager.isSpeechTokenTimestampEnabled(),
             mergeSegments = settingsManager.isSpeechTokenTimestampMergeEnabled(),
-            smartMerge = settingsManager.isSpeechTokenTimestampSmartMergeEnabled(),
-            filterLongMerge = settingsManager.isSpeechTokenTimestampLongSegmentFilterEnabled(),
-            maxCharacters = settingsManager.getSpeechTokenTimestampMergeMaxCharacters(),
+            smartMerge = settingsManager.isSpeechTokenTimestampSmartMergeEnabled(
+                SettingsManager.ASR_MODEL_QWEN3_ASR
+            ),
+            filterLongMerge = settingsManager.isSpeechTokenTimestampLongSegmentFilterEnabled(
+                SettingsManager.ASR_MODEL_QWEN3_ASR
+            ),
+            punctuationSplit = settingsManager.isSpeechTokenTimestampPunctuationSplitEnabled(
+                SettingsManager.ASR_MODEL_QWEN3_ASR
+            ),
+            maxCharacters = settingsManager.getSpeechTokenTimestampMergeMaxCharacters(
+                SettingsManager.ASR_MODEL_QWEN3_ASR
+            ),
             mergeGapMs = gap
         )
     }
@@ -68,6 +77,7 @@ fun Qwen3AsrSettingsScreen(
     var mergeSegments by rememberSaveable(refreshKey) { mutableStateOf(initial.mergeSegments) }
     var smartMerge by rememberSaveable(refreshKey) { mutableStateOf(initial.smartMerge) }
     var filterLongMerge by rememberSaveable(refreshKey) { mutableStateOf(initial.filterLongMerge) }
+    var punctuationSplit by rememberSaveable(refreshKey) { mutableStateOf(initial.punctuationSplit) }
     var maxCharacters by rememberSaveable(refreshKey) { mutableIntStateOf(initial.maxCharacters) }
     var mergeGapMs by rememberSaveable(refreshKey) { mutableIntStateOf(initial.mergeGapMs) }
     var mergeGapText by rememberSaveable(refreshKey) { mutableStateOf(initial.mergeGapMs.toString()) }
@@ -75,7 +85,8 @@ fun Qwen3AsrSettingsScreen(
     val alignerEnabled = forcedAlignmentAvailable && forcedAlignment
     val mergeEnabled = alignerEnabled && mergeSegments
     val fixedGapEnabled = mergeEnabled && !smartMerge
-    val maxCharactersEnabled = mergeEnabled && filterLongMerge
+    val smartOptionsEnabled = mergeEnabled && smartMerge
+    val maxCharactersEnabled = smartOptionsEnabled && filterLongMerge
 
     AppToolScaffold(
         title = stringResource(R.string.qwen3_asr_settings_title),
@@ -178,7 +189,10 @@ fun Qwen3AsrSettingsScreen(
                         opacity = if (mergeEnabled) 1f else 0.5f,
                         onCheckedChange = { enabled ->
                             smartMerge = enabled
-                            settingsManager.setSpeechTokenTimestampSmartMergeEnabled(enabled)
+                            settingsManager.setSpeechTokenTimestampSmartMergeEnabled(
+                                enabled,
+                                SettingsManager.ASR_MODEL_QWEN3_ASR
+                            )
                         }
                     )
                     SupportingText(
@@ -248,11 +262,14 @@ fun Qwen3AsrSettingsScreen(
                     SettingsSwitchRow(
                         title = stringResource(R.string.speech_merge_filter_long),
                         checked = filterLongMerge,
-                        enabled = mergeEnabled,
-                        opacity = if (mergeEnabled) 1f else 0.5f,
+                        enabled = smartOptionsEnabled,
+                        opacity = if (smartOptionsEnabled) 1f else 0.5f,
                         onCheckedChange = { enabled ->
                             filterLongMerge = enabled
-                            settingsManager.setSpeechTokenTimestampLongSegmentFilterEnabled(enabled)
+                            settingsManager.setSpeechTokenTimestampLongSegmentFilterEnabled(
+                                enabled,
+                                SettingsManager.ASR_MODEL_QWEN3_ASR
+                            )
                         },
                         modifier = Modifier.padding(top = 12.dp)
                     )
@@ -271,7 +288,10 @@ fun Qwen3AsrSettingsScreen(
                             onValueChange = { value ->
                                 val count = value.roundToInt().coerceIn(15, 50)
                                 maxCharacters = count
-                                settingsManager.setSpeechTokenTimestampMergeMaxCharacters(count)
+                                settingsManager.setSpeechTokenTimestampMergeMaxCharacters(
+                                    count,
+                                    SettingsManager.ASR_MODEL_QWEN3_ASR
+                                )
                             },
                             valueRange = 15f..50f,
                             steps = 34,
@@ -285,6 +305,21 @@ fun Qwen3AsrSettingsScreen(
                             modifier = Modifier.width(40.dp)
                         )
                     }
+                    SettingsSwitchRow(
+                        title = stringResource(R.string.speech_merge_punctuation_split),
+                        description = stringResource(R.string.speech_merge_punctuation_split_hint),
+                        checked = punctuationSplit,
+                        enabled = smartOptionsEnabled,
+                        opacity = if (smartOptionsEnabled) 1f else 0.5f,
+                        onCheckedChange = { enabled ->
+                            punctuationSplit = enabled
+                            settingsManager.setSpeechTokenTimestampPunctuationSplitEnabled(
+                                enabled,
+                                SettingsManager.ASR_MODEL_QWEN3_ASR
+                            )
+                        },
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
                 }
             }
         }
@@ -307,6 +342,7 @@ private data class Qwen3AsrSettingsValues(
     val mergeSegments: Boolean,
     val smartMerge: Boolean,
     val filterLongMerge: Boolean,
+    val punctuationSplit: Boolean,
     val maxCharacters: Int,
     val mergeGapMs: Int
 )

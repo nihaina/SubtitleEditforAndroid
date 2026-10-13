@@ -1291,9 +1291,9 @@ class SettingsManager private constructor(context: Context) {
         timelineKey("token_enabled")?.let { prefs.edit().putBoolean(it, enabled).apply() }
     }
 
-    fun isSpeechTokenTimestampMergeEnabled(): Boolean {
-        val key = timelineKey("token_merge_enabled") ?: return false
-        val fallback = if (getAsrModelType() == ASR_MODEL_SENSEVOICE) {
+    fun isSpeechTokenTimestampMergeEnabled(type: String = getAsrModelType()): Boolean {
+        val key = timelineKey("token_merge_enabled", type) ?: return false
+        val fallback = if (type == ASR_MODEL_SENSEVOICE) {
             prefs.getBoolean(KEY_STT_TOKEN_TIMESTAMP_MERGE_ENABLED, true)
         } else true
         return prefs.getBoolean(key, fallback)
@@ -1303,9 +1303,9 @@ class SettingsManager private constructor(context: Context) {
         timelineKey("token_merge_enabled")?.let { prefs.edit().putBoolean(it, enabled).apply() }
     }
 
-    fun getSpeechTokenTimestampMergeGapMs(): Int {
-        val key = timelineKey("token_merge_gap_ms") ?: return 150
-        val fallback = if (getAsrModelType() == ASR_MODEL_SENSEVOICE) {
+    fun getSpeechTokenTimestampMergeGapMs(type: String = getAsrModelType()): Int {
+        val key = timelineKey("token_merge_gap_ms", type) ?: return 150
+        val fallback = if (type == ASR_MODEL_SENSEVOICE) {
             prefs.getInt(KEY_STT_TOKEN_TIMESTAMP_MERGE_GAP_MS, 150)
         } else 150
         return prefs.getInt(key, fallback).coerceIn(0, 5000)
@@ -1317,37 +1317,47 @@ class SettingsManager private constructor(context: Context) {
         }
     }
 
-    fun isSpeechTokenTimestampSmartMergeEnabled(): Boolean =
-        timelineKey("token_smart_merge_enabled")?.let { prefs.getBoolean(it, true) } ?: true
+    fun isSpeechTokenTimestampSmartMergeEnabled(type: String = getAsrModelType()): Boolean =
+        timelineKey("token_smart_merge_enabled", type)?.let { prefs.getBoolean(it, true) } ?: true
 
-    fun setSpeechTokenTimestampSmartMergeEnabled(enabled: Boolean) {
-        timelineKey("token_smart_merge_enabled")?.let { prefs.edit().putBoolean(it, enabled).apply() }
+    fun setSpeechTokenTimestampSmartMergeEnabled(enabled: Boolean, type: String = getAsrModelType()) {
+        timelineKey("token_smart_merge_enabled", type)?.let { prefs.edit().putBoolean(it, enabled).apply() }
     }
 
-    fun isSpeechTokenTimestampLongSegmentFilterEnabled(): Boolean =
-        timelineKey("token_merge_length_filter_enabled")?.let { prefs.getBoolean(it, true) } ?: true
+    fun isSpeechTokenTimestampLongSegmentFilterEnabled(type: String = getAsrModelType()): Boolean =
+        timelineKey("token_merge_length_filter_enabled", type)?.let { prefs.getBoolean(it, true) } ?: true
 
-    fun setSpeechTokenTimestampLongSegmentFilterEnabled(enabled: Boolean) {
-        timelineKey("token_merge_length_filter_enabled")?.let { prefs.edit().putBoolean(it, enabled).apply() }
+    fun setSpeechTokenTimestampLongSegmentFilterEnabled(enabled: Boolean, type: String = getAsrModelType()) {
+        timelineKey("token_merge_length_filter_enabled", type)?.let { prefs.edit().putBoolean(it, enabled).apply() }
     }
 
-    fun getSpeechTokenTimestampMergeMaxCharacters(): Int =
-        timelineKey("token_merge_max_characters")?.let { prefs.getInt(it, 25).coerceIn(15, 50) } ?: 25
+    fun isSpeechTokenTimestampPunctuationSplitEnabled(type: String = getAsrModelType()): Boolean =
+        timelineKey("token_merge_punctuation_split_enabled", type)?.let { prefs.getBoolean(it, true) } ?: true
 
-    fun setSpeechTokenTimestampMergeMaxCharacters(count: Int) {
-        timelineKey("token_merge_max_characters")?.let {
+    fun setSpeechTokenTimestampPunctuationSplitEnabled(enabled: Boolean, type: String = getAsrModelType()) {
+        timelineKey("token_merge_punctuation_split_enabled", type)?.let { prefs.edit().putBoolean(it, enabled).apply() }
+    }
+
+    fun getSpeechTokenTimestampMergeMaxCharacters(type: String = getAsrModelType()): Int =
+        timelineKey("token_merge_max_characters", type)?.let { prefs.getInt(it, 25).coerceIn(15, 50) } ?: 25
+
+    fun setSpeechTokenTimestampMergeMaxCharacters(count: Int, type: String = getAsrModelType()) {
+        timelineKey("token_merge_max_characters", type)?.let {
             prefs.edit().putInt(it, count.coerceIn(15, 50)).apply()
         }
     }
 
     fun speechTokenTimestampMergeSummary(): String = buildString {
         if (isSpeechTokenTimestampSmartMergeEnabled()) {
-            append("智能合并 150/200/230/250/300/350/400ms")
+            append("智能合并 0–${TimedTextMergePolicy.SMART_MAX_GAP_MS}ms，每轮增加 1ms")
+            if (isSpeechTokenTimestampLongSegmentFilterEnabled()) {
+                append("，目标 ${getSpeechTokenTimestampMergeMaxCharacters()} 字")
+            }
+            if (isSpeechTokenTimestampPunctuationSplitEnabled()) {
+                append("，按标点切分")
+            }
         } else {
             append("最大间隔 ${getSpeechTokenTimestampMergeGapMs()}ms")
-        }
-        if (isSpeechTokenTimestampLongSegmentFilterEnabled()) {
-            append("，最多 ${getSpeechTokenTimestampMergeMaxCharacters()} 字")
         }
     }
 

@@ -384,9 +384,11 @@
     <string name="activity_speech_to_subtitle_settings_text_53">设为 0 时仅合并重叠或首尾相接的字幕段</string>
     <string name="activity_speech_to_subtitle_settings_text_54" translatable="false">150</string>
     <string name="speech_merge_smart">智能合并</string>
-    <string name="speech_merge_smart_hint">自动进行多轮合并</string>
+    <string name="speech_merge_smart_hint">从 0 到 500 毫秒逐毫秒尝试合并，优先合并间隔较小的语音段</string>
     <string name="speech_merge_filter_long">过滤较长段</string>
     <string name="speech_merge_max_characters">最大字数</string>
+    <string name="speech_merge_punctuation_split">按标点切分</string>
+    <string name="speech_merge_punctuation_split_hint">首尾相接的字幕合并后强制按标点切分，标点归左；其他字幕以标点结尾时只向左合并，标点在中间或字幕只有标点时正常合并</string>
     <string name="unit_milliseconds">毫秒</string>
     <string name="unit_seconds">秒</string>
     <string name="vad_settings_title">VAD 配置</string>

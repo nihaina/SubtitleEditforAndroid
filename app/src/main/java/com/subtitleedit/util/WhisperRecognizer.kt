@@ -51,7 +51,8 @@ class WhisperRecognizer(
     data class SubtitleSegment(
         val startTime: Long,  // 毫秒
         val endTime: Long,    // 毫秒
-        val text: String
+        val text: String,
+        val parts: List<TimedTextPart> = emptyList(),
     )
 
     /** Official-style Qwen chunk result: one complete ASR text per audio chunk. */
@@ -898,17 +899,20 @@ class WhisperRecognizer(
                     TokenTimestampSegmenter.Segment(
                         startTimeMs = it.startTime,
                         endTimeMs = it.endTime,
-                        text = it.text
+                        text = it.text,
+                        parts = it.parts,
                     )
                 }
                 val settings = settingsManager()
+                val smart = settings.isSpeechTokenTimestampSmartMergeEnabled(modelType)
                 val mergedSegments = if (settings.isSpeechTokenTimestampMergeEnabled()) {
                     TokenTimestampSegmenter.mergeSegments(
                         segments = tokenSegments,
                         maxGapMs = settings.getSpeechTokenTimestampMergeGapMs(),
-                        smart = settings.isSpeechTokenTimestampSmartMergeEnabled(),
-                        maxCharacters = settings.getSpeechTokenTimestampMergeMaxCharacters()
-                            .takeIf { settings.isSpeechTokenTimestampLongSegmentFilterEnabled() }
+                        smart = smart,
+                        maxCharacters = settings.getSpeechTokenTimestampMergeMaxCharacters(modelType)
+                            .takeIf { smart && settings.isSpeechTokenTimestampLongSegmentFilterEnabled(modelType) },
+                        splitOnPunctuation = smart && settings.isSpeechTokenTimestampPunctuationSplitEnabled(modelType),
                     ).also {
                         Log.d(
                             TAG,
@@ -1093,7 +1097,8 @@ class WhisperRecognizer(
                             SubtitleSegment(
                                 startTime = it.startTimeMs,
                                 endTime = it.endTimeMs,
-                                text = it.text
+                                text = it.text,
+                                parts = it.parts,
                             )
                         }
                         Log.d(

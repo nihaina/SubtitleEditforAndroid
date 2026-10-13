@@ -33,9 +33,10 @@ internal class AsrTimelineSettingsViewModel(
             tokenTimestampEnabled = tokenTimestampModelAvailable &&
                 settingsManager.isSpeechTokenTimestampEnabled(),
             tokenTimestampMerge = settingsManager.isSpeechTokenTimestampMergeEnabled(),
-            smartMerge = settingsManager.isSpeechTokenTimestampSmartMergeEnabled(),
-            filterLongMerge = settingsManager.isSpeechTokenTimestampLongSegmentFilterEnabled(),
-            mergeMaxCharacters = settingsManager.getSpeechTokenTimestampMergeMaxCharacters(),
+            smartMerge = settingsManager.isSpeechTokenTimestampSmartMergeEnabled(modelType),
+            filterLongMerge = settingsManager.isSpeechTokenTimestampLongSegmentFilterEnabled(modelType),
+            punctuationSplit = settingsManager.isSpeechTokenTimestampPunctuationSplitEnabled(modelType),
+            mergeMaxCharacters = settingsManager.getSpeechTokenTimestampMergeMaxCharacters(modelType),
             mergeGapMs = mergeGapMs,
             mergeGapText = String.format(Locale.US, "%.0f", mergeGapMs.toFloat())
         )
@@ -101,18 +102,23 @@ internal class AsrTimelineSettingsViewModel(
 
     fun setSmartMerge(enabled: Boolean) {
         setState { copy(smartMerge = enabled) }
-        settingsManager.setSpeechTokenTimestampSmartMergeEnabled(enabled)
+        settingsManager.setSpeechTokenTimestampSmartMergeEnabled(enabled, modelType)
     }
 
     fun setFilterLongMerge(enabled: Boolean) {
         setState { copy(filterLongMerge = enabled) }
-        settingsManager.setSpeechTokenTimestampLongSegmentFilterEnabled(enabled)
+        settingsManager.setSpeechTokenTimestampLongSegmentFilterEnabled(enabled, modelType)
+    }
+
+    fun setPunctuationSplit(enabled: Boolean) {
+        setState { copy(punctuationSplit = enabled) }
+        settingsManager.setSpeechTokenTimestampPunctuationSplitEnabled(enabled, modelType)
     }
 
     fun setMergeMaxCharacters(value: Float) {
         val count = value.roundToInt().coerceIn(15, 50)
         setState { copy(mergeMaxCharacters = count) }
-        settingsManager.setSpeechTokenTimestampMergeMaxCharacters(count)
+        settingsManager.setSpeechTokenTimestampMergeMaxCharacters(count, modelType)
     }
 
     fun setMergeGap(value: Float) {
