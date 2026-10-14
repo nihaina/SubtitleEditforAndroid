@@ -19,6 +19,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.doOnPreDraw
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.subtitleedit.R
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.subtitle.WebVttStyleDefinition
@@ -195,22 +197,71 @@ internal class EditorWebVttStyleDialog(private val activity: AppCompatActivity) 
             refresh()
             scroll.doOnPreDraw { dialog.window?.decorView?.alpha = 1f }
         }
+        dialog.show()
         val decor = dialog.window?.decorView
-        val boundsListener = ViewTreeObserver.OnGlobalLayoutListener {
-            if (decor != null) {
+        if (decor != null) {
+            val normalMaximumHeight = (activity.resources.displayMetrics.heightPixels * 0.9f)
+                .toInt().coerceAtLeast(dp(48))
+            var chromeHeight = -1
+            var lastMaximumHeight = -1
+
+            fun updateBounds() {
+                if (scroll.height <= 0) return
                 val frame = Rect()
                 decor.getWindowVisibleDisplayFrame(frame)
-                if (frame.height() > 0 && scroll.height > 0) {
-                    scroll.maximumHeight = (frame.height() - (decor.height - scroll.height) - dp(24)).coerceAtLeast(dp(48))
+                if (frame.height() <= 0) return
+
+                val rootInsets = ViewCompat.getRootWindowInsets(decor)
+                val imeVisible = rootInsets?.let {
+                    it.isVisible(WindowInsetsCompat.Type.ime())
+                } ?: (frame.height() < activity.resources.displayMetrics.heightPixels * 0.85f)
+
+                // Measure the dialog chrome only before the first IME resize.  Recomputing
+                // it from the already-shrunk ScrollView makes the reduced height feed back
+                // into the next layout pass and prevents restoration after the IME is hidden.
+                if (chromeHeight < 0 && !imeVisible) {
+                    chromeHeight = (decor.height - scroll.height).coerceAtLeast(0)
+                }
+                if (chromeHeight < 0) {
+                    chromeHeight = (decor.height - scroll.height).coerceAtLeast(0)
+                }
+
+                val targetMaximumHeight = if (imeVisible) {
+                    (frame.height() - chromeHeight - dp(24)).coerceAtLeast(dp(48))
+                } else {
+                    normalMaximumHeight
+                }
+                if (targetMaximumHeight == lastMaximumHeight) return
+                lastMaximumHeight = targetMaximumHeight
+                scroll.maximumHeight = targetMaximumHeight
+
+                // AlertDialog keeps its previous WRAP_CONTENT measurement after an
+                // ADJUST_RESIZE pass on some Android versions. Re-wrap it after changing
+                // the bound so hiding the IME restores the full style editor height.
+                decor.post {
+                    if (!dialog.isShowing) return@post
+                    dialog.window?.setLayout(
+                        minOf(activity.resources.displayMetrics.widthPixels - dp(24), dp(600)),
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    )
                 }
             }
+
+            val boundsListener = ViewTreeObserver.OnGlobalLayoutListener { updateBounds() }
+            decor.viewTreeObserver.addOnGlobalLayoutListener(boundsListener)
+            ViewCompat.setOnApplyWindowInsetsListener(decor) { _, insets ->
+                decor.post { updateBounds() }
+                insets
+            }
+            decor.post { updateBounds() }
+            dialog.setOnDismissListener {
+                if (decor.viewTreeObserver.isAlive) decor.viewTreeObserver.removeOnGlobalLayoutListener(boundsListener)
+                ViewCompat.setOnApplyWindowInsetsListener(decor, null)
+                onClosed()
+            }
+        } else {
+            dialog.setOnDismissListener { onClosed() }
         }
-        decor?.viewTreeObserver?.addOnGlobalLayoutListener(boundsListener)
-        dialog.setOnDismissListener {
-            if (decor?.viewTreeObserver?.isAlive == true) decor.viewTreeObserver.removeOnGlobalLayoutListener(boundsListener)
-            onClosed()
-        }
-        dialog.show()
         return dialog
     }
 

@@ -7,6 +7,8 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.view.View
 import com.subtitleedit.R
+import com.subtitleedit.util.SubtitleFontChoice
+import com.subtitleedit.util.SubtitleFontManager
 import com.subtitleedit.util.subtitle.WebVttStyleSettings
 import kotlin.math.ceil
 import kotlin.math.max
@@ -14,9 +16,17 @@ import kotlin.math.max
 /** A native sample frame like Subtitle Edit: cue background, text/shadow, no outline. */
 internal class EditorWebVttStylePreviewView(context: Context) : View(context) {
     var settings = WebVttStyleSettings()
-        set(value) { field = value; invalidate() }
+        set(value) {
+            field = value
+            // A font can be imported between two updates while its family name
+            // stays the same; force the file lookup to run again in that case.
+            resolvedTypefaceKey = null
+            invalidate()
+        }
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val sample = context.getString(R.string.vtt_style_sample)
+    private var resolvedTypefaceKey: String? = null
+    private var resolvedTypeface: Typeface = Typeface.DEFAULT
 
     init { contentDescription = context.getString(R.string.vtt_style_preview) }
 
@@ -24,10 +34,14 @@ internal class EditorWebVttStylePreviewView(context: Context) : View(context) {
         super.onDraw(canvas)
         canvas.drawColor(Color.rgb(38, 38, 38))
         val style = settings
-        val family = style.fontName.substringBefore(',').trim().trim('"', '\'').ifBlank { "sans-serif" }
+        val family = style.fontName
+            .substringBefore(',')
+            .trim()
+            .trim('"', '\'')
+            .ifBlank { "sans-serif" }
         val typefaceStyle = (if (style.bold) Typeface.BOLD else Typeface.NORMAL) or
             (if (style.italic) Typeface.ITALIC else Typeface.NORMAL)
-        paint.typeface = Typeface.create(family, typefaceStyle)
+        paint.typeface = resolveTypeface(family, typefaceStyle)
         paint.textSize = (style.fontSize?.takeIf { it > 0 }?.times(2.5) ?: 60.0).toFloat()
         paint.isUnderlineText = style.underline
         paint.isStrikeThruText = style.strikeout
@@ -67,4 +81,37 @@ internal class EditorWebVttStylePreviewView(context: Context) : View(context) {
         canvas.drawText(sample, x, baseline, paint)
         canvas.restoreToCount(saved)
     }
+
+    /**
+     * Resolve the same concrete face used by the font picker and subtitle renderer.
+     * Typeface.create("name", ...) only works for Android's built-in families; it
+     * silently falls back to the default face for imported fonts (and for many
+     * names read from fonts.xml).  The picker keeps the actual file and TTC face
+     * index, so use those when available and only fall back to the family name as
+     * a last resort.
+     */
+    private fun resolveTypeface(family: String, style: Int): Typeface {
+        val key = "${family.lowercase()}#$style"
+        if (key == resolvedTypefaceKey) return resolvedTypeface
+
+        val choice = runCatching {
+            SubtitleFontManager.resolveSystemFont(context, family)
+                ?: SubtitleFontManager.listFonts(context).firstOrNull {
+                    it.name.equals(family, ignoreCase = true) ||
+                        it.file?.name.equals(family, ignoreCase = true)
+                }
+        }.getOrNull()
+        val base = choice?.let(::loadTypeface)
+            ?: Typeface.create(family, Typeface.NORMAL)
+        resolvedTypeface = Typeface.create(base, style)
+        resolvedTypefaceKey = key
+        return resolvedTypeface
+    }
+
+    private fun loadTypeface(choice: SubtitleFontChoice): Typeface? = runCatching {
+        val file = choice.file ?: return@runCatching null
+        Typeface.Builder(file)
+            .setTtcIndex(choice.collectionIndex)
+            .build()
+    }.getOrNull()
 }
