@@ -168,6 +168,29 @@ class WebVttSubtitleFormatHandlerTest {
     }
 
     @Test
+    fun alignmentEditRewritesOnlyPositionAndLineSettings() {
+        val entry = load(
+            "WEBVTT\n\n00:01.000 --> 00:02.000 position:20% line:20% size:70% region:r1 align:start vertical:rl\nHello"
+        ).entries.single()
+
+        WebVttSubtitleFormatHandler.updateCueAlignment(entry, 6)
+
+        assertEquals("{\\an6}Hello", entry.text)
+        assertEquals(
+            "size:70% region:r1 align:start vertical:rl position:80% line:50%",
+            entry.cueSettings
+        )
+    }
+
+    @Test
+    fun alignmentEditLeavesEmptyCueTextUnchanged() {
+        val entry = SubtitleEntry(startTime = 1000L, endTime = 2000L)
+        WebVttSubtitleFormatHandler.updateCueAlignment(entry, 7)
+        assertEquals("", entry.text)
+        assertEquals("", entry.cueSettings)
+    }
+
+    @Test
     fun mergesAdjacentCuesWithIdenticalTimesAndDropsExactDuplicates() {
         val document = load(cues(
             cue(1000, 4000, "Hello"),

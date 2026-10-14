@@ -372,8 +372,22 @@ internal class EditorViewModel(
         if (currentFormat != SubtitleParser.SubtitleFormat.VTT) return EditorCommandResult()
         val beforeDocument = documentState.subtitleDocument
         if (beforeDocument == updated) return EditorCommandResult()
+        val metadataChanged = updated.entries.mapIndexedNotNull { index, entry ->
+            val before = beforeDocument.entries.getOrNull(index)
+            index.takeIf {
+                before == null ||
+                    entry.cueIdentifier != before.cueIdentifier ||
+                    entry.cueSettings != before.cueSettings
+            }
+        }.toSet()
         val updates = updated.entries.mapIndexedNotNull { index, entry ->
-            (index to entry.text).takeIf { entry.text != beforeDocument.entries.getOrNull(index)?.text }
+            val before = beforeDocument.entries.getOrNull(index)
+            (index to entry.text).takeIf {
+                before == null ||
+                    entry.text != before.text ||
+                    entry.cueIdentifier != before.cueIdentifier ||
+                    entry.cueSettings != before.cueSettings
+            }
         }
         val beforeSource = if (documentState.sourceViewNeedsListSync) {
             val sourceEntries = SubtitleParser.parseDocument(
@@ -386,6 +400,14 @@ internal class EditorViewModel(
             documentState,
             EditorCommand.UpdateTexts(updates, removeBlankEntries = false)
         )
+        // UpdateTexts owns text edits; keep VTT cue metadata in the live list in sync too.
+        // Alignment edits change cueSettings while preserving each entry's stable identity.
+        updated.entries.forEachIndexed { index, updatedEntry ->
+            documentState.subtitleEntries.getOrNull(index)?.let { currentEntry ->
+                currentEntry.cueIdentifier = updatedEntry.cueIdentifier
+                currentEntry.cueSettings = updatedEntry.cueSettings
+            }
+        }
         var source = syncSourceDocument(beforeSource, currentFormat, beforeDocument.entries, updated.entries)
         if (updated.header != beforeDocument.header) {
             source = replaceVttSourceHeader(source, updated.header)
@@ -406,9 +428,12 @@ internal class EditorViewModel(
             afterHeader = updated.header
         )
         publishDocument()
-        return if (updated.header != beforeDocument.header && result.changedPositions.isEmpty()) {
+        val changedPositions = result.changedPositions + metadataChanged
+        return if (updated.header != beforeDocument.header && changedPositions.isEmpty()) {
             result.copy(changedPositions = updated.entries.indices.toSet())
-        } else result
+        } else {
+            result.copy(changedPositions = changedPositions)
+        }
     }
 
     private fun replaceVttSourceHeader(source: String, header: String): String {

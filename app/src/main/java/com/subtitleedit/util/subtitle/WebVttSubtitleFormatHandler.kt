@@ -186,6 +186,12 @@ object WebVttSubtitleFormatHandler : SubtitleFormatHandler {
 
     internal fun updateCueSettings(entry: SubtitleEntry, settings: String) = WebVttCueProcessing.updateSettings(entry, settings)
 
+    /** Applies Subtitle Edit's an1..an9 placement while preserving other cue settings. */
+    internal fun updateCueAlignment(entry: SubtitleEntry, alignment: Int) {
+        if (entry.text.isEmpty()) return
+        updateCueSettings(entry, WebVttCueProcessing.settingsForAlignment(entry.cueSettings, alignment))
+    }
+
     internal fun parseTimeLine(line: String): WebVttTimeLine? {
         val match = timelinePattern.matchEntire(line) ?: return null
         val suffix = match.groupValues[3]

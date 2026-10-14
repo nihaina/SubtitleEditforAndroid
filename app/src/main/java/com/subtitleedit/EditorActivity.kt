@@ -47,6 +47,7 @@ import com.subtitleedit.editor.EditorSubtitleDialogController
 import com.subtitleedit.editor.EditorConfirmationDialogController
 import com.subtitleedit.editor.EditorHistoryCoordinator
 import com.subtitleedit.editor.EditorColorPickerDialog
+import com.subtitleedit.editor.EditorAlignmentPickerDialog
 import com.subtitleedit.editor.EditorFontPickerDialog
 import com.subtitleedit.editor.EditorWebVttStyleDialog
 import com.subtitleedit.editor.EditorFileSessionController
@@ -78,6 +79,7 @@ import com.subtitleedit.util.SubtitleTextSplitOps
 import com.subtitleedit.util.SubtitleFormattingTagOps
 import com.subtitleedit.util.SubtitleStyleOps
 import com.subtitleedit.util.SubtitleFontOps
+import com.subtitleedit.util.SubtitleAlignmentOps
 import com.subtitleedit.util.SubtitleFontManager
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.audio.Mp3FileIssues
@@ -1957,6 +1959,13 @@ class EditorActivity : AppCompatActivity() {
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 )
             )
+            addView(
+                menuActionView("排列", { showSubtitleAlignmentPicker(positions, dialog) }, trailingChevron = true) {},
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
         }
         val columnWidth = maxOf(measureMenuWidth(leftColumn), measureMenuWidth(rightColumn))
         val rightLabel = formattingButton.getChildAt(0) as TextView
@@ -2157,6 +2166,57 @@ class EditorActivity : AppCompatActivity() {
             notifyEntriesChanged(result.changedPositions)
         }
     }
+
+    private fun showSubtitleAlignmentPicker(positions: Set<Int>, parentDialog: AlertDialog) {
+        if (!ensureListMode() || positions.isEmpty()) return
+        val initialAlignment = positions.sorted().firstNotNullOfOrNull { position ->
+            stateModel.subtitleEntries.getOrNull(position)?.text?.let(::alignmentFromText)
+        }
+        EditorAlignmentPickerDialog(this).show(initialAlignment) { alignment ->
+            parentDialog.dismiss()
+            applySubtitleAlignment(positions, alignment)
+        }
+    }
+
+    private fun applySubtitleAlignment(positions: Set<Int>, alignment: Int) {
+        if (deferLargeListEdit(stateModel.subtitleEntries.size) {
+                applySubtitleAlignment(positions, alignment)
+            }) return
+        if (!ensureListMode()) return
+        if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.VTT) {
+            val updated = stateModel.subtitleDocument.copy(
+                entries = stateModel.subtitleDocument.entries.mapIndexed { index, entry ->
+                    if (index !in positions) {
+                        entry
+                    } else {
+                        entry.copy().also {
+                            WebVttSubtitleFormatHandler.updateCueAlignment(it, alignment)
+                        }
+                    }
+                }
+            )
+            applyVttDocumentChanges(updated, "排列")
+            return
+        }
+        val targets = positions.sorted().mapNotNull { position ->
+            stateModel.subtitleEntries.getOrNull(position)?.let { position to it.text }
+        }
+        val updates = targets.mapNotNull { (position, text) ->
+            val updatedText = SubtitleAlignmentOps.set(text, alignment)
+            (position to updatedText).takeIf { updatedText != text }
+        }
+        if (updates.isEmpty()) return
+        val result = stateModel.execute(EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
+        if (result.changedPositions.isNotEmpty()) {
+            notifyEntriesChanged(result.changedPositions)
+        }
+    }
+
+    private fun alignmentFromText(text: String): Int? = Regex("\\\\an([1-9])")
+        .find(text)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.toIntOrNull()
 
     private fun fontNameFromText(text: String): String? {
         val match = Regex(

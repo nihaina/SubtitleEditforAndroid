@@ -85,7 +85,13 @@ internal object WebVttCueProcessing {
         val raw = entry.cueSettings.trim()
         if (current == positionInfo(raw)) return raw
         val alignment = alignmentTag(entry.text)?.groupValues?.get(1)?.toInt() ?: 2
-        val remaining = raw.split(Regex("\\s+")).filter {
+        return settingsForAlignment(raw, alignment)
+    }
+
+    /** Replaces only WebVTT position/line settings, preserving other cue settings. */
+    fun settingsForAlignment(settings: String, alignment: Int): String {
+        require(alignment in 1..9) { "ASSA alignment must be 1..9" }
+        val remaining = settings.trim().split(Regex("\\s+")).filter {
             it.isNotEmpty() && !it.startsWith("position:") && !it.startsWith("line:")
         }.joinToString(" ")
         return listOf(remaining, defaultSettings[alignment]).filter { it.isNotEmpty() }.joinToString(" ")
