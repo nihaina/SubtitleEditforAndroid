@@ -6,6 +6,7 @@ import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
 import org.jsoup.nodes.TextNode
 import org.jsoup.parser.Parser
+import kotlin.math.roundToInt
 
 /** Temporary libmpv track; never used for saving or converting the user's document. */
 internal object WebVttPreviewWriter {
@@ -17,6 +18,12 @@ internal object WebVttPreviewWriter {
     private val alignmentPrefix = Regex(
         """^((?:\s*<(?:i|b|u|c(?:\.[^>]*)?|font(?:\s[^>]*)?)>)*\s*)\{\\an([1-9])\}""",
         RegexOption.IGNORE_CASE
+    )
+    private val cuePosition = Regex(
+        """(?:^|\s)position:(\d+(?:\.\d+)?)%""", RegexOption.IGNORE_CASE
+    )
+    private val cueLine = Regex(
+        """(?:^|\s)line:(\d+(?:\.\d+)?)%""", RegexOption.IGNORE_CASE
     )
 
     fun write(document: SubtitleDocument): String {
@@ -38,6 +45,8 @@ internal object WebVttPreviewWriter {
         append("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, ")
         append("Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, ")
         append("Alignment, MarginL, MarginR, MarginV, Encoding\n")
+        // Keep the same generic default as Subtitle Edit. Imported fonts are only used
+        // when a cue carries an explicit \fn override.
         append("Style: Default,sans-serif,15.2,&H00FFFFFF,&H00FFFFFF,&H00000000,&H50000000,")
         append("0,0,0,0,100,100,0,0,1,0.66,0,2,7,7,13,1\n\n[Events]\n")
         append("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
@@ -45,6 +54,15 @@ internal object WebVttPreviewWriter {
 
     private fun renderCue(entry: SubtitleEntry, styles: Styles): String = buildString {
         var text = entry.text
+        val x = cuePosition.find(entry.cueSettings)?.groupValues?.get(1)?.toDoubleOrNull()
+        val y = cueLine.find(entry.cueSettings)?.groupValues?.get(1)?.toDoubleOrNull()
+        if (x != null && y != null) {
+            append("{\\pos(")
+                .append((x * 384.0 / 100.0).roundToInt())
+                .append(',')
+                .append((y * 288.0 / 100.0).roundToInt())
+                .append(")}")
+        }
         alignmentPrefix.find(text)?.let { prefix ->
             append("{\\an").append(prefix.groupValues[2]).append('}')
             text = text.replaceRange(prefix.range, prefix.groupValues[1])

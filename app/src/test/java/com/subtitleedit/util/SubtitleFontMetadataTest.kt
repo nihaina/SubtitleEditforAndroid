@@ -17,6 +17,16 @@ class SubtitleFontMetadataTest {
         assertEquals(listOf("Collection Family"), SubtitleFontMetadata.familyNames(ttc))
     }
 
+    @Test
+    fun prefersLibassFaceNameOverTypographicFamilyName() {
+        val file = tempFontFile(
+            "face",
+            buildFontWithNames(face = "Example Bold", family = "Example", fontOffset = 0, tableOffset = 28)
+        )
+
+        assertEquals(listOf("Example Bold"), SubtitleFontMetadata.familyNames(file))
+    }
+
     private fun buildCollection(family: String): ByteArray {
         val fontOffset = 16
         return bytes {
@@ -51,6 +61,41 @@ class SubtitleFontMetadataTest {
             writeShort(value.size)
             writeShort(0)
             write(value)
+        }.also { check(fontOffset == 0 || fontOffset + it.size <= tableOffset + tableLength) }
+    }
+
+    private fun buildFontWithNames(face: String, family: String, fontOffset: Int, tableOffset: Int): ByteArray {
+        val faceBytes = face.toByteArray(StandardCharsets.UTF_16BE)
+        val familyBytes = family.toByteArray(StandardCharsets.UTF_16BE)
+        val stringOffset = 30
+        val tableLength = stringOffset + faceBytes.size + familyBytes.size
+        return bytes {
+            writeInt(0x00010000)
+            writeShort(1)
+            writeShort(0)
+            writeShort(0)
+            writeShort(0)
+            writeBytes("name")
+            writeInt(0)
+            writeInt(tableOffset)
+            writeInt(tableLength)
+            writeShort(0)
+            writeShort(2)
+            writeShort(stringOffset)
+            writeShort(3)
+            writeShort(1)
+            writeShort(0x0409)
+            writeShort(1)
+            writeShort(faceBytes.size)
+            writeShort(0)
+            writeShort(3)
+            writeShort(1)
+            writeShort(0x0409)
+            writeShort(16)
+            writeShort(familyBytes.size)
+            writeShort(faceBytes.size)
+            write(faceBytes)
+            write(familyBytes)
         }.also { check(fontOffset == 0 || fontOffset + it.size <= tableOffset + tableLength) }
     }
 

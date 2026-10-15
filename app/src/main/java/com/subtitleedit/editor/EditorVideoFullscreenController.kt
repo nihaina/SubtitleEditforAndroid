@@ -69,6 +69,13 @@ internal class EditorVideoFullscreenController(
         renderCollapsed()
     }
 
+    /** Restores the mixed video/waveform layout after a transient editor overlay. */
+    fun setMixedDisplay(mixed: Boolean) {
+        if (!isVideo || isFullscreen() || isMixed() == mixed) return
+        setMixed(mixed)
+        renderCollapsed()
+    }
+
     fun onWindowFocusChanged(hasFocus: Boolean) {
         if (hasFocus && isFullscreen()) hideSystemBars()
     }

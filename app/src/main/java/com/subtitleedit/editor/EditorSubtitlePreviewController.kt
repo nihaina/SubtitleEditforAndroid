@@ -2,6 +2,7 @@ package com.subtitleedit.editor
 
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
+import com.subtitleedit.util.subtitle.SubtitleDocument
 import com.subtitleedit.util.subtitle.WebVttPreviewWriter
 import com.subtitleedit.util.subtitle.WebVttSubtitleFormatHandler
 import com.subtitleedit.util.subtitle.toSubtitleLines
@@ -37,13 +38,14 @@ internal class EditorSubtitlePreviewController(
         format: SubtitleParser.SubtitleFormat,
         entries: List<SubtitleEntry>,
         sourceViewMode: Boolean,
-        sourceContent: String
+        sourceContent: String,
+        debounceMs: Long = 300L
     ) {
         val generation = ++requestGeneration
         pendingRequest = PreviewRequest(format, entries, sourceViewMode, sourceContent)
         updateJob?.cancel()
         updateJob = scope.launch {
-            delay(300L)
+            delay(debounceMs.coerceAtLeast(0L))
             val request = pendingRequest ?: return@launch
             pendingRequest = null
             val entrySnapshot = request.entries.map { it.copy() }
@@ -93,6 +95,20 @@ internal class EditorSubtitlePreviewController(
                 buildWebVttPreview(entries, sourceViewMode, sourceContent)
             }
             rawSourceFormat -> sourceContent
+            format == SubtitleParser.SubtitleFormat.SRT || format == SubtitleParser.SubtitleFormat.LRC -> {
+                // Subtitle Edit hands every non-ASS preview to libass as a temporary ASS
+                // track.  Besides making SRT/LRC rendering use the same renderer as VTT,
+                // this is what makes inline <font face="..."> tags become ASS \fn
+                // overrides instead of being left to mpv's format-specific parser.
+                val previewEntries = if (sourceViewMode && entries.isEmpty() && sourceContent.isNotBlank()) {
+                    SubtitleParser.parse(sourceContent, format)
+                } else {
+                    entries
+                }
+                WebVttPreviewWriter.write(
+                    SubtitleDocument(SubtitleParser.SubtitleFormat.VTT, previewEntries)
+                )
+            }
             sourceViewMode -> if (entries.isNotEmpty() || sourceContent.isBlank()) {
                 SubtitleParser.toSRT(entries)
             } else {
@@ -104,7 +120,9 @@ internal class EditorSubtitlePreviewController(
 
         sessionDir.mkdirs()
         val extension = when {
-            format == SubtitleParser.SubtitleFormat.VTT -> "ass"
+            format == SubtitleParser.SubtitleFormat.VTT ||
+                format == SubtitleParser.SubtitleFormat.SRT ||
+                format == SubtitleParser.SubtitleFormat.LRC -> "ass"
             rawSourceFormat -> format.name.lowercase()
             else -> "srt"
         }

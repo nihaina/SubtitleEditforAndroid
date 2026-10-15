@@ -192,6 +192,15 @@ object WebVttSubtitleFormatHandler : SubtitleFormatHandler {
         updateCueSettings(entry, WebVttCueProcessing.settingsForAlignment(entry.cueSettings, alignment))
     }
 
+    /** Applies exact percentage coordinates while preserving other cue settings. */
+    internal fun updateCueCoordinate(entry: SubtitleEntry, xPercent: Float, yPercent: Float) {
+        if (entry.text.isEmpty()) return
+        updateCueSettings(
+            entry,
+            WebVttCueProcessing.settingsForCoordinate(entry.cueSettings, xPercent, yPercent)
+        )
+    }
+
     internal fun parseTimeLine(line: String): WebVttTimeLine? {
         val match = timelinePattern.matchEntire(line) ?: return null
         val suffix = match.groupValues[3]

@@ -113,11 +113,39 @@ class EditorSubtitlePreviewControllerTest {
     }
 
     @Test
-    fun srtAndRawAssPreviewsKeepTheirExistingFormatsAndContent() = runBlocking {
+    fun srtAndLrcPreviewsUseAssSoInlineFontsReachLibass() = runBlocking {
         val rows = listOf(SubtitleEntry(startTime = 1_000, endTime = 2_000, text = "<font color=red>Hello</font>"))
         val srt = preview(SubtitleFormat.SRT, rows, false, "old source")
-        assertEquals("srt", srt.extension)
-        assertEquals(SubtitleParser.toSRT(rows), srt.content)
+        assertEquals("ass", srt.extension)
+        assertTrue(srt.content.contains("Dialogue: 0,"))
+        assertTrue(srt.content.contains("Hello"))
+
+        val srtFont = preview(
+            SubtitleFormat.SRT,
+            listOf(SubtitleEntry(startTime = 1_000, endTime = 2_000, text = "<font face=Arial>Hello</font>")),
+            false,
+            "old source"
+        )
+        assertTrue(srtFont.content.contains("{\\fnArial}"))
+
+        val lrcRows = listOf(SubtitleEntry(startTime = 1_000, endTime = 2_000, text = "<font face=Arial>Hello</font>"))
+        val lrc = preview(SubtitleFormat.LRC, lrcRows, false, "old source")
+        assertEquals("ass", lrc.extension)
+        assertTrue(lrc.content.contains("{\\fnArial}"))
+
+        val plain = preview(
+            SubtitleFormat.SRT,
+            listOf(SubtitleEntry(startTime = 1_000, endTime = 2_000, text = "Hello")),
+            false,
+            "old source"
+        )
+        assertTrue(plain.content.contains("Style: Default,sans-serif,15.2,"))
+        assertFalse(plain.content.contains("\\fn"))
+    }
+
+    @Test
+    fun rawAssPreviewKeepsItsExistingFormatAndContent() = runBlocking {
+        val rows = listOf(SubtitleEntry(startTime = 1_000, endTime = 2_000, text = "<font color=red>Hello</font>"))
         val source = "[Script Info]\nTitle: raw ASS\n"
         val ass = preview(SubtitleFormat.ASS, rows, true, source)
         assertEquals("ass", ass.extension)

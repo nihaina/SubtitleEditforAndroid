@@ -92,6 +92,15 @@ object SubtitleFontManager {
         return moved
     }
 
+    /**
+     * Writes the fontconfig file used by libass and returns the directory passed to
+     * libass as its explicit-font directory.
+     *
+     * System fonts stay exclusively in fontconfig. Imported fonts stay exclusively
+     * in [fontDirectory] and are considered only when an ASS `\\fn` override names
+     * one of them. Putting imported fonts in fontconfig makes them participate in
+     * missing-glyph fallback and can make a selected system font appear replaced.
+     */
     fun writeFontConfig(context: Context): File {
         val config = File(context.filesDir, "fonts.conf")
         val fontDir = fontDirectory(context)
@@ -101,7 +110,6 @@ object SubtitleFontManager {
         val content = """
             <fontconfig>
               ${SYSTEM_FONT_DIRECTORIES.joinToString("\n") { "<dir>${xml(it)}</dir>" }}
-              <dir>${xml(fontDir.absolutePath)}</dir>
               <cachedir>${xml(context.cacheDir.absolutePath)}</cachedir>
               <alias><family>sans-serif</family><prefer><family>Roboto</family><family>Noto Sans</family></prefer></alias>
               <alias><family>serif</family><prefer><family>Noto Serif</family></prefer></alias>

@@ -42,6 +42,10 @@ internal class EditorPlaybackController(
     var playbackSpeed: Float = 1.0f
         private set
 
+    /** True while the media engine is actively playing. Used by transient editor overlays. */
+    val isCurrentlyPlaying: Boolean
+        get() = isPlaying
+
     private var isPlaying = false
     private var isUserSeeking = false
     private var engine: EditorPlaybackEngine? = null
@@ -197,6 +201,17 @@ internal class EditorPlaybackController(
         stopProgressUpdate()
         updatePlayerUi()
         showVideoControls(scheduleAutoHide = false)
+    }
+
+    /** Resume playback after a transient editor overlay, if it was playing before it opened. */
+    fun resumeAfterTransientOverlay(shouldResume: Boolean) {
+        if (!shouldResume) return
+        val playbackEngine = engine?.takeIf { it.phase.canAccessPlayer } ?: return
+        if (!playbackEngine.isPlaying) playbackEngine.play()
+        isPlaying = true
+        startProgressUpdate()
+        updatePlayerUi()
+        syncVideoControlsWithPlayback()
     }
 
     fun replaceVideoSubtitleTrack(file: File?) {

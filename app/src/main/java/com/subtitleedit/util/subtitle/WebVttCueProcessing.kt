@@ -97,6 +97,43 @@ internal object WebVttCueProcessing {
         return listOf(remaining, defaultSettings[alignment]).filter { it.isNotEmpty() }.joinToString(" ")
     }
 
+    /** Replaces only position/line with exact percentages, preserving all other cue settings. */
+    fun settingsForCoordinate(settings: String, xPercent: Float, yPercent: Float): String {
+        require(xPercent in 0f..100f && yPercent in 0f..100f)
+        val position = "position:${formatPercent(xPercent)}%"
+        val line = "line:${formatPercent(yPercent)}%"
+        var hasPosition = false
+        var hasLine = false
+        val rewritten = settings.trim().split(Regex("\\s+"))
+            .filter { it.isNotEmpty() }
+            .map { token ->
+                when {
+                    token.startsWith("position:", ignoreCase = true) -> {
+                        hasPosition = true
+                        position + token.substringAfter(':').indexOf(',')
+                            .takeIf { it >= 0 }
+                            ?.let { token.substringAfter(':').substring(it) }
+                            .orEmpty()
+                    }
+                    token.startsWith("line:", ignoreCase = true) -> {
+                        hasLine = true
+                        line + token.substringAfter(':').indexOf(',')
+                            .takeIf { it >= 0 }
+                            ?.let { token.substringAfter(':').substring(it) }
+                            .orEmpty()
+                    }
+                    else -> token
+                }
+            }
+            .toMutableList()
+        if (!hasPosition) rewritten += position
+        if (!hasLine) rewritten += line
+        return rewritten.joinToString(" ")
+    }
+
+    private fun formatPercent(value: Float): String =
+        "%.2f".format(java.util.Locale.US, value).trimEnd('0').trimEnd('.')
+
     fun updateSettings(entry: SubtitleEntry, settings: String) {
         val alignment = alignmentTag(entry.text)
         val body = if (alignment == null) entry.text else entry.text.removeRange(alignment.range)

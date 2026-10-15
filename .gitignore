@@ -165,6 +165,7 @@ target/
 
 # Temporary upstream reference checkout
 subtitleedit-upstream/
+.tmp-subtitleedit-*
 
 # Kotlin
 *.kotlin_module

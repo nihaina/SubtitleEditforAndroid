@@ -75,8 +75,14 @@ internal object SubtitleFontMetadata {
             val value = String(bytes, charset).trim('\u0000', ' ', '\t', '\r', '\n')
             if (value.isNotEmpty()) candidates += FontName(nameId, language, value)
         }
+        // libass resolves ASS \fn names using the OpenType face name (name ID 1,
+        // the Win32/GDI-compatible name).  The typographic family name (ID 16) can
+        // collapse distinct faces such as "Arial" and "Arial Bold", causing an
+        // explicitly selected local font to render as the generic/default face.
+        // Prefer the face name while retaining ID 16 as a fallback for fonts that
+        // do not provide ID 1.
         return candidates.sortedWith(
-            compareBy<FontName> { if (it.nameId == 16) 0 else 1 }
+            compareBy<FontName> { if (it.nameId == 1) 0 else 1 }
                 .thenBy { if (it.language == 0x0409 || it.language == 0) 0 else 1 }
         ).firstOrNull()?.value
     }

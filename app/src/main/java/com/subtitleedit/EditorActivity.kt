@@ -4,6 +4,8 @@ import android.app.AlertDialog
 import android.content.ClipData
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.Color
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
@@ -14,6 +16,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -21,7 +24,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.doOnPreDraw
@@ -48,6 +53,7 @@ import com.subtitleedit.editor.EditorConfirmationDialogController
 import com.subtitleedit.editor.EditorHistoryCoordinator
 import com.subtitleedit.editor.EditorColorPickerDialog
 import com.subtitleedit.editor.EditorAlignmentPickerDialog
+import com.subtitleedit.editor.EditorCoordinatePickerView
 import com.subtitleedit.editor.EditorFontPickerDialog
 import com.subtitleedit.editor.EditorWebVttStyleDialog
 import com.subtitleedit.editor.EditorFileSessionController
@@ -80,6 +86,8 @@ import com.subtitleedit.util.SubtitleFormattingTagOps
 import com.subtitleedit.util.SubtitleStyleOps
 import com.subtitleedit.util.SubtitleFontOps
 import com.subtitleedit.util.SubtitleAlignmentOps
+import com.subtitleedit.util.SubtitleCoordinate
+import com.subtitleedit.util.SubtitleCoordinateOps
 import com.subtitleedit.util.SubtitleFontManager
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.audio.Mp3FileIssues
@@ -172,6 +180,23 @@ class EditorActivity : AppCompatActivity() {
     private var pendingFontParentDialog: AlertDialog? = null
     private var pendingStyleFontName: String = ""
     private var pendingStyleFontSelection: ((String) -> Unit)? = null
+
+    // Transient video coordinate picking session. The subtitle document remains unchanged until
+    // the user confirms the alignment dialog after returning from the picker.
+    private var coordinatePickerView: EditorCoordinatePickerView? = null
+    private var coordinatePickerBottomBar: LinearLayout? = null
+    private var coordinatePickerPositions: Set<Int> = emptySet()
+    private var coordinatePickerWasPlaying = false
+    private var coordinatePickerOverlayVisibility = View.VISIBLE
+    private var coordinatePickerOverlayAlpha = 1f
+    private var coordinatePickerOriginalEntries: List<SubtitleEntry> = emptyList()
+    private var coordinatePickerInitialAlignment: Int? = null
+    private var coordinatePickerInitialCoordinate: SubtitleCoordinate? = null
+    private var coordinatePickerInitialCoordinateEnabled: Boolean = false
+    private var coordinatePickerWasMixed = false
+    private var coordinatePickerWasFullscreen = false
+    private var coordinatePickerPending = false
+    private var coordinatePickerGeneration = 0L
 
     private val fontFileLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -387,6 +412,20 @@ class EditorActivity : AppCompatActivity() {
         )
         editorCoordinator.bindNavigation()
         editorCoordinator.bindState()
+        // Back from the transient coordinate editor means cancel the coordinate session first.
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (coordinatePickerView != null) {
+                    finishCoordinatePicker(confirm = false)
+                } else if (coordinatePickerPending) {
+                    cancelPendingCoordinatePicker()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                    isEnabled = true
+                }
+            }
+        })
         
         if (stateModel.documentLoaded) {
             restoreDocumentState()
@@ -2167,20 +2206,53 @@ class EditorActivity : AppCompatActivity() {
         }
     }
 
-    private fun showSubtitleAlignmentPicker(positions: Set<Int>, parentDialog: AlertDialog) {
+    private fun showSubtitleAlignmentPicker(
+        positions: Set<Int>,
+        parentDialog: AlertDialog? = null,
+        coordinateOverride: SubtitleCoordinate? = null,
+        coordinateOverrideEnabled: Boolean = false,
+        alignmentOverride: Int? = null
+    ) {
         if (!ensureListMode() || positions.isEmpty()) return
-        val initialAlignment = positions.sorted().firstNotNullOfOrNull { position ->
+        val initialAlignment = alignmentOverride ?: positions.sorted().firstNotNullOfOrNull { position ->
             stateModel.subtitleEntries.getOrNull(position)?.text?.let(::alignmentFromText)
         }
-        EditorAlignmentPickerDialog(this).show(initialAlignment) { alignment ->
-            parentDialog.dismiss()
-            applySubtitleAlignment(positions, alignment)
-        }
+        val initialCoordinate = coordinateOverride ?: positions.sorted().firstNotNullOfOrNull { position ->
+            stateModel.subtitleEntries.getOrNull(position)?.let {
+                SubtitleCoordinateOps.fromEntry(it, stateModel.currentFormat)
+            }
+        } ?: SubtitleCoordinateOps.defaultForAlignment(initialAlignment ?: 2)
+        EditorAlignmentPickerDialog(this).show(
+            initialAlignment = initialAlignment,
+            initialCoordinate = initialCoordinate,
+            initialCoordinateEnabled = coordinateOverrideEnabled,
+            onSelected = { alignment, coordinate ->
+                parentDialog?.dismiss()
+                applySubtitleAlignmentAndCoordinate(positions, alignment, coordinate)
+            },
+            onCoordinatePick = { alignment, coordinate, coordinateEnabled ->
+                parentDialog?.dismiss()
+                beginCoordinatePicker(
+                    positions,
+                    alignment,
+                    coordinate,
+                    coordinateEnabled
+                )
+            }
+        )
     }
 
     private fun applySubtitleAlignment(positions: Set<Int>, alignment: Int) {
+        applySubtitleAlignmentAndCoordinate(positions, alignment, null)
+    }
+
+    private fun applySubtitleAlignmentAndCoordinate(
+        positions: Set<Int>,
+        alignment: Int?,
+        coordinate: SubtitleCoordinate?
+    ) {
         if (deferLargeListEdit(stateModel.subtitleEntries.size) {
-                applySubtitleAlignment(positions, alignment)
+                applySubtitleAlignmentAndCoordinate(positions, alignment, coordinate)
             }) return
         if (!ensureListMode()) return
         if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.VTT) {
@@ -2190,19 +2262,29 @@ class EditorActivity : AppCompatActivity() {
                         entry
                     } else {
                         entry.copy().also {
-                            WebVttSubtitleFormatHandler.updateCueAlignment(it, alignment)
+                            alignment?.let { value ->
+                                WebVttSubtitleFormatHandler.updateCueAlignment(it, value)
+                            }
+                            coordinate?.let { value ->
+                                WebVttSubtitleFormatHandler.updateCueCoordinate(
+                                    it, value.xPercent, value.yPercent
+                                )
+                            }
                         }
                     }
                 }
             )
-            applyVttDocumentChanges(updated, "排列")
+            applyVttDocumentChanges(updated, if (coordinate == null) "排列" else "排列和坐标")
             return
         }
         val targets = positions.sorted().mapNotNull { position ->
             stateModel.subtitleEntries.getOrNull(position)?.let { position to it.text }
         }
         val updates = targets.mapNotNull { (position, text) ->
-            val updatedText = SubtitleAlignmentOps.set(text, alignment)
+            val alignedText = alignment?.let { value ->
+                SubtitleAlignmentOps.set(text, value)
+            } ?: text
+            val updatedText = coordinate?.let { SubtitleCoordinateOps.set(alignedText, it) } ?: alignedText
             (position to updatedText).takeIf { updatedText != text }
         }
         if (updates.isEmpty()) return
@@ -2217,6 +2299,253 @@ class EditorActivity : AppCompatActivity() {
         ?.groupValues
         ?.getOrNull(1)
         ?.toIntOrNull()
+
+    private fun beginCoordinatePicker(
+        positions: Set<Int>,
+        initialAlignment: Int?,
+        initialCoordinate: SubtitleCoordinate,
+        initialCoordinateEnabled: Boolean = false
+    ) {
+        if (stateModel.mediaType != EditorMediaType.VIDEO || !::playbackController.isInitialized) {
+            showShortToast("坐标选择需要先打开视频")
+            return
+        }
+        if (coordinatePickerView != null) return
+        val firstAttempt = !coordinatePickerPending
+        if (firstAttempt) {
+            // Capture the mixed/fullscreen state before normalizing the video layout.
+            // The normalizer clears isVideoMixed, so reading it afterwards would lose
+            // the user's layout and the picker could never restore it.
+            coordinatePickerPending = true
+            coordinatePickerGeneration++
+            coordinatePickerPositions = positions.toSet()
+            coordinatePickerInitialAlignment = initialAlignment
+            coordinatePickerInitialCoordinate = initialCoordinate
+            coordinatePickerInitialCoordinateEnabled = initialCoordinateEnabled
+            coordinatePickerOriginalEntries = stateModel.subtitleEntries.map { it.copy() }
+            coordinatePickerWasMixed = stateModel.isVideoMixed
+            coordinatePickerWasFullscreen = stateModel.isVideoFullscreen
+            coordinatePickerWasPlaying = playbackController.isCurrentlyPlaying
+            coordinatePickerOverlayVisibility = binding.videoControlsOverlay.visibility
+            coordinatePickerOverlayAlpha = binding.videoControlsOverlay.alpha
+            if (::videoFullscreenController.isInitialized) {
+                // Mixed display moves mpvView into waveformVideoOverlay. Put it back in the
+                // normal viewport before placing the picker on top of the video.
+                videoFullscreenController.resetMixedDisplay()
+                exitVideoFullscreen()
+            }
+        }
+
+        val viewport = binding.videoViewportContainer
+        if (viewport.width <= 0 || viewport.height <= 0) {
+            val generation = coordinatePickerGeneration
+            viewport.post {
+                if (coordinatePickerPending && coordinatePickerGeneration == generation) {
+                    beginCoordinatePicker(
+                        positions,
+                        initialAlignment,
+                        initialCoordinate,
+                        initialCoordinateEnabled
+                    )
+                }
+            }
+            return
+        }
+        coordinatePickerPending = false
+
+        playbackController.pauseForLifecycle()
+        binding.videoControlsOverlay.animate().cancel()
+        binding.videoControlsOverlay.alpha = 0f
+        binding.videoControlsOverlay.visibility = View.GONE
+
+        val picker = EditorCoordinatePickerView(
+            context = this,
+            initial = initialCoordinate,
+            videoAspectRatio = videoDisplayAspectRatio()
+        ) { coordinate ->
+            updateCoordinatePickerPreview(coordinate)
+        }
+        coordinatePickerView = picker
+        viewport.addView(
+            picker,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+        coordinatePickerBottomBar = createCoordinatePickerBottomBar()
+        (binding.editorRoot as? CoordinatorLayout)?.let { root ->
+            val params = CoordinatorLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                menuDp(56)
+            ).apply {
+                gravity = Gravity.BOTTOM
+            }
+            root.addView(coordinatePickerBottomBar, params)
+        }
+        updateCoordinatePickerPreview(initialCoordinate)
+    }
+
+    /** Returns the display aspect ratio used by the video surface, if media metadata is usable. */
+    private fun videoDisplayAspectRatio(): Float? {
+        val mediaFile = stateModel.currentFile?.takeIf { it.isFile } ?: return null
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(mediaFile.absolutePath)
+            val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                ?.toFloatOrNull()
+            val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                ?.toFloatOrNull()
+            val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                ?.toIntOrNull() ?: 0
+            if (width == null || height == null || width <= 0f || height <= 0f) {
+                null
+            } else if (rotation == 90 || rotation == 270) {
+                height / width
+            } else {
+                width / height
+            }
+        } catch (_: Throwable) {
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+    private fun createCoordinatePickerBottomBar(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(menuDp(16), menuDp(6), menuDp(16), menuDp(6))
+        setBackgroundColor(Color.argb(230, 20, 20, 20))
+        elevation = menuDp(4).toFloat()
+        addView(TextView(this@EditorActivity).apply {
+            text = "拖动绿色十字调整字幕位置"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        addView(android.widget.Button(this@EditorActivity).apply {
+            text = "取消"
+            setOnClickListener { finishCoordinatePicker(confirm = false) }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, menuDp(48)))
+        addView(android.widget.Button(this@EditorActivity).apply {
+            text = "确定"
+            setOnClickListener { finishCoordinatePicker(confirm = true) }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, menuDp(48)))
+    }
+
+    private fun updateCoordinatePickerPreview(coordinate: SubtitleCoordinate) {
+        if (coordinatePickerView == null) return
+        coordinatePickerPositions.forEach { position ->
+            val entry = stateModel.subtitleEntries.getOrNull(position) ?: return@forEach
+            if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.VTT) {
+                WebVttSubtitleFormatHandler.updateCueCoordinate(
+                    entry, coordinate.xPercent, coordinate.yPercent
+                )
+            } else {
+                entry.text = SubtitleCoordinateOps.set(entry.text, coordinate)
+            }
+        }
+        stateModel.refreshDocument()
+        // Dragging can generate dozens of motion events. Keep the preview responsive while
+        // avoiding an mpv subtitle-track replacement for every event.
+        subtitlePreviewController.schedule(
+            format = stateModel.currentFormat,
+            entries = stateModel.subtitleEntries,
+            sourceViewMode = stateModel.isSourceViewMode,
+            sourceContent = if (stateModel.isSourceViewMode) stateModel.sourceViewContent else stateModel.originalFileContent,
+            debounceMs = 70L
+        )
+    }
+
+    private fun finishCoordinatePicker(confirm: Boolean) {
+        val picker = coordinatePickerView ?: return
+        val selectedCoordinate = picker.coordinate()
+        val positions = coordinatePickerPositions
+        val originalEntries = coordinatePickerOriginalEntries
+        val selectedAlignment = coordinatePickerInitialAlignment
+        val coordinateWasEnabled = coordinatePickerInitialCoordinateEnabled
+
+        coordinatePickerView = null
+        coordinatePickerGeneration++
+        coordinatePickerBottomBar?.let { bar ->
+            (bar.parent as? ViewGroup)?.removeView(bar)
+        }
+        coordinatePickerBottomBar = null
+        (picker.parent as? ViewGroup)?.removeView(picker)
+
+        // The drag preview is intentionally not a document edit. Restore the original rows
+        // before reopening the alignment dialog, then commit only after its final confirmation.
+        stateModel.subtitleEntries = originalEntries.map { it.copy() }.toMutableList()
+        scheduleSubtitlePreview()
+        binding.videoControlsOverlay.animate().cancel()
+        binding.videoControlsOverlay.alpha = coordinatePickerOverlayAlpha
+        binding.videoControlsOverlay.visibility = coordinatePickerOverlayVisibility
+        playbackController.resumeAfterTransientOverlay(coordinatePickerWasPlaying)
+        if (coordinatePickerWasMixed && ::videoFullscreenController.isInitialized) {
+            videoFullscreenController.setMixedDisplay(true)
+        }
+
+        coordinatePickerPositions = emptySet()
+        coordinatePickerOriginalEntries = emptyList()
+        coordinatePickerInitialAlignment = null
+        val coordinateForDialog = if (confirm) selectedCoordinate else coordinatePickerInitialCoordinate
+        // The picker only stages a value. Keep the checkbox state from the
+        // alignment dialog so the final dialog confirmation remains the one
+        // place that applies a coordinate to subtitles.
+        val coordinateEnabled = coordinateWasEnabled
+        coordinatePickerInitialCoordinate = null
+        coordinatePickerInitialCoordinateEnabled = false
+        coordinatePickerWasMixed = false
+        val restoreFullscreen = coordinatePickerWasFullscreen
+        coordinatePickerWasFullscreen = false
+        if (restoreFullscreen && ::videoFullscreenController.isInitialized) {
+            // Coordinate picking temporarily uses the inline editor viewport. Restore
+            // the user's fullscreen state after the picker overlay is removed.
+            videoFullscreenController.toggle()
+        }
+        // Return to the alignment dialog in both cases. Confirm fills the newly picked
+        // coordinate; cancel keeps the value that was shown before entering the picker.
+        showSubtitleAlignmentPicker(
+            positions,
+            null,
+            coordinateForDialog,
+            coordinateOverrideEnabled = coordinateEnabled,
+            alignmentOverride = selectedAlignment
+        )
+    }
+
+    /** Cancels a picker that is waiting for the video viewport to obtain a size. */
+    private fun cancelPendingCoordinatePicker() {
+        if (!coordinatePickerPending || coordinatePickerView != null) return
+        val positions = coordinatePickerPositions
+        val initialCoordinate = coordinatePickerInitialCoordinate
+        val initialAlignment = coordinatePickerInitialAlignment
+        val initialCoordinateEnabled = coordinatePickerInitialCoordinateEnabled
+        val restoreMixed = coordinatePickerWasMixed
+        val restoreFullscreen = coordinatePickerWasFullscreen
+        coordinatePickerPending = false
+        coordinatePickerGeneration++
+        coordinatePickerPositions = emptySet()
+        coordinatePickerOriginalEntries = emptyList()
+        coordinatePickerInitialAlignment = null
+        coordinatePickerInitialCoordinate = null
+        coordinatePickerInitialCoordinateEnabled = false
+        coordinatePickerWasMixed = false
+        coordinatePickerWasFullscreen = false
+        if (restoreMixed && ::videoFullscreenController.isInitialized) {
+            videoFullscreenController.setMixedDisplay(true)
+        }
+        if (restoreFullscreen && ::videoFullscreenController.isInitialized) {
+            videoFullscreenController.toggle()
+        }
+        showSubtitleAlignmentPicker(
+            positions,
+            null,
+            initialCoordinate,
+            coordinateOverrideEnabled = initialCoordinateEnabled,
+            alignmentOverride = initialAlignment
+        )
+    }
 
     private fun fontNameFromText(text: String): String? {
         val match = Regex(
