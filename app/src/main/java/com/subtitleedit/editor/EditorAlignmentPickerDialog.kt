@@ -102,18 +102,22 @@ internal class EditorAlignmentPickerDialog(private val activity: AppCompatActivi
             grid.addView(button, params)
         }
 
-        val coordinate = initialCoordinate ?: SubtitleCoordinateOps.defaultForAlignment(initialAlignment ?: 2)
+        // A nine-grid alignment is not an explicit coordinate override. Keep the
+        // fields empty in that case; only use its standard anchor if the user opens
+        // the video picker before entering exact values.
+        val pickerCoordinate = initialCoordinate
+            ?: SubtitleCoordinateOps.defaultForAlignment(initialAlignment ?: 2)
         lateinit var dialog: AlertDialog
         val xInput = EditText(activity).apply {
             hint = "横坐标 %"
-            setText(formatCoordinate(coordinate.xPercent))
+            setText(initialCoordinate?.let { formatCoordinate(it.xPercent) }.orEmpty())
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
             setSingleLine(true)
             setSelectAllOnFocus(true)
         }
         val yInput = EditText(activity).apply {
             hint = "纵坐标 %"
-            setText(formatCoordinate(coordinate.yPercent))
+            setText(initialCoordinate?.let { formatCoordinate(it.yPercent) }.orEmpty())
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
             setSingleLine(true)
             setSelectAllOnFocus(true)
@@ -161,7 +165,11 @@ internal class EditorAlignmentPickerDialog(private val activity: AppCompatActivi
                 setBackgroundResource(android.R.color.transparent)
                 setPadding(dp(8), dp(8), dp(8), dp(8))
                 setOnClickListener {
-                    val value = readCoordinate()
+                    val value = readCoordinate() ?: if (
+                        xInput.text.isNullOrBlank() && yInput.text.isNullOrBlank()
+                    ) {
+                        pickerCoordinate
+                    } else null
                     if (value == null) {
                         // Do not silently replace an invalid value with the default
                         // position.  This keeps the value shown in the dialog and

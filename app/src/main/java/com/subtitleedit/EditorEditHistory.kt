@@ -294,7 +294,9 @@ internal class EditorEditHistory {
         fun hasEditableDifference(old: SubtitleEntry, current: SubtitleEntry): Boolean =
             old.startTime != current.startTime ||
                 old.endTime != current.endTime ||
-                old.text != current.text
+                old.text != current.text ||
+                old.cueIdentifier != current.cueIdentifier ||
+                old.cueSettings != current.cueSettings
 
         fun haveSameEditableEntries(
             before: List<SubtitleEntry>,

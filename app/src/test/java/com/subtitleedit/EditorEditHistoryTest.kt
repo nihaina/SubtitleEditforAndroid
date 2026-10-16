@@ -167,6 +167,42 @@ class EditorEditHistoryTest {
     }
 
     @Test
+    fun cueMetadataChangesAreUndoableContentChanges() {
+        val beforeEntry = SubtitleEntry(
+            startTime = 0L,
+            endTime = 1000L,
+            text = "字幕",
+            cueSettings = "align:center"
+        )
+        val afterEntry = beforeEntry.copy(cueSettings = "align:center position:50% line:80%")
+        val before = EditorEditHistory.ListState(listOf(beforeEntry), emptySet())
+        val after = EditorEditHistory.ListState(listOf(afterEntry), emptySet())
+        val difference = EditorEditHistory.difference(before, after)
+        val operation = EditorEditHistory.Operation.ListChange(
+            before = before,
+            after = after,
+            description = "排列和坐标",
+            beforeSourceText = "before source",
+            afterSourceText = "after source"
+        )
+        val state = EditorDocumentState().apply {
+            subtitleEntries = mutableListOf(afterEntry.copy())
+            originalFileContent = "after source"
+            sourceViewContent = "after source"
+            currentFormat = com.subtitleedit.util.SubtitleParser.SubtitleFormat.VTT
+        }
+
+        assertFalse(difference.isEmpty)
+        assertEquals(listOf(beforeEntry.stableId), difference.modified.map { it.first.stableId })
+        assertFalse(operation.isSelectionOnly())
+
+        operation.execute(state, undo = true)
+
+        assertEquals("align:center", state.subtitleEntries.single().cueSettings)
+        assertEquals("before source", state.originalFileContent)
+    }
+
+    @Test
     fun historyOperationExecutesAgainstDocumentState() {
         val history = EditorEditHistory()
         val beforeEntry = SubtitleEntry(startTime = 0L, endTime = 1000L, text = "旧")

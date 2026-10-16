@@ -83,6 +83,14 @@ object SubtitleCoordinateOps {
             fromText(entry.text) ?: alignmentFromText(entry.text)
         }
 
+    /** Returns only coordinates explicitly stored in the entry, without deriving them from alignment. */
+    fun fromExplicitEntry(entry: SubtitleEntry, format: SubtitleFormat): SubtitleCoordinate? =
+        if (format == SubtitleFormat.VTT) {
+            fromVttSettings(entry.cueSettings)
+        } else {
+            fromText(entry.text)
+        }
+
     fun fromVttSettings(settings: String): SubtitleCoordinate? {
         val x = Regex("(?:^|\\s)position:(\\d+(?:\\.\\d+)?)%", RegexOption.IGNORE_CASE)
             .find(settings)?.groupValues?.get(1)?.toFloatOrNull()

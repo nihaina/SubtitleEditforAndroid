@@ -17,6 +17,7 @@ import android.view.MotionEvent
 import android.view.View
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleEntryOps
+import com.subtitleedit.util.SubtitleFormattingTagOps
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -847,10 +848,14 @@ class WaveformTimelineView @JvmOverloads constructor(
             val rw = max(x2 - x1, 4f)
             canvas.drawRoundRect(RectF(x1, boxTop, x1 + rw, boxBot), 4f, 4f, subtitlePaint)
 
-            if (sub.text.isNotEmpty()) {
+            val displayText = SubtitleFormattingTagOps.remove(
+                sub.text,
+                SubtitleFormattingTagOps.Kind.ALL
+            )
+            if (displayText.isNotEmpty()) {
                 val availW = rw - 20f
                 if (availW > 12f) {
-                    canvas.drawText(clipText(sub.text, availW), x1 + 10f, boxTop + boxH / 2f + 8f, textPaint)
+                    canvas.drawText(clipText(displayText, availW), x1 + 10f, boxTop + boxH / 2f + 8f, textPaint)
                 }
             }
             index++
@@ -893,11 +898,15 @@ class WaveformTimelineView @JvmOverloads constructor(
             }
 
             // 字幕文本
-            if (sub.text.isNotEmpty()) {
+            val displayText = SubtitleFormattingTagOps.remove(
+                sub.text,
+                SubtitleFormattingTagOps.Kind.ALL
+            )
+            if (displayText.isNotEmpty()) {
                 val textStartX = moveZoneLeft + 4f
                 val availW = moveZoneRight - textStartX - 4f
                 if (availW > 12f) {
-                    canvas.drawText(clipText(sub.text, availW), textStartX, boxTop + boxH / 2f + 8f, textPaint)
+                    canvas.drawText(clipText(displayText, availW), textStartX, boxTop + boxH / 2f + 8f, textPaint)
                 }
             }
             index++

@@ -2253,9 +2253,9 @@ class EditorActivity : AppCompatActivity() {
         }
         val initialCoordinate = coordinateOverride ?: positions.sorted().firstNotNullOfOrNull { position ->
             stateModel.subtitleEntries.getOrNull(position)?.let {
-                SubtitleCoordinateOps.fromEntry(it, stateModel.currentFormat)
+                SubtitleCoordinateOps.fromExplicitEntry(it, stateModel.currentFormat)
             }
-        } ?: SubtitleCoordinateOps.defaultForAlignment(initialAlignment ?: 2)
+        }
         val firstVttEntry = positions.sorted().firstNotNullOfOrNull { position ->
             stateModel.subtitleEntries.getOrNull(position)
         }

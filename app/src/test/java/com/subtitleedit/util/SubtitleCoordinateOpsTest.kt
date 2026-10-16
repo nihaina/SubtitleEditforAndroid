@@ -68,6 +68,14 @@ class SubtitleCoordinateOpsTest {
     }
 
     @Test
+    fun explicitEntryCoordinateDoesNotTreatAlignmentAsCoordinate() {
+        val entry = SubtitleEntry(text = "{\\an2}Hello")
+
+        assertEquals(null, SubtitleCoordinateOps.fromExplicitEntry(entry, SubtitleFormat.SRT))
+        assertEquals(null, SubtitleCoordinateOps.fromExplicitEntry(entry, SubtitleFormat.VTT))
+    }
+
+    @Test
     fun vttCoordinateSettingsPreserveOtherCueAttributes() {
         val settings = WebVttCueProcessing.settingsForCoordinate(
             "region:main align:center size:80% position:10%,start line:20%,center",
