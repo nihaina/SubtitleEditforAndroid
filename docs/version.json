@@ -1,7 +1,7 @@
 {
-  "versionCode": 12,
-  "versionName": "1.2.2",
+  "versionCode": 13,
+  "versionName": "1.2.3",
   "downloadUrl": "https://github.com/nihaina/SubtitleEditforAndroid/releases/latest",
-  "releaseNotes": "1. 支持部署本地LLM，可以使用本地大模型进行翻译和标点预测，默认支持Index-Translate模型和Gemma4模型，可以自行导入其他GGUF模型文件。使用前请阅读帮助内容，仅支持64位设备\n2. 支持自行调整单次处理的字幕数量\n3. 默认编码添加自动，会自动检测并使用对应的编码打开文件\n4. 重新添加动态Padding开关\n5. 优化LRC、SRT、VTT字幕的解析\n6. 编辑器内添加部分样式调整\n7. VTT字幕格式可以定义样式，添加说话人，支持浏览器预览效果\n8. 添加软件配置的备份恢复功能",
+  "releaseNotes": "1. 重做智能合并，修复单句对话过长时异常截断，添加按标点切分\n2. 编辑器里，视频可以收起展开，或者和波形图混合显示\n3. 编辑器内可以设置字体，颜色，字号等标签效果\n4. 编辑器内可以可视化设置精确的字幕位置坐标\n5. 移除打开视频时的仅加载音频项",
   "forceUpdate": false
 }
