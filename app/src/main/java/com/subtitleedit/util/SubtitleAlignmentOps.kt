@@ -53,7 +53,7 @@ object SubtitleAlignmentOps {
      */
     fun set(text: String, alignment: Int, writeAn2Tag: Boolean = false): String {
         require(alignment in 1..9) { "ASSA alignment must be 1..9" }
-        var result = remove(text)
+        var result = SubtitleCoordinateOps.remove(remove(text))
         if (result.isEmpty() || (alignment == 2 && !writeAn2Tag)) return result
 
         if (result.startsWith("{\\")) {

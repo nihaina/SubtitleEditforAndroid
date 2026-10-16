@@ -20,20 +20,40 @@ class SubtitleCoordinateOpsTest {
     }
 
     @Test
-    fun assPositionIsInsertedWithoutDroppingOtherOverrideTags() {
+    fun assPositionReplacesAlignmentAndKeepsOtherOverrideTags() {
         val result = SubtitleCoordinateOps.set(
             "{\\an8\\i1}Hello",
             SubtitleCoordinate(25f, 75f)
         )
 
-        assertEquals("{\\pos(96,216)\\an8\\i1}Hello", result)
+        assertEquals("{\\pos(96,216)\\i1}Hello", result)
+    }
+
+    @Test
+    fun assPositionReplacesExistingAlignmentAndPositionTags() {
+        val result = SubtitleCoordinateOps.set(
+            "{\\pos(10,20)\\an7\\i1}Hello",
+            SubtitleCoordinate(25f, 75f)
+        )
+
+        assertEquals("{\\pos(96,216)\\i1}Hello", result)
+    }
+
+    @Test
+    fun assPositionRegeneratesDerivedAlignmentForCustomCoordinate() {
+        val result = SubtitleCoordinateOps.set(
+            "{\\an8}Hello",
+            SubtitleCoordinate(10f, 10f)
+        )
+
+        assertEquals("{\\an7\\pos(38,29)}Hello", result)
     }
 
     @Test
     fun assPositionDoesNotRemoveLiteralEmptyBracesInsideText() {
         val result = SubtitleCoordinateOps.set("Hello {} world", SubtitleCoordinate(50f, 50f))
 
-        assertEquals("{\\pos(192,144)}Hello {} world", result)
+        assertEquals("{\\an5\\pos(192,144)}Hello {} world", result)
     }
 
     @Test

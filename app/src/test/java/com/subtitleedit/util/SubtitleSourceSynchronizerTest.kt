@@ -1,6 +1,7 @@
 package com.subtitleedit.util
 
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.util.subtitle.WebVttSubtitleFormatHandler
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -220,14 +221,51 @@ Second
     fun vttRemovingAlignmentAlsoRemovesItsSourcePositionSettings() {
         val source = "WEBVTT\n\ncue\n00:01.000 --> 00:02.000 line:10% position:20% region:r1\nHello\n"
         val old = SubtitleParser.parseVTT(source)
+        val updatedEntry = old.single().copy().also {
+            WebVttSubtitleFormatHandler.clearCueAlignment(it)
+        }
         val updated = SubtitleSourceSynchronizer.apply(
             source, SubtitleParser.SubtitleFormat.VTT, old,
-            listOf(old.single().copy(text = "Hello"))
+            listOf(updatedEntry)
         )
         val entry = SubtitleParser.parseVTT(updated).single()
         assertEquals("Hello", entry.text)
         assertEquals("region:r1", entry.cueSettings)
         assertEquals("cue", entry.cueIdentifier)
+    }
+
+    @Test
+    fun vttCoordinateEditKeepsNewPositionSettingsWhenAlignmentTagIsRemoved() {
+        val source = "WEBVTT\n\ncue\n00:01.000 --> 00:02.000 line:20% position:10%\nHello\n"
+        val old = SubtitleParser.parseVTT(source)
+        val updatedEntry = old.single().copy().also {
+            WebVttSubtitleFormatHandler.updateCueCoordinate(it, 25f, 75f)
+        }
+
+        val updated = SubtitleSourceSynchronizer.apply(
+            source, SubtitleParser.SubtitleFormat.VTT, old, listOf(updatedEntry)
+        )
+        val entry = SubtitleParser.parseVTT(updated).single()
+        assertEquals("Hello", entry.text)
+        assertEquals("line:75% position:25%", entry.cueSettings)
+    }
+
+    @Test
+    fun vttRemovingGeneratedCustomAlignmentTagAlsoClearsCuePlacementSettings() {
+        val source = "WEBVTT\n\ncue\n00:01.000 --> 00:02.000 line:10% position:10% region:r1\nHello\n"
+        val old = SubtitleParser.parseVTT(source)
+        assertEquals("{\\an7}Hello", old.single().text)
+
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.VTT,
+            old,
+            listOf(old.single().copy(text = "Hello"))
+        )
+
+        val entry = SubtitleParser.parseVTT(updated).single()
+        assertEquals("Hello", entry.text)
+        assertEquals("region:r1", entry.cueSettings)
     }
 
     @Test

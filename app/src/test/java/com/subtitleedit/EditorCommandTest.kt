@@ -41,6 +41,20 @@ class EditorCommandTest {
     }
 
     @Test
+    fun removingVttDerivedAlignmentFromTextClearsCuePlacementImmediately() {
+        val viewModel = EditorViewModel()
+        viewModel.loadSubtitleContent(
+            "WEBVTT\n\n00:01.000 --> 00:02.000 position:10% line:10% region:r1\nHello\n",
+            "sample.vtt"
+        )
+
+        viewModel.execute(EditorCommand.UpdateText(0, "Hello"))
+
+        assertEquals("Hello", viewModel.subtitleDocument.entries.single().text)
+        assertEquals("region:r1", viewModel.subtitleDocument.entries.single().cueSettings)
+    }
+
+    @Test
     fun deleteAndInsertCommandsPreserveStableEntries() {
         val viewModel = EditorViewModel()
         val first = SubtitleEntry(text = "第一")

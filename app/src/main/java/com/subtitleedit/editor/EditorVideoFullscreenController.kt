@@ -69,6 +69,19 @@ internal class EditorVideoFullscreenController(
         renderCollapsed()
     }
 
+    /**
+     * Expands the inline video viewport for a transient editor overlay.
+     *
+     * Mixed display forces the video into the collapsed waveform layout.  A
+     * coordinate picker needs the full video frame, but the normal collapsed
+     * state must remain untouched when the picker was opened from elsewhere.
+     */
+    fun expandInlineDisplay() {
+        if (!isVideo || isFullscreen() || !isCollapsed()) return
+        setCollapsed(false)
+        renderCollapsed()
+    }
+
     /** Restores the mixed video/waveform layout after a transient editor overlay. */
     fun setMixedDisplay(mixed: Boolean) {
         if (!isVideo || isFullscreen() || isMixed() == mixed) return

@@ -516,6 +516,11 @@ class EditorActivity : AppCompatActivity() {
                 setSubtitleTimeToCurrentPosition(entry, position)
             },
             hasPlayableMedia = stateModel.mediaType.hasPlayableMedia,
+            onFormatMetadataClick = { _, position ->
+                if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.VTT) {
+                    showSubtitleAlignmentPicker(setOf(position))
+                }
+            },
             onSelectionChanged = {
                 recordListSelectionChange()
                 updateSelectedCountDisplay()
@@ -2095,6 +2100,35 @@ class EditorActivity : AppCompatActivity() {
 
     private fun removeFormattingTags(positions: Set<Int>, kind: SubtitleFormattingTagOps.Kind) {
         if (!ensureListMode()) return
+        if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.VTT &&
+            (kind == SubtitleFormattingTagOps.Kind.ALIGNMENT || kind == SubtitleFormattingTagOps.Kind.ALL)
+        ) {
+            val updated = stateModel.subtitleDocument.copy(
+                entries = stateModel.subtitleDocument.entries.mapIndexed { index, entry ->
+                    if (index !in positions) {
+                        entry
+                    } else {
+                        entry.copy().also { copy ->
+                            copy.text = SubtitleFormattingTagOps.remove(copy.text, kind)
+                            WebVttSubtitleFormatHandler.clearCueAlignment(copy)
+                        }
+                    }
+                }
+            )
+            val changed = updated.entries.mapIndexedNotNull { index, entry ->
+                val before = stateModel.subtitleEntries.getOrNull(index)
+                index.takeIf {
+                    before != null && (before.text != entry.text || before.cueSettings != entry.cueSettings)
+                }
+            }
+            if (changed.isEmpty()) {
+                showShortToast("没有可删除的格式化标签")
+                return
+            }
+            applyVttDocumentChanges(updated, "删除格式化标签")
+            showShortToast("已删除格式化标签")
+            return
+        }
         val updates = positions.sorted().mapNotNull { position ->
             val entry = stateModel.subtitleEntries.getOrNull(position) ?: return@mapNotNull null
             val updatedText = SubtitleFormattingTagOps.remove(entry.text, kind)
@@ -2222,10 +2256,31 @@ class EditorActivity : AppCompatActivity() {
                 SubtitleCoordinateOps.fromEntry(it, stateModel.currentFormat)
             }
         } ?: SubtitleCoordinateOps.defaultForAlignment(initialAlignment ?: 2)
+        val firstVttEntry = positions.sorted().firstNotNullOfOrNull { position ->
+            stateModel.subtitleEntries.getOrNull(position)
+        }
+        val vttCoordinateMode = if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.VTT) {
+            val settings = firstVttEntry?.cueSettings.orEmpty()
+            val hasPlacement = Regex("(?:^|\\s)(?:position|line):", RegexOption.IGNORE_CASE)
+                .containsMatchIn(settings)
+            if (!hasPlacement) {
+                false
+            } else {
+                val standard = SubtitleCoordinateOps.defaultForAlignment(initialAlignment ?: 2)
+                val exact = SubtitleCoordinateOps.fromVttSettings(settings)
+                initialAlignment == null || exact == null ||
+                    exact.xPercent != standard.xPercent || exact.yPercent != standard.yPercent
+            }
+        } else {
+            false
+        }
+        val inferredCoordinateEnabled = coordinateOverrideEnabled || (
+            vttCoordinateMode && alignmentOverride == null
+        )
         EditorAlignmentPickerDialog(this).show(
             initialAlignment = initialAlignment,
             initialCoordinate = initialCoordinate,
-            initialCoordinateEnabled = coordinateOverrideEnabled,
+            initialCoordinateEnabled = inferredCoordinateEnabled,
             onSelected = { alignment, coordinate ->
                 parentDialog?.dismiss()
                 applySubtitleAlignmentAndCoordinate(positions, alignment, coordinate)
@@ -2333,6 +2388,9 @@ class EditorActivity : AppCompatActivity() {
                 // normal viewport before placing the picker on top of the video.
                 videoFullscreenController.resetMixedDisplay()
                 exitVideoFullscreen()
+                if (coordinatePickerWasMixed) {
+                    videoFullscreenController.expandInlineDisplay()
+                }
             }
         }
 
@@ -2476,6 +2534,15 @@ class EditorActivity : AppCompatActivity() {
         // The drag preview is intentionally not a document edit. Restore the original rows
         // before reopening the alignment dialog, then commit only after its final confirmation.
         stateModel.subtitleEntries = originalEntries.map { it.copy() }.toMutableList()
+        // The picker mutates the same row objects held by the adapter while previewing. Rebind
+        // the restored copies so the list and its identity-based selection set do not retain the
+        // transient coordinate preview after cancel or when returning to the alignment dialog.
+        submitSubtitleList(
+            refreshAll = false,
+            syncWaveform = false,
+            markChanged = false,
+            schedulePreview = false
+        )
         scheduleSubtitlePreview()
         binding.videoControlsOverlay.animate().cancel()
         binding.videoControlsOverlay.alpha = coordinatePickerOverlayAlpha

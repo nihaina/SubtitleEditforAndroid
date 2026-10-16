@@ -81,10 +81,22 @@ internal object WebVttCueProcessing {
     }
 
     fun settingsFor(entry: SubtitleEntry): String {
-        val current = alignmentTag(entry.text)?.value.orEmpty()
         val raw = entry.cueSettings.trim()
+        val alignmentTag = alignmentTag(entry.text)
+        // Coordinate edits keep exact WebVTT position/line values while refreshing
+        // the nearest derived ASS tag in the editor text. Preserve those exact
+        // values on write instead of replacing them with nine-grid defaults.
+        if (alignmentTag == null) {
+            // Parsed position/line settings normally have a derived {\\anN}
+            // prefix in the editor text. If that prefix is removed directly,
+            // clear the corresponding WebVTT placement on write as well. The
+            // default bottom-centre placement deliberately has no derived tag,
+            // so keep its exact settings when positionInfo() is empty.
+            return if (positionInfo(raw).isEmpty()) raw else settingsForAlignment(raw, 2)
+        }
+        val current = alignmentTag.value
         if (current == positionInfo(raw)) return raw
-        val alignment = alignmentTag(entry.text)?.groupValues?.get(1)?.toInt() ?: 2
+        val alignment = alignmentTag.groupValues[1].toInt()
         return settingsForAlignment(raw, alignment)
     }
 
@@ -137,6 +149,19 @@ internal object WebVttCueProcessing {
     fun updateSettings(entry: SubtitleEntry, settings: String) {
         val alignment = alignmentTag(entry.text)
         val body = if (alignment == null) entry.text else entry.text.removeRange(alignment.range)
+        entry.text = positionInfo(settings) + body
+        entry.cueSettings = settings
+    }
+
+    /**
+     * Stores exact coordinates and refreshes the derived ASS alignment tag in the
+     * editor text. The tag is only a preview/compatibility representation; the
+     * precise WebVTT position and line values remain authoritative for writing.
+     */
+    fun updateCoordinateSettings(entry: SubtitleEntry, settings: String) {
+        // Parsed VTT cues can contain one derived tag per merged line. Remove all
+        // old derived tags before adding the single anchor for the new cue position.
+        val body = positionTag.replace(entry.text, "")
         entry.text = positionInfo(settings) + body
         entry.cueSettings = settings
     }

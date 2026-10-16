@@ -145,7 +145,10 @@ class WebVttSubtitleFormatHandlerTest {
     @Test
     fun removingOrChangingAlignmentUpdatesSettingsWithoutDiscardingOtherCueProperties() {
         val document = load("WEBVTT\n\n00:01.000 --> 00:02.000 line:10% position:20% size:70% region:r1 vertical:rl\nHello")
-        val removed = document.copy(entries = listOf(document.entries.single().copy(text = "Hello")))
+        val removedEntry = document.entries.single().copy().also {
+            WebVttSubtitleFormatHandler.clearCueAlignment(it)
+        }
+        val removed = document.copy(entries = listOf(removedEntry))
         val saved = load(WebVttSubtitleFormatHandler.write(removed)).entries.single()
         assertEquals("Hello", saved.text)
         assertEquals("size:70% region:r1 vertical:rl", saved.cueSettings)
@@ -188,6 +191,78 @@ class WebVttSubtitleFormatHandlerTest {
         WebVttSubtitleFormatHandler.updateCueAlignment(entry, 7)
         assertEquals("", entry.text)
         assertEquals("", entry.cueSettings)
+    }
+
+    @Test
+    fun coordinateEditReplacesDerivedAlignmentTag() {
+        val entry = SubtitleEntry(
+            text = "{\\an7}Hello",
+            cueSettings = "position:10% line:20% size:80%"
+        )
+
+        WebVttSubtitleFormatHandler.updateCueCoordinate(entry, 10f, 10f)
+
+        assertEquals("{\\an7}Hello", entry.text)
+        assertEquals("position:10% line:10% size:80%", entry.cueSettings)
+    }
+
+    @Test
+    fun coordinateEditReplacesDerivedAlignmentTagsAcrossMergedLines() {
+        val entry = SubtitleEntry(
+            text = "First\n{\\an1}Second",
+            cueSettings = "position:80% line:80%"
+        )
+
+        WebVttSubtitleFormatHandler.updateCueCoordinate(entry, 10f, 10f)
+
+        assertEquals("{\\an7}First\nSecond", entry.text)
+        assertEquals("position:10% line:10%", entry.cueSettings)
+    }
+
+    @Test
+    fun coordinateEditWritesExactSettingsAndReloadsDerivedAlignmentTag() {
+        val entry = SubtitleEntry(
+            text = "{\\an7}Hello",
+            cueSettings = "position:10% line:20% size:80%"
+        )
+        WebVttSubtitleFormatHandler.updateCueCoordinate(entry, 10f, 10f)
+
+        val serialized = WebVttSubtitleFormatHandler.write(
+            SubtitleDocument(SubtitleParser.SubtitleFormat.VTT, listOf(entry), header = "WEBVTT")
+        )
+        assertTrue(serialized.contains("position:10% line:10% size:80%"))
+        assertFalse(serialized.contains("{\\an7}"))
+        assertEquals("{\\an7}Hello", load(serialized).entries.single().text)
+    }
+
+    @Test
+    fun removingDerivedCustomAlignmentTagClearsCuePlacementSettingsOnWrite() {
+        val entry = load(
+            "WEBVTT\n\n00:01.000 --> 00:02.000 position:10% line:10% size:80%\nHello"
+        ).entries.single().also {
+            it.text = "Hello"
+        }
+
+        val saved = load(
+            WebVttSubtitleFormatHandler.write(
+                SubtitleDocument(SubtitleParser.SubtitleFormat.VTT, listOf(entry), header = "WEBVTT")
+            )
+        ).entries.single()
+
+        assertEquals("Hello", saved.text)
+        assertEquals("size:80%", saved.cueSettings)
+    }
+
+    @Test
+    fun missingDerivedTagKeepsExplicitBottomCentreCuePlacement() {
+        val entry = SubtitleEntry(
+            text = "Hello",
+            cueSettings = "position:50% line:80% size:80%"
+        )
+
+        val settings = WebVttSubtitleFormatHandler.getCueSettings(entry)
+
+        assertEquals("position:50% line:80% size:80%", settings)
     }
 
     @Test

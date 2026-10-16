@@ -7,6 +7,7 @@ import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.SubtitleColorOps
 import com.subtitleedit.util.subtitle.SubtitleDocument
+import com.subtitleedit.util.subtitle.WebVttSubtitleFormatHandler
 import com.subtitleedit.util.subtitle.toSubtitleLines
 import com.subtitleedit.repository.DefaultSubtitleRepository
 import com.subtitleedit.repository.SubtitleRepository
@@ -316,6 +317,19 @@ internal class EditorViewModel(
 
     fun execute(command: EditorCommand): EditorCommandResult {
         val result = applySubtitleEdit(documentState, command)
+        if (currentFormat == SubtitleParser.SubtitleFormat.VTT &&
+            (command is EditorCommand.UpdateText || command is EditorCommand.UpdateTexts)
+        ) {
+            // The editor stores the derived {\\anN} prefix in cue text while
+            // keeping the precise WebVTT placement in cueSettings. If a text
+            // edit removes that prefix, clear position/line immediately so
+            // the live list metadata and the eventual source stay in sync.
+            result.changedPositions.forEach { position ->
+                documentState.subtitleEntries.getOrNull(position)?.let { entry ->
+                    entry.cueSettings = WebVttSubtitleFormatHandler.getCueSettings(entry)
+                }
+            }
+        }
         if (result.changedPositions.isNotEmpty() || result.structureChanged) publishDocument()
         return result
     }

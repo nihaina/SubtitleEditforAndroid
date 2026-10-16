@@ -30,6 +30,15 @@ class SubtitleAlignmentOpsTest {
     }
 
     @Test
+    fun settingAlignmentReplacesExplicitCoordinate() {
+        assertEquals(
+            "{\\an8\\i1}Hello",
+            SubtitleAlignmentOps.set("{\\pos(96,216)\\an7\\i1}Hello", 8)
+        )
+        assertEquals("Hello", SubtitleAlignmentOps.set("{\\pos(96,216)}Hello", 2))
+    }
+
+    @Test
     fun removesStandaloneAndInlineTags() {
         val result = SubtitleAlignmentOps.remove("{\\an8}Hello \\an9")
         assertEquals("Hello ", result)

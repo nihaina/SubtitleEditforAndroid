@@ -37,18 +37,43 @@ object SubtitleCoordinateOps {
         )
     }
 
+    /** Removes explicit ASS positioning overrides and an empty leading override block. */
+    fun remove(text: String): String = posTag.replace(text, "")
+        .replaceFirst(Regex("^\\{\\}"), "")
+
     fun set(text: String, coordinate: SubtitleCoordinate): String {
         if (text.isEmpty()) return text
         val x = (coordinate.xPercent * PREVIEW_PLAY_RES_WIDTH / 100f).roundToInt()
         val y = (coordinate.yPercent * PREVIEW_PLAY_RES_HEIGHT / 100f).roundToInt()
-        val withoutExisting = posTag.replace(text, "")
-            .replaceFirst(Regex("^\\{\\}"), "")
+        val withoutExisting = remove(SubtitleAlignmentOps.remove(text))
         val tag = "\\pos($x,$y)"
-        return if (withoutExisting.startsWith("{\\") && withoutExisting.indexOf('}') > 0) {
+        val withPosition = if (withoutExisting.startsWith("{\\") && withoutExisting.indexOf('}') > 0) {
             withoutExisting.substring(0, 1) + tag + withoutExisting.substring(1)
         } else {
             "{$tag}$withoutExisting"
         }
+        val alignment = alignmentFor(coordinate)
+        if (alignment == 2) return withPosition
+        return if (withPosition.startsWith("{\\") && withPosition.indexOf('}') > 0) {
+            withPosition.substring(0, 2) + "an$alignment\\" + withPosition.substring(2)
+        } else {
+            "{\\an$alignment}$withPosition"
+        }
+    }
+
+    /** Maps an exact coordinate to the same derived ASS anchor used by WebVTT. */
+    private fun alignmentFor(coordinate: SubtitleCoordinate): Int {
+        val column = when {
+            coordinate.xPercent < 25f -> 1
+            coordinate.xPercent > 75f -> 3
+            else -> 2
+        }
+        val row = when {
+            coordinate.yPercent < 25f -> 2
+            coordinate.yPercent < 75f -> 1
+            else -> 0
+        }
+        return row * 3 + column
     }
 
     fun fromEntry(entry: SubtitleEntry, format: SubtitleFormat): SubtitleCoordinate? =

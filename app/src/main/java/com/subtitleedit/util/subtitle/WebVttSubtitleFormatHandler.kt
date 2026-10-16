@@ -192,10 +192,15 @@ object WebVttSubtitleFormatHandler : SubtitleFormatHandler {
         updateCueSettings(entry, WebVttCueProcessing.settingsForAlignment(entry.cueSettings, alignment))
     }
 
+    /** Removes the alignment-derived position/line settings from a cue. */
+    internal fun clearCueAlignment(entry: SubtitleEntry) {
+        updateCueSettings(entry, WebVttCueProcessing.settingsForAlignment(entry.cueSettings, 2))
+    }
+
     /** Applies exact percentage coordinates while preserving other cue settings. */
     internal fun updateCueCoordinate(entry: SubtitleEntry, xPercent: Float, yPercent: Float) {
         if (entry.text.isEmpty()) return
-        updateCueSettings(
+        WebVttCueProcessing.updateCoordinateSettings(
             entry,
             WebVttCueProcessing.settingsForCoordinate(entry.cueSettings, xPercent, yPercent)
         )

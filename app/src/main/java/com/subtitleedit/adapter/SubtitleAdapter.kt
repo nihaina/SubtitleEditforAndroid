@@ -38,7 +38,8 @@ class SubtitleAdapter(
     private val onJumpToTimeClick: (SubtitleEntry, Int) -> Unit, // 跳转到字幕时间
     private val onSetTimeClick: (SubtitleEntry, Int) -> Unit, // 设置字幕时间为当前进度
     private var hasPlayableMedia: Boolean = false,
-    private val onSelectionChanged: (() -> Unit)? = null // 选中状态变化回调
+    private val onSelectionChanged: (() -> Unit)? = null, // 选中状态变化回调
+    private val onFormatMetadataClick: ((SubtitleEntry, Int) -> Unit)? = null
 ) : ListAdapter<SubtitleEntry, SubtitleAdapter.SubtitleViewHolder>(SubtitleDiffCallback()) {
 
     fun setHasPlayableMedia(value: Boolean) {
@@ -356,6 +357,12 @@ class SubtitleAdapter(
             }.joinToString(" · ")
             tvFormatMetadata.text = formatMetadata
             tvFormatMetadata.visibility = if (formatMetadata.isBlank()) View.GONE else View.VISIBLE
+            tvFormatMetadata.setOnClickListener {
+                val adapterPosition = adapterPosition
+                if (adapterPosition != RecyclerView.NO_POSITION) {
+                    onFormatMetadataClick?.invoke(entry, adapterPosition)
+                }
+            }
 
             bindTimeColors(currentList, position)
 

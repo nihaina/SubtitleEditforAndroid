@@ -33,6 +33,11 @@ internal class EditorCoordinatePickerView(
     private var xPercent = initial.xPercent
     private var yPercent = initial.yPercent
     private var dragging = false
+    // Keep the pointer position separately from the crosshair position.  The picker
+    // behaves like a touchpad: pressing anywhere on the video starts a relative drag
+    // and does not jump the crosshair underneath the finger.
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
 
     init {
         isClickable = true
@@ -68,17 +73,20 @@ internal class EditorCoordinatePickerView(
                 // Do not turn a press on letterbox/pillarbox into a coordinate jump. The
                 // selectable surface is the actual video image only.
                 dragging = videoContentRect().contains(event.x, event.y)
-                if (dragging) update(event.x, event.y)
+                if (dragging) {
+                    lastTouchX = event.x
+                    lastTouchY = event.y
+                }
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!dragging) return true
-                dragging = true
-                update(event.x, event.y)
+                moveBy(event.x - lastTouchX, event.y - lastTouchY)
+                lastTouchX = event.x
+                lastTouchY = event.y
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (dragging) update(event.x, event.y)
                 dragging = false
                 performClick()
                 return true
@@ -89,11 +97,12 @@ internal class EditorCoordinatePickerView(
 
     override fun performClick(): Boolean = super.performClick()
 
-    private fun update(x: Float, y: Float) {
+    private fun moveBy(deltaX: Float, deltaY: Float) {
         if (width <= 0 || height <= 0) return
         val content = videoContentRect()
-        xPercent = ((x - content.left) * 100f / content.width()).coerceIn(0f, 100f)
-        yPercent = ((y - content.top) * 100f / content.height()).coerceIn(0f, 100f)
+        if (content.width() <= 0f || content.height() <= 0f) return
+        xPercent = (xPercent + deltaX * 100f / content.width()).coerceIn(0f, 100f)
+        yPercent = (yPercent + deltaY * 100f / content.height()).coerceIn(0f, 100f)
         invalidate()
         onChanged(coordinate())
     }
