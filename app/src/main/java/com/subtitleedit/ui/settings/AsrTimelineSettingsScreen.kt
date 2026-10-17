@@ -39,8 +39,8 @@ data class AsrTimelineSettingsState(
     val filterLongMerge: Boolean = true,
     val punctuationSplit: Boolean = true,
     val mergeMaxCharacters: Int = 25,
-    val mergeGapMs: Int = 150,
-    val mergeGapText: String = "150"
+    val mergeGapMs: Int = 500,
+    val mergeGapText: String = "500"
 )
 
 @Composable
@@ -131,17 +131,10 @@ fun AsrTimelineSettingsScreen(
                     )
                     val mergeEnabled = state.tokenTimestampEnabled && state.tokenTimestampMerge
                     Column(modifier = Modifier.alpha(if (mergeEnabled) 1f else 0.5f)) {
-                        SettingsSwitchRow(
-                            title = stringResource(R.string.speech_merge_smart),
-                            description = stringResource(R.string.speech_merge_smart_hint),
-                            checked = state.smartMerge,
-                            enabled = mergeEnabled,
-                            onCheckedChange = onSmartMergeChanged
-                        )
                         Text(
                             text = stringResource(R.string.activity_speech_to_subtitle_settings_text_52),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (mergeEnabled && !state.smartMerge) {
+                            color = if (mergeEnabled) {
                                 MaterialTheme.colorScheme.onSurface
                             } else {
                                 MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
@@ -152,14 +145,14 @@ fun AsrTimelineSettingsScreen(
                             text = stringResource(R.string.activity_speech_to_subtitle_settings_text_53),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
-                                alpha = if (mergeEnabled && !state.smartMerge) 1f else 0.5f
+                                alpha = if (mergeEnabled) 1f else 0.5f
                             ),
                             modifier = Modifier.padding(start = 4.dp, top = 2.dp)
                         )
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .alpha(if (mergeEnabled && !state.smartMerge) 1f else 0.5f),
+                                .alpha(if (mergeEnabled) 1f else 0.5f),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             AppSlider(
@@ -167,13 +160,13 @@ fun AsrTimelineSettingsScreen(
                                 onValueChange = onMergeGapChanged,
                                 valueRange = 0f..5000f,
                                 steps = 99,
-                                enabled = mergeEnabled && !state.smartMerge,
+                                enabled = mergeEnabled,
                                 modifier = Modifier.weight(1f)
                             )
                             OutlinedTextField(
                                 value = state.mergeGapText,
                                 onValueChange = onMergeGapTextChanged,
-                                enabled = mergeEnabled && !state.smartMerge,
+                                enabled = mergeEnabled,
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 suffix = { Text(stringResource(R.string.unit_milliseconds)) },
@@ -182,6 +175,14 @@ fun AsrTimelineSettingsScreen(
                                     .width(104.dp)
                             )
                         }
+                        SettingsSwitchRow(
+                            title = stringResource(R.string.speech_merge_smart),
+                            description = stringResource(R.string.speech_merge_smart_hint),
+                            checked = state.smartMerge,
+                            enabled = mergeEnabled,
+                            onCheckedChange = onSmartMergeChanged,
+                            modifier = Modifier.padding(top = 12.dp)
+                        )
                         SettingsSwitchRow(
                             title = stringResource(R.string.speech_merge_filter_long),
                             checked = state.filterLongMerge,

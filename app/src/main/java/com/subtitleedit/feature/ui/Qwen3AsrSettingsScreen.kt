@@ -84,7 +84,7 @@ fun Qwen3AsrSettingsScreen(
 
     val alignerEnabled = forcedAlignmentAvailable && forcedAlignment
     val mergeEnabled = alignerEnabled && mergeSegments
-    val fixedGapEnabled = mergeEnabled && !smartMerge
+    val maxGapEnabled = mergeEnabled
     val smartOptionsEnabled = mergeEnabled && smartMerge
     val maxCharactersEnabled = smartOptionsEnabled && filterLongMerge
 
@@ -182,42 +182,24 @@ fun Qwen3AsrSettingsScreen(
                             .alpha(if (alignerEnabled) 1f else 0.5f)
                     )
 
-                    SettingsSwitchRow(
-                        title = stringResource(R.string.speech_merge_smart),
-                        checked = smartMerge,
-                        enabled = mergeEnabled,
-                        opacity = if (mergeEnabled) 1f else 0.5f,
-                        onCheckedChange = { enabled ->
-                            smartMerge = enabled
-                            settingsManager.setSpeechTokenTimestampSmartMergeEnabled(
-                                enabled,
-                                SettingsManager.ASR_MODEL_QWEN3_ASR
-                            )
-                        }
-                    )
-                    SupportingText(
-                        text = stringResource(R.string.speech_merge_smart_hint),
-                        modifier = Modifier.alpha(if (mergeEnabled) 1f else 0.5f)
-                    )
-
                     Text(
                         text = stringResource(R.string.activity_speech_to_subtitle_settings_text_52),
                         color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier
                             .padding(top = 12.dp)
-                            .alpha(if (fixedGapEnabled) 1f else 0.5f)
+                            .alpha(if (maxGapEnabled) 1f else 0.5f)
                     )
                     SupportingText(
                         text = stringResource(R.string.activity_speech_to_subtitle_settings_text_53),
                         modifier = Modifier
                             .padding(top = 2.dp)
-                            .alpha(if (fixedGapEnabled) 1f else 0.5f)
+                            .alpha(if (maxGapEnabled) 1f else 0.5f)
                     )
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .alpha(if (fixedGapEnabled) 1f else 0.5f),
+                            .alpha(if (maxGapEnabled) 1f else 0.5f),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         AppSlider(
@@ -230,7 +212,7 @@ fun Qwen3AsrSettingsScreen(
                             },
                             valueRange = 0f..5000f,
                             steps = 99,
-                            enabled = fixedGapEnabled,
+                            enabled = maxGapEnabled,
                             modifier = Modifier.weight(1f)
                         )
                         OutlinedTextField(
@@ -246,7 +228,7 @@ fun Qwen3AsrSettingsScreen(
                                     settingsManager.setSpeechTokenTimestampMergeGapMs(snapped)
                                 }
                             },
-                            enabled = fixedGapEnabled,
+                            enabled = maxGapEnabled,
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             suffix = { Text(stringResource(R.string.unit_milliseconds), style = MaterialTheme.typography.bodySmall) },
@@ -258,6 +240,25 @@ fun Qwen3AsrSettingsScreen(
                                 .width(104.dp)
                         )
                     }
+
+                    SettingsSwitchRow(
+                        title = stringResource(R.string.speech_merge_smart),
+                        checked = smartMerge,
+                        enabled = mergeEnabled,
+                        opacity = if (mergeEnabled) 1f else 0.5f,
+                        onCheckedChange = { enabled ->
+                            smartMerge = enabled
+                            settingsManager.setSpeechTokenTimestampSmartMergeEnabled(
+                                enabled,
+                                SettingsManager.ASR_MODEL_QWEN3_ASR
+                            )
+                        },
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                    SupportingText(
+                        text = stringResource(R.string.speech_merge_smart_hint),
+                        modifier = Modifier.alpha(if (mergeEnabled) 1f else 0.5f)
+                    )
 
                     SettingsSwitchRow(
                         title = stringResource(R.string.speech_merge_filter_long),

@@ -10,10 +10,11 @@ class TimedTextMergePolicyTest {
         cues: List<Cue>,
         smart: Boolean = true,
         limit: Int? = null,
-        splitPunctuation: Boolean = true
+        splitPunctuation: Boolean = true,
+        maxGapMs: Int = 500
     ): List<Cue> =
         TimedTextMergePolicy.merge(
-            cues, maxGapMs = 5000, smart = smart, maxCharacters = limit,
+            cues, maxGapMs = maxGapMs, smart = smart, maxCharacters = limit,
             start = { it.start }, end = { it.end }, text = { it.text },
             combine = { left, right -> Cue(left.start, maxOf(left.end, right.end), left.text + right.text) },
             split = { cue, index ->
@@ -32,10 +33,38 @@ class TimedTextMergePolicyTest {
     @Test
     fun smartMergeAcceptsGapsThroughFiveHundredMillisecondsAndRejectsLargerGap() {
         for (gap in listOf(0L, 1L, 150L, 200L, 230L, 250L, 300L, 350L, 400L, 499L, 500L)) {
-            assertEquals(listOf("甲乙"), merge(listOf(Cue(0, 10, "甲"), Cue(10 + gap, 20 + gap, "乙"))).map { it.text })
+            assertEquals(
+                listOf("甲乙"),
+                merge(
+                    listOf(Cue(0, 10, "甲"), Cue(10 + gap, 20 + gap, "乙")),
+                    maxGapMs = 500
+                ).map { it.text }
+            )
         }
         val cues = listOf(Cue(0, 10, "甲"), Cue(510, 520, "乙"), Cue(1021, 1031, "丙"))
-        assertEquals(listOf("甲乙", "丙"), merge(cues).map { it.text })
+        assertEquals(listOf("甲乙", "丙"), merge(cues, maxGapMs = 500).map { it.text })
+    }
+
+    @Test
+    fun smartMergeUsesConfiguredMaximumGapInsteadOfFixedFiveHundredMilliseconds() {
+        val cues = listOf(
+            Cue(0, 10, "甲"),
+            Cue(210, 220, "乙"), // 200 ms gap from the first cue
+            Cue(421, 431, "丙") // 201 ms gap from the merged first pair
+        )
+
+        assertEquals(
+            listOf("甲乙", "丙"),
+            merge(cues, maxGapMs = 200).map { it.text }
+        )
+        assertEquals(
+            listOf("甲乙丙"),
+            merge(cues, maxGapMs = 201).map { it.text }
+        )
+        assertEquals(
+            listOf("甲", "乙", "丙"),
+            merge(cues, maxGapMs = 0).map { it.text }
+        )
     }
 
     @Test
@@ -201,8 +230,11 @@ class TimedTextMergePolicyTest {
     @Test
     fun manualMergingIgnoresTheSmartLengthAndPunctuationOptions() {
         val cues = listOf(Cue(0, 100, "1234567890，甲乙"), Cue(1000, 1100, "丙丁戊己"))
-        assertEquals(listOf("1234567890，甲乙丙丁戊己"), merge(cues, smart = false, limit = 15).map { it.text })
-        assertEquals(cues, merge(cues, smart = true, limit = 15))
+        assertEquals(
+            listOf("1234567890，甲乙丙丁戊己"),
+            merge(cues, smart = false, limit = 15, maxGapMs = 5000).map { it.text }
+        )
+        assertEquals(cues, merge(cues, smart = true, limit = 15, maxGapMs = 500))
     }
 
     @Test

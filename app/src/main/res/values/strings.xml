@@ -382,9 +382,9 @@
     <string name="activity_speech_to_subtitle_settings_text_51">开启后，按所选间隔模式合并实验打轴的相邻字幕段，并按顺序拼接字幕内容</string>
     <string name="activity_speech_to_subtitle_settings_text_52">最大合并间隔</string>
     <string name="activity_speech_to_subtitle_settings_text_53">设为 0 时仅合并重叠或首尾相接的字幕段</string>
-    <string name="activity_speech_to_subtitle_settings_text_54" translatable="false">150</string>
+    <string name="activity_speech_to_subtitle_settings_text_54" translatable="false">500</string>
     <string name="speech_merge_smart">智能合并</string>
-    <string name="speech_merge_smart_hint">从 0 到 500 毫秒逐毫秒尝试合并，优先合并间隔较小的语音段</string>
+    <string name="speech_merge_smart_hint">从 0 到最大合并间隔逐毫秒尝试合并，优先合并间隔较小的语音段</string>
     <string name="speech_merge_filter_long">过滤较长段</string>
     <string name="speech_merge_max_characters">最大字数</string>
     <string name="speech_merge_punctuation_split">按标点切分</string>

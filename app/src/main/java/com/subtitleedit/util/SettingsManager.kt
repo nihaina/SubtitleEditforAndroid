@@ -1304,10 +1304,10 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun getSpeechTokenTimestampMergeGapMs(type: String = getAsrModelType()): Int {
-        val key = timelineKey("token_merge_gap_ms", type) ?: return 150
+        val key = timelineKey("token_merge_gap_ms", type) ?: return 500
         val fallback = if (type == ASR_MODEL_SENSEVOICE) {
-            prefs.getInt(KEY_STT_TOKEN_TIMESTAMP_MERGE_GAP_MS, 150)
-        } else 150
+            prefs.getInt(KEY_STT_TOKEN_TIMESTAMP_MERGE_GAP_MS, 500)
+        } else 500
         return prefs.getInt(key, fallback).coerceIn(0, 5000)
     }
 
@@ -1349,7 +1349,7 @@ class SettingsManager private constructor(context: Context) {
 
     fun speechTokenTimestampMergeSummary(): String = buildString {
         if (isSpeechTokenTimestampSmartMergeEnabled()) {
-            append("智能合并 0–${TimedTextMergePolicy.SMART_MAX_GAP_MS}ms，每轮增加 1ms")
+            append("智能合并 0–${getSpeechTokenTimestampMergeGapMs()}ms，每轮增加 1ms")
             if (isSpeechTokenTimestampLongSegmentFilterEnabled()) {
                 append("，目标 ${getSpeechTokenTimestampMergeMaxCharacters()} 字")
             }

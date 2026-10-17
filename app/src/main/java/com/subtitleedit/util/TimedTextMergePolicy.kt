@@ -1,7 +1,6 @@
 package com.subtitleedit.util
 
 internal object TimedTextMergePolicy {
-    const val SMART_MAX_GAP_MS = 500
     private val punctuationTypes = setOf(
         Character.CONNECTOR_PUNCTUATION.toInt(),
         Character.DASH_PUNCTUATION.toInt(),
@@ -49,8 +48,9 @@ internal object TimedTextMergePolicy {
         }
 
         val limit = maxCharacters?.coerceAtLeast(1)
+        val smartMaxGapMs = maxGapMs.coerceIn(0, 5000)
         var result = segments.map { MergeUnit(it) }
-        for (gapLimit in 0..SMART_MAX_GAP_MS) {
+        for (gapLimit in 0..smartMaxGapMs) {
             while (result.size > 1) {
                 val next = mutableListOf<MergeUnit<T>>()
                 var changed = false
