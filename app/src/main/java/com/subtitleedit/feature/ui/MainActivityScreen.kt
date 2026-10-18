@@ -144,7 +144,8 @@ internal data class MainActivityScreenState(
     val sortField: FileSortField = FileSortField.NAME,
     val sortDirection: FileSortDirection = FileSortDirection.ASCENDING,
     val canConvertSelected: Boolean = false,
-    val canCompressSelected: Boolean = true
+    val canCompressSelected: Boolean = true,
+    val canClearCacheSelected: Boolean = false
 )
 
 internal enum class MainCreateItemKind { FOLDER, FILE }
@@ -178,6 +179,7 @@ internal fun MainActivityScreen(
     onDelete: () -> Unit,
     onConvertSelection: () -> Unit,
     onCompressSelection: () -> Unit,
+    onClearCacheSelection: () -> Unit,
     onShowSelectionProperties: () -> Unit,
     onConfirmDestination: () -> Unit,
     onCancelDestination: () -> Unit,
@@ -196,7 +198,9 @@ internal fun MainActivityScreen(
     onDismissMainDialog: () -> Unit,
     onPermissionDialogConfirm: () -> Unit,
     onRenameConfirm: (String) -> Unit,
-    onDeleteConfirm: () -> Unit
+    onDeleteConfirm: () -> Unit,
+    onCacheItemSelected: (com.subtitleedit.ui.settings.SettingsCacheItem) -> Unit,
+    onCacheClearConfirm: (com.subtitleedit.ui.settings.SettingsCacheItem) -> Unit
 ) {
     val listState = rememberLazyListState()
     val topLevelPagesState = remember { MainTopLevelPagesState() }
@@ -527,8 +531,10 @@ internal fun MainActivityScreen(
                     onDelete = onDelete,
                     canConvert = state.canConvertSelected,
                     canCompress = state.canCompressSelected,
+                    canClearCache = state.canClearCacheSelected,
                     onConvert = onConvertSelection,
                     onCompress = onCompressSelection,
+                    onClearCache = onClearCacheSelection,
                     onProperties = onShowSelectionProperties,
                     onConfirmDestination = onConfirmDestination,
                     onCancelDestination = onCancelDestination
@@ -664,7 +670,9 @@ internal fun MainActivityScreen(
         onDismissMainDialog = onDismissMainDialog,
         onPermissionDialogConfirm = onPermissionDialogConfirm,
         onRenameConfirm = onRenameConfirm,
-        onDeleteConfirm = onDeleteConfirm
+        onDeleteConfirm = onDeleteConfirm,
+        onCacheItemSelected = onCacheItemSelected,
+        onCacheClearConfirm = onCacheClearConfirm
     )
 }
 
@@ -977,8 +985,10 @@ private fun SelectionActions(
     onDelete: () -> Unit,
     canConvert: Boolean,
     canCompress: Boolean,
+    canClearCache: Boolean,
     onConvert: () -> Unit,
     onCompress: () -> Unit,
+    onClearCache: () -> Unit,
     onProperties: () -> Unit,
     onConfirmDestination: () -> Unit,
     onCancelDestination: () -> Unit
@@ -1012,6 +1022,12 @@ private fun SelectionActions(
                         DropdownMenuItem(
                             text = { Text("压缩") },
                             onClick = { menuExpanded = false; onCompress() }
+                        )
+                    }
+                    if (canClearCache) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.clear_cache)) },
+                            onClick = { menuExpanded = false; onClearCache() }
                         )
                     }
                     DropdownMenuItem(

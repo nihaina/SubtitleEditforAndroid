@@ -64,8 +64,10 @@ import com.subtitleedit.util.ArchivePasswordVault
 import com.subtitleedit.util.DirectoryWatcher
 import com.subtitleedit.util.DirectorySearchController
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.util.MediaCacheCleaner
 import com.subtitleedit.util.SubtitleFormatConverter
 import com.subtitleedit.util.UpdateChecker
+import com.subtitleedit.ui.settings.SettingsCacheItem
 import java.io.File
 import java.lang.ref.WeakReference
 import kotlinx.coroutines.CancellationException
@@ -135,6 +137,7 @@ class MainActivity : AppComposeActivity() {
     private var pendingArchiveDraft: PendingArchiveDraft? = null
     private var pendingRenameFile: File? = null
     private var pendingDeleteFiles: List<File>? = null
+    private var pendingMediaCacheFiles: List<File>? = null
     private var nextSubtitleConversionDialogId = 0
     private val directoryWatcher = DirectoryWatcher(::refreshWatchedDirectory)
     private lateinit var directorySearchController: DirectorySearchController
@@ -300,6 +303,7 @@ class MainActivity : AppComposeActivity() {
                         onDelete = ::confirmDeleteSelectedFiles,
                         onConvertSelection = ::showSubtitleFormatConvertDialog,
                         onCompressSelection = ::showCreateArchiveDialog,
+                        onClearCacheSelection = ::showSelectedMediaCacheDialog,
                         onShowSelectionProperties = ::showSelectedProperties,
                         onConfirmDestination = ::completeDestinationOperation,
                         onCancelDestination = ::cancelDestinationSelection,
@@ -318,7 +322,9 @@ class MainActivity : AppComposeActivity() {
                         onDismissMainDialog = ::dismissMainDialog,
                         onPermissionDialogConfirm = ::confirmPermissionDialog,
                         onRenameConfirm = ::confirmRename,
-                        onDeleteConfirm = ::deleteConfirmedSelection
+                        onDeleteConfirm = ::deleteConfirmedSelection,
+                        onCacheItemSelected = ::confirmSelectedMediaCacheClear,
+                        onCacheClearConfirm = ::clearSelectedMediaCache
                 )
             }
         }
@@ -399,6 +405,9 @@ class MainActivity : AppComposeActivity() {
         val canConvertSelected = selectedFiles.isNotEmpty() && selectedFiles.all {
             it.isFile && FileUtils.isSubtitleFile(it)
         }
+        val canClearCacheSelected = selectedFiles.isNotEmpty() && selectedFiles.all {
+            it.isFile && (FileUtils.isAudioFile(it) || FileTypePolicy.isVideo(it))
+        }
         screenState = MainActivityScreenState(
             selectedTopLevelItem = document.selectedTopLevelItem,
             // Selection actions and title belong to the directory content. The
@@ -425,7 +434,8 @@ class MainActivity : AppComposeActivity() {
             sortField = document.sortField ?: FileSortField.NAME,
             sortDirection = document.sortDirection ?: FileSortDirection.ASCENDING,
             canConvertSelected = canConvertSelected,
-            canCompressSelected = !isFileSearchQueryActive()
+            canCompressSelected = !isFileSearchQueryActive(),
+            canClearCacheSelected = canClearCacheSelected
         )
     }
 
@@ -564,6 +574,7 @@ class MainActivity : AppComposeActivity() {
         mainDialog = null
         pendingRenameFile = null
         pendingDeleteFiles = null
+        pendingMediaCacheFiles = null
     }
 
     private fun confirmPermissionDialog() {
@@ -1022,7 +1033,29 @@ class MainActivity : AppComposeActivity() {
         val files = pendingDeleteFiles ?: return
         dismissMainDialog()
         stateModel.viewModelScope.launch {
-            val deleted = withContext(Dispatchers.IO) { files.all { it.deleteRecursively() } }
+            val deleted = withContext(Dispatchers.IO) {
+                var allDeleted = true
+                files.forEach { file ->
+                    val mediaFiles = when {
+                        isAudioOrVideoFile(file) -> listOf(file)
+                        file.isDirectory -> file.walkTopDown().filter(::isAudioOrVideoFile).toList()
+                        else -> emptyList()
+                    }
+                    val cacheSnapshot = mediaFiles.takeIf { it.isNotEmpty() }?.let {
+                        MediaCacheCleaner.snapshotForMedia(
+                            mediaFiles = it,
+                            kinds = MediaCacheCleaner.Kind.values().asList(),
+                            appCacheDir = cacheDir
+                        )
+                    }
+                    if (!file.deleteRecursively()) {
+                        allDeleted = false
+                    } else {
+                        cacheSnapshot?.let(MediaCacheCleaner::clear)
+                    }
+                }
+                allDeleted
+            }
             if (deleted) {
                 exitSelectionMode()
                 stateModel.documentState.currentDirectory?.let(::loadDirectory)
@@ -1031,6 +1064,82 @@ class MainActivity : AppComposeActivity() {
                 showShortToast("删除失败")
             }
         }
+    }
+
+    private fun showSelectedMediaCacheDialog() {
+        val mediaFiles = selectedFiles().filter(::isAudioOrVideoFile)
+        if (mediaFiles.isEmpty()) return
+        pendingMediaCacheFiles = mediaFiles
+        stateModel.viewModelScope.launch {
+            val cacheStats = withContext(Dispatchers.IO) {
+                MediaCacheCleaner.statsForMedia(mediaFiles, cacheDir)
+            }
+            val items = MediaCacheCleaner.Kind.values().map { kind ->
+                val stats = cacheStats.getValue(kind)
+                val labelRes = when (kind) {
+                    MediaCacheCleaner.Kind.WAVEFORM -> R.string.settings_cache_waveform_label
+                    MediaCacheCleaner.Kind.SPECTROGRAM -> R.string.settings_cache_spectrogram_label
+                    MediaCacheCleaner.Kind.QUICK_TRANSCRIBE -> R.string.settings_cache_quick_transcribe_label
+                }
+                val emptyRes = when (kind) {
+                    MediaCacheCleaner.Kind.WAVEFORM -> R.string.settings_cache_waveform_empty
+                    MediaCacheCleaner.Kind.SPECTROGRAM -> R.string.settings_cache_spectrogram_empty
+                    MediaCacheCleaner.Kind.QUICK_TRANSCRIBE -> R.string.settings_cache_quick_transcribe_empty
+                }
+                val label = getString(labelRes)
+                SettingsCacheItem(
+                    key = kind.key,
+                    label = label,
+                    sizeBytes = stats.sizeBytes,
+                    emptyMessage = getString(emptyRes),
+                    confirmationMessage = getString(
+                        R.string.file_manager_cache_confirm,
+                        mediaFiles.size,
+                        label,
+                        formatCacheSize(stats.sizeBytes)
+                    ),
+                    fileCount = stats.fileCount
+                )
+            }
+            if (pendingMediaCacheFiles == mediaFiles && mainDialog == null) {
+                mainDialog = MainActivityDialogUi.CacheSelection(items)
+            }
+        }
+    }
+
+    private fun confirmSelectedMediaCacheClear(item: SettingsCacheItem) {
+        if (item.fileCount <= 0) {
+            dismissMainDialog()
+            showShortToast(item.emptyMessage)
+        } else {
+            mainDialog = MainActivityDialogUi.CacheConfirmation(item)
+        }
+    }
+
+    private fun clearSelectedMediaCache(item: SettingsCacheItem) {
+        val mediaFiles = pendingMediaCacheFiles ?: selectedFiles().filter(::isAudioOrVideoFile)
+        dismissMainDialog()
+        val kind = MediaCacheCleaner.Kind.fromKey(item.key) ?: return
+        stateModel.viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                MediaCacheCleaner.clearForMedia(
+                    mediaFiles = mediaFiles,
+                    kinds = listOf(kind),
+                    appCacheDir = cacheDir
+                )
+            }
+            val kindLabel = item.label.removeSuffix("缓存")
+            showShortToast(getString(R.string.settings_cache_cleared, result.fileCount, kindLabel))
+        }
+    }
+
+    private fun isAudioOrVideoFile(file: File): Boolean = file.isFile &&
+        (FileUtils.isAudioFile(file) || FileTypePolicy.isVideo(file))
+
+    private fun formatCacheSize(bytes: Long): String = when {
+        bytes < 1024L -> "$bytes B"
+        bytes < 1024L * 1024 -> "${"%.1f".format(java.util.Locale.getDefault(), bytes / 1024.0)} KB"
+        else -> "${"%.2f".format(java.util.Locale.getDefault(), bytes / 1024.0 / 1024.0)} MB"
     }
 
     private fun showSubtitleFormatConvertDialog() {

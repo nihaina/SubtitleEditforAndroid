@@ -43,6 +43,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppOption
+import com.subtitleedit.ui.settings.SettingsCacheItem
 import com.subtitleedit.util.ArchiveManager
 
 internal sealed interface MainActivityDialogUi {
@@ -50,6 +51,8 @@ internal sealed interface MainActivityDialogUi {
     data object PermissionDenied : MainActivityDialogUi
     data class Rename(val initialName: String) : MainActivityDialogUi
     data class DeleteConfirmation(val selectedCount: Int) : MainActivityDialogUi
+    data class CacheSelection(val items: List<SettingsCacheItem>) : MainActivityDialogUi
+    data class CacheConfirmation(val item: SettingsCacheItem) : MainActivityDialogUi
 }
 
 internal data class SubtitleConversionDialogUi(
@@ -109,7 +112,9 @@ internal fun MainFileOperationDialogs(
     onDismissMainDialog: () -> Unit,
     onPermissionDialogConfirm: () -> Unit,
     onRenameConfirm: (String) -> Unit,
-    onDeleteConfirm: () -> Unit
+    onDeleteConfirm: () -> Unit,
+    onCacheItemSelected: (SettingsCacheItem) -> Unit,
+    onCacheClearConfirm: (SettingsCacheItem) -> Unit
 ) {
     subtitleConversion?.let { dialog ->
         SubtitleConversionDialog(
@@ -156,7 +161,9 @@ internal fun MainFileOperationDialogs(
             onDismiss = onDismissMainDialog,
             onPermissionConfirm = onPermissionDialogConfirm,
             onRenameConfirm = onRenameConfirm,
-            onDeleteConfirm = onDeleteConfirm
+            onDeleteConfirm = onDeleteConfirm,
+            onCacheItemSelected = onCacheItemSelected,
+            onCacheClearConfirm = onCacheClearConfirm
         )
     }
 }
@@ -167,7 +174,9 @@ private fun MainActivityDialog(
     onDismiss: () -> Unit,
     onPermissionConfirm: () -> Unit,
     onRenameConfirm: (String) -> Unit,
-    onDeleteConfirm: () -> Unit
+    onDeleteConfirm: () -> Unit,
+    onCacheItemSelected: (SettingsCacheItem) -> Unit,
+    onCacheClearConfirm: (SettingsCacheItem) -> Unit
 ) {
     when (dialog) {
         is MainActivityDialogUi.Message -> AlertDialog(
@@ -200,6 +209,46 @@ private fun MainActivityDialog(
             text = { Text("确定要删除选中的 ${dialog.selectedCount} 项吗？此操作无法撤销。") },
             confirmButton = {
                 Button(onClick = onDeleteConfirm) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+            }
+        )
+        is MainActivityDialogUi.CacheSelection -> AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(stringResource(R.string.clear_cache)) },
+            text = {
+                Column {
+                    dialog.items.forEach { item ->
+                        TextButton(
+                            onClick = { onCacheItemSelected(item) },
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp)
+                        ) {
+                            Text(
+                                stringResource(
+                                    R.string.settings_cache_item_with_size,
+                                    item.label,
+                                    item.displaySize()
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+            }
+        )
+        is MainActivityDialogUi.CacheConfirmation -> AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(stringResource(R.string.clear_cache_item, dialog.item.label)) },
+            text = { Text(dialog.item.confirmationMessage) },
+            confirmButton = {
+                TextButton(onClick = { onCacheClearConfirm(dialog.item) }) {
+                    Text(stringResource(R.string.clear))
+                }
             },
             dismissButton = {
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }

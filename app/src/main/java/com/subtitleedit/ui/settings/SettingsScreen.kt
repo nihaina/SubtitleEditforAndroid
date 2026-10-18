@@ -71,7 +71,8 @@ data class SettingsCacheItem(
     val label: String,
     val sizeBytes: Long,
     val emptyMessage: String,
-    val confirmationMessage: String
+    val confirmationMessage: String,
+    val fileCount: Int = 0
 ) {
     fun displaySize(): String = when {
         sizeBytes < 1024L -> "$sizeBytes B"
