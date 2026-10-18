@@ -74,7 +74,6 @@ data class AiModelChooserUi(
 data class AiSettingsScreenState(
     val provider: String,
     val localModelName: String,
-    val localContextSize: Int = 2048,
     val subtitlesPerRequest: Int = 200,
     /** Runtime state is deliberately separate from the imported model path. */
     val localModelLoaded: Boolean = false,
@@ -108,7 +107,6 @@ data class AiSettingsScreenState(
             return AiSettingsScreenState(
                 provider = provider,
                 localModelName = settings.getLlmModelDisplayName(),
-                localContextSize = settings.getLlmContextSize(),
                 subtitlesPerRequest = settings.getAiSubtitlesPerRequest(provider),
                 apiKey = settings.getAiApiKey(provider),
                 baseUrl = if (AiProviderConfig.getProvider(provider).customEndpoint) {
@@ -174,9 +172,6 @@ fun AiSettingsScreen(
                 onRevealApiKey = onRevealApiKey,
                 onHideApiKey = { onStateChange { it.copy(apiKeyVisible = false) } },
                 onCopyApiKey = onCopyApiKey,
-                onContextSizeChange = { value ->
-                    onStateChange { it.copy(localContextSize = value) }
-                },
                 onSubtitlesPerRequestChange = { value ->
                     onStateChange { it.copy(subtitlesPerRequest = value) }
                 },
@@ -247,7 +242,6 @@ private fun ProviderCard(
     onRevealApiKey: () -> Unit,
     onHideApiKey: () -> Unit,
     onCopyApiKey: () -> Unit,
-    onContextSizeChange: (Int) -> Unit,
     onSubtitlesPerRequestChange: (Int) -> Unit,
     onLoadLocalModel: () -> Unit,
     onUnloadLocalModel: () -> Unit
@@ -295,26 +289,6 @@ private fun ProviderCard(
             modifier = Modifier.padding(top = 2.dp)
         )
         if (provider.id == AiProviderConfig.LOCAL) {
-            var contextSizeText by remember(state.localContextSize) {
-                mutableStateOf(state.localContextSize.toString())
-            }
-            OutlinedTextField(
-                value = contextSizeText,
-                onValueChange = { value ->
-                    val digits = value.filter(Char::isDigit)
-                    contextSizeText = digits
-                    digits.toIntOrNull()
-                        ?.takeIf { it in 1024..32768 }
-                        ?.let(onContextSizeChange)
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                label = { Text(stringResource(R.string.activity_ai_settings_local_context_size)) },
-                singleLine = true,
-                enabled = !state.localModelLoaded && !state.localModelLoading,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-            )
             Text(
                 text = stringResource(R.string.activity_ai_settings_local_model_label),
                 style = MaterialTheme.typography.bodySmall,

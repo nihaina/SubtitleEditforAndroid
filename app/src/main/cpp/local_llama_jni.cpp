@@ -2,6 +2,7 @@
 
 #include "llama.h"
 #include "chat.h"
+#include "reasoning-budget.h"
 #include "ggml-backend.h"
 
 #include <algorithm>
@@ -59,6 +60,20 @@ std::vector<std::string> jobject_array_to_strings(JNIEnv * env, jobjectArray val
         env->DeleteLocalRef(value);
     }
     return result;
+}
+
+llama_tokens tokenize(const llama_vocab * vocab, const std::string & text) {
+    if (vocab == nullptr || text.empty()) return {};
+    const int32_t count = -llama_tokenize(
+        vocab, text.c_str(), static_cast<int32_t>(text.size()), nullptr, 0, false, true);
+    if (count <= 0) return {};
+    llama_tokens tokens(static_cast<size_t>(count));
+    if (llama_tokenize(
+            vocab, text.c_str(), static_cast<int32_t>(text.size()),
+            tokens.data(), count, false, true) < 0) {
+        return {};
+    }
+    return tokens;
 }
 
 // Return the largest prefix ending on a complete UTF-8 code point. Token
@@ -208,6 +223,9 @@ Java_com_subtitleedit_localllm_LocalLlmNative_generate(
     jlong handle,
     jint context_size,
     jfloat temperature,
+    jfloat top_p,
+    jfloat repetition_penalty,
+    jint thinking_budget,
     jobjectArray role_values,
     jobjectArray content_values,
     jboolean thinking_enabled,
@@ -423,11 +441,50 @@ Java_com_subtitleedit_localllm_LocalLlmNative_generate(
     const uint32_t batch_limit = llama_n_batch(model->context);
 
     auto sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler * reasoning_budget_sampler = nullptr;
+    if (thinking_enabled == JNI_TRUE && thinking_budget >= 0 &&
+        !rendered.thinking_start_tag.empty() && !rendered.thinking_end_tags.empty()) {
+        const auto start_tokens = tokenize(vocab, rendered.thinking_start_tag);
+        std::vector<llama_tokens> end_tokens;
+        end_tokens.reserve(rendered.thinking_end_tags.size());
+        for (const auto & end_tag : rendered.thinking_end_tags) {
+            auto tokens = tokenize(vocab, end_tag);
+            if (!tokens.empty()) end_tokens.push_back(std::move(tokens));
+        }
+        const auto forced_tokens = end_tokens.empty() ? llama_tokens{} : end_tokens.front();
+        if (!start_tokens.empty() && !end_tokens.empty() && !forced_tokens.empty()) {
+            const auto initial_state = rendered.generation_prompt.find(rendered.thinking_start_tag) !=
+                std::string::npos ? REASONING_BUDGET_COUNTING : REASONING_BUDGET_IDLE;
+            reasoning_budget_sampler = common_reasoning_budget_init(
+                vocab,
+                {start_tokens},
+                end_tokens,
+                forced_tokens,
+                std::max(0, static_cast<int>(thinking_budget)),
+                initial_state);
+            llama_sampler_chain_add(
+                sampler,
+                reasoning_budget_sampler);
+            if (initial_state == REASONING_BUDGET_COUNTING) {
+                for (const auto & token : tokenize(vocab, rendered.generation_prompt)) {
+                    llama_sampler_accept(reasoning_budget_sampler, token);
+                }
+            }
+        }
+    }
+    const float normalized_repetition_penalty = std::clamp(repetition_penalty, 1.0f, 2.0f);
+    if (normalized_repetition_penalty > 1.0f) {
+        llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
+            llama_vocab_n_tokens(vocab), 256, normalized_repetition_penalty, 0.0f, 0.0f));
+    }
     if (temperature <= 0.001f) {
         llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
     } else {
         llama_sampler_chain_add(sampler, llama_sampler_init_top_k(40));
-        llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.95f, 1));
+        const float normalized_top_p = std::clamp(top_p, 0.0f, 1.0f);
+        if (normalized_top_p < 1.0f) {
+            llama_sampler_chain_add(sampler, llama_sampler_init_top_p(normalized_top_p, 1));
+        }
         llama_sampler_chain_add(sampler, llama_sampler_init_temp(temperature));
         llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
     }

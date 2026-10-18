@@ -190,9 +190,6 @@ internal class AiSettingsViewModel(
         if (current.subtitlesPerRequest != next.subtitlesPerRequest) {
             settingsManager.setAiSubtitlesPerRequest(current.provider, next.subtitlesPerRequest)
         }
-        if (current.localContextSize != next.localContextSize) {
-            settingsManager.setLlmContextSize(next.localContextSize)
-        }
         if (current.provider == next.provider) {
             if (current.apiKey != next.apiKey) {
                 settingsManager.setAiApiKey(current.provider, next.apiKey.trim())
@@ -503,7 +500,11 @@ internal class AiSettingsViewModel(
                             ""
                         },
                         localRepackEnabled = settingsManager.isLlmRepackEnabled(),
-                        localContextSize = settingsManager.getLlmContextSize()
+                        localContextSize = settingsManager.getLlmContextSize(),
+                        localThinkingBudget = settingsManager.getLlmThinkingBudget(),
+                        localTemperature = settingsManager.getLlmTemperature(),
+                        localTopP = settingsManager.getLlmTopP(),
+                        localRepetitionPenalty = settingsManager.getLlmRepetitionPenalty()
                     )
                 )
             )

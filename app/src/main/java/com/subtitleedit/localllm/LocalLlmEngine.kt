@@ -106,6 +106,10 @@ object LocalLlmEngine {
         modelPath: String,
         repackEnabled: Boolean,
         contextSize: Int,
+        thinkingBudget: Int,
+        temperature: Float,
+        topP: Float,
+        repetitionPenalty: Float,
         thinkingEnabled: Boolean,
         conversation: List<LocalChatMessage>,
         onDelta: (String) -> Unit,
@@ -158,7 +162,10 @@ object LocalLlmEngine {
                         null,
                         repackEnabled,
                         contextSize.coerceIn(MIN_CONTEXT, MAX_CONTEXT),
-                        DEFAULT_TEMPERATURE,
+                        temperature.coerceIn(0f, 2f),
+                        topP.coerceIn(0f, 1f),
+                        repetitionPenalty.coerceIn(1f, 2f),
+                        thinkingBudget.coerceIn(64, contextSize.coerceIn(MIN_CONTEXT, MAX_CONTEXT)),
                         conversation.map { it.role }.toTypedArray(),
                         conversation.map { it.content }.toTypedArray(),
                         thinkingEnabled,
@@ -272,7 +279,6 @@ object LocalLlmEngine {
         }
     }
 
-    private const val DEFAULT_TEMPERATURE = 0f
     private const val MIN_CONTEXT = 1024
     private const val MAX_CONTEXT = 32768
 }

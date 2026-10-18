@@ -628,7 +628,11 @@ data class ChatBackendConfig(
     /** GGUF path and repack preference consumed by LocalLlmBackend. */
     val localModelPath: String = "",
     val localRepackEnabled: Boolean = true,
-    val localContextSize: Int = 2048
+    val localContextSize: Int = 2048,
+    val localThinkingBudget: Int = 512,
+    val localTemperature: Float = 0.8f,
+    val localTopP: Float = 0.95f,
+    val localRepetitionPenalty: Float = 1.0f
 )
 
 enum class ChatReasoningLevel(val effort: String) {

@@ -173,7 +173,6 @@
     <string name="activity_ai_settings_punctuation_title">标点预测</string>
     <string name="activity_ai_settings_punctuation_prompt_hint">标点预测使用的 AI 平台和处理设置</string>
     <string name="activity_ai_settings_hint_04">目标语言</string>
-    <string name="activity_ai_settings_local_context_size">上下文长度</string>
     <string name="activity_ai_settings_subtitles_per_request">单次处理字幕条数</string>
     <string name="activity_ai_settings_subtitles_per_request_hint">范围 1–%1$d，默认 %2$d。</string>
     <string name="activity_ai_settings_local_model_label">当前模型</string>
@@ -402,6 +401,14 @@
     <string name="llm_settings_section">本地 LLM</string>
     <string name="llm_settings_repack_title">启用重打包</string>
     <string name="llm_settings_repack_hint">控制本地 llama.cpp 加载 GGUF 模型时是否启用额外缓冲区重打包。</string>
+    <string name="llm_settings_context_size">上下文大小</string>
+    <string name="llm_settings_context_size_hint">本地模型上下文窗口大小（1024-32768 tokens）。</string>
+    <string name="llm_settings_thinking_budget">思考预算</string>
+    <string name="llm_settings_thinking_budget_hint">思考阶段最多使用的 token 数，范围为 64 到上下文大小。</string>
+    <string name="llm_settings_temperature">温度</string>
+    <string name="llm_settings_top_p">Top-P</string>
+    <string name="llm_settings_repetition_penalty">重复惩罚</string>
+    <string name="llm_settings_disabled">已禁用</string>
     <string name="qwen3_asr_vad_title">使用 VAD 打轴</string>
     <string name="asr_vad_settings_entry">VAD 配置</string>
     <string name="qwen3_asr_vad_switch">使用 VAD 检测并划分语音段</string>

@@ -16,6 +16,6 @@ Java_com_subtitleedit_localllm_LocalLlmNative_cancel(JNIEnv *, jobject, jlong) {
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_subtitleedit_localllm_LocalLlmNative_generate(
-    JNIEnv *, jobject, jlong, jint, jfloat, jobjectArray, jobjectArray, jboolean, jobject) {
+    JNIEnv *, jobject, jlong, jint, jfloat, jfloat, jfloat, jint, jobjectArray, jobjectArray, jboolean, jobject) {
     return 1;
 }

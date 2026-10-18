@@ -103,6 +103,10 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_LLM_MODEL_FAMILY = "llm_model_family"
         private const val KEY_LLM_REPACK_ENABLED = "llm_repack_enabled"
         private const val KEY_LLM_CONTEXT_SIZE = "llm_context_size"
+        private const val KEY_LLM_THINKING_BUDGET = "llm_thinking_budget"
+        private const val KEY_LLM_TEMPERATURE = "llm_temperature"
+        private const val KEY_LLM_TOP_P = "llm_top_p"
+        private const val KEY_LLM_REPETITION_PENALTY = "llm_repetition_penalty"
         private const val KEY_LLM_SUBTITLES_PER_REQUEST = "llm_subtitles_per_request"
         private const val KEY_AI_SUBTITLES_PER_REQUEST = "ai_subtitles_per_request"
         private const val KEY_VAD_THRESHOLD = "vad_threshold"
@@ -311,6 +315,14 @@ class SettingsManager private constructor(context: Context) {
                 snapshot[key] = isSpeechVadDynamicPaddingEnabled(type)
             }
         }
+        // Include effective local LLM values even when the user has never
+        // opened the LLM settings page and the defaults are not persisted yet.
+        snapshot[KEY_LLM_REPACK_ENABLED] = isLlmRepackEnabled()
+        snapshot[KEY_LLM_CONTEXT_SIZE] = getLlmContextSize()
+        snapshot[KEY_LLM_THINKING_BUDGET] = getLlmThinkingBudget()
+        snapshot[KEY_LLM_TEMPERATURE] = getLlmTemperature()
+        snapshot[KEY_LLM_TOP_P] = getLlmTopP()
+        snapshot[KEY_LLM_REPETITION_PENALTY] = getLlmRepetitionPenalty()
         return snapshot
     }
 
@@ -954,6 +966,40 @@ class SettingsManager private constructor(context: Context) {
 
     fun setLlmContextSize(size: Int) {
         prefs.edit().putInt(KEY_LLM_CONTEXT_SIZE, size.coerceIn(1024, 32768)).apply()
+    }
+
+    fun getLlmThinkingBudget(): Int {
+        val contextSize = getLlmContextSize()
+        return prefs.getInt(KEY_LLM_THINKING_BUDGET, contextSize / 4)
+            .coerceIn(64, contextSize)
+    }
+
+    fun setLlmThinkingBudget(tokens: Int) {
+        prefs.edit().putInt(
+            KEY_LLM_THINKING_BUDGET,
+            tokens.coerceIn(64, getLlmContextSize())
+        ).apply()
+    }
+
+    fun getLlmTemperature(): Float = prefs.getFloat(KEY_LLM_TEMPERATURE, 0.8f)
+        .coerceIn(0f, 2f)
+
+    fun setLlmTemperature(value: Float) {
+        prefs.edit().putFloat(KEY_LLM_TEMPERATURE, value.coerceIn(0f, 2f)).apply()
+    }
+
+    fun getLlmTopP(): Float = prefs.getFloat(KEY_LLM_TOP_P, 0.95f)
+        .coerceIn(0f, 1f)
+
+    fun setLlmTopP(value: Float) {
+        prefs.edit().putFloat(KEY_LLM_TOP_P, value.coerceIn(0f, 1f)).apply()
+    }
+
+    fun getLlmRepetitionPenalty(): Float = prefs.getFloat(KEY_LLM_REPETITION_PENALTY, 1.0f)
+        .coerceIn(1f, 2f)
+
+    fun setLlmRepetitionPenalty(value: Float) {
+        prefs.edit().putFloat(KEY_LLM_REPETITION_PENALTY, value.coerceIn(1f, 2f)).apply()
     }
 
     fun getAiSubtitlesPerRequest(provider: String): Int {

@@ -66,7 +66,11 @@ class AiTranslationConversation(
                 ""
             },
             localRepackEnabled = settingsManager.isLlmRepackEnabled(),
-            localContextSize = settingsManager.getLlmContextSize()
+            localContextSize = settingsManager.getLlmContextSize(),
+            localThinkingBudget = settingsManager.getLlmThinkingBudget(),
+            localTemperature = settingsManager.getLlmTemperature(),
+            localTopP = settingsManager.getLlmTopP(),
+            localRepetitionPenalty = settingsManager.getLlmRepetitionPenalty()
         ),
         tools = if (provider == AiProviderConfig.LOCAL) emptyList() else ChatTools.create(context.applicationContext),
         context = context.applicationContext

@@ -50,6 +50,10 @@ class LocalLlmBackend(
                 modelPath = config.localModelPath,
                 repackEnabled = config.localRepackEnabled,
                 contextSize = config.localContextSize,
+                thinkingBudget = config.localThinkingBudget,
+                temperature = config.localTemperature,
+                topP = config.localTopP,
+                repetitionPenalty = config.localRepetitionPenalty,
                 thinkingEnabled = config.thinkingEnabled,
                 conversation = requestMessages,
                 onDelta = { delta ->
