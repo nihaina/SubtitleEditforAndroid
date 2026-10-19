@@ -10,6 +10,7 @@ import com.subtitleedit.chat.ChatTools
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser.SubtitleFormat
 import kotlinx.coroutines.CancellationException
+import java.io.IOException
 import java.util.UUID
 
 /**
@@ -173,76 +174,25 @@ class AiTranslationConversation(
                 activeBatch = batch
                 activeBatchStart = startPosition + translations.size
                 streamedContent.setLength(0)
-                var streamedBatchCount = 0
-                val userContent = buildTranslationUserContent(
-                    subtitles = batch,
-                    targetLanguage = targetLanguage,
-                    customPrompt = customPrompt,
-                    startPosition = activeBatchStart,
-                    format = subtitleFormat,
-                    sequenceOnly = localProvider,
-                    includeBlockMarkers = !localProvider,
-                    indexTranslate = indexTranslate2bModel
-                )
-                val result = conversation.sendUserMessage(
-                    content = userContent,
-                    onEvent = { event ->
-                        if (event is ChatBackend.Event.TextDelta) {
-                            streamedContent.append(event.text)
-                            runCatching { streamCallback?.invoke(streamedContent.toString()) }
-                            val completedPrefix = completedBatchPrefix(
-                                content = streamedContent.toString(),
-                                expected = batch,
-                                startPosition = activeBatchStart
-                            ).size
-                            if (completedPrefix > streamedBatchCount) {
-                                streamedBatchCount = completedPrefix
-                                runCatching {
-                                    streamProgressCallback?.invoke(
-                                        translations.size + streamedBatchCount,
-                                        subtitles.size
-                                    )
-                                }
-                            }
-                        }
-                    },
-                    isCancelled = isCancelled
-                )
-                if (streamedContent.isEmpty()) {
-                    streamedContent.append(result.text)
-                    runCatching { streamCallback?.invoke(streamedContent.toString()) }
-                    val completedPrefix = completedBatchPrefix(
-                        content = streamedContent.toString(),
-                        expected = batch,
-                        startPosition = activeBatchStart
-                    ).size
-                    if (completedPrefix > streamedBatchCount) {
-                        streamedBatchCount = completedPrefix
-                        runCatching {
-                            streamProgressCallback?.invoke(
-                                translations.size + streamedBatchCount,
-                                subtitles.size
-                            )
-                        }
-                    }
-                }
-                historyStore.append(
-                    id = historySessionId,
-                    title = historyTitle ?: "翻译为$targetLanguage · ${subtitles.size} 条字幕",
-                    type = ChatHistoryStore.TYPE_TRANSLATION,
-                    messages = result.messages
-                )
-                val batchTranslations = parseSubtitleTranslation(
-                    content = result.text,
-                    expectedSubtitles = batch,
-                    format = subtitleFormat,
-                    expectedStartPosition = activeBatchStart,
-                    sequenceOnly = localProvider
+                val batchTranslations = translateBatchWithRecovery(
+                    batch = batch,
+                    batchStart = activeBatchStart,
+                    totalSubtitles = subtitles.size,
+                    completedBeforeBatch = translations.size,
+                    streamCallback = streamCallback,
+                    streamProgressCallback = streamProgressCallback,
+                    isCancelled = isCancelled,
+                    streamedContent = streamedContent
                 )
                 translations += batchTranslations
+                activeBatch = emptyList()
+                streamedContent.setLength(0)
                 progressCallback?.invoke(translations.size, subtitles.size)
             }
             return TranslationRunResult(translations)
+        } catch (error: BatchTranslationCancelled) {
+            translations += error.completedTranslations
+            throw TranslationCancelledException(translations, error.message)
         } catch (error: CancellationException) {
             translations += completedBatchPrefix(
                 content = streamedContent.toString(),
@@ -253,6 +203,317 @@ class AiTranslationConversation(
         } catch (error: Exception) {
             return TranslationRunResult(translations, error)
         }
+    }
+
+    private sealed class BatchAttempt {
+        data class Success(val translations: List<String>) : BatchAttempt()
+        data class Failure(
+            val issue: TranslationProtocolIssue,
+            val completedPrefix: List<String>
+        ) : BatchAttempt()
+    }
+
+    private class BatchTranslationCancelled(
+        val completedTranslations: List<String>,
+        message: String?
+    ) : CancellationException(message ?: "翻译已取消")
+
+    /**
+     * Finishes one batch before returning anything to the caller. A protocol error is recovered
+     * in three increasingly narrow passes: retry from the preceding cue, retry a three-cue
+     * window, then retry the preceding cue/current cue separately before continuing with the tail.
+     */
+    private suspend fun translateBatchWithRecovery(
+        batch: List<SubtitleEntry>,
+        batchStart: Int,
+        totalSubtitles: Int,
+        completedBeforeBatch: Int,
+        streamCallback: ((String) -> Unit)?,
+        streamProgressCallback: ((Int, Int) -> Unit)?,
+        isCancelled: () -> Boolean,
+        streamedContent: StringBuilder
+    ): List<String> {
+        val translated = arrayOfNulls<String>(batch.size)
+        val pending = ArrayDeque<List<Int>>()
+        pending.add((batch.indices).toList())
+        var lastIssueIndex: Int? = null
+        var retryLevel = 0
+        var activeRequestIndices: List<Int>? = null
+
+        fun reportProgress() {
+            val completed = translated.count { it != null }
+            runCatching {
+                streamProgressCallback?.invoke(
+                    completedBeforeBatch + completed,
+                    totalSubtitles
+                )
+            }
+        }
+
+        fun enqueueMissingRanges() {
+            var rangeStart = -1
+            for (index in 0..translated.size) {
+                val missing = index < translated.size && translated[index] == null
+                if (missing && rangeStart < 0) rangeStart = index
+                if (!missing && rangeStart >= 0) {
+                    pending.add((rangeStart until index).toList())
+                    rangeStart = -1
+                }
+            }
+        }
+
+        try {
+            while (pending.isNotEmpty()) {
+                if (isCancelled()) throw CancellationException("翻译已取消")
+                val requestIndices = pending.removeFirst()
+                if (requestIndices.isEmpty()) continue
+                activeRequestIndices = requestIndices
+                val attempt = requestBatchRange(
+                    batch = batch,
+                    batchStart = batchStart,
+                    requestIndices = requestIndices,
+                    streamCallback = streamCallback,
+                    isCancelled = isCancelled,
+                    streamedContent = streamedContent
+                )
+                activeRequestIndices = null
+                when (attempt) {
+                    is BatchAttempt.Success -> {
+                        requestIndices.zip(attempt.translations).forEach { (index, text) ->
+                            translated[index] = text
+                        }
+                        reportProgress()
+                        // A successful three-cue recovery window only covers the local
+                        // window. Continue with the untouched tail before declaring the
+                        // batch complete. Existing stage-three queues already contain
+                        // their remaining requests, so do not duplicate them.
+                        if (pending.isEmpty()) {
+                            enqueueMissingRanges()
+                        }
+                    }
+
+                    is BatchAttempt.Failure -> {
+                        val issueOffset = attempt.issue.index.coerceIn(0, requestIndices.lastIndex)
+                        requestIndices.take(attempt.completedPrefix.size.coerceAtMost(issueOffset))
+                            .zip(attempt.completedPrefix)
+                            .forEach { (index, text) -> translated[index] = text }
+                        reportProgress()
+
+                        val issueIndex = requestIndices[issueOffset]
+                        if (lastIssueIndex != issueIndex) {
+                            lastIssueIndex = issueIndex
+                            retryLevel = 1
+                        } else {
+                            retryLevel++
+                        }
+                        if (retryLevel > 3) {
+                            throw IOException(
+                                "字幕第 ${batchStart + issueIndex} 条连续三次返回格式错误：${attempt.issue.message}"
+                            )
+                        }
+
+                        pending.clear()
+                        when (retryLevel) {
+                            1 -> {
+                                val retryStart = (issueIndex - 1).coerceAtLeast(0)
+                                pending.add((retryStart until batch.size).toList())
+                            }
+
+                            2 -> {
+                                val windowStart = (issueIndex - 1).coerceAtLeast(0)
+                                val windowEnd = (issueIndex + 2).coerceAtMost(batch.size)
+                                pending.add((windowStart until windowEnd).toList())
+                            }
+
+                            else -> {
+                                val previous = (issueIndex - 1).takeIf { it >= 0 }
+                                previous?.let { pending.add(listOf(it)) }
+                                pending.add(listOf(issueIndex))
+                                if (issueIndex + 1 < batch.size) {
+                                    pending.add((issueIndex + 1 until batch.size).toList())
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (error: CancellationException) {
+            if (isCancelled()) {
+                activeRequestIndices?.let { requestIndices ->
+                    val requestSubtitles = requestIndices.map(batch::get)
+                    val completedPrefix = completedBatchPrefix(
+                        streamedContent.toString(),
+                        requestSubtitles,
+                        batchStart + requestIndices.first()
+                    )
+                    requestIndices.take(completedPrefix.size)
+                        .zip(completedPrefix)
+                        .forEach { (index, text) -> translated[index] = text }
+                }
+                // A retry can have completed later cues while earlier ones are still pending.
+                // Returning only the contiguous prefix keeps subtitle/result alignment intact.
+                throw BatchTranslationCancelled(
+                    translated.takeWhile { it != null }.filterNotNull(),
+                    error.message
+                )
+            }
+            throw error
+        }
+
+        if (translated.any { it == null }) {
+            throw IOException("AI 未完成当前批次翻译")
+        }
+        @Suppress("UNCHECKED_CAST")
+        return translated.toList() as List<String>
+    }
+
+    private suspend fun requestBatchRange(
+        batch: List<SubtitleEntry>,
+        batchStart: Int,
+        requestIndices: List<Int>,
+        streamCallback: ((String) -> Unit)?,
+        isCancelled: () -> Boolean,
+        streamedContent: StringBuilder
+    ): BatchAttempt {
+        val requestSubtitles = requestIndices.map(batch::get)
+        val requestStart = batchStart + requestIndices.first()
+        val userContent = buildTranslationUserContent(
+            subtitles = requestSubtitles,
+            targetLanguage = targetLanguage,
+            customPrompt = customPrompt,
+            startPosition = requestStart,
+            format = subtitleFormat,
+            sequenceOnly = localProvider,
+            includeBlockMarkers = !localProvider,
+            indexTranslate = indexTranslate2bModel
+        )
+        streamedContent.setLength(0)
+        val streamedReasoning = StringBuilder()
+        var protocolIssue: TranslationProtocolIssue? = null
+
+        suspend fun recordInterruptedAttempt() {
+            val messages = listOf(
+                ChatBackend.ChatMessage(role = "user", content = userContent),
+                ChatBackend.ChatMessage(
+                    role = "assistant",
+                    content = streamedContent.toString(),
+                    reasoningContent = streamedReasoning.toString()
+                )
+            )
+            conversation.appendInterruptedTurn(
+                userContent = userContent,
+                partialAssistantContent = streamedContent.toString(),
+                partialReasoningContent = streamedReasoning.toString()
+            )
+            historyStore.append(
+                id = historySessionId,
+                title = historyTitle ?: "翻译为$targetLanguage · ${batch.size} 条字幕",
+                type = ChatHistoryStore.TYPE_TRANSLATION,
+                messages = messages
+            )
+        }
+
+        val result = try {
+            conversation.sendUserMessage(
+                content = userContent,
+                onEvent = { event ->
+                    when (event) {
+                        is ChatBackend.Event.ReasoningDelta -> streamedReasoning.append(event.text)
+                        is ChatBackend.Event.TextDelta -> {
+                            streamedContent.append(event.text)
+                            runCatching { streamCallback?.invoke(streamedContent.toString()) }
+                            if (protocolIssue == null) {
+                                findTranslationProtocolIssue(
+                                    content = streamedContent.toString(),
+                                    expectedSubtitles = requestSubtitles,
+                                    format = subtitleFormat,
+                                    expectedStartPosition = requestStart,
+                                    sequenceOnly = localProvider,
+                                    finalResponse = false
+                                )?.let { issue ->
+                                    protocolIssue = issue
+                                    // Causes both the HTTP SSE reader and the local generation loop
+                                    // to stop at the first identifiable bad cue.
+                                    conversation.cancel()
+                                }
+                            }
+                        }
+                        else -> Unit
+                    }
+                },
+                isCancelled = { isCancelled() || protocolIssue != null }
+            )
+        } catch (error: CancellationException) {
+            if (protocolIssue != null && !isCancelled()) {
+                recordInterruptedAttempt()
+                return BatchAttempt.Failure(
+                    protocolIssue!!,
+                    completedBatchPrefix(streamedContent.toString(), requestSubtitles, requestStart)
+                )
+            }
+            throw error
+        } catch (error: Exception) {
+            if (protocolIssue != null && !isCancelled()) {
+                recordInterruptedAttempt()
+                return BatchAttempt.Failure(
+                    protocolIssue!!,
+                    completedBatchPrefix(streamedContent.toString(), requestSubtitles, requestStart)
+                )
+            }
+            throw error
+        }
+
+        if (streamedContent.isEmpty()) {
+            streamedContent.append(result.text)
+            runCatching { streamCallback?.invoke(streamedContent.toString()) }
+        }
+        if (protocolIssue != null) {
+            return BatchAttempt.Failure(
+                protocolIssue!!,
+                completedBatchPrefix(streamedContent.toString(), requestSubtitles, requestStart)
+            )
+        }
+        val finalIssue = findTranslationProtocolIssue(
+            content = result.text,
+            expectedSubtitles = requestSubtitles,
+            format = subtitleFormat,
+            expectedStartPosition = requestStart,
+            sequenceOnly = localProvider,
+            finalResponse = true
+        )
+        if (finalIssue != null) {
+            historyStore.append(
+                id = historySessionId,
+                title = historyTitle ?: "翻译为$targetLanguage",
+                type = ChatHistoryStore.TYPE_TRANSLATION,
+                messages = result.messages
+            )
+            return BatchAttempt.Failure(
+                finalIssue,
+                completedBatchPrefix(result.text, requestSubtitles, requestStart)
+            )
+        }
+        historyStore.append(
+            id = historySessionId,
+            title = historyTitle ?: "翻译为$targetLanguage · ${batch.size} 条字幕",
+            type = ChatHistoryStore.TYPE_TRANSLATION,
+            messages = result.messages
+        )
+        val parsed = try {
+            parseSubtitleTranslation(
+                content = result.text,
+                expectedSubtitles = requestSubtitles,
+                format = subtitleFormat,
+                expectedStartPosition = requestStart,
+                sequenceOnly = localProvider
+            )
+        } catch (error: Exception) {
+            return BatchAttempt.Failure(
+                TranslationProtocolIssue(0, error.message ?: "AI 返回字幕格式无效"),
+                completedBatchPrefix(result.text, requestSubtitles, requestStart)
+            )
+        }
+        return BatchAttempt.Success(parsed)
     }
 
     private fun completedBatchPrefix(

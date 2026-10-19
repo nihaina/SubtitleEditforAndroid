@@ -33,6 +33,10 @@ private val TIMED_SUBTITLE_LINE = Regex(
     """^[ \t]*(\d{1,3}:\d{2}:\d{2}[,.]\d{3})[ \t]*(?:-->|->|—>|——>)[ \t]*(\d{1,3}:\d{2}:\d{2}[,.]\d{3})[ \t]*\r?$""",
     RegexOption.MULTILINE
 )
+private val TIMED_SUBTITLE_ARROW_LINE = Regex(
+    """^[ \t]*([0-9][^\s]*:[^\s]*)[ \t]*(?:-->|->|—>|——>)[ \t]*([^\s]*)[ \t]*\r?$""",
+    RegexOption.MULTILINE
+)
 private val TRANSLATION_TIMESTAMP =
     Regex("""^(\d{1,3}):(\d{2}):(\d{2})[,.](\d{3})$""")
 private val SRT_SEQUENCE_BEFORE_CUE = Regex("""\n[ \t]*\d+[ \t]*\n[ \t]*$""")
@@ -41,6 +45,7 @@ private val SUBTITLE_SEQUENCE_LINE = Regex("""^[ \t]*(\d+)[ \t]*\r?$""", RegexOp
 private val INLINE_SUBTITLE_SEQUENCE_LINE =
     Regex("""^[ \t]*\[([0-9]+)](.*)$""", RegexOption.MULTILINE)
 private val LRC_TIME_TAG = Regex("""\[-?\d{1,4}:\d{1,2}(?:[.:]\d{1,3})?]""")
+private val LRC_TAGGED_LINE = Regex("""^\s*\[[^\]\r\n]*]""", RegexOption.MULTILINE)
 private val LRC_TIMED_LINE = Regex(
     """^\s*(?:\[-?\d{1,4}:\d{1,2}(?:[.:]\d{1,3})?])+""",
     RegexOption.MULTILINE
@@ -263,6 +268,249 @@ internal fun parseSubtitleTranslation(
     }
 }
 
+/** The first subtitle in a response that violates the input protocol. */
+internal data class TranslationProtocolIssue(
+    val index: Int,
+    val message: String
+)
+
+/**
+ * Inspects a streamed or completed response without requiring the whole batch to be valid.
+ * `finalResponse` enables missing-cue detection; while streaming, a missing cue is not known
+ * until a later cue or the end of the response has arrived.
+ */
+internal fun findTranslationProtocolIssue(
+    content: String,
+    expectedSubtitles: List<SubtitleEntry>,
+    format: SubtitleFormat,
+    expectedStartPosition: Int = 1,
+    sequenceOnly: Boolean = false,
+    finalResponse: Boolean = false
+): TranslationProtocolIssue? {
+    if (expectedSubtitles.isEmpty()) return null
+    if (content.isBlank()) {
+        return if (finalResponse) {
+            TranslationProtocolIssue(0, "AI 未返回字幕翻译结果")
+        } else {
+            null
+        }
+    }
+    return if (sequenceOnly) {
+        findSequenceProtocolIssue(content, expectedSubtitles, expectedStartPosition, finalResponse)
+    } else if (format == SubtitleFormat.SRT) {
+        findTimedProtocolIssue(content, expectedSubtitles, expectedStartPosition, finalResponse)
+    } else {
+        findIndexedProtocolIssue(content, expectedSubtitles, format, expectedStartPosition, finalResponse)
+    }
+}
+
+private fun findSequenceProtocolIssue(
+    content: String,
+    expectedSubtitles: List<SubtitleEntry>,
+    expectedStartPosition: Int,
+    finalResponse: Boolean
+): TranslationProtocolIssue? {
+    val expected = expectedSubtitles.mapIndexed { offset, subtitle ->
+        subtitle.index.takeIf { it > 0 } ?: (expectedStartPosition + offset)
+    }
+    val expectedSet = expected.toSet()
+    val seen = mutableSetOf<Int>()
+    extractSequenceSubtitleBlocks(content).forEach { block ->
+        if (block.sequence !in expectedSet) {
+            val index = expected.indexOfFirst { it !in seen }
+                .takeIf { it >= 0 } ?: expected.lastIndex
+            return TranslationProtocolIssue(index, "AI 返回了非本批次序号 ${block.sequence}")
+        }
+        if (!seen.add(block.sequence)) {
+            return TranslationProtocolIssue(
+                expected.indexOf(block.sequence).coerceAtLeast(0),
+                "翻译结果包含重复字幕序号：${block.sequence}"
+            )
+        }
+        val returnedIndex = expected.indexOf(block.sequence)
+        val skippedIndex = (0 until returnedIndex).firstOrNull { expected[it] !in seen }
+        if (skippedIndex != null) {
+            return TranslationProtocolIssue(
+                skippedIndex,
+                "AI 返回序号 ${block.sequence} 前缺少原字幕序号 ${expected[skippedIndex]}"
+            )
+        }
+    }
+    if (finalResponse) {
+        val missing = expected.indexOfFirst { it !in seen }
+        if (missing >= 0) {
+            return TranslationProtocolIssue(
+                missing,
+                "AI 返回 ${seen.size}/${expected.size} 个匹配字幕；缺少：原字幕 ${expected[missing]}"
+            )
+        }
+    }
+    return null
+}
+
+private fun findTimedProtocolIssue(
+    content: String,
+    expectedSubtitles: List<SubtitleEntry>,
+    expectedStartPosition: Int,
+    finalResponse: Boolean
+): TranslationProtocolIssue? {
+    val expected = expectedSubtitles.map(SubtitleEntry::translationTimeRange)
+    val expectedCounts = expected.groupingBy { it }.eachCount()
+    val seenCounts = mutableMapOf<TranslationTimeRange, Int>()
+    val normalized = markedTranslationContent(content)
+        ?: limitToSrtCodeBlock(normalizeSubtitleText(content))
+    // Match timestamp-like lines even when their shape is malformed, so streaming can stop
+    // as soon as a bad timestamp arrives instead of waiting for final missing-cue detection.
+    val timeMatches = TIMED_SUBTITLE_ARROW_LINE.findAll(normalized)
+        .filter { match ->
+            finalResponse ||
+                (match.range.last + 1 < normalized.length &&
+                    normalized[match.range.last + 1] == '\n')
+        }
+        .toList()
+    val usedExpected = mutableSetOf<Int>()
+    timeMatches.forEachIndexed { index, match ->
+        val startTime = parseTranslationTimestamp(match.groupValues[1])
+        val endTime = parseTranslationTimestamp(match.groupValues[2])
+        if (startTime == null || endTime == null) {
+            return TranslationProtocolIssue(
+                index.coerceAtMost(expected.lastIndex),
+                "字幕时间戳无法解析：${match.groupValues[1]} --> ${match.groupValues[2]}"
+            )
+        }
+        val range = TranslationTimeRange(startTime, endTime)
+        val expectedIndex = expected.indices.firstOrNull {
+            it !in usedExpected && expected[it] == range
+        }
+        if (expectedIndex == null) {
+            val firstMissing = expected.indices.firstOrNull { it !in usedExpected }
+                ?: index.coerceAtMost(expected.lastIndex)
+            return TranslationProtocolIssue(firstMissing, "翻译结果包含非本批次时间轴：${range.format()}")
+        }
+        val skippedIndex = (0 until expectedIndex).firstOrNull { it !in usedExpected }
+        if (skippedIndex != null) {
+            return TranslationProtocolIssue(
+                skippedIndex,
+                "返回时间轴 ${range.format()} 前缺少原字幕时间轴 ${expected[skippedIndex].format()}"
+            )
+        }
+        usedExpected += expectedIndex
+        val sequenceLine = normalized.substring(0, match.range.first)
+            .lineSequence()
+            .lastOrNull { it.isNotBlank() }
+            ?.trim()
+        val returnedSequence = sequenceLine?.toIntOrNull()
+        val expectedSequence = expectedSubtitles[expectedIndex].index
+            .takeIf { it > 0 } ?: (expectedStartPosition + expectedIndex)
+        if (returnedSequence == null || returnedSequence != expectedSequence) {
+            return TranslationProtocolIssue(
+                expectedIndex,
+                "序号 ${returnedSequence ?: "缺失"} 与原字幕序号 $expectedSequence 不一致"
+            )
+        }
+    }
+    extractTimedSubtitleBlocks(content).forEach { block ->
+        val expectedCount = expectedCounts[block.timeRange]
+        if (expectedCount == null) {
+            val index = expected.indices.firstOrNull { seenCounts.getOrDefault(expected[it], 0) < expectedCounts.getValue(expected[it]) }
+                ?: 0
+            return TranslationProtocolIssue(index, "翻译结果包含非本批次时间轴：${block.timeRange.format()}")
+        }
+        val count = seenCounts.getOrDefault(block.timeRange, 0)
+        if (count >= expectedCount) {
+            val index = expected.indexOf(block.timeRange).coerceAtLeast(0)
+            return TranslationProtocolIssue(index, "翻译结果包含重复时间轴：${block.timeRange.format()}")
+        }
+        seenCounts[block.timeRange] = count + 1
+    }
+    if (finalResponse) {
+        val missing = expected.indices.firstOrNull {
+            seenCounts.getOrDefault(expected[it], 0) < expectedCounts.getValue(expected[it])
+        }
+        if (missing != null) {
+            return TranslationProtocolIssue(
+                missing,
+                "AI 返回 ${seenCounts.values.sum()}/${expected.size} 个匹配时间轴；缺少：原字幕"
+            )
+        }
+    }
+    return null
+}
+
+private fun findIndexedProtocolIssue(
+    content: String,
+    expectedSubtitles: List<SubtitleEntry>,
+    format: SubtitleFormat,
+    expectedStartPosition: Int,
+    finalResponse: Boolean
+): TranslationProtocolIssue? {
+    val expected = expectedSubtitles.mapIndexed { offset, subtitle ->
+        IndexedSubtitleKey(
+            sequence = subtitle.index.takeIf { it > 0 } ?: (expectedStartPosition + offset),
+            startTimeMs = normalizedIndexedStartTime(subtitle, format),
+            endTimeMs = subtitle.endTime.takeIf { format == SubtitleFormat.VTT }
+        )
+    }
+    val bySequence = expected.groupBy { it.sequence }
+    val seen = mutableSetOf<Int>()
+    val expectedCueIdentifiers = expectedSubtitles.mapIndexed { offset, subtitle ->
+        (subtitle.index.takeIf { it > 0 } ?: (expectedStartPosition + offset)) to subtitle.cueIdentifier
+    }.toMap()
+    extractIndexedSubtitleBlocks(
+        content,
+        format,
+        finalResponse,
+        expectedCueIdentifiers
+    ).forEach { block ->
+        val expectedKey = bySequence[block.sequence]?.firstOrNull()
+        if (expectedKey == null) {
+            val index = expected.indexOfFirst { it.sequence !in seen }
+                .takeIf { it >= 0 } ?: expected.lastIndex
+            return TranslationProtocolIssue(index, "AI 返回了非本批次序号 ${block.sequence}")
+        }
+        if (!seen.add(block.sequence)) {
+            return TranslationProtocolIssue(
+                expected.indexOfFirst { it.sequence == block.sequence }.coerceAtLeast(0),
+                "翻译结果包含重复字幕序号：${block.sequence}"
+            )
+        }
+        val returnedIndex = expected.indexOf(expectedKey)
+        val skippedIndex = (0 until returnedIndex).firstOrNull {
+            expected[it].sequence !in seen
+        }
+        if (skippedIndex != null) {
+            return TranslationProtocolIssue(
+                skippedIndex,
+                "AI 返回序号 ${block.sequence} 前缺少原字幕序号 ${expected[skippedIndex].sequence}"
+            )
+        }
+        if (block.startTimeMs == null || (format == SubtitleFormat.VTT && block.endTimeMs == null)) {
+            return TranslationProtocolIssue(
+                expected.indexOf(expectedKey).coerceAtLeast(0),
+                "序号 ${block.sequence} 的原格式时间轴无法解析"
+            )
+        }
+        if (block.startTimeMs != expectedKey.startTimeMs ||
+            (format == SubtitleFormat.VTT && block.endTimeMs != expectedKey.endTimeMs)
+        ) {
+            return TranslationProtocolIssue(
+                expected.indexOf(expectedKey).coerceAtLeast(0),
+                "序号 ${block.sequence} 的时间轴与原字幕不一致"
+            )
+        }
+    }
+    if (finalResponse) {
+        val missing = expected.indexOfFirst { it.sequence !in seen }
+        if (missing >= 0) {
+            return TranslationProtocolIssue(
+                missing,
+                "AI 返回 ${seen.size}/${expected.size} 个匹配字幕；缺少：原字幕 ${expected[missing].sequence}"
+            )
+        }
+    }
+    return null
+}
+
 private data class SequenceSubtitleBlock(
     val sequence: Int,
     val text: String
@@ -378,7 +626,14 @@ private fun parseIndexedSubtitleTranslation(
         )
     }
     val expectedBySequence = expectedKeys.associateBy { it.sequence }
-    val blocks = extractIndexedSubtitleBlocks(content, format)
+    val expectedCueIdentifiers = expectedSubtitles.mapIndexed { offset, subtitle ->
+        (subtitle.index.takeIf { it > 0 } ?: (expectedStartPosition + offset)) to subtitle.cueIdentifier
+    }.toMap()
+    val blocks = extractIndexedSubtitleBlocks(
+        content,
+        format,
+        expectedCueIdentifiers = expectedCueIdentifiers
+    )
     if (blocks.isEmpty()) {
         throw IOException("AI 未返回带序号的 ${format.name} 字幕块")
     }
@@ -437,12 +692,18 @@ private fun parseIndexedSubtitleTranslation(
 
 private fun extractIndexedSubtitleBlocks(
     content: String,
-    format: SubtitleFormat
+    format: SubtitleFormat,
+    finalResponse: Boolean = true,
+    expectedCueIdentifiers: Map<Int, String> = emptyMap()
 ): List<IndexedSubtitleBlock> {
     val normalizedContent = markedTranslationContent(content)
         ?: limitToIndexedCodeBlock(normalizeSubtitleText(content), format)
     if (format == SubtitleFormat.VTT) {
-        return extractIndexedVttSubtitleBlocks(normalizedContent)
+        return extractIndexedVttSubtitleBlocks(
+            normalizedContent,
+            finalResponse,
+            expectedCueIdentifiers
+        )
     }
     val sequenceMatches = SUBTITLE_SEQUENCE_LINE.findAll(normalizedContent)
         .filter { sequenceMatch ->
@@ -451,7 +712,13 @@ private fun extractIndexedSubtitleBlocks(
                 .lineSequence()
                 .dropWhile { it.isBlank() }
                 .firstOrNull()
-                ?.let(LRC_TIMED_LINE::containsMatchIn) == true
+                ?.let { line ->
+                    if (format == SubtitleFormat.LRC) {
+                        LRC_TAGGED_LINE.containsMatchIn(line)
+                    } else {
+                        LRC_TIMED_LINE.containsMatchIn(line)
+                    }
+                } == true
         }
         .toList()
     return sequenceMatches.mapNotNull { sequenceMatch ->
@@ -469,31 +736,95 @@ private fun extractIndexedSubtitleBlocks(
     }
 }
 
-private fun extractIndexedVttSubtitleBlocks(content: String): List<IndexedSubtitleBlock> {
-    val sequenceMatches = SUBTITLE_SEQUENCE_LINE.findAll(content).toList()
-    val timeMatches = VTT_TIMED_LINE.findAll(content).toList()
+private fun extractIndexedVttSubtitleBlocks(
+    content: String,
+    finalResponse: Boolean,
+    expectedCueIdentifiers: Map<Int, String>
+): List<IndexedSubtitleBlock> {
+    val allSequenceMatches = SUBTITLE_SEQUENCE_LINE.findAll(content).toList()
+    val identifierLineStarts = mutableSetOf<Int>()
+    allSequenceMatches.forEach { sequenceMatch ->
+        val sequence = sequenceMatch.groupValues[1].toIntOrNull() ?: return@forEach
+        val expectedIdentifier = expectedCueIdentifiers[sequence]
+            ?.takeIf(String::isNotBlank) ?: return@forEach
+        val nextLineStart = content.indexOf('\n', sequenceMatch.range.last + 1)
+            .takeIf { it >= 0 }?.plus(1) ?: return@forEach
+        var candidateLineStart = nextLineStart
+        while (candidateLineStart < content.length) {
+            val candidateLineEnd = content.indexOf('\n', candidateLineStart)
+            if (candidateLineEnd < 0) break
+            val candidateLine = content.substring(candidateLineStart, candidateLineEnd)
+                .trimEnd('\r')
+            if (candidateLine.isNotBlank()) {
+                if (candidateLine == expectedIdentifier) {
+                    allSequenceMatches.firstOrNull {
+                        it.range.first == candidateLineStart
+                    }?.let { identifierLineStarts += candidateLineStart }
+                }
+                break
+            }
+            candidateLineStart = candidateLineEnd + 1
+        }
+    }
+    val sequenceMatches = allSequenceMatches.filter { it.range.first !in identifierLineStarts }
+    val timeMatches = VTT_TIMED_LINE.findAll(content)
+        .filter { match ->
+            finalResponse || content.indexOf('\n', match.range.first) >= 0
+        }
+        .toList()
     val blocks = mutableListOf<IndexedSubtitleBlock>()
     var sequenceIndex = 0
     while (sequenceIndex < sequenceMatches.size) {
         val sequenceMatch = sequenceMatches[sequenceIndex]
-        val timeMatch = timeMatches.firstOrNull { it.range.first > sequenceMatch.range.last }
-        if (timeMatch == null) {
-            val sequence = sequenceMatch.groupValues[1].toIntOrNull()
-            if (sequence != null) {
-                blocks += IndexedSubtitleBlock(sequence, null, null, "")
-            }
-            break
-        }
-        val nextSequence = sequenceMatches.firstOrNull { it.range.first > timeMatch.range.last }
-        val blockEnd = nextSequence?.range?.first ?: content.length
         val sequence = sequenceMatch.groupValues[1].toIntOrNull()
-        if (sequence != null) {
-            val body = content.substring(sequenceMatch.range.last + 1, blockEnd)
-                .trim('\n', '\r')
-                .removeTrailingMarkdownFence()
-            parseIndexedVttBlock(sequence, body)?.let(blocks::add)
+        if (sequence == null) {
+            sequenceIndex++
+            continue
         }
-        sequenceIndex = sequenceMatches.indexOfFirst { it.range.first >= blockEnd }
+        val nextSequence = sequenceMatches.firstOrNull { it.range.first > sequenceMatch.range.first }
+        val timeMatch = timeMatches.firstOrNull {
+            it.range.first > sequenceMatch.range.last &&
+                (nextSequence == null || it.range.first < nextSequence.range.first)
+        }
+        if (timeMatch == null) {
+            if (!finalResponse && nextSequence == null) {
+                fun nextCompletedNonBlankLine(from: Int): Pair<String, Int>? {
+                    var lineStart = from
+                    while (lineStart < content.length) {
+                        val lineEnd = content.indexOf('\n', lineStart)
+                        if (lineEnd < 0) return null
+                        val line = content.substring(lineStart, lineEnd).trimEnd('\r')
+                        if (line.isNotBlank()) return line to lineStart
+                        lineStart = lineEnd + 1
+                    }
+                    return null
+                }
+                val identifier = expectedCueIdentifiers[sequence]?.takeIf(String::isNotBlank)
+                val firstLine = nextCompletedNonBlankLine(sequenceMatch.range.last + 1)
+                if (firstLine == null) return blocks
+                val nextLine = if (firstLine.first == identifier) {
+                    nextCompletedNonBlankLine(content.indexOf('\n', firstLine.second) + 1)
+                        ?: return blocks
+                } else {
+                    firstLine
+                }
+                if (nextLine.first.isBlank()) return blocks
+            }
+            blocks += IndexedSubtitleBlock(sequence, null, null, "")
+            sequenceIndex++
+            continue
+        }
+        val nextSequenceAfterTime = sequenceMatches.firstOrNull {
+            it.range.first > timeMatch.range.last
+        }
+        val sectionEnd = nextSequenceAfterTime?.range?.first ?: content.length
+        val body = content.substring(sequenceMatch.range.last + 1, sectionEnd)
+            .trim('\n', '\r')
+            .removeTrailingMarkdownFence()
+        val block = parseIndexedVttBlock(sequence, body)
+            ?: IndexedSubtitleBlock(sequence, null, null, "")
+        blocks += block
+        sequenceIndex = sequenceMatches.indexOfFirst { it.range.first >= sectionEnd }
             .takeIf { it >= 0 } ?: sequenceMatches.size
     }
     return blocks
@@ -615,7 +946,14 @@ internal fun parseCompletedIndexedTranslationPrefix(
             endTimeMs = subtitle.endTime.takeIf { format == SubtitleFormat.VTT }
         )
     }
-    val extractedBlocks = extractIndexedSubtitleBlocks(content, format)
+    val expectedCueIdentifiers = expectedSubtitles.mapIndexed { offset, subtitle ->
+        (subtitle.index.takeIf { it > 0 } ?: (expectedStartPosition + offset)) to subtitle.cueIdentifier
+    }.toMap()
+    val extractedBlocks = extractIndexedSubtitleBlocks(
+        content,
+        format,
+        expectedCueIdentifiers = expectedCueIdentifiers
+    )
     val completedBlocks = if (hasCompleteTranslationBlock(content)) {
         extractedBlocks
     } else {

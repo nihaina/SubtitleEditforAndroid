@@ -140,6 +140,44 @@ class ChatBackendTest {
     }
 
     @Test
+    fun interruptedTurnIsIncludedInTheNextRequestContext() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody("data: {\"choices\":[{\"delta\":{\"content\":\"重试后的译文\"}}]}\n\n" +
+                    "data: [DONE]\n\n"))
+            val conversation = ChatConversation(
+                config = ChatBackendConfig(
+                    providerId = "custom",
+                    apiKey = "test-key",
+                    model = "test-model",
+                    baseUrl = server.url("/v1").toString(),
+                )
+            )
+
+            conversation.appendInterruptedTurn(
+                userContent = "字幕 3 至 8 的翻译请求",
+                partialAssistantContent = "3\n00:00:03,000 --> 00:00:04,000\n三\n\n4\n错误时间戳",
+                partialReasoningContent = "先检查时间戳"
+            )
+            conversation.sendUserMessage("重新翻译字幕 3 至 8")
+
+            val messages = JSONObject(server.takeRequest().body.readUtf8())
+                .getJSONArray("messages")
+            assertEquals(3, messages.length())
+            assertEquals("user", messages.getJSONObject(0).getString("role"))
+            assertEquals("字幕 3 至 8 的翻译请求", messages.getJSONObject(0).getString("content"))
+            assertEquals("assistant", messages.getJSONObject(1).getString("role"))
+            assertEquals(
+                "3\n00:00:03,000 --> 00:00:04,000\n三\n\n4\n错误时间戳",
+                messages.getJSONObject(1).getString("content")
+            )
+            assertEquals("先检查时间戳", messages.getJSONObject(1).getString("reasoning_content"))
+            assertEquals("重新翻译字幕 3 至 8", messages.getJSONObject(2).getString("content"))
+        }
+    }
+
+    @Test
     fun toolCall_isExecutedAndContinuedInsideBackend() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse()

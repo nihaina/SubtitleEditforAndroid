@@ -58,6 +58,20 @@ class ChatConversation(
 
     suspend fun snapshot(): List<ChatBackend.ChatMessage> = historyMutex.withLock { history.toList() }
 
+    /** Adds a user turn and its partial assistant reply when generation was interrupted. */
+    suspend fun appendInterruptedTurn(
+        userContent: String,
+        partialAssistantContent: String,
+        partialReasoningContent: String = ""
+    ) = historyMutex.withLock {
+        history += ChatBackend.ChatMessage(role = "user", content = userContent)
+        history += ChatBackend.ChatMessage(
+            role = "assistant",
+            content = partialAssistantContent,
+            reasoningContent = partialReasoningContent
+        )
+    }
+
     suspend fun clear() = historyMutex.withLock {
         history.removeAll { it.role != "system" }
     }

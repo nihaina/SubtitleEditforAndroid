@@ -4,12 +4,183 @@ import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser.SubtitleFormat
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
 
 class AiTranslationProtocolTest {
+
+    @Test
+    fun streamingSequenceProtocol_detectsSkippedCueImmediately() {
+        val expected = listOf(
+            testSubtitle(1, "one"),
+            testSubtitle(2, "two"),
+            testSubtitle(3, "three")
+        )
+
+        val issue = findTranslationProtocolIssue(
+            content = "[1]一\n\n[3]三",
+            expectedSubtitles = expected,
+            format = SubtitleFormat.SRT,
+            sequenceOnly = true
+        )
+
+        assertNotNull(issue)
+        assertEquals(1, issue!!.index)
+    }
+
+    @Test
+    fun streamingIndexedProtocol_detectsSkippedSequenceImmediately() {
+        val expected = listOf(
+            testSubtitle(1, "one"),
+            testSubtitle(2, "two"),
+            testSubtitle(3, "three")
+        )
+        val content = "1\n[00:02.000]一\n\n3\n[00:06.000]三"
+
+        val issue = findTranslationProtocolIssue(
+            content = content,
+            expectedSubtitles = expected,
+            format = SubtitleFormat.LRC
+        )
+
+        assertNotNull(issue)
+        assertEquals(1, issue!!.index)
+    }
+
+    @Test
+    fun streamingTimedProtocol_detectsWrongTimestampBeforeBatchEnds() {
+        val expected = listOf(
+            testSubtitle(1, "one"),
+            testSubtitle(2, "two")
+        )
+        val issue = findTranslationProtocolIssue(
+            content = "1\n${expected[0].getTimeAxisSRT()}\n一\n\n" +
+                "2\n00:00:99 --> 00:01:00,000\n二\n",
+            expectedSubtitles = expected,
+            format = SubtitleFormat.SRT
+        )
+
+        assertNotNull(issue)
+        assertEquals(1, issue!!.index)
+    }
+
+    @Test
+    fun streamingTimedProtocol_ignoresIncompleteTimestampLineUntilItEnds() {
+        val expected = listOf(testSubtitle(1, "one"))
+        val partial = "1\n00:00:01,000 --> 00:00:"
+
+        val issue = findTranslationProtocolIssue(
+            content = partial,
+            expectedSubtitles = expected,
+            format = SubtitleFormat.SRT
+        )
+
+        assertEquals(null, issue)
+    }
+
+    @Test
+    fun streamingVttProtocol_waitsForTimestampAfterSequence() {
+        val expected = listOf(testSubtitle(1, "one"))
+        val issue = findTranslationProtocolIssue(
+            content = "1\n",
+            expectedSubtitles = expected,
+            format = SubtitleFormat.VTT
+        )
+
+        assertEquals(null, issue)
+    }
+
+    @Test
+    fun streamingVttProtocol_waitsAfterNumericCueIdentifier() {
+        val expected = listOf(
+            SubtitleEntry(
+                index = 7,
+                startTime = 1_000,
+                endTime = 2_000,
+                cueIdentifier = "123",
+                text = "one"
+            )
+        )
+        val issue = findTranslationProtocolIssue(
+            content = "7\n123\n",
+            expectedSubtitles = expected,
+            format = SubtitleFormat.VTT
+        )
+
+        assertEquals(null, issue)
+    }
+
+    @Test
+    fun streamingVttProtocol_detectsMalformedCompletedTimestampLine() {
+        val expected = listOf(testSubtitle(1, "one"))
+        val issue = findTranslationProtocolIssue(
+            content = "1\nnot-a-time --> 00:00:03.500\ntext\n",
+            expectedSubtitles = expected,
+            format = SubtitleFormat.VTT
+        )
+
+        assertNotNull(issue)
+        assertEquals(0, issue!!.index)
+    }
+
+    @Test
+    fun vttProtocol_numericCueIdentifierIsNotTreatedAsSequence() {
+        val expected = listOf(
+            SubtitleEntry(
+                index = 7,
+                startTime = 1_000,
+                endTime = 2_000,
+                cueIdentifier = "8",
+                text = "one"
+            ),
+            SubtitleEntry(index = 8, startTime = 3_000, endTime = 4_000, text = "two")
+        )
+        val response = "7\n8\n00:00:01.000 --> 00:00:02.000\n一\n\n" +
+            "8\n00:00:03.000 --> 00:00:04.000\n二"
+
+        val issue = findTranslationProtocolIssue(
+            content = response,
+            expectedSubtitles = expected,
+            format = SubtitleFormat.VTT,
+            finalResponse = true
+        )
+
+        assertEquals(null, issue)
+        assertEquals(
+            listOf("一", "二"),
+            parseSubtitleTranslation(response, expected, SubtitleFormat.VTT)
+        )
+    }
+
+    @Test
+    fun streamingLrcProtocol_detectsMalformedTimestampTag() {
+        val expected = listOf(testSubtitle(1, "one"))
+        val issue = findTranslationProtocolIssue(
+            content = "1\n[not-a-time]\ntext",
+            expectedSubtitles = expected,
+            format = SubtitleFormat.LRC
+        )
+
+        assertNotNull(issue)
+        assertEquals(0, issue!!.index)
+    }
+
+    @Test
+    fun finalProtocolCheck_detectsMissingCue() {
+        val expected = listOf(testSubtitle(1, "one"), testSubtitle(2, "two"))
+        val issue = findTranslationProtocolIssue(
+            content = "1\n${expected[0].getTimeAxisSRT()}\n一",
+            expectedSubtitles = expected,
+            format = SubtitleFormat.SRT,
+            finalResponse = true
+        )
+
+        assertNotNull(issue)
+        assertEquals(1, issue!!.index)
+    }
 
     @Test
     fun batches_defaultToTwoHundredSubtitles() {
