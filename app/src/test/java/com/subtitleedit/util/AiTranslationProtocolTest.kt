@@ -57,8 +57,8 @@ class AiTranslationProtocolTest {
             testSubtitle(2, "two")
         )
         val issue = findTranslationProtocolIssue(
-            content = "1\n${expected[0].getTimeAxisSRT()}\n一\n\n" +
-                "2\n00:00:99 --> 00:01:00,000\n二\n",
+            content = "${expected[0].getTimeAxisSRT()}\n一\n\n" +
+                "00:00:99 --> 00:01:00,000\n二\n",
             expectedSubtitles = expected,
             format = SubtitleFormat.SRT
         )
@@ -70,7 +70,7 @@ class AiTranslationProtocolTest {
     @Test
     fun streamingTimedProtocol_ignoresIncompleteTimestampLineUntilItEnds() {
         val expected = listOf(testSubtitle(1, "one"))
-        val partial = "1\n00:00:01,000 --> 00:00:"
+        val partial = "00:00:01,000 --> 00:00:"
 
         val issue = findTranslationProtocolIssue(
             content = partial,
@@ -85,7 +85,7 @@ class AiTranslationProtocolTest {
     fun streamingVttProtocol_waitsForTimestampAfterSequence() {
         val expected = listOf(testSubtitle(1, "one"))
         val issue = findTranslationProtocolIssue(
-            content = "1\n",
+            content = "",
             expectedSubtitles = expected,
             format = SubtitleFormat.VTT
         )
@@ -105,7 +105,7 @@ class AiTranslationProtocolTest {
             )
         )
         val issue = findTranslationProtocolIssue(
-            content = "7\n123\n",
+            content = "123\n",
             expectedSubtitles = expected,
             format = SubtitleFormat.VTT
         )
@@ -117,7 +117,7 @@ class AiTranslationProtocolTest {
     fun streamingVttProtocol_detectsMalformedCompletedTimestampLine() {
         val expected = listOf(testSubtitle(1, "one"))
         val issue = findTranslationProtocolIssue(
-            content = "1\nnot-a-time --> 00:00:03.500\ntext\n",
+            content = "not-a-time --> 00:00:03.500\ntext\n",
             expectedSubtitles = expected,
             format = SubtitleFormat.VTT
         )
@@ -138,8 +138,8 @@ class AiTranslationProtocolTest {
             ),
             SubtitleEntry(index = 8, startTime = 3_000, endTime = 4_000, text = "two")
         )
-        val response = "7\n8\n00:00:01.000 --> 00:00:02.000\n一\n\n" +
-            "8\n00:00:03.000 --> 00:00:04.000\n二"
+        val response = "00:00:01.000 --> 00:00:02.000\n一\n\n" +
+            "00:00:03.000 --> 00:00:04.000\n二"
 
         val issue = findTranslationProtocolIssue(
             content = response,
@@ -159,7 +159,7 @@ class AiTranslationProtocolTest {
     fun streamingLrcProtocol_detectsMalformedTimestampTag() {
         val expected = listOf(testSubtitle(1, "one"))
         val issue = findTranslationProtocolIssue(
-            content = "1\n[not-a-time]\ntext",
+            content = "[not-a-time]\ntext",
             expectedSubtitles = expected,
             format = SubtitleFormat.LRC
         )
@@ -169,10 +169,28 @@ class AiTranslationProtocolTest {
     }
 
     @Test
+    fun streamingTimestampedProtocol_acceptsNonAdjacentRepeatedTimestamp() {
+        val expected = listOf(
+            SubtitleEntry(startTime = 1_000, endTime = 2_000, text = "first"),
+            SubtitleEntry(startTime = 3_000, endTime = 4_000, text = "second"),
+            SubtitleEntry(startTime = 1_000, endTime = 5_000, text = "third")
+        )
+
+        val issue = findTranslationProtocolIssue(
+            content = "[00:01.00]一\n\n[00:03.00]二\n\n[00:01.00]三",
+            expectedSubtitles = expected,
+            format = SubtitleFormat.LRC,
+            finalResponse = true
+        )
+
+        assertEquals(null, issue)
+    }
+
+    @Test
     fun finalProtocolCheck_detectsMissingCue() {
         val expected = listOf(testSubtitle(1, "one"), testSubtitle(2, "two"))
         val issue = findTranslationProtocolIssue(
-            content = "1\n${expected[0].getTimeAxisSRT()}\n一",
+            content = "${expected[0].getTimeAxisSRT()}\n一",
             expectedSubtitles = expected,
             format = SubtitleFormat.SRT,
             finalResponse = true
@@ -255,7 +273,7 @@ class AiTranslationProtocolTest {
 
         assertEquals(
             "帮我翻译成中文，以原格式输出\n\n" +
-                "start\n1\n00:00:02,000 --> 00:00:03,500\nhello\nend",
+                "start\n00:00:02,000 --> 00:00:03,500\nhello\nend",
             buildTranslationUserContent(subtitles, "中文")
         )
     }
@@ -266,7 +284,7 @@ class AiTranslationProtocolTest {
 
         assertEquals(
             "帮我翻译成中文，以原格式输出\n请使用正式语气\n\n" +
-                "start\n1\n00:00:02,000 --> 00:00:03,500\nhello\nend",
+                "start\n00:00:02,000 --> 00:00:03,500\nhello\nend",
             buildTranslationUserContent(subtitles, "中文", "请使用正式语气")
         )
     }
@@ -358,21 +376,21 @@ class AiTranslationProtocolTest {
     }
 
     @Test
-    fun lrcInput_addsLocalSequenceWithoutConvertingStyleText() {
+    fun lrcApiInput_containsOnlyTimestampAndSubtitleText() {
         val subtitles = listOf(
             SubtitleEntry(index = 1, startTime = 1_000, endTime = 2_000, text = "<b>字幕一</b>"),
             SubtitleEntry(index = 2, startTime = 3_250, endTime = 4_000, text = "字幕二")
         )
 
         assertEquals(
-            "start\n1\n[00:01.00]<b>字幕一</b>\n\n" +
-                "2\n[00:03.25]字幕二\nend",
+            "start\n[00:01.00]<b>字幕一</b>\n\n" +
+                "[00:03.25]字幕二\nend",
             buildSubtitleTranslationContent(subtitles, SubtitleFormat.LRC)
         )
     }
 
     @Test
-    fun lrcResponse_isMatchedByLocalSequenceAndPreservesBlankText() {
+    fun lrcResponse_isMatchedByTimestampAndPreservesBlankText() {
         val expected = listOf(
             SubtitleEntry(index = 1, startTime = 1_000, endTime = 2_000, text = "source one"),
             SubtitleEntry(index = 2, startTime = 3_250, endTime = 4_000, text = "source two")
@@ -381,7 +399,7 @@ class AiTranslationProtocolTest {
         assertEquals(
             listOf("译文一", ""),
             parseSubtitleTranslation(
-                "2\n[00:03.25]\n\n1\n[00:01.00]译文一",
+                "[00:03.25]\n\n[00:01.00]译文一",
                 expected,
                 SubtitleFormat.LRC
             )
@@ -389,7 +407,24 @@ class AiTranslationProtocolTest {
     }
 
     @Test
-    fun vttInputAndResponse_preserveCuePropertiesAndStyleText() {
+    fun lrcResponse_supportsGroupedTimestampsAndNumericSubtitleText() {
+        val expected = listOf(
+            SubtitleEntry(startTime = 1_000, endTime = 2_000, text = "source one"),
+            SubtitleEntry(startTime = 2_000, endTime = 3_000, text = "source two")
+        )
+
+        assertEquals(
+            listOf("42", "42"),
+            parseSubtitleTranslation(
+                "[00:01.00][00:02.00]42",
+                expected,
+                SubtitleFormat.LRC
+            )
+        )
+    }
+
+    @Test
+    fun vttApiInputOmitsSequenceAndCueProperties_responseMatchesByTimestamp() {
         val expected = listOf(
             SubtitleEntry(
                 index = 7,
@@ -402,13 +437,13 @@ class AiTranslationProtocolTest {
         )
 
         assertEquals(
-            "start\n7\n123\n00:00:01.000 --> 00:00:02.000 align:start\n<c.red>Hello</c>\nend",
+            "start\n00:00:01.000 --> 00:00:02.000\n<c.red>Hello</c>\nend",
             buildSubtitleTranslationContent(expected, SubtitleFormat.VTT)
         )
         assertEquals(
             listOf("<c.red>你好</c>"),
             parseSubtitleTranslation(
-                "7\n123\n00:00:01.000 --> 00:00:02.000 align:start\n<c.red>你好</c>",
+                "00:00:01.000 --> 00:00:02.000\n<c.red>你好</c>",
                 expected,
                 SubtitleFormat.VTT
             )
@@ -416,19 +451,53 @@ class AiTranslationProtocolTest {
     }
 
     @Test
-    fun indexedResponse_rejectsChangedOriginalFormatTime() {
+    fun vttResponse_preservesNumericLastLineOfSubtitleText() {
+        val expected = listOf(
+            SubtitleEntry(startTime = 1_000, endTime = 2_000, text = "source")
+        )
+
+        assertEquals(
+            listOf("Year\n2024"),
+            parseSubtitleTranslation(
+                "00:00:01.000 --> 00:00:02.000\nYear\n2024",
+                expected,
+                SubtitleFormat.VTT
+            )
+        )
+    }
+
+    @Test
+    fun srtResponse_preservesNumericLastLineBeforeNextCue() {
+        val expected = listOf(
+            SubtitleEntry(startTime = 1_000, endTime = 2_000, text = "source one"),
+            SubtitleEntry(startTime = 3_000, endTime = 4_000, text = "source two")
+        )
+
+        assertEquals(
+            listOf("Year\n2024", "Next"),
+            parseSubtitleTranslation(
+                "00:00:01,000 --> 00:00:02,000\nYear\n2024\n\n" +
+                    "00:00:03,000 --> 00:00:04,000\nNext",
+                expected,
+                SubtitleFormat.SRT
+            )
+        )
+    }
+
+    @Test
+    fun timestampedResponse_rejectsChangedOriginalFormatTime() {
         val expected = listOf(
             SubtitleEntry(index = 1, startTime = 1_000, endTime = 2_000, text = "source")
         )
 
         val error = assertThrows(IOException::class.java) {
             parseSubtitleTranslation(
-                "1\n[00:01.50]译文",
+                "[00:01.50]译文",
                 expected,
                 SubtitleFormat.LRC
             )
         }
-        assertTrue(error.message.orEmpty().contains("序号 1 的时间轴与原字幕不一致"))
+        assertTrue(error.message.orEmpty().contains("非本批次时间轴"))
     }
 
     @Test
@@ -440,7 +509,7 @@ class AiTranslationProtocolTest {
         assertEquals(
             listOf("译文"),
             parseSubtitleTranslation(
-                "1\n[00:01.01]译文",
+                "[00:01.01]译文",
                 expected,
                 SubtitleFormat.LRC
             )
@@ -495,8 +564,8 @@ class AiTranslationProtocolTest {
         assertEquals(
             listOf("译文一", "译文二"),
             parseTimedSubtitleTranslation(
-                "2\n${expected[1].getTimeAxisSRT()}\n译文二\n\n" +
-                    "1\n${expected[0].getTimeAxisSRT()}\n译文一",
+                "${expected[1].getTimeAxisSRT()}\n译文二\n\n" +
+                    "${expected[0].getTimeAxisSRT()}\n译文一",
                 expected
             )
         )
@@ -511,11 +580,9 @@ class AiTranslationProtocolTest {
         val content = """
             以下是翻译结果：
             ```srt
-            598
             ${expected[0].getTimeAxisSRT()}
             译文一
 
-            599
             ${expected[1].getTimeAxisSRT()}
             译文二
             ```
@@ -529,7 +596,7 @@ class AiTranslationProtocolTest {
     }
 
     @Test
-    fun parser_ignoresSequenceNumbersThatDriftAfterAnUnrelatedLostCue() {
+    fun parser_matchesTimestampAfterAnUnrelatedLostCue() {
         val expected = listOf(
             SubtitleEntry(index = 599, startTime = 1_000, endTime = 2_000, text = "source one"),
             SubtitleEntry(index = 600, startTime = 3_000, endTime = 4_000, text = "source two")
@@ -538,8 +605,8 @@ class AiTranslationProtocolTest {
         assertEquals(
             listOf("译文一", "译文二"),
             parseTimedSubtitleTranslation(
-                "598\n${expected[0].getTimeAxisSRT()}\n译文一\n\n" +
-                    "599\n${expected[1].getTimeAxisSRT()}\n译文二",
+                "${expected[0].getTimeAxisSRT()}\n译文一\n\n" +
+                    "${expected[1].getTimeAxisSRT()}\n译文二",
                 expected
             )
         )
@@ -555,11 +622,9 @@ class AiTranslationProtocolTest {
         val content = """
             翻译结果如下：
             start
-            301
             ${expected[0].getTimeAxisSRT()}
             译文一
 
-            302
             ${expected[1].getTimeAxisSRT()}
             译文二
             end
@@ -578,8 +643,8 @@ class AiTranslationProtocolTest {
         val expected = List(3) { index -> testSubtitle(301 + index, "source") }
         val error = assertThrows(IOException::class.java) {
             parseTimedSubtitleTranslation(
-                "301\n${expected[0].getTimeAxisSRT()}\n字幕301\n\n" +
-                    "303\n${expected[2].getTimeAxisSRT()}\n字幕303",
+                "${expected[0].getTimeAxisSRT()}\n字幕301\n\n" +
+                    "${expected[2].getTimeAxisSRT()}\n字幕303",
                 expected
             )
         }
@@ -593,8 +658,8 @@ class AiTranslationProtocolTest {
         val expected = listOf(testSubtitle(301, "source"))
         assertThrows(IOException::class.java) {
             parseTimedSubtitleTranslation(
-                "301\n${expected[0].getTimeAxisSRT()}\n字幕301\n\n" +
-                    "301\n${expected[0].getTimeAxisSRT()}\n重复",
+                "${expected[0].getTimeAxisSRT()}\n字幕301\n\n" +
+                    "${expected[0].getTimeAxisSRT()}\n重复",
                 expected
             )
         }
@@ -610,8 +675,8 @@ class AiTranslationProtocolTest {
         assertEquals(
             listOf("译文一", "译文二"),
             parseTimedSubtitleTranslation(
-                "1\n00:00:01,000 --> 00:00:02,000\n译文一\n\n" +
-                    "2\n00:00:01,000 --> 00:00:02,000\n译文二",
+                "00:00:01,000 --> 00:00:02,000\n译文一\n\n" +
+                    "00:00:01,000 --> 00:00:02,000\n译文二",
                 expected
             )
         )
@@ -622,14 +687,11 @@ class AiTranslationProtocolTest {
         val expected = List(4) { index -> testSubtitle(301 + index, "source") }
         val completedLines = """
             翻译如下：
-            301
             ${expected[0].getTimeAxisSRT()}
             字幕301
 
-            302
             ${expected[1].getTimeAxisSRT()}
 
-            304
             ${expected[3].getTimeAxisSRT()}
             字幕304
         """.trimIndent() + "\n"
@@ -646,7 +708,7 @@ class AiTranslationProtocolTest {
         assertEquals(
             emptyList<String>(),
             parseCompletedTimedTranslationPrefix(
-                "302\n${expected[1].getTimeAxisSRT()}\n字幕302\n",
+                "${expected[1].getTimeAxisSRT()}\n字幕302\n",
                 expected
             )
         )
@@ -657,15 +719,12 @@ class AiTranslationProtocolTest {
         val expected = List(3) { index -> testSubtitle(301 + index, "source") }
         val content = """
             start
-            301
             ${expected[0].getTimeAxisSRT()}
             字幕301
 
-            302
             ${expected[1].getTimeAxisSRT()}
             字幕302
 
-            303
             ${expected[2].getTimeAxisSRT()}
             字幕
         """.trimIndent()

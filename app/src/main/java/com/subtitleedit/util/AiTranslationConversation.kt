@@ -528,7 +528,7 @@ class AiTranslationConversation(
             } else if (subtitleFormat == SubtitleFormat.SRT) {
                 parseCompletedTimedTranslationPrefix(content, expected)
             } else {
-                parseCompletedIndexedTranslationPrefix(content, expected, subtitleFormat, startPosition)
+                parseCompletedTimestampedTranslationPrefix(content, expected, subtitleFormat)
             }
         }.getOrDefault(emptyList())
     }
