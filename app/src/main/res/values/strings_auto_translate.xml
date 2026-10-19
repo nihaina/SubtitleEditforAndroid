@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="auto_translate_no_files">请先添加要翻译的文件</string>
+    <string name="auto_translate_unsupported_file">文件“%1$s”不是支持的字幕或 TXT 文件，未添加（仅支持 SRT、LRC、TXT、VTT）</string>
     <string name="auto_translate_empty_subtitles">未检测到可翻译的字幕行</string>
     <string name="auto_translate_processing_failed">处理失败</string>
     <string name="auto_translate_punctuation_history_title">标点预测 · %1$s</string>

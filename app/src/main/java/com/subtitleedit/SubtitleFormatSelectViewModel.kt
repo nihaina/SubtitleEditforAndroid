@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.lifecycle.SavedStateHandle
+import com.subtitleedit.util.SubtitleFormatConverter
 
 internal data class SubtitleFormatSelectUiState(
     val selectedUri: Uri? = null,
@@ -24,7 +25,7 @@ internal class SubtitleFormatSelectViewModel(
 ) {
     fun onFilePicked(uri: Uri) {
         val name = queryDisplayName(uri) ?: string(R.string.unknown_file)
-        if (name.substringAfterLast('.', "").lowercase() !in supportedExtensions) {
+        if (!SubtitleFormatConverter.isSupportedSourceFileName(name)) {
             toast(R.string.subtitle_format_select_unsupported, duration = Toast.LENGTH_LONG)
             return
         }
@@ -48,6 +49,5 @@ internal class SubtitleFormatSelectViewModel(
     private companion object {
         const val KEY_SELECTED_URI = "selected_uri"
         const val KEY_SELECTED_NAME = "selected_name"
-        val supportedExtensions = setOf("srt", "lrc", "txt", "vtt")
     }
 }

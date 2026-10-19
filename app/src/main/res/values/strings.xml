@@ -497,6 +497,7 @@
     <string name="transcript_match_vad_required">请先配置 VAD 模型，或启用内置 VAD 模型</string>
     <string name="transcript_match_native_required">当前安装包缺少 Qwen tokenizer 原生库</string>
     <string name="transcript_match_select_text_first">请先选择文本文件</string>
+    <string name="transcript_match_unsupported_text">请选择 SRT、LRC、TXT 或 VTT 字幕文件</string>
     <string name="transcript_match_select_audio_first">请先选择音频文件</string>
     <string name="transcript_match_reading_document">正在读取文稿</string>
     <string name="transcript_match_empty_document">文本文件为空</string>

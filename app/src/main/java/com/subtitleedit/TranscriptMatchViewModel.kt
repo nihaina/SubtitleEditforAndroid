@@ -18,6 +18,7 @@ import com.subtitleedit.util.QwenHuggingFaceTokenizer
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleParser
+import com.subtitleedit.util.SubtitleFormatConverter
 import com.subtitleedit.util.TranscriptForcedAligner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -80,8 +81,13 @@ internal class TranscriptMatchViewModel(application: Application) :
     }
 
     fun selectText(uri: Uri) {
+        val name = displayName(uri)
+        if (!SubtitleFormatConverter.isSupportedSourceFileName(name)) {
+            toast(R.string.transcript_match_unsupported_text)
+            return
+        }
         textUri = uri
-        textName = displayName(uri)
+        textName = name
         setState { copy(textFileName = textName) }
         updatePending()
     }

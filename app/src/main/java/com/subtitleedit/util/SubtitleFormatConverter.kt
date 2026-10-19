@@ -5,6 +5,7 @@ import android.net.Uri
 import com.subtitleedit.repository.DefaultSubtitleRepository
 import com.subtitleedit.usecase.ConvertSubtitleFormatUseCase
 import java.io.File
+import java.util.Locale
 
 /** 字幕格式转换工具页和文件管理页共用的转换入口。 */
 object SubtitleFormatConverter {
@@ -16,6 +17,18 @@ object SubtitleFormatConverter {
         SubtitleParser.SubtitleFormat.VTT
     )
     val supportedSourceFormats = supportedTargetFormats + SubtitleParser.SubtitleFormat.TXT
+
+    /**
+     * Source file extensions accepted by the conversion workflow.
+     *
+     * Keep this check filename based: document providers may expose a generic MIME type,
+     * while the format picker still allows the user to select the file. The selected item
+     * is then rejected before it is added to the conversion queue.
+     */
+    val supportedSourceExtensions = setOf("srt", "lrc", "txt", "vtt")
+
+    fun isSupportedSourceFileName(fileName: String): Boolean =
+        fileName.substringAfterLast('.', "").lowercase(Locale.ROOT) in supportedSourceExtensions
 
     data class Source(
         val fileName: String,

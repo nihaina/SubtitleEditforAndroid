@@ -18,6 +18,7 @@ import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleParser
+import com.subtitleedit.util.SubtitleFormatConverter
 import com.subtitleedit.util.SubtitlePunctuationPredictor
 import com.subtitleedit.util.subtitle.SubtitleDocument
 import kotlinx.coroutines.CancellationException
@@ -110,8 +111,13 @@ internal class AutoTranslateViewModel(application: Application) :
     fun addFiles(uris: List<Uri>) {
         uris.forEach { uri ->
             if (files.any { it.uri == uri }) return@forEach
+            val fileName = getFileNameFromUri(uri) ?: string(R.string.unknown_file)
+            if (!SubtitleFormatConverter.isSupportedSourceFileName(fileName)) {
+                toast(R.string.auto_translate_unsupported_file, fileName)
+                return@forEach
+            }
             runCatching { app.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-            files += AutoTranslateFile(uri, getFileNameFromUri(uri) ?: string(R.string.unknown_file), getFileSizeFromUri(uri))
+            files += AutoTranslateFile(uri, fileName, getFileSizeFromUri(uri))
         }
         publish()
     }

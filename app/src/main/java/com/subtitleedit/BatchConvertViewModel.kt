@@ -50,6 +50,10 @@ internal class BatchConvertViewModel(
         uris.forEach { uri ->
             if (convertFiles.none { it.uri == uri }) {
                 val fileName = UriDisplayName.of(app, uri, fallback = string(R.string.unknown_file))
+                if (!SubtitleFormatConverter.isSupportedSourceFileName(fileName)) {
+                    toast(R.string.batch_convert_unsupported_file, fileName)
+                    return@forEach
+                }
                 convertFiles = convertFiles + ConvertFile(uri, fileName, getFileSizeFromUri(uri))
             }
         }
