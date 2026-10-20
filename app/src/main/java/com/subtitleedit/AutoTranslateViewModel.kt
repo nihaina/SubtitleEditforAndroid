@@ -20,6 +20,9 @@ import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.SubtitleFormatConverter
 import com.subtitleedit.util.SubtitlePunctuationPredictor
+import com.subtitleedit.util.SubtitleTextSplitOps
+import com.subtitleedit.util.TxtTranslationSession
+import com.subtitleedit.util.restoreTxtLineLayout
 import com.subtitleedit.util.subtitle.SubtitleDocument
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -82,6 +85,8 @@ internal class AutoTranslateViewModel(application: Application) :
         var progressStage: ProcessingStage? = null
         var message = ""
         var document: SubtitleDocument? = null
+        var originalText: String? = null
+        var textTranslationSession: TxtTranslationSession? = null
         var punctuationPredictionCompleted = false
         var punctuationSession: SubtitlePunctuationPredictor.Session? = null
         @Volatile var cancellationRequested = false
@@ -221,7 +226,7 @@ internal class AutoTranslateViewModel(application: Application) :
                 file.document = document
             }
             updateProcessingStage(file, ProcessingStage.SAVING)
-            val outputText = SubtitleParser.serialize(document)
+            val outputText = file.textTranslationSession?.translatedText ?: SubtitleParser.serialize(document)
             currentCoroutineContext().ensureActive()
             SubtitleOutputWriter.writeText(app, outputUri, file.fileName.substringBeforeLast("."), outputExtension(file), outputText, overwrite = overwriteOutput)
             file.status = FileStatus.COMPLETED
@@ -280,7 +285,7 @@ internal class AutoTranslateViewModel(application: Application) :
                 file.totalLines = total
                 publish()
             },
-            requestStreamingPrediction = { text, onStream ->
+            requestStreamingPredictionWithRetry = { text, isRetry, onStream, shouldStop ->
                 currentCoroutineContext().ensureActive()
                 if (file.cancellationRequested) {
                     throw CancellationException(string(R.string.auto_translate_punctuation_cancelled))
@@ -288,18 +293,21 @@ internal class AutoTranslateViewModel(application: Application) :
                 resetAiStream(file)
                 conversation.predictPunctuation(
                     text = text,
+                    clearConversation = !isRetry,
+                    recordInterruptedTurn = shouldStop,
                     streamCallback = { content ->
                         publishAiStream(file, content)
                         onStream(content)
+                        if (shouldStop()) conversation.cancel()
                     },
-                    isCancelled = { file.cancellationRequested }
+                    isCancelled = { file.cancellationRequested || shouldStop() }
                 ).getOrElse { throw it }
                     .also {
                         file.message = ""
                         publish()
                     }
             },
-            requestPrediction = { text ->
+            requestPredictionWithRetry = { text, isRetry ->
                 currentCoroutineContext().ensureActive()
                 if (file.cancellationRequested) {
                     throw CancellationException(string(R.string.auto_translate_punctuation_cancelled))
@@ -307,6 +315,7 @@ internal class AutoTranslateViewModel(application: Application) :
                 resetAiStream(file)
                 conversation.predictPunctuation(
                     text = text,
+                    clearConversation = !isRetry,
                     isCancelled = { file.cancellationRequested }
                 ).getOrElse { throw it }
             }
@@ -315,6 +324,9 @@ internal class AutoTranslateViewModel(application: Application) :
     }
 
     private suspend fun translateDocument(file: AutoTranslateFile, document: SubtitleDocument, config: TranslationConfig): SubtitleDocument {
+        if (document.format == SubtitleParser.SubtitleFormat.TXT) {
+            return translateTextDocument(file, document, config)
+        }
         val entries = document.entries
         updateProcessingStage(file, ProcessingStage.TRANSLATION, file.translatedTexts.size, entries.size)
         val translator = aiTranslationService.createConversation(app, config.provider, config.apiKey, config.model, config.targetLanguage, config.customPrompt, config.baseUrl, document.format, config.reasoningLevel, file.sessionId, string(R.string.auto_translate_translation_history_title, file.fileName, config.targetLanguage), config.thinkingEnabled)
@@ -353,10 +365,57 @@ internal class AutoTranslateViewModel(application: Application) :
         return document.copy(entries = entries.mapIndexed { index, entry -> entry.copy(text = file.translatedTexts[index]) })
     }
 
+    private suspend fun translateTextDocument(file: AutoTranslateFile, document: SubtitleDocument, config: TranslationConfig): SubtitleDocument {
+        val session = file.textTranslationSession ?: TxtTranslationSession(
+            text = if (file.punctuationPredictionCompleted) {
+                file.originalText?.let { source ->
+                    restoreTxtLineLayout(source, document.entries.associate { it.index to it.text })
+                } ?: document.entries.joinToString("\n") { it.text }
+            } else {
+                file.originalText ?: document.entries.joinToString("\n") { it.text }
+            },
+            wordStart = { text, offset -> SubtitleTextSplitOps.wordStartAt(app, text, offset) }
+        ).also { file.textTranslationSession = it }
+        updateProcessingStage(file, ProcessingStage.TRANSLATION, session.completedCount, session.totalCount)
+        val translator = aiTranslationService.createConversation(app, config.provider, config.apiKey, config.model, config.targetLanguage, config.customPrompt, config.baseUrl, document.format, config.reasoningLevel, file.sessionId, string(R.string.auto_translate_translation_history_title, file.fileName, config.targetLanguage), config.thinkingEnabled)
+        file.activeConversation = translator
+        var consecutiveErrors = 0
+        while (session.completedCount < session.totalCount) {
+            currentCoroutineContext().ensureActive()
+            if (file.cancellationRequested) throw CancellationException(string(R.string.task_cancelled))
+            resetAiStream(file)
+            publish()
+            try {
+                val translated = translator.translateText(
+                    text = session.nextText,
+                    streamCallback = { publishAiStream(file, it) },
+                    isCancelled = { file.cancellationRequested }
+                ).getOrElse { throw it }
+                currentCoroutineContext().ensureActive()
+                session.appendTranslation(translated)
+                file.processedLines = session.completedCount
+                file.message = ""
+                consecutiveErrors = 0
+                publish()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                consecutiveErrors++
+                if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) throw error
+                file.message = error.message ?: string(R.string.auto_translate_translation_failed)
+                publish()
+                delay((consecutiveErrors * 500L).coerceAtMost(3_000L))
+            }
+        }
+        return document.copy(entries = listOf(document.entries.first().copy(text = session.translatedText)))
+    }
+
     private suspend fun loadDocument(file: AutoTranslateFile): SubtitleDocument {
         val content = FileUtils.readUri(app, file.uri, settingsManager.getConfiguredEncoding())
             .ifEmpty { throw IllegalArgumentException(string(R.string.auto_translate_read_failed)) }
-        return SubtitleParser.parseDocument(content, file.fileName, SubtitleParser.detectFormat(content, file.fileName))
+        val format = SubtitleParser.detectFormat(content, file.fileName)
+        if (format == SubtitleParser.SubtitleFormat.TXT) file.originalText = content
+        return SubtitleParser.parseDocument(content, file.fileName, format)
     }
 
     private fun validateSelectedFeatures(config: TranslationConfig?): Boolean {

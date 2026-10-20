@@ -135,6 +135,69 @@ class SubtitlePunctuationPredictorTest {
     }
 
     @Test
+    fun retryRecoveryUsesPrefixWindowAndThenSingleCueRequests() = runBlocking {
+        val source = subtitleEntries(5)
+        val requests = mutableListOf<String>()
+        var calls = 0
+
+        val result = SubtitlePunctuationPredictor.Session(
+            source,
+            entriesPerBatch = 5
+        ).run(
+            requestPredictionWithRetry = { text, _ ->
+                calls++
+                requests += text
+                val response = punctuateRequest(text, "。")
+                when (calls) {
+                    1, 2, 3 -> response.replace("第4条", "错误内容")
+                    else -> response
+                }
+            }
+        )
+
+        assertEquals(
+            listOf(
+                listOf(1, 2, 3, 4, 5),
+                listOf(3, 4, 5),
+                listOf(3, 4, 5),
+                listOf(3),
+                listOf(4),
+                listOf(5)
+            ),
+            requests.map { request ->
+                request.lines().filter { it.startsWith("第") }.map { it.removePrefix("第").removeSuffix("条") .toInt() }
+            }
+        )
+        assertEquals(source.map { it.copy(text = "${it.text}。") }, result)
+    }
+
+    @Test
+    fun changedErrorPositionRestartsFirstRetryStage() = runBlocking {
+        val source = subtitleEntries(4)
+        val requests = mutableListOf<String>()
+
+        val result = SubtitlePunctuationPredictor.Session(source, entriesPerBatch = 4).run(
+            requestPredictionWithRetry = { text, _ ->
+                requests += text
+                val response = punctuateRequest(text, "。")
+                when (requests.size) {
+                    1 -> response.replace("第3条", "错误内容")
+                    2 -> response.replace("第2条", "错误内容")
+                    else -> response
+                }
+            }
+        )
+
+        assertEquals(
+            listOf(listOf(1, 2, 3, 4), listOf(2, 3, 4), listOf(1, 2, 3, 4)),
+            requests.map { request ->
+                request.lines().filter { it.startsWith("第") }.map { it.removePrefix("第").removeSuffix("条").toInt() }
+            }
+        )
+        assertEquals(source.map { it.copy(text = "${it.text}。") }, result)
+    }
+
+    @Test
     fun formattingAndResponseExtractionKeepPunctuationPredictionIndependent() = runBlocking {
         val source = subtitleEntries(301).flatMap { entry ->
             listOf(entry.copy(text = "，${entry.text}！"), entry.copy(text = "。”"))

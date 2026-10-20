@@ -15,6 +15,25 @@ import kotlin.math.ceil
 object SubtitleTextSplitOps {
     data class Result(val left: String, val right: String)
 
+    /** Return the start of the word containing the character at a UTF-16 offset. */
+    fun wordStartAt(context: Context, text: String, offset: Int): Int {
+        if (text.isEmpty()) return 0
+        var pivot = offset.coerceIn(0, text.lastIndex)
+        if (pivot > 0 && Character.isLowSurrogate(text[pivot]) &&
+            Character.isHighSurrogate(text[pivot - 1])
+        ) pivot--
+        val localized = wordSelectionRange(text, pivot)
+        val suggested = suggestTextClassifierSelection(context, text, localized.first, localized.second)
+        val range = if (suggested != null && suggested.first <= localized.first &&
+            suggested.second >= localized.second
+        ) suggested else localized
+        var start = range.first.coerceIn(0, pivot)
+        if (start > 0 && Character.isLowSurrogate(text[start]) &&
+            Character.isHighSurrogate(text[start - 1])
+        ) start--
+        return start
+    }
+
     fun split(context: Context, text: String, ratio: Float): Result {
         if (text.length <= 1) return Result(text, "新字幕")
         val candidate = ceil(text.length * ratio.coerceIn(0f, 1f))

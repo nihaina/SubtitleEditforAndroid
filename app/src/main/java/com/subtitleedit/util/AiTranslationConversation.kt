@@ -88,15 +88,56 @@ class AiTranslationConversation(
 
     fun cancel() = conversation.cancel()
 
+    /** TXT chunks use the same translation instruction without the cue/time-axis protocol. */
+    suspend fun translateText(
+        text: String,
+        streamCallback: ((String) -> Unit)? = null,
+        isCancelled: () -> Boolean = { false }
+    ): Result<String> {
+        if (text.isBlank()) return Result.success(text)
+        return runCatching {
+            if (isCancelled()) throw CancellationException("翻译已取消")
+            if (localProvider) conversation.clear()
+            val streamed = StringBuilder()
+            val result = conversation.sendUserMessage(
+                content = buildTextTranslationUserContent(
+                    text, targetLanguage, customPrompt, indexTranslate2bModel
+                ),
+                onEvent = { event ->
+                    if (event is ChatBackend.Event.TextDelta) {
+                        streamed.append(event.text)
+                        runCatching { streamCallback?.invoke(streamed.toString()) }
+                    }
+                },
+                isCancelled = isCancelled
+            )
+            if (isCancelled()) throw CancellationException("翻译已取消")
+            if (streamed.isEmpty()) runCatching { streamCallback?.invoke(result.text) }
+            historyStore.append(
+                id = historySessionId,
+                title = historyTitle ?: "翻译为$targetLanguage",
+                type = ChatHistoryStore.TYPE_TRANSLATION,
+                messages = result.messages
+            )
+            extractSubtitleAiResponse(result.text).also {
+                if (it.isBlank()) throw IOException("AI 未返回文本翻译结果")
+            }
+        }
+    }
+
     suspend fun predictPunctuation(
         text: String,
         streamCallback: ((String) -> Unit)? = null,
+        clearConversation: Boolean = true,
+        recordInterruptedTurn: () -> Boolean = { false },
         isCancelled: () -> Boolean = { false }
     ): Result<String> = processSubtitleText(
         text = text,
         instruction = PUNCTUATION_PREDICTION_PROMPT,
         defaultHistoryTitle = "标点预测",
         streamCallback = streamCallback,
+        clearConversation = clearConversation,
+        recordInterruptedTurn = recordInterruptedTurn,
         isCancelled = isCancelled
     )
 
@@ -105,6 +146,8 @@ class AiTranslationConversation(
         instruction: String,
         defaultHistoryTitle: String,
         streamCallback: ((String) -> Unit)?,
+        clearConversation: Boolean,
+        recordInterruptedTurn: () -> Boolean,
         isCancelled: () -> Boolean
     ): Result<String> {
         if (text.isBlank()) return Result.success(text)
@@ -120,18 +163,47 @@ class AiTranslationConversation(
             }
             // The caller provides all context needed for this batch. Earlier batches
             // stay in the history archive, but must not enter this AI request.
-            conversation.clear()
+            if (clearConversation) conversation.clear()
             val streamedContent = StringBuilder()
-            val result = conversation.sendUserMessage(
-                content = prompt,
-                onEvent = { event ->
-                    if (event is ChatBackend.Event.TextDelta) {
-                        streamedContent.append(event.text)
-                        runCatching { streamCallback?.invoke(streamedContent.toString()) }
-                    }
-                },
-                isCancelled = isCancelled
-            )
+            val result = try {
+                conversation.sendUserMessage(
+                    content = prompt,
+                    onEvent = { event ->
+                        if (event is ChatBackend.Event.TextDelta) {
+                            streamedContent.append(event.text)
+                            runCatching { streamCallback?.invoke(streamedContent.toString()) }
+                        }
+                    },
+                    isCancelled = isCancelled
+                )
+            } catch (error: Throwable) {
+                if (recordInterruptedTurn()) {
+                    val partial = streamedContent.toString()
+                    conversation.appendInterruptedTurn(
+                        userContent = prompt,
+                        partialAssistantContent = partial
+                    )
+                    historyStore.append(
+                        id = historySessionId,
+                        title = historyTitle ?: defaultHistoryTitle,
+                        type = ChatHistoryStore.TYPE_TRANSLATION,
+                        messages = listOf(
+                            ChatBackend.ChatMessage(role = "user", content = prompt),
+                            ChatBackend.ChatMessage(role = "assistant", content = partial)
+                        )
+                    )
+                }
+                throw error
+            }
+            if (recordInterruptedTurn()) {
+                historyStore.append(
+                    id = historySessionId,
+                    title = historyTitle ?: defaultHistoryTitle,
+                    type = ChatHistoryStore.TYPE_TRANSLATION,
+                    messages = result.messages
+                )
+                throw CancellationException("标点预测响应格式错误")
+            }
             if (streamedContent.isEmpty()) {
                 runCatching { streamCallback?.invoke(result.text) }
             }

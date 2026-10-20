@@ -88,6 +88,13 @@ private fun wrapTranslationBlock(content: String): String = buildString {
     append(TRANSLATION_BLOCK_END)
 }
 
+internal fun buildTextTranslationUserContent(
+    text: String,
+    targetLanguage: String,
+    customPrompt: String = "",
+    indexTranslate: Boolean = false
+): String = buildTranslationInstruction(targetLanguage, customPrompt, indexTranslate) + "\n\n" + text
+
 internal fun buildTimedSubtitleContent(
     subtitles: List<SubtitleEntry>,
     startPosition: Int = 1,
