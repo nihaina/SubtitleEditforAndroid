@@ -23,6 +23,8 @@ import com.subtitleedit.util.SubtitlePunctuationPredictor
 import com.subtitleedit.util.SubtitleTextSplitOps
 import com.subtitleedit.util.TxtTranslationSession
 import com.subtitleedit.util.TxtPunctuationSession
+import com.subtitleedit.util.InvalidTxtAiResponseException
+import com.subtitleedit.util.requestTxtAiWithTagRetries
 import com.subtitleedit.util.restoreTxtLineLayout
 import com.subtitleedit.util.subtitle.SubtitleDocument
 import kotlinx.coroutines.CancellationException
@@ -265,9 +267,7 @@ internal class AutoTranslateViewModel(application: Application) :
         val entriesPerBatch = settingsManager.getAiSubtitlesPerRequest(provider)
         val session = file.punctuationSession ?: SubtitlePunctuationPredictor.Session(
             preparedEntries,
-            entriesPerBatch = entriesPerBatch,
-            includeBlockMarkers = provider != AiProviderConfig.LOCAL,
-            bracketSequence = provider == AiProviderConfig.LOCAL
+            entriesPerBatch = entriesPerBatch
         ).also { file.punctuationSession = it }
         updateProcessingStage(file, ProcessingStage.PUNCTUATION_PREDICTION, session.processedCount, session.totalCount)
         if (session.totalCount == 0) return document
@@ -380,12 +380,21 @@ internal class AutoTranslateViewModel(application: Application) :
             resetAiStream(file)
             publish()
             try {
-                val predicted = conversation.predictPunctuation(
-                    text = session.nextText,
-                    clearConversation = true,
-                    streamCallback = { publishAiStream(file, it) },
-                    isCancelled = { file.cancellationRequested }
-                ).getOrElse { throw it }
+                val predicted = requestTxtAiWithTagRetries(
+                    request = {
+                        conversation.predictPunctuation(
+                            text = session.nextText,
+                            clearConversation = true,
+                            streamCallback = { publishAiStream(file, it) },
+                            isCancelled = { file.cancellationRequested }
+                        ).getOrElse { throw it }
+                    },
+                    onRetry = { retries, error ->
+                        file.message = error.message ?: string(R.string.auto_translate_processing_failed)
+                        publish()
+                        delay((retries * 500L).coerceAtMost(3_000L))
+                    }
+                )
                 currentCoroutineContext().ensureActive()
                 session.appendPrediction(predicted)
                 file.processedLines = session.completedCount
@@ -395,6 +404,7 @@ internal class AutoTranslateViewModel(application: Application) :
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
+                if (error is InvalidTxtAiResponseException) throw error
                 consecutiveErrors++
                 if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) throw error
                 file.message = error.message ?: string(R.string.auto_translate_processing_failed)
@@ -470,11 +480,20 @@ internal class AutoTranslateViewModel(application: Application) :
             resetAiStream(file)
             publish()
             try {
-                val translated = translator.translateText(
-                    text = session.nextText,
-                    streamCallback = { publishAiStream(file, it) },
-                    isCancelled = { file.cancellationRequested }
-                ).getOrElse { throw it }
+                val translated = requestTxtAiWithTagRetries(
+                    request = {
+                        translator.translateText(
+                            text = session.nextText,
+                            streamCallback = { publishAiStream(file, it) },
+                            isCancelled = { file.cancellationRequested }
+                        ).getOrElse { throw it }
+                    },
+                    onRetry = { retries, error ->
+                        file.message = error.message ?: string(R.string.auto_translate_translation_failed)
+                        publish()
+                        delay((retries * 500L).coerceAtMost(3_000L))
+                    }
+                )
                 currentCoroutineContext().ensureActive()
                 session.appendTranslation(translated)
                 file.processedLines = session.completedCount
@@ -484,6 +503,7 @@ internal class AutoTranslateViewModel(application: Application) :
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
+                if (error is InvalidTxtAiResponseException) throw error
                 consecutiveErrors++
                 if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) throw error
                 file.message = error.message ?: string(R.string.auto_translate_translation_failed)

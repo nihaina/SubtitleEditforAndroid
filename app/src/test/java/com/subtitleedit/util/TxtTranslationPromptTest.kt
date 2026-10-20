@@ -8,7 +8,7 @@ class TxtTranslationPromptTest {
     fun reusesOneClickInstructionAndCustomPromptWithPlainText() {
         val text = "第一行。\n\n第二行。"
         assertEquals(
-            "帮我翻译成英语，以原格式输出\n保留人名\n\n$text",
+            "帮我翻译成英语，以原格式输出\n保留人名\n\n<start>\n$text\n<end>",
             buildTextTranslationUserContent(text, "英语", " 保留人名 ")
         )
     }
@@ -16,7 +16,7 @@ class TxtTranslationPromptTest {
     @Test
     fun indexTranslate2bUsesExistingShortInstruction() {
         assertEquals(
-            "帮我翻译成中文\n\nHello world.",
+            "帮我翻译成中文\n\n<start>\nHello world.\n<end>",
             buildTextTranslationUserContent("Hello world.", "中文", indexTranslate = true)
         )
     }

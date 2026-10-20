@@ -247,8 +247,8 @@ class AiTranslationProtocolTest {
         )
 
         assertEquals(
-            "start\n1\n00:00:01,000 --> 00:00:02,000\n字幕一\n\n" +
-                "2\n00:00:03,000 --> 00:00:04,000\n两行\n字幕\nend",
+            "<start>\n1\n00:00:01,000 --> 00:00:02,000\n字幕一\n" +
+                "2\n00:00:03,000 --> 00:00:04,000\n两行\n字幕\n<end>",
             content
         )
         assertFalse(content.contains("1.字幕一"))
@@ -262,7 +262,7 @@ class AiTranslationProtocolTest {
         )
 
         assertEquals(
-            "start\n7\n123\n\n302\n两行\n字幕\nend",
+            "<start>\n7\n123\n302\n两行\n字幕\n<end>",
             buildTimedSubtitleContent(subtitles, startPosition = 301, includeTimestamps = false)
         )
     }
@@ -272,8 +272,8 @@ class AiTranslationProtocolTest {
         val subtitles = listOf(testSubtitle(1, "hello"))
 
         assertEquals(
-            "帮我翻译成中文，以原格式输出\n\n" +
-                "start\n00:00:02,000 --> 00:00:03,500\nhello\nend",
+            "帮我翻译成中文，以原格式输出\n" +
+                "<start>\n00:00:02,000 --> 00:00:03,500\nhello\n<end>",
             buildTranslationUserContent(subtitles, "中文")
         )
     }
@@ -283,8 +283,8 @@ class AiTranslationProtocolTest {
         val subtitles = listOf(testSubtitle(1, "hello"))
 
         assertEquals(
-            "帮我翻译成中文，以原格式输出\n请使用正式语气\n\n" +
-                "start\n00:00:02,000 --> 00:00:03,500\nhello\nend",
+            "帮我翻译成中文，以原格式输出\n请使用正式语气\n" +
+                "<start>\n00:00:02,000 --> 00:00:03,500\nhello\n<end>",
             buildTranslationUserContent(subtitles, "中文", "请使用正式语气")
         )
     }
@@ -294,8 +294,8 @@ class AiTranslationProtocolTest {
         val subtitles = listOf(testSubtitle(1, "hello"))
 
         assertEquals(
-            "帮我翻译成中文\n\n" +
-                "start\n[1]hello\nend",
+            "帮我翻译成中文\n" +
+                "<start>\n[1]hello\n<end>",
             buildTranslationUserContent(
                 subtitles,
                 "中文",
@@ -313,8 +313,8 @@ class AiTranslationProtocolTest {
         )
 
         assertEquals(
-            "帮我翻译成中文，以原格式输出\n\n" +
-                "start\n[1]字幕1\n\n[2]字幕2\nend",
+            "帮我翻译成中文，以原格式输出\n" +
+                "<start>\n[1]字幕1\n[2]字幕2\n<end>",
             buildTranslationUserContent(
                 subtitles,
                 "中文",
@@ -331,8 +331,8 @@ class AiTranslationProtocolTest {
         )
 
         assertEquals(
-            "帮我翻译成中文，以原格式输出\n\n" +
-                "[1]字幕1\n\n[2]字幕2",
+            "帮我翻译成中文，以原格式输出\n" +
+                "[1]字幕1\n[2]字幕2",
             buildTranslationUserContent(
                 subtitles,
                 "中文",
@@ -355,6 +355,74 @@ class AiTranslationProtocolTest {
                 "start\n[8]译文二\n\n[7]译文一\n第二行\nend",
                 expected
             )
+        )
+    }
+
+    @Test
+    fun subtitleResponseContent_acceptsTaggedLegacyAndTaglessResponses() {
+        assertEquals("[1]译文", subtitleResponseContent("<start>\n[1]译文\n<end>"))
+        assertEquals("[1]译文", subtitleResponseContent("start\n[1]译文\nend"))
+        assertEquals("[1]译文", subtitleResponseContent("[1]译文"))
+    }
+
+    @Test
+    fun subtitleResponseContent_usesAvailableBoundaryWhenOneMarkerIsMissing() {
+        assertEquals("[1]译文", subtitleResponseContent("[1]译文\n<end>\n说明"))
+        assertEquals("[1]译文", subtitleResponseContent("<start>\n[1]译文"))
+    }
+
+    @Test
+    fun taglessSubtitleContentMayContainTheWordEndAsCueText() {
+        assertEquals("1\nend", subtitleResponseContent("1\nend"))
+        assertEquals(
+            listOf("end"),
+            parseSequenceSubtitleTranslation("1\nend", listOf(testSubtitle(1, "source")))
+        )
+    }
+
+    @Test
+    fun cueTextMayContainStartAndEndInsideOrWithoutTags() {
+        val expected = listOf(testSubtitle(1, "source"))
+        val body = "1\nstart\nend"
+        for (response in listOf(body, "<start>\n$body\n<end>", "<start>\n$body")) {
+            assertEquals(listOf("start\nend"), parseSequenceSubtitleTranslation(response, expected))
+        }
+    }
+
+    @Test
+    fun streamingCueTextDoesNotCompleteALegacyBlock() {
+        val expected = listOf(testSubtitle(1, "source"))
+        for (response in listOf("1\nstart\nend", "<start>\n1\nstart\nend")) {
+            assertEquals(
+                emptyList<String>(),
+                parseCompletedSequenceTranslationPrefix(response, expected, 1)
+            )
+        }
+        assertEquals(
+            listOf("start\nend"),
+            parseCompletedSequenceTranslationPrefix(
+                "说明\nstart\n1\nstart\nend\nend\n补充说明", expected, 1
+            )
+        )
+    }
+
+    @Test
+    fun subtitleResponseContent_removesIncompleteStreamingMarkerLines() {
+        assertEquals("[1]译文", subtitleResponseContent("<start>\n[1]译文\n<en"))
+        assertEquals("[1]译文", subtitleResponseContent("<sta\n[1]译文"))
+    }
+
+    @Test
+    fun sequenceParser_matchesTaggedAndTaglessRepliesBySequence() {
+        val expected = listOf(testSubtitle(1, "source one"), testSubtitle(2, "source two"))
+
+        assertEquals(
+            listOf("一", "二"),
+            parseSequenceSubtitleTranslation("<start>\n[1]一\n[2]二\n<end>", expected)
+        )
+        assertEquals(
+            listOf("一", "二"),
+            parseSequenceSubtitleTranslation("[1]一\n[2]二", expected)
         )
     }
 
@@ -383,8 +451,8 @@ class AiTranslationProtocolTest {
         )
 
         assertEquals(
-            "start\n[00:01.00]<b>字幕一</b>\n\n" +
-                "[00:03.25]字幕二\nend",
+            "<start>\n[00:01.00]<b>字幕一</b>\n" +
+                "[00:03.25]字幕二\n<end>",
             buildSubtitleTranslationContent(subtitles, SubtitleFormat.LRC)
         )
     }
@@ -437,7 +505,7 @@ class AiTranslationProtocolTest {
         )
 
         assertEquals(
-            "start\n00:00:01.000 --> 00:00:02.000\n<c.red>Hello</c>\nend",
+            "<start>\n00:00:01.000 --> 00:00:02.000\n<c.red>Hello</c>\n<end>",
             buildSubtitleTranslationContent(expected, SubtitleFormat.VTT)
         )
         assertEquals(
@@ -635,6 +703,21 @@ class AiTranslationProtocolTest {
         assertEquals(
             listOf("译文一", "译文二"),
             parseTimedSubtitleTranslation(content, expected)
+        )
+    }
+
+    @Test
+    fun parser_matchesAngleMarkedAndUnmarkedRepliesByTimeRange() {
+        val expected = listOf(testSubtitle(301, "source"))
+        val timedTranslation = "${expected.single().getTimeAxisSRT()}\n译文"
+
+        assertEquals(
+            listOf("译文"),
+            parseTimedSubtitleTranslation("说明\n<start>\n$timedTranslation\n<end>\n结束", expected)
+        )
+        assertEquals(
+            listOf("译文"),
+            parseTimedSubtitleTranslation("$timedTranslation\n<end>", expected)
         )
     }
 

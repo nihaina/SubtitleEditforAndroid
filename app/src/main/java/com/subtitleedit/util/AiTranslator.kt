@@ -58,12 +58,26 @@ private val VTT_TIMED_LINE = Regex(
     RegexOption.MULTILINE
 )
 private val TRANSLATION_BLOCK_START_LINE = Regex(
+    """^[ \t]*(?:<$TRANSLATION_BLOCK_START>|$TRANSLATION_BLOCK_START)[ \t]*$""",
+    setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE)
+)
+private val ANGLE_TRANSLATION_BLOCK_END_LINE = Regex(
+    """^[ \t]*<$TRANSLATION_BLOCK_END>[ \t]*$""",
+    setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE)
+)
+private val LEGACY_TRANSLATION_BLOCK_START_LINE = Regex(
     """^[ \t]*$TRANSLATION_BLOCK_START[ \t]*$""",
     setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE)
 )
-private val MARKED_TRANSLATION_BLOCK = Regex(
-    """(?ms)^[ \t]*$TRANSLATION_BLOCK_START[ \t]*\r?\n(.*?)^[ \t]*$TRANSLATION_BLOCK_END[ \t]*(?:\r?\n|$)""",
-    RegexOption.IGNORE_CASE
+private val LEGACY_TRANSLATION_BLOCK_END_LINE = Regex(
+    """^[ \t]*$TRANSLATION_BLOCK_END[ \t]*$""",
+    setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE)
+)
+private val INCOMPLETE_ANGLE_TRANSLATION_MARKER_LINE = Regex(
+    """(?im)^[ \t]*<(?:s(?:t(?:a(?:r(?:t)?)?)?)?|e(?:n(?:d)?)?)?[ \t]*\r?$"""
+)
+private val COMPLETE_ANGLE_TRANSLATION_BLOCK = Regex(
+    """(?is)<$TRANSLATION_BLOCK_START>.*?<$TRANSLATION_BLOCK_END>"""
 )
 
 private fun buildTranslationInstruction(
@@ -81,11 +95,15 @@ private fun buildTranslationInstruction(
     }
 
 private fun wrapTranslationBlock(content: String): String = buildString {
+    append('<')
     append(TRANSLATION_BLOCK_START)
+    append('>')
     append('\n')
     append(content)
     append('\n')
+    append('<')
     append(TRANSLATION_BLOCK_END)
+    append('>')
 }
 
 internal fun buildTextTranslationUserContent(
@@ -93,7 +111,7 @@ internal fun buildTextTranslationUserContent(
     targetLanguage: String,
     customPrompt: String = "",
     indexTranslate: Boolean = false
-): String = buildTranslationInstruction(targetLanguage, customPrompt, indexTranslate) + "\n\n" + text
+): String = buildTranslationInstruction(targetLanguage, customPrompt, indexTranslate) + "\n\n<start>\n" + text + "\n<end>"
 
 internal fun buildTimedSubtitleContent(
     subtitles: List<SubtitleEntry>,
@@ -120,7 +138,7 @@ internal fun buildTimedSubtitleContent(
                 append(normalizeSubtitleText(subtitle.text))
             }
         }
-    }.joinToString("\n\n")
+    }.joinToString("\n")
     return if (includeBlockMarkers) wrapTranslationBlock(content) else content
 }
 
@@ -135,7 +153,7 @@ internal fun buildTranslationUserContent(
     indexTranslate: Boolean = false
 ): String = buildString {
     append(buildTranslationInstruction(targetLanguage, customPrompt, indexTranslate))
-    append("\n\n")
+    append('\n')
     append(
         if (sequenceOnly) {
             buildTimedSubtitleContent(
@@ -156,7 +174,7 @@ internal fun buildSubtitleTranslationContent(
     format: SubtitleFormat
 ): String = when (format) {
     SubtitleFormat.LRC -> wrapTranslationBlock(
-        subtitles.joinToString("\n\n") { subtitle ->
+        subtitles.joinToString("\n") { subtitle ->
             TimeUtils.formatLRC(subtitle.startTime) + normalizeSubtitleText(subtitle.text)
         }
     )
@@ -170,11 +188,11 @@ internal fun buildSubtitleTranslationContent(
                 append('\n')
                 append(normalizeSubtitleText(subtitle.text))
             }
-        }.joinToString("\n\n")
+        }.joinToString("\n")
     )
 
     else -> wrapTranslationBlock(
-        subtitles.joinToString("\n\n") { subtitle ->
+        subtitles.joinToString("\n") { subtitle ->
             "${subtitle.getTimeAxisSRT()}\n${normalizeSubtitleText(subtitle.text)}"
         }
     )
@@ -846,22 +864,65 @@ private fun extractTimedSubtitleBlocks(content: String): List<TimedSubtitleBlock
     }
 }
 
-/**
- * Returns only complete protocol blocks when the response contains the block markers.
- * A null result means the response uses the legacy format or a stream whose final `end`
- * marker has not arrived yet; those responses use the existing prefix parser.
- */
+/** Null leaves unmarked responses to the existing cue and code-block parsers. */
 internal fun markedTranslationContent(content: String): String? {
     val normalized = normalizeSubtitleText(content)
-    if (!TRANSLATION_BLOCK_START_LINE.containsMatchIn(normalized)) return null
-    val completeBlocks = MARKED_TRANSLATION_BLOCK.findAll(normalized)
-        .map { it.groupValues[1].trim('\n', '\r') }
-        .toList()
-    return completeBlocks.takeIf { it.isNotEmpty() }?.joinToString("\n\n")
+    val hasMarkers = TRANSLATION_BLOCK_START_LINE.containsMatchIn(normalized) ||
+        ANGLE_TRANSLATION_BLOCK_END_LINE.containsMatchIn(normalized) ||
+        INCOMPLETE_ANGLE_TRANSLATION_MARKER_LINE.containsMatchIn(normalized)
+    return if (hasMarkers) subtitleResponseContent(normalized) else null
 }
 
-private fun hasCompleteTranslationBlock(content: String): Boolean =
-    MARKED_TRANSLATION_BLOCK.containsMatchIn(normalizeSubtitleText(content))
+/** Extracts the body of subtitle markers while allowing legacy and partially streamed replies. */
+internal fun subtitleResponseContent(content: String): String {
+    val raw = normalizeSubtitleText(content)
+    val extracted = extractSubtitleAiResponse(raw)
+    // Complete angle-tagged blocks have already been isolated by the generic extractor.
+    // Return immediately so a legitimate cue whose text is literally "start" or "end"
+    // is never mistaken for a legacy protocol marker.
+    if (COMPLETE_ANGLE_TRANSLATION_BLOCK.containsMatchIn(raw)) {
+        return extracted.trim('\n', '\r')
+    }
+
+    var normalized = INCOMPLETE_ANGLE_TRANSLATION_MARKER_LINE
+        .replace(normalizeSubtitleText(extracted), "")
+    val startMarker = leadingTranslationBlockStart(normalized)
+    if (startMarker != null) {
+        normalized = normalized.substring(startMarker.range.last + 1)
+        val endMarker = ANGLE_TRANSLATION_BLOCK_END_LINE.find(normalized)
+            ?: if (startMarker.value.trim().equals(TRANSLATION_BLOCK_START, ignoreCase = true)) {
+                LEGACY_TRANSLATION_BLOCK_END_LINE.findAll(normalized).lastOrNull()
+            } else null
+        if (endMarker != null) {
+            normalized = normalized.substring(0, endMarker.range.first)
+        }
+    } else {
+        val angleEnd = ANGLE_TRANSLATION_BLOCK_END_LINE.find(normalized)
+        if (angleEnd != null) {
+            normalized = normalized.substring(0, angleEnd.range.first)
+        }
+    }
+    return normalized.trim('\n', '\r')
+}
+
+/** Legacy markers are protocol only before the first cue, never within cue text. */
+private fun leadingTranslationBlockStart(content: String): MatchResult? {
+    val firstCue = listOf(
+        SUBTITLE_SEQUENCE_LINE, INLINE_SUBTITLE_SEQUENCE_LINE, TIMED_SUBTITLE_LINE,
+        VTT_TIMED_LINE, LRC_TIMED_LINE
+    ).mapNotNull { it.find(content)?.range?.first }.minOrNull() ?: content.length
+    return TRANSLATION_BLOCK_START_LINE.findAll(content)
+        .firstOrNull { it.range.first < firstCue }
+}
+
+private fun hasCompleteTranslationBlock(content: String): Boolean {
+    val normalized = normalizeSubtitleText(content)
+    if (ANGLE_TRANSLATION_BLOCK_END_LINE.containsMatchIn(normalized)) return true
+    val startMarker = leadingTranslationBlockStart(normalized) ?: return false
+    return startMarker.value.trim().equals(TRANSLATION_BLOCK_START, ignoreCase = true) &&
+        LEGACY_TRANSLATION_BLOCK_END_LINE.findAll(normalized)
+            .any { it.range.first > startMarker.range.last }
+}
 
 private fun limitToSrtCodeBlock(content: String): String {
     val timeStart = TIMED_SUBTITLE_LINE.find(content)?.range?.first ?: return content

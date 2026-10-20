@@ -35,7 +35,7 @@ class SubtitlePunctuationPredictorTest {
             }
 
             assertEquals("Requests for $count entries", ranges.map { range ->
-                "start\n" + range.joinToString("\n\n") { "${it + 1000}\n第${it}条" } + "\nend"
+                "<start>\n" + range.joinToString("\n") { "[${it + 1000}]第${it}条" } + "\n<end>"
             }, requests)
             assertEquals(source.map { it.copy(text = "${it.text}。") }, result)
         }
@@ -55,7 +55,7 @@ class SubtitlePunctuationPredictorTest {
         })
 
         assertEquals(listOf(20, 20, 20, 1), requests.map { text ->
-            text.lines().count { it.startsWith("第") }
+            text.lines().count { it.startsWith("[") }
         })
         assertEquals(source.map { it.copy(text = "${it.text}。") }, result)
     }
@@ -75,26 +75,24 @@ class SubtitlePunctuationPredictorTest {
         })
 
         assertEquals(listOf(1000, 1000, 1), requests.map { text ->
-            text.lines().count { it.startsWith("第") }
+            text.lines().count { it.startsWith("[") }
         })
         assertEquals(source.map { it.copy(text = "${it.text}。") }, result)
     }
 
     @Test
-    fun localModelSession_omitsTranslationBlockMarkers() = runBlocking {
+    fun punctuationRequestsUseBracketedLinesAndTags() = runBlocking {
         val source = subtitleEntries(2)
         val requests = mutableListOf<String>()
 
         SubtitlePunctuationPredictor.Session(
-            source,
-            includeBlockMarkers = false,
-            bracketSequence = true
+            source
         ).run(requestPrediction = { text ->
             requests += text
             punctuateRequest(text, "。")
         })
 
-        assertEquals("[1001]第1条\n\n[1002]第2条", requests.single())
+        assertEquals("<start>\n[1001]第1条\n[1002]第2条\n<end>", requests.single())
     }
 
     @Test
@@ -112,6 +110,30 @@ class SubtitlePunctuationPredictorTest {
     }
 
     @Test
+    fun taglessSubtitleResponseKeepsCueTextThatIsEnd() {
+        val source = listOf(subtitleEntries(1).single().copy(text = "end"))
+
+        assertEquals(
+            source,
+            SubtitlePunctuationPredictor.matchSubtitleEntries(source, "1001\nend")
+        )
+    }
+
+    @Test
+    fun subtitleResponseAcceptsLegacyWrappersAndProtocolWordsAsText() {
+        val source = listOf(SubtitleEntry(index = 7, text = "start\nend"))
+        val body = "[7]start\nend"
+        for (response in listOf(
+            body,
+            "<start>\n$body\n<end>",
+            "```text\n$body\n```",
+            "[[PUNCTUATED_TEXT]]$body[[/PUNCTUATED_TEXT]]"
+        )) {
+            assertEquals(source, SubtitlePunctuationPredictor.matchSubtitleEntries(source, response))
+        }
+    }
+
+    @Test
     fun streamingSessionReportsCompletedCueProgressBeforeBatchCommit() = runBlocking {
         val source = subtitleEntries(3)
         val streamProgress = mutableListOf<Pair<Int, Int>>()
@@ -123,7 +145,7 @@ class SubtitlePunctuationPredictorTest {
             onStreamProgress = { done, total -> streamProgress += done to total },
             requestStreamingPrediction = { text, emit ->
                 val response = punctuateRequest(text, "。")
-                emit(response.lines().take(3).joinToString("\n"))
+                emit(response.lines().take(2).joinToString("\n"))
                 emit(response)
                 response
             },
@@ -165,7 +187,7 @@ class SubtitlePunctuationPredictorTest {
                 listOf(5)
             ),
             requests.map { request ->
-                request.lines().filter { it.startsWith("第") }.map { it.removePrefix("第").removeSuffix("条") .toInt() }
+                request.lines().filter { it.startsWith("[") }.map { it.substringAfter("]").removePrefix("第").removeSuffix("条").toInt() }
             }
         )
         assertEquals(source.map { it.copy(text = "${it.text}。") }, result)
@@ -191,7 +213,7 @@ class SubtitlePunctuationPredictorTest {
         assertEquals(
             listOf(listOf(1, 2, 3, 4), listOf(2, 3, 4), listOf(1, 2, 3, 4)),
             requests.map { request ->
-                request.lines().filter { it.startsWith("第") }.map { it.removePrefix("第").removeSuffix("条").toInt() }
+                request.lines().filter { it.startsWith("[") }.map { it.substringAfter("]").removePrefix("第").removeSuffix("条").toInt() }
             }
         )
         assertEquals(source.map { it.copy(text = "${it.text}。") }, result)
@@ -207,16 +229,16 @@ class SubtitlePunctuationPredictorTest {
 
         val result = SubtitlePunctuationPredictor.predictSubtitleEntriesInBatches(prepared) { text ->
             requests += text
-            val blocks = punctuateRequest(text, "。").removePrefix("start\n").removeSuffix("\nend")
-                .split("\n\n")
+            val blocks = punctuateRequest(text, "。").removePrefix("<start>\n").removeSuffix("\n<end>")
+                .split("\n")
             val reply = blocks.chunked(150).joinToString("\n\n") { chunk ->
-                "```text\n" + chunk.joinToString("\n\n") + "\n```"
+                "```text\n" + chunk.joinToString("\n") + "\n```"
             }
             extractSubtitleAiResponse(reply)
         }
 
-        assertEquals(listOf(200, 101), requests.map { text -> text.lines().count { it.startsWith("第") } })
-        assertEquals("start\n1201\n第201条", requests.last().lines().take(3).joinToString("\n"))
+        assertEquals(listOf(200, 101), requests.map { text -> text.lines().count { it.startsWith("[") } })
+        assertEquals("<start>\n[1201]第201条", requests.last().lines().take(2).joinToString("\n"))
         assertEquals(prepared.map { it.copy(text = "${it.text}。") }, result)
     }
 
@@ -244,7 +266,7 @@ class SubtitlePunctuationPredictorTest {
             entry.copy(text = if (index == 0) "你好\n\n世界" else "Hello  world")
         }
         val result = SubtitlePunctuationPredictor.predictSubtitleEntriesInBatches(source) { text ->
-            assertEquals("start\n1001\n你好\n\n世界\n\n1002\nHello  world\nend", text)
+            assertEquals("<start>\n[1001]你好\n\n世界\n[1002]Hello  world\n<end>", text)
             extractSubtitleAiResponse(
                 "[[PUNCTUATED_TEXT]]\r\n1001\r\n你好，\r\n\r\n世界！\r\n\r\n1002\r\nHello,  world!\r\n[[/PUNCTUATED_TEXT]]"
             )
@@ -386,7 +408,7 @@ class SubtitlePunctuationPredictorTest {
         }
 
         assertEquals(requests[1], requests[2])
-        assertEquals(listOf("start", "1201", "第201条"), requests[2].lines().take(3))
+        assertEquals(listOf("<start>", "[1201]第201条", "[1202]第202条"), requests[2].lines().take(3))
         assertEquals(listOf(0 to 301, 200 to 301, 200 to 301, 301 to 301), progress)
         assertEquals(source.mapIndexed { index, entry ->
             entry.copy(text = entry.text + if (index < 200) "！" else "？")
@@ -411,7 +433,7 @@ class SubtitlePunctuationPredictorTest {
             assertEquals(200, session.processedCount)
             val requests = mutableListOf<String>()
             val result = session.run { text -> requests += text; text }
-            assertEquals(listOf("start", "1201", "第201条"), requests.first().lines().take(3))
+            assertEquals(listOf("<start>", "[1201]第201条", "[1202]第202条"), requests.first().lines().take(3))
             assertEquals(1, requests.size)
             assertEquals(source, result)
         }
@@ -451,7 +473,7 @@ class SubtitlePunctuationPredictorTest {
         }
 
         assertEquals(source, result)
-        assertEquals("start\n201\n第201条\nend", requests.last())
+        assertEquals("<start>\n[201]第201条\n<end>", requests.last())
     }
 
     @Test
@@ -485,6 +507,72 @@ class SubtitlePunctuationPredictorTest {
                 "[7]你好！\n世界。\n\n[9]结束！"
             )
         )
+    }
+
+    @Test
+    fun bracketedSubtitleRepliesAreMatchedWithoutStartOrEndTags() {
+        val source = listOf(
+            SubtitleEntry(index = 7, text = "你好"),
+            SubtitleEntry(index = 9, text = "世界")
+        )
+        val response = "[9]世界。\n[7]你好！"
+
+        assertEquals(
+            listOf(source[0].copy(text = "你好！"), source[1].copy(text = "世界。")),
+            SubtitlePunctuationPredictor.matchSubtitleEntries(source, response)
+        )
+        assertEquals(
+            2,
+            SubtitlePunctuationPredictor.completedPrefixCount(
+                source,
+                "[7]你好！\n[9]世界。"
+            )
+        )
+    }
+
+    @Test
+    fun subtitleReplyPreambleIsSkippedWhenStartTagIsMissing() {
+        val source = listOf(SubtitleEntry(index = 7, text = "你好"))
+        val response = "以下是处理结果：\n\n[7]你好！"
+
+        assertEquals(
+            listOf(source.single().copy(text = "你好！")),
+            SubtitlePunctuationPredictor.matchSubtitleEntries(source, response)
+        )
+        assertEquals(
+            1,
+            SubtitlePunctuationPredictor.completedPrefixCount(source, response)
+        )
+    }
+
+    @Test
+    fun unknownSequenceAfterPreambleIsStillRejected() {
+        val source = listOf(SubtitleEntry(index = 7, text = "你好"))
+        assertThrows(IOException::class.java) {
+            SubtitlePunctuationPredictor.matchSubtitleEntries(
+                source,
+                "以下是处理结果：\n[99]其他\n[7]你好！"
+            )
+        }
+    }
+
+    @Test
+    fun fencedAndPunctuatedWrappersAreAcceptedByProtocolValidation() {
+        val source = listOf(SubtitleEntry(index = 7, text = "你好"))
+        val responses = listOf(
+            "```text\n[7]你好！\n```",
+            "[[PUNCTUATED_TEXT]]\n[7]你好！\n[[/PUNCTUATED_TEXT]]"
+        )
+        responses.forEach { response ->
+            assertEquals(
+                null,
+                SubtitlePunctuationPredictor.findPunctuationProtocolIssue(
+                    response,
+                    source,
+                    finalResponse = true
+                )
+            )
+        }
     }
 
     @Test
@@ -537,7 +625,7 @@ class SubtitlePunctuationPredictorTest {
     }
 
     private fun punctuateRequest(text: String, punctuation: String): String =
-        text.lines().joinToString("\n") { if (it.startsWith("第")) it + punctuation else it }
+        text.lines().joinToString("\n") { if (it.startsWith("[")) it + punctuation else it }
 
     private fun subtitleEntries(count: Int): List<SubtitleEntry> = (1..count).map { position ->
         SubtitleEntry(

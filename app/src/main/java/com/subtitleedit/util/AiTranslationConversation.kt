@@ -119,7 +119,15 @@ class AiTranslationConversation(
                 type = ChatHistoryStore.TYPE_TRANSLATION,
                 messages = result.messages
             )
-            extractSubtitleAiResponse(result.text).also {
+            val translation = try {
+                extractTaggedTxtAiResponse(result.text)
+            } catch (error: InvalidTxtAiResponseException) {
+                // A failed cloud reply is already in ChatConversation history. Remove it
+                // before AutoTranslateViewModel retries this TXT chunk.
+                if (!localProvider) conversation.clear()
+                throw error
+            }
+            translation.also {
                 if (it.isBlank()) throw IOException("AI 未返回文本翻译结果")
             }
         }
@@ -158,8 +166,10 @@ class AiTranslationConversation(
                     append('\n')
                     append(it)
                 }
-                append("\n\n")
+                if (subtitleFormat == SubtitleFormat.TXT) append("\n\n") else append('\n')
+                if (subtitleFormat == SubtitleFormat.TXT) append("<start>\n")
                 append(text)
+                if (subtitleFormat == SubtitleFormat.TXT) append("\n<end>")
             }
             // The caller provides all context needed for this batch. Earlier batches
             // stay in the history archive, but must not enter this AI request.
@@ -213,7 +223,11 @@ class AiTranslationConversation(
                 type = ChatHistoryStore.TYPE_TRANSLATION,
                 messages = result.messages
             )
-            extractSubtitleAiResponse(result.text)
+            if (subtitleFormat == SubtitleFormat.TXT) {
+                extractTaggedTxtAiResponse(result.text)
+            } else {
+                extractSubtitleAiResponse(result.text)
+            }
         }
     }
 
@@ -456,7 +470,7 @@ class AiTranslationConversation(
             startPosition = requestStart,
             format = subtitleFormat,
             sequenceOnly = localProvider,
-            includeBlockMarkers = !localProvider,
+            includeBlockMarkers = true,
             indexTranslate = indexTranslate2bModel
         )
         streamedContent.setLength(0)

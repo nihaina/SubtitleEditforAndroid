@@ -32,9 +32,7 @@ object SubtitlePunctuationPredictor {
 
     class Session(
         private val entries: List<SubtitleEntry>,
-        private val entriesPerBatch: Int = DEFAULT_AI_SUBTITLES_PER_REQUEST,
-        private val includeBlockMarkers: Boolean = true,
-        private val bracketSequence: Boolean = false
+        private val entriesPerBatch: Int = DEFAULT_AI_SUBTITLES_PER_REQUEST
     ) {
         init {
             require(entriesPerBatch > 0) { "每批字幕数量必须大于 0" }
@@ -97,8 +95,8 @@ object SubtitlePunctuationPredictor {
                         requestIndices.map(batch::get),
                         startPosition = processedCount + requestIndices.first() + 1,
                         includeTimestamps = false,
-                        includeBlockMarkers = includeBlockMarkers,
-                        inlineSequence = bracketSequence
+                        includeBlockMarkers = true,
+                        inlineSequence = true
                     )
                     val isRetry = retrying
                     var streamedBatchCount = 0
@@ -260,15 +258,10 @@ object SubtitlePunctuationPredictor {
                 PunctuationProtocolIssue(0, "AI 未返回标点预测结果")
             } else null
         }
-        val content = extractSubtitleAiResponse(response)
+        val content = subtitleResponseContent(response)
             .replace("\r\n", "\n")
             .replace('\r', '\n')
-        val normalizedLines = content.lines()
-        val hasMarkers = normalizedLines.firstOrNull { it.isNotBlank() }
-            ?.trim()?.equals("start", ignoreCase = true) == true
-        val lines = normalizedLines
-            .let { if (hasMarkers) it.dropWhile { line -> line.trim().equals("start", ignoreCase = true) } else it }
-            .let { if (hasMarkers) it.dropLastWhile { line -> line.trim().equals("end", ignoreCase = true) } else it }
+        val responseLines = content.lines()
         val sequences = entries.mapIndexed { offset, entry ->
             entry.index.takeIf { it > 0 } ?: (startPosition + offset)
         }
@@ -276,6 +269,9 @@ object SubtitlePunctuationPredictor {
         if (expectedBySequence.size != entries.size) {
             return PunctuationProtocolIssue(0, "原字幕序号重复")
         }
+        val firstCueLine = firstRecognizedSequenceLine(responseLines)
+        if (firstCueLine < 0 && !finalResponse) return null
+        val lines = if (firstCueLine >= 0) responseLines.drop(firstCueLine) else responseLines
         val seen = mutableSetOf<Int>()
         var cursor = 0
         while (cursor < lines.size) {
@@ -351,7 +347,7 @@ object SubtitlePunctuationPredictor {
         response: String,
         startPosition: Int = 1
     ): List<SubtitleEntry> {
-        val content = extractSubtitleAiResponse(response)
+        val content = subtitleResponseContent(response)
             .replace("\r\n", "\n").replace('\r', '\n')
         val sequences = entries.mapIndexed { offset, entry ->
             entry.index.takeIf { it > 0 } ?: (startPosition + offset)
@@ -360,7 +356,9 @@ object SubtitlePunctuationPredictor {
         if (expectedBySequence.size != entries.size) {
             throw IOException("标点预测文本匹配失败：原字幕序号重复")
         }
-        val lines = (markedTranslationContent(content) ?: content).lines()
+        val responseLines = content.lines()
+        val firstCueLine = firstRecognizedSequenceLine(responseLines)
+        val lines = if (firstCueLine >= 0) responseLines.drop(firstCueLine) else responseLines
         val inlineSequence = lines.any { INLINE_SEQUENCE_LINE.matches(it.trimEnd('\r')) }
         val returnedBySequence = mutableMapOf<Int, String>()
         var cursor = 0
@@ -425,23 +423,18 @@ object SubtitlePunctuationPredictor {
         startPosition: Int = 1
     ): Int {
         if (entries.isEmpty() || response.isBlank()) return 0
-        val normalizedLines = extractSubtitleAiResponse(response)
+        val responseLines = subtitleResponseContent(response)
             .replace("\r\n", "\n")
             .replace('\r', '\n')
             .lines()
-        // Strip the protocol markers only for a marked response. In the local
-        // marker-free protocol, a cue's actual text may itself be "end".
-        val hasBlockStart = normalizedLines.firstOrNull { it.isNotBlank() }
-            ?.trim()
-            ?.equals("start", ignoreCase = true) == true
-        val normalized = normalizedLines
-            .let { lines -> if (hasBlockStart) lines.dropWhile { it.trim().equals("start", ignoreCase = true) } else lines }
-            .let { lines -> if (hasBlockStart) lines.dropLastWhile { it.trim().equals("end", ignoreCase = true) } else lines }
         val sequences = entries.mapIndexed { offset, entry ->
             entry.index.takeIf { it > 0 } ?: (startPosition + offset)
         }
         val expectedBySequence = sequences.zip(entries).toMap()
         if (expectedBySequence.size != entries.size) return 0
+        val firstCueLine = firstRecognizedSequenceLine(responseLines)
+        if (firstCueLine < 0) return 0
+        val normalized = responseLines.drop(firstCueLine)
 
         var cursor = 0
         var completed = 0
@@ -475,6 +468,15 @@ object SubtitlePunctuationPredictor {
         return completed
     }
 
+    private fun firstRecognizedSequenceLine(lines: List<String>): Int {
+        return lines.indexOfFirst { line ->
+            val inline = INLINE_SEQUENCE_LINE.matchEntire(line.trimEnd('\r'))
+            val sequence = inline?.groupValues?.get(1)?.toIntOrNull()
+                ?: line.trim().toIntOrNull()
+            sequence != null
+        }
+    }
+
     private fun matchingText(text: String): String = text.replace(matchingIgnoredCharacters, "")
 
     private fun completedPrefixTexts(
@@ -484,13 +486,16 @@ object SubtitlePunctuationPredictor {
     ): List<String> {
         val count = completedPrefixCount(entries, response, startPosition)
         if (count == 0) return emptyList()
-        val normalized = extractSubtitleAiResponse(response)
+        val normalized = subtitleResponseContent(response)
             .replace("\r\n", "\n")
             .replace('\r', '\n')
-        val lines = (markedTranslationContent(normalized) ?: normalized).lines()
+        val responseLines = normalized.lines()
         val sequences = entries.mapIndexed { offset, entry ->
             entry.index.takeIf { it > 0 } ?: (startPosition + offset)
         }
+        val firstCueLine = firstRecognizedSequenceLine(responseLines)
+        if (firstCueLine < 0) return emptyList()
+        val lines = responseLines.drop(firstCueLine)
         val bySequence = sequences.zip(entries).toMap()
         val result = mutableListOf<String>()
         var cursor = 0
