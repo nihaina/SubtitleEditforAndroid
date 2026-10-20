@@ -4,7 +4,7 @@ import com.subtitleedit.model.SubtitleEntry
 import java.io.IOException
 
 internal const val PUNCTUATION_PREDICTION_PROMPT =
-    "以下为换行分离的字幕文本，帮我逐行添加标点符号，不修改原文，不做额外说明，以原格式输出"
+    "帮我添加标点符号，不修改原文，以原格式输出"
 
 internal data class PunctuationProtocolIssue(
     val index: Int,
@@ -315,6 +315,11 @@ object SubtitlePunctuationPredictor {
             val returnedLines = buildList {
                 if (inlinePresent) add(firstText)
                 addAll(lines.subList(cursor, end))
+            }
+            // The current cue may still be receiving text. Wait until another
+            // non-blank line starts before validating its content during streaming.
+            if (!finalResponse && lines.subList(end, lines.size).none { it.isNotBlank() }) {
+                break
             }
             expectedLines.zip(returnedLines).forEachIndexed { lineIndex, (original, returned) ->
                 if (matchingText(original) != matchingText(returned)) {

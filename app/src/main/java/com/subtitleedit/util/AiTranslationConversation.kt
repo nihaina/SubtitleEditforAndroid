@@ -97,22 +97,18 @@ class AiTranslationConversation(
         if (text.isBlank()) return Result.success(text)
         return runCatching {
             if (isCancelled()) throw CancellationException("翻译已取消")
-            if (localProvider) conversation.clear()
             val streamed = StringBuilder()
-            val result = conversation.sendUserMessage(
+            val result = sendUserPrompt(
                 content = buildTextTranslationUserContent(
                     text, targetLanguage, customPrompt, indexTranslate2bModel
                 ),
-                onEvent = { event ->
-                    if (event is ChatBackend.Event.TextDelta) {
-                        streamed.append(event.text)
-                        runCatching { streamCallback?.invoke(streamed.toString()) }
-                    }
-                },
-                isCancelled = isCancelled
+                clearConversation = localProvider,
+                streamCallback = streamCallback,
+                isCancelled = isCancelled,
+                cancellationMessage = "翻译已取消",
+                streamedContent = streamed,
+                streamedReasoning = StringBuilder()
             )
-            if (isCancelled()) throw CancellationException("翻译已取消")
-            if (streamed.isEmpty()) runCatching { streamCallback?.invoke(result.text) }
             historyStore.append(
                 id = historySessionId,
                 title = historyTitle ?: "翻译为$targetLanguage",
@@ -171,27 +167,25 @@ class AiTranslationConversation(
                 append(text)
                 if (subtitleFormat == SubtitleFormat.TXT) append("\n<end>")
             }
-            // The caller provides all context needed for this batch. Earlier batches
-            // stay in the history archive, but must not enter this AI request.
-            if (clearConversation) conversation.clear()
             val streamedContent = StringBuilder()
+            val streamedReasoning = StringBuilder()
             val result = try {
-                conversation.sendUserMessage(
+                sendUserPrompt(
                     content = prompt,
-                    onEvent = { event ->
-                        if (event is ChatBackend.Event.TextDelta) {
-                            streamedContent.append(event.text)
-                            runCatching { streamCallback?.invoke(streamedContent.toString()) }
-                        }
-                    },
-                    isCancelled = isCancelled
+                    clearConversation = clearConversation,
+                    streamCallback = streamCallback,
+                    isCancelled = isCancelled,
+                    cancellationMessage = "标点预测已取消",
+                    streamedContent = streamedContent,
+                    streamedReasoning = streamedReasoning
                 )
             } catch (error: Throwable) {
                 if (recordInterruptedTurn()) {
                     val partial = streamedContent.toString()
                     conversation.appendInterruptedTurn(
                         userContent = prompt,
-                        partialAssistantContent = partial
+                        partialAssistantContent = partial,
+                        partialReasoningContent = streamedReasoning.toString()
                     )
                     historyStore.append(
                         id = historySessionId,
@@ -199,7 +193,11 @@ class AiTranslationConversation(
                         type = ChatHistoryStore.TYPE_TRANSLATION,
                         messages = listOf(
                             ChatBackend.ChatMessage(role = "user", content = prompt),
-                            ChatBackend.ChatMessage(role = "assistant", content = partial)
+                            ChatBackend.ChatMessage(
+                                role = "assistant",
+                                content = partial,
+                                reasoningContent = streamedReasoning.toString()
+                            )
                         )
                     )
                 }
@@ -224,7 +222,12 @@ class AiTranslationConversation(
                 messages = result.messages
             )
             if (subtitleFormat == SubtitleFormat.TXT) {
-                extractTaggedTxtAiResponse(result.text)
+                try {
+                    extractTaggedTxtAiResponse(result.text)
+                } catch (error: InvalidTxtAiResponseException) {
+                    if (!localProvider) conversation.clear()
+                    throw error
+                }
             } else {
                 extractSubtitleAiResponse(result.text)
             }
@@ -500,34 +503,31 @@ class AiTranslationConversation(
         }
 
         val result = try {
-            conversation.sendUserMessage(
+            sendUserPrompt(
                 content = userContent,
-                onEvent = { event ->
-                    when (event) {
-                        is ChatBackend.Event.ReasoningDelta -> streamedReasoning.append(event.text)
-                        is ChatBackend.Event.TextDelta -> {
-                            streamedContent.append(event.text)
-                            runCatching { streamCallback?.invoke(streamedContent.toString()) }
-                            if (protocolIssue == null) {
-                                findTranslationProtocolIssue(
-                                    content = streamedContent.toString(),
-                                    expectedSubtitles = requestSubtitles,
-                                    format = subtitleFormat,
-                                    expectedStartPosition = requestStart,
-                                    sequenceOnly = localProvider,
-                                    finalResponse = false
-                                )?.let { issue ->
-                                    protocolIssue = issue
-                                    // Causes both the HTTP SSE reader and the local generation loop
-                                    // to stop at the first identifiable bad cue.
-                                    conversation.cancel()
-                                }
-                            }
+                clearConversation = false,
+                streamCallback = streamCallback,
+                isCancelled = { isCancelled() || protocolIssue != null },
+                cancellationMessage = "翻译已取消",
+                streamedContent = streamedContent,
+                streamedReasoning = streamedReasoning,
+                onTextDelta = {
+                    if (protocolIssue == null) {
+                        findTranslationProtocolIssue(
+                            content = streamedContent.toString(),
+                            expectedSubtitles = requestSubtitles,
+                            format = subtitleFormat,
+                            expectedStartPosition = requestStart,
+                            sequenceOnly = localProvider,
+                            finalResponse = false
+                        )?.let { issue ->
+                            protocolIssue = issue
+                            // Causes both the HTTP SSE reader and the local generation loop
+                            // to stop at the first identifiable bad cue.
+                            conversation.cancel()
                         }
-                        else -> Unit
                     }
-                },
-                isCancelled = { isCancelled() || protocolIssue != null }
+                }
             )
         } catch (error: CancellationException) {
             if (protocolIssue != null && !isCancelled()) {
@@ -549,10 +549,6 @@ class AiTranslationConversation(
             throw error
         }
 
-        if (streamedContent.isEmpty()) {
-            streamedContent.append(result.text)
-            runCatching { streamCallback?.invoke(streamedContent.toString()) }
-        }
         if (protocolIssue != null) {
             return BatchAttempt.Failure(
                 protocolIssue!!,
@@ -600,6 +596,47 @@ class AiTranslationConversation(
             )
         }
         return BatchAttempt.Success(parsed)
+    }
+
+    /**
+     * Sends one user turn through the same local/API path used by one-click translation.
+     * Callers keep protocol-specific history and parsing, while this method owns the common
+     * input simulation, reasoning-channel capture, visible streaming and cancellation checks.
+     */
+    private suspend fun sendUserPrompt(
+        content: String,
+        clearConversation: Boolean,
+        streamCallback: ((String) -> Unit)?,
+        isCancelled: () -> Boolean,
+        cancellationMessage: String,
+        streamedContent: StringBuilder,
+        streamedReasoning: StringBuilder,
+        onTextDelta: (() -> Unit)? = null
+    ): ChatBackend.SendResult {
+        if (isCancelled()) throw CancellationException(cancellationMessage)
+        if (clearConversation) conversation.clear()
+        val result = conversation.sendUserMessage(
+            content = content,
+            onEvent = { event ->
+                when (event) {
+                    is ChatBackend.Event.ReasoningDelta -> streamedReasoning.append(event.text)
+                    is ChatBackend.Event.TextDelta -> {
+                        streamedContent.append(event.text)
+                        runCatching { streamCallback?.invoke(streamedContent.toString()) }
+                        onTextDelta?.invoke()
+                    }
+                    else -> Unit
+                }
+            },
+            isCancelled = isCancelled
+        )
+        if (isCancelled()) throw CancellationException(cancellationMessage)
+        if (streamedContent.isEmpty()) {
+            streamedContent.append(result.text)
+            runCatching { streamCallback?.invoke(streamedContent.toString()) }
+            onTextDelta?.invoke()
+        }
+        return result
     }
 
     private fun completedBatchPrefix(

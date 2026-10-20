@@ -300,7 +300,7 @@ internal class AutoTranslateViewModel(application: Application) :
                 resetAiStream(file)
                 conversation.predictPunctuation(
                     text = text,
-                    clearConversation = !isRetry,
+                    clearConversation = provider == AiProviderConfig.LOCAL && !isRetry,
                     recordInterruptedTurn = shouldStop,
                     streamCallback = { content ->
                         publishAiStream(file, content)
@@ -322,7 +322,7 @@ internal class AutoTranslateViewModel(application: Application) :
                 resetAiStream(file)
                 conversation.predictPunctuation(
                     text = text,
-                    clearConversation = !isRetry,
+                    clearConversation = provider == AiProviderConfig.LOCAL && !isRetry,
                     isCancelled = { file.cancellationRequested }
                 ).getOrElse { throw it }
             }
@@ -384,7 +384,7 @@ internal class AutoTranslateViewModel(application: Application) :
                     request = {
                         conversation.predictPunctuation(
                             text = session.nextText,
-                            clearConversation = true,
+                            clearConversation = provider == AiProviderConfig.LOCAL,
                             streamCallback = { publishAiStream(file, it) },
                             isCancelled = { file.cancellationRequested }
                         ).getOrElse { throw it }

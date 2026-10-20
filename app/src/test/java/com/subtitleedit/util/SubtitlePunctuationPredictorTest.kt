@@ -110,6 +110,70 @@ class SubtitlePunctuationPredictorTest {
     }
 
     @Test
+    fun streamingProtocolWaitsForTheNextCueBeforeCheckingPartialInlineText() {
+        val source = listOf(
+            SubtitleEntry(index = 7, text = "你好"),
+            SubtitleEntry(index = 9, text = "世界")
+        )
+
+        assertEquals(
+            null,
+            SubtitlePunctuationPredictor.findPunctuationProtocolIssue(
+                response = "[7]你",
+                entries = source,
+                finalResponse = false
+            )
+        )
+        assertEquals(
+            0,
+            SubtitlePunctuationPredictor.findPunctuationProtocolIssue(
+                response = "[7]你\n[9]世界。",
+                entries = source,
+                finalResponse = false
+            )?.index
+        )
+    }
+
+    @Test
+    fun finalProtocolValidationStillRejectsPartialInlineText() {
+        val source = listOf(SubtitleEntry(index = 7, text = "你好"))
+
+        assertEquals(
+            0,
+            SubtitlePunctuationPredictor.findPunctuationProtocolIssue(
+                response = "[7]你",
+                entries = source,
+                finalResponse = true
+            )?.index
+        )
+    }
+
+    @Test
+    fun streamingProtocolWaitsForTheNextCueInNumberedFormat() {
+        val source = listOf(
+            SubtitleEntry(index = 7, text = "你好"),
+            SubtitleEntry(index = 9, text = "世界")
+        )
+
+        assertEquals(
+            null,
+            SubtitlePunctuationPredictor.findPunctuationProtocolIssue(
+                response = "7\n你",
+                entries = source,
+                finalResponse = false
+            )
+        )
+        assertEquals(
+            0,
+            SubtitlePunctuationPredictor.findPunctuationProtocolIssue(
+                response = "7\n你\n9\n世界。",
+                entries = source,
+                finalResponse = false
+            )?.index
+        )
+    }
+
+    @Test
     fun taglessSubtitleResponseKeepsCueTextThatIsEnd() {
         val source = listOf(subtitleEntries(1).single().copy(text = "end"))
 
