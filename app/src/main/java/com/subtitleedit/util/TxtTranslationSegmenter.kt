@@ -74,7 +74,18 @@ internal object TxtTranslationSegmenter {
     }
 
     /** Joins independent translations, restoring whitespace at the source segment boundaries. */
-    fun merge(translations: List<String>, segments: List<Segment>): String {
+    fun merge(translations: List<String>, segments: List<Segment>): String =
+        mergeSegments(translations, segments, addEnglishSpaces = true)
+
+    /** Joins punctuation predictions without inserting or normalizing source characters. */
+    fun mergePunctuation(predictions: List<String>, segments: List<Segment>): String =
+        mergeSegments(predictions, segments, addEnglishSpaces = false)
+
+    private fun mergeSegments(
+        translations: List<String>,
+        segments: List<Segment>,
+        addEnglishSpaces: Boolean
+    ): String {
         require(translations.size == segments.size) { "Translation and segment counts must match" }
         if (translations.isEmpty()) return ""
 
@@ -92,7 +103,7 @@ internal object TxtTranslationSegmenter {
                 result.append(sourceGap)
                 result.append(translation.substring(leadingWhitespaceEnd(translation)))
             } else {
-                if (needsEnglishSpace(result, translation)) result.append(' ')
+                if (addEnglishSpaces && needsEnglishSpace(result, translation)) result.append(' ')
                 result.append(translation)
             }
         }

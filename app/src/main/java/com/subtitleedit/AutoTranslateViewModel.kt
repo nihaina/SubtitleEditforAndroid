@@ -22,6 +22,7 @@ import com.subtitleedit.util.SubtitleFormatConverter
 import com.subtitleedit.util.SubtitlePunctuationPredictor
 import com.subtitleedit.util.SubtitleTextSplitOps
 import com.subtitleedit.util.TxtTranslationSession
+import com.subtitleedit.util.TxtPunctuationSession
 import com.subtitleedit.util.restoreTxtLineLayout
 import com.subtitleedit.util.subtitle.SubtitleDocument
 import kotlinx.coroutines.CancellationException
@@ -87,6 +88,7 @@ internal class AutoTranslateViewModel(application: Application) :
         var document: SubtitleDocument? = null
         var originalText: String? = null
         var textTranslationSession: TxtTranslationSession? = null
+        var textPunctuationSession: TxtPunctuationSession? = null
         var punctuationPredictionCompleted = false
         var punctuationSession: SubtitlePunctuationPredictor.Session? = null
         @Volatile var cancellationRequested = false
@@ -226,7 +228,9 @@ internal class AutoTranslateViewModel(application: Application) :
                 file.document = document
             }
             updateProcessingStage(file, ProcessingStage.SAVING)
-            val outputText = file.textTranslationSession?.translatedText ?: SubtitleParser.serialize(document)
+            val outputText = file.textTranslationSession?.translatedText
+                ?: file.textPunctuationSession?.predictedText
+                ?: SubtitleParser.serialize(document)
             currentCoroutineContext().ensureActive()
             SubtitleOutputWriter.writeText(app, outputUri, file.fileName.substringBeforeLast("."), outputExtension(file), outputText, overwrite = overwriteOutput)
             file.status = FileStatus.COMPLETED
@@ -253,6 +257,9 @@ internal class AutoTranslateViewModel(application: Application) :
     }
 
     private suspend fun applyPunctuationPrediction(file: AutoTranslateFile, document: SubtitleDocument): SubtitleDocument {
+        if (document.format == SubtitleParser.SubtitleFormat.TXT) {
+            return predictTxtPunctuation(file, document)
+        }
         val provider = settingsManager.getAiPunctuationProvider()
         val preparedEntries = SubtitlePunctuationPredictor.prepareEntries(document.entries)
         val entriesPerBatch = settingsManager.getAiSubtitlesPerRequest(provider)
@@ -323,6 +330,81 @@ internal class AutoTranslateViewModel(application: Application) :
         return document.copy(entries = punctuated)
     }
 
+    private suspend fun predictTxtPunctuation(
+        file: AutoTranslateFile,
+        document: SubtitleDocument
+    ): SubtitleDocument {
+        val source = file.originalText ?: document.entries.joinToString("\n") { it.text }
+        val session = file.textPunctuationSession ?: TxtPunctuationSession(source) { text, offset ->
+            SubtitleTextSplitOps.wordStartAt(app, text, offset)
+        }.also { file.textPunctuationSession = it }
+        val provider = settingsManager.getAiPunctuationProvider()
+        updateProcessingStage(
+            file,
+            ProcessingStage.PUNCTUATION_PREDICTION,
+            session.completedCount,
+            session.totalCount
+        )
+        if (session.totalCount == 0) return document
+        val apiKey = settingsManager.getAiApiKey(provider)
+        val model = settingsManager.getAiPunctuationModel(provider)
+        val baseUrl = settingsManager.getAiBaseUrl(provider)
+        if (provider == AiProviderConfig.LOCAL) {
+            if (settingsManager.getLlmModelPath().isBlank()) {
+                throw IllegalArgumentException(string(R.string.ai_processing_configuration_required))
+            }
+        } else if (apiKey.isBlank() || model.isBlank() || baseUrl.isBlank()) {
+            throw IllegalArgumentException(string(R.string.ai_processing_configuration_required))
+        }
+        val conversation = aiTranslationService.createConversation(
+            app,
+            provider,
+            apiKey,
+            model,
+            "",
+            settingsManager.getAiPunctuationCustomPrompt(),
+            baseUrl,
+            document.format,
+            settingsManager.getAiPunctuationReasoningLevel(provider),
+            "punctuation_${file.sessionId}",
+            string(R.string.auto_translate_punctuation_history_title, file.fileName),
+            settingsManager.isAiLocalPunctuationThinkingEnabled()
+        )
+        file.activeConversation = conversation
+        var consecutiveErrors = 0
+        while (session.completedCount < session.totalCount) {
+            currentCoroutineContext().ensureActive()
+            if (file.cancellationRequested) {
+                throw CancellationException(string(R.string.auto_translate_punctuation_cancelled))
+            }
+            resetAiStream(file)
+            publish()
+            try {
+                val predicted = conversation.predictPunctuation(
+                    text = session.nextText,
+                    clearConversation = true,
+                    streamCallback = { publishAiStream(file, it) },
+                    isCancelled = { file.cancellationRequested }
+                ).getOrElse { throw it }
+                currentCoroutineContext().ensureActive()
+                session.appendPrediction(predicted)
+                file.processedLines = session.completedCount
+                file.message = ""
+                consecutiveErrors = 0
+                publish()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                consecutiveErrors++
+                if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) throw error
+                file.message = error.message ?: string(R.string.auto_translate_processing_failed)
+                publish()
+                delay((consecutiveErrors * 500L).coerceAtMost(3_000L))
+            }
+        }
+        return document.copy(entries = listOf(document.entries.first().copy(text = session.predictedText)))
+    }
+
     private suspend fun translateDocument(file: AutoTranslateFile, document: SubtitleDocument, config: TranslationConfig): SubtitleDocument {
         if (document.format == SubtitleParser.SubtitleFormat.TXT) {
             return translateTextDocument(file, document, config)
@@ -368,9 +450,11 @@ internal class AutoTranslateViewModel(application: Application) :
     private suspend fun translateTextDocument(file: AutoTranslateFile, document: SubtitleDocument, config: TranslationConfig): SubtitleDocument {
         val session = file.textTranslationSession ?: TxtTranslationSession(
             text = if (file.punctuationPredictionCompleted) {
-                file.originalText?.let { source ->
-                    restoreTxtLineLayout(source, document.entries.associate { it.index to it.text })
-                } ?: document.entries.joinToString("\n") { it.text }
+                file.textPunctuationSession?.predictedText
+                    ?: file.originalText?.let { source ->
+                        restoreTxtLineLayout(source, document.entries.associate { it.index to it.text })
+                    }
+                    ?: document.entries.joinToString("\n") { it.text }
             } else {
                 file.originalText ?: document.entries.joinToString("\n") { it.text }
             },
