@@ -12,7 +12,12 @@ import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import java.util.ArrayDeque
 import java.util.Locale
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.TimeUnit
 import kotlin.math.min
 
 /**
@@ -27,9 +32,10 @@ class VocalSeparationEngine(
     private val modelPath: String,
     private val modelDisplayName: String,
     private val modelSize: Long? = null,
-    private val threadCount: Int = 2,
-    private val graphOptimizationEnabled: Boolean = false,
-    private val cpuArenaEnabled: Boolean = false,
+    private val threadCount: Int = 6,
+    private val chunkParallelEnabled: Boolean = false,
+    private val graphOptimizationEnabled: Boolean = true,
+    private val cpuArenaEnabled: Boolean = true,
     private val log: (String) -> Unit = {}
 ) : VocalSeparationRunner {
     enum class Stem(val fileSuffix: String, val displayName: String, val modelIndex: Int) {
@@ -71,7 +77,7 @@ class VocalSeparationEngine(
         log("分块参数：44.1kHz / 双声道 / ${"%.2f".format(Locale.getDefault(), SEGMENT / SAMPLE_RATE.toDouble())}秒 / 25% 重叠")
         log(
             "ORT 线程：$threadCount；图优化：${enabledText(graphOptimizationEnabled)}；" +
-                "CPU arena：${enabledText(cpuArenaEnabled)}"
+                "CPU arena：${enabledText(cpuArenaEnabled)}；块间并行：${if (chunkParallelEnabled) "开启（最多 2 块）" else "关闭"}"
         )
 
         val environment = OrtEnvironment.getEnvironment(OrtLoggingLevel.ORT_LOGGING_LEVEL_WARNING, "subtitleedit-demix")
@@ -127,9 +133,6 @@ class VocalSeparationEngine(
             arrayOf(FloatArray(SEGMENT), FloatArray(SEGMENT))
         }
         val weights = FloatArray(SEGMENT)
-        val inputBuffer = ByteBuffer.allocateDirect(2 * SEGMENT * Float.SIZE_BYTES)
-            .order(ByteOrder.nativeOrder())
-            .asFloatBuffer()
         val interleavedBytes = ByteArray(SEGMENT * BYTES_PER_FRAME)
         val outputFiles = stems.associateWith { stem ->
             File(outputDir, "${outputBaseName}_${stem.fileSuffix}.wav")
@@ -137,42 +140,69 @@ class VocalSeparationEngine(
         val writers = outputFiles.mapValues { (_, file) ->
             StreamingWavWriter(file, SAMPLE_RATE, CHANNELS, totalFrames)
         }
+        val maxParallelChunks = if (chunkParallelEnabled) MAX_PARALLEL_CHUNKS else 1
+        val inferenceExecutor = Executors.newFixedThreadPool(maxParallelChunks)
+        val pendingChunks = ArrayDeque<PendingChunk>()
 
         try {
             RandomAccessFile(pcmFile, "r").use { pcm ->
                 var baseFrame = 0L
-                for (chunkIndex in 0 until chunkCount) {
-                    checkNotCancelled(isCancelled)
-                    val chunkStart = chunkIndex.toLong() * STRIDE
-                    val chunkLength = min(SEGMENT.toLong(), totalFrames - chunkStart).toInt()
-                    if (chunkLength <= 0) break
+                var nextChunkToSchedule = 0
+                while (nextChunkToSchedule < chunkCount || pendingChunks.isNotEmpty()) {
+                    while (nextChunkToSchedule < chunkCount && pendingChunks.size < maxParallelChunks) {
+                        checkNotCancelled(isCancelled)
+                        val chunkIndex = nextChunkToSchedule
+                        val chunkStart = chunkIndex.toLong() * STRIDE
+                        val chunkLength = min(SEGMENT.toLong(), totalFrames - chunkStart).toInt()
+                        if (chunkLength <= 0) break
 
-                    val chunkStartedAt = System.currentTimeMillis()
-                    readChunk(pcm, chunkStart, chunkLength, interleavedBytes, inputBuffer)
-                    inputBuffer.position(0)
-
-                    OnnxTensor.createTensor(
-                        environment,
-                        inputBuffer,
-                        longArrayOf(1, CHANNELS.toLong(), SEGMENT.toLong())
-                    ).use { inputTensor ->
-                        session.run(mapOf(INPUT_NAME to inputTensor)).use { inferenceResult ->
-                            val outputTensor = inferenceResult.get(OUTPUT_NAME).orElseThrow {
-                                IllegalStateException("模型没有输出张量 $OUTPUT_NAME")
-                            } as? OnnxTensor ?: throw IllegalStateException("模型输出不是张量")
-                            accumulateSelectedStems(
-                                outputTensor.floatBuffer,
-                                stems,
-                                accumulators,
-                                transitionWindow,
-                                weights,
-                                chunkLength
-                            )
+                        val inputBuffer = ByteBuffer.allocateDirect(2 * SEGMENT * Float.SIZE_BYTES)
+                            .order(ByteOrder.nativeOrder())
+                            .asFloatBuffer()
+                        readChunk(pcm, chunkStart, chunkLength, interleavedBytes, inputBuffer)
+                        inputBuffer.position(0)
+                        val inputTensor = OnnxTensor.createTensor(
+                            environment,
+                            inputBuffer,
+                            longArrayOf(1, CHANNELS.toLong(), SEGMENT.toLong())
+                        )
+                        try {
+                            val future = inferenceExecutor.submit<ChunkInference> {
+                                val inferenceStartedAt = System.currentTimeMillis()
+                                val result = inputTensor.use { tensor ->
+                                    session.run(mapOf(INPUT_NAME to tensor))
+                                }
+                                ChunkInference(result, System.currentTimeMillis() - inferenceStartedAt)
+                            }
+                            pendingChunks.addLast(PendingChunk(chunkIndex, chunkLength, future))
+                        } catch (e: Throwable) {
+                            inputTensor.close()
+                            throw e
                         }
+                        nextChunkToSchedule++
                     }
 
-                    val isLast = chunkIndex == chunkCount - 1
-                    val flushEnd = if (isLast) totalFrames else (chunkIndex + 1L) * STRIDE
+                    if (pendingChunks.isEmpty()) break
+                    val pending = pendingChunks.first
+                    val inference = awaitInference(pending.future)
+                    pendingChunks.removeFirst()
+                    inference.result.use { inferenceResult ->
+                        checkNotCancelled(isCancelled)
+                        val outputTensor = inferenceResult.get(OUTPUT_NAME).orElseThrow {
+                            IllegalStateException("模型没有输出张量 $OUTPUT_NAME")
+                        } as? OnnxTensor ?: throw IllegalStateException("模型输出不是张量")
+                        accumulateSelectedStems(
+                            outputTensor.floatBuffer,
+                            stems,
+                            accumulators,
+                            transitionWindow,
+                            weights,
+                            pending.chunkLength
+                        )
+                    }
+
+                    val isLast = pending.chunkIndex == chunkCount - 1
+                    val flushEnd = if (isLast) totalFrames else (pending.chunkIndex + 1L) * STRIDE
                     val flushCount = (flushEnd - baseFrame).toInt().coerceAtMost(SEGMENT)
                     normalizeAndWrite(stems, accumulators, weights, writers, flushCount)
 
@@ -182,15 +212,38 @@ class VocalSeparationEngine(
                         baseFrame += flushCount
                     }
 
-                    val elapsed = System.currentTimeMillis() - chunkStartedAt
-                    log("分块 ${chunkIndex + 1}/$chunkCount 完成：输入 ${"%.2f".format(Locale.getDefault(), chunkLength / SAMPLE_RATE.toDouble())} 秒，耗时 ${formatDuration(elapsed)}")
-                    onProgress(chunkIndex + 1, chunkCount)
+                    log("分块 ${pending.chunkIndex + 1}/$chunkCount 完成：输入 ${"%.2f".format(Locale.getDefault(), pending.chunkLength / SAMPLE_RATE.toDouble())} 秒，推理耗时 ${formatDuration(inference.elapsedMs)}")
+                    onProgress(pending.chunkIndex + 1, chunkCount)
                 }
             }
         } catch (e: Throwable) {
             writers.values.forEach { runCatching { it.close() } }
             outputFiles.values.forEach { it.delete() }
             throw e
+        } finally {
+            inferenceExecutor.shutdown()
+            var interrupted = false
+            for (pending in pendingChunks) {
+                var completed = false
+                while (!completed) {
+                    try {
+                        pending.future.get().result.close()
+                        completed = true
+                    } catch (_: InterruptedException) {
+                        interrupted = true
+                    } catch (_: Throwable) {
+                        completed = true
+                    }
+                }
+            }
+            while (!inferenceExecutor.isTerminated) {
+                try {
+                    inferenceExecutor.awaitTermination(1, TimeUnit.DAYS)
+                } catch (_: InterruptedException) {
+                    interrupted = true
+                }
+            }
+            if (interrupted) Thread.currentThread().interrupt()
         }
 
         writers.values.forEach { it.close() }
@@ -287,6 +340,23 @@ class VocalSeparationEngine(
         if (isCancelled()) throw InterruptedException("人声分离已取消")
     }
 
+    private fun awaitInference(future: Future<ChunkInference>): ChunkInference = try {
+        future.get()
+    } catch (e: ExecutionException) {
+        throw e.cause ?: e
+    }
+
+    private data class PendingChunk(
+        val chunkIndex: Int,
+        val chunkLength: Int,
+        val future: Future<ChunkInference>
+    )
+
+    private data class ChunkInference(
+        val result: OrtSession.Result,
+        val elapsedMs: Long
+    )
+
     private fun buildTransitionWindow(): FloatArray {
         val window = FloatArray(SEGMENT) { 1f }
         for (i in 0 until OVERLAP) {
@@ -358,6 +428,7 @@ class VocalSeparationEngine(
         const val INPUT_NAME = "mix"
         const val OUTPUT_NAME = "stems"
         private const val BYTES_PER_FRAME = CHANNELS * Float.SIZE_BYTES
+        private const val MAX_PARALLEL_CHUNKS = 2
 
         private fun formatDuration(ms: Long): String = if (ms < 1000) {
             "${ms}ms"

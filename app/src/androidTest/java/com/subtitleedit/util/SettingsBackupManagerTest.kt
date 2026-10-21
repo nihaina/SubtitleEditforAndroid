@@ -88,6 +88,39 @@ class SettingsBackupManagerTest {
         }
     }
 
+    @Test
+    fun demixOrtSettingsAreExportedAndRestored() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val settings = SettingsManager.getInstance(context)
+        val original = DemixOrtSettingsSnapshot.from(settings)
+        try {
+            settings.setDemixOrtIntraOpThreads(7)
+            settings.setDemixOrtChunkParallelEnabled(true)
+            settings.setDemixOrtGraphOptimizationEnabled(false)
+            settings.setDemixOrtCpuArenaEnabled(false)
+
+            val backup = JSONObject(SettingsBackupManager.export(context))
+                .getJSONObject("settings")
+            assertTypedValue(backup, "demix_ort_intra_op_threads", "int", 7)
+            assertTypedValue(backup, "demix_ort_chunk_parallel", "boolean", true)
+            assertTypedValue(backup, "demix_ort_graph_optimization", "boolean", false)
+            assertTypedValue(backup, "demix_ort_cpu_arena", "boolean", false)
+
+            original.restore(settings)
+            SettingsBackupManager.restore(context, JSONObject()
+                .put("schemaVersion", 1)
+                .put("settings", backup)
+                .toString())
+
+            assertEquals(7, settings.getDemixOrtIntraOpThreads())
+            assertEquals(true, settings.isDemixOrtChunkParallelEnabled())
+            assertEquals(false, settings.isDemixOrtGraphOptimizationEnabled())
+            assertEquals(false, settings.isDemixOrtCpuArenaEnabled())
+        } finally {
+            original.restore(settings)
+        }
+    }
+
     private data class LlmSettingsSnapshot(
         val repackEnabled: Boolean,
         val contextSize: Int,
@@ -113,6 +146,29 @@ class SettingsBackupManagerTest {
                 temperature = settings.getLlmTemperature(),
                 topP = settings.getLlmTopP(),
                 repetitionPenalty = settings.getLlmRepetitionPenalty()
+            )
+        }
+    }
+
+    private data class DemixOrtSettingsSnapshot(
+        val intraOpThreads: Int,
+        val chunkParallelEnabled: Boolean,
+        val graphOptimizationEnabled: Boolean,
+        val cpuArenaEnabled: Boolean
+    ) {
+        fun restore(settings: SettingsManager) {
+            settings.setDemixOrtIntraOpThreads(intraOpThreads)
+            settings.setDemixOrtChunkParallelEnabled(chunkParallelEnabled)
+            settings.setDemixOrtGraphOptimizationEnabled(graphOptimizationEnabled)
+            settings.setDemixOrtCpuArenaEnabled(cpuArenaEnabled)
+        }
+
+        companion object {
+            fun from(settings: SettingsManager) = DemixOrtSettingsSnapshot(
+                intraOpThreads = settings.getDemixOrtIntraOpThreads(),
+                chunkParallelEnabled = settings.isDemixOrtChunkParallelEnabled(),
+                graphOptimizationEnabled = settings.isDemixOrtGraphOptimizationEnabled(),
+                cpuArenaEnabled = settings.isDemixOrtCpuArenaEnabled()
             )
         }
     }

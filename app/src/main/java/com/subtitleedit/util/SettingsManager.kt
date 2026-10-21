@@ -152,6 +152,11 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_DEMIX_MODEL_TYPE = "demix_model_type"
         private const val KEY_DEMIX_ORT_GRAPH_OPTIMIZATION = "demix_ort_graph_optimization"
         private const val KEY_DEMIX_ORT_CPU_ARENA = "demix_ort_cpu_arena"
+        private const val KEY_DEMIX_ORT_INTRA_OP_THREADS = "demix_ort_intra_op_threads"
+        private const val KEY_DEMIX_ORT_CHUNK_PARALLEL = "demix_ort_chunk_parallel"
+        private const val DEFAULT_DEMIX_ORT_INTRA_OP_THREADS = 6
+        private const val MIN_DEMIX_ORT_INTRA_OP_THREADS = 1
+        private const val MAX_DEMIX_ORT_INTRA_OP_THREADS = 8
 
         const val WAVEFORM_CACHE_APP = "app_cache"
         const val WAVEFORM_CACHE_SOURCE = "source_dir"
@@ -323,6 +328,12 @@ class SettingsManager private constructor(context: Context) {
         snapshot[KEY_LLM_TEMPERATURE] = getLlmTemperature()
         snapshot[KEY_LLM_TOP_P] = getLlmTopP()
         snapshot[KEY_LLM_REPETITION_PENALTY] = getLlmRepetitionPenalty()
+        // Include effective Demucs/ONNX runtime values even when the user has
+        // never opened the vocal separation settings page.
+        snapshot[KEY_DEMIX_ORT_INTRA_OP_THREADS] = getDemixOrtIntraOpThreads()
+        snapshot[KEY_DEMIX_ORT_CHUNK_PARALLEL] = isDemixOrtChunkParallelEnabled()
+        snapshot[KEY_DEMIX_ORT_GRAPH_OPTIMIZATION] = isDemixOrtGraphOptimizationEnabled()
+        snapshot[KEY_DEMIX_ORT_CPU_ARENA] = isDemixOrtCpuArenaEnabled()
         return snapshot
     }
 
@@ -1556,17 +1567,36 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun isDemixOrtGraphOptimizationEnabled(): Boolean =
-        prefs.getBoolean(KEY_DEMIX_ORT_GRAPH_OPTIMIZATION, false)
+        prefs.getBoolean(KEY_DEMIX_ORT_GRAPH_OPTIMIZATION, true)
 
     fun setDemixOrtGraphOptimizationEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_DEMIX_ORT_GRAPH_OPTIMIZATION, enabled).apply()
     }
 
     fun isDemixOrtCpuArenaEnabled(): Boolean =
-        prefs.getBoolean(KEY_DEMIX_ORT_CPU_ARENA, false)
+        prefs.getBoolean(KEY_DEMIX_ORT_CPU_ARENA, true)
 
     fun setDemixOrtCpuArenaEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_DEMIX_ORT_CPU_ARENA, enabled).apply()
+    }
+
+    fun getDemixOrtIntraOpThreads(): Int = prefs.getInt(
+        KEY_DEMIX_ORT_INTRA_OP_THREADS,
+        DEFAULT_DEMIX_ORT_INTRA_OP_THREADS
+    ).coerceIn(MIN_DEMIX_ORT_INTRA_OP_THREADS, MAX_DEMIX_ORT_INTRA_OP_THREADS)
+
+    fun setDemixOrtIntraOpThreads(threadCount: Int) {
+        prefs.edit().putInt(
+            KEY_DEMIX_ORT_INTRA_OP_THREADS,
+            threadCount.coerceIn(MIN_DEMIX_ORT_INTRA_OP_THREADS, MAX_DEMIX_ORT_INTRA_OP_THREADS)
+        ).apply()
+    }
+
+    fun isDemixOrtChunkParallelEnabled(): Boolean =
+        prefs.getBoolean(KEY_DEMIX_ORT_CHUNK_PARALLEL, false)
+
+    fun setDemixOrtChunkParallelEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_DEMIX_ORT_CHUNK_PARALLEL, enabled).apply()
     }
 
     private fun demixModelKey(stem: String): String = when (stem.lowercase()) {

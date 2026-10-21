@@ -302,6 +302,8 @@ internal class VocalSeparationViewModel(
                         modelPath = directPath,
                         modelDisplayName = modelName,
                         modelSize = size,
+                        threadCount = settings.getDemixOrtIntraOpThreads(),
+                        chunkParallelEnabled = settings.isDemixOrtChunkParallelEnabled(),
                         graphOptimizationEnabled = settings.isDemixOrtGraphOptimizationEnabled(),
                         cpuArenaEnabled = settings.isDemixOrtCpuArenaEnabled(),
                         log = { message -> appendRuntimeLog("$prefix $modelLabel: $message") }

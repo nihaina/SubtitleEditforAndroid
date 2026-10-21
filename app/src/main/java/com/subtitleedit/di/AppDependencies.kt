@@ -39,6 +39,8 @@ internal class AppDependencies(application: Application) {
         modelPath: String,
         modelDisplayName: String,
         modelSize: Long?,
+        threadCount: Int,
+        chunkParallelEnabled: Boolean,
         graphOptimizationEnabled: Boolean,
         cpuArenaEnabled: Boolean,
         log: (String) -> Unit
@@ -46,6 +48,8 @@ internal class AppDependencies(application: Application) {
         modelPath = modelPath,
         modelDisplayName = modelDisplayName,
         modelSize = modelSize,
+        threadCount = threadCount,
+        chunkParallelEnabled = chunkParallelEnabled,
         graphOptimizationEnabled = graphOptimizationEnabled,
         cpuArenaEnabled = cpuArenaEnabled,
         log = log

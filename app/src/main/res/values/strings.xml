@@ -541,7 +541,12 @@
     <string name="activity_vocal_separation_settings_text_16">可能提高推理速度，但 HTDemucs 在模型加载时可能产生很高的内存峰值。</string>
     <string name="activity_vocal_separation_settings_text_17">启用 CPU arena</string>
     <string name="activity_vocal_separation_settings_text_18">复用 CPU 内存分配通常有利于速度，但可能在多个分块之间保留较大的内存池。</string>
-    <string name="activity_vocal_separation_settings_text_19">默认均关闭，以降低移动设备运行 HTDemucs 时发生内存不足的风险。修改将在下一次开始人声分离时生效。</string>
+    <string name="activity_vocal_separation_settings_text_19">图优化和 CPU arena 默认开启，可能提升推理速度但会增加内存占用；如遇内存不足或运行不稳定，可关闭。所有修改将在下一次开始人声分离时生效。</string>
+    <string name="activity_vocal_separation_settings_text_20">算子内线程数</string>
+    <string name="activity_vocal_separation_settings_text_21">控制单个 ONNX 运算使用的 CPU 线程数。不同设备的最佳值不同，增加线程不一定会更快。</string>
+    <string name="activity_vocal_separation_settings_text_22">%1$d 个线程</string>
+    <string name="activity_vocal_separation_settings_text_23">启用块间并行</string>
+    <string name="activity_vocal_separation_settings_text_24">最多同时推理 2 个音频分块，可能提高速度，也会增加峰值内存。设备内存不足或运行不稳定时请关闭。</string>
     <string name="activity_vocal_separation_text_01">人声分离设置</string>
     <string name="activity_vocal_separation_title">人声分离</string>
     <string name="activity_vocal_separation_settings_title">人声分离设置</string>
