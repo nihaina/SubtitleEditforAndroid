@@ -74,7 +74,7 @@ class VocalSeparationEngine(
         log("模型：$modelDisplayName${modelSize?.let { "，大小 ${formatBytes(it)}" }.orEmpty()}")
         log("输入张量：$INPUT_NAME [1, 2, $SEGMENT]")
         log("输出张量：$OUTPUT_NAME [1, 4, 2, $SEGMENT]")
-        log("分块参数：44.1kHz / 双声道 / ${"%.2f".format(Locale.getDefault(), SEGMENT / SAMPLE_RATE.toDouble())}秒 / 25% 重叠")
+        log("分块参数：44.1kHz / 双声道 / ${"%.2f".format(Locale.getDefault(), SEGMENT / SAMPLE_RATE.toDouble())}秒 / 5% 重叠")
         log(
             "ORT 线程：$threadCount；图优化：${enabledText(graphOptimizationEnabled)}；" +
                 "CPU arena：${enabledText(cpuArenaEnabled)}；块间并行：${if (chunkParallelEnabled) "开启（最多 2 块）" else "关闭"}"
@@ -423,7 +423,7 @@ class VocalSeparationEngine(
         const val SAMPLE_RATE = 44100
         const val CHANNELS = 2
         const val SEGMENT = 343980
-        const val OVERLAP = SEGMENT / 4
+        const val OVERLAP = SEGMENT / 20
         const val STRIDE = SEGMENT - OVERLAP
         const val INPUT_NAME = "mix"
         const val OUTPUT_NAME = "stems"
