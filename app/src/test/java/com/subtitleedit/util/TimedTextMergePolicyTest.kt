@@ -293,6 +293,21 @@ class TimedTextMergePolicyTest {
     }
 
     @Test
+    fun leadingPunctuationCannotMergeLeftAfterItFirstMergesRight() {
+        val cues = listOf(
+            Cue(0, 10, "甲"),
+            Cue(100, 110, "。"),
+            Cue(120, 130, "乙"),
+        )
+
+        assertEquals(listOf("甲", "。乙"), merge(cues, maxGapMs = 100).map { it.text })
+        assertEquals(
+            listOf("甲。乙"),
+            merge(cues, maxGapMs = 100, splitPunctuation = false).map { it.text },
+        )
+    }
+
+    @Test
     fun disablingDirectionalPunctuationAllowsTerminalPunctuationToMergeRight() {
         val cues = listOf(Cue(0, 10, "甲。"), Cue(20, 30, "乙"))
         assertEquals(listOf("甲。乙"), merge(cues, splitPunctuation = false).map { it.text })

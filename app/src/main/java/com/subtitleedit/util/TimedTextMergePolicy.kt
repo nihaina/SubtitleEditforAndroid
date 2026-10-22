@@ -64,7 +64,8 @@ internal object TimedTextMergePolicy {
                         val right = result[index + 1]
                         val gap = start(right.value) - end(left.value)
                         if (right.splitBoundaryBefore || left.rejectedRight === right || gap > gapLimit ||
-                            (gapLimit > 0 && splitOnPunctuation && endsInPunctuation(text(left.value)))
+                            (gapLimit > 0 && splitOnPunctuation &&
+                                (endsInPunctuation(text(left.value)) || startsInPunctuation(text(right.value))))
                         ) break
                         continuous = continuous && gap <= 0L
                         combined = combine(combined, right.value)
@@ -197,6 +198,12 @@ internal object TimedTextMergePolicy {
         // A punctuation-only subtitle still participates normally in both directions.
         return trimmed.isNotEmpty() && characterCount(trimmed) > 0 &&
             Character.getType(trimmed.codePointBefore(trimmed.length)) in punctuationTypes
+    }
+
+    private fun startsInPunctuation(text: String): Boolean {
+        val trimmed = text.trimStart()
+        return trimmed.isNotEmpty() &&
+            Character.getType(trimmed.codePointAt(0)) in punctuationTypes
     }
 
     private fun punctuationSplitIndex(text: String): Int? {

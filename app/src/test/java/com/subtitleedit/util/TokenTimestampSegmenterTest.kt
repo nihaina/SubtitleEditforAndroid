@@ -101,7 +101,7 @@ class TokenTimestampSegmenterTest {
             TokenTimestampSegmenter.Segment(2_050, 2_300, "尾"),
         )
 
-        val merged = TokenTimestampSegmenter.mergeSegments(segments, 0, smart = true, maxCharacters = 15, splitOnPunctuation = false)
+        val merged = TokenTimestampSegmenter.mergeSegments(segments, 50, smart = true, maxCharacters = 15, splitOnPunctuation = false)
 
         assertEquals(listOf("1234567890，", "甲乙丙丁戊己庚辛尾"), merged.map { it.text })
         assertEquals(0L, merged[0].startTimeMs)
@@ -120,7 +120,7 @@ class TokenTimestampSegmenterTest {
             audioEndTimeMs = 3_000,
         )
 
-        val merged = TokenTimestampSegmenter.mergeSegments(segments, 0, smart = true, maxCharacters = 15, splitOnPunctuation = false)
+        val merged = TokenTimestampSegmenter.mergeSegments(segments, 50, smart = true, maxCharacters = 15, splitOnPunctuation = false)
 
         assertEquals(listOf("12345678，", "甲乙丙丁戊己庚辛"), merged.map { it.text })
         assertEquals(1_000L, merged[0].startTimeMs)
@@ -137,7 +137,7 @@ class TokenTimestampSegmenterTest {
             TokenTimestampSegmenter.Segment(1_701, 1_800, "尾"),
         )
 
-        val merged = TokenTimestampSegmenter.mergeSegments(segments, 0, smart = true, maxCharacters = 15)
+        val merged = TokenTimestampSegmenter.mergeSegments(segments, 1, smart = true, maxCharacters = 15)
 
         assertEquals(listOf("𠀀".repeat(8) + "，", "甲".repeat(8) + "尾"), merged.map { it.text })
         assertEquals(firstText + "尾", merged.joinToString("") { it.text })
@@ -230,7 +230,7 @@ class TokenTimestampSegmenterTest {
                 TokenTimestampSegmenter.Segment(901, 1_100, "尾"),
             )
 
-            val merged = TokenTimestampSegmenter.mergeSegments(segments, 0, smart = true, maxCharacters = 15)
+            val merged = TokenTimestampSegmenter.mergeSegments(segments, 1, smart = true, maxCharacters = 15)
 
             assertEquals(listOf("12345678，", "甲乙丙丁戊己庚辛尾"), merged.map { it.text })
             assertEquals(100L, merged.first().startTimeMs)
@@ -260,8 +260,8 @@ class TokenTimestampSegmenterTest {
             TokenTimestampSegmenter.Segment(200, 300, "丙"),
         )
 
-        val enabled = TokenTimestampSegmenter.mergeSegments(segments, 0, smart = true)
-        val disabled = TokenTimestampSegmenter.mergeSegments(segments, 0, smart = true, splitOnPunctuation = false)
+        val enabled = TokenTimestampSegmenter.mergeSegments(segments, 1, smart = true)
+        val disabled = TokenTimestampSegmenter.mergeSegments(segments, 1, smart = true, splitOnPunctuation = false)
 
         assertEquals(listOf("甲乙。", "丙"), enabled.map { it.text })
         assertEquals(listOf("甲乙。丙"), disabled.map { it.text })

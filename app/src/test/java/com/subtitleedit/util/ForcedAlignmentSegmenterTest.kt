@@ -93,7 +93,7 @@ class ForcedAlignmentSegmenterTest {
             ),
         )
 
-        val merged = ForcedAlignmentSegmenter.mergeSegments(segments, 0, smart = true, maxCharacters = 15, splitOnPunctuation = false)
+        val merged = ForcedAlignmentSegmenter.mergeSegments(segments, 200, smart = true, maxCharacters = 15, splitOnPunctuation = false)
 
         assertEquals(listOf("1234567890。", "abcdefgh ix"), merged.map { it.text })
         assertEquals(900L, merged[0].startTimeMs)
@@ -121,7 +121,7 @@ class ForcedAlignmentSegmenterTest {
         assertEquals(1, original.size)
         val segments = original + ForcedAlignmentSegmenter.Segment(1_950, 2_200, "尾")
 
-        val merged = ForcedAlignmentSegmenter.mergeSegments(segments, 0, smart = true, maxCharacters = 15)
+        val merged = ForcedAlignmentSegmenter.mergeSegments(segments, 150, smart = true, maxCharacters = 15)
 
         assertEquals(listOf("12345678，", "甲乙丙丁戊己庚辛尾"), merged.map { it.text })
         assertEquals(1_000L, merged[0].startTimeMs)
@@ -252,7 +252,7 @@ class ForcedAlignmentSegmenterTest {
             ),
         )
 
-        val merged = ForcedAlignmentSegmenter.mergeSegments(segments, 0, smart = true)
+        val merged = ForcedAlignmentSegmenter.mergeSegments(segments, 200, smart = true)
 
         assertEquals("甲，乙丙", merged.single().text)
         assertEquals(0L, merged.single().startTimeMs)
@@ -281,7 +281,7 @@ class ForcedAlignmentSegmenterTest {
             ForcedAlignmentSegmenter.Segment(250, 400, "丙", alignedStartTimeMs = 200, alignedEndTimeMs = 350),
         )
 
-        val merged = ForcedAlignmentSegmenter.mergeSegments(segments, 0, smart = true)
+        val merged = ForcedAlignmentSegmenter.mergeSegments(segments, 1, smart = true)
 
         assertEquals(listOf("甲乙。", "丙"), merged.map { it.text })
         assertEquals(200L, merged.first().alignedEndTimeMs)
