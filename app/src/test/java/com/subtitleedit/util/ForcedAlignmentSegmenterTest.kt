@@ -64,6 +64,52 @@ class ForcedAlignmentSegmenterTest {
     }
 
     @Test
+    fun zeroSplitGapKeepsShortGappedAlignedUnitsAvailableToPostProcessing() {
+        val units = listOf(
+            ForcedAlignmentUnit("甲", 100, 150),
+            ForcedAlignmentUnit("乙", 170, 220),
+            ForcedAlignmentUnit("丙", 240, 290),
+        )
+        val preGrouped = ForcedAlignmentSegmenter.split(
+            units = units,
+            audioStartTimeMs = 0,
+            audioEndTimeMs = 1_000,
+            splitGapMs = 250,
+        )
+        assertEquals(listOf("甲乙丙"), preGrouped.map { it.text })
+        assertEquals(
+            listOf("甲乙丙"),
+            ForcedAlignmentSegmenter.mergeSegments(
+                preGrouped,
+                maxGapMs = 20,
+                smart = true,
+                maxCharacters = 2,
+                splitOnPunctuation = false,
+            ).map { it.text },
+        )
+
+        val segments = ForcedAlignmentSegmenter.split(
+            units = units,
+            audioStartTimeMs = 0,
+            audioEndTimeMs = 1_000,
+            splitGapMs = 0,
+        )
+
+        assertEquals(listOf("甲", "乙", "丙"), segments.map { it.text })
+        assertEquals(listOf(100L, 170L, 240L), segments.map { it.alignedStartTimeMs })
+        assertEquals(listOf(150L, 220L, 290L), segments.map { it.alignedEndTimeMs })
+
+        val merged = ForcedAlignmentSegmenter.mergeSegments(
+            segments,
+            maxGapMs = 20,
+            smart = true,
+            maxCharacters = 2,
+            splitOnPunctuation = false,
+        )
+        assertEquals(listOf("甲乙", "丙"), merged.map { it.text })
+    }
+
+    @Test
     fun mergeKeepsSpaceAfterEnglishSentencePunctuation() {
         val segments = ForcedAlignmentSegmenter.split(
             units = listOf(

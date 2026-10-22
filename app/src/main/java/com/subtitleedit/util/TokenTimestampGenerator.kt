@@ -28,17 +28,19 @@ class TokenTimestampGenerator(context: Context) {
         units: List<ForcedAlignmentUnit>,
         audioStartTimeMs: Long,
         audioEndTimeMs: Long,
-        splitGapMs: Int = QWEN_FORCED_ALIGNMENT_SPLIT_GAP_MS,
     ): List<Segment> {
+        val modelType = SettingsManager.ASR_MODEL_QWEN3_ASR
+        val mergeEnabled = settingsManager.isSpeechTokenTimestampMergeEnabled(modelType)
         val aligned = ForcedAlignmentSegmenter.split(
             units = units,
             audioStartTimeMs = audioStartTimeMs,
             audioEndTimeMs = audioEndTimeMs,
-            splitGapMs = splitGapMs,
+            // Do not pre-group aligned units. The configured merge/filter pass must see each
+            // unit boundary, including when segment merging is disabled.
+            splitGapMs = 0,
         )
-        val modelType = SettingsManager.ASR_MODEL_QWEN3_ASR
         val smart = settingsManager.isSpeechTokenTimestampSmartMergeEnabled(modelType)
-        val segments = if (settingsManager.isSpeechTokenTimestampMergeEnabled(modelType)) {
+        val segments = if (mergeEnabled) {
             ForcedAlignmentSegmenter.mergeSegments(
                 segments = aligned,
                 maxGapMs = settingsManager.getSpeechTokenTimestampMergeGapMs(modelType),
@@ -282,7 +284,6 @@ class TokenTimestampGenerator(context: Context) {
 
     companion object {
         private const val TAG = "TokenTimestampGenerator"
-        private const val QWEN_FORCED_ALIGNMENT_SPLIT_GAP_MS = 250
 
         fun isSupported(context: Context, settingsManager: SettingsManager): Boolean =
             settingsManager.getAsrModelType() != SettingsManager.ASR_MODEL_WHISPER &&
