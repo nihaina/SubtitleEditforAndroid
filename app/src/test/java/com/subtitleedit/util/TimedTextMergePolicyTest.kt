@@ -331,6 +331,29 @@ class TimedTextMergePolicyTest {
     }
 
     @Test
+    fun punctuationOnlyCueMergesTowardTheCloserSideAndKeepsPunctuationDirection() {
+        val punctuationCloserToLeft = listOf(
+            Cue(0, 100, "ね"),
+            Cue(140, 220, "、"),
+            Cue(620, 700, "楽"),
+        )
+        assertEquals(
+            listOf("ね、", "楽"),
+            merge(punctuationCloserToLeft, maxGapMs = 400).map { it.text },
+        )
+
+        val punctuationCloserToRight = listOf(
+            Cue(0, 100, "ね"),
+            Cue(500, 580, "、"),
+            Cue(620, 700, "楽"),
+        )
+        assertEquals(
+            listOf("ね", "、楽"),
+            merge(punctuationCloserToRight, maxGapMs = 400).map { it.text },
+        )
+    }
+
+    @Test
     fun disablingDirectionalPunctuationAllowsTerminalPunctuationToMergeRight() {
         val cues = listOf(Cue(0, 10, "甲。"), Cue(20, 30, "乙"))
         assertEquals(listOf("甲。乙"), merge(cues, splitPunctuation = false).map { it.text })

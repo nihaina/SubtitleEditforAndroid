@@ -217,7 +217,7 @@ internal object TimedTextMergePolicy {
 
     private fun startsInPunctuation(text: String): Boolean {
         val trimmed = text.trimStart()
-        return trimmed.isNotEmpty() &&
+        return trimmed.isNotEmpty() && characterCount(trimmed) > 0 &&
             Character.getType(trimmed.codePointAt(0)) in punctuationTypes
     }
 
