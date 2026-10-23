@@ -47,14 +47,18 @@ fun Qwen3AsrSettingsScreen(
     onOpenVadSettings: () -> Unit
 ) {
     val initial = remember(refreshKey) {
-        val gap = ((settingsManager.getSpeechTokenTimestampMergeGapMs() + 25) / 50) * 50
+        val gap = ((settingsManager.getSpeechTokenTimestampMergeGapMs(SettingsManager.ASR_MODEL_QWEN3_ASR) + 25) / 50) * 50
         Qwen3AsrSettingsValues(
             useVadTimestamp = settingsManager.isAsrVadTimestampEnabled(SettingsManager.ASR_MODEL_QWEN3_ASR),
             dynamicPaddingEnabled = settingsManager.isSpeechVadDynamicPaddingEnabled(
                 SettingsManager.ASR_MODEL_QWEN3_ASR
             ),
-            forcedAlignment = forcedAlignmentAvailable && settingsManager.isSpeechTokenTimestampEnabled(),
-            mergeSegments = settingsManager.isSpeechTokenTimestampMergeEnabled(),
+            forcedAlignment = forcedAlignmentAvailable && settingsManager.isSpeechTokenTimestampEnabled(
+                SettingsManager.ASR_MODEL_QWEN3_ASR
+            ),
+            mergeSegments = settingsManager.isSpeechTokenTimestampMergeEnabled(
+                SettingsManager.ASR_MODEL_QWEN3_ASR
+            ),
             smartMerge = settingsManager.isSpeechTokenTimestampSmartMergeEnabled(
                 SettingsManager.ASR_MODEL_QWEN3_ASR
             ),
@@ -106,7 +110,7 @@ fun Qwen3AsrSettingsScreen(
                         )
                         if (!enabled) {
                             forcedAlignment = forcedAlignmentAvailable &&
-                                settingsManager.isSpeechTokenTimestampEnabled()
+                                settingsManager.isSpeechTokenTimestampEnabled(SettingsManager.ASR_MODEL_QWEN3_ASR)
                         }
                     },
                     modifier = Modifier.padding(top = 12.dp)
@@ -147,7 +151,10 @@ fun Qwen3AsrSettingsScreen(
                         enabled = forcedAlignmentAvailable,
                         onCheckedChange = { enabled ->
                             forcedAlignment = enabled
-                            settingsManager.setSpeechTokenTimestampEnabled(enabled)
+                            settingsManager.setSpeechTokenTimestampEnabled(
+                                enabled,
+                                SettingsManager.ASR_MODEL_QWEN3_ASR
+                            )
                         },
                         modifier = Modifier.padding(top = 12.dp)
                     )
@@ -171,7 +178,10 @@ fun Qwen3AsrSettingsScreen(
                         opacity = if (alignerEnabled) 1f else 0.5f,
                         onCheckedChange = { enabled ->
                             mergeSegments = enabled
-                            settingsManager.setSpeechTokenTimestampMergeEnabled(enabled)
+                            settingsManager.setSpeechTokenTimestampMergeEnabled(
+                                enabled,
+                                SettingsManager.ASR_MODEL_QWEN3_ASR
+                            )
                         },
                         modifier = Modifier.padding(top = 16.dp)
                     )
@@ -208,7 +218,10 @@ fun Qwen3AsrSettingsScreen(
                                 val gap = ((value.roundToInt().coerceIn(0, 5000) + 25) / 50) * 50
                                 mergeGapMs = gap
                                 mergeGapText = gap.toString()
-                                settingsManager.setSpeechTokenTimestampMergeGapMs(gap)
+                                settingsManager.setSpeechTokenTimestampMergeGapMs(
+                                    gap,
+                                    SettingsManager.ASR_MODEL_QWEN3_ASR
+                                )
                             },
                             valueRange = 0f..5000f,
                             steps = 99,
@@ -225,7 +238,10 @@ fun Qwen3AsrSettingsScreen(
                                     if (input != snapped.toString()) {
                                         mergeGapText = snapped.toString()
                                     }
-                                    settingsManager.setSpeechTokenTimestampMergeGapMs(snapped)
+                                    settingsManager.setSpeechTokenTimestampMergeGapMs(
+                                        snapped,
+                                        SettingsManager.ASR_MODEL_QWEN3_ASR
+                                    )
                                 }
                             },
                             enabled = maxGapEnabled,

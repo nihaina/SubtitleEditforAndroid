@@ -31,6 +31,33 @@ class TimedTextMergePolicyTest {
     }
 
     @Test
+    fun countsContiguousEnglishLettersAndArabicNumeralsAsSingleUnits() {
+        assertEquals(1, TimedTextMergePolicy.characterCount("sub"))
+        assertEquals(1, TimedTextMergePolicy.characterCount("SUB"))
+        assertEquals(2, TimedTextMergePolicy.characterCount("s ub"))
+        assertEquals(2, TimedTextMergePolicy.characterCount("12 34"))
+        assertEquals(2, TimedTextMergePolicy.characterCount("sub-word"))
+        assertEquals(2, TimedTextMergePolicy.characterCount("sub12"))
+        assertEquals(4, TimedTextMergePolicy.characterCount("你好sub12"))
+    }
+
+    @Test
+    fun longSegmentFilterUsesWordGroupsForEnglishAndNumbers() {
+        assertEquals(
+            listOf("sub"),
+            merge(listOf(Cue(0, 10, "s"), Cue(11, 20, "ub")), limit = 1).map { it.text }
+        )
+        assertEquals(
+            listOf("s", " ub"),
+            merge(listOf(Cue(0, 10, "s"), Cue(11, 20, " ub")), limit = 1).map { it.text }
+        )
+        assertEquals(
+            listOf("12 ", "34"),
+            merge(listOf(Cue(0, 10, "12 "), Cue(11, 20, "34")), limit = 1).map { it.text }
+        )
+    }
+
+    @Test
     fun smartMergeAcceptsGapsThroughFiveHundredMillisecondsAndRejectsLargerGap() {
         for (gap in listOf(0L, 1L, 150L, 200L, 230L, 250L, 300L, 350L, 400L, 499L, 500L)) {
             assertEquals(
@@ -74,7 +101,7 @@ class TimedTextMergePolicyTest {
             Cue(200, 300, "A"),
             Cue(400, 500, "B")
         )
-        assertEquals(listOf("12345678901234", "AB"), merge(cues, limit = 15).map { it.text })
+        assertEquals(listOf("12345678901234", "AB"), merge(cues, limit = 1).map { it.text })
     }
 
     @Test
@@ -84,7 +111,7 @@ class TimedTextMergePolicyTest {
             Cue(500, 600, "A"),
             Cue(650, 750, "B")
         )
-        assertEquals(listOf("12345678901234", "AB"), merge(cues, limit = 15).map { it.text })
+        assertEquals(listOf("12345678901234", "AB"), merge(cues, limit = 1).map { it.text })
     }
 
     @Test
@@ -94,7 +121,7 @@ class TimedTextMergePolicyTest {
             Cue(200, 300, "A"),
             Cue(500, 600, "B")
         )
-        assertEquals(listOf("1234567890123456789012345", "AB"), merge(cues, limit = 25).map { it.text })
+        assertEquals(listOf("1234567890123456789012345", "AB"), merge(cues, limit = 1).map { it.text })
         assertEquals(listOf("1234567890123456789012345AB"), merge(cues, smart = false, limit = null).map { it.text })
     }
 
@@ -105,7 +132,7 @@ class TimedTextMergePolicyTest {
             Cue(200, 300, "丙丁戊己庚辛壬癸"),
             Cue(400, 500, "子丑寅卯")
         )
-        val merged = merge(cues, limit = 15)
+        val merged = merge(cues, limit = 14)
         assertEquals(listOf("12345678，", "甲乙丙丁戊己庚辛壬癸子丑寅卯"), merged.map { it.text })
         assertEquals(cues.joinToString("") { it.text }, merged.joinToString("") { it.text })
         assertEquals(0L, merged.first().start)
@@ -120,7 +147,7 @@ class TimedTextMergePolicyTest {
         )
         assertEquals(
             listOf("12345，", "67890。！？」", "甲乙丙丁戊己庚辛"),
-            merge(cues, limit = 15).map { it.text }
+            merge(cues, limit = 8).map { it.text }
         )
     }
 
@@ -130,7 +157,7 @@ class TimedTextMergePolicyTest {
             Cue(0, 100, "1234567890123456，甲"),
             Cue(200, 300, "乙丙")
         )
-        assertEquals(cues, merge(cues, limit = 15))
+        assertEquals(cues, merge(cues, limit = 1))
     }
 
     @Test
@@ -141,7 +168,7 @@ class TimedTextMergePolicyTest {
         )
         assertEquals(
             listOf("1234567890，", "abcdefghij。", "ABCDEFGHIJ！", "甲乙丙丁戊己"),
-            merge(cues, limit = 15, splitPunctuation = false).map { it.text }
+            merge(cues, limit = 6, splitPunctuation = false).map { it.text }
         )
     }
 
@@ -218,7 +245,7 @@ class TimedTextMergePolicyTest {
     @Test
     fun aPositiveGapWithoutPunctuationStillEnforcesTheLimit() {
         val cues = listOf(Cue(0, 100, "123456789012345"), Cue(101, 200, "甲乙"))
-        assertEquals(cues, merge(cues, limit = 15))
+        assertEquals(cues, merge(cues, limit = 1))
     }
 
     @Test
@@ -239,24 +266,20 @@ class TimedTextMergePolicyTest {
 
     @Test
     fun smartMergeTriesEachMillisecondBeforeTheNextGap() {
-        val cues = listOf(
-            Cue(0, 10, "12"),
-            Cue(12, 20, "3"),
-            Cue(21, 30, "4")
-        )
-        assertEquals(listOf("12", "34"), merge(cues, limit = 3).map { it.text })
+        val cues = listOf(Cue(0, 10, "12 "), Cue(12, 20, "3"), Cue(21, 30, "4"))
+        assertEquals(listOf("12 ", "34"), merge(cues, limit = 1).map { it.text })
     }
 
     @Test
     fun refusesTheWholePairIfAPunctuationSeparatedMiddlePieceStillExceedsTheLimit() {
-        val cues = listOf(Cue(0, 10, "1"), Cue(20, 100, "12,3123,12"))
-        assertEquals(cues, merge(cues, limit = 3))
+        val cues = listOf(Cue(0, 10, "1"), Cue(20, 100, "12 3,4"))
+        assertEquals(cues, merge(cues, limit = 1))
     }
 
     @Test
     fun splitsAValidPairAndDoesNotImmediatelyForceJoinItsTouchingPiecesAgain() {
         val cues = listOf(Cue(0, 10, "1"), Cue(20, 100, "12,3"))
-        assertEquals(listOf("112,", "3"), merge(cues, limit = 3).map { it.text })
+        assertEquals(listOf("112,", "3"), merge(cues, limit = 1).map { it.text })
     }
 
     @Test
@@ -264,20 +287,20 @@ class TimedTextMergePolicyTest {
         val cues = listOf(Cue(0, 10, "1"), Cue(20, 100, "12,3"))
         assertEquals(
             listOf("112,", "3"),
-            merge(cues, limit = 3, splitPunctuation = false).map { it.text }
+            merge(cues, limit = 1, splitPunctuation = false).map { it.text }
         )
     }
 
     @Test
     fun acceptsSeveralPunctuationPiecesOnlyWhenEveryPieceFits() {
         val cues = listOf(Cue(0, 10, "1"), Cue(20, 100, "12,12,12"))
-        assertEquals(listOf("112,", "12,", "12"), merge(cues, limit = 3).map { it.text })
+        assertEquals(listOf("112,", "12,", "12"), merge(cues, limit = 1).map { it.text })
     }
 
     @Test
     fun rightPieceFromAValidSplitCanStillMergeWithTheNextSourceSubtitle() {
         val cues = listOf(Cue(0, 10, "1"), Cue(20, 100, "12,3"), Cue(130, 140, "4"))
-        assertEquals(listOf("112,", "34"), merge(cues, limit = 3).map { it.text })
+        assertEquals(listOf("112,", "34"), merge(cues, limit = 1).map { it.text })
     }
 
     @Test
@@ -330,10 +353,10 @@ class TimedTextMergePolicyTest {
     @Test
     fun rejectsTheUsersEqualGapGroupIfItsMiddlePunctuationPieceStillExceedsTheLimit() {
         val cues = listOf(
-            Cue(0, 100, "1"), Cue(200, 300, "12,3"),
+            Cue(0, 100, "1"), Cue(200, 300, "12 3,4"),
             Cue(400, 500, "123,"), Cue(600, 700, "12"),
         )
-        assertEquals(cues, merge(cues, limit = 3, splitPunctuation = false))
+        assertEquals(cues, merge(cues, limit = 1, splitPunctuation = false))
     }
 
     @Test
@@ -342,12 +365,12 @@ class TimedTextMergePolicyTest {
             Cue(0, 100, "1"), Cue(200, 300, "12,3"),
             Cue(400, 500, "12,"), Cue(600, 700, "12"),
         )
-        assertEquals(listOf("112,", "312,", "12"), merge(cues, limit = 3, splitPunctuation = false).map { it.text })
+        assertEquals(listOf("112,", "312,", "12"), merge(cues, limit = 1, splitPunctuation = false).map { it.text })
     }
 
     @Test
     fun aRejectedSmallGapDoesNotBlockTheNextLargerValidPair() {
-        val cues = listOf(Cue(0, 100, "123"), Cue(101, 200, "4"), Cue(202, 300, "5"))
-        assertEquals(listOf("123", "45"), merge(cues, limit = 3).map { it.text })
+        val cues = listOf(Cue(0, 100, "甲乙丙"), Cue(101, 200, "4"), Cue(202, 300, "5"))
+        assertEquals(listOf("甲乙丙", "45"), merge(cues, limit = 3).map { it.text })
     }
 }

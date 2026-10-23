@@ -1145,21 +1145,21 @@ class SettingsManager private constructor(context: Context) {
         timelineKey("vad_enabled", type)?.let { prefs.edit().putBoolean(it, enabled).apply() }
     }
 
-    fun getSpeechFixedSegmentSeconds(): Int {
-        val key = timelineKey("fixed_segment_seconds")
+    fun getSpeechFixedSegmentSeconds(type: String = getAsrModelType()): Int {
+        val key = timelineKey("fixed_segment_seconds", type)
         val fallback = when {
-            getAsrModelType() == ASR_MODEL_QWEN3_ASR -> 30
+            type == ASR_MODEL_QWEN3_ASR -> 30
             key != null -> 10
-            getAsrModelType() == ASR_MODEL_WHISPER ->
+            type == ASR_MODEL_WHISPER ->
                 prefs.getInt(KEY_STT_FIXED_SEGMENT_SECONDS, 30)
             else -> 30
         }
         return (key?.let { prefs.getInt(it, fallback) } ?: fallback).coerceIn(5, 120)
     }
 
-    fun setSpeechFixedSegmentSeconds(seconds: Int) {
-        val key = timelineKey("fixed_segment_seconds")
-            ?: if (getAsrModelType() == ASR_MODEL_WHISPER) KEY_STT_FIXED_SEGMENT_SECONDS else null
+    fun setSpeechFixedSegmentSeconds(seconds: Int, type: String = getAsrModelType()) {
+        val key = timelineKey("fixed_segment_seconds", type)
+            ?: if (type == ASR_MODEL_WHISPER) KEY_STT_FIXED_SEGMENT_SECONDS else null
         key?.let {
             prefs.edit().putInt(it, seconds.coerceIn(5, 120)).apply()
         }
@@ -1332,8 +1332,7 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putFloat(KEY_STT_HOTWORDS_SCORE, score.coerceIn(0.5f, 5.0f)).apply()
     }
 
-    fun isSpeechTokenTimestampEnabled(): Boolean {
-        val type = getAsrModelType()
+    fun isSpeechTokenTimestampEnabled(type: String = getAsrModelType()): Boolean {
         if (isAsrVadTimestampEnabled(type)) return false
         val key = timelineKey("token_enabled", type) ?: return false
         val fallback = when (type) {
@@ -1344,8 +1343,8 @@ class SettingsManager private constructor(context: Context) {
         return prefs.getBoolean(key, fallback)
     }
 
-    fun setSpeechTokenTimestampEnabled(enabled: Boolean) {
-        timelineKey("token_enabled")?.let { prefs.edit().putBoolean(it, enabled).apply() }
+    fun setSpeechTokenTimestampEnabled(enabled: Boolean, type: String = getAsrModelType()) {
+        timelineKey("token_enabled", type)?.let { prefs.edit().putBoolean(it, enabled).apply() }
     }
 
     fun isSpeechTokenTimestampMergeEnabled(type: String = getAsrModelType()): Boolean {
@@ -1356,8 +1355,8 @@ class SettingsManager private constructor(context: Context) {
         return prefs.getBoolean(key, fallback)
     }
 
-    fun setSpeechTokenTimestampMergeEnabled(enabled: Boolean) {
-        timelineKey("token_merge_enabled")?.let { prefs.edit().putBoolean(it, enabled).apply() }
+    fun setSpeechTokenTimestampMergeEnabled(enabled: Boolean, type: String = getAsrModelType()) {
+        timelineKey("token_merge_enabled", type)?.let { prefs.edit().putBoolean(it, enabled).apply() }
     }
 
     fun getSpeechTokenTimestampMergeGapMs(type: String = getAsrModelType()): Int {
@@ -1368,8 +1367,8 @@ class SettingsManager private constructor(context: Context) {
         return prefs.getInt(key, fallback).coerceIn(0, 5000)
     }
 
-    fun setSpeechTokenTimestampMergeGapMs(gapMs: Int) {
-        timelineKey("token_merge_gap_ms")?.let {
+    fun setSpeechTokenTimestampMergeGapMs(gapMs: Int, type: String = getAsrModelType()) {
+        timelineKey("token_merge_gap_ms", type)?.let {
             prefs.edit().putInt(it, gapMs.coerceIn(0, 5000)).apply()
         }
     }

@@ -21,8 +21,8 @@ internal class AsrTimelineSettingsViewModel(
 
     private fun loadSettings(): AsrTimelineSettingsState {
         val tokenTimestampModelAvailable = hasUsableTokenTimestampModel()
-        val fixedSegmentSeconds = settingsManager.getSpeechFixedSegmentSeconds()
-        val mergeGapMs = settingsManager.getSpeechTokenTimestampMergeGapMs()
+        val fixedSegmentSeconds = settingsManager.getSpeechFixedSegmentSeconds(modelType)
+        val mergeGapMs = settingsManager.getSpeechTokenTimestampMergeGapMs(modelType)
         return AsrTimelineSettingsState(
             useVadTimestamp = settingsManager.isAsrVadTimestampEnabled(modelType),
             dynamicPaddingEnabled = settingsManager.isSpeechVadDynamicPaddingEnabled(modelType),
@@ -31,8 +31,8 @@ internal class AsrTimelineSettingsViewModel(
             fixedVadSegmentation = settingsManager.isSpeechFixedVadSegmentationEnabled(modelType),
             tokenTimestampModelAvailable = tokenTimestampModelAvailable,
             tokenTimestampEnabled = tokenTimestampModelAvailable &&
-                settingsManager.isSpeechTokenTimestampEnabled(),
-            tokenTimestampMerge = settingsManager.isSpeechTokenTimestampMergeEnabled(),
+                settingsManager.isSpeechTokenTimestampEnabled(modelType),
+            tokenTimestampMerge = settingsManager.isSpeechTokenTimestampMergeEnabled(modelType),
             smartMerge = settingsManager.isSpeechTokenTimestampSmartMergeEnabled(modelType),
             filterLongMerge = settingsManager.isSpeechTokenTimestampLongSegmentFilterEnabled(modelType),
             punctuationSplit = settingsManager.isSpeechTokenTimestampPunctuationSplitEnabled(modelType),
@@ -48,7 +48,7 @@ internal class AsrTimelineSettingsViewModel(
             copy(
                 useVadTimestamp = enabled,
                 tokenTimestampEnabled = if (!enabled) {
-                    tokenTimestampModelAvailable && settingsManager.isSpeechTokenTimestampEnabled()
+                    tokenTimestampModelAvailable && settingsManager.isSpeechTokenTimestampEnabled(modelType)
                 } else {
                     tokenTimestampEnabled
                 }
@@ -69,7 +69,7 @@ internal class AsrTimelineSettingsViewModel(
                 fixedSegmentSecondsText = String.format(Locale.US, "%d", seconds)
             )
         }
-        settingsManager.setSpeechFixedSegmentSeconds(seconds)
+        settingsManager.setSpeechFixedSegmentSeconds(seconds, modelType)
     }
 
     fun setFixedSegmentSecondsText(text: String) {
@@ -78,7 +78,7 @@ internal class AsrTimelineSettingsViewModel(
         val clamped = value.coerceIn(5, 120)
         val snapped = (((clamped + 2) / 5) * 5).coerceIn(5, 120)
         setState { copy(fixedSegmentSeconds = snapped) }
-        settingsManager.setSpeechFixedSegmentSeconds(clamped)
+        settingsManager.setSpeechFixedSegmentSeconds(clamped, modelType)
     }
 
     fun setFixedVadSegmentation(enabled: Boolean) {
@@ -92,12 +92,12 @@ internal class AsrTimelineSettingsViewModel(
             return
         }
         setState { copy(tokenTimestampEnabled = enabled) }
-        settingsManager.setSpeechTokenTimestampEnabled(enabled)
+        settingsManager.setSpeechTokenTimestampEnabled(enabled, modelType)
     }
 
     fun setTokenTimestampMerge(enabled: Boolean) {
         setState { copy(tokenTimestampMerge = enabled) }
-        settingsManager.setSpeechTokenTimestampMergeEnabled(enabled)
+        settingsManager.setSpeechTokenTimestampMergeEnabled(enabled, modelType)
     }
 
     fun setSmartMerge(enabled: Boolean) {
@@ -129,7 +129,7 @@ internal class AsrTimelineSettingsViewModel(
                 mergeGapText = String.format(Locale.US, "%.0f", gapMs.toFloat())
             )
         }
-        settingsManager.setSpeechTokenTimestampMergeGapMs(gapMs)
+        settingsManager.setSpeechTokenTimestampMergeGapMs(gapMs, modelType)
     }
 
     fun setMergeGapText(text: String) {

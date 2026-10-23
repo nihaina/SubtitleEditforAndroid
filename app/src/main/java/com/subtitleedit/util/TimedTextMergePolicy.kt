@@ -1,6 +1,8 @@
 package com.subtitleedit.util
 
 internal object TimedTextMergePolicy {
+    private enum class Run { NONE, LETTER, DIGIT }
+
     private val punctuationTypes = setOf(
         Character.CONNECTOR_PUNCTUATION.toInt(),
         Character.DASH_PUNCTUATION.toInt(),
@@ -11,13 +13,26 @@ internal object TimedTextMergePolicy {
         Character.OTHER_PUNCTUATION.toInt()
     )
 
-    fun characterCount(text: String): Int = text.codePoints()
-        .filter { codePoint ->
+    fun characterCount(text: String): Int {
+        var count = 0
+        var previousRun = Run.NONE
+        var index = 0
+        while (index < text.length) {
+            val codePoint = text.codePointAt(index)
+            index += Character.charCount(codePoint)
             val type = Character.getType(codePoint)
-            !Character.isWhitespace(codePoint) && !Character.isSpaceChar(codePoint) &&
+            val run = runFor(codePoint)
+            if (run != Run.NONE) {
+                if (run != previousRun) count++
+            } else if (!Character.isWhitespace(codePoint) && !Character.isSpaceChar(codePoint) &&
                 type !in punctuationTypes
+            ) {
+                count++
+            }
+            previousRun = run
         }
-        .count().toInt()
+        return count
+    }
 
     fun <T> merge(
         segments: List<T>,
@@ -210,21 +225,35 @@ internal object TimedTextMergePolicy {
         val totalCount = characterCount(text)
         var index = 0
         var count = 0
+        var previousRun = Run.NONE
         while (index < text.length) {
             val codePoint = text.codePointAt(index)
             val type = Character.getType(codePoint)
             index += Character.charCount(codePoint)
             if (type !in punctuationTypes) {
-                if (!Character.isWhitespace(codePoint) && !Character.isSpaceChar(codePoint)) count++
+                val run = runFor(codePoint)
+                if (run != Run.NONE) {
+                    if (run != previousRun) count++
+                } else if (!Character.isWhitespace(codePoint) && !Character.isSpaceChar(codePoint)) {
+                    count++
+                }
+                previousRun = run
                 continue
             }
             // Keep punctuation clusters together on the left, including closing quotes.
             while (index < text.length && Character.getType(text.codePointAt(index)) in punctuationTypes) {
                 index += Character.charCount(text.codePointAt(index))
             }
+            previousRun = Run.NONE
             if (count == 0 || count == totalCount) continue
             return index
         }
         return null
+    }
+
+    private fun runFor(codePoint: Int): Run = when {
+        codePoint in 'a'.code..'z'.code || codePoint in 'A'.code..'Z'.code -> Run.LETTER
+        codePoint in '0'.code..'9'.code -> Run.DIGIT
+        else -> Run.NONE
     }
 }
