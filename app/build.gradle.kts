@@ -94,8 +94,8 @@ android {
         applicationId = "com.subtitleedit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 13
-        versionName = "1.2.3"
+        versionCode = 14
+        versionName = "1.2.4"
 
         ndk {
             // The local llama.cpp runtime is built for 64-bit ARM and x86.
