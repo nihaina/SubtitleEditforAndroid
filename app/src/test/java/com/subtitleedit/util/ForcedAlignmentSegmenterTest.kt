@@ -139,7 +139,7 @@ class ForcedAlignmentSegmenterTest {
             ),
         )
 
-        val merged = ForcedAlignmentSegmenter.mergeSegments(segments, 200, smart = true, maxCharacters = 2, splitOnPunctuation = false)
+        val merged = ForcedAlignmentSegmenter.mergeSegments(segments, 200, smart = true, maxCharacters = 2, splitOnPunctuation = true)
 
         assertEquals(listOf("1234567890。", "abcdefgh ix"), merged.map { it.text })
         assertEquals(900L, merged[0].startTimeMs)

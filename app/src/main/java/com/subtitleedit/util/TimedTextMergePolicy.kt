@@ -98,10 +98,11 @@ internal object TimedTextMergePolicy {
                         // punctuation boundaries also preserve the terminal direction rule.
                         gapLimit == 0 && splitOnPunctuation -> splitAtPunctuation(combined, text, split)
                         continuous || limit == null || characterCount(text(combined)) <= limit -> listOf(combined)
-                        else -> splitWithinLimit(combined, limit, text, split)
+                        splitOnPunctuation -> splitWithinLimit(combined, limit, text, split)
+                        else -> null
                     }
                     if (pieces == null) {
-                        val pairMerges = if (limit != null && punctuationSplitIndex(text(combined)) == null) {
+                        val pairMerges = if (limit != null) {
                             mergeShortPairs(result.subList(first, index + 1), limit, start, end, text, combine)
                         } else {
                             null
@@ -148,8 +149,7 @@ internal object TimedTextMergePolicy {
         text: (T) -> String,
         combine: (T, T) -> T
     ): List<MergeUnit<T>>? {
-        // Without a punctuation split to validate, retain normal pair merging so one long
-        // cue cannot prevent a shorter neighboring pair with the same gap from merging.
+        // Keep valid short pairs when a whole group cannot fit the limit after punctuation splitting.
         val candidates = (0 until group.lastIndex).mapNotNull { index ->
             val combined = combine(group[index].value, group[index + 1].value)
             val count = characterCount(text(combined))

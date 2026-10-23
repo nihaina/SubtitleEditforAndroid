@@ -161,15 +161,16 @@ class TimedTextMergePolicyTest {
     }
 
     @Test
-    fun splitsAnOversizedRemainderAtItsNextPunctuation() {
+    fun oversizedRemainderSplitsOnlyWhenPunctuationSplittingIsEnabled() {
         val cues = listOf(
-            Cue(0, 100, "1234567890，"),
+            Cue(0, 100, "1234567890，甲"),
             Cue(200, 300, "abcdefghij。ABCDEFGHIJ！甲乙丙丁戊己")
         )
         assertEquals(
-            listOf("1234567890，", "abcdefghij。", "ABCDEFGHIJ！", "甲乙丙丁戊己"),
-            merge(cues, limit = 6, splitPunctuation = false).map { it.text }
+            listOf("1234567890，", "甲abcdefghij。", "ABCDEFGHIJ！", "甲乙丙丁戊己"),
+            merge(cues, limit = 6, splitPunctuation = true).map { it.text }
         )
+        assertEquals(cues, merge(cues, limit = 6, splitPunctuation = false))
     }
 
     @Test
@@ -283,18 +284,37 @@ class TimedTextMergePolicyTest {
     }
 
     @Test
-    fun validPunctuationSplittingDoesNotDependOnTheDirectionalPunctuationOption() {
+    fun disablingPunctuationSplittingUsesTheLongSegmentFallback() {
         val cues = listOf(Cue(0, 10, "1"), Cue(20, 100, "12,3"))
         assertEquals(
             listOf("112,", "3"),
-            merge(cues, limit = 1, splitPunctuation = false).map { it.text }
+            merge(cues, limit = 1, splitPunctuation = true).map { it.text }
         )
+        assertEquals(cues, merge(cues, limit = 1, splitPunctuation = false))
     }
 
     @Test
     fun acceptsSeveralPunctuationPiecesOnlyWhenEveryPieceFits() {
         val cues = listOf(Cue(0, 10, "1"), Cue(20, 100, "12,12,12"))
         assertEquals(listOf("112,", "12,", "12"), merge(cues, limit = 1).map { it.text })
+        assertEquals(cues, merge(cues, limit = 1, splitPunctuation = false))
+    }
+
+    @Test
+    fun failedPunctuationSplitFallsBackToShortPairMerging() {
+        val cues = listOf(
+            Cue(0, 100, "甲乙丙，丁"),
+            Cue(200, 300, "戊"),
+            Cue(400, 500, "己"),
+        )
+        assertEquals(
+            listOf("甲乙丙，丁", "戊己"),
+            merge(cues, limit = 2, splitPunctuation = true).map { it.text },
+        )
+        assertEquals(
+            listOf("甲乙丙，丁", "戊己"),
+            merge(cues, limit = 2, splitPunctuation = false).map { it.text },
+        )
     }
 
     @Test
@@ -388,7 +408,8 @@ class TimedTextMergePolicyTest {
             Cue(0, 100, "1"), Cue(200, 300, "12,3"),
             Cue(400, 500, "12,"), Cue(600, 700, "12"),
         )
-        assertEquals(listOf("112,", "312,", "12"), merge(cues, limit = 1, splitPunctuation = false).map { it.text })
+        assertEquals(listOf("112,", "312,", "12"), merge(cues, limit = 1).map { it.text })
+        assertEquals(cues, merge(cues, limit = 1, splitPunctuation = false))
     }
 
     @Test
