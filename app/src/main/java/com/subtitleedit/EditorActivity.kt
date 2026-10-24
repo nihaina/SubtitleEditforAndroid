@@ -2801,9 +2801,12 @@ class EditorActivity : AppCompatActivity() {
         stateModel.historyEntriesSnapshot = historyBefore.entries
         stateModel.historySelectionSnapshot = historyBefore.selectedIds
         cutPasteController.clear()
+        val mergedEntryIds = sortedPositions.mapNotNull { position ->
+            historyBefore.entries.getOrNull(position)?.stableId
+        }.toSet()
         submitSubtitleList(
             refreshAll = true,
-            clearSelection = true,
+            selectedStableIds = historyBefore.selectedIds - mergedEntryIds,
             markChanged = true
         )
         showShortToast("已合并 ${sortedPositions.size} 行字幕")
@@ -2957,10 +2960,7 @@ class EditorActivity : AppCompatActivity() {
             refreshAll = true,
             syncWaveform = false,
             markChanged = true
-        ) {
-            subtitleAdapter.syncSelectionWithCurrentList()
-            updateSelectedCountDisplay()
-        }
+        )
         setWaveformSubtitlesKeepSelection(insertPosition)
         val message = if (pasteAfterInsert) {
             "已${if (after) "向后" else "向前"}粘贴 ${stateModel.clipboardTexts.size} 项"
@@ -3091,7 +3091,6 @@ class EditorActivity : AppCompatActivity() {
 
         submitSubtitleList(
             refreshAll = true,
-            selectedIndices = pasteResult.affectedPositions,
             markChanged = true
         )
         com.subtitleedit.util.OverwritingToast.makeText(this, "已粘贴 ${stateModel.clipboardTexts.size} 项", Toast.LENGTH_SHORT).show()
@@ -3504,7 +3503,7 @@ class EditorActivity : AppCompatActivity() {
         renumberEntries(force = refreshAll)
         stateModel.refreshDocument()
         val targetSelectedIds = listPresentationController.targetSelection(
-            stateModel.selectedIndices, selectedStableIds, clearSelection
+            selectedIndices, selectedStableIds, clearSelection
         )
         if (markChanged) recordListStateChange(targetSelectedIds)
         subtitleAdapter.submitList(stateModel.subtitleEntries.toList()) {
@@ -3837,7 +3836,7 @@ class EditorActivity : AppCompatActivity() {
         startPosition: Int,
         entries: List<SubtitleEntry>
     ): MergeGroup {
-        val mergedEntry = entries.first().copy()
+        val mergedEntry = entries.first().copyWithNewStableId()
         entries.drop(1).forEach { entry ->
             mergedEntry.startTime = minOf(mergedEntry.startTime, entry.startTime)
             mergedEntry.endTime = maxOf(mergedEntry.endTime, entry.endTime)
@@ -3872,12 +3871,16 @@ class EditorActivity : AppCompatActivity() {
 
         cutPasteController.clear()
         val historyBefore = currentHistoryListState()
+        val mergedEntryIds = groups
+            .filter { it.entries.size > 1 && it.startPosition in appliedByStart }
+            .flatMap { group -> group.entries }
+            .mapTo(mutableSetOf()) { it.stableId }
         replaceSubtitleEntries(mergedEntries)
         stateModel.historyEntriesSnapshot = historyBefore.entries
         stateModel.historySelectionSnapshot = historyBefore.selectedIds
         submitSubtitleList(
             refreshAll = true,
-            clearSelection = true,
+            selectedStableIds = historyBefore.selectedIds - mergedEntryIds,
             markChanged = true
         )
         showShortToast(getString(R.string.merge_subtitles_result, removedCount))
@@ -4451,7 +4454,7 @@ class EditorActivity : AppCompatActivity() {
             (playhead - entry.startTime).toFloat() / duration.toFloat()
         )
         val historyBefore = currentHistoryListState()
-        val selectedIds = historyBefore.selectedIds - entry.stableId
+        val splitEntryId = entry.stableId
         val result = stateModel.execute(
             EditorCommand.Split(position, playhead, split.left, split.right)
         )
@@ -4460,7 +4463,7 @@ class EditorActivity : AppCompatActivity() {
         stateModel.historySelectionSnapshot = historyBefore.selectedIds
         submitSubtitleList(
             refreshAll = true,
-            selectedStableIds = selectedIds,
+            selectedStableIds = historyBefore.selectedIds - splitEntryId,
             syncWaveform = false,
             markChanged = true
         )

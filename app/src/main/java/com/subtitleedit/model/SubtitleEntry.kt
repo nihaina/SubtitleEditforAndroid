@@ -61,6 +61,8 @@ data class SubtitleEntry(
         )
     }
 
+    fun copyWithNewStableId(): SubtitleEntry = copy(stableId = nextStableId())
+
     private companion object {
         private val nextId = AtomicLong(1L)
 

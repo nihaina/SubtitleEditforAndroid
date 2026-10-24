@@ -157,15 +157,17 @@ internal sealed interface EditorCommand {
             ) return EditorCommandResult()
 
             val sourceEntries = validPositions.map { state.subtitleEntries[it] }
-            val merged = sourceEntries.first()
-            merged.startTime = sourceEntries.minOf { it.startTime }
-            merged.endTime = sourceEntries.maxOf { it.endTime }
-            merged.text = sourceEntries.joinToString("\n") { it.text }
-            merged.endTimeModified = sourceEntries.any { it.endTimeModified }
+            val merged = sourceEntries.first().copyWithNewStableId().apply {
+                startTime = sourceEntries.minOf { it.startTime }
+                endTime = sourceEntries.maxOf { it.endTime }
+                text = sourceEntries.joinToString("\n") { it.text }
+                endTimeModified = sourceEntries.any { it.endTimeModified }
+            }
 
             validPositions.drop(1).sortedDescending().forEach { position ->
                 state.subtitleEntries.removeAt(position)
             }
+            state.subtitleEntries[validPositions.first()] = merged
             state.subtitleEntries.forEachIndexed { index, entry -> entry.index = index + 1 }
             return EditorCommandResult(
                 changedPositions = validPositions.toSet(),
@@ -175,7 +177,7 @@ internal sealed interface EditorCommand {
         }
     }
 
-    /** Split one cue at a playback position while keeping the left cue's stable identity. */
+    /** Split one cue at a playback position; both resulting cues are new subtitle rows. */
     data class Split(
         val position: Int,
         val splitTime: Long,
@@ -189,9 +191,11 @@ internal sealed interface EditorCommand {
             }
             val originalEnd = entry.endTime
             val originalEndModified = entry.endTimeModified
-            entry.endTime = splitTime
-            entry.endTimeModified = true
-            entry.text = leftText
+            val left = entry.copyWithNewStableId().apply {
+                endTime = splitTime
+                endTimeModified = true
+                text = leftText
+            }
             val right = SubtitleEntry(
                 index = position + 2,
                 startTime = splitTime,
@@ -199,6 +203,7 @@ internal sealed interface EditorCommand {
                 text = rightText,
                 endTimeModified = originalEndModified
             )
+            state.subtitleEntries[position] = left
             state.subtitleEntries.add(position + 1, right)
             state.subtitleEntries.forEachIndexed { index, subtitle -> subtitle.index = index + 1 }
             return EditorCommandResult(

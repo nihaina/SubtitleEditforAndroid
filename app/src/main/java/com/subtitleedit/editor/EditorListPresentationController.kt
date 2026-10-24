@@ -24,7 +24,7 @@ internal class EditorListPresentationController(
             selectedStableIds != null -> selectedStableIds.filterTo(mutableSetOf()) { it in currentIds }
             selectedIndices != null -> selectedIndices.mapNotNullTo(mutableSetOf()) { entries().getOrNull(it)?.stableId }
             clearSelection -> emptySet()
-            else -> selectedIds()
+            else -> selectedIds().filterTo(mutableSetOf()) { it in currentIds }
         }
     }
 

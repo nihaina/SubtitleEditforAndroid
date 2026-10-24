@@ -114,9 +114,11 @@ class EditorCommandTest {
     @Test
     fun mergeCommandJoinsTextWithLineBreakAndKeepsWholeTimeRange() {
         val viewModel = EditorViewModel()
+        val first = SubtitleEntry(index = 1, startTime = 100L, endTime = 500L, text = "第一")
+        val second = SubtitleEntry(index = 2, startTime = 600L, endTime = 900L, text = "第二")
         viewModel.subtitleEntries = mutableListOf(
-            SubtitleEntry(index = 1, startTime = 100L, endTime = 500L, text = "第一"),
-            SubtitleEntry(index = 2, startTime = 600L, endTime = 900L, text = "第二"),
+            first,
+            second,
             SubtitleEntry(index = 3, startTime = 1_000L, endTime = 1_200L, text = "第三")
         )
 
@@ -128,6 +130,8 @@ class EditorCommandTest {
             viewModel.subtitleDocument.entries.map { it.text })
         assertEquals(100L, viewModel.subtitleDocument.entries[0].startTime)
         assertEquals(900L, viewModel.subtitleDocument.entries[0].endTime)
+        assertTrue(first.stableId != viewModel.subtitleDocument.entries[0].stableId)
+        assertTrue(second.stableId != viewModel.subtitleDocument.entries[0].stableId)
         assertEquals(listOf(1, 2), viewModel.subtitleDocument.entries.map { it.index })
     }
 
@@ -148,7 +152,7 @@ class EditorCommandTest {
     }
 
     @Test
-    fun splitCommandKeepsLeftIdentityAndCreatesRightEntry() {
+    fun splitCommandCreatesNewIdentitiesForBothResultingEntries() {
         val viewModel = EditorViewModel()
         val original = SubtitleEntry(
             index = 1,
@@ -169,8 +173,12 @@ class EditorCommandTest {
             viewModel.subtitleDocument.entries.map { it.startTime })
         assertEquals(listOf(400L, 900L),
             viewModel.subtitleDocument.entries.map { it.endTime })
-        assertEquals(original.stableId, viewModel.subtitleDocument.entries[0].stableId)
+        assertTrue(original.stableId != viewModel.subtitleDocument.entries[0].stableId)
         assertTrue(original.stableId != viewModel.subtitleDocument.entries[1].stableId)
+        assertTrue(
+            viewModel.subtitleDocument.entries[0].stableId !=
+                viewModel.subtitleDocument.entries[1].stableId
+        )
         assertEquals(listOf(1, 2), viewModel.subtitleDocument.entries.map { it.index })
     }
 
