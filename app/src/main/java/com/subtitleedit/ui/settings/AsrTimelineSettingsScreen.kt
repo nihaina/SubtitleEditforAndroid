@@ -25,6 +25,7 @@ import com.subtitleedit.ui.components.AppSlider
 import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.ui.components.SectionHeader
 import com.subtitleedit.ui.components.SettingsSwitchRow
+import com.subtitleedit.util.AsrPunctuationOptions
 
 data class AsrTimelineSettingsState(
     val useVadTimestamp: Boolean = false,
@@ -38,6 +39,7 @@ data class AsrTimelineSettingsState(
     val smartMerge: Boolean = true,
     val filterLongMerge: Boolean = true,
     val punctuationSplit: Boolean = true,
+    val splitPunctuation: List<String> = AsrPunctuationOptions.defaults.toList(),
     val mergeMaxCharacters: Int = 25,
     val mergeGapMs: Int = 500,
     val mergeGapText: String = "500"
@@ -59,6 +61,7 @@ fun AsrTimelineSettingsScreen(
     onSmartMergeChanged: (Boolean) -> Unit,
     onFilterLongMergeChanged: (Boolean) -> Unit,
     onPunctuationSplitChanged: (Boolean) -> Unit,
+    onSplitPunctuationChanged: (List<String>) -> Unit,
     onMergeMaxCharactersChanged: (Float) -> Unit,
     onMergeGapChanged: (Float) -> Unit,
     onMergeGapTextChanged: (String) -> Unit
@@ -219,13 +222,12 @@ fun AsrTimelineSettingsScreen(
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
                         }
-                        SettingsSwitchRow(
-                            title = stringResource(R.string.speech_merge_punctuation_split),
-                            description = stringResource(R.string.speech_merge_punctuation_split_hint),
+                        AsrPunctuationSplitSettings(
                             checked = state.punctuationSplit,
+                            selectedPunctuation = state.splitPunctuation,
                             enabled = mergeEnabled && state.smartMerge,
-                            opacity = if (mergeEnabled && state.smartMerge) 1f else 0.5f,
                             onCheckedChange = onPunctuationSplitChanged,
+                            onPunctuationChange = onSplitPunctuationChanged,
                             modifier = Modifier.padding(top = 8.dp)
                         )
                     }

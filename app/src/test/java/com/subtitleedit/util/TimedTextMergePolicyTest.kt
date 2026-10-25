@@ -11,6 +11,7 @@ class TimedTextMergePolicyTest {
         smart: Boolean = true,
         limit: Int? = null,
         splitPunctuation: Boolean = true,
+        punctuationMarks: Set<Int> = AsrPunctuationOptions.defaultCodePoints,
         maxGapMs: Int = 500
     ): List<Cue> =
         TimedTextMergePolicy.merge(
@@ -22,7 +23,8 @@ class TimedTextMergePolicyTest {
                 Cue(cue.start, boundary, cue.text.substring(0, index)) to
                     Cue(boundary, cue.end, cue.text.substring(index))
             },
-            splitOnPunctuation = splitPunctuation
+            splitOnPunctuation = splitPunctuation,
+            punctuationMarks = punctuationMarks,
         )
 
     @Test
@@ -385,6 +387,57 @@ class TimedTextMergePolicyTest {
             val cues = listOf(Cue(0, 10, leftText), Cue(20, 30, "丙"))
             assertEquals(listOf(leftText + "丙"), merge(cues).map { it.text })
         }
+    }
+
+    @Test
+    fun selectedPunctuationMarksTriggerPunctuationSplits() {
+        val splitMarks = listOf('，', ',', '、', '；', ';', '。', '．', '.', '？', '?', '！', '!')
+        for (mark in splitMarks) {
+            val cues = listOf(Cue(0, 10, "甲${mark}乙"), Cue(10, 20, "丙"))
+            assertEquals(
+                "mark $mark",
+                listOf("甲${mark}", "乙丙"),
+                merge(cues, limit = 1).map { it.text },
+            )
+        }
+
+        val otherPunctuation = listOf(
+            "甲“乙”丙", "甲‘乙’丙", "甲:乙:丙", "甲—乙—丙", "甲…乙…丙",
+        )
+        for (text in otherPunctuation) {
+            val cues = listOf(Cue(0, 10, text), Cue(10, 20, "丁"))
+            assertEquals(text, listOf(text + "丁"), merge(cues, limit = 1).map { it.text })
+        }
+    }
+
+    @Test
+    fun selectedPunctuationSetControlsSplittingAndDirectionalMergeBlocking() {
+        val semicolonOnly = setOf(';'.code)
+        val cues = listOf(Cue(0, 10, "甲，乙;"), Cue(10, 20, "丙丁"))
+
+        assertEquals(
+            listOf("甲，乙;", "丙丁"),
+            merge(cues, limit = 2, punctuationMarks = semicolonOnly).map { it.text },
+        )
+        val terminalCommaCues = listOf(Cue(0, 10, "甲，"), Cue(20, 30, "乙"))
+        assertEquals(
+            terminalCommaCues,
+            merge(terminalCommaCues, maxGapMs = 20, punctuationMarks = setOf('，'.code)),
+        )
+    }
+
+    @Test
+    fun closingQuoteAfterASelectedMarkStaysWithTheLeftCue() {
+        val cues = listOf(Cue(0, 10, "甲，”乙"), Cue(10, 20, "丙"))
+
+        assertEquals(listOf("甲，”", "乙丙"), merge(cues, limit = 1).map { it.text })
+    }
+
+    @Test
+    fun quotationMarksDoNotBlockMergingAcrossAnAllowedGap() {
+        val cues = listOf(Cue(0, 10, "甲”"), Cue(20, 30, "乙“"))
+
+        assertEquals(listOf("甲”乙“"), merge(cues, maxGapMs = 20).map { it.text })
     }
 
     @Test

@@ -109,7 +109,8 @@ internal object TokenTimestampSegmenter {
         maxGapMs: Int,
         smart: Boolean = false,
         maxCharacters: Int? = null,
-        splitOnPunctuation: Boolean = true
+        splitOnPunctuation: Boolean = true,
+        punctuationMarks: Set<Int> = AsrPunctuationOptions.defaultCodePoints
     ): List<Segment> = TimedTextMergePolicy.merge(
         segments, maxGapMs, smart, maxCharacters,
         start = { it.startTimeMs },
@@ -132,6 +133,7 @@ internal object TokenTimestampSegmenter {
                 segment.copy(startTimeMs = right.startTimeMs, endTimeMs = right.endTimeMs, text = right.text, parts = right.parts)
         },
         splitOnPunctuation = splitOnPunctuation,
+        punctuationMarks = punctuationMarks,
     )
 
     private fun sourceParts(segment: Segment): List<TimedTextPart> = TimedTextSplitter.sourceParts(

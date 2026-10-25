@@ -126,6 +126,31 @@ class ForcedAlignmentSegmenterTest {
     }
 
     @Test
+    fun sentenceTerminatorsAndSemicolonsTriggerAutomaticAlignmentSplits() {
+        val splitMarks = listOf('；', ';', '。', '．', '.', '？', '?', '！', '!')
+        for (mark in splitMarks) {
+            val segments = ForcedAlignmentSegmenter.split(
+                units = listOf(ForcedAlignmentUnit("甲${mark}", 0, 100), ForcedAlignmentUnit("乙", 110, 200)),
+                audioStartTimeMs = 0,
+                audioEndTimeMs = 1_000,
+                splitGapMs = 250,
+            )
+            assertEquals("mark $mark", listOf("甲${mark}", "乙"), segments.map { it.text })
+        }
+
+        for (text in listOf("甲，", "甲,", "甲、", "甲：", "甲:", "甲”", "甲'")) {
+            val segments = ForcedAlignmentSegmenter.split(
+                units = listOf(ForcedAlignmentUnit(text, 0, 100), ForcedAlignmentUnit("乙", 110, 200)),
+                audioStartTimeMs = 0,
+                audioEndTimeMs = 1_000,
+                splitGapMs = 250,
+            )
+            assertEquals(text, listOf(text + "乙"), segments.map { it.text })
+        }
+
+    }
+
+    @Test
     fun punctuationSplitKeepsOriginalDisplayAndAlignmentBoundaries() {
         val segments = listOf(
             ForcedAlignmentSegmenter.Segment(

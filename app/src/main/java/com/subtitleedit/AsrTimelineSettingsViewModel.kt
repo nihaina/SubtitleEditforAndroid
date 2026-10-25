@@ -36,6 +36,7 @@ internal class AsrTimelineSettingsViewModel(
             smartMerge = settingsManager.isSpeechTokenTimestampSmartMergeEnabled(modelType),
             filterLongMerge = settingsManager.isSpeechTokenTimestampLongSegmentFilterEnabled(modelType),
             punctuationSplit = settingsManager.isSpeechTokenTimestampPunctuationSplitEnabled(modelType),
+            splitPunctuation = settingsManager.getSpeechTokenTimestampSplitPunctuation(modelType),
             mergeMaxCharacters = settingsManager.getSpeechTokenTimestampMergeMaxCharacters(modelType),
             mergeGapMs = mergeGapMs,
             mergeGapText = String.format(Locale.US, "%.0f", mergeGapMs.toFloat())
@@ -113,6 +114,11 @@ internal class AsrTimelineSettingsViewModel(
     fun setPunctuationSplit(enabled: Boolean) {
         setState { copy(punctuationSplit = enabled) }
         settingsManager.setSpeechTokenTimestampPunctuationSplitEnabled(enabled, modelType)
+    }
+
+    fun setSplitPunctuation(punctuation: List<String>) {
+        settingsManager.setSpeechTokenTimestampSplitPunctuation(punctuation, modelType)
+        setState { copy(splitPunctuation = settingsManager.getSpeechTokenTimestampSplitPunctuation(modelType)) }
     }
 
     fun setMergeMaxCharacters(value: Float) {

@@ -913,6 +913,9 @@ class WhisperRecognizer(
                         maxCharacters = settings.getSpeechTokenTimestampMergeMaxCharacters(modelType)
                             .takeIf { smart && settings.isSpeechTokenTimestampLongSegmentFilterEnabled(modelType) },
                         splitOnPunctuation = smart && settings.isSpeechTokenTimestampPunctuationSplitEnabled(modelType),
+                        punctuationMarks = AsrPunctuationOptions.codePoints(
+                            settings.getSpeechTokenTimestampSplitPunctuation(modelType)
+                        ),
                     ).also {
                         Log.d(
                             TAG,

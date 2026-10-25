@@ -31,6 +31,12 @@ class TokenTimestampGenerator(context: Context) {
     ): List<Segment> {
         val modelType = SettingsManager.ASR_MODEL_QWEN3_ASR
         val mergeEnabled = settingsManager.isSpeechTokenTimestampMergeEnabled(modelType)
+        val smart = settingsManager.isSpeechTokenTimestampSmartMergeEnabled(modelType)
+        val punctuationSplitEnabled = smart &&
+            settingsManager.isSpeechTokenTimestampPunctuationSplitEnabled(modelType)
+        val punctuationMarks = AsrPunctuationOptions.codePoints(
+            settingsManager.getSpeechTokenTimestampSplitPunctuation(modelType)
+        )
         val aligned = ForcedAlignmentSegmenter.split(
             units = units,
             audioStartTimeMs = audioStartTimeMs,
@@ -39,7 +45,6 @@ class TokenTimestampGenerator(context: Context) {
             // unit boundary, including when segment merging is disabled.
             splitGapMs = 0,
         )
-        val smart = settingsManager.isSpeechTokenTimestampSmartMergeEnabled(modelType)
         val segments = if (mergeEnabled) {
             ForcedAlignmentSegmenter.mergeSegments(
                 segments = aligned,
@@ -47,7 +52,8 @@ class TokenTimestampGenerator(context: Context) {
                 smart = smart,
                 maxCharacters = settingsManager.getSpeechTokenTimestampMergeMaxCharacters(modelType)
                     .takeIf { smart && settingsManager.isSpeechTokenTimestampLongSegmentFilterEnabled(modelType) },
-                splitOnPunctuation = smart && settingsManager.isSpeechTokenTimestampPunctuationSplitEnabled(modelType),
+                splitOnPunctuation = punctuationSplitEnabled,
+                punctuationMarks = punctuationMarks,
             ).map { Segment(it.startTimeMs, it.endTimeMs, it.text) }
         } else {
             aligned.map { Segment(it.startTimeMs, it.endTimeMs, it.text) }

@@ -67,8 +67,7 @@ internal object ForcedAlignmentSegmenter {
 
             val next = normalized.getOrNull(index + 1)
             val gap = next?.let { it.startTimeMs - unit.endTimeMs }
-            if (next != null && gap != null &&
-                (gap >= gapThreshold || isSentenceBoundary(unit.text))) {
+            if (next != null && gap != null && (gap >= gapThreshold || isSentenceBoundary(unit.text))) {
                 val extension = min(contextMs, gap / 2L)
                 addSegment(
                     output = output,
@@ -108,7 +107,8 @@ internal object ForcedAlignmentSegmenter {
         maxGapMs: Int,
         smart: Boolean = false,
         maxCharacters: Int? = null,
-        splitOnPunctuation: Boolean = true
+        splitOnPunctuation: Boolean = true,
+        punctuationMarks: Set<Int> = AsrPunctuationOptions.defaultCodePoints
     ): List<Segment> = TimedTextMergePolicy.merge(
         segments, maxGapMs, smart, maxCharacters,
         start = { it.alignedStartTimeMs },
@@ -137,6 +137,7 @@ internal object ForcedAlignmentSegmenter {
             )
         },
         splitOnPunctuation = splitOnPunctuation,
+        punctuationMarks = punctuationMarks,
     )
 
     private fun sourceParts(segment: Segment): List<TimedTextPart> = TimedTextSplitter.sourceParts(
@@ -193,5 +194,5 @@ internal object ForcedAlignmentSegmenter {
         }
 
     private fun isSentenceBoundary(text: String): Boolean =
-        text.lastOrNull()?.let { it in charArrayOf('。', '！', '？', '；', '.', '!', '?', ';') } == true
+        TimedTextMergePolicy.endsWithSentenceTerminator(text)
 }

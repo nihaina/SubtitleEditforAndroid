@@ -1394,6 +1394,28 @@ class SettingsManager private constructor(context: Context) {
         timelineKey("token_merge_punctuation_split_enabled", type)?.let { prefs.edit().putBoolean(it, enabled).apply() }
     }
 
+    fun getSpeechTokenTimestampSplitPunctuation(type: String = getAsrModelType()): List<String> {
+        val key = timelineKey("token_merge_split_punctuation", type) ?: return AsrPunctuationOptions.defaults.toList()
+        val stored = prefs.getString(key, null) ?: return AsrPunctuationOptions.defaults.toList()
+        return runCatching {
+            val selected = JSONArray(stored).let { array ->
+                buildSet {
+                    for (index in 0 until array.length()) add(array.getString(index))
+                }
+            }
+            AsrPunctuationOptions.choices.filter { it in selected }
+        }.getOrDefault(AsrPunctuationOptions.defaults.toList())
+    }
+
+    fun setSpeechTokenTimestampSplitPunctuation(punctuation: Collection<String>, type: String = getAsrModelType()) {
+        val key = timelineKey("token_merge_split_punctuation", type) ?: return
+        val selected = punctuation.toSet()
+        val stored = JSONArray().apply {
+            AsrPunctuationOptions.choices.filter { it in selected }.forEach(::put)
+        }
+        prefs.edit().putString(key, stored.toString()).apply()
+    }
+
     fun getSpeechTokenTimestampMergeMaxCharacters(type: String = getAsrModelType()): Int =
         timelineKey("token_merge_max_characters", type)?.let { prefs.getInt(it, 25).coerceIn(15, 50) } ?: 25
 

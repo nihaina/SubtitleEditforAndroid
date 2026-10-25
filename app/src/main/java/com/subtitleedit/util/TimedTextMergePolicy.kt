@@ -3,6 +3,13 @@ package com.subtitleedit.util
 internal object TimedTextMergePolicy {
     private enum class Run { NONE, LETTER, DIGIT }
 
+    private val automaticSentenceTerminators = setOf(
+        '；'.code, ';'.code,
+        '。'.code, '．'.code, '.'.code,
+        '？'.code, '?'.code,
+        '！'.code, '!'.code,
+    )
+
     private val punctuationTypes = setOf(
         Character.CONNECTOR_PUNCTUATION.toInt(),
         Character.DASH_PUNCTUATION.toInt(),
@@ -44,7 +51,8 @@ internal object TimedTextMergePolicy {
         text: (T) -> String,
         combine: (T, T) -> T,
         split: (T, Int) -> Pair<T, T>,
-        splitOnPunctuation: Boolean = true
+        splitOnPunctuation: Boolean = true,
+        punctuationMarks: Set<Int> = AsrPunctuationOptions.defaultCodePoints
     ): List<T> {
         if (segments.size < 2) return segments
         if (!smart) {
@@ -80,7 +88,8 @@ internal object TimedTextMergePolicy {
                         val gap = start(right.value) - end(left.value)
                         if (right.splitBoundaryBefore || left.rejectedRight === right || gap > gapLimit ||
                             (gapLimit > 0 && splitOnPunctuation &&
-                                (endsInPunctuation(text(left.value)) || startsInPunctuation(text(right.value))))
+                                (endsInPunctuation(text(left.value), punctuationMarks) ||
+                                    startsInPunctuation(text(right.value), punctuationMarks)))
                         ) break
                         continuous = continuous && gap <= 0L
                         combined = combine(combined, right.value)
@@ -96,9 +105,9 @@ internal object TimedTextMergePolicy {
                     val pieces = when {
                         // Touching groups split unconditionally in the first round. Their
                         // punctuation boundaries also preserve the terminal direction rule.
-                        gapLimit == 0 && splitOnPunctuation -> splitAtPunctuation(combined, text, split)
+                        gapLimit == 0 && splitOnPunctuation -> splitAtPunctuation(combined, text, split, punctuationMarks)
                         continuous || limit == null || characterCount(text(combined)) <= limit -> listOf(combined)
-                        splitOnPunctuation -> splitWithinLimit(combined, limit, text, split)
+                        splitOnPunctuation -> splitWithinLimit(combined, limit, text, split, punctuationMarks)
                         else -> null
                     }
                     if (pieces == null) {
@@ -186,20 +195,22 @@ internal object TimedTextMergePolicy {
         combined: T,
         limit: Int,
         text: (T) -> String,
-        split: (T, Int) -> Pair<T, T>
-    ): List<T>? = splitAtPunctuation(combined, text, split).takeIf { pieces ->
+        split: (T, Int) -> Pair<T, T>,
+        punctuationMarks: Set<Int>,
+    ): List<T>? = splitAtPunctuation(combined, text, split, punctuationMarks).takeIf { pieces ->
         pieces.size > 1 && pieces.all { characterCount(text(it)) <= limit }
     }
 
     private fun <T> splitAtPunctuation(
         combined: T,
         text: (T) -> String,
-        split: (T, Int) -> Pair<T, T>
+        split: (T, Int) -> Pair<T, T>,
+        punctuationMarks: Set<Int>,
     ): List<T> {
         val pieces = mutableListOf<T>()
         var remainder = combined
         while (true) {
-            val splitIndex = punctuationSplitIndex(text(remainder)) ?: break
+            val splitIndex = punctuationSplitIndex(text(remainder), punctuationMarks) ?: break
             val (left, right) = split(remainder, splitIndex)
             pieces += left
             remainder = right
@@ -208,20 +219,40 @@ internal object TimedTextMergePolicy {
         return pieces
     }
 
-    private fun endsInPunctuation(text: String): Boolean {
+    private fun endsInPunctuation(text: String, punctuationMarks: Set<Int>): Boolean {
         val trimmed = text.trimEnd()
-        // A punctuation-only subtitle still participates normally in both directions.
-        return trimmed.isNotEmpty() && characterCount(trimmed) > 0 &&
-            Character.getType(trimmed.codePointBefore(trimmed.length)) in punctuationTypes
+        // Punctuation-only cues still merge toward the closer side instead of blocking both sides.
+        return characterCount(trimmed) > 0 && hasSelectedPunctuationInTrailingCluster(trimmed, punctuationMarks)
     }
 
-    private fun startsInPunctuation(text: String): Boolean {
+    private fun startsInPunctuation(text: String, punctuationMarks: Set<Int>): Boolean {
         val trimmed = text.trimStart()
-        return trimmed.isNotEmpty() && characterCount(trimmed) > 0 &&
-            Character.getType(trimmed.codePointAt(0)) in punctuationTypes
+        if (characterCount(trimmed) == 0) return false
+        var index = 0
+        while (index < trimmed.length) {
+            val codePoint = trimmed.codePointAt(index)
+            if (Character.getType(codePoint) !in punctuationTypes) return false
+            if (codePoint in punctuationMarks) return true
+            index += Character.charCount(codePoint)
+        }
+        return false
     }
 
-    private fun punctuationSplitIndex(text: String): Int? {
+    internal fun endsWithSentenceTerminator(text: String): Boolean =
+        hasSelectedPunctuationInTrailingCluster(text.trimEnd(), automaticSentenceTerminators)
+
+    private fun hasSelectedPunctuationInTrailingCluster(text: String, punctuationMarks: Set<Int>): Boolean {
+        var index = text.length
+        while (index > 0) {
+            val codePoint = text.codePointBefore(index)
+            if (Character.getType(codePoint) !in punctuationTypes) return false
+            if (codePoint in punctuationMarks) return true
+            index -= Character.charCount(codePoint)
+        }
+        return false
+    }
+
+    private fun punctuationSplitIndex(text: String, punctuationMarks: Set<Int>): Int? {
         val totalCount = characterCount(text)
         var index = 0
         var count = 0
@@ -240,11 +271,13 @@ internal object TimedTextMergePolicy {
                 previousRun = run
                 continue
             }
-            // Keep punctuation clusters together on the left, including closing quotes.
+            previousRun = Run.NONE
+            if (codePoint !in punctuationMarks) continue
+
+            // Keep punctuation following a split mark together on the left, including quotes.
             while (index < text.length && Character.getType(text.codePointAt(index)) in punctuationTypes) {
                 index += Character.charCount(text.codePointAt(index))
             }
-            previousRun = Run.NONE
             if (count == 0 || count == totalCount) continue
             return index
         }

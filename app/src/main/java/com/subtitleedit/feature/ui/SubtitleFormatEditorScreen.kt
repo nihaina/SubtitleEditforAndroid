@@ -55,6 +55,7 @@ import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppAlertDialog
 import com.subtitleedit.ui.components.AppTaskProgress
 import com.subtitleedit.ui.components.AppToolScaffold
+import com.subtitleedit.util.AsrPunctuationOptions
 import com.subtitleedit.util.PunctuationReplacementScope
 
 data class SubtitleFormatEditorRow(
@@ -74,11 +75,7 @@ data class SubtitleFormatEditorOptions(
     val addEndPunctuation: String
 )
 
-private val punctuationOptions = listOf(
-    '，', ',', '、', '。', '．', '.', '？', '?', '！', '!', '：', ':', '；', ';',
-    '“', '”', '‘', '’', '「', '」', '『', '』', '"', '\'',
-    '（', '）', '(', ')', '【', '】', '[', ']', '—', '–', '-', '…', '·'
-)
+private val punctuationOptions = AsrPunctuationOptions.choices.map { it.single() }
 private val endPunctuationDefaults = "。．.，,、？?！!：:；;…".toSet()
 private val addEndPunctuationOptions = listOf("", "。", ".", "！", "!", "？", "?", "，", ",", "…")
 

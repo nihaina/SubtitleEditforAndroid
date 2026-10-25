@@ -34,6 +34,7 @@ import com.subtitleedit.ui.components.AppSlider
 import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.ui.components.SectionHeader
 import com.subtitleedit.ui.components.SettingsSwitchRow
+import com.subtitleedit.ui.settings.AsrPunctuationSplitSettings
 import com.subtitleedit.util.SettingsManager
 import kotlin.math.roundToInt
 
@@ -68,6 +69,9 @@ fun Qwen3AsrSettingsScreen(
             punctuationSplit = settingsManager.isSpeechTokenTimestampPunctuationSplitEnabled(
                 SettingsManager.ASR_MODEL_QWEN3_ASR
             ),
+            splitPunctuation = settingsManager.getSpeechTokenTimestampSplitPunctuation(
+                SettingsManager.ASR_MODEL_QWEN3_ASR
+            ),
             maxCharacters = settingsManager.getSpeechTokenTimestampMergeMaxCharacters(
                 SettingsManager.ASR_MODEL_QWEN3_ASR
             ),
@@ -82,6 +86,7 @@ fun Qwen3AsrSettingsScreen(
     var smartMerge by rememberSaveable(refreshKey) { mutableStateOf(initial.smartMerge) }
     var filterLongMerge by rememberSaveable(refreshKey) { mutableStateOf(initial.filterLongMerge) }
     var punctuationSplit by rememberSaveable(refreshKey) { mutableStateOf(initial.punctuationSplit) }
+    var splitPunctuation by rememberSaveable(refreshKey) { mutableStateOf(initial.splitPunctuation) }
     var maxCharacters by rememberSaveable(refreshKey) { mutableIntStateOf(initial.maxCharacters) }
     var mergeGapMs by rememberSaveable(refreshKey) { mutableIntStateOf(initial.mergeGapMs) }
     var mergeGapText by rememberSaveable(refreshKey) { mutableStateOf(initial.mergeGapMs.toString()) }
@@ -322,16 +327,21 @@ fun Qwen3AsrSettingsScreen(
                             modifier = Modifier.width(40.dp)
                         )
                     }
-                    SettingsSwitchRow(
-                        title = stringResource(R.string.speech_merge_punctuation_split),
-                        description = stringResource(R.string.speech_merge_punctuation_split_hint),
+                    AsrPunctuationSplitSettings(
                         checked = punctuationSplit,
+                        selectedPunctuation = splitPunctuation,
                         enabled = smartOptionsEnabled,
-                        opacity = if (smartOptionsEnabled) 1f else 0.5f,
                         onCheckedChange = { enabled ->
                             punctuationSplit = enabled
                             settingsManager.setSpeechTokenTimestampPunctuationSplitEnabled(
                                 enabled,
+                                SettingsManager.ASR_MODEL_QWEN3_ASR
+                            )
+                        },
+                        onPunctuationChange = { punctuation ->
+                            splitPunctuation = punctuation
+                            settingsManager.setSpeechTokenTimestampSplitPunctuation(
+                                punctuation,
                                 SettingsManager.ASR_MODEL_QWEN3_ASR
                             )
                         },
@@ -360,6 +370,7 @@ private data class Qwen3AsrSettingsValues(
     val smartMerge: Boolean,
     val filterLongMerge: Boolean,
     val punctuationSplit: Boolean,
+    val splitPunctuation: List<String>,
     val maxCharacters: Int,
     val mergeGapMs: Int
 )

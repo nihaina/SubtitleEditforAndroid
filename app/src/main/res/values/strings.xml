@@ -388,6 +388,9 @@
     <string name="speech_merge_max_characters">最大字数</string>
     <string name="speech_merge_punctuation_split">按标点切分</string>
     <string name="speech_merge_punctuation_split_hint">首尾相接或超出最大字数的合并组按标点切分，标点归左；切分后仍超出字数限制时按较长段过滤回退；其他字幕以标点结尾时只向左合并，标点在中间或字幕只有标点时正常合并</string>
+    <string name="speech_merge_set_punctuation">设置标点</string>
+    <string name="speech_merge_select_punctuation_hint">选择会触发合并阻断或字幕切分的标点。</string>
+    <string name="speech_merge_punctuation_default">恢复默认</string>
     <string name="unit_milliseconds">毫秒</string>
     <string name="unit_seconds">秒</string>
     <string name="vad_settings_title">VAD 配置</string>
