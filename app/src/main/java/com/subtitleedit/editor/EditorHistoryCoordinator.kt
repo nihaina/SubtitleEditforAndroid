@@ -12,7 +12,6 @@ internal class EditorHistoryCoordinator(
     private val documentState: EditorDocumentState,
     private val selectedIds: () -> Set<Long>,
     private val sourceMode: () -> Boolean,
-    private val sourceEntriesReady: () -> Boolean,
     private val applyOperation: (Operation, Boolean) -> Unit,
     private val invalidateMenu: () -> Unit
 ) {
@@ -52,17 +51,11 @@ internal class EditorHistoryCoordinator(
         }
     }
 
-    fun recordSource(before: String, after: String, beforeEntries: List<SubtitleEntry>? = null) {
-        if (!sourceMode() || !stateModel.historyBaselineInitialized || before == after) return
-        val cached = beforeEntries?.map { it.copy() }
-            ?: documentState.subtitleEntries.takeIf {
-                sourceEntriesReady() && stateModel.sourceHistoryTextSnapshot == before
-            }?.map { it.copy() }
+    fun recordSource(edit: EditorSourceTextEdit, before: String) {
+        if (!sourceMode() || !stateModel.historyBaselineInitialized || edit.isNoOp) return
         stateModel.recordSourceHistory(
-            before, after,
-            EditorHistoryDescriptionFormatter.describeSourceTextChange(before, after),
-            cached ?: emptyList(),
-            before.takeIf { cached != null }
+            edit,
+            EditorHistoryDescriptionFormatter.describeSourceTextChange(edit, before)
         )
         invalidateMenu()
     }

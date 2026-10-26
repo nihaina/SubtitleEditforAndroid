@@ -52,7 +52,10 @@ object SubtitleParser {
         format: SubtitleFormat? = null
     ): SubtitleDocument {
         val lines = content.toSubtitleLines()
-        val selectedFormat = format ?: detectFormat(content, fileName)
+        // Reuse the line list already required by the selected handler.  Calling the public
+        // detectFormat overload here would normalize and split the whole document a second
+        // time, which is a sizeable transient allocation for large subtitle files.
+        val selectedFormat = format ?: detectFormat(content, fileName, lines)
         val handler = handlerFor(selectedFormat)
         if (handler != null) return handler.load(lines, fileName)
 
@@ -64,6 +67,14 @@ object SubtitleParser {
 
     fun detectFormat(content: String, fileName: String? = null): SubtitleFormat {
         val lines = content.toSubtitleLines()
+        return detectFormat(content, fileName, lines)
+    }
+
+    private fun detectFormat(
+        content: String,
+        fileName: String?,
+        lines: List<String>
+    ): SubtitleFormat {
         val extension = fileName?.substringAfterLast('.', "")?.lowercase().orEmpty()
 
         // 文本文件始终使用原文编辑，避免其中的时间戳或配置节被误识别为字幕。

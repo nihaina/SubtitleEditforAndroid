@@ -1,6 +1,7 @@
 package com.subtitleedit
 
 import com.subtitleedit.util.SubtitleParser
+import com.subtitleedit.editor.EditorSourceTextEdit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -214,13 +215,8 @@ class EditorSubtitleColorTest {
         val model = EditorViewModel()
         model.loadSubtitleContent(after, "test.vtt")
         val command = EditorEditHistory.Operation.SourceChange(
-            beforeText = before,
-            afterText = after,
+            edit = EditorSourceTextEdit.between(before, after),
             description = "STYLE",
-            beforeEntries = model.subtitleEntries.map { it.copy() },
-            beforeEntriesText = before,
-            afterEntries = model.subtitleEntries.map { it.copy() },
-            afterEntriesText = after
         )
 
         model.executeHistoryCommand(command, undo = true)

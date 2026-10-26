@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.editor.EditorSourceTextEdit
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.SubtitleColorOps
 import com.subtitleedit.util.subtitle.SubtitleDocument
@@ -104,8 +105,7 @@ internal class EditorViewModel(
         set(value) { documentState.sourceViewNeedsListSync = value }
     fun setSourceDocumentContent(content: String) {
         // SourceEditorView already owns the visible document and emits a debounced preview.
-        // Avoid publishing the entire document on every keystroke; history keeps the full
-        // before snapshot and the preview publishes only when parsing completes.
+        // History retains only the edited range, and the preview publishes parsed entries later.
         documentState.sourceViewContent = content
         documentState.originalFileContent = content
         documentState.sourceViewNeedsListSync = true
@@ -203,14 +203,6 @@ internal class EditorViewModel(
         editHistory.clear()
     }
 
-    fun updateLatestSourceHistory(afterText: String, entries: List<SubtitleEntry>) {
-        editHistory.updateLatestSourceAfterEntries(afterText, entries)
-    }
-
-    fun updateSourceHistory(afterText: String, entries: List<SubtitleEntry>) {
-        editHistory.updateSourceAfterEntries(afterText, entries)
-    }
-
     fun setHistoryBaseline(state: EditorEditHistory.ListState, sourceText: String, clear: Boolean) {
         if (clear) editHistory.clear()
         documentState.historyEntriesSnapshot = state.entries
@@ -241,7 +233,7 @@ internal class EditorViewModel(
         val difference = EditorEditHistory.difference(before, after)
         if (difference.isEmpty && beforeHeader == afterHeader) return false
         editHistory.record(
-            EditorEditHistory.Operation.ListChange(
+            EditorEditHistory.Operation.ListChange.fromStates(
                 before = before,
                 after = after,
                 description = description,
@@ -257,23 +249,16 @@ internal class EditorViewModel(
     }
 
     fun recordSourceHistory(
-        beforeText: String,
-        afterText: String,
+        edit: EditorSourceTextEdit,
         description: String,
-        beforeEntries: List<SubtitleEntry>,
-        beforeEntriesText: String?
     ): Boolean {
-        if (beforeText == afterText) return false
+        if (edit.isNoOp) return false
         editHistory.record(
             EditorEditHistory.Operation.SourceChange(
-                beforeText = beforeText,
-                afterText = afterText,
+                edit = edit,
                 description = description,
-                beforeEntries = beforeEntries,
-                beforeEntriesText = beforeEntriesText
             )
         )
-        documentState.sourceHistoryTextSnapshot = afterText
         return true
     }
 
@@ -298,7 +283,11 @@ internal class EditorViewModel(
         documentState.sourceViewNeedsListSync = false
         documentState.hasUnsavedChanges = false
         documentState.sourceHistoryTextSnapshot = content
-        publishDocument()
+        // The parser result is not mutated during the open flow. Reuse it for the initial
+        // StateFlow publication instead of asking subtitleDocument to deep-copy every entry a
+        // second time. The editable state remains isolated by replaceDocument(), and subsequent
+        // mutations publish fresh snapshots through publishDocument().
+        publishDocument(document)
         onEvent(EditorEvent.SetDocumentLoaded(true))
         return document
     }
@@ -566,8 +555,8 @@ internal class EditorViewModel(
         _uiState.value = transform(_uiState.value)
     }
 
-    private fun publishDocument() {
-        _document.value = documentState.subtitleDocument
+    private fun publishDocument(snapshot: SubtitleDocument? = null) {
+        _document.value = snapshot ?: documentState.subtitleDocument
     }
 }
 

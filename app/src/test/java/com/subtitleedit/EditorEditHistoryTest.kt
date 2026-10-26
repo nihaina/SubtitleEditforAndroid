@@ -1,6 +1,7 @@
 package com.subtitleedit
 
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.editor.EditorSourceTextEdit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -57,8 +58,9 @@ class EditorEditHistoryTest {
         history.record(sourceChange("abcde", "abcd"), timestampMs = 1_400L)
 
         val operation = history.takeUndo() as EditorEditHistory.Operation.SourceChange
-        assertEquals("abcdef", operation.beforeText)
-        assertEquals("abcd", operation.afterText)
+        assertEquals(4, operation.edit.startOffset)
+        assertEquals("ef", operation.edit.deletedText)
+        assertEquals("", operation.edit.insertedText)
         assertFalse(history.canUndo)
     }
 
@@ -100,7 +102,7 @@ class EditorEditHistoryTest {
     fun sourceViewPeekSkipsSelectionOnlyOperations() {
         val history = EditorEditHistory()
         val entry = SubtitleEntry(text = "same")
-        val selection = EditorEditHistory.Operation.ListChange(
+        val selection = EditorEditHistory.Operation.ListChange.fromStates(
             before = EditorEditHistory.ListState(listOf(entry), emptySet()),
             after = EditorEditHistory.ListState(listOf(entry.copy()), setOf(entry.stableId)),
             description = "select"
@@ -121,7 +123,7 @@ class EditorEditHistoryTest {
         val history = EditorEditHistory()
         val controller = EditorHistoryController(history)
         val entry = SubtitleEntry(text = "same")
-        val selection = EditorEditHistory.Operation.ListChange(
+        val selection = EditorEditHistory.Operation.ListChange.fromStates(
             before = EditorEditHistory.ListState(listOf(entry), emptySet()),
             after = EditorEditHistory.ListState(listOf(entry.copy()), setOf(entry.stableId)),
             description = "select"
@@ -142,7 +144,7 @@ class EditorEditHistoryTest {
         val history = EditorEditHistory()
         val controller = EditorHistoryController(history)
         val entry = SubtitleEntry(text = "same")
-        val selection = EditorEditHistory.Operation.ListChange(
+        val selection = EditorEditHistory.Operation.ListChange.fromStates(
             before = EditorEditHistory.ListState(listOf(entry), emptySet()),
             after = EditorEditHistory.ListState(listOf(entry.copy()), setOf(entry.stableId)),
             description = "select"
@@ -167,6 +169,32 @@ class EditorEditHistoryTest {
     }
 
     @Test
+    fun listHistoryDeltaRestoresAddedDeletedAndUpdatedRows() {
+        val first = SubtitleEntry(text = "first")
+        val deleted = SubtitleEntry(text = "deleted")
+        val added = SubtitleEntry(text = "added")
+        val before = EditorEditHistory.ListState(listOf(first, deleted), selectedIds = setOf(deleted.stableId))
+        val after = EditorEditHistory.ListState(listOf(first.copy(text = "changed"), added), selectedIds = setOf(added.stableId))
+        val operation = EditorEditHistory.Operation.ListChange.fromStates(before, after, "编辑")
+        val state = EditorDocumentState().apply {
+            subtitleEntries = before.entries.map { it.copy() }.toMutableList()
+            historySelectionSnapshot = before.selectedIds
+            originalFileContent = ""
+            sourceViewContent = ""
+            currentFormat = com.subtitleedit.util.SubtitleParser.SubtitleFormat.TXT
+        }
+
+        val redo = operation.execute(state, undo = false)
+        assertEquals(listOf("changed", "added"), state.subtitleEntries.map { it.text })
+        assertEquals(setOf(added.stableId), redo.selectedIds)
+
+        state.historySelectionSnapshot = redo.selectedIds
+        val undo = operation.execute(state, undo = true)
+        assertEquals(listOf("first", "deleted"), state.subtitleEntries.map { it.text })
+        assertEquals(setOf(deleted.stableId), undo.selectedIds)
+    }
+
+    @Test
     fun cueMetadataChangesAreUndoableContentChanges() {
         val beforeEntry = SubtitleEntry(
             startTime = 0L,
@@ -178,7 +206,7 @@ class EditorEditHistoryTest {
         val before = EditorEditHistory.ListState(listOf(beforeEntry), emptySet())
         val after = EditorEditHistory.ListState(listOf(afterEntry), emptySet())
         val difference = EditorEditHistory.difference(before, after)
-        val operation = EditorEditHistory.Operation.ListChange(
+        val operation = EditorEditHistory.Operation.ListChange.fromStates(
             before = before,
             after = after,
             description = "排列和坐标",
@@ -207,7 +235,7 @@ class EditorEditHistoryTest {
         val history = EditorEditHistory()
         val beforeEntry = SubtitleEntry(startTime = 0L, endTime = 1000L, text = "旧")
         val afterEntry = beforeEntry.copy(text = "新")
-        val operation = EditorEditHistory.Operation.ListChange(
+        val operation = EditorEditHistory.Operation.ListChange.fromStates(
             before = EditorEditHistory.ListState(listOf(beforeEntry), emptySet()),
             after = EditorEditHistory.ListState(listOf(afterEntry), emptySet()),
             description = "修改"
@@ -230,7 +258,7 @@ class EditorEditHistoryTest {
         val viewModel = EditorViewModel()
         val before = SubtitleEntry(text = "前")
         val after = before.copy(text = "后")
-        val command = EditorEditHistory.Operation.ListChange(
+        val command = EditorEditHistory.Operation.ListChange.fromStates(
             before = EditorEditHistory.ListState(listOf(before), emptySet()),
             after = EditorEditHistory.ListState(listOf(after), emptySet()),
             description = "修改"
@@ -243,77 +271,67 @@ class EditorEditHistoryTest {
     }
 
     @Test
-    fun sourceHistoryWithCachedEntriesKeepsDocumentSynchronized() {
-        val beforeEntry = SubtitleEntry(startTime = 0L, endTime = 1000L, text = "旧")
-        val afterEntry = beforeEntry.copy(text = "新")
+    fun sourceHistoryPatchRestoresTextWithoutKeepingAnEntrySnapshot() {
+        val currentEntry = SubtitleEntry(startTime = 0L, endTime = 1000L, text = "新")
         val state = EditorDocumentState().apply {
-            subtitleEntries = mutableListOf(afterEntry.copy())
+            subtitleEntries = mutableListOf(currentEntry.copy())
             originalFileContent = "新"
             sourceViewContent = "新"
             sourceViewNeedsListSync = true
             currentFormat = com.subtitleedit.util.SubtitleParser.SubtitleFormat.TXT
         }
         val operation = EditorEditHistory.Operation.SourceChange(
-            beforeText = "旧",
-            afterText = "新",
-            description = "修改",
-            beforeEntries = listOf(beforeEntry),
-            beforeEntriesText = "旧",
-            afterEntries = listOf(afterEntry),
-            afterEntriesText = "新"
+            edit = EditorSourceTextEdit.between("旧", "新"),
+            description = "修改"
         )
 
         val result = operation.execute(state, undo = true)
 
         assertEquals("旧", state.sourceViewContent)
-        assertEquals("旧", state.subtitleEntries.single().text)
-        assertFalse(state.sourceViewNeedsListSync)
-        assertTrue(result.entriesResolved)
+        assertEquals("新", state.subtitleEntries.single().text)
+        assertTrue(state.sourceViewNeedsListSync)
+        assertFalse(result.entriesResolved)
+
+        operation.execute(state, undo = false)
+        assertEquals("新", state.sourceViewContent)
     }
 
     @Test
-    fun latestSourceHistoryCachesEntriesForRedo() {
-        val history = EditorEditHistory()
-        val before = SubtitleEntry(startTime = 0L, endTime = 1000L, text = "旧")
-        val after = SubtitleEntry(startTime = 0L, endTime = 1000L, text = "新")
-        val operation = EditorEditHistory.Operation.SourceChange(
-            beforeText = "旧",
-            afterText = "新",
-            description = "修改",
-            beforeEntries = listOf(before),
-            beforeEntriesText = "旧"
-        )
-        history.record(operation)
+    fun sourceHistoryOperationRetainsOnlyTheChangedRange() {
+        val operation = sourceChange("subtitle row", "subtitle rows") as EditorEditHistory.Operation.SourceChange
 
-        history.updateLatestSourceAfterEntries("新", listOf(after))
-
-        assertEquals(listOf(after), operation.afterEntries)
-        assertEquals("新", operation.afterEntriesText)
+        assertEquals(12, operation.edit.startOffset)
+        assertEquals("", operation.edit.deletedText)
+        assertEquals("s", operation.edit.insertedText)
     }
 
     @Test
-    fun sourceHistoryCacheUpdatesOperationOnRedoStack() {
-        val history = EditorEditHistory()
-        val before = SubtitleEntry(text = "旧")
-        val after = SubtitleEntry(text = "新")
-        val operation = EditorEditHistory.Operation.SourceChange(
-            beforeText = "旧", afterText = "新", description = "修改",
-            beforeEntries = listOf(before), beforeEntriesText = "旧"
+    fun newlineHistoryStoresOnlyTheInsertedLineEnding() {
+        val before = "first\r\nsecond\r\nthird"
+        val after = "first\r\nsec\r\nond\r\nthird"
+        val edit = EditorSourceTextEdit.fromRanges(
+            before = before,
+            after = after,
+            oldStart = 7,
+            oldEnd = 15,
+            newStart = 7,
+            newEnd = 17,
+            lineNumber = 1
         )
-        history.record(operation)
-        history.pushRedo(history.takeUndo()!!)
 
-        history.updateSourceAfterEntries("新", listOf(after))
-
-        assertEquals(listOf(after), operation.afterEntries)
+        assertEquals(10, edit.startOffset)
+        assertEquals("", edit.deletedText)
+        assertEquals("\r\n", edit.insertedText)
+        assertEquals(before, edit.applyTo(after, undo = true))
+        assertEquals(after, edit.applyTo(before, undo = false))
     }
 
     private fun sourceChange(before: String, after: String) =
-        EditorEditHistory.Operation.SourceChange(before, after, "source")
+        EditorEditHistory.Operation.SourceChange(EditorSourceTextEdit.between(before, after), "source")
 
     private fun listChange(beforeText: String, afterText: String): EditorEditHistory.Operation {
         val entry = SubtitleEntry(text = beforeText)
-        return EditorEditHistory.Operation.ListChange(
+        return EditorEditHistory.Operation.ListChange.fromStates(
             before = EditorEditHistory.ListState(listOf(entry), emptySet()),
             after = EditorEditHistory.ListState(listOf(entry.copy(text = afterText)), emptySet()),
             description = "list"

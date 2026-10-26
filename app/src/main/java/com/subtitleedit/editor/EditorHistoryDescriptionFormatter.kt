@@ -32,22 +32,15 @@ internal object EditorHistoryDescriptionFormatter {
         return descriptions.joinToString("\n")
     }
 
-    fun describeSourceTextChange(before: String, after: String): String {
-        val beforeLines = before.split('\n')
-        val afterLines = after.split('\n')
-        val descriptions = mutableListOf<String>()
-        var changedCount = 0
-        for (index in 0 until maxOf(beforeLines.size, afterLines.size)) {
-            if (beforeLines.getOrNull(index) == afterLines.getOrNull(index)) continue
-            changedCount++
-            if (descriptions.size < MAX_DESCRIPTION_LINES) {
-                descriptions += "修改${index + 1}行 修改前${shortText(beforeLines.getOrNull(index).orEmpty().removeSuffix("\r"))}"
-            }
+    fun describeSourceTextChange(edit: EditorSourceTextEdit, before: String): String {
+        if (edit.deletedText.isEmpty() && edit.insertedText in LINE_ENDINGS) {
+            return "第${edit.lineNumber + 1}行换行"
         }
-        if (changedCount > descriptions.size) {
-            descriptions += "其余 ${changedCount - descriptions.size} 行变更"
+        if (edit.insertedText.isEmpty() && edit.deletedText in LINE_ENDINGS) {
+            return "合并第${edit.lineNumber + 1}行与第${edit.lineNumber + 2}行"
         }
-        return descriptions.joinToString("\n")
+        val oldLine = EditorSourceTextEdit.lineTextBefore(before, edit.startOffset)
+        return "修改${edit.lineNumber + 1}行 修改前${shortText(oldLine)}"
     }
 
     private fun formatHistoryTime(entry: SubtitleEntry): String =
@@ -55,6 +48,7 @@ internal object EditorHistoryDescriptionFormatter {
 
     private const val MAX_DESCRIPTION_LINES = 100
     private const val MAX_DESCRIPTION_TEXT_LENGTH = 160
+    private val LINE_ENDINGS = setOf("\n", "\r", "\r\n", "\u2028", "\u2029", "\u0085")
 
     private fun shortText(text: String): String =
         if (text.length <= MAX_DESCRIPTION_TEXT_LENGTH) text

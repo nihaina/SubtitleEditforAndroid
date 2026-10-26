@@ -25,7 +25,7 @@ internal class EditorSourceWaveformSyncController(
     private val currentEntries: () -> List<SubtitleEntry>,
     private val cancelPreview: () -> Unit,
     private val schedulePreview: () -> Unit,
-    private val recordHistory: (String, String, List<SubtitleEntry>?) -> Unit,
+    private val recordHistory: (String, String) -> Unit,
     private val onSourceUpdated: (String) -> Unit
 ) {
     private data class Request(
@@ -105,7 +105,7 @@ internal class EditorSourceWaveformSyncController(
                         continue
                     }
                     if (request.recordHistory) {
-                        recordHistory(request.historyStart ?: request.content, result, request.historyEntries)
+                        recordHistory(request.historyStart ?: request.content, result)
                         if (request.dragKey != null && historyKey == request.dragKey) {
                             historyKey = null
                             historyStart = null

@@ -2137,7 +2137,8 @@ class SourceEditorView @JvmOverloads constructor(
                 newLineCount = parts.size,
                 startOffset = startOffset,
                 oldEndOffset = startOffset + oldTextLength + originalEnding.length,
-                newEndOffset = startOffset + normalized.length + originalEnding.length
+                newEndOffset = startOffset + line.serializedLength +
+                    inserted.sumOf { it.serializedLength }
             )
         )
     }

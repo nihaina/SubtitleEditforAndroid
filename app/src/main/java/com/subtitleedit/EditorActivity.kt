@@ -47,6 +47,8 @@ import com.subtitleedit.editor.EditorPlaybackController
 import com.subtitleedit.editor.EditorSearchController
 import com.subtitleedit.editor.EditorSourcePreviewController
 import com.subtitleedit.editor.EditorSourceLineEditController
+import com.subtitleedit.editor.EditorSourceTextEdit
+import com.subtitleedit.editor.EditorSourceViewCoordinator
 import com.subtitleedit.editor.EditorSourceWaveformSyncController
 import com.subtitleedit.editor.EditorSubtitleDialogController
 import com.subtitleedit.editor.EditorConfirmationDialogController
@@ -59,7 +61,6 @@ import com.subtitleedit.editor.EditorWebVttStyleDialog
 import com.subtitleedit.editor.EditorFileSessionController
 import com.subtitleedit.editor.EditorListOperationsController
 import com.subtitleedit.editor.EditorSourceViewState
-import com.subtitleedit.editor.EditorSourceViewCoordinator
 import com.subtitleedit.editor.EditorSaveSessionController
 import com.subtitleedit.editor.EditorListPresentationController
 import com.subtitleedit.editor.EditorSubtitlePreviewController
@@ -328,9 +329,12 @@ class EditorActivity : AppCompatActivity() {
         sourceViewCoordinator = EditorSourceViewCoordinator(
             format = { stateModel.currentFormat },
             peekUndo = { stateModel.peekUndo() },
-            updateLatestHistory = { content, entries -> stateModel.updateLatestSourceHistory(content, entries) },
-            applyEntries = { entries -> applySourceViewEntries(entries) },
-            setEntriesGeneration = { stateModel.documentState.sourceViewEntriesGeneration = stateModel.documentState.sourceViewEditGeneration },
+            entries = { stateModel.subtitleEntries },
+            applyEntries = ::applySourceViewEntries,
+            setEntriesGeneration = {
+                stateModel.documentState.sourceViewEntriesGeneration =
+                    stateModel.documentState.sourceViewEditGeneration
+            },
             clearPendingEdits = { sourceViewHasPendingEdits = false }
         )
         setupSubtitleDialogController()
@@ -564,22 +568,29 @@ class EditorActivity : AppCompatActivity() {
             snapshotContent = ::snapshotSourceViewContentIfNeeded,
             onParsed = ::applySourcePreview
         )
-        binding.etSourceView.addOnDocumentChangedListener {
+        binding.etSourceView.addOnDocumentChangeListener { change ->
             if (stateModel.isSourceViewMode && !suppressSourceViewChanges) {
+                val beforeText = stateModel.sourceHistoryTextSnapshot
                 val updatedText = binding.etSourceView.getDocumentText()
-                recordSourceTextChange(stateModel.sourceHistoryTextSnapshot, updatedText)
+                val edit = EditorSourceTextEdit.fromRanges(
+                    before = beforeText,
+                    after = updatedText,
+                    oldStart = change.startOffset,
+                    oldEnd = change.oldEndOffset,
+                    newStart = change.startOffset,
+                    newEnd = change.newEndOffset,
+                    lineNumber = change.startLine
+                )
+                recordSourceTextEdit(edit, beforeText)
                 stateModel.sourceHistoryTextSnapshot = updatedText
                 stateModel.setSourceDocumentContent(updatedText)
                 sourceViewHasPendingEdits = true
                 stateModel.documentState.sourceViewEditGeneration++
                 // SourceEditorView keeps one editable block per physical line. The debounced
-                // preview performs the full-text snapshot only when parsing is needed.
+                // The debounced preview reads the current full text only when parsing is needed;
+                // the history item itself retains only this edit's range.
                 updateFormatInfo()
                 scheduleSourceViewPreview()
-            }
-        }
-        binding.etSourceView.addOnDocumentChangeListener { change ->
-            if (stateModel.isSourceViewMode && !suppressSourceViewChanges) {
                 if (change.oldLineCount != change.newLineCount) sourceLineEditController.invalidateLineIndex()
                 applySimpleSourceLineChange(change.startLine, change.oldLineCount, change.newLineCount)
             }
@@ -625,7 +636,6 @@ class EditorActivity : AppCompatActivity() {
                 } else emptySet()
             },
             sourceMode = { stateModel.isSourceViewMode },
-            sourceEntriesReady = { stateModel.documentState.sourceViewEntriesGeneration == stateModel.documentState.sourceViewEditGeneration },
             applyOperation = ::applyHistoryOperation,
             invalidateMenu = ::invalidateOptionsMenu
         )
@@ -877,7 +887,6 @@ class EditorActivity : AppCompatActivity() {
         current.cueSettings = updated.cueSettings
         stateModel.documentState.sourceViewEntriesGeneration = stateModel.documentState.sourceViewEditGeneration
         sourceViewHasPendingEdits = false
-        stateModel.updateSourceHistory(stateModel.sourceViewContent, stateModel.subtitleEntries)
         if (::subtitleAdapter.isInitialized && entryIndex in 0 until subtitleAdapter.itemCount) {
             subtitleAdapter.notifyItemChanged(entryIndex)
         }
@@ -907,7 +916,6 @@ class EditorActivity : AppCompatActivity() {
                 stateModel.documentState.documentLrcVariant = parsedDocument.lrcVariant
             }
             applySourceViewEntries(normalizeSourceViewEntries(parsedDocument.entries))
-            stateModel.updateLatestSourceHistory(sourceSnapshot, stateModel.subtitleEntries)
             stateModel.documentState.sourceViewEntriesGeneration = editGeneration
             sourceViewHasPendingEdits = false
         }
@@ -952,7 +960,6 @@ class EditorActivity : AppCompatActivity() {
         stateModel.sourceViewContent = updatedSource
         stateModel.sourceHistoryTextSnapshot = updatedSource
         sourceViewHasPendingEdits = false
-        stateModel.updateLatestSourceHistory(updatedSource, stateModel.subtitleEntries)
         stateModel.documentState.sourceViewEditGeneration++
         stateModel.documentState.sourceViewEntriesGeneration = stateModel.documentState.sourceViewEditGeneration
         setSourceViewEditorText(updatedSource, preserveScroll = true)
@@ -1254,18 +1261,15 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun parseContent(content: String, fileName: String? = null) {
-        val document = stateModel.loadSubtitleContent(content, fileName)
-        stateModel.currentFormat = document.format
+        stateModel.loadSubtitleContent(content, fileName)
         
         if (stateModel.currentFormat.isSourceOnly) {
             // Source-only documents still need a block model for waveform playback and for
             // keeping source rows aligned with the list view.  The source editor displays
             // the untouched full text, while these parsed entries provide the corresponding
             // subtitle blocks.
-            replaceSubtitleEntries(document.entries, preserveStableIds = false)
             enterSourceViewMode()
         } else {
-            replaceSubtitleEntries(document.entries, preserveStableIds = false)
             exitSourceViewMode()
         }
         
@@ -1468,13 +1472,7 @@ class EditorActivity : AppCompatActivity() {
                 editedContent = stateModel.sourceViewContent
                 sourcePreviewController.cancel()
                 if (stateModel.documentState.sourceViewEntriesGeneration != stateModel.documentState.sourceViewEditGeneration) {
-                    val appliedLocally = sourceViewCoordinator.applyDeletionLocally(editedContent)
-                    if (!appliedLocally) {
-                        // Keep the current rows for the transition and parse the large source
-                        // document after the list is visible. This removes the full-file parse
-                        // from the user-facing switch path.
-                        needsBackgroundParse = true
-                    }
+                    needsBackgroundParse = !sourceViewCoordinator.applyDeletionLocally(editedContent)
                 }
                 stateModel.originalFileContent = editedContent
                 stateModel.sourceViewContent = editedContent
@@ -1545,7 +1543,6 @@ class EditorActivity : AppCompatActivity() {
         applySourceViewEntries(normalizeSourceViewEntries(document.entries))
         stateModel.documentState.sourceViewEntriesGeneration = generation
         stateModel.sourceViewNeedsListSync = false
-        stateModel.updateSourceHistory(content, stateModel.subtitleEntries)
         syncEditHistoryBaseline()
         submitSubtitleList(
             refreshAll = false,
@@ -3128,11 +3125,15 @@ class EditorActivity : AppCompatActivity() {
 
     private fun recordSourceTextChange(
         beforeText: String,
-        afterText: String,
-        beforeEntries: List<SubtitleEntry>? = null
+        afterText: String
     ) {
         if (suppressHistoryRecording) return
-        historyCoordinator.recordSource(beforeText, afterText, beforeEntries)
+        recordSourceTextEdit(EditorSourceTextEdit.between(beforeText, afterText), beforeText)
+    }
+
+    private fun recordSourceTextEdit(edit: EditorSourceTextEdit, beforeText: String) {
+        if (suppressHistoryRecording) return
+        historyCoordinator.recordSource(edit, beforeText)
     }
 
     private fun recordListSelectionChange() {
@@ -3173,162 +3174,47 @@ class EditorActivity : AppCompatActivity() {
         val operation = command as? EditorEditHistory.Operation ?: return
         when (operation) {
             is EditorEditHistory.Operation.ListChange -> {
-                val target = if (undo) operation.before else operation.after
-                val targetSourceText = if (undo) {
-                    operation.beforeSourceText
-                } else {
-                    operation.afterSourceText
-                }
-                (if (undo) operation.beforeHeader else operation.afterHeader)?.let {
-                    stateModel.documentHeader = it
-                }
-                if (stateModel.isSourceViewMode) {
-                    applyListHistoryInSourceView(target.entries, targetSourceText)
-                } else {
-                    applyListHistoryInListView(target, targetSourceText)
-                }
+                val result = operation.execute(stateModel.documentState, undo)
+                applyListHistoryResult(result)
             }
             is EditorEditHistory.Operation.SourceChange -> {
-                val targetText = if (undo) operation.beforeText else operation.afterText
-                val targetEntries = if (undo) {
-                    operation.beforeEntries.takeIf { operation.beforeEntriesText == operation.beforeText }
-                } else {
-                    operation.afterEntries?.takeIf { operation.afterEntriesText == operation.afterText }
-                }
-                applySourceHistoryText(targetText, targetEntries)
+                val targetText = operation.edit.applyTo(stateModel.sourceViewContent, undo)
+                applySourceHistoryText(targetText)
             }
         }
     }
 
-    private fun applyListHistoryInSourceView(
-        targetEntries: List<SubtitleEntry>,
-        targetSourceText: String?
-    ) {
-        val effectiveTargetEntries: List<SubtitleEntry>
-        val updated: String
-        if (targetSourceText != null) {
-            effectiveTargetEntries = targetEntries
-            updated = targetSourceText
-        } else {
-            val source = stateModel.sourceViewContent
-            val currentEntries = SubtitleParser.parseDocument(source, format = stateModel.currentFormat).entries
-            effectiveTargetEntries = SubtitleEntryOps.applyEditableHistoryTarget(
-                current = stateModel.subtitleEntries,
-                target = targetEntries
-            )
-            updated = SubtitleSourceSynchronizer.apply(
-                content = source,
-                format = stateModel.currentFormat,
-                oldEntries = currentEntries,
-                newEntries = effectiveTargetEntries
-            )
-        }
-        stateModel.originalFileContent = updated
-        stateModel.sourceViewContent = updated
-        stateModel.sourceHistoryTextSnapshot = updated
-        setSourceViewEditorText(updated, preserveScroll = true)
-        applySourceViewEntries(effectiveTargetEntries.map { it.copy() })
-        updateFormatInfo()
-    }
-
-    private fun applyListHistoryInListView(
-        target: EditorEditHistory.ListState,
-        targetSourceText: String?
-    ) {
-        if (targetSourceText == null && canRestoreListEntriesInPlace(target.entries)) {
-            restoreListEntriesInPlace(target)
+    private fun applyListHistoryResult(result: EditorHistoryCommandResult) {
+        val updatedSource = result.sourceText ?: stateModel.sourceViewContent
+        val targetEntries = result.entries.map { it.copy() }
+        if (stateModel.isSourceViewMode) {
+            sourcePreviewController.cancel()
+            stateModel.documentState.sourceViewEditGeneration++
+            sourceViewHasPendingEdits = false
+            setSourceViewEditorText(updatedSource, preserveScroll = true)
+            applySourceViewEntries(targetEntries)
+            stateModel.documentState.sourceViewEntriesGeneration =
+                stateModel.documentState.sourceViewEditGeneration
+            updateFormatInfo()
             return
         }
 
-        val previousCount = stateModel.subtitleEntries.size
-        val effectiveTargetEntries: List<SubtitleEntry>
-        val updatedSource: String
-        if (targetSourceText != null) {
-            effectiveTargetEntries = target.entries
-            updatedSource = targetSourceText
-        } else {
-            val source = stateModel.originalFileContent
-            val currentEntries = SubtitleParser.parseDocument(source, format = stateModel.currentFormat).entries
-            effectiveTargetEntries = SubtitleEntryOps.applyEditableHistoryTarget(
-                current = stateModel.subtitleEntries,
-                target = target.entries
-            )
-            updatedSource = SubtitleSourceSynchronizer.apply(
-                content = source,
-                format = stateModel.currentFormat,
-                oldEntries = currentEntries,
-                newEntries = effectiveTargetEntries
-            )
-        }
-        stateModel.originalFileContent = updatedSource
-        stateModel.sourceViewContent = updatedSource
-        stateModel.sourceHistoryTextSnapshot = updatedSource
-        applySourceViewEntries(effectiveTargetEntries.map { it.copy() })
-        if (previousCount != stateModel.subtitleEntries.size || subtitleAdapter.itemCount != stateModel.subtitleEntries.size) {
+        val previousCount = subtitleAdapter.itemCount
+        applySourceViewEntries(targetEntries)
+        if (previousCount != targetEntries.size || result.structureChanged) {
             submitSubtitleList(
-                // A structural history restore can update retained entries in place before
-                // ListAdapter receives the new list.  Force a full bind so those rows do not
-                // keep displaying the pre-undo contents.
                 refreshAll = true,
+                selectedStableIds = result.selectedIds,
                 syncWaveform = false,
                 markChanged = false
-            ) {
-                subtitleAdapter.setSelectionByStableIds(target.selectedIds)
-                updateSelectedCountDisplay()
-            }
+            ) { updateSelectedCountDisplay() }
         } else {
-            subtitleAdapter.setSelectionByStableIds(target.selectedIds)
+            result.changedPositions.forEach { position ->
+                if (position in 0 until subtitleAdapter.itemCount) subtitleAdapter.notifyItemChanged(position)
+            }
+            subtitleAdapter.setSelectionByStableIds(result.selectedIds)
             updateSelectedCountDisplay()
         }
-    }
-
-    private fun canRestoreListEntriesInPlace(targetEntries: List<SubtitleEntry>): Boolean {
-        if (stateModel.subtitleEntries.size != targetEntries.size) return false
-        return stateModel.subtitleEntries.zip(targetEntries).all { (current, target) ->
-            current.stableId == target.stableId &&
-                current.cueIdentifier == target.cueIdentifier &&
-                current.cueSettings == target.cueSettings
-        }
-    }
-
-    private fun restoreListEntriesInPlace(target: EditorEditHistory.ListState) {
-        val source = stateModel.originalFileContent
-        val currentEntries = stateModel.subtitleEntries.toList()
-        val changedPositions = currentEntries.indices.filter { position ->
-            val current = currentEntries[position]
-            val historical = target.entries[position]
-            current.startTime != historical.startTime ||
-                current.endTime != historical.endTime ||
-                current.text != historical.text ||
-                current.endTimeModified != historical.endTimeModified
-        }
-        val updatedSource = SubtitleSourceSynchronizer.apply(
-            content = source,
-            format = stateModel.currentFormat,
-            oldEntries = currentEntries,
-            newEntries = target.entries
-        )
-
-        currentEntries.forEachIndexed { position, current ->
-            val historical = target.entries[position]
-            current.index = historical.index
-            current.startTime = historical.startTime
-            current.endTime = historical.endTime
-            current.text = historical.text
-            current.endTimeModified = historical.endTimeModified
-        }
-        stateModel.originalFileContent = updatedSource
-        stateModel.sourceViewContent = updatedSource
-        stateModel.sourceHistoryTextSnapshot = updatedSource
-        if (changedPositions.isNotEmpty()) {
-            notifyEntriesChanged(
-                positions = changedPositions,
-                syncWaveform = true,
-                markChanged = false
-            )
-        }
-        subtitleAdapter.setSelectionByStableIds(target.selectedIds)
-        updateSelectedCountDisplay()
     }
 
     private fun applySourceHistoryText(
