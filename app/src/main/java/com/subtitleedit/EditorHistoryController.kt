@@ -58,7 +58,14 @@ internal class EditorHistoryController(
         }
 
         skippedSelectionOperations.asReversed().forEach(restore)
-        apply(operation)
+        try {
+            apply(operation)
+        } catch (error: Throwable) {
+            // The operation was removed before applying it. Put it back when the current
+            // document no longer matches its patch so a failed undo/redo cannot lose history.
+            restore(operation)
+            throw error
+        }
         destination(operation)
         return true
     }

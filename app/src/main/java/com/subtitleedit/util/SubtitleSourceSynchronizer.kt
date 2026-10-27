@@ -27,24 +27,719 @@ object SubtitleSourceSynchronizer {
         // Parser results are freshly allocated and therefore have fresh IDs. Associate them
         // with the caller's in-memory rows before applying structural edits, enabling raw cue
         // blocks to follow their stable subtitle identity across insertions/deletions.
-        val newIds = newEntries.mapTo(HashSet(newEntries.size)) { it.stableId }
-        val associatedOldEntries = if (oldEntries.any { it.stableId in newIds }) {
+        val associatedOldEntries = if (haveSameStableOrder(oldEntries, newEntries)) {
             oldEntries
         } else {
-            SubtitleEntryOps.retainStableIds(newEntries, oldEntries)
+            val newIds = newEntries.mapTo(HashSet(newEntries.size)) { it.stableId }
+            if (oldEntries.any { it.stableId in newIds }) oldEntries
+            else SubtitleEntryOps.retainStableIds(newEntries, oldEntries)
         }
         return when (format) {
-            SubtitleParser.SubtitleFormat.SRT -> patchSrt(content, associatedOldEntries, newEntries)
-            SubtitleParser.SubtitleFormat.VTT -> patchVtt(content, associatedOldEntries, newEntries)
-            SubtitleParser.SubtitleFormat.LRC -> patchLrc(content, associatedOldEntries, newEntries)
+            SubtitleParser.SubtitleFormat.SRT ->
+                patchSingleSrtCue(content, associatedOldEntries, newEntries)
+                    ?: patchMultipleSrtCues(content, associatedOldEntries, newEntries)
+                    ?: patchSrtStructuralChange(content, associatedOldEntries, newEntries)
+                    ?: patchSrt(content, associatedOldEntries, newEntries)
+            SubtitleParser.SubtitleFormat.VTT ->
+                patchSingleVttCue(content, associatedOldEntries, newEntries)
+                    ?: patchMultipleVttCues(content, associatedOldEntries, newEntries)
+                    ?: patchVttStructuralChange(content, associatedOldEntries, newEntries)
+                    ?: patchVtt(content, associatedOldEntries, newEntries)
+            SubtitleParser.SubtitleFormat.LRC ->
+                patchSingleLrcText(content, associatedOldEntries, newEntries)
+                    ?: patchMultipleLrcTexts(content, associatedOldEntries, newEntries)
+                    ?: patchLrc(content, associatedOldEntries, newEntries)
+            SubtitleParser.SubtitleFormat.TXT ->
+                patchSingleTxtLine(content, associatedOldEntries, newEntries)
+                    ?: patchMultipleTxtLines(content, associatedOldEntries, newEntries)
+                    ?: content
             else -> content
         }
+    }
+
+    private fun patchSingleTxtLine(
+        content: String,
+        oldEntries: List<SubtitleEntry>,
+        newEntries: List<SubtitleEntry>
+    ): String? {
+        val target = singleChangedEntry(oldEntries, newEntries) ?: return null
+        val old = oldEntries[target.first]
+        val new = newEntries[target.first]
+        if (old.startTime != new.startTime || old.endTime != new.endTime) return null
+        var cursor = 0
+        var nonBlank = 0
+        while (cursor <= content.length) {
+            val lineEnd = content.indexOfAny(charArrayOf('\r', '\n'), cursor)
+                .takeIf { it >= 0 } ?: content.length
+            val line = content.substring(cursor, lineEnd)
+            if (line.isNotBlank()) {
+                if (nonBlank == target.first) {
+                    // parseTXT trims physical lines. Verify the source row before replacing it;
+                    // this keeps a stale/mismatched history snapshot from patching an unrelated
+                    // non-empty line.
+                    if (line.trim() != old.text.trim()) return null
+                    return replaceContentRange(content, cursor, lineEnd, new.text)
+                }
+                nonBlank++
+            }
+            if (lineEnd >= content.length) break
+            cursor = lineEnd + if (content[lineEnd] == '\r' && content.getOrNull(lineEnd + 1) == '\n') 2 else 1
+        }
+        return null
+    }
+
+    private fun patchMultipleTxtLines(
+        content: String,
+        oldEntries: List<SubtitleEntry>,
+        newEntries: List<SubtitleEntry>
+    ): String? {
+        val changes = changedEntriesInStableOrder(oldEntries, newEntries) ?: return null
+        if (changes.size < 2 || changes.any { (_, old, new) ->
+                old.startTime != new.startTime || old.endTime != new.endTime
+            }
+        ) return null
+        val byIndex = changes.associate { it.first to it.second }
+        val replacements = ArrayList<RawReplacement>(changes.size)
+        var cursor = 0
+        var entryIndex = 0
+        while (cursor <= content.length) {
+            val lineEnd = content.indexOfAny(charArrayOf('\r', '\n'), cursor)
+                .takeIf { it >= 0 } ?: content.length
+            val line = content.substring(cursor, lineEnd)
+            if (line.isNotBlank()) {
+                val old = byIndex[entryIndex]
+                if (old != null) {
+                    val new = newEntries[entryIndex]
+                    if (line.trim() != old.text.trim()) return null
+                    replacements += RawReplacement(cursor, lineEnd, new.text)
+                }
+                entryIndex++
+            }
+            if (lineEnd >= content.length) break
+            cursor = lineEnd + if (content[lineEnd] == '\r' && content.getOrNull(lineEnd + 1) == '\n') 2 else 1
+        }
+        return replacements.takeIf { it.size == changes.size }?.let { applyReplacements(content, it) }
+    }
+
+    private fun patchSingleLrcText(
+        content: String,
+        oldEntries: List<SubtitleEntry>,
+        newEntries: List<SubtitleEntry>
+    ): String? {
+        val target = singleChangedEntry(oldEntries, newEntries) ?: return null
+        val old = oldEntries[target.first]
+        val new = newEntries[target.first]
+        if (old.endTime != new.endTime ||
+            old.endTimeModified != new.endTimeModified
+        ) return null
+        val metadata = detectLrcMetadata(content)
+        val tagPattern = lrcTimeTagPattern
+        var cursor = 0
+        var entryIndex = 0
+        while (cursor <= content.length) {
+            val lineEnd = content.indexOfAny(charArrayOf('\r', '\n'), cursor)
+                .takeIf { it >= 0 } ?: content.length
+            val line = content.substring(cursor, lineEnd)
+            val tags = tagPattern.findAll(line).toList()
+            if (tags.isNotEmpty()) {
+                if (tags.size != 1) return null
+                if (entryIndex == target.first) {
+                    val text = line.substring(tags.single().range.last + 1)
+                    if (text.trimEnd() != old.text.trimEnd()) return null
+                    val tag = if (old.startTime == new.startTime) tags.single().value
+                        else formatLrcTag(new.startTime, metadata.variant, metadata.offsetMs)
+                    val replacement = line.substring(0, tags.single().range.first) + tag +
+                        LrcSubtitleFormatHandler.normalizeLrcText(new.text)
+                    return replaceContentRange(content, cursor, lineEnd, replacement)
+                }
+                entryIndex += tags.size
+            }
+            if (lineEnd >= content.length) break
+            cursor = lineEnd + if (content[lineEnd] == '\r' && content.getOrNull(lineEnd + 1) == '\n') 2 else 1
+        }
+        return null
+    }
+
+    private fun patchMultipleLrcTexts(
+        content: String,
+        oldEntries: List<SubtitleEntry>,
+        newEntries: List<SubtitleEntry>
+    ): String? {
+        val changes = changedEntriesInStableOrder(oldEntries, newEntries) ?: return null
+        if (changes.size < 2 || changes.any { (_, old, new) ->
+                old.endTime != new.endTime ||
+                    old.endTimeModified != new.endTimeModified
+            }
+        ) return null
+        val metadata = detectLrcMetadata(content)
+        val byIndex = changes.associate { it.first to it.second }
+        val replacements = ArrayList<RawReplacement>(changes.size)
+        val tagPattern = lrcTimeTagPattern
+        var cursor = 0
+        var entryIndex = 0
+        while (cursor <= content.length) {
+            val lineEnd = content.indexOfAny(charArrayOf('\r', '\n'), cursor)
+                .takeIf { it >= 0 } ?: content.length
+            val line = content.substring(cursor, lineEnd)
+            val tagCount = tagPattern.findAll(line).count()
+            if (tagCount > 0) {
+                val changed = (entryIndex until entryIndex + tagCount).firstOrNull { it in byIndex }
+                if (changed != null) {
+                    if (tagCount != 1) return null
+                    val tag = tagPattern.find(line) ?: return null
+                    val old = byIndex.getValue(changed)
+                    val new = newEntries[changed]
+                    val text = line.substring(tag.range.last + 1)
+                    if (text.trimEnd() != old.text.trimEnd()) return null
+                    val updatedTag = if (old.startTime == new.startTime) tag.value
+                        else formatLrcTag(new.startTime, metadata.variant, metadata.offsetMs)
+                    val replacement = line.substring(0, tag.range.first) + updatedTag +
+                        LrcSubtitleFormatHandler.normalizeLrcText(new.text)
+                    replacements += RawReplacement(cursor, lineEnd, replacement)
+                }
+                entryIndex += tagCount
+            }
+            if (lineEnd >= content.length) break
+            cursor = lineEnd + if (content[lineEnd] == '\r' && content.getOrNull(lineEnd + 1) == '\n') 2 else 1
+        }
+        return replacements.takeIf { it.size == changes.size }?.let { applyReplacements(content, it) }
+    }
+
+    /** Patch one SRT cue by scanning cue boundaries, without parsing or splitting the document. */
+    private fun patchSingleSrtCue(
+        content: String,
+        oldEntries: List<SubtitleEntry>,
+        newEntries: List<SubtitleEntry>
+    ): String? {
+        val target = singleChangedEntry(oldEntries, newEntries) ?: return null
+        val old = oldEntries[target.first]
+        val new = newEntries[target.first]
+        val textChanged = old.text != new.text
+        val timingChanged = old.startTime != new.startTime || old.endTime != new.endTime ||
+            old.endTimeModified != new.endTimeModified
+        if ((!textChanged && !timingChanged) || old.index != new.index ||
+            old.cueIdentifier != new.cueIdentifier || old.cueSettings != new.cueSettings
+        ) return null
+        val span = findCueSpan(content, target.first, vtt = false) ?: return null
+        val block = splitLines(content.substring(span.start, span.endExclusive))
+        val timelineOffset = block.indexOfFirst { SrtSubtitleFormatHandler.parseTimeLine(it.text) != null }
+        if (timelineOffset < 0) return null
+        val rawTimeline = SrtSubtitleFormatHandler.parseTimeLine(block[timelineOffset].text) ?: return null
+        if (rawTimeline.isFrameCandidate) {
+            if (timingChanged) return null
+        } else if (rawTimeline.startTime != old.startTime || rawTimeline.endTime != old.endTime) {
+            return null
+        }
+        if (block.count { SrtSubtitleFormatHandler.parseTimeLine(it.text) != null } != 1) return null
+        val originalBody = block.drop(timelineOffset + 1).takeLastWhile { it.text.isBlank() }
+        val body = block.drop(timelineOffset + 1).dropLast(originalBody.size)
+            .joinToString("\n") { it.text }
+        if (body.trimEnd() != old.text.trimEnd()) return null
+        val patched = patchSrtCue(block, timelineOffset, old, new)
+        return replaceContentRange(content, span.start, span.endExclusive, patched)
+    }
+
+    /** Patch multiple ordinary SRT cues by reparsing only the changed cue blocks. */
+    private fun patchMultipleSrtCues(
+        content: String,
+        oldEntries: List<SubtitleEntry>,
+        newEntries: List<SubtitleEntry>
+    ): String? {
+        val changes = changedEntriesInStableOrder(oldEntries, newEntries) ?: return null
+        if (changes.size < 2 || changes.any { (_, old, new) ->
+                old.index != new.index || old.cueIdentifier != new.cueIdentifier ||
+                    old.cueSettings != new.cueSettings
+            }
+        ) return null
+        val spans = findCueSpans(content, changes.mapTo(HashSet(changes.size)) { it.first }, vtt = false)
+        if (spans.size != changes.size) return null
+        val replacements = ArrayList<RawReplacement>(changes.size)
+        for ((entryIndex, old, new) in changes) {
+            val span = spans[entryIndex] ?: return null
+            val block = splitLines(content.substring(span.start, span.endExclusive))
+            val timelineOffset = block.indexOfFirst { SrtSubtitleFormatHandler.parseTimeLine(it.text) != null }
+            if (timelineOffset < 0) return null
+            val rawTimeline = SrtSubtitleFormatHandler.parseTimeLine(block[timelineOffset].text) ?: return null
+            val timingChanged = old.startTime != new.startTime || old.endTime != new.endTime ||
+                old.endTimeModified != new.endTimeModified
+            if ((rawTimeline.isFrameCandidate && timingChanged) ||
+                (!rawTimeline.isFrameCandidate &&
+                    (rawTimeline.startTime != old.startTime || rawTimeline.endTime != old.endTime)) ||
+                block.count { SrtSubtitleFormatHandler.parseTimeLine(it.text) != null } != 1
+            ) return null
+            val trailing = block.drop(timelineOffset + 1).takeLastWhile { it.text.isBlank() }
+            val body = block.drop(timelineOffset + 1).dropLast(trailing.size)
+                .joinToString("\n") { it.text }
+            if (body.trimEnd() != old.text.trimEnd()) return null
+            replacements += RawReplacement(
+                span.start,
+                span.endExclusive,
+                patchSrtCue(block, timelineOffset, old, new)
+            )
+        }
+        return applyReplacements(content, replacements)
+    }
+
+    /** Apply inserts/deletes around stable SRT rows without constructing a document parse tree. */
+    private fun patchSrtStructuralChange(
+        content: String,
+        oldEntries: List<SubtitleEntry>,
+        newEntries: List<SubtitleEntry>
+    ): String? {
+        if (haveSameStableOrder(oldEntries, newEntries) ||
+            countCueTimelines(content, vtt = false) != oldEntries.size ||
+            containsSrtFrameTimeline(content)
+        ) return null
+        if (oldEntries.isEmpty()) {
+            if (newEntries.isEmpty()) return content
+            val ending = preferredEndingFromContent(content)
+            return buildString(content.length + newEntries.sumOf { it.text.length + 48 }) {
+                append(content)
+                if (isNotEmpty() && !endsWith("\n")) append(ending)
+                newEntries.forEach { append(appendSrtCue(it, ending)) }
+            }
+        }
+        val oldIndexById = oldEntries.mapIndexed { index, entry -> entry.stableId to index }.toMap()
+        val newIndexById = newEntries.mapIndexed { index, entry -> entry.stableId to index }.toMap()
+        val commonOldOrder = oldEntries.map { it.stableId }.filter { it in newIndexById }
+        val commonNewOrder = newEntries.map { it.stableId }.filter { it in oldIndexById }
+        if (oldIndexById.size != oldEntries.size || newIndexById.size != newEntries.size ||
+            commonOldOrder != commonNewOrder
+        ) return null
+
+        val spans = findCueSpans(content, oldEntries.indices.toSet(), vtt = false)
+        if (spans.size != oldEntries.size) return null
+        val insertionsBeforeOld = Array(oldEntries.size) { mutableListOf<SubtitleEntry>() }
+        val trailingInsertions = mutableListOf<SubtitleEntry>()
+        var followingOldIndex: Int? = null
+        val nextOldIndex = arrayOfNulls<Int>(newEntries.size)
+        for (index in newEntries.indices.reversed()) {
+            nextOldIndex[index] = followingOldIndex
+            oldIndexById[newEntries[index].stableId]?.let { followingOldIndex = it }
+        }
+        newEntries.forEachIndexed { newIndex, entry ->
+            if (entry.stableId in oldIndexById) return@forEachIndexed
+            val insertionPoint = nextOldIndex[newIndex]
+            if (insertionPoint == null) trailingInsertions += entry
+            else insertionsBeforeOld[insertionPoint] += entry
+        }
+        if (newEntries.isEmpty() && oldEntries.isEmpty()) return content
+
+        val replacementsByOldIndex = HashMap<Int, String>()
+        for (oldIndex in oldEntries.indices) {
+            val span = spans[oldIndex] ?: return null
+            val newIndex = newIndexById[oldEntries[oldIndex].stableId] ?: continue
+            val old = oldEntries[oldIndex]
+            val new = newEntries[newIndex]
+            if (sameSerializedEntry(old, new)) continue
+            val block = splitLines(content.substring(span.start, span.endExclusive))
+            val timelineOffset = block.indexOfFirst { SrtSubtitleFormatHandler.parseTimeLine(it.text) != null }
+            if (timelineOffset < 0 ||
+                block.count { SrtSubtitleFormatHandler.parseTimeLine(it.text) != null } != 1 ||
+                !srtBodyMatches(block, timelineOffset, old)
+            ) return null
+            replacementsByOldIndex[oldIndex] = patchSrtCue(block, timelineOffset, old, new)
+        }
+        // Deleted blocks must also be one ordinary cue; otherwise a trailing NOTE/footer could
+        // be removed with the row. Keeping that case on the format handler path preserves it.
+        for (oldIndex in oldEntries.indices) {
+            if (oldEntries[oldIndex].stableId in newIndexById) continue
+            val span = spans[oldIndex] ?: return null
+            val block = splitLines(content.substring(span.start, span.endExclusive))
+            val timelineOffset = block.indexOfFirst { SrtSubtitleFormatHandler.parseTimeLine(it.text) != null }
+            if (timelineOffset < 0 ||
+                block.count { SrtSubtitleFormatHandler.parseTimeLine(it.text) != null } != 1 ||
+                !srtBodyMatches(block, timelineOffset, oldEntries[oldIndex])
+            ) return null
+        }
+
+        val ending = preferredEndingFromContent(content)
+        return buildString(content.length + trailingInsertions.sumOf { it.text.length + 48 }) {
+            var cursor = 0
+            oldEntries.indices.forEach { oldIndex ->
+                val span = spans[oldIndex] ?: return@forEach
+                append(content, cursor, span.start)
+                insertionsBeforeOld[oldIndex].forEach { append(appendSrtCue(it, ending)) }
+                val newIndex = newIndexById[oldEntries[oldIndex].stableId]
+                if (newIndex != null) {
+                    val patched = replacementsByOldIndex[oldIndex]
+                    if (patched != null) append(patched)
+                    else append(content, span.start, span.endExclusive)
+                }
+                cursor = span.endExclusive
+            }
+            append(content, cursor, content.length)
+            if (trailingInsertions.isNotEmpty()) {
+                if (isNotEmpty() && last() != '\n' && last() != '\r') append(ending)
+                trailingInsertions.forEach { append(appendSrtCue(it, ending)) }
+            }
+        }
+    }
+
+    /** Apply ordinary one-entry-per-cue VTT structure edits using raw cue blocks. */
+    private fun patchVttStructuralChange(
+        content: String,
+        oldEntries: List<SubtitleEntry>,
+        newEntries: List<SubtitleEntry>
+    ): String? {
+        if (haveSameStableOrder(oldEntries, newEntries) ||
+            content.lineSequence().any { it.contains("X-TIMESTAMP-MAP", ignoreCase = true) } ||
+            countCueTimelines(content, vtt = true) != oldEntries.size
+        ) return null
+        if (oldEntries.isEmpty()) {
+            if (newEntries.isEmpty()) return content
+            val ending = preferredEndingFromContent(content)
+            return buildString(content.length + newEntries.sumOf { it.text.length + 48 }) {
+                append(content)
+                if (isNotEmpty() && !endsWith("\n")) append(ending)
+                newEntries.forEach { append(appendVttCue(it, ending)) }
+            }
+        }
+        val oldIndexById = oldEntries.mapIndexed { index, entry -> entry.stableId to index }.toMap()
+        val newIndexById = newEntries.mapIndexed { index, entry -> entry.stableId to index }.toMap()
+        val commonOldOrder = oldEntries.map { it.stableId }.filter { it in newIndexById }
+        val commonNewOrder = newEntries.map { it.stableId }.filter { it in oldIndexById }
+        if (oldIndexById.size != oldEntries.size || newIndexById.size != newEntries.size ||
+            commonOldOrder != commonNewOrder
+        ) return null
+
+        val spans = findCueSpans(content, oldEntries.indices.toSet(), vtt = true)
+        if (spans.size != oldEntries.size) return null
+        val insertionsBeforeOld = Array(oldEntries.size) { mutableListOf<SubtitleEntry>() }
+        val trailingInsertions = mutableListOf<SubtitleEntry>()
+        var followingOldIndex: Int? = null
+        val nextOldIndex = arrayOfNulls<Int>(newEntries.size)
+        for (index in newEntries.indices.reversed()) {
+            nextOldIndex[index] = followingOldIndex
+            oldIndexById[newEntries[index].stableId]?.let { followingOldIndex = it }
+        }
+        newEntries.forEachIndexed { newIndex, entry ->
+            if (entry.stableId in oldIndexById) return@forEachIndexed
+            val insertionPoint = nextOldIndex[newIndex]
+            if (insertionPoint == null) trailingInsertions += entry
+            else insertionsBeforeOld[insertionPoint] += entry
+        }
+        val lastCueEnd = spans[oldEntries.lastIndex]?.endExclusive ?: return null
+        if (trailingInsertions.isNotEmpty() && content.substring(lastCueEnd).any { !it.isWhitespace() }) {
+            // Keep NOTE/STYLE/REGION sections after the final cue. The full VTT handler knows
+            // their insertion boundary; a raw append would otherwise put the new cue inside a
+            // trailing NOTE block.
+            return null
+        }
+
+        val replacementsByOldIndex = HashMap<Int, String>()
+        for (oldIndex in oldEntries.indices) {
+            val span = spans[oldIndex] ?: return null
+            val newIndex = newIndexById[oldEntries[oldIndex].stableId] ?: continue
+            val old = oldEntries[oldIndex]
+            val new = newEntries[newIndex]
+            if (sameSerializedEntry(old, new)) continue
+            val block = splitLines(content.substring(span.start, span.endExclusive))
+            val timelineOffset = block.indexOfFirst { WebVttSubtitleFormatHandler.parseTimeLine(it.text) != null }
+            if (timelineOffset < 0 ||
+                block.count { WebVttSubtitleFormatHandler.parseTimeLine(it.text) != null } != 1 ||
+                !vttBodyMatches(block, timelineOffset, old)
+            ) return null
+            replacementsByOldIndex[oldIndex] = patchVttCue(block, timelineOffset, old, new)
+        }
+        for (oldIndex in oldEntries.indices) {
+            if (oldEntries[oldIndex].stableId in newIndexById) continue
+            val span = spans[oldIndex] ?: return null
+            val block = splitLines(content.substring(span.start, span.endExclusive))
+            val timelineOffset = block.indexOfFirst { WebVttSubtitleFormatHandler.parseTimeLine(it.text) != null }
+            if (timelineOffset < 0 ||
+                block.count { WebVttSubtitleFormatHandler.parseTimeLine(it.text) != null } != 1 ||
+                !vttBodyMatches(block, timelineOffset, oldEntries[oldIndex])
+            ) return null
+        }
+
+        val ending = preferredEndingFromContent(content)
+        return buildString(content.length + trailingInsertions.sumOf { it.text.length + 48 }) {
+            var cursor = 0
+            oldEntries.indices.forEach { oldIndex ->
+                val span = spans[oldIndex] ?: return@forEach
+                append(content, cursor, span.start)
+                insertionsBeforeOld[oldIndex].forEach { append(appendVttCue(it, ending)) }
+                val newIndex = newIndexById[oldEntries[oldIndex].stableId]
+                if (newIndex != null) {
+                    val patched = replacementsByOldIndex[oldIndex]
+                    if (patched != null) append(patched)
+                    else append(content, span.start, span.endExclusive)
+                }
+                cursor = span.endExclusive
+            }
+            append(content, cursor, content.length)
+            if (trailingInsertions.isNotEmpty()) {
+                if (isNotEmpty() && last() != '\n' && last() != '\r') append(ending)
+                trailingInsertions.forEach { append(appendVttCue(it, ending)) }
+            }
+        }
+    }
+
+    /** Patch one ordinary VTT cue locally; merged/word-timestamp cues use the existing fallback. */
+    private fun patchSingleVttCue(
+        content: String,
+        oldEntries: List<SubtitleEntry>,
+        newEntries: List<SubtitleEntry>
+    ): String? {
+        val target = singleChangedEntry(oldEntries, newEntries) ?: return null
+        val old = oldEntries[target.first]
+        val new = newEntries[target.first]
+        val textChanged = old.text != new.text
+        val timingChanged = old.startTime != new.startTime || old.endTime != new.endTime ||
+            old.endTimeModified != new.endTimeModified
+        if ((!textChanged && !timingChanged) || old.index != new.index ||
+            old.cueIdentifier != new.cueIdentifier || old.cueSettings != new.cueSettings
+        ) return null
+        if (content.lineSequence().any { it.contains("X-TIMESTAMP-MAP", ignoreCase = true) }) return null
+        if (countCueTimelines(content, vtt = true) != oldEntries.size) return null
+        val span = findCueSpan(content, target.first, vtt = true) ?: return null
+        val block = splitLines(content.substring(span.start, span.endExclusive))
+        val timelineOffset = block.indexOfFirst { WebVttSubtitleFormatHandler.parseTimeLine(it.text) != null }
+        if (timelineOffset < 0) return null
+        if (block.count { WebVttSubtitleFormatHandler.parseTimeLine(it.text) != null } != 1) return null
+        val rawTimeline = WebVttSubtitleFormatHandler.parseTimeLine(block[timelineOffset].text) ?: return null
+        if (rawTimeline.startTime != old.startTime || rawTimeline.endTime != old.endTime) return null
+        val trailing = block.drop(timelineOffset + 1).takeLastWhile { it.text.isBlank() }
+        val body = block.drop(timelineOffset + 1).dropLast(trailing.size)
+            .joinToString("\n") { it.text }
+        val expectedBody = WebVttTextFormatting.writeText(old.text).replace("\r\n", "\n").trimEnd()
+        if (body.trimEnd() != expectedBody) return null
+        val patched = patchVttCue(block, timelineOffset, old, new)
+        return replaceContentRange(content, span.start, span.endExclusive, patched)
+    }
+
+    /** Patch several ordinary VTT cues locally; special sections/maps remain on the safe path. */
+    private fun patchMultipleVttCues(
+        content: String,
+        oldEntries: List<SubtitleEntry>,
+        newEntries: List<SubtitleEntry>
+    ): String? {
+        val changes = changedEntriesInStableOrder(oldEntries, newEntries) ?: return null
+        if (changes.size < 2 ||
+            content.lineSequence().any { it.contains("X-TIMESTAMP-MAP", ignoreCase = true) } ||
+            countCueTimelines(content, vtt = true) != oldEntries.size
+        ) return null
+        val spans = findCueSpans(content, changes.mapTo(HashSet(changes.size)) { it.first }, vtt = true)
+        if (spans.size != changes.size) return null
+        val replacements = ArrayList<RawReplacement>(changes.size)
+        for ((entryIndex, old, new) in changes) {
+            val span = spans[entryIndex] ?: return null
+            val block = splitLines(content.substring(span.start, span.endExclusive))
+            val timelineOffset = block.indexOfFirst { WebVttSubtitleFormatHandler.parseTimeLine(it.text) != null }
+            if (timelineOffset < 0 ||
+                block.count { WebVttSubtitleFormatHandler.parseTimeLine(it.text) != null } != 1
+            ) return null
+            val rawTimeline = WebVttSubtitleFormatHandler.parseTimeLine(block[timelineOffset].text) ?: return null
+            if (rawTimeline.startTime != old.startTime || rawTimeline.endTime != old.endTime) return null
+            val trailing = block.drop(timelineOffset + 1).takeLastWhile { it.text.isBlank() }
+            val body = block.drop(timelineOffset + 1).dropLast(trailing.size)
+                .joinToString("\n") { it.text }
+            val expectedBody = WebVttTextFormatting.writeText(old.text).replace("\r\n", "\n").trimEnd()
+            if (body.trimEnd() != expectedBody) return null
+            replacements += RawReplacement(
+                span.start,
+                span.endExclusive,
+                patchVttCue(block, timelineOffset, old, new)
+            )
+        }
+        return applyReplacements(content, replacements)
+    }
+
+    private fun countCueTimelines(content: String, vtt: Boolean): Int {
+        var cursor = 0
+        var count = 0
+        while (cursor <= content.length) {
+            val lineEnd = content.indexOfAny(charArrayOf('\r', '\n'), cursor)
+                .takeIf { it >= 0 } ?: content.length
+            val line = content.substring(cursor, lineEnd)
+            if (if (vtt) WebVttSubtitleFormatHandler.parseTimeLine(line) != null
+                else SrtSubtitleFormatHandler.parseTimeLine(line) != null
+            ) count++
+            if (lineEnd >= content.length) break
+            cursor = lineEnd + if (content[lineEnd] == '\r' && content.getOrNull(lineEnd + 1) == '\n') 2 else 1
+        }
+        return count
+    }
+
+    private fun singleChangedEntry(
+        oldEntries: List<SubtitleEntry>,
+        newEntries: List<SubtitleEntry>
+    ): Pair<Int, Unit>? {
+        if (oldEntries.size != newEntries.size || oldEntries.isEmpty()) return null
+        var changedIndex = -1
+        for (index in oldEntries.indices) {
+            if (oldEntries[index].stableId != newEntries[index].stableId) {
+                return null
+            }
+            if (oldEntries[index] != newEntries[index]) {
+                if (changedIndex >= 0) return null
+                changedIndex = index
+            }
+        }
+        return changedIndex.takeIf { it >= 0 }?.let { it to Unit }
+    }
+
+    private data class RawCueSpan(val start: Int, val endExclusive: Int)
+
+    private data class RawReplacement(val start: Int, val endExclusive: Int, val text: String)
+
+    private fun changedEntriesInStableOrder(
+        oldEntries: List<SubtitleEntry>,
+        newEntries: List<SubtitleEntry>
+    ): List<Triple<Int, SubtitleEntry, SubtitleEntry>>? {
+        if (!haveSameStableOrder(oldEntries, newEntries)) return null
+        val changes = ArrayList<Triple<Int, SubtitleEntry, SubtitleEntry>>()
+        for (index in oldEntries.indices) {
+            val old = oldEntries[index]
+            val new = newEntries[index]
+            if (old != new) changes += Triple(index, old, new)
+        }
+        return changes.takeIf { it.isNotEmpty() }
+    }
+
+    private fun applyReplacements(content: String, replacements: List<RawReplacement>): String {
+        if (replacements.isEmpty()) return content
+        val sorted = replacements.sortedBy { it.start }
+        val capacity = content.length + sorted.sumOf { it.text.length - (it.endExclusive - it.start) }
+        return buildString(capacity.coerceAtLeast(0)) {
+            var cursor = 0
+            sorted.forEach { replacement ->
+                if (replacement.start < cursor || replacement.endExclusive < replacement.start) return@forEach
+                append(content, cursor, replacement.start)
+                append(replacement.text)
+                cursor = replacement.endExclusive
+            }
+            append(content, cursor, content.length)
+        }
+    }
+
+    private fun findCueSpans(
+        content: String,
+        targetIndices: Set<Int>,
+        vtt: Boolean
+    ): Map<Int, RawCueSpan> {
+        if (targetIndices.isEmpty()) return emptyMap()
+        val spans = HashMap<Int, RawCueSpan>(targetIndices.size)
+        var cursor = 0
+        var cueIndex = 0
+        var activeIndex: Int? = null
+        var activeStart = -1
+        var candidatePrefixStart = -1
+        var blankSinceTimeline = true
+        while (cursor <= content.length) {
+            val lineEnd = content.indexOfAny(charArrayOf('\r', '\n'), cursor)
+                .takeIf { it >= 0 } ?: content.length
+            val line = content.substring(cursor, lineEnd)
+            val timeline = if (vtt) WebVttSubtitleFormatHandler.parseTimeLine(line) != null
+            else SrtSubtitleFormatHandler.parseTimeLine(line) != null
+            val trimmed = line.trimStart('\uFEFF').trim()
+            if (vtt && activeIndex != null && cueIndex > activeIndex &&
+                (trimmed == "NOTE" || trimmed.startsWith("NOTE ") ||
+                    trimmed == "STYLE" || trimmed.startsWith("STYLE ") ||
+                    trimmed == "REGION" || trimmed.startsWith("REGION "))
+            ) {
+                spans[activeIndex] = RawCueSpan(activeStart, cursor)
+                activeIndex = null
+                activeStart = -1
+            }
+            if (timeline) {
+                val start = candidatePrefixStart.takeIf { it >= 0 } ?: cursor
+                activeIndex?.let { spans[it] = RawCueSpan(activeStart, start) }
+                activeIndex = cueIndex.takeIf { it in targetIndices }
+                activeStart = if (activeIndex != null) start else -1
+                cueIndex++
+                candidatePrefixStart = -1
+                blankSinceTimeline = false
+            } else if (line.isBlank()) {
+                blankSinceTimeline = true
+            } else if (!vtt && trimmed.toIntOrNull() != null) {
+                candidatePrefixStart = cursor
+                blankSinceTimeline = false
+            } else if (vtt && blankSinceTimeline && !trimmed.equals("WEBVTT", ignoreCase = true) &&
+                !trimmed.startsWith("X-TIMESTAMP-MAP", ignoreCase = true) &&
+                trimmed != "NOTE" && !trimmed.startsWith("NOTE ") &&
+                trimmed != "STYLE" && !trimmed.startsWith("STYLE ") &&
+                trimmed != "REGION" && !trimmed.startsWith("REGION ")
+            ) {
+                candidatePrefixStart = cursor
+                blankSinceTimeline = false
+            } else {
+                if (!vtt) candidatePrefixStart = -1
+                blankSinceTimeline = false
+            }
+            if (lineEnd >= content.length) break
+            cursor = lineEnd + if (content[lineEnd] == '\r' && content.getOrNull(lineEnd + 1) == '\n') 2 else 1
+        }
+        activeIndex?.let { spans[it] = RawCueSpan(activeStart, content.length) }
+        return spans
+    }
+
+    private fun findCueSpan(content: String, targetIndex: Int, vtt: Boolean): RawCueSpan? {
+        var cursor = 0
+        var cueIndex = 0
+        var activeStart = -1
+        var candidatePrefixStart = -1
+        var blankSinceTimeline = true
+        while (cursor <= content.length) {
+            val lineEnd = content.indexOfAny(charArrayOf('\r', '\n'), cursor)
+                .takeIf { it >= 0 } ?: content.length
+            val line = content.substring(cursor, lineEnd)
+            val timeline = if (vtt) WebVttSubtitleFormatHandler.parseTimeLine(line) != null
+            else SrtSubtitleFormatHandler.parseTimeLine(line) != null
+            val trimmed = line.trimStart('\uFEFF').trim()
+            if (vtt && activeStart >= 0 && cueIndex > targetIndex &&
+                (trimmed == "NOTE" || trimmed.startsWith("NOTE ") ||
+                    trimmed == "STYLE" || trimmed.startsWith("STYLE ") ||
+                    trimmed == "REGION" || trimmed.startsWith("REGION "))
+            ) return RawCueSpan(activeStart, cursor)
+            if (timeline) {
+                val candidateStart = candidatePrefixStart.takeIf { it >= 0 } ?: cursor
+                if (cueIndex == targetIndex) activeStart = candidateStart
+                else if (cueIndex > targetIndex && activeStart >= 0) {
+                    return RawCueSpan(activeStart, candidateStart)
+                }
+                cueIndex++
+                candidatePrefixStart = -1
+                blankSinceTimeline = false
+            } else if (line.isBlank()) {
+                blankSinceTimeline = true
+            } else if (!vtt && trimmed.toIntOrNull() != null) {
+                candidatePrefixStart = cursor
+                blankSinceTimeline = false
+            } else if (vtt && blankSinceTimeline && !trimmed.equals("WEBVTT", ignoreCase = true) &&
+                !trimmed.startsWith("X-TIMESTAMP-MAP", ignoreCase = true) &&
+                trimmed != "NOTE" && !trimmed.startsWith("NOTE ") &&
+                trimmed != "STYLE" && !trimmed.startsWith("STYLE ") &&
+                trimmed != "REGION" && !trimmed.startsWith("REGION ")
+            ) {
+                candidatePrefixStart = cursor
+                blankSinceTimeline = false
+            } else {
+                // A numeric SRT line may be a sequence number immediately before a timeline;
+                // clear it once another body line follows so numeric subtitle text is not reused
+                // as a later cue prefix.
+                if (!vtt) candidatePrefixStart = -1
+                blankSinceTimeline = false
+            }
+            if (lineEnd >= content.length) break
+            cursor = lineEnd + if (content[lineEnd] == '\r' && content.getOrNull(lineEnd + 1) == '\n') 2 else 1
+        }
+        return activeStart.takeIf { it >= 0 }?.let { RawCueSpan(it, content.length) }
     }
 
     private fun sameSerializedEntries(
         oldEntries: List<SubtitleEntry>,
         newEntries: List<SubtitleEntry>
-    ): Boolean = oldEntries.size == newEntries.size && oldEntries.zip(newEntries).all { (old, new) ->
+    ): Boolean {
+        if (oldEntries.size != newEntries.size) return false
+        for (index in oldEntries.indices) {
+            if (!sameSerializedEntry(oldEntries[index], newEntries[index])) return false
+        }
+        return true
+    }
+
+    private fun sameSerializedEntry(old: SubtitleEntry, new: SubtitleEntry): Boolean =
         old.index == new.index &&
             old.startTime == new.startTime &&
             old.endTime == new.endTime &&
@@ -52,6 +747,69 @@ object SubtitleSourceSynchronizer {
             old.endTimeModified == new.endTimeModified &&
             old.cueIdentifier == new.cueIdentifier &&
             old.cueSettings == new.cueSettings
+
+    private fun srtBodyMatches(block: List<RawLine>, timelineOffset: Int, entry: SubtitleEntry): Boolean {
+        val trailing = block.drop(timelineOffset + 1).takeLastWhile { it.text.isBlank() }
+        val body = block.drop(timelineOffset + 1).dropLast(trailing.size)
+            .joinToString("\n") { it.text }
+        return body.trimEnd() == entry.text.trimEnd()
+    }
+
+    private fun vttBodyMatches(block: List<RawLine>, timelineOffset: Int, entry: SubtitleEntry): Boolean {
+        val trailing = block.drop(timelineOffset + 1).takeLastWhile { it.text.isBlank() }
+        val body = block.drop(timelineOffset + 1).dropLast(trailing.size)
+            .joinToString("\n") { it.text }
+        val expected = WebVttTextFormatting.writeText(entry.text).replace("\r\n", "\n").trimEnd()
+        return body.trimEnd() == expected
+    }
+
+    private fun containsSrtFrameTimeline(content: String): Boolean {
+        var cursor = 0
+        while (cursor <= content.length) {
+            val lineEnd = content.indexOfAny(charArrayOf('\r', '\n'), cursor)
+                .takeIf { it >= 0 } ?: content.length
+            if (SrtSubtitleFormatHandler.parseTimeLine(content.substring(cursor, lineEnd))?.isFrameCandidate == true) {
+                return true
+            }
+            if (lineEnd >= content.length) break
+            cursor = lineEnd + if (content[lineEnd] == '\r' && content.getOrNull(lineEnd + 1) == '\n') 2 else 1
+        }
+        return false
+    }
+
+    private fun preferredEndingFromContent(content: String): String {
+        var index = 0
+        while (index < content.length && content[index] != '\r' && content[index] != '\n') index++
+        if (index >= content.length) return "\n"
+        return if (content[index] == '\r' && content.getOrNull(index + 1) == '\n') "\r\n"
+        else content[index].toString()
+    }
+
+    private fun haveSameStableOrder(
+        oldEntries: List<SubtitleEntry>,
+        newEntries: List<SubtitleEntry>
+    ): Boolean {
+        if (oldEntries.size != newEntries.size) return false
+        for (index in oldEntries.indices) {
+            if (oldEntries[index].stableId != newEntries[index].stableId) return false
+        }
+        return true
+    }
+
+    /** Build the new immutable source with one destination buffer and no intermediate substrings. */
+    private fun replaceContentRange(
+        content: String,
+        start: Int,
+        endExclusive: Int,
+        replacement: String
+    ): String {
+        val safeStart = start.coerceIn(0, content.length)
+        val safeEnd = endExclusive.coerceIn(safeStart, content.length)
+        return buildString(content.length - (safeEnd - safeStart) + replacement.length) {
+            append(content, 0, safeStart)
+            append(replacement)
+            append(content, safeEnd, content.length)
+        }
     }
 
     private data class RawLine(val text: String, val ending: String) {
@@ -66,6 +824,8 @@ object SubtitleSourceSynchronizer {
         val entryStart: Int,
         var terminatorLineIndex: Int? = null
     )
+
+    private data class LrcMetadata(val variant: LrcVariant, val offsetMs: Long)
 
     private fun patchSrt(
         content: String,
@@ -891,7 +1651,30 @@ object SubtitleSourceSynchronizer {
         }
         .lastOrNull() ?: 0L
 
+    /** Read only the format-wide LRC attributes needed to rewrite a cue tag. */
+    private fun detectLrcMetadata(content: String): LrcMetadata {
+        var cursor = 0
+        var milliseconds = false
+        var offsetMs = 0L
+        while (cursor <= content.length) {
+            val lineEnd = content.indexOfAny(charArrayOf('\r', '\n'), cursor)
+                .takeIf { it >= 0 } ?: content.length
+            val line = content.substring(cursor, lineEnd)
+            val trimmed = line.trim()
+            if (lrcMillisecondsTagPattern.containsMatchIn(line.trimStart('\uFEFF'))) milliseconds = true
+            lrcOffsetPattern.matchEntire(trimmed)?.groupValues?.getOrNull(1)
+                ?.toDoubleOrNull()?.roundToLong()?.let { offsetMs = it }
+            if (lineEnd >= content.length) break
+            cursor = lineEnd + if (content[lineEnd] == '\r' && content.getOrNull(lineEnd + 1) == '\n') 2 else 1
+        }
+        return LrcMetadata(
+            if (milliseconds) LrcVariant.MILLISECONDS else LrcVariant.CENTISECONDS,
+            offsetMs
+        )
+    }
+
     private val lrcMillisecondsTagPattern = Regex("^\\[\\d+:\\d{2}\\.\\d{3}]")
+    private val lrcTimeTagPattern = Regex("\\[-?\\d{1,4}[:.]\\d{1,2}(?:[.:]\\d{1,3})?]")
     private val lrcOffsetPattern = Regex(
         "^\\[offset:\\s*([+-]?\\d+(?:\\.\\d+)?)\\]\\s*$",
         RegexOption.IGNORE_CASE

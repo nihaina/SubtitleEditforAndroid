@@ -10,6 +10,7 @@ import com.subtitleedit.mpv.MpvPlayerHost
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 internal class MpvPlaybackEngine(
     private val playerHost: MpvPlayerHost,
@@ -40,6 +41,8 @@ internal class MpvPlaybackEngine(
     private var seekDispatchPosted = false
     private var seekEventObserved = false
     private var readyNotified = false
+    /** Keep the latest live track request until mpv is ready to accept sub-add. */
+    private val pendingSubtitleTrackUpdate = AtomicReference<SubtitleTrackUpdate?>(null)
 
     override val phase: PlaybackPhase
         get() = playbackPhase
@@ -65,6 +68,7 @@ internal class MpvPlaybackEngine(
 
     override fun prepare(file: File) {
         playbackPhase = PlaybackPhase.LOADING
+        pendingSubtitleTrackUpdate.set(null)
         try {
             if (!initialized) {
                 MPVLib.addObserver(this)
@@ -135,8 +139,16 @@ internal class MpvPlaybackEngine(
     }
 
     fun replaceSubtitleTrack(file: File?, fontsDir: File? = null) {
-        if (!phase.canAccessPlayer) return
+        if (phase == PlaybackPhase.RELEASED) return
+        pendingSubtitleTrackUpdate.set(SubtitleTrackUpdate(file, fontsDir))
+        applyPendingSubtitleTrackUpdate()
+    }
+
+    private fun applyPendingSubtitleTrackUpdate() {
+        if (!phase.canAccessPlayer || pendingSubtitleTrackUpdate.get() == null) return
         postMpvAccess {
+            val update = pendingSubtitleTrackUpdate.getAndSet(null) ?: return@postMpvAccess
+            val fontsDir = update.fontsDir
             if (fontsDir != null) {
                 // Set the current shared directory before creating the new libass
                 // renderer. This also picks up newly imported font files.
@@ -149,6 +161,7 @@ internal class MpvPlaybackEngine(
                 }
             }
             runCatching { MPVLib.command(arrayOf("sub-remove")) }
+            val file = update.file
             if (file != null && file.isFile && file.length() > 0L) {
                 MPVLib.command(
                     arrayOf("sub-add", file.absolutePath, "select", "TsumugiSub live preview")
@@ -159,6 +172,7 @@ internal class MpvPlaybackEngine(
 
     override fun release() {
         val wasInitialized = initialized
+        pendingSubtitleTrackUpdate.set(null)
         initialized = false
         mpvAccessHandler.removeCallbacksAndMessages(null)
         positionReadPending.set(false)
@@ -394,6 +408,7 @@ internal class MpvPlaybackEngine(
         if (!phase.canAccessPlayer || readyNotified) return
         readyNotified = true
         listener?.onReady(cachedDurationMs, selectedAudioStreamIndex())
+        applyPendingSubtitleTrackUpdate()
         listener?.onPlaybackStateChanged()
     }
 
@@ -414,5 +429,10 @@ internal class MpvPlaybackEngine(
 
     private data class SeekRequest(
         val positionMs: Long
+    )
+
+    private data class SubtitleTrackUpdate(
+        val file: File?,
+        val fontsDir: File?
     )
 }

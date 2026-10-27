@@ -343,7 +343,7 @@ class EditorSearchController(
         )
         updateResultCount()
         if (announce) announceResults()
-        highlightSourceResults(scrollToCurrent)
+        highlightSourceResults(content.length, scrollToCurrent)
     }
 
     private fun searchInListView(
@@ -399,7 +399,7 @@ class EditorSearchController(
         }
     }
 
-    private fun highlightSourceResults(scrollToCurrent: Boolean) {
+    private fun highlightSourceResults(contentLength: Int, scrollToCurrent: Boolean) {
         clearSourceHighlights()
         val query = engine.query
         if (query.isEmpty() || engine.results.isEmpty()) return
@@ -413,7 +413,7 @@ class EditorSearchController(
             positions.map { start ->
                 com.subtitleedit.view.SourceEditorView.Highlight(
                     start = start,
-                    end = (start + query.length).coerceAtMost(binding.etSourceView.getDocumentText().length),
+                    end = (start + query.length).coerceAtMost(contentLength),
                     current = start == current
                 )
             }
@@ -451,7 +451,7 @@ class EditorSearchController(
     private fun scrollToCurrentResult() {
         val position = engine.currentResultPositionOrNull() ?: return
         if (isSourceViewMode()) {
-            highlightSourceResults(scrollToCurrent = true)
+            highlightSourceResults(binding.etSourceView.getDocumentText().length, scrollToCurrent = true)
         } else {
             binding.rvSubtitles.scrollToPosition(position)
             subtitleAdapter.highlightSearchResult(

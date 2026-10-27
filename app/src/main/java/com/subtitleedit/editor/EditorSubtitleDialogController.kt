@@ -40,7 +40,9 @@ internal class EditorSubtitleDialogController(
             .setPositiveButton("确定") { _, _ ->
                 val value = TimeUtils.parseFromInput(input.text.toString())
                 if (value == null) showMessage("时间格式无效")
-                else if (updateTime(position, start, value)) onUpdated(position, "已更新")
+                else if (updateTime(position, start, value)) {
+                    onUpdated(position, "已更新")
+                }
             }
             .setNegativeButton("取消", null)
             .show()
@@ -57,7 +59,9 @@ internal class EditorSubtitleDialogController(
             .setTitle("编辑字幕文本")
             .setView(input)
             .setPositiveButton("确定") { _, _ ->
-                if (updateText(position, input.text.toString())) onUpdated(position, "已更新")
+                if (updateText(position, input.text.toString())) {
+                    onUpdated(position, "已更新")
+                }
             }
             .setNegativeButton("取消", null)
             .show()

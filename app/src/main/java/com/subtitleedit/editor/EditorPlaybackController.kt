@@ -217,7 +217,6 @@ internal class EditorPlaybackController(
     fun replaceVideoSubtitleTrack(file: File?) {
         if (mediaType == EditorMediaType.VIDEO) {
             val player = engine as? MpvPlaybackEngine ?: return
-            if (!player.phase.canAccessPlayer) return
             val fontsDir = file?.let { SubtitleFontManager.writeFontConfig(context) }
             player.replaceSubtitleTrack(file, fontsDir)
         }

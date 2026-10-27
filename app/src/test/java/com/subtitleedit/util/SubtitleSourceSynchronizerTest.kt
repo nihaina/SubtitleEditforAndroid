@@ -807,4 +807,177 @@ Second
         assertTrue(updated.contains("1\n00:00:03,000-->00:00:04,000\nSecond"))
         assertTrue(!updated.contains("7\n00:00:01.000"))
     }
+
+    @Test
+    fun singleSrtTextEditPatchesOnlyTheTargetCueAndKeepsRawLayout() {
+        val source = "NOTE keep this header\r\n\r\n7\r\n00:00:01.000   -->   00:00:02.000\r\nFirst\r\n\r\n9\r\n00:00:03,000-->00:00:04,000\r\nSecond\r\n\r\n"
+        val old = SubtitleParser.parseDocument(source, format = SubtitleParser.SubtitleFormat.SRT).entries
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.SRT,
+            old,
+            listOf(old[0], old[1].copy(text = "Changed"))
+        )
+
+        assertEquals(
+            "NOTE keep this header\r\n\r\n7\r\n00:00:01.000   -->   00:00:02.000\r\nFirst\r\n\r\n9\r\n00:00:03,000-->00:00:04,000\r\nChanged\r\n\r\n",
+            updated
+        )
+        assertEquals(listOf("First", "Changed"), SubtitleParser.parseSRT(updated).map { it.text })
+    }
+
+    @Test
+    fun singleVttTextEditPatchesCueWithoutRewritingHeaderSettingsOrFooter() {
+        val source = "WEBVTT - demo\n\nSTYLE\n::cue { color: red; }\n\ncue-1\n00:01.000 --> 00:02.000 align:center\nOld\n\nNOTE footer\nkeep me\n"
+        val old = SubtitleParser.parseDocument(source, format = SubtitleParser.SubtitleFormat.VTT).entries
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.VTT,
+            old,
+            listOf(old.single().copy(text = "Changed"))
+        )
+
+        assertEquals(source.replace("Old", "Changed"), updated)
+        assertEquals("cue-1", SubtitleParser.parseVTT(updated).single().cueIdentifier)
+        assertEquals("align:center", SubtitleParser.parseVTT(updated).single().cueSettings)
+    }
+
+    @Test
+    fun singleLrcTextEditPatchesOnlyTheTimedLine() {
+        val source = "[ti:Demo]\r\n[offset:500]\r\n[00:01.00]First\r\n\r\n[00:03.00]Second\r\n"
+        val old = SubtitleParser.parseDocument(source, format = SubtitleParser.SubtitleFormat.LRC).entries
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            old,
+            listOf(old[0], old[1].copy(text = "Changed"))
+        )
+
+        assertEquals(source.replace("Second", "Changed"), updated)
+        assertEquals(listOf("First", "Changed"), SubtitleParser.parseLRC(updated).map { it.text })
+    }
+
+    @Test
+    fun singleTxtTextEditKeepsBlankLinesAndLineEndings() {
+        val source = "First\r\n\r\nSecond\r\n"
+        val old = SubtitleParser.parseTXT(source)
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.TXT,
+            old,
+            listOf(old[0], old[1].copy(text = "Changed"))
+        )
+
+        assertEquals("First\r\n\r\nChanged\r\n", updated)
+        assertEquals(listOf("First", "Changed"), SubtitleParser.parseTXT(updated).map { it.text })
+    }
+
+    @Test
+    fun multipleSrtTextEditsPatchOnlyChangedCueBlocks() {
+        val source = "NOTE preserve header\r\n\r\n7\r\n00:00:01.000   -->   00:00:02.000\r\nFirst\r\n\r\n9\r\n00:00:03,000-->00:00:04,000\r\nSecond\r\n\r\n"
+        val old = SubtitleParser.parseDocument(source, format = SubtitleParser.SubtitleFormat.SRT).entries
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.SRT,
+            old,
+            listOf(old[0].copy(text = "One"), old[1].copy(text = "Two"))
+        )
+
+        assertEquals(
+            "NOTE preserve header\r\n\r\n7\r\n00:00:01.000   -->   00:00:02.000\r\nOne\r\n\r\n9\r\n00:00:03,000-->00:00:04,000\r\nTwo\r\n\r\n",
+            updated
+        )
+        assertEquals(listOf("One", "Two"), SubtitleParser.parseSRT(updated).map { it.text })
+    }
+
+    @Test
+    fun frameTimedSrtTextEditPreservesTheOriginalFrameTimeline() {
+        val source = "1\n00:00:01,12 --> 00:00:02,20\nA\n"
+        val old = SubtitleParser.parseDocument(source, format = SubtitleParser.SubtitleFormat.SRT).entries
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.SRT,
+            old,
+            listOf(old.single().copy(text = "Edited"))
+        )
+
+        assertEquals("1\n00:00:01,12 --> 00:00:02,20\nEdited\n", updated)
+    }
+
+    @Test
+    fun multipleLrcTextEditsKeepMetadataAndRawSeparators() {
+        val source = "[ti:Demo]\r\n[offset:500]\r\n[00:01.00]First\r\n\r\n[00:03.00]Second\r\n[00:05.00]Third\r\n"
+        val old = SubtitleParser.parseDocument(source, format = SubtitleParser.SubtitleFormat.LRC).entries
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            old,
+            listOf(old[0].copy(text = "One"), old[1], old[2].copy(text = "Three"))
+        )
+
+        assertEquals(source.replace("First", "One").replace("Third", "Three"), updated)
+        assertEquals(listOf("One", "Second", "Three"), SubtitleParser.parseLRC(updated).map { it.text })
+    }
+
+    @Test
+    fun lrcStartTimeEditRewritesOnlyTheTargetTagWithOffsetAppliedOnce() {
+        val source = "[ti:Demo]\r\n[offset:500]\r\n[00:01.000]First\r\n[00:03.000]Second\r\n"
+        val old = SubtitleParser.parseDocument(source, format = SubtitleParser.SubtitleFormat.LRC).entries
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.LRC,
+            old,
+            listOf(old[0].copy(startTime = old[0].startTime + 1_000L), old[1])
+        )
+
+        assertEquals(source.replace("[00:01.000]", "[00:02.000]"), updated)
+        assertEquals(old[0].startTime + 1_000L, SubtitleParser.parseLRC(updated).first().startTime)
+    }
+
+    @Test
+    fun stableSrtInsertionPreservesUnchangedRawCues() {
+        val source = "NOTE keep\r\n\r\n7\r\n00:00:01.000   -->   00:00:02.000\r\nFirst\r\n\r\n9\r\n00:00:03,000-->00:00:04,000\r\nSecond\r\n\r\n"
+        val old = SubtitleParser.parseDocument(source, format = SubtitleParser.SubtitleFormat.SRT).entries
+        val inserted = SubtitleEntry(index = 2, startTime = 2_500L, endTime = 2_900L, text = "New")
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.SRT,
+            old,
+            listOf(old[0], inserted, old[1].copy(index = 3))
+        )
+
+        assertTrue(updated.startsWith("NOTE keep\r\n\r\n7\r\n00:00:01.000   -->   00:00:02.000"))
+        assertTrue(updated.contains("3\r\n00:00:03,000-->00:00:04,000\r\nSecond"))
+        assertEquals(listOf("First", "New", "Second"), SubtitleParser.parseSRT(updated).map { it.text })
+    }
+
+    @Test
+    fun multipleTxtTextEditsKeepBlankLinesAndLineEndings() {
+        val source = "First\r\n\r\nSecond\r\nThird\r\n"
+        val old = SubtitleParser.parseTXT(source)
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.TXT,
+            old,
+            listOf(old[0].copy(text = "One"), old[1], old[2].copy(text = "Three"))
+        )
+
+        assertEquals("One\r\n\r\nSecond\r\nThree\r\n", updated)
+    }
+
+    @Test
+    fun multipleVttTextEditsKeepSectionsIdentifiersAndFooter() {
+        val source = "WEBVTT - demo\n\nSTYLE\n::cue { color: red; }\n\nfirst\n00:01.000 --> 00:02.000 align:center\nOne\n\nsecond\n00:03.000 --> 00:04.000 line:90%\nTwo\n\nNOTE footer\nkeep me\n"
+        val old = SubtitleParser.parseDocument(source, format = SubtitleParser.SubtitleFormat.VTT).entries
+        val updated = SubtitleSourceSynchronizer.apply(
+            source,
+            SubtitleParser.SubtitleFormat.VTT,
+            old,
+            listOf(old[0].copy(text = "Changed one"), old[1].copy(text = "Changed two"))
+        )
+
+        assertEquals(source.replace("One", "Changed one").replace("Two", "Changed two"), updated)
+        assertEquals(listOf("first", "second"), SubtitleParser.parseVTT(updated).map { it.cueIdentifier })
+        assertTrue(updated.endsWith("NOTE footer\nkeep me\n"))
+    }
 }

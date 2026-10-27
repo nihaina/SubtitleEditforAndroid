@@ -138,6 +138,22 @@ internal class SourceLineAdapter(
         setLineCount(lines.size)
     }
 
+    fun notifyDocumentRowsChanged(position: Int, count: Int) {
+        if (count > 0) notifyItemRangeChanged(position, count, PAYLOAD_TEXT)
+    }
+
+    fun notifyDocumentRowsReplaced(position: Int, removedCount: Int, insertedCount: Int) {
+        if (removedCount > 0) notifyItemRangeRemoved(position, removedCount)
+        if (insertedCount > 0) notifyItemRangeInserted(position, insertedCount)
+        val shiftedStart = position + insertedCount
+        if (shiftedStart < itemCount) {
+            notifyItemRangeChanged(shiftedStart, itemCount - shiftedStart, PAYLOAD_INDEX)
+        }
+        // Keep RecyclerView's old item count valid until the structural notifications above have
+        // been dispatched; the gutter change itself is a payload update and cannot reset scroll.
+        setLineCount(lines.size)
+    }
+
     fun requestLineFocus(position: Int, column: Int) {
         pendingFocusPosition = position
         pendingFocusColumn = column
@@ -287,7 +303,18 @@ internal class SourceLineAdapter(
             bindEnabled(enabled)
             binding = true
             try {
-                if (editor.text?.toString() != line.text) editor.setText(line.text)
+                if (editor.text?.toString() != line.text) {
+                    val hadFocus = editor.hasFocus()
+                    val selectionStart = editor.selectionStart
+                    val selectionEnd = editor.selectionEnd
+                    editor.setText(line.text)
+                    if (hadFocus && selectionStart >= 0 && selectionEnd >= 0) {
+                        editor.setSelection(
+                            selectionStart.coerceIn(0, editor.length()),
+                            selectionEnd.coerceIn(0, editor.length())
+                        )
+                    }
+                }
                 applyHighlights(highlights)
             } finally {
                 binding = false

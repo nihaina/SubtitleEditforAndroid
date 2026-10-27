@@ -152,6 +152,40 @@ class EditorSubtitlePreviewControllerTest {
         assertEquals(source, ass.content)
     }
 
+    @Test
+    fun latestScheduledPreviewUsesTheUndoTargetSnapshot() = runBlocking {
+        val cache = Files.createTempDirectory("subtitle-preview-undo-test-").toFile()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val track = CompletableDeferred<File?>()
+        val controller = EditorSubtitlePreviewController(cache, scope) { track.complete(it) }
+        try {
+            controller.schedule(
+                SubtitleFormat.SRT,
+                listOf(SubtitleEntry(startTime = 1_000, endTime = 2_000, text = "After edit")),
+                sourceViewMode = true,
+                sourceContent = "1\n00:00:01,000 --> 00:00:02,000\nAfter edit\n",
+                debounceMs = 5_000L
+            )
+            controller.schedule(
+                SubtitleFormat.SRT,
+                listOf(SubtitleEntry(startTime = 3_000, endTime = 4_000, text = "Before edit")),
+                sourceViewMode = true,
+                sourceContent = "1\n00:00:03,000 --> 00:00:04,000\nBefore edit\n",
+                debounceMs = 0L
+            )
+
+            val file = withTimeout(5_000) { track.await() } ?: error("Preview track missing")
+            val content = file.readText()
+            assertTrue(content.contains("0:00:03.00,0:00:04.00"))
+            assertTrue(content.contains("Before edit"))
+            assertFalse(content.contains("After edit"))
+        } finally {
+            controller.release()
+            scope.cancel()
+            cache.deleteRecursively()
+        }
+    }
+
     private data class Preview(val extension: String, val content: String)
 
     private suspend fun preview(

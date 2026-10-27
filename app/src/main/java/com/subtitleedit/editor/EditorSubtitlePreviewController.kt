@@ -24,8 +24,10 @@ internal class EditorSubtitlePreviewController(
 ) {
     private val sessionDir = File(cacheDir, "mpv-subtitles/${UUID.randomUUID()}")
     private var updateJob: Job? = null
-    private var pendingRequest: PreviewRequest? = null
     private var requestGeneration = 0L
+    // Preview serialization prevents canceled-but-already-running full subtitle writes from
+    // overlapping when a large document is edited repeatedly.
+    private val previewDispatcher = Dispatchers.IO.limitedParallelism(1)
 
     private data class PreviewRequest(
         val format: SubtitleParser.SubtitleFormat,
@@ -42,14 +44,15 @@ internal class EditorSubtitlePreviewController(
         debounceMs: Long = 300L
     ) {
         val generation = ++requestGeneration
-        pendingRequest = PreviewRequest(format, entries, sourceViewMode, sourceContent)
+        // Keep the list structure stable for the worker, but defer the expensive per-entry copy
+        // until the serialized IO dispatcher.  Previously this map { copy() } ran on the main
+        // thread after the debounce and caused a visible pause for large subtitle files.
+        val request = PreviewRequest(format, entries.toList(), sourceViewMode, sourceContent)
         updateJob?.cancel()
         updateJob = scope.launch {
             delay(debounceMs.coerceAtLeast(0L))
-            val request = pendingRequest ?: return@launch
-            pendingRequest = null
-            val entrySnapshot = request.entries.map { it.copy() }
-            val preview = withContext(Dispatchers.IO) {
+            val preview = withContext(previewDispatcher) {
+                val entrySnapshot = request.entries.map { it.copy() }
                 buildPreviewFile(
                     request.format,
                     entrySnapshot,
@@ -70,7 +73,6 @@ internal class EditorSubtitlePreviewController(
         requestGeneration++
         updateJob?.cancel()
         updateJob = null
-        pendingRequest = null
     }
 
     fun release() {

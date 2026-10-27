@@ -12,9 +12,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EditorSourcePreviewControllerTest {
@@ -76,6 +79,38 @@ class EditorSourcePreviewControllerTest {
         delay(50L)
 
         assertEquals(0, callbackCount)
+        controller.cancel()
+        scope.cancel()
+    }
+
+    @Test
+    fun parserFailureCompletesWithoutEscapingTheScope() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        var finished = false
+        var success = true
+        val controller = EditorSourcePreviewController(
+            scope = scope,
+            isSourceViewMode = { true },
+            suppressSourceViewChanges = { false },
+            editGeneration = { 1L },
+            currentFormat = { SubtitleParser.SubtitleFormat.SRT },
+            snapshotContent = { "source" },
+            onParsed = { _, _, _ -> error("must not publish a failed parse") },
+            debounceMillis = 1L,
+            parseDocument = { _, _ -> error("malformed source") }
+        )
+
+        controller.schedule { _, parsedSuccessfully ->
+            finished = true
+            success = parsedSuccessfully
+        }
+        withTimeout(1000L) {
+            while (!finished) delay(5L)
+        }
+
+        assertTrue(finished)
+        assertFalse(success)
+        assertTrue(scope.isActive)
         controller.cancel()
         scope.cancel()
     }

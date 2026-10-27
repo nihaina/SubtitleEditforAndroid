@@ -21,6 +21,8 @@ internal class EditorLifecycleCoordinator(
     private val isDocumentLoaded: () -> Boolean,
     private val isSourceMode: () -> Boolean,
     private val hasPendingSourceEdits: () -> Boolean,
+    private val hasPendingSourceHistorySync: () -> Boolean,
+    private val recordSourceSyncBackground: () -> Unit,
     private val snapshotSource: () -> Unit,
     private val scheduleSourcePreview: () -> Unit,
     private val scheduleSubtitlePreview: () -> Unit,
@@ -31,7 +33,10 @@ internal class EditorLifecycleCoordinator(
     private val saveListScroll: (Int, Int) -> Unit
 ) {
     fun onStop() {
-        sourcePreview.cancel()
+        // Full source synchronization is intentionally allowed to continue in lifecycleScope
+        // while the Activity is backgrounded. Record the request so onStart can restart it only
+        // if the previous job was cancelled or otherwise became inactive.
+        recordSourceSyncBackground()
         sourceWaveformSync.cancel()
         subtitlePreview?.cancelPending()
         cancelSourceParse()
@@ -50,8 +55,11 @@ internal class EditorLifecycleCoordinator(
 
     fun onStart() {
         if (!isDocumentLoaded()) return
-        if (isSourceMode() && hasPendingSourceEdits()) scheduleSourcePreview()
-        else scheduleSubtitlePreview()
+        if (isSourceMode() && (hasPendingSourceEdits() || hasPendingSourceHistorySync())) {
+            if (!sourcePreview.isActive) scheduleSourcePreview()
+        } else {
+            scheduleSubtitlePreview()
+        }
     }
 
     fun onDestroy() {

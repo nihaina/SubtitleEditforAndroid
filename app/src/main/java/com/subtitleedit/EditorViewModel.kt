@@ -205,7 +205,7 @@ internal class EditorViewModel(
 
     fun setHistoryBaseline(state: EditorEditHistory.ListState, sourceText: String, clear: Boolean) {
         if (clear) editHistory.clear()
-        documentState.historyEntriesSnapshot = state.entries
+        documentState.historyEntriesSnapshot = state.entries.map { it.copy() }.toMutableList()
         documentState.historySelectionSnapshot = state.selectedIds
         documentState.sourceHistoryTextSnapshot = sourceText
         documentState.historyBaselineInitialized = true
@@ -216,7 +216,12 @@ internal class EditorViewModel(
             setHistoryBaseline(state, sourceText.orEmpty(), clear = false)
             return
         }
-        documentState.historyEntriesSnapshot = state.entries
+        // Undo/redo normally changes only one row. Advance the already-owned snapshot by copying
+        // changed rows instead of deep-copying the entire document at the end of each operation.
+        documentState.historyEntriesSnapshot = advanceHistorySnapshot(
+            previous = documentState.historyEntriesSnapshot,
+            current = state.entries
+        )
         documentState.historySelectionSnapshot = state.selectedIds
         if (sourceMode && sourceText != null) documentState.sourceHistoryTextSnapshot = sourceText
     }
@@ -228,10 +233,11 @@ internal class EditorViewModel(
         beforeSourceText: String?,
         afterSourceText: String?,
         beforeHeader: String? = null,
-        afterHeader: String? = null
+        afterHeader: String? = null,
+        difference: EditorEditHistory.ListDifference? = null
     ): Boolean {
-        val difference = EditorEditHistory.difference(before, after)
-        if (difference.isEmpty && beforeHeader == afterHeader) return false
+        val resolvedDifference = difference ?: EditorEditHistory.difference(before, after)
+        if (resolvedDifference.isEmpty && beforeHeader == afterHeader) return false
         editHistory.record(
             EditorEditHistory.Operation.ListChange.fromStates(
                 before = before,
@@ -243,9 +249,36 @@ internal class EditorViewModel(
                 afterHeader = afterHeader
             )
         )
-        documentState.historyEntriesSnapshot = after.entries
+        documentState.historyEntriesSnapshot = advanceHistorySnapshot(
+            previous = before.entries,
+            current = after.entries
+        )
         documentState.historySelectionSnapshot = after.selectedIds
         return true
+    }
+
+    /**
+     * Keep the history baseline independent from mutable document rows. The owned baseline list
+     * is updated in place for same-order edits, copying only rows whose editable fields changed.
+     * Inserts, deletes, and reorders still need a new full snapshot because their index mapping is
+     * structural.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun advanceHistorySnapshot(
+        previous: List<SubtitleEntry>,
+        current: List<SubtitleEntry>
+    ): List<SubtitleEntry> {
+        if (previous.size != current.size) return current.map { it.copy() }.toMutableList()
+        var snapshot: MutableList<SubtitleEntry>? = previous as? MutableList<SubtitleEntry>
+        current.forEachIndexed { index, entry ->
+            val old = previous[index]
+            if (old.stableId != entry.stableId) return current.map { it.copy() }.toMutableList()
+            if (EditorEditHistory.hasEditableDifference(old, entry)) {
+                if (snapshot == null) snapshot = previous.toMutableList()
+                snapshot!![index] = entry.copy()
+            }
+        }
+        return snapshot ?: previous
     }
 
     fun recordSourceHistory(
@@ -305,6 +338,25 @@ internal class EditorViewModel(
     }
 
     fun execute(command: EditorCommand): EditorCommandResult {
+        return execute(command, publish = true)
+    }
+
+    /**
+     * Apply a list edit without publishing the full document snapshot immediately.
+     *
+     * List editing callers usually follow this with notifyEntriesChanged()/submitSubtitleList(),
+     * which records the history delta and publishes the synchronized document once. Skipping the
+     * eager snapshot avoids copying every subtitle entry twice for a single-row edit in a large
+     * file. Callers that do not perform a subsequent UI/history synchronization must keep using
+     * [execute].
+     */
+    fun executeWithoutPublish(command: EditorCommand): EditorCommandResult =
+        execute(command, publish = false)
+
+    private fun execute(
+        command: EditorCommand,
+        publish: Boolean
+    ): EditorCommandResult {
         val result = applySubtitleEdit(documentState, command)
         if (currentFormat == SubtitleParser.SubtitleFormat.VTT &&
             (command is EditorCommand.UpdateText || command is EditorCommand.UpdateTexts)
@@ -319,7 +371,9 @@ internal class EditorViewModel(
                 }
             }
         }
-        if (result.changedPositions.isNotEmpty() || result.structureChanged) publishDocument()
+        if (publish && (result.changedPositions.isNotEmpty() || result.structureChanged)) {
+            publishDocument()
+        }
         return result
     }
 
@@ -335,9 +389,14 @@ internal class EditorViewModel(
         val rawSource = documentState.originalFileContent
         val beforeSource = if (documentState.sourceViewNeedsListSync) {
             // Pending list edits must be present in both the color result and its undo
-            // snapshot. The current list is not the baseline of the still-older source.
-            val sourceEntries = SubtitleParser.parseDocument(rawSource, format = currentFormat).entries
-            syncSourceDocument(rawSource, currentFormat, sourceEntries, beforeDocument.entries)
+            // snapshot. The history baseline is the entry mapping for the current source; do
+            // not reparsed the entire raw document during an edit.
+            syncSourceDocument(
+                rawSource,
+                currentFormat,
+                documentState.historyEntriesSnapshot,
+                beforeDocument.entries
+            )
         } else {
             rawSource
         }
@@ -393,11 +452,12 @@ internal class EditorViewModel(
             }
         }
         val beforeSource = if (documentState.sourceViewNeedsListSync) {
-            val sourceEntries = SubtitleParser.parseDocument(
+            syncSourceDocument(
                 documentState.originalFileContent,
-                format = currentFormat
-            ).entries
-            syncSourceDocument(documentState.originalFileContent, currentFormat, sourceEntries, beforeDocument.entries)
+                currentFormat,
+                documentState.historyEntriesSnapshot,
+                beforeDocument.entries
+            )
         } else documentState.originalFileContent
         val result = applySubtitleEdit(
             documentState,
@@ -471,7 +531,8 @@ internal class EditorViewModel(
 
     fun syncListChangesToSource(
         beforeEntries: List<SubtitleEntry>,
-        afterEntries: List<SubtitleEntry>
+        afterEntries: List<SubtitleEntry>,
+        publish: Boolean = true
     ) {
         val updatedSource = syncSourceDocument(
             content = documentState.originalFileContent,
@@ -482,7 +543,7 @@ internal class EditorViewModel(
         documentState.originalFileContent = updatedSource
         documentState.sourceViewContent = updatedSource
         documentState.sourceViewNeedsListSync = false
-        publishDocument()
+        if (publish) publishDocument()
     }
 
     fun undo(

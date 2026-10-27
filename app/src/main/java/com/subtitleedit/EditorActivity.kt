@@ -136,10 +136,30 @@ class EditorActivity : AppCompatActivity() {
     private var sourceViewHasPendingEdits: Boolean
         get() = sourceViewState.pendingEdits
         set(value) { sourceViewState.pendingEdits = value }
+    /** A source-view operation is waiting for its background full parse. */
+    private var sourceHistorySyncPending = false
+    /** Monotonically increasing token for each full source synchronization request. */
+    private var nextSourceSyncToken = 0L
+    private var activeSourceSyncRequest: SourceSyncRequest? = null
+    /** onStop records this; onStart resumes only when the previous job is no longer active. */
+    private var sourceSyncNeedsResume = false
     private var sourceViewTransitionJob: Job? = null
     private var sourceListParseJob: Job? = null
     /** Only the latest media selection may update playback and MP3 inspection state. */
     private var mediaLoadJob: Job? = null
+
+    private data class SourceSyncRequest(
+        val token: Long,
+        val generation: Long
+    )
+
+    private enum class SourceSyncStatus {
+        SUCCESS,
+        FAILURE,
+        CANCELLED,
+        BACKGROUND,
+        GENERATION_INVALID
+    }
     /** URI copies are asynchronous too; stale copies must not write a later selection's state. */
     private var mediaOpenJob: Job? = null
     private var mediaOpenGeneration = 0L
@@ -367,6 +387,8 @@ class EditorActivity : AppCompatActivity() {
             isDocumentLoaded = { stateModel.documentLoaded },
             isSourceMode = { stateModel.isSourceViewMode },
             hasPendingSourceEdits = { sourceViewHasPendingEdits },
+            hasPendingSourceHistorySync = { sourceHistorySyncPending || sourceSyncNeedsResume },
+            recordSourceSyncBackground = ::recordSourceSyncBackground,
             snapshotSource = { snapshotSourceViewContentIfNeeded() },
             scheduleSourcePreview = { scheduleSourceViewPreview() },
             scheduleSubtitlePreview = { scheduleSubtitlePreview() },
@@ -475,14 +497,23 @@ class EditorActivity : AppCompatActivity() {
         menuView = menu,
         sourceMode = stateModel.isSourceViewMode,
         selectedCount = if (::subtitleAdapter.isInitialized) subtitleAdapter.getSelectedCount() else 0,
-        undo = if (stateModel.isSourceViewMode) stateModel.peekUndoWithoutSelection() else stateModel.peekUndo(),
-        redo = if (stateModel.isSourceViewMode) stateModel.peekRedoWithoutSelection() else stateModel.peekRedo(),
-        sourceTransitioning = stateModel.isSourceViewTransitioning || sourceViewTransitionJob?.isActive == true
+        undo = if (sourceHistorySyncPending) null else if (stateModel.isSourceViewMode) {
+            stateModel.peekUndoWithoutSelection()
+        } else stateModel.peekUndo(),
+        redo = if (sourceHistorySyncPending) null else if (stateModel.isSourceViewMode) {
+            stateModel.peekRedoWithoutSelection()
+        } else stateModel.peekRedo(),
+        sourceTransitioning = stateModel.isSourceViewTransitioning ||
+            sourceViewTransitionJob?.isActive == true || sourceHistorySyncPending
     )
 
     private fun handleMenuClick(item: MenuItem): Boolean = editorCoordinator.handleMenu(item)
 
     private fun handleEditorMenuAction(action: EditorMenuController.Action) {
+        if (sourceHistorySyncPending && action == EditorMenuController.Action.SEARCH) {
+            showShortToast("正在同步，请稍候")
+            return
+        }
         when (action) {
             EditorMenuController.Action.UNDO -> undoEdit()
             EditorMenuController.Action.REDO -> redoEdit()
@@ -569,7 +600,7 @@ class EditorActivity : AppCompatActivity() {
             onParsed = ::applySourcePreview
         )
         binding.etSourceView.addOnDocumentChangeListener { change ->
-            if (stateModel.isSourceViewMode && !suppressSourceViewChanges) {
+            if (stateModel.isSourceViewMode && !suppressSourceViewChanges && !sourceHistorySyncPending) {
                 val beforeText = stateModel.sourceHistoryTextSnapshot
                 val updatedText = binding.etSourceView.getDocumentText()
                 val edit = EditorSourceTextEdit.fromRanges(
@@ -584,15 +615,49 @@ class EditorActivity : AppCompatActivity() {
                 recordSourceTextEdit(edit, beforeText)
                 stateModel.sourceHistoryTextSnapshot = updatedText
                 stateModel.setSourceDocumentContent(updatedText)
-                sourceViewHasPendingEdits = true
+                // The current full snapshot was already built above. Reuse it for preview and
+                // lifecycle operations instead of rebuilding the whole source document later.
+                sourceViewHasPendingEdits = false
                 stateModel.documentState.sourceViewEditGeneration++
-                // SourceEditorView keeps one editable block per physical line. The debounced
-                // The debounced preview reads the current full text only when parsing is needed;
-                // the history item itself retains only this edit's range.
+                // SourceEditorView keeps one editable block per physical line. The history item
+                // itself retains only this edit's range.
                 updateFormatInfo()
-                scheduleSourceViewPreview()
-                if (change.oldLineCount != change.newLineCount) sourceLineEditController.invalidateLineIndex()
-                applySimpleSourceLineChange(change.startLine, change.oldLineCount, change.newLineCount)
+                sourceLineEditController.invalidateLineIndex()
+                if (sourceLineEditController.requiresFullParse(
+                        before = beforeText,
+                        after = updatedText,
+                        format = stateModel.currentFormat,
+                        startOffset = change.startOffset,
+                        oldEndOffset = change.oldEndOffset,
+                        newEndOffset = change.newEndOffset
+                    )
+                ) {
+                    sourceViewHasPendingEdits = true
+                    scheduleSourceViewPreview()
+                    return@addOnDocumentChangeListener
+                }
+                val appliedLocally = applySimpleSourceLineChange(
+                    change.startLine,
+                    change.oldLineCount,
+                    change.newLineCount
+                )
+                val appliedBlockLocally = !appliedLocally && applySourceBlockChange(
+                    before = beforeText,
+                    after = updatedText,
+                    startLine = change.startLine,
+                    oldLineCount = change.oldLineCount,
+                    newLineCount = change.newLineCount,
+                    oldStartOffset = change.startOffset,
+                    newStartOffset = change.startOffset
+                )
+                if (appliedLocally || appliedBlockLocally) {
+                    if (stateModel.mediaType == EditorMediaType.VIDEO) scheduleSubtitlePreview()
+                } else {
+                    // Keep the last valid row model while the edit is malformed or uses a cue
+                    // construct that cannot be reconciled safely from one source block.
+                    sourceViewHasPendingEdits = true
+                    scheduleSourceViewPreview()
+                }
             }
         }
     }
@@ -605,14 +670,14 @@ class EditorActivity : AppCompatActivity() {
             entryAt = { position -> stateModel.subtitleEntries.getOrNull(position) },
             updateTime = { position, start, value ->
                 val result = if (start) {
-                    stateModel.execute(EditorCommand.UpdateTime(position, startTime = value))
+                    stateModel.executeWithoutPublish(EditorCommand.UpdateTime(position, startTime = value))
                 } else {
-                    stateModel.execute(EditorCommand.UpdateTime(position, endTime = value))
+                    stateModel.executeWithoutPublish(EditorCommand.UpdateTime(position, endTime = value))
                 }
                 result.changedPositions.isNotEmpty()
             },
             updateText = { position, value ->
-                stateModel.execute(EditorCommand.UpdateText(position, value))
+                stateModel.executeWithoutPublish(EditorCommand.UpdateText(position, value))
                     .changedPositions.isNotEmpty()
             },
             updateCue = { position, identifier, settings ->
@@ -621,7 +686,12 @@ class EditorActivity : AppCompatActivity() {
                     WebVttSubtitleFormatHandler.updateCueSettings(this, settings)
                 }
             },
-            onUpdated = ::onEntryUpdated,
+            // The dialog callbacks use executeWithoutPublish; the adapter and history baseline
+            // are updated by notifyEntriesChanged below, so do not deep-copy the whole document
+            // into StateFlow for every single row edit.
+            onUpdated = { position, message ->
+                onEntryUpdated(position, message, documentAlreadyPublished = true)
+            },
             showMessage = ::showShortToast
         )
     }
@@ -653,13 +723,17 @@ class EditorActivity : AppCompatActivity() {
                 replaceSourceViewContent(content)
             },
             applyEntryUpdates = { updates ->
-                val result = stateModel.execute(
+                val result = stateModel.executeWithoutPublish(
                     EditorCommand.UpdateTexts(updates.map { it.index to it.newText })
                 )
                 if (result.removedCount > 0) {
                     submitSubtitleList(refreshAll = true, markChanged = true)
                 } else {
-                    notifyEntriesChanged(updates.map { it.index }, includeNeighbors = false)
+                    notifyEntriesChanged(
+                        updates.map { it.index },
+                        includeNeighbors = false,
+                        refreshDocument = false
+                    )
                 }
                 result.removedCount
             },
@@ -702,8 +776,10 @@ class EditorActivity : AppCompatActivity() {
             sourceContent = { stateModel.sourceViewContent },
             snapshotSourceContent = ::snapshotSourceViewContentIfNeeded,
             currentEntries = { stateModel.subtitleEntries },
-            cancelPreview = { sourcePreviewController.cancel() },
-            schedulePreview = ::scheduleSourceViewPreview,
+            cancelPreview = ::cancelSourcePreview,
+            // Waveform timing edits already mutate the affected SubtitleEntry objects. They only
+            // need the media preview refreshed; never reparse the complete source document.
+            schedulePreview = ::scheduleSubtitlePreview,
             recordHistory = ::recordSourceTextChange,
             onSourceUpdated = ::applySourceWaveformUpdatedSource
         )
@@ -716,6 +792,10 @@ class EditorActivity : AppCompatActivity() {
             mediaRepository = mediaRepository,
             currentPlaybackPositionMs = { playbackController.currentPositionMs },
             onSubtitleChanged = { changedIndex, updatedEntry, dragSessionKey, isFinal ->
+                if (sourceHistorySyncPending) {
+                    showShortToast("正在同步，请稍候")
+                    return@EditorWaveformController
+                }
                 val currentEntry = stateModel.subtitleEntries.getOrNull(changedIndex)
                     ?: return@EditorWaveformController
                 if (stateModel.isSourceViewMode) {
@@ -743,6 +823,7 @@ class EditorActivity : AppCompatActivity() {
                         includeNeighbors = true,
                         syncWaveform = false,
                         markChanged = isFinal,
+                        refreshDocument = false,
                     )
                 }
             },
@@ -853,19 +934,106 @@ class EditorActivity : AppCompatActivity() {
         scheduleSubtitlePreview()
     }
 
-    private fun scheduleSubtitlePreview() {
+    private fun scheduleSubtitlePreview() = scheduleSubtitlePreview(debounceMs = 300L)
+
+    private fun scheduleSubtitlePreview(debounceMs: Long) {
         if (stateModel.mediaType != EditorMediaType.VIDEO || !::subtitlePreviewController.isInitialized) return
         subtitlePreviewController.schedule(
             format = stateModel.currentFormat,
             entries = stateModel.subtitleEntries,
             sourceViewMode = stateModel.isSourceViewMode,
-            sourceContent = if (stateModel.isSourceViewMode) stateModel.sourceViewContent else stateModel.originalFileContent
+            sourceContent = if (stateModel.isSourceViewMode) stateModel.sourceViewContent else stateModel.originalFileContent,
+            debounceMs = debounceMs
         )
     }
 
-    /** 源码视图也保持 mpv 预览；防抖后只有最新文本会进入后台解析流程。 */
+    /** Parse source edits that change document-wide cue semantics, with an input lock. */
     private fun scheduleSourceViewPreview() {
-        sourcePreviewController.schedule()
+        if (!stateModel.isSourceViewMode || !::sourcePreviewController.isInitialized) return
+        val request = SourceSyncRequest(
+            token = ++nextSourceSyncToken,
+            generation = stateModel.documentState.sourceViewEditGeneration
+        )
+        activeSourceSyncRequest = request
+        sourceSyncNeedsResume = false
+        sourceHistorySyncPending = true
+        showListLoading()
+        binding.etSourceView.setDocumentEnabled(false)
+        sourcePreviewController.schedule { finishedGeneration, success ->
+            val status = when {
+                finishedGeneration != request.generation ||
+                    stateModel.documentState.sourceViewEditGeneration != request.generation ->
+                    SourceSyncStatus.GENERATION_INVALID
+                success -> SourceSyncStatus.SUCCESS
+                else -> SourceSyncStatus.FAILURE
+            }
+            finishSourceSync(request, status)
+        }
+        invalidateOptionsMenu()
+    }
+
+    /** Cancel a superseded parse through the same token state machine as other outcomes. */
+    private fun cancelSourcePreview() {
+        val request = activeSourceSyncRequest
+        sourcePreviewController.cancel()
+        if (request != null) finishSourceSync(request, SourceSyncStatus.CANCELLED)
+    }
+
+    /** Record a background transition without cancelling the full parse. */
+    private fun recordSourceSyncBackground() {
+        if (stateModel.isSourceViewMode && sourceHistorySyncPending) {
+            sourceSyncNeedsResume = true
+            finishSourceSync(activeSourceSyncRequest, SourceSyncStatus.BACKGROUND)
+        }
+    }
+
+    /** Apply one state transition for every source-sync completion/lifecycle outcome. */
+    private fun finishSourceSync(
+        request: SourceSyncRequest?,
+        status: SourceSyncStatus
+    ) {
+        if (request == null || activeSourceSyncRequest?.token != request.token) return
+        when (status) {
+            SourceSyncStatus.BACKGROUND -> {
+                sourceSyncNeedsResume = true
+                return
+            }
+            SourceSyncStatus.GENERATION_INVALID -> {
+                activeSourceSyncRequest = null
+                sourceSyncNeedsResume = true
+                sourceHistorySyncPending = stateModel.isSourceViewMode
+                return
+            }
+            SourceSyncStatus.CANCELLED -> {
+                // Cancellation here is an intentional supersession (view transition, history
+                // application, or a newer local source update). No replacement parse owns the
+                // lock yet, so release the old request's UI state immediately.
+                activeSourceSyncRequest = null
+                sourceSyncNeedsResume = false
+                sourceHistorySyncPending = false
+                binding.etSourceView.setDocumentEnabled(true)
+                hideSourceViewLoading()
+                invalidateOptionsMenu()
+                return
+            }
+            SourceSyncStatus.FAILURE -> {
+                sourceViewHasPendingEdits = true
+                showShortToast("字幕更新失败，保留上次有效结果")
+            }
+            SourceSyncStatus.SUCCESS -> Unit
+        }
+        activeSourceSyncRequest = null
+        sourceSyncNeedsResume = false
+        sourceHistorySyncPending = false
+        binding.etSourceView.setDocumentEnabled(true)
+        hideSourceViewLoading()
+        invalidateOptionsMenu()
+    }
+
+    /** Release the shared loading mask when a source parse finishes or a view transition wins. */
+    private fun hideSourceViewLoading() {
+        binding.editorListLoadingOverlay.visibility = View.GONE
+        listLoadingActive = false
     }
 
     /**
@@ -873,11 +1041,16 @@ class EditorActivity : AppCompatActivity() {
      * still used for structural edits, but ordinary character edits can be applied from the
      * changed source block immediately and therefore do not make view switches or history wait.
      */
-    private fun applySimpleSourceLineChange(startLine: Int, oldLineCount: Int, newLineCount: Int) {
-        if (stateModel.subtitleEntries.isEmpty()) return
-        val update = sourceLineEditController.resolve(startLine, oldLineCount, newLineCount) ?: return
+    private fun applySimpleSourceLineChange(
+        startLine: Int,
+        oldLineCount: Int,
+        newLineCount: Int
+    ): Boolean {
+        if (stateModel.subtitleEntries.isEmpty()) return false
+        val update = sourceLineEditController.resolve(startLine, oldLineCount, newLineCount)
+            ?: return false
         val entryIndex = update.entryIndex
-        val current = stateModel.subtitleEntries.getOrNull(entryIndex) ?: return
+        val current = stateModel.subtitleEntries.getOrNull(entryIndex) ?: return false
         val updated = update.entry
         current.startTime = updated.startTime
         current.endTime = updated.endTime
@@ -895,6 +1068,47 @@ class EditorActivity : AppCompatActivity() {
         syncWaveformSubtitles(changedPositions = listOf(entryIndex))
         if (::playbackController.isInitialized) playbackController.invalidateHighlightCache()
         if (::searchController.isInitialized) searchController.onDocumentChanged()
+        return true
+    }
+
+    /** Replace only the subtitle entries in the source block touched by an edit. */
+    private fun applySourceBlockChange(
+        before: String,
+        after: String,
+        startLine: Int,
+        oldLineCount: Int,
+        newLineCount: Int,
+        oldStartOffset: Int? = null,
+        newStartOffset: Int? = null
+    ): Boolean {
+        val update = sourceLineEditController.resolveBlock(
+            before = before,
+            after = after,
+            startLine = startLine,
+            oldLineCount = oldLineCount,
+            newLineCount = newLineCount,
+            oldStartOffset = oldStartOffset,
+            newStartOffset = newStartOffset
+        ) ?: return false
+        val target = stateModel.subtitleEntries.toMutableList()
+        if (update.entryIndex !in 0..target.size ||
+            update.entryIndex + update.oldEntryCount > target.size
+        ) return false
+        repeat(update.oldEntryCount) { target.removeAt(update.entryIndex) }
+        target.addAll(
+            update.entryIndex,
+            normalizeSourceViewEntries(update.entries).map { it.copy() }
+        )
+        // The block reconciler has already assigned fresh IDs to split rows and retained IDs
+        // for unaffected rows. Do not run the global content matcher again, which would otherwise
+        // reattach the original ID when the split occurs at the end of the document.
+        applySourceViewEntries(target, preserveProvidedStableIds = true)
+        stateModel.documentState.sourceViewEntriesGeneration =
+            stateModel.documentState.sourceViewEditGeneration
+        sourceViewHasPendingEdits = false
+        if (::playbackController.isInitialized) playbackController.invalidateHighlightCache()
+        if (::searchController.isInitialized) searchController.onDocumentChanged()
+        return true
     }
 
     private fun applySourcePreview(
@@ -925,7 +1139,8 @@ class EditorActivity : AppCompatActivity() {
                 format = stateModel.currentFormat,
                 entries = parsedDocument.entries,
                 sourceViewMode = true,
-                sourceContent = sourceSnapshot
+                sourceContent = sourceSnapshot,
+                debounceMs = 0L
             )
         }
     }
@@ -1297,6 +1512,11 @@ class EditorActivity : AppCompatActivity() {
         sourceListParseJob = null
         sourceWaveformSyncController.cancel()
         sourceViewHasPendingEdits = false
+        sourceHistorySyncPending = false
+        activeSourceSyncRequest = null
+        sourceSyncNeedsResume = false
+        hideSourceViewLoading()
+        binding.etSourceView.setDocumentEnabled(true)
         stateModel.documentState.sourceViewEditGeneration++
         stateModel.documentState.sourceViewEntriesGeneration = stateModel.documentState.sourceViewEditGeneration
         if (::searchController.isInitialized) searchController.clearSourceWorkForTransition()
@@ -1338,6 +1558,11 @@ class EditorActivity : AppCompatActivity() {
         onFinished: (() -> Unit)? = null
     ) {
         stateModel.isSourceViewMode = false
+        sourceHistorySyncPending = false
+        activeSourceSyncRequest = null
+        sourceSyncNeedsResume = false
+        hideSourceViewLoading()
+        binding.etSourceView.setDocumentEnabled(true)
         if (::searchController.isInitialized) searchController.clearSourceWorkForTransition()
         
         // 保存 ScrollView 的滚动位置
@@ -1381,6 +1606,10 @@ class EditorActivity : AppCompatActivity() {
      * 切换源视图模式
      */
     private fun toggleSourceView() {
+        if (sourceHistorySyncPending) {
+            showShortToast("正在同步，请稍候")
+            return
+        }
         if (stateModel.isSourceViewTransitioning || sourceViewTransitionJob?.isActive == true) {
             showShortToast("正在切换视图，请稍候")
             return
@@ -1412,7 +1641,7 @@ class EditorActivity : AppCompatActivity() {
         showShortToast("正在切换到源视图…")
         sourceViewTransitionJob = lifecycleScope.launch {
             try {
-                sourcePreviewController.cancel()
+                cancelSourcePreview()
                 val sourceBase = stateModel.originalFileContent
                 val freshContent = if (!stateModel.sourceViewNeedsListSync) {
                     sourceBase
@@ -1422,10 +1651,7 @@ class EditorActivity : AppCompatActivity() {
                         SubtitleSourceSynchronizer.apply(
                             content = sourceBase,
                             format = stateModel.currentFormat,
-                            oldEntries = SubtitleParser.parseDocument(
-                                sourceBase,
-                                format = stateModel.currentFormat
-                            ).entries,
+                            oldEntries = stateModel.historyEntriesSnapshot.map { it.copy() },
                             newEntries = listSnapshot
                         )
                     }
@@ -1466,13 +1692,12 @@ class EditorActivity : AppCompatActivity() {
         binding.etSourceView.setDocumentEnabled(false)
         showShortToast("正在切换到列表视图…")
         sourceViewTransitionJob = lifecycleScope.launch {
-            var needsBackgroundParse = false
             try {
                 sourceWaveformSyncController.cancelAndJoin()
                 editedContent = stateModel.sourceViewContent
-                sourcePreviewController.cancel()
+                cancelSourcePreview()
                 if (stateModel.documentState.sourceViewEntriesGeneration != stateModel.documentState.sourceViewEditGeneration) {
-                    needsBackgroundParse = !sourceViewCoordinator.applyDeletionLocally(editedContent)
+                    sourceViewCoordinator.applyDeletionLocally(editedContent)
                 }
                 stateModel.originalFileContent = editedContent
                 stateModel.sourceViewContent = editedContent
@@ -1487,11 +1712,7 @@ class EditorActivity : AppCompatActivity() {
                     updateFormatInfo()
                     // 等源码 Editable、解析临时对象和列表提交完成一个帧周期后，
                     // 再重建 mpv 字幕轨，避免切换瞬间额外复制所有条目。
-                    if (needsBackgroundParse) {
-                        scheduleListSourceParse(editedContent, stateModel.documentState.sourceViewEditGeneration)
-                    } else {
-                        sourcePreviewController.scheduleListPreview(::scheduleSubtitlePreview)
-                    }
+                    sourcePreviewController.scheduleListPreview(::scheduleSubtitlePreview)
                     showShortToast("已切换到列表视图")
                 }
             } catch (e: CancellationException) {
@@ -1507,19 +1728,18 @@ class EditorActivity : AppCompatActivity() {
         }
     }
 
-    /** Parse a source snapshot off the UI thread and publish it once the list view is active. */
+    /** Source rows are kept incrementally synchronized while editing; no second full parse is needed. */
     private fun scheduleListSourceParse(content: String, generation: Long) {
-        sourceListParseJob?.cancel()
-        sourceListParseJob = lifecycleScope.launch {
-            try {
-                val document = withContext(Dispatchers.Default) {
-                    SubtitleParser.parseDocument(content, format = stateModel.currentFormat)
-                }
-                if (isActive) applyParsedListSourceDocument(document, content, generation)
-            } finally {
-                if (sourceListParseJob === coroutineContext[Job]) sourceListParseJob = null
-            }
-        }
+        if (stateModel.isSourceViewMode || stateModel.sourceViewContent != content) return
+        stateModel.documentState.sourceViewEntriesGeneration = generation
+        stateModel.sourceViewNeedsListSync = false
+        syncEditHistoryBaseline()
+        submitSubtitleList(
+            refreshAll = false,
+            syncWaveform = false,
+            markChanged = false
+        )
+        scheduleSubtitlePreview(debounceMs = 0L)
     }
 
     private fun applyParsedListSourceDocument(
@@ -1549,6 +1769,7 @@ class EditorActivity : AppCompatActivity() {
             syncWaveform = false,
             markChanged = false
         )
+        scheduleSubtitlePreview(debounceMs = 0L)
     }
 
     private fun setSourceViewEditorText(content: String, preserveScroll: Boolean = false) {
@@ -1563,23 +1784,37 @@ class EditorActivity : AppCompatActivity() {
 
     private fun configureSourceViewEditor(content: String) {
         setSourceViewEditorText(content)
+        if (::sourceLineEditController.isInitialized) {
+            sourceLineEditController.prepareDocument(content, stateModel.currentFormat)
+        }
         stateModel.sourceHistoryTextSnapshot = content
         binding.etSourceView.setDocumentEnabled(true)
     }
 
-    /** 搜索替换直接重写完整源码内容。 */
+    /** 搜索替换写回源码后，只重建差异涉及的字幕块。 */
     private fun replaceSourceViewContent(content: String) {
-        recordSourceTextChange(stateModel.sourceHistoryTextSnapshot, content)
+        val before = stateModel.sourceHistoryTextSnapshot
+        val edit = EditorSourceTextEdit.between(before, content)
+        recordSourceTextEdit(edit, before)
         setSourceViewEditorText(content)
         stateModel.originalFileContent = content
         stateModel.sourceViewContent = content
         stateModel.sourceHistoryTextSnapshot = content
         stateModel.sourceViewNeedsListSync = false
         stateModel.hasUnsavedChanges = true
-        sourceViewHasPendingEdits = true
+        sourceViewHasPendingEdits = false
         stateModel.documentState.sourceViewEditGeneration++
         updateFormatInfo()
-        scheduleSourceViewPreview()
+        val appliedLocally = applySourceHistoryEditLocally(
+            edit = edit,
+            undo = false,
+            before = before,
+            after = content
+        )
+        if (!appliedLocally) {
+            sourceViewHasPendingEdits = true
+            scheduleSourceViewPreview()
+        }
     }
 
     private fun snapshotSourceViewContentIfNeeded(): String {
@@ -1846,7 +2081,11 @@ class EditorActivity : AppCompatActivity() {
             description
         )
         if (result.changedPositions.isNotEmpty()) {
-            notifyEntriesChanged(result.changedPositions, markChanged = false)
+            notifyEntriesChanged(
+                result.changedPositions,
+                markChanged = false,
+                refreshDocument = false
+            )
         }
         if (result.changedPositions.isNotEmpty() || updated.header != beforeHeader) {
             markAsChanged()
@@ -2135,11 +2374,11 @@ class EditorActivity : AppCompatActivity() {
             showShortToast("没有可删除的格式化标签")
             return
         }
-        val result = stateModel.execute(
+        val result = stateModel.executeWithoutPublish(
             EditorCommand.UpdateTexts(updates, removeBlankEntries = false)
         )
         if (result.changedPositions.isNotEmpty()) {
-            notifyEntriesChanged(result.changedPositions)
+            notifyEntriesChanged(result.changedPositions, refreshDocument = false)
             showShortToast("已删除格式化标签")
         }
     }
@@ -2157,9 +2396,9 @@ class EditorActivity : AppCompatActivity() {
             (target.first to updatedText).takeIf { updatedText != target.second }
         }
         if (updates.isEmpty()) return
-        val result = stateModel.execute(EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
+        val result = stateModel.executeWithoutPublish(EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
         if (result.changedPositions.isNotEmpty()) {
-            notifyEntriesChanged(result.changedPositions)
+            notifyEntriesChanged(result.changedPositions, refreshDocument = false)
         }
     }
 
@@ -2179,7 +2418,11 @@ class EditorActivity : AppCompatActivity() {
         if (!ensureListMode()) return
         val result = stateModel.applySubtitleColor(positions, color, currentHistoryListState().selectedIds)
         if (result.changedPositions.isNotEmpty()) {
-            notifyEntriesChanged(result.changedPositions, markChanged = false)
+            notifyEntriesChanged(
+                result.changedPositions,
+                markChanged = false,
+                refreshDocument = false
+            )
             markAsChanged()
             invalidateOptionsMenu()
         }
@@ -2231,9 +2474,9 @@ class EditorActivity : AppCompatActivity() {
             (target.first to updatedText).takeIf { updatedText != target.second }
         }
         if (updates.isEmpty()) return
-        val result = stateModel.execute(EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
+        val result = stateModel.executeWithoutPublish(EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
         if (result.changedPositions.isNotEmpty()) {
-            notifyEntriesChanged(result.changedPositions)
+            notifyEntriesChanged(result.changedPositions, refreshDocument = false)
         }
     }
 
@@ -2340,9 +2583,9 @@ class EditorActivity : AppCompatActivity() {
             (position to updatedText).takeIf { updatedText != text }
         }
         if (updates.isEmpty()) return
-        val result = stateModel.execute(EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
+        val result = stateModel.executeWithoutPublish(EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
         if (result.changedPositions.isNotEmpty()) {
-            notifyEntriesChanged(result.changedPositions)
+            notifyEntriesChanged(result.changedPositions, refreshDocument = false)
         }
     }
 
@@ -2764,14 +3007,14 @@ class EditorActivity : AppCompatActivity() {
                 extendSubtitleToAdjacent(positions, towardPrevious)
             }) return
         if (!ensureListMode()) return
-        val result = stateModel.execute(
+        val result = stateModel.executeWithoutPublish(
             EditorCommand.ExtendToAdjacent(positions, towardPrevious)
         )
         if (result.changedPositions.isEmpty()) {
             showShortToast("没有可延伸的字幕")
             return
         }
-        notifyEntriesChanged(result.changedPositions)
+        notifyEntriesChanged(result.changedPositions, refreshDocument = false)
         showShortToast(
             if (positions.size > 1) "已延伸 ${result.changedPositions.size} 行字幕"
             else if (towardPrevious) "已向前延伸至上一行" else "已向后延伸至下一行"
@@ -2790,7 +3033,7 @@ class EditorActivity : AppCompatActivity() {
         }
 
         val historyBefore = currentHistoryListState()
-        val result = stateModel.execute(EditorCommand.Merge(sortedPositions))
+        val result = stateModel.executeWithoutPublish(EditorCommand.Merge(sortedPositions))
         if (!result.structureChanged) {
             showShortToast("没有可合并的字幕")
             return
@@ -2890,7 +3133,10 @@ class EditorActivity : AppCompatActivity() {
                 submitSubtitleList(refreshAll = true, markChanged = true)
                 com.subtitleedit.util.OverwritingToast.makeText(this, "已粘贴 ${stateModel.clipboardTexts.size} 项", Toast.LENGTH_SHORT).show()
             } else {
-                notifyEntriesChanged(pasteResult.affectedPositions)
+                notifyEntriesChanged(
+                    pasteResult.affectedPositions,
+                    refreshDocument = false
+                )
                 com.subtitleedit.util.OverwritingToast.makeText(this, "已粘贴", Toast.LENGTH_SHORT).show()
             }
         }
@@ -2914,7 +3160,7 @@ class EditorActivity : AppCompatActivity() {
 
     private fun deleteSingleSubtitleConfirmed(position: Int) {
         val historyBefore = currentHistoryListState()
-        stateModel.execute(EditorCommand.Delete(setOf(position)))
+        stateModel.executeWithoutPublish(EditorCommand.Delete(setOf(position)))
         syncAfterDelete(setOf(position), historyBefore)
         com.subtitleedit.util.OverwritingToast.makeText(this, "已删除", Toast.LENGTH_SHORT).show()
     }
@@ -2951,7 +3197,7 @@ class EditorActivity : AppCompatActivity() {
             if (pasteAfterInsert) stateModel.clipboardTexts else listOf("新字幕"), insertPosition,
             durationPerEntryMs
         )
-        stateModel.execute(EditorCommand.Insert(insertPosition, insertedEntries))
+        stateModel.executeWithoutPublish(EditorCommand.Insert(insertPosition, insertedEntries))
         renumberEntries(force = true)
         submitSubtitleList(
             refreshAll = true,
@@ -2980,7 +3226,7 @@ class EditorActivity : AppCompatActivity() {
         val insertPos = stateModel.subtitleEntries.indexOfFirst { it.startTime > realStart }
             .let { if (it == -1) stateModel.subtitleEntries.size else it }
 
-        stateModel.execute(EditorCommand.Insert(insertPos, listOf(newEntry)))
+        stateModel.executeWithoutPublish(EditorCommand.Insert(insertPos, listOf(newEntry)))
         renumberEntries(force = true)
         submitSubtitleList(
             refreshAll = true,
@@ -3010,8 +3256,11 @@ class EditorActivity : AppCompatActivity() {
         
         val selectedEntries = requireSelectedEntries("没有选中的字幕") ?: return
         
-        stateModel.execute(EditorCommand.ApplyOffset(selectedEntries.map { it.second }.toSet(), offsetMs))
-        notifyEntriesChanged(selectedEntries.map { it.second })
+        stateModel.executeWithoutPublish(EditorCommand.ApplyOffset(selectedEntries.map { it.second }.toSet(), offsetMs))
+        notifyEntriesChanged(
+            selectedEntries.map { it.second },
+            refreshDocument = false
+        )
         showShortToast("已对选中项应用 ${offsetMs}ms 偏移")
     }
     
@@ -3142,9 +3391,20 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun undoEdit() {
+        if (sourceHistorySyncPending) {
+            showShortToast("正在同步，请稍候")
+            return
+        }
         if (deferLargeListEdit(stateModel.subtitleEntries.size, ::undoEdit)) return
         suppressHistoryRecording = true
-        val applied = try { historyCoordinator.undo() } finally { suppressHistoryRecording = false }
+        val applied = try {
+            historyCoordinator.undo()
+        } catch (error: Exception) {
+            showShortToast("撤回失败：${error.message ?: "文档已变化"}")
+            false
+        } finally {
+            suppressHistoryRecording = false
+        }
         if (!applied) {
             invalidateOptionsMenu()
             return
@@ -3155,9 +3415,20 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun redoEdit() {
+        if (sourceHistorySyncPending) {
+            showShortToast("正在同步，请稍候")
+            return
+        }
         if (deferLargeListEdit(stateModel.subtitleEntries.size, ::redoEdit)) return
         suppressHistoryRecording = true
-        val applied = try { historyCoordinator.redo() } finally { suppressHistoryRecording = false }
+        val applied = try {
+            historyCoordinator.redo()
+        } catch (error: Exception) {
+            showShortToast("恢复失败：${error.message ?: "文档已变化"}")
+            false
+        } finally {
+            suppressHistoryRecording = false
+        }
         if (!applied) {
             invalidateOptionsMenu()
             return
@@ -3179,28 +3450,38 @@ class EditorActivity : AppCompatActivity() {
             }
             is EditorEditHistory.Operation.SourceChange -> {
                 val targetText = operation.edit.applyTo(stateModel.sourceViewContent, undo)
-                applySourceHistoryText(targetText)
+                applySourceHistoryText(targetText, sourceEdit = operation.edit, undo = undo)
             }
         }
     }
 
     private fun applyListHistoryResult(result: EditorHistoryCommandResult) {
         val updatedSource = result.sourceText ?: stateModel.sourceViewContent
-        val targetEntries = result.entries.map { it.copy() }
+        // ListChange.execute() already applied fields to the live entries. Reuse that list so an
+        // ordinary row undo/redo does not deep-copy the entire document a second time.
+        val targetEntries = result.entries
         if (stateModel.isSourceViewMode) {
-            sourcePreviewController.cancel()
+            sourceWaveformSyncController.cancel()
+            cancelSourcePreview()
             stateModel.documentState.sourceViewEditGeneration++
             sourceViewHasPendingEdits = false
             setSourceViewEditorText(updatedSource, preserveScroll = true)
-            applySourceViewEntries(targetEntries)
+            if (result.structureChanged) {
+                syncWaveformSubtitles(preserveSelection = true)
+            } else {
+                syncWaveformSubtitles(preserveSelection = true, changedPositions = result.changedPositions)
+            }
             stateModel.documentState.sourceViewEntriesGeneration =
                 stateModel.documentState.sourceViewEditGeneration
             updateFormatInfo()
+            // History already installed the target entries locally. Refresh the video track
+            // with those entries; waiting for a source parse here leaves the old subtitle track
+            // visible even though the editor has been reverted.
+            scheduleSubtitlePreview(debounceMs = 0L)
             return
         }
 
         val previousCount = subtitleAdapter.itemCount
-        applySourceViewEntries(targetEntries)
         if (previousCount != targetEntries.size || result.structureChanged) {
             submitSubtitleList(
                 refreshAll = true,
@@ -3208,36 +3489,60 @@ class EditorActivity : AppCompatActivity() {
                 syncWaveform = false,
                 markChanged = false
             ) { updateSelectedCountDisplay() }
+            syncWaveformSubtitles(preserveSelection = true)
         } else {
             result.changedPositions.forEach { position ->
                 if (position in 0 until subtitleAdapter.itemCount) subtitleAdapter.notifyItemChanged(position)
             }
             subtitleAdapter.setSelectionByStableIds(result.selectedIds)
             updateSelectedCountDisplay()
+            syncWaveformSubtitles(preserveSelection = true, changedPositions = result.changedPositions)
         }
+        // List undo/redo mutates the live rows directly. Keep the video track on the same
+        // snapshot instead of waiting for a later list-to-source synchronization.
+        scheduleSubtitlePreview(debounceMs = 0L)
     }
 
     private fun applySourceHistoryText(
         targetText: String,
-        cachedEntries: List<SubtitleEntry>? = null
+        cachedEntries: List<SubtitleEntry>? = null,
+        sourceEdit: EditorSourceTextEdit? = null,
+        undo: Boolean = false
     ) {
+        val previousText = stateModel.sourceViewContent
         val selectedIds = currentHistoryListState().selectedIds
         val previousCount = stateModel.subtitleEntries.size
         stateModel.originalFileContent = targetText
         stateModel.sourceViewContent = targetText
         stateModel.sourceHistoryTextSnapshot = targetText
-        if (cachedEntries != null) stateModel.documentState.restoreVttMetadata(targetText)
+        sourceEdit?.let { stateModel.documentState.updateVttMetadataForSourceEdit(targetText, it.lineNumber) }
         if (stateModel.isSourceViewMode) {
-            sourcePreviewController.cancel()
+            sourceWaveformSyncController.cancel()
+            cancelSourcePreview()
             stateModel.documentState.sourceViewEditGeneration++
             sourceViewHasPendingEdits = false
             setSourceViewEditorText(targetText, preserveScroll = true)
+            var appliedLocally = false
             if (cachedEntries != null) {
+                sourceHistorySyncPending = false
                 applySourceViewEntries(cachedEntries)
                 stateModel.documentState.sourceViewEntriesGeneration = stateModel.documentState.sourceViewEditGeneration
+                appliedLocally = true
+            } else if (sourceEdit != null && applySourceHistoryEditLocally(
+                edit = sourceEdit,
+                undo = undo,
+                before = previousText,
+                after = targetText
+            )) {
+                sourceHistorySyncPending = false
+                appliedLocally = true
             } else {
+                // Complex undo/redo patches (for example a merged VTT cue or a timestamp-map
+                // edit) cannot be reconciled from one block safely. Serialize one fallback parse
+                // and keep editing/history controls disabled until its result is installed.
                 scheduleSourceViewPreview()
             }
+            if (appliedLocally) scheduleSubtitlePreview(debounceMs = 0L)
             updateFormatInfo()
             return
         }
@@ -3259,10 +3564,66 @@ class EditorActivity : AppCompatActivity() {
             subtitleAdapter.setSelectionByStableIds(selectedIds)
             updateSelectedCountDisplay()
         }
+        scheduleSubtitlePreview()
     }
 
-    private fun onEntryUpdated(position: Int, message: String = "已更新") {
-        notifyEntriesChanged(listOf(position))
+    /** Apply a text-only undo/redo immediately when it stays inside one subtitle block. */
+    private fun applySourceHistoryEditLocally(
+        edit: EditorSourceTextEdit,
+        undo: Boolean,
+        before: String,
+        after: String
+    ): Boolean {
+        val oldFragment = if (undo) edit.insertedText else edit.deletedText
+        val newFragment = if (undo) edit.deletedText else edit.insertedText
+        if (sourceLineEditController.requiresFullParse(
+                before = before,
+                after = after,
+                format = stateModel.currentFormat,
+                startOffset = edit.startOffset,
+                oldEndOffset = edit.startOffset + oldFragment.length,
+                newEndOffset = edit.startOffset + newFragment.length
+            )
+        ) return false
+        val oldLineCount = sourceEditLineCount(oldFragment)
+        val newLineCount = sourceEditLineCount(newFragment)
+        return applySimpleSourceLineChange(edit.lineNumber, oldLineCount, newLineCount) ||
+            applySourceBlockChange(
+                before = before,
+                after = after,
+                startLine = edit.lineNumber,
+                oldLineCount = oldLineCount,
+                newLineCount = newLineCount,
+                oldStartOffset = edit.startOffset,
+                newStartOffset = edit.startOffset
+            )
+    }
+
+    private fun sourceEditLineCount(text: String): Int {
+        var breaks = 0
+        var index = 0
+        while (index < text.length) {
+            when (text[index]) {
+                '\r' -> {
+                    breaks++
+                    if (index + 1 < text.length && text[index + 1] == '\n') index++
+                }
+                '\n', '\u2028', '\u2029', '\u0085' -> breaks++
+            }
+            index++
+        }
+        return breaks + 1
+    }
+
+    private fun onEntryUpdated(
+        position: Int,
+        message: String = "已更新",
+        documentAlreadyPublished: Boolean = false
+    ) {
+        notifyEntriesChanged(
+            listOf(position),
+            refreshDocument = !documentAlreadyPublished
+        )
         showShortToast(message)
     }
 
@@ -3270,7 +3631,8 @@ class EditorActivity : AppCompatActivity() {
         positions: Iterable<Int>,
         includeNeighbors: Boolean = true,
         syncWaveform: Boolean = true,
-        markChanged: Boolean = true
+        markChanged: Boolean = true,
+        refreshDocument: Boolean = true
     ) {
         val positionList = positions.toList()
         val renderVersion = if (positionList.size > BULK_NOTIFY_THRESHOLD &&
@@ -3279,7 +3641,7 @@ class EditorActivity : AppCompatActivity() {
             showListLoading()
             ++listRenderVersion
         } else null
-        stateModel.refreshDocument()
+        if (refreshDocument) stateModel.refreshDocument()
         listPresentationController.notifyPositions(positionList, includeNeighbors)
         if (syncWaveform) syncWaveformSubtitles(changedPositions = positionList)
         if (markChanged) {
@@ -3846,20 +4208,23 @@ class EditorActivity : AppCompatActivity() {
             // 有长按位置，对长按的那一行应用偏移（无论是否有选中状态）
             longClickPos >= 0 && longClickPos < stateModel.subtitleEntries.size -> {
                 val entry = stateModel.subtitleEntries[longClickPos]
-                stateModel.execute(EditorCommand.ApplyOffset(setOf(longClickPos), offsetMs))
+                stateModel.executeWithoutPublish(EditorCommand.ApplyOffset(setOf(longClickPos), offsetMs))
                 
-                notifyEntriesChanged(listOf(longClickPos))
+                notifyEntriesChanged(listOf(longClickPos), refreshDocument = false)
             }
             // 没有长按位置但有选中的字幕，对选中的字幕应用偏移
             subtitleAdapter.getSelectedCount() > 0 -> {
                 val selectedEntries = subtitleAdapter.getSelectedEntries()
-                stateModel.execute(EditorCommand.ApplyOffset(selectedEntries.map { it.second }.toSet(), offsetMs))
+                stateModel.executeWithoutPublish(EditorCommand.ApplyOffset(selectedEntries.map { it.second }.toSet(), offsetMs))
                 
-                notifyEntriesChanged(selectedEntries.map { it.second })
+                notifyEntriesChanged(
+                    selectedEntries.map { it.second },
+                    refreshDocument = false
+                )
             }
             // 都没有，对所有字幕应用偏移
             else -> {
-                stateModel.execute(EditorCommand.ApplyOffset(stateModel.subtitleEntries.indices.toSet(), offsetMs))
+                stateModel.executeWithoutPublish(EditorCommand.ApplyOffset(stateModel.subtitleEntries.indices.toSet(), offsetMs))
                 
                 submitSubtitleList(refreshAll = true, markChanged = true)
             }
@@ -3883,7 +4248,7 @@ class EditorActivity : AppCompatActivity() {
     private fun deleteSelectedSubtitlesConfirmed(selectedEntries: List<Pair<SubtitleEntry, Int>>) {
         val historyBefore = currentHistoryListState()
         val deletedIndices = selectedEntries.map { it.second }.toSet()
-        stateModel.execute(EditorCommand.Delete(deletedIndices))
+        stateModel.executeWithoutPublish(EditorCommand.Delete(deletedIndices))
         syncAfterDelete(deletedIndices, historyBefore)
         com.subtitleedit.util.OverwritingToast.makeText(this, "已删除 ${selectedEntries.size} 条字幕", Toast.LENGTH_SHORT).show()
     }
@@ -4012,7 +4377,11 @@ class EditorActivity : AppCompatActivity() {
             stateModel.subtitleEntries.getOrNull(item.entryPosition)?.text = item.translatedText
         }
         if (appliedItems.isNotEmpty()) {
-            notifyEntriesChanged(appliedItems.map { it.entryPosition }, includeNeighbors = false)
+            notifyEntriesChanged(
+                appliedItems.map { it.entryPosition },
+                includeNeighbors = false,
+                refreshDocument = false
+            )
         }
         showShortToast("已应用 ${appliedItems.size} 条$actionName")
     }
@@ -4055,11 +4424,16 @@ class EditorActivity : AppCompatActivity() {
      * are rebound.  A size change still replaces the list in one operation because every row
      * after the edit has a new index.
      */
-    private fun applySourceViewEntries(updatedEntries: List<SubtitleEntry>) {
+    private fun applySourceViewEntries(
+        updatedEntries: List<SubtitleEntry>,
+        preserveProvidedStableIds: Boolean = false
+    ) {
         if (stateModel.subtitleEntries.size != updatedEntries.size) {
             val previousEntries = stateModel.subtitleEntries.toList()
             val previousIds = previousEntries.mapTo(mutableSetOf()) { it.stableId }
-            val associatedEntries = if (updatedEntries.any { it.stableId in previousIds }) {
+            val associatedEntries = if (
+                preserveProvidedStableIds || updatedEntries.any { it.stableId in previousIds }
+            ) {
                 updatedEntries.map { it.copy() }
             } else {
                 SubtitleEntryOps.retainStableIds(previousEntries, updatedEntries)
@@ -4115,7 +4489,8 @@ class EditorActivity : AppCompatActivity() {
                 changedPositions,
                 includeNeighbors = true,
                 syncWaveform = false,
-                markChanged = false
+                markChanged = false,
+                refreshDocument = false
             )
             syncWaveformSubtitles(preserveSelection = true, changedPositions = changedPositions)
         } else {
@@ -4341,7 +4716,7 @@ class EditorActivity : AppCompatActivity() {
         )
         val historyBefore = currentHistoryListState()
         val splitEntryId = entry.stableId
-        val result = stateModel.execute(
+        val result = stateModel.executeWithoutPublish(
             EditorCommand.Split(position, playhead, split.left, split.right)
         )
         if (!result.structureChanged) return
@@ -4576,9 +4951,9 @@ class EditorActivity : AppCompatActivity() {
         if (!ensureMediaMode()) return
         
         val newStartTime = playbackController.currentPositionMs
-        stateModel.execute(EditorCommand.UpdateTime(position, startTime = newStartTime))
+        stateModel.executeWithoutPublish(EditorCommand.UpdateTime(position, startTime = newStartTime))
         
-        notifyEntriesChanged(listOf(position))
+        notifyEntriesChanged(listOf(position), refreshDocument = false)
         
         if (newStartTime >= entry.endTime) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "开始时间已设置，但大于结束时间，请调整结束时间", Toast.LENGTH_LONG).show()

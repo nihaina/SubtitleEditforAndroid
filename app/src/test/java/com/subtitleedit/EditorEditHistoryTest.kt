@@ -254,6 +254,66 @@ class EditorEditHistoryTest {
     }
 
     @Test
+    fun rowHistoryResultReusesLiveDocumentEntries() {
+        val first = SubtitleEntry(startTime = 0L, endTime = 1000L, text = "旧")
+        val second = SubtitleEntry(startTime = 1000L, endTime = 2000L, text = "保留")
+        val after = first.copy(text = "新")
+        val operation = EditorEditHistory.Operation.ListChange.fromStates(
+            before = EditorEditHistory.ListState(listOf(first, second), emptySet()),
+            after = EditorEditHistory.ListState(listOf(after, second), emptySet()),
+            description = "修改"
+        )
+        val liveFirst = first.copy()
+        val liveSecond = second.copy()
+        val state = EditorDocumentState().apply {
+            subtitleEntries = mutableListOf(liveFirst, liveSecond)
+            historyEntriesSnapshot = mutableListOf(first.copy(), second.copy())
+            originalFileContent = ""
+            currentFormat = com.subtitleedit.util.SubtitleParser.SubtitleFormat.TXT
+        }
+
+        val result = operation.execute(state, undo = false)
+
+        assertSame(state.subtitleEntries, result.entries)
+        assertSame(liveSecond, result.entries[1])
+        assertEquals("新", liveFirst.text)
+    }
+
+    @Test
+    fun sameOrderHistoryBaselineAdvancesChangedRowsInPlace() {
+        val first = SubtitleEntry(text = "前")
+        val second = SubtitleEntry(text = "保持")
+        val viewModel = EditorViewModel()
+        viewModel.subtitleEntries = mutableListOf(first.copy(), second.copy())
+        viewModel.setHistoryBaseline(
+            EditorEditHistory.ListState(viewModel.subtitleEntries.map { it.copy() }, emptySet()),
+            sourceText = "",
+            clear = true
+        )
+        val ownedBaseline = viewModel.historyEntriesSnapshot
+        val previousFirst = ownedBaseline[0]
+        val previousSecond = ownedBaseline[1]
+        val before = EditorEditHistory.ListState(ownedBaseline, emptySet())
+        viewModel.subtitleEntries[0].text = "后"
+
+        viewModel.recordListHistory(
+            before = before,
+            after = EditorEditHistory.ListState(viewModel.subtitleEntries, emptySet()),
+            description = "修改",
+            beforeSourceText = null,
+            afterSourceText = null
+        )
+
+        assertSame(ownedBaseline, viewModel.historyEntriesSnapshot)
+        assertEquals(listOf("后", "保持"), viewModel.historyEntriesSnapshot.map { it.text })
+        assertSame(previousSecond, viewModel.historyEntriesSnapshot[1])
+        assertEquals("前", previousFirst.text)
+        val recorded = viewModel.peekUndo() as EditorEditHistory.Operation.ListChange
+        assertEquals("前", recorded.updated.single().before.text)
+        assertEquals("保持", viewModel.historyEntriesSnapshot[1].text)
+    }
+
+    @Test
     fun viewModelExecutesHistoryCommandAndPublishesDocument() {
         val viewModel = EditorViewModel()
         val before = SubtitleEntry(text = "前")

@@ -65,6 +65,12 @@ class SourceEditorView @JvmOverloads constructor(
         val newEndOffset: Int
     )
 
+    private data class ScrollAnchor(
+        val stableId: Long,
+        val position: Int,
+        val top: Int
+    )
+
     private val lineLayoutManager = LinearLayoutManager(context).apply {
         // Source rows may wrap to different visual heights. Smooth scrollbar metrics estimate
         // the document range from the currently visible rows, so that estimate can change while
@@ -80,6 +86,10 @@ class SourceEditorView @JvmOverloads constructor(
 
     private val lines = mutableListOf<SourceLineBlock>()
     private val offsets = LineOffsets()
+    // The line model is authoritative, but rebuilding the serialized document for every
+    // listener/search/preview callback is O(file size). Keep the last serialized snapshot and
+    // invalidate it only when a line model mutation actually occurs.
+    private var documentTextCache: String? = null
     private val highlights = mutableListOf<Highlight>()
     private val documentChangedListeners = mutableListOf<() -> Unit>()
     private val documentChangeListeners = mutableListOf<(DocumentChange) -> Unit>()
@@ -474,18 +484,48 @@ class SourceEditorView @JvmOverloads constructor(
 
     fun setDocumentText(value: String, preserveScroll: Boolean = false) {
         if (documentSelection != null) clearDocumentSelection()
-        val previousScroll = if (preserveScroll) getDocumentScrollOffset() else 0
-        replaceLines(value)
-        lineAdapter.notifyDataSetChanged()
-        if (preserveScroll) post { scrollToDocumentY(previousScroll) }
+        // RecyclerView uses item-based scroll metrics here because source rows have variable
+        // heights. Keep unchanged row objects and dispatch only the changed range on waveform and
+        // history writes; a full data-set refresh can reset the viewport during repeated updates.
+        val previousAnchor = if (preserveScroll) captureScrollAnchor() else null
+        documentTextCache = value
+        val structureChanged = if (preserveScroll) {
+            replaceLinesIncrementally(value)
+        } else {
+            replaceLines(value)
+            lineAdapter.notifyDataSetChanged()
+            false
+        }
+        if (structureChanged && previousAnchor != null) {
+            postOnAnimation { restoreScrollAnchor(previousAnchor) }
+        }
     }
 
-    fun getDocumentText(): String = buildString(offsets.documentLength) {
+    private fun captureScrollAnchor(): ScrollAnchor? {
+        val position = lineLayoutManager.findFirstVisibleItemPosition()
+        if (position == androidx.recyclerview.widget.RecyclerView.NO_POSITION) return null
+        val line = lines.getOrNull(position) ?: return null
+        return ScrollAnchor(
+            stableId = line.stableId,
+            position = position,
+            top = lineLayoutManager.findViewByPosition(position)?.top ?: 0
+        )
+    }
+
+    private fun restoreScrollAnchor(anchor: ScrollAnchor) {
+        if (lines.isEmpty()) return
+        val position = lines.indexOfFirst { it.stableId == anchor.stableId }
+            .takeIf { it >= 0 }
+            ?: anchor.position.coerceIn(0, lines.lastIndex)
+        lineLayoutManager.scrollToPositionWithOffset(position, anchor.top)
+    }
+
+    fun getDocumentText(): String = documentTextCache ?: buildString(offsets.documentLength) {
         lines.forEach { line ->
             append(line.text)
             append(line.lineEnding)
         }
-    }
+    }.also { documentTextCache = it }
 
     fun replaceDocumentText(value: String) {
         val oldLineCount = lines.size
@@ -2054,6 +2094,80 @@ class SourceEditorView @JvmOverloads constructor(
         lineAdapter.setLineCount(lines.size, notify = false)
     }
 
+    /** Update only the changed physical rows and reuse every unchanged row's stable identity. */
+    private fun replaceLinesIncrementally(value: String): Boolean {
+        val diff = SourceDocumentLineDiffs.diff(
+            oldCount = lines.size,
+            updatedContent = value,
+            oldLineLength = { position -> lines[position].serializedLength },
+            oldLineMatchesAt = { position, content, offset ->
+                val old = lines[position]
+                SourceDocumentLineDiffs.matchesAt(content, offset, old.text, old.lineEnding)
+            }
+        )
+        val oldCount = diff.oldChangedCount
+        val newCount = diff.newChangedCount
+        if (oldCount == 0 && newCount == 0) {
+            preferredLineEnding = lines.firstOrNull { it.lineEnding.isNotEmpty() }?.lineEnding ?: "\n"
+            return false
+        }
+
+        if (oldCount == newCount) {
+            var firstChanged = -1
+            var lastChanged = -1
+            repeat(newCount) { offset ->
+                val position = diff.unchangedPrefix + offset
+                val old = lines[position]
+                val updated = diff.replacement[offset]
+                if (old.text != updated.text || old.lineEnding != updated.lineEnding) {
+                    val oldLength = old.serializedLength
+                    old.text = updated.text
+                    old.lineEnding = updated.lineEnding
+                    offsets.update(position, old.serializedLength - oldLength)
+                    if (firstChanged < 0) firstChanged = position
+                    lastChanged = position
+                }
+            }
+            if (firstChanged >= 0) {
+                lineAdapter.notifyDocumentRowsChanged(firstChanged, lastChanged - firstChanged + 1)
+            }
+        } else {
+            val replacementStart = diff.unchangedPrefix
+            val reusedCount = minOf(oldCount, newCount)
+            var firstChanged = -1
+            var lastChanged = -1
+            repeat(reusedCount) { offset ->
+                val position = replacementStart + offset
+                val old = lines[position]
+                val updated = diff.replacement[offset]
+                if (old.text != updated.text || old.lineEnding != updated.lineEnding) {
+                    val oldLength = old.serializedLength
+                    old.text = updated.text
+                    old.lineEnding = updated.lineEnding
+                    offsets.update(position, old.serializedLength - oldLength)
+                    if (firstChanged < 0) firstChanged = position
+                    lastChanged = position
+                }
+            }
+            if (firstChanged >= 0) {
+                lineAdapter.notifyDocumentRowsChanged(firstChanged, lastChanged - firstChanged + 1)
+            }
+
+            val structuralStart = replacementStart + reusedCount
+            val removedCount = oldCount - reusedCount
+            offsets.remove(structuralStart, removedCount)
+            lines.subList(structuralStart, diff.oldChangedEnd).clear()
+            val inserted = diff.replacement.drop(reusedCount).map { line ->
+                SourceLineBlock(nextLineId++, line.text, line.lineEnding)
+            }
+            lines.addAll(structuralStart, inserted)
+            offsets.insert(structuralStart, inserted.map { it.serializedLength })
+            lineAdapter.notifyDocumentRowsReplaced(structuralStart, removedCount, inserted.size)
+        }
+        preferredLineEnding = lines.firstOrNull { it.lineEnding.isNotEmpty() }?.lineEnding ?: "\n"
+        return oldCount != newCount
+    }
+
     private fun onLineTextChanged(
         position: Int,
         rawValue: String,
@@ -2089,6 +2203,7 @@ class SourceEditorView @JvmOverloads constructor(
             if (line.text == normalized) return
             val startOffset = offsets.start(position)
             val oldLength = line.text.length
+            documentTextCache = null
             line.text = normalized
             offsets.update(position, normalized.length - oldLength)
             notifyDocumentChanged(
@@ -2109,6 +2224,7 @@ class SourceEditorView @JvmOverloads constructor(
         val originalEnding = line.lineEnding
         val oldSerializedLength = line.serializedLength
         val parts = splitEditorLines(normalized)
+        documentTextCache = null
         line.text = parts.first()
         line.lineEnding = preferredLineEnding
         val inserted = parts.drop(1).mapIndexed { index, text ->
@@ -2150,6 +2266,7 @@ class SourceEditorView @JvmOverloads constructor(
         val startOffset = offsets.start(position)
         val oldSerializedLength = line.serializedLength
         val originalEnding = line.lineEnding
+        documentTextCache = null
         val before = line.text.substring(0, safeColumn)
         val after = line.text.substring(safeColumn)
         line.text = before
@@ -2182,6 +2299,7 @@ class SourceEditorView @JvmOverloads constructor(
         val oldEndOffset = offsets.start(position) + current.text.length
         val cursor = previous.text.length
         val oldPreviousLength = previous.serializedLength
+        documentTextCache = null
         previous.text += current.text
         previous.lineEnding = current.lineEnding
         lines.removeAt(position)
@@ -2210,6 +2328,7 @@ class SourceEditorView @JvmOverloads constructor(
         val oldEndOffset = offsets.start(position + 1) + next.text.length
         val cursor = current.text.length
         val oldCurrentLength = current.serializedLength
+        documentTextCache = null
         current.text += next.text
         current.lineEnding = next.lineEnding
         lines.removeAt(position + 1)

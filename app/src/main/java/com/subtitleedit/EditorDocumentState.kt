@@ -5,6 +5,7 @@ import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.subtitle.LrcVariant
 import com.subtitleedit.util.subtitle.SubtitleDocument
+import com.subtitleedit.util.subtitle.WebVttSubtitleFormatHandler
 import java.io.File
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
@@ -54,19 +55,30 @@ internal class EditorDocumentState {
             lrcVariant = documentLrcVariant
         )
 
+    /** Update only VTT sections when a source edit touches the header/footer. */
+    fun updateVttMetadataForSourceEdit(content: String, editedLine: Int) {
+        if (currentFormat != SubtitleParser.SubtitleFormat.VTT) return
+        var cursor = 0
+        var lineIndex = 0
+        while (cursor <= content.length) {
+            val lineEnd = content.indexOfAny(charArrayOf('\r', '\n'), cursor)
+                .takeIf { it >= 0 } ?: content.length
+            if (WebVttSubtitleFormatHandler.parseTimeLine(content.substring(cursor, lineEnd)) != null) {
+                if (editedLine < lineIndex) documentHeader = content.substring(0, cursor).trimEnd()
+                return
+            }
+            if (lineEnd >= content.length) return
+            cursor = lineEnd + if (content[lineEnd] == '\r' && content.getOrNull(lineEnd + 1) == '\n') 2 else 1
+            lineIndex++
+        }
+    }
+
     fun replaceDocument(document: SubtitleDocument) {
         currentFormat = document.format
         documentLrcVariant = document.lrcVariant
         documentHeader = document.header
         documentFooter = document.footer
         subtitleEntries = document.entries.map { it.copy() }.toMutableList()
-    }
-
-    fun restoreVttMetadata(content: String) {
-        if (currentFormat != SubtitleParser.SubtitleFormat.VTT) return
-        val document = SubtitleParser.parseDocument(content, format = currentFormat)
-        documentHeader = document.header
-        documentFooter = document.footer
     }
 
     fun startNewSubtitleDocument() {
