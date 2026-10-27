@@ -109,14 +109,16 @@ internal object SourceDocumentLineDiffs {
         return text.isNotEmpty() || endingStart == 0 || isLineBreak(content[endingStart - 1])
     }
 
-    private fun splitRange(
+    internal fun splitRange(
         content: String,
         start: Int,
         end: Int,
         appendTerminalEmptyRow: Boolean
     ): List<SourceDocumentLine> {
         if (start == end) {
-            return if (appendTerminalEmptyRow && start > 0 && isLineBreak(content[start - 1])) {
+            return if (appendTerminalEmptyRow &&
+                (start == 0 || isLineBreak(content[start - 1]))
+            ) {
                 listOf(SourceDocumentLine("", ""))
             } else {
                 emptyList()

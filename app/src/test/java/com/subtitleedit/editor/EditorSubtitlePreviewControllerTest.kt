@@ -186,6 +186,36 @@ class EditorSubtitlePreviewControllerTest {
         }
     }
 
+    @Test
+    fun previewCacheKeepsOnlyTheActiveAndRecentTracks() = runBlocking {
+        val cache = Files.createTempDirectory("subtitle-preview-cache-test-").toFile()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        var nextTrack = CompletableDeferred<File?>()
+        val controller = EditorSubtitlePreviewController(cache, scope) { track ->
+            nextTrack.complete(track)
+        }
+        try {
+            repeat(6) { index ->
+                nextTrack = CompletableDeferred()
+                controller.schedule(
+                    SubtitleFormat.SRT,
+                    listOf(SubtitleEntry(startTime = 1_000, endTime = 2_000, text = "Cue $index")),
+                    sourceViewMode = false,
+                    sourceContent = "1\n00:00:01,000 --> 00:00:02,000\nCue $index\n",
+                    debounceMs = 0L
+                )
+                withTimeout(5_000) { nextTrack.await() }
+            }
+            val session = cache.resolve("mpv-subtitles").listFiles()?.singleOrNull()
+            val liveFiles = session?.listFiles()?.count { it.isFile && it.name.startsWith("live-") } ?: 0
+            assertTrue("preview cache grew to $liveFiles files", liveFiles <= 3)
+        } finally {
+            controller.release()
+            scope.cancel()
+            cache.deleteRecursively()
+        }
+    }
+
     private data class Preview(val extension: String, val content: String)
 
     private suspend fun preview(

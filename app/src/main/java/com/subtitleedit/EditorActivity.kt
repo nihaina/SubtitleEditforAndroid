@@ -98,6 +98,7 @@ import com.subtitleedit.util.subtitle.WebVttBrowserPreview
 import com.subtitleedit.util.subtitle.WebVttStyleOps
 import com.subtitleedit.util.subtitle.WebVttVoiceOps
 import com.subtitleedit.util.SubtitleSourceSynchronizer
+import com.subtitleedit.view.SourceEditorView
 import com.subtitleedit.util.TimeUtils
 import com.subtitleedit.util.subtitle.SubtitleDocument
 import java.io.File
@@ -143,6 +144,8 @@ class EditorActivity : AppCompatActivity() {
     private var activeSourceSyncRequest: SourceSyncRequest? = null
     /** onStop records this; onStart resumes only when the previous job is no longer active. */
     private var sourceSyncNeedsResume = false
+    /** A cross-mode source history operation is resolving the list rows in the background. */
+    private var sourceListHistorySyncPending = false
     private var sourceViewTransitionJob: Job? = null
     private var sourceListParseJob: Job? = null
     /** Only the latest media selection may update playback and MP3 inspection state. */
@@ -387,14 +390,22 @@ class EditorActivity : AppCompatActivity() {
             isDocumentLoaded = { stateModel.documentLoaded },
             isSourceMode = { stateModel.isSourceViewMode },
             hasPendingSourceEdits = { sourceViewHasPendingEdits },
-            hasPendingSourceHistorySync = { sourceHistorySyncPending || sourceSyncNeedsResume },
+            hasPendingSourceHistorySync = {
+                sourceHistorySyncPending || sourceSyncNeedsResume || sourceListHistorySyncPending
+            },
             recordSourceSyncBackground = ::recordSourceSyncBackground,
             snapshotSource = { snapshotSourceViewContentIfNeeded() },
             scheduleSourcePreview = { scheduleSourceViewPreview() },
             scheduleSubtitlePreview = { scheduleSubtitlePreview() },
             cancelSourceParse = {
-                sourceListParseJob?.cancel()
-                sourceListParseJob = null
+                // A list-mode source-history parse is the authoritative recovery for the
+                // already-applied undo/redo operation. Let it finish while the Activity is in
+                // the background; cancelling it would leave the list and preview on the old
+                // rows with no source-view callback available to restart it.
+                if (!sourceListHistorySyncPending) {
+                    sourceListParseJob?.cancel()
+                    sourceListParseJob = null
+                }
             },
             savePlaybackState = { position, speed ->
                 stateModel.playbackPositionMs = position
@@ -497,20 +508,27 @@ class EditorActivity : AppCompatActivity() {
         menuView = menu,
         sourceMode = stateModel.isSourceViewMode,
         selectedCount = if (::subtitleAdapter.isInitialized) subtitleAdapter.getSelectedCount() else 0,
-        undo = if (sourceHistorySyncPending) null else if (stateModel.isSourceViewMode) {
+        undo = if (sourceHistorySyncPending || sourceListHistorySyncPending) null else if (stateModel.isSourceViewMode) {
             stateModel.peekUndoWithoutSelection()
         } else stateModel.peekUndo(),
-        redo = if (sourceHistorySyncPending) null else if (stateModel.isSourceViewMode) {
+        redo = if (sourceHistorySyncPending || sourceListHistorySyncPending) null else if (stateModel.isSourceViewMode) {
             stateModel.peekRedoWithoutSelection()
         } else stateModel.peekRedo(),
         sourceTransitioning = stateModel.isSourceViewTransitioning ||
-            sourceViewTransitionJob?.isActive == true || sourceHistorySyncPending
+            sourceViewTransitionJob?.isActive == true || sourceHistorySyncPending ||
+            sourceListHistorySyncPending
     )
 
     private fun handleMenuClick(item: MenuItem): Boolean = editorCoordinator.handleMenu(item)
 
     private fun handleEditorMenuAction(action: EditorMenuController.Action) {
-        if (sourceHistorySyncPending && action == EditorMenuController.Action.SEARCH) {
+        if ((sourceHistorySyncPending || sourceListHistorySyncPending) &&
+            action == EditorMenuController.Action.SEARCH
+        ) {
+            showShortToast("正在同步，请稍候")
+            return
+        }
+        if (sourceListHistorySyncPending && action == EditorMenuController.Action.SAVE) {
             showShortToast("正在同步，请稍候")
             return
         }
@@ -781,7 +799,9 @@ class EditorActivity : AppCompatActivity() {
             // need the media preview refreshed; never reparse the complete source document.
             schedulePreview = ::scheduleSubtitlePreview,
             recordHistory = ::recordSourceTextChange,
-            onSourceUpdated = ::applySourceWaveformUpdatedSource
+            onSourceUpdated = { updatedSource, sourceEdit ->
+                applySourceWaveformUpdatedSource(updatedSource, sourceEdit)
+            }
         )
         waveformController = EditorWaveformController(
             context = this,
@@ -792,7 +812,7 @@ class EditorActivity : AppCompatActivity() {
             mediaRepository = mediaRepository,
             currentPlaybackPositionMs = { playbackController.currentPositionMs },
             onSubtitleChanged = { changedIndex, updatedEntry, dragSessionKey, isFinal ->
-                if (sourceHistorySyncPending) {
+                if (sourceHistorySyncPending || sourceListHistorySyncPending) {
                     showShortToast("正在同步，请稍候")
                     return@EditorWaveformController
                 }
@@ -1170,14 +1190,21 @@ class EditorActivity : AppCompatActivity() {
     }
 
     /** 将波形拖动后的时间字段回写源视图，避免每次 MOVE 都触发逐行重建。 */
-    private fun applySourceWaveformUpdatedSource(updatedSource: String) {
+    private fun applySourceWaveformUpdatedSource(
+        updatedSource: String,
+        sourceEdit: EditorSourceTextEdit? = null
+    ) {
         stateModel.originalFileContent = updatedSource
         stateModel.sourceViewContent = updatedSource
         stateModel.sourceHistoryTextSnapshot = updatedSource
         sourceViewHasPendingEdits = false
         stateModel.documentState.sourceViewEditGeneration++
         stateModel.documentState.sourceViewEntriesGeneration = stateModel.documentState.sourceViewEditGeneration
-        setSourceViewEditorText(updatedSource, preserveScroll = true)
+        setSourceViewEditorText(
+            updatedSource,
+            preserveScroll = true,
+            changeHint = sourceEdit?.let { sourceEditToDocumentChange(it) }
+        )
         updateFormatInfo()
         scheduleSubtitlePreview()
     }
@@ -1476,6 +1503,10 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun parseContent(content: String, fileName: String? = null) {
+        // A new subtitle document invalidates previews from the previous document before its
+        // rows are installed. Otherwise an already-running build could replace the new video's
+        // track after this parse completes.
+        if (::subtitlePreviewController.isInitialized) subtitlePreviewController.cancelPending()
         stateModel.loadSubtitleContent(content, fileName)
         
         if (stateModel.currentFormat.isSourceOnly) {
@@ -1606,7 +1637,7 @@ class EditorActivity : AppCompatActivity() {
      * 切换源视图模式
      */
     private fun toggleSourceView() {
-        if (sourceHistorySyncPending) {
+        if (sourceHistorySyncPending || sourceSyncNeedsResume || sourceListHistorySyncPending) {
             showShortToast("正在同步，请稍候")
             return
         }
@@ -1697,7 +1728,33 @@ class EditorActivity : AppCompatActivity() {
                 editedContent = stateModel.sourceViewContent
                 cancelSourcePreview()
                 if (stateModel.documentState.sourceViewEntriesGeneration != stateModel.documentState.sourceViewEditGeneration) {
-                    sourceViewCoordinator.applyDeletionLocally(editedContent)
+                    val appliedDeletion = sourceViewCoordinator.applyDeletionLocally(editedContent)
+                    if (!appliedDeletion) {
+                        // A failed/invalid full source sync may leave the row model behind the
+                        // editor text. Deletion-only recovery is insufficient for replacements,
+                        // timestamp edits, and malformed-then-repaired cues, so parse the current
+                        // source before exposing list view.
+                        val parsed = withContext(Dispatchers.Default) {
+                            SubtitleParser.parseDocument(
+                                editedContent,
+                                format = stateModel.currentFormat
+                            )
+                        }
+                        if (parsed.entries.isEmpty() && sourceContainsSubtitleMarker(editedContent)) {
+                            error("字幕内容尚未完整")
+                        }
+                        if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.VTT) {
+                            stateModel.documentState.documentHeader = parsed.header
+                            stateModel.documentState.documentFooter = parsed.footer
+                        }
+                        if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.LRC) {
+                            stateModel.documentState.documentLrcVariant = parsed.lrcVariant
+                        }
+                        applySourceViewEntries(normalizeSourceViewEntries(parsed.entries))
+                        stateModel.documentState.sourceViewEntriesGeneration =
+                            stateModel.documentState.sourceViewEditGeneration
+                        sourceViewHasPendingEdits = false
+                    }
                 }
                 stateModel.originalFileContent = editedContent
                 stateModel.sourceViewContent = editedContent
@@ -1731,15 +1788,32 @@ class EditorActivity : AppCompatActivity() {
     /** Source rows are kept incrementally synchronized while editing; no second full parse is needed. */
     private fun scheduleListSourceParse(content: String, generation: Long) {
         if (stateModel.isSourceViewMode || stateModel.sourceViewContent != content) return
-        stateModel.documentState.sourceViewEntriesGeneration = generation
-        stateModel.sourceViewNeedsListSync = false
-        syncEditHistoryBaseline()
-        submitSubtitleList(
-            refreshAll = false,
-            syncWaveform = false,
-            markChanged = false
-        )
-        scheduleSubtitlePreview(debounceMs = 0L)
+        sourceListParseJob?.cancel()
+        sourceListHistorySyncPending = true
+        invalidateOptionsMenu()
+        val format = stateModel.currentFormat
+        sourceListParseJob = lifecycleScope.launch {
+            try {
+                val document = withContext(Dispatchers.Default) {
+                    SubtitleParser.parseDocument(content, format = format)
+                }
+                if (!isActive || stateModel.isSourceViewMode ||
+                    stateModel.sourceViewContent != content ||
+                    generation != stateModel.documentState.sourceViewEditGeneration
+                ) return@launch
+                applyParsedListSourceDocument(document, content, generation)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                showShortToast("字幕同步失败：${error.message ?: "保留当前列表"}")
+            } finally {
+                if (sourceListParseJob === coroutineContext[Job]) {
+                    sourceListParseJob = null
+                    sourceListHistorySyncPending = false
+                    invalidateOptionsMenu()
+                }
+            }
+        }
     }
 
     private fun applyParsedListSourceDocument(
@@ -1772,11 +1846,15 @@ class EditorActivity : AppCompatActivity() {
         scheduleSubtitlePreview(debounceMs = 0L)
     }
 
-    private fun setSourceViewEditorText(content: String, preserveScroll: Boolean = false) {
+    private fun setSourceViewEditorText(
+        content: String,
+        preserveScroll: Boolean = false,
+        changeHint: SourceEditorView.DocumentChange? = null
+    ) {
         if (::sourceLineEditController.isInitialized) sourceLineEditController.invalidateLineIndex()
         suppressSourceViewChanges = true
         try {
-            binding.etSourceView.setDocumentText(content, preserveScroll)
+            binding.etSourceView.setDocumentText(content, preserveScroll, changeHint)
         } finally {
             suppressSourceViewChanges = false
         }
@@ -3391,7 +3469,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun undoEdit() {
-        if (sourceHistorySyncPending) {
+        if (sourceHistorySyncPending || sourceListHistorySyncPending) {
             showShortToast("正在同步，请稍候")
             return
         }
@@ -3415,7 +3493,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun redoEdit() {
-        if (sourceHistorySyncPending) {
+        if (sourceHistorySyncPending || sourceListHistorySyncPending) {
             showShortToast("正在同步，请稍候")
             return
         }
@@ -3521,7 +3599,11 @@ class EditorActivity : AppCompatActivity() {
             cancelSourcePreview()
             stateModel.documentState.sourceViewEditGeneration++
             sourceViewHasPendingEdits = false
-            setSourceViewEditorText(targetText, preserveScroll = true)
+            setSourceViewEditorText(
+                targetText,
+                preserveScroll = true,
+                changeHint = sourceEdit?.let { sourceEditToDocumentChange(it, undo) }
+            )
             var appliedLocally = false
             if (cachedEntries != null) {
                 sourceHistorySyncPending = false
@@ -3547,12 +3629,39 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
-        if (cachedEntries == null) {
+        // A source-text history operation can be undone after the user has switched to list
+        // view. The list rows are still the pre-undo model at this point, so reconcile them before
+        // scheduling the video preview. Simple edits use the same block-local path as source mode;
+        // complex edits fall back to the serialized document parse below.
+        stateModel.documentState.sourceViewEditGeneration++
+        if (cachedEntries == null && sourceEdit != null && applySourceHistoryEditLocally(
+                edit = sourceEdit,
+                undo = undo,
+                before = previousText,
+                after = targetText
+            )
+        ) {
+            stateModel.documentState.sourceViewEntriesGeneration =
+                stateModel.documentState.sourceViewEditGeneration
             stateModel.sourceViewNeedsListSync = false
+            submitSubtitleList(
+                refreshAll = false,
+                selectedStableIds = selectedIds,
+                syncWaveform = false,
+                markChanged = false
+            )
+            scheduleSubtitlePreview(debounceMs = 0L)
+            return
+        }
+
+        if (cachedEntries == null) {
             scheduleListSourceParse(targetText, stateModel.documentState.sourceViewEditGeneration)
             return
         }
         applySourceViewEntries(cachedEntries)
+        stateModel.documentState.sourceViewEntriesGeneration =
+            stateModel.documentState.sourceViewEditGeneration
+        stateModel.sourceViewNeedsListSync = false
         if (previousCount != stateModel.subtitleEntries.size || subtitleAdapter.itemCount != stateModel.subtitleEntries.size) {
             submitSubtitleList(
                 refreshAll = false,
@@ -3613,6 +3722,22 @@ class EditorActivity : AppCompatActivity() {
             index++
         }
         return breaks + 1
+    }
+
+    private fun sourceEditToDocumentChange(
+        edit: EditorSourceTextEdit,
+        undo: Boolean = false
+    ): SourceEditorView.DocumentChange {
+        val deleted = if (undo) edit.insertedText else edit.deletedText
+        val inserted = if (undo) edit.deletedText else edit.insertedText
+        return SourceEditorView.DocumentChange(
+            startLine = edit.lineNumber,
+            oldLineCount = sourceEditLineCount(deleted),
+            newLineCount = sourceEditLineCount(inserted),
+            startOffset = edit.startOffset,
+            oldEndOffset = edit.startOffset + deleted.length,
+            newEndOffset = edit.startOffset + inserted.length
+        )
     }
 
     private fun onEntryUpdated(
@@ -3829,6 +3954,10 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun saveFile(continuation: SaveContinuation = SaveContinuation.NONE) {
+        if (sourceListHistorySyncPending) {
+            showShortToast("正在同步，请稍候")
+            return
+        }
         stateModel.saveCoordinator.begin(continuation)
         stateModel.documentUri?.let { uriString ->
             saveFileToUriAsync(Uri.parse(uriString))
@@ -3870,6 +3999,10 @@ class EditorActivity : AppCompatActivity() {
     }
     
     private fun saveFileAs() {
+        if (sourceListHistorySyncPending) {
+            showShortToast("正在同步，请稍候")
+            return
+        }
         stateModel.saveCoordinator.begin(SaveContinuation.NONE)
         launchSaveFilePicker()
     }
@@ -4753,6 +4886,9 @@ class EditorActivity : AppCompatActivity() {
         restoreDocument: Boolean = false,
         inspectMp3: Boolean? = null
     ) {
+        // Media preparation changes the player generation. Drop any preview that belongs to the
+        // previous media before a new prepare() can accept its subtitle track.
+        if (::subtitlePreviewController.isInitialized) subtitlePreviewController.cancelPending()
         // Opening another file while a previous conversion/probe is still running must not let
         // the old result replace the new media or consume the only visible warning dialog.
         mediaLoadJob?.cancel()

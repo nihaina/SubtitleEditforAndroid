@@ -23,8 +23,12 @@ internal class EditorSubtitlePreviewController(
     private val replaceTrack: (File?) -> Unit
 ) {
     private val sessionDir = File(cacheDir, "mpv-subtitles/${UUID.randomUUID()}")
+    private val requestLock = Any()
     private var updateJob: Job? = null
-    private var requestGeneration = 0L
+    @Volatile private var requestGeneration = 0L
+    @Volatile private var released = false
+    @Volatile private var installedPreviewFile: File? = null
+    @Volatile private var previousInstalledPreviewFile: File? = null
     // Preview serialization prevents canceled-but-already-running full subtitle writes from
     // overlapping when a large document is edited repeatedly.
     private val previewDispatcher = Dispatchers.IO.limitedParallelism(1)
@@ -43,6 +47,7 @@ internal class EditorSubtitlePreviewController(
         sourceContent: String,
         debounceMs: Long = 300L
     ) {
+        if (released) return
         val generation = ++requestGeneration
         // Keep the list structure stable for the worker, but defer the expensive per-entry copy
         // until the serialized IO dispatcher.  Previously this map { copy() } ran on the main
@@ -53,6 +58,11 @@ internal class EditorSubtitlePreviewController(
             delay(debounceMs.coerceAtLeast(0L))
             val preview = withContext(previewDispatcher) {
                 val entrySnapshot = request.entries.map { it.copy() }
+                // The list is intentionally shallow-captured to keep large edits off the main
+                // thread. If a mutable row changed while it was being copied, the schedule that
+                // accompanied that mutation advanced requestGeneration; discard this mixed
+                // snapshot instead of sending it to mpv.
+                if (generation != requestGeneration || released) return@withContext null
                 buildPreviewFile(
                     request.format,
                     entrySnapshot,
@@ -61,23 +71,52 @@ internal class EditorSubtitlePreviewController(
                     generation
                 )
             }
-            if (!isActive || generation != requestGeneration) {
+            if (!isActive || generation != requestGeneration || released) {
                 preview?.delete()
                 return@launch
             }
-            replaceTrack(preview)
+            val accepted = synchronized(requestLock) {
+                if (released || generation != requestGeneration) {
+                    false
+                } else {
+                    // Serialize the final generation check with cancellation. This closes the
+                    // narrow window where a media/document switch could invalidate a request
+                    // after the check but before replaceTrack() queues it to mpv.
+                    replaceTrack(preview)
+                    if (preview != null) {
+                        previousInstalledPreviewFile = installedPreviewFile
+                        installedPreviewFile = preview
+                    } else {
+                        previousInstalledPreviewFile = installedPreviewFile
+                        installedPreviewFile = null
+                    }
+                    true
+                }
+            }
+            if (!accepted) {
+                preview?.delete()
+            }
         }
     }
 
     fun cancelPending() {
-        requestGeneration++
-        updateJob?.cancel()
-        updateJob = null
+        synchronized(requestLock) {
+            requestGeneration++
+            updateJob?.cancel()
+            updateJob = null
+        }
     }
 
     fun release() {
-        cancelPending()
-        replaceTrack(null)
+        synchronized(requestLock) {
+            released = true
+            requestGeneration++
+            updateJob?.cancel()
+            updateJob = null
+            replaceTrack(null)
+            installedPreviewFile = null
+            previousInstalledPreviewFile = null
+        }
         sessionDir.deleteRecursively()
     }
 
@@ -120,6 +159,8 @@ internal class EditorSubtitlePreviewController(
         }
         if (content.isBlank()) return null
 
+        if (released) return null
+
         sessionDir.mkdirs()
         val extension = when {
             format == SubtitleParser.SubtitleFormat.VTT ||
@@ -136,7 +177,27 @@ internal class EditorSubtitlePreviewController(
             staging.copyTo(destination, overwrite = true)
             staging.delete()
         }
+        if (released) {
+            runCatching { destination.delete() }
+            runCatching { sessionDir.deleteRecursively() }
+            return null
+        }
+        cleanupPreviewFiles(
+            keep = listOf(destination, installedPreviewFile, previousInstalledPreviewFile)
+                .filterNotNull()
+                .mapTo(mutableSetOf()) { it.absolutePath }
+        )
         return destination
+    }
+
+    /** Keep the active and immediately previous tracks, removing abandoned generations. */
+    private fun cleanupPreviewFiles(keep: Set<String>) {
+        sessionDir.listFiles()?.forEach { file ->
+            if (file.absolutePath in keep) return@forEach
+            if (file.name.startsWith("live-")) {
+                runCatching { file.delete() }
+            }
+        }
     }
 
     private fun buildWebVttPreview(

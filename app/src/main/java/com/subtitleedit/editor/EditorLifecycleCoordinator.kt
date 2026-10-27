@@ -57,6 +57,10 @@ internal class EditorLifecycleCoordinator(
         if (!isDocumentLoaded()) return
         if (isSourceMode() && (hasPendingSourceEdits() || hasPendingSourceHistorySync())) {
             if (!sourcePreview.isActive) scheduleSourcePreview()
+        } else if (hasPendingSourceHistorySync()) {
+            // A list-mode source-history parse owns the current document snapshot. Do not
+            // publish the still-old row model from onStart while that parse is finishing.
+            return
         } else {
             scheduleSubtitlePreview()
         }

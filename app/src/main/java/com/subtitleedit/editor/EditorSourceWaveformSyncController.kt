@@ -26,7 +26,7 @@ internal class EditorSourceWaveformSyncController(
     private val cancelPreview: () -> Unit,
     private val schedulePreview: () -> Unit,
     private val recordHistory: (String, String) -> Unit,
-    private val onSourceUpdated: (String) -> Unit
+    private val onSourceUpdated: (String, EditorSourceTextEdit) -> Unit
 ) {
     private data class Request(
         val content: String,
@@ -95,7 +95,12 @@ internal class EditorSourceWaveformSyncController(
                                 format = currentFormat(),
                                 oldEntries = request.entries,
                                 newEntries = updatedEntries
-                            )
+                            )?.let { updatedSource ->
+                                updatedSource to EditorSourceTextEdit.between(
+                                    request.content,
+                                    updatedSource
+                                )
+                            }
                         }
                     }
                     if (!isActive || !isSourceViewMode() || request.generation != editGeneration()) continue
@@ -104,15 +109,16 @@ internal class EditorSourceWaveformSyncController(
                         schedulePreview()
                         continue
                     }
+                    val (updatedSource, sourceEdit) = result
                     if (request.recordHistory) {
-                        recordHistory(request.historyStart ?: request.content, result)
+                        recordHistory(request.historyStart ?: request.content, updatedSource)
                         if (request.dragKey != null && historyKey == request.dragKey) {
                             historyKey = null
                             historyStart = null
                             historyEntries = null
                         }
                     }
-                    onSourceUpdated(result)
+                    onSourceUpdated(updatedSource, sourceEdit)
                 }
             } finally {
                 if (job === running) job = null

@@ -30,6 +30,7 @@ import android.view.textclassifier.TextClassificationContext
 import android.view.textclassifier.TextClassifier
 import android.view.textclassifier.TextSelection
 import android.widget.PopupWindow
+import androidx.core.view.doOnNextLayout
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -70,6 +71,22 @@ class SourceEditorView @JvmOverloads constructor(
         val position: Int,
         val top: Int
     )
+
+    private data class SelectionAnchor(
+        val stableId: Long,
+        val offset: Int
+    )
+
+    private data class SelectionSnapshot(
+        val anchor: SelectionAnchor,
+        val focus: SelectionAnchor
+    )
+
+    /** Invalidates older viewport restores when waveform updates arrive in quick succession. */
+    private var scrollRestoreGeneration = 0L
+    private var scrollRestoreInProgress = false
+    /** Stable viewport anchor shared by one burst of external waveform writes. */
+    private var burstScrollAnchor: ScrollAnchor? = null
 
     private val lineLayoutManager = LinearLayoutManager(context).apply {
         // Source rows may wrap to different visual heights. Smooth scrollbar metrics estimate
@@ -345,6 +362,13 @@ class SourceEditorView @JvmOverloads constructor(
         }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                // A real touch starts a new user-controlled viewport. Do not keep applying the
+                // previous waveform burst's anchor after the user has intentionally scrolled.
+                if (burstScrollAnchor != null) {
+                    burstScrollAnchor = null
+                    scrollRestoreGeneration++
+                    scrollRestoreInProgress = false
+                }
                 imeShowRequested = false
                 // Defer caret visibility correction until this gesture is known to be a tap.
                 // Starting a scroll while the IME is visible must not be interrupted by the
@@ -482,23 +506,31 @@ class SourceEditorView @JvmOverloads constructor(
         documentChangeListeners += listener
     }
 
-    fun setDocumentText(value: String, preserveScroll: Boolean = false) {
-        if (documentSelection != null) clearDocumentSelection()
+    fun setDocumentText(
+        value: String,
+        preserveScroll: Boolean = false,
+        changeHint: DocumentChange? = null
+    ) {
         // RecyclerView uses item-based scroll metrics here because source rows have variable
         // heights. Keep unchanged row objects and dispatch only the changed range on waveform and
         // history writes; a full data-set refresh can reset the viewport during repeated updates.
-        val previousAnchor = if (preserveScroll) captureScrollAnchor() else null
+        val previousAnchor = if (preserveScroll) captureExternalScrollAnchor() else null
+        val previousSelection = if (preserveScroll) captureSelectionSnapshot() else null
+        if (!preserveScroll) clearDocumentSelection()
         documentTextCache = value
         val structureChanged = if (preserveScroll) {
-            replaceLinesIncrementally(value)
+            if (changeHint != null) {
+                replaceLinesIncrementally(value, changeHint)
+            } else {
+                replaceLinesIncrementally(value)
+            }
         } else {
             replaceLines(value)
             lineAdapter.notifyDataSetChanged()
             false
         }
-        if (structureChanged && previousAnchor != null) {
-            postOnAnimation { restoreScrollAnchor(previousAnchor) }
-        }
+        previousSelection?.let(::restoreSelectionSnapshot)
+        previousAnchor?.let(::scheduleScrollAnchorRestore)
     }
 
     private fun captureScrollAnchor(): ScrollAnchor? {
@@ -512,12 +544,78 @@ class SourceEditorView @JvmOverloads constructor(
         )
     }
 
+    private fun captureExternalScrollAnchor(): ScrollAnchor? {
+        val existing = burstScrollAnchor
+        if (existing != null && lines.any { it.stableId == existing.stableId }) return existing
+        return captureScrollAnchor()?.also { burstScrollAnchor = it }
+    }
+
+    private fun captureSelectionSnapshot(): SelectionSnapshot? {
+        val selection = documentSelection ?: return null
+        val anchorLine = lines.getOrNull(selection.anchorLine) ?: return null
+        val focusLine = lines.getOrNull(selection.focusLine) ?: return null
+        return SelectionSnapshot(
+            anchor = SelectionAnchor(anchorLine.stableId, selection.anchorOffset),
+            focus = SelectionAnchor(focusLine.stableId, selection.focusOffset)
+        )
+    }
+
+    private fun restoreSelectionSnapshot(snapshot: SelectionSnapshot) {
+        val anchorLine = lines.indexOfFirst { it.stableId == snapshot.anchor.stableId }
+        val focusLine = lines.indexOfFirst { it.stableId == snapshot.focus.stableId }
+        if (anchorLine < 0 || focusLine < 0) return
+        documentSelection = DocumentSelection(
+            anchorLine = anchorLine,
+            anchorOffset = snapshot.anchor.offset.coerceIn(0, lines[anchorLine].text.length),
+            focusLine = focusLine,
+            focusOffset = snapshot.focus.offset.coerceIn(0, lines[focusLine].text.length)
+        )
+        resetHandleEndpointMapping()
+        lineAdapter.refreshHighlights()
+        selectionActionMode?.invalidateContentRect()
+        updateSelectionHandlePopups()
+    }
+
     private fun restoreScrollAnchor(anchor: ScrollAnchor) {
         if (lines.isEmpty()) return
         val position = lines.indexOfFirst { it.stableId == anchor.stableId }
             .takeIf { it >= 0 }
             ?: anchor.position.coerceIn(0, lines.lastIndex)
         lineLayoutManager.scrollToPositionWithOffset(position, anchor.top)
+    }
+
+    private fun scheduleScrollAnchorRestore(anchor: ScrollAnchor) {
+        val generation = ++scrollRestoreGeneration
+        scrollRestoreInProgress = true
+        // RecyclerView applies notifyItemRangeChanged/Inserted during the next layout pass. A
+        // plain postOnAnimation or pre-draw callback can run before that pass, so the later row
+        // remeasure moves the viewport a few pixels on every waveform sync. Restore after the
+        // completed layout, then correct once more against the actual child top. Newer syncs
+        // invalidate older callbacks.
+        doOnNextLayout {
+            if (generation != scrollRestoreGeneration) return@doOnNextLayout
+            restoreScrollAnchor(anchor)
+            postOnAnimation {
+                if (generation != scrollRestoreGeneration || lines.isEmpty()) {
+                    if (generation == scrollRestoreGeneration) scrollRestoreInProgress = false
+                    return@postOnAnimation
+                }
+                val position = lines.indexOfFirst { it.stableId == anchor.stableId }
+                    .takeIf { it >= 0 }
+                    ?: anchor.position.coerceIn(0, lines.lastIndex)
+                val child = lineLayoutManager.findViewByPosition(position)
+                if (child == null) {
+                    restoreScrollAnchor(anchor)
+                } else {
+                    val delta = child.top - anchor.top
+                    if (delta != 0) scrollBy(0, delta)
+                }
+                scrollRestoreInProgress = false
+            }
+        }
+        postDelayed({
+            if (generation == scrollRestoreGeneration) burstScrollAnchor = null
+        }, 240L)
     }
 
     fun getDocumentText(): String = documentTextCache ?: buildString(offsets.documentLength) {
@@ -762,7 +860,7 @@ class SourceEditorView @JvmOverloads constructor(
     /** Scroll only when the focused visual line is actually hidden below the IME. */
     private fun ensureFocusedLineVisible() {
         if (!imeVisible || imeEnsureBlockedByUserScroll || selectionTouchActive ||
-            documentSelection != null || height <= 0
+            documentSelection != null || scrollRestoreInProgress || height <= 0
         ) return
         val focusedEditor = findFocus() as? SourceLineEditText ?: return
         val caretLayout = focusedEditor.layout
@@ -2166,6 +2264,110 @@ class SourceEditorView @JvmOverloads constructor(
         }
         preferredLineEnding = lines.firstOrNull { it.lineEnding.isNotEmpty() }?.lineEnding ?: "\n"
         return oldCount != newCount
+    }
+
+    /**
+     * Apply a caller-provided source edit range without scanning the unchanged prefix/suffix.
+     * Waveform synchronization already computes this range off the UI thread.
+     */
+    private fun replaceLinesIncrementally(
+        value: String,
+        change: DocumentChange
+    ): Boolean {
+        val startLine = change.startLine.coerceIn(0, lines.size)
+        val oldEndLine = (startLine + change.oldLineCount.coerceAtLeast(0))
+            .coerceIn(startLine, lines.size)
+        if (startLine > lines.size || oldEndLine > lines.size) {
+            return replaceLinesIncrementally(value)
+        }
+
+        val newStartOffset = lineStartAtOffset(value, change.startOffset)
+        val newEndOffset = endOffsetAfterLines(
+            value,
+            newStartOffset,
+            change.newLineCount.coerceAtLeast(1)
+        )
+        val replacement = SourceDocumentLineDiffs.splitRange(
+            content = value,
+            start = newStartOffset,
+            end = newEndOffset,
+            appendTerminalEmptyRow = newEndOffset == value.length
+        )
+        val oldCount = oldEndLine - startLine
+        if (oldCount == replacement.size) {
+            var firstChanged = -1
+            var lastChanged = -1
+            replacement.forEachIndexed { offset, updated ->
+                val position = startLine + offset
+                val old = lines[position]
+                if (old.text != updated.text || old.lineEnding != updated.lineEnding) {
+                    val oldLength = old.serializedLength
+                    old.text = updated.text
+                    old.lineEnding = updated.lineEnding
+                    offsets.update(position, old.serializedLength - oldLength)
+                    if (firstChanged < 0) firstChanged = position
+                    lastChanged = position
+                }
+            }
+            if (firstChanged >= 0) {
+                lineAdapter.notifyDocumentRowsChanged(
+                    firstChanged,
+                    lastChanged - firstChanged + 1
+                )
+            }
+            preferredLineEnding = lines.firstOrNull { it.lineEnding.isNotEmpty() }?.lineEnding ?: "\n"
+            return false
+        }
+
+        offsets.remove(startLine, oldCount)
+        lines.subList(startLine, oldEndLine).clear()
+        val inserted = replacement.map { line ->
+            SourceLineBlock(nextLineId++, line.text, line.lineEnding)
+        }
+        lines.addAll(startLine, inserted)
+        offsets.insert(startLine, inserted.map { it.serializedLength })
+        lineAdapter.notifyDocumentRowsReplaced(startLine, oldCount, inserted.size)
+        preferredLineEnding = lines.firstOrNull { it.lineEnding.isNotEmpty() }?.lineEnding ?: "\n"
+        return true
+    }
+
+    private fun endOffsetAfterLines(content: String, start: Int, count: Int): Int {
+        var cursor = start.coerceIn(0, content.length)
+        repeat(count) {
+            val end = lineEnd(content, cursor)
+            if (end >= content.length) {
+                cursor = content.length
+                return@repeat
+            }
+            cursor = if (content[end] == '\r' && end + 1 < content.length && content[end + 1] == '\n') {
+                end + 2
+            } else {
+                end + 1
+            }
+        }
+        return cursor
+    }
+
+    private fun lineStartAtOffset(content: String, offset: Int): Int {
+        var index = offset.coerceIn(0, content.length)
+        while (index > 0 && content[index - 1] != '\r' && content[index - 1] != '\n' &&
+            content[index - 1] != '\u2028' && content[index - 1] != '\u2029' &&
+            content[index - 1] != '\u0085'
+        ) {
+            index--
+        }
+        return index
+    }
+
+    private fun lineEnd(content: String, start: Int): Int {
+        var index = start.coerceIn(0, content.length)
+        while (index < content.length && content[index] != '\r' && content[index] != '\n' &&
+            content[index] != '\u2028' && content[index] != '\u2029' &&
+            content[index] != '\u0085'
+        ) {
+            index++
+        }
+        return index
     }
 
     private fun onLineTextChanged(

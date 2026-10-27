@@ -26,6 +26,8 @@ internal class MpvPlaybackEngine(
     private val mpvAccessHandler = Handler(mpvAccessThread.looper)
     private val positionReadPending = AtomicBoolean(false)
     private val positionReadGeneration = AtomicLong(0L)
+    private val mediaGeneration = AtomicLong(0L)
+    private val subtitleTrackRequestGeneration = AtomicLong(0L)
     private val mpvAccessLock = Any()
     private val seekStateLock = Any()
     private val audioClock = if (interpolateAudioPosition) AudioPlaybackClock() else null
@@ -68,6 +70,8 @@ internal class MpvPlaybackEngine(
 
     override fun prepare(file: File) {
         playbackPhase = PlaybackPhase.LOADING
+        mediaGeneration.incrementAndGet()
+        subtitleTrackRequestGeneration.incrementAndGet()
         pendingSubtitleTrackUpdate.set(null)
         try {
             if (!initialized) {
@@ -140,7 +144,14 @@ internal class MpvPlaybackEngine(
 
     fun replaceSubtitleTrack(file: File?, fontsDir: File? = null) {
         if (phase == PlaybackPhase.RELEASED) return
-        pendingSubtitleTrackUpdate.set(SubtitleTrackUpdate(file, fontsDir))
+        pendingSubtitleTrackUpdate.set(
+            SubtitleTrackUpdate(
+                file = file,
+                fontsDir = fontsDir,
+                mediaGeneration = mediaGeneration.get(),
+                requestGeneration = subtitleTrackRequestGeneration.incrementAndGet()
+            )
+        )
         applyPendingSubtitleTrackUpdate()
     }
 
@@ -148,6 +159,7 @@ internal class MpvPlaybackEngine(
         if (!phase.canAccessPlayer || pendingSubtitleTrackUpdate.get() == null) return
         postMpvAccess {
             val update = pendingSubtitleTrackUpdate.getAndSet(null) ?: return@postMpvAccess
+            if (update.mediaGeneration != mediaGeneration.get()) return@postMpvAccess
             val fontsDir = update.fontsDir
             if (fontsDir != null) {
                 // Set the current shared directory before creating the new libass
@@ -166,12 +178,22 @@ internal class MpvPlaybackEngine(
                 MPVLib.command(
                     arrayOf("sub-add", file.absolutePath, "select", "TsumugiSub live preview")
                 )
+                scheduleSubtitleTrackVerification(
+                    file = file,
+                    mediaGeneration = update.mediaGeneration,
+                    requestGeneration = update.requestGeneration,
+                    attempt = 0
+                )
+            } else {
+                Log.d(TAG, "Subtitle preview track removed")
             }
         }
     }
 
     override fun release() {
         val wasInitialized = initialized
+        mediaGeneration.incrementAndGet()
+        subtitleTrackRequestGeneration.incrementAndGet()
         pendingSubtitleTrackUpdate.set(null)
         initialized = false
         mpvAccessHandler.removeCallbacksAndMessages(null)
@@ -319,6 +341,60 @@ internal class MpvPlaybackEngine(
         }
     }
 
+    private fun scheduleSubtitleTrackVerification(
+        file: File,
+        mediaGeneration: Long,
+        requestGeneration: Long,
+        attempt: Int
+    ) {
+        val delayMs = when (attempt) {
+            0 -> 50L
+            1 -> 100L
+            else -> 200L
+        }
+        val posted = mpvAccessHandler.postDelayed({
+            synchronized(mpvAccessLock) {
+                if (!initialized || !playbackPhase.canAccessPlayer ||
+                    this.mediaGeneration.get() != mediaGeneration ||
+                    subtitleTrackRequestGeneration.get() != requestGeneration
+                ) return@synchronized
+                if (isSubtitleTrackLoaded(file)) {
+                    Log.d(TAG, "Subtitle preview track loaded: ${file.absolutePath}")
+                } else if (attempt < 2) {
+                    // MPV commands are asynchronous and command() has no return value. Re-issue
+                    // the latest add when the track-list event did not expose the requested file.
+                    // The generation guards prevent an old retry from touching a newer media or
+                    // preview request.
+                    MPVLib.command(
+                        arrayOf("sub-add", file.absolutePath, "select", "TsumugiSub live preview")
+                    )
+                    scheduleSubtitleTrackVerification(
+                        file,
+                        mediaGeneration,
+                        requestGeneration,
+                        attempt + 1
+                    )
+                } else {
+                    Log.e(TAG, "Subtitle preview track was not loaded: ${file.absolutePath}")
+                }
+            }
+        }, delayMs)
+        if (!posted) Log.w(TAG, "Unable to verify subtitle preview track")
+    }
+
+    private fun isSubtitleTrackLoaded(file: File): Boolean {
+        val count = MPVLib.getPropertyInt("track-list/count") ?: return false
+        val path = file.absolutePath
+        return (0 until count).any { index ->
+            val type = MPVLib.getPropertyString("track-list/$index/type")
+            val selected = MPVLib.getPropertyBoolean("track-list/$index/selected") == true
+            val external = MPVLib.getPropertyString("track-list/$index/external-filename")
+            val title = MPVLib.getPropertyString("track-list/$index/title")
+            selected && (type == "sub" || type == "subtitle") &&
+                (external == path || title == "TsumugiSub live preview")
+        }
+    }
+
     override fun eventProperty(property: String, value: Double) {
         when (property) {
             "time-pos" -> {
@@ -433,6 +509,8 @@ internal class MpvPlaybackEngine(
 
     private data class SubtitleTrackUpdate(
         val file: File?,
-        val fontsDir: File?
+        val fontsDir: File?,
+        val mediaGeneration: Long,
+        val requestGeneration: Long
     )
 }
