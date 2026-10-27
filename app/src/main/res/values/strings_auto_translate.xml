@@ -8,6 +8,7 @@
     <string name="auto_translate_translation_history_title">AI字幕处理 · %1$s · %2$s</string>
     <string name="auto_translate_punctuation_cancelled">标点预测已取消</string>
     <string name="auto_translate_translation_failed">翻译失败</string>
+    <string name="auto_translate_translation_no_output_retry">AI 长时间无响应，正在自动重试 %1$d/%2$d</string>
     <string name="auto_translate_no_translation_result">翻译未返回结果</string>
     <string name="auto_translate_read_failed">无法读取文件</string>
     <string name="auto_translate_select_feature">请至少选择一项处理功能</string>

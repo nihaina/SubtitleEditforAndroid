@@ -13,6 +13,8 @@ import com.subtitleedit.feature.ui.AutoTranslateUiState
 import com.subtitleedit.repository.AiTranslationService
 import com.subtitleedit.util.AiProviderConfig
 import com.subtitleedit.util.AiTranslationConversation
+import com.subtitleedit.util.AiNoOutputTimeoutException
+import com.subtitleedit.util.AI_NO_OUTPUT_MAX_RETRIES
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
@@ -441,12 +443,15 @@ internal class AutoTranslateViewModel(application: Application) :
                     file.processedLines = completed + current
                     publish()
                 },
+                retryOnNoOutput = true,
+                onNoOutputRetry = { retries -> updateNoOutputRetryStatus(file, retries) },
                 isCancelled = { file.cancellationRequested }
             )
             file.message = ""
             file.translatedTexts += result.translations; file.processedLines = file.translatedTexts.size; publish()
             if (result.isComplete && result.translations.isNotEmpty()) { consecutiveErrors = 0; continue }
             if (result.error != null) {
+                if (result.error is AiNoOutputTimeoutException) throw result.error
                 consecutiveErrors++; file.message = result.error.message ?: string(R.string.auto_translate_translation_failed)
                 if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) throw result.error
                 publish(); delay((consecutiveErrors * 500L).coerceAtMost(3_000L))
@@ -485,6 +490,8 @@ internal class AutoTranslateViewModel(application: Application) :
                         translator.translateText(
                             text = session.nextText,
                             streamCallback = { publishAiStream(file, it) },
+                            retryOnNoOutput = true,
+                            onNoOutputRetry = { retries -> updateNoOutputRetryStatus(file, retries) },
                             isCancelled = { file.cancellationRequested }
                         ).getOrElse { throw it }
                     },
@@ -503,7 +510,7 @@ internal class AutoTranslateViewModel(application: Application) :
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                if (error is InvalidTxtAiResponseException) throw error
+                if (error is InvalidTxtAiResponseException || error is AiNoOutputTimeoutException) throw error
                 consecutiveErrors++
                 if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) throw error
                 file.message = error.message ?: string(R.string.auto_translate_translation_failed)
@@ -567,6 +574,13 @@ internal class AutoTranslateViewModel(application: Application) :
         file.lastStreamPublishedAt = 0L
         file.lastStreamPreview = ""
         file.message = ""
+    }
+
+    private fun updateNoOutputRetryStatus(file: AutoTranslateFile, retries: Int) {
+        file.lastStreamPublishedAt = 0L
+        file.lastStreamPreview = ""
+        file.message = string(R.string.auto_translate_translation_no_output_retry, retries, AI_NO_OUTPUT_MAX_RETRIES)
+        publish()
     }
 
     private suspend fun updateProcessingStage(file: AutoTranslateFile, stage: ProcessingStage, processedLines: Int = 0, totalLines: Int = 0) {

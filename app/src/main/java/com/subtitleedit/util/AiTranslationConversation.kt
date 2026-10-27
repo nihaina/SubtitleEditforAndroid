@@ -92,6 +92,8 @@ class AiTranslationConversation(
     suspend fun translateText(
         text: String,
         streamCallback: ((String) -> Unit)? = null,
+        retryOnNoOutput: Boolean = false,
+        onNoOutputRetry: ((Int) -> Unit)? = null,
         isCancelled: () -> Boolean = { false }
     ): Result<String> {
         if (text.isBlank()) return Result.success(text)
@@ -107,7 +109,9 @@ class AiTranslationConversation(
                 isCancelled = isCancelled,
                 cancellationMessage = "翻译已取消",
                 streamedContent = streamed,
-                streamedReasoning = StringBuilder()
+                streamedReasoning = StringBuilder(),
+                retryOnNoOutput = retryOnNoOutput,
+                onNoOutputRetry = onNoOutputRetry
             )
             historyStore.append(
                 id = historySessionId,
@@ -240,6 +244,8 @@ class AiTranslationConversation(
         progressCallback: ((Int, Int) -> Unit)? = null,
         streamCallback: ((String) -> Unit)? = null,
         streamProgressCallback: ((Int, Int) -> Unit)? = null,
+        retryOnNoOutput: Boolean = false,
+        onNoOutputRetry: ((Int) -> Unit)? = null,
         isCancelled: () -> Boolean = { false }
     ): TranslationRunResult {
         require(startPosition > 0) { "字幕起始位置必须大于 0" }
@@ -270,6 +276,8 @@ class AiTranslationConversation(
                     completedBeforeBatch = translations.size,
                     streamCallback = streamCallback,
                     streamProgressCallback = streamProgressCallback,
+                    retryOnNoOutput = retryOnNoOutput,
+                    onNoOutputRetry = onNoOutputRetry,
                     isCancelled = isCancelled,
                     streamedContent = streamedContent
                 )
@@ -319,6 +327,8 @@ class AiTranslationConversation(
         completedBeforeBatch: Int,
         streamCallback: ((String) -> Unit)?,
         streamProgressCallback: ((Int, Int) -> Unit)?,
+        retryOnNoOutput: Boolean,
+        onNoOutputRetry: ((Int) -> Unit)?,
         isCancelled: () -> Boolean,
         streamedContent: StringBuilder
     ): List<String> {
@@ -362,6 +372,8 @@ class AiTranslationConversation(
                     batchStart = batchStart,
                     requestIndices = requestIndices,
                     streamCallback = streamCallback,
+                    retryOnNoOutput = retryOnNoOutput,
+                    onNoOutputRetry = onNoOutputRetry,
                     isCancelled = isCancelled,
                     streamedContent = streamedContent
                 )
@@ -461,6 +473,8 @@ class AiTranslationConversation(
         batchStart: Int,
         requestIndices: List<Int>,
         streamCallback: ((String) -> Unit)?,
+        retryOnNoOutput: Boolean,
+        onNoOutputRetry: ((Int) -> Unit)?,
         isCancelled: () -> Boolean,
         streamedContent: StringBuilder
     ): BatchAttempt {
@@ -511,6 +525,8 @@ class AiTranslationConversation(
                 cancellationMessage = "翻译已取消",
                 streamedContent = streamedContent,
                 streamedReasoning = streamedReasoning,
+                retryOnNoOutput = retryOnNoOutput,
+                onNoOutputRetry = onNoOutputRetry,
                 onTextDelta = {
                     if (protocolIssue == null) {
                         findTranslationProtocolIssue(
@@ -611,7 +627,56 @@ class AiTranslationConversation(
         cancellationMessage: String,
         streamedContent: StringBuilder,
         streamedReasoning: StringBuilder,
+        retryOnNoOutput: Boolean = false,
+        onNoOutputRetry: ((Int) -> Unit)? = null,
         onTextDelta: (() -> Unit)? = null
+    ): ChatBackend.SendResult {
+        if (retryOnNoOutput) {
+            return retryAiRequestWhenNoOutput(
+                isCancelled = isCancelled,
+                onTimeout = conversation::cancel,
+                onRetry = { retries ->
+                    streamedContent.setLength(0)
+                    streamedReasoning.setLength(0)
+                    onNoOutputRetry?.invoke(retries)
+                }
+            ) { onOutput, isTimedOut ->
+                sendUserPromptAttempt(
+                    content = content,
+                    clearConversation = clearConversation,
+                    streamCallback = streamCallback,
+                    isCancelled = { isCancelled() || isTimedOut() },
+                    cancellationMessage = cancellationMessage,
+                    streamedContent = streamedContent,
+                    streamedReasoning = streamedReasoning,
+                    onTextDelta = onTextDelta,
+                    onOutput = onOutput
+                )
+            }
+        }
+        return sendUserPromptAttempt(
+            content = content,
+            clearConversation = clearConversation,
+            streamCallback = streamCallback,
+            isCancelled = isCancelled,
+            cancellationMessage = cancellationMessage,
+            streamedContent = streamedContent,
+            streamedReasoning = streamedReasoning,
+            onTextDelta = onTextDelta,
+            onOutput = {}
+        )
+    }
+
+    private suspend fun sendUserPromptAttempt(
+        content: String,
+        clearConversation: Boolean,
+        streamCallback: ((String) -> Unit)?,
+        isCancelled: () -> Boolean,
+        cancellationMessage: String,
+        streamedContent: StringBuilder,
+        streamedReasoning: StringBuilder,
+        onTextDelta: (() -> Unit)?,
+        onOutput: () -> Unit
     ): ChatBackend.SendResult {
         if (isCancelled()) throw CancellationException(cancellationMessage)
         if (clearConversation) conversation.clear()
@@ -619,8 +684,12 @@ class AiTranslationConversation(
             content = content,
             onEvent = { event ->
                 when (event) {
-                    is ChatBackend.Event.ReasoningDelta -> streamedReasoning.append(event.text)
+                    is ChatBackend.Event.ReasoningDelta -> {
+                        if (event.text.isNotEmpty()) onOutput()
+                        streamedReasoning.append(event.text)
+                    }
                     is ChatBackend.Event.TextDelta -> {
+                        if (event.text.isNotEmpty()) onOutput()
                         streamedContent.append(event.text)
                         runCatching { streamCallback?.invoke(streamedContent.toString()) }
                         onTextDelta?.invoke()
@@ -632,6 +701,7 @@ class AiTranslationConversation(
         )
         if (isCancelled()) throw CancellationException(cancellationMessage)
         if (streamedContent.isEmpty()) {
+            if (result.text.isNotEmpty()) onOutput()
             streamedContent.append(result.text)
             runCatching { streamCallback?.invoke(streamedContent.toString()) }
             onTextDelta?.invoke()
