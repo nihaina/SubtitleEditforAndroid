@@ -27,8 +27,17 @@ internal class TxtTranslationSession(
     private val segments = TxtTranslationSegmenter.split(text, wordStart = wordStart)
     private val translations = mutableListOf<String>()
 
+    constructor(
+        text: String,
+        wordStart: (String, Int) -> Int,
+        completedTranslations: List<String>
+    ) : this(text, wordStart) {
+        completedTranslations.take(segments.size).forEach(::appendTranslation)
+    }
+
     val totalCount: Int get() = segments.size
     val completedCount: Int get() = translations.size
+    fun completedTranslationsSnapshot(): List<String> = translations.toList()
     val nextText: String get() = segments[completedCount].text
     var translatedText: String = ""
         private set

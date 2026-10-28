@@ -1,6 +1,7 @@
 package com.subtitleedit.repository
 
 import android.content.Context
+import com.subtitleedit.chat.ChatBackend
 import com.subtitleedit.util.AiModelClient
 import com.subtitleedit.util.AiProviderConfig
 import com.subtitleedit.util.AiTranslationConversation
@@ -22,7 +23,8 @@ internal class DefaultAiTranslationService : AiTranslationService {
         reasoningLevel: AiProviderConfig.ReasoningLevel,
         historySessionId: String,
         historyTitle: String?,
-        thinkingEnabled: Boolean
+        thinkingEnabled: Boolean,
+        initialMessages: List<ChatBackend.ChatMessage>
     ) = AiTranslationConversation(
         context = context,
         provider = provider,
@@ -35,6 +37,7 @@ internal class DefaultAiTranslationService : AiTranslationService {
         reasoningLevel = reasoningLevel,
         thinkingEnabled = thinkingEnabled,
         historySessionId = historySessionId,
-        historyTitle = historyTitle
+        historyTitle = historyTitle,
+        initialMessages = initialMessages
     )
 }

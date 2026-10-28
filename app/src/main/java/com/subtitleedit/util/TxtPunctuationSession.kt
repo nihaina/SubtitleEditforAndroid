@@ -10,8 +10,17 @@ internal class TxtPunctuationSession(
     private val segments = TxtTranslationSegmenter.split(text, wordStart = wordStart)
     private val predictions = mutableListOf<String>()
 
+    constructor(
+        text: String,
+        wordStart: (String, Int) -> Int,
+        completedPredictions: List<String>
+    ) : this(text, wordStart) {
+        completedPredictions.take(segments.size).forEach(::appendPrediction)
+    }
+
     val totalCount: Int get() = segments.size
     val completedCount: Int get() = predictions.size
+    fun completedPredictionsSnapshot(): List<String> = predictions.toList()
     val nextText: String get() = segments[completedCount].text
     var predictedText: String = ""
         private set

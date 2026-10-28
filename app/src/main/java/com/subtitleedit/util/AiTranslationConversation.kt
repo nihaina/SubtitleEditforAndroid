@@ -29,6 +29,7 @@ class AiTranslationConversation(
     private val subtitleFormat: SubtitleFormat = SubtitleFormat.SRT,
     reasoningLevel: AiProviderConfig.ReasoningLevel = AiProviderConfig.defaultReasoningLevel(provider),
     private val thinkingEnabled: Boolean = reasoningLevel != AiProviderConfig.ReasoningLevel.OFF,
+    private val initialMessages: List<ChatBackend.ChatMessage> = emptyList(),
     /** Stable ID for one editor translation operation, including all split batches and retries. */
     private val historySessionId: String = UUID.randomUUID().toString(),
     private val historyTitle: String? = null
@@ -74,6 +75,7 @@ class AiTranslationConversation(
             localRepetitionPenalty = settingsManager.getLlmRepetitionPenalty()
         ),
         tools = if (provider == AiProviderConfig.LOCAL) emptyList() else ChatTools.create(context.applicationContext),
+        initialMessages = initialMessages,
         context = context.applicationContext
     )
     private val historyStore = ChatHistoryStore(context)
@@ -267,6 +269,7 @@ class AiTranslationConversation(
         subtitles: List<SubtitleEntry>,
         startPosition: Int = 1,
         progressCallback: ((Int, Int) -> Unit)? = null,
+        completedTranslationsCallback: ((List<String>) -> Unit)? = null,
         streamCallback: ((String) -> Unit)? = null,
         streamProgressCallback: ((Int, Int) -> Unit)? = null,
         retryOnNoOutput: Boolean = false,
@@ -314,6 +317,7 @@ class AiTranslationConversation(
                 activeBatch = emptyList()
                 streamedContent.setLength(0)
                 progressCallback?.invoke(translations.size, subtitles.size)
+                completedTranslationsCallback?.invoke(translations.toList())
             }
             return TranslationRunResult(translations)
         } catch (error: BatchTranslationCancelled) {

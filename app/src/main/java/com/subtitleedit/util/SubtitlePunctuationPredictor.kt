@@ -32,7 +32,8 @@ object SubtitlePunctuationPredictor {
 
     class Session(
         private val entries: List<SubtitleEntry>,
-        private val entriesPerBatch: Int = DEFAULT_AI_SUBTITLES_PER_REQUEST
+        private val entriesPerBatch: Int = DEFAULT_AI_SUBTITLES_PER_REQUEST,
+        completedTexts: List<String> = emptyList()
     ) {
         init {
             require(entriesPerBatch > 0) { "每批字幕数量必须大于 0" }
@@ -42,6 +43,15 @@ object SubtitlePunctuationPredictor {
         var processedCount: Int = 0
             private set
         private val completed = mutableListOf<SubtitleEntry>()
+
+        init {
+            completedTexts.take(entries.size).forEachIndexed { index, text ->
+                completed += entries[index].copy(text = text)
+            }
+            processedCount = completed.size
+        }
+
+        fun completedTextsSnapshot(): List<String> = completed.map(SubtitleEntry::text)
 
         suspend fun run(
             onProgress: (Int, Int) -> Unit = { _, _ -> },

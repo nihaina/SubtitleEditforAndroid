@@ -8,6 +8,8 @@ import android.provider.OpenableColumns
 import androidx.annotation.StringRes
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.viewModelScope
+import com.subtitleedit.chat.ChatBackend
+import com.subtitleedit.chat.ChatHistoryStore
 import com.subtitleedit.feature.ui.AutoTranslateFileUi
 import com.subtitleedit.feature.ui.AutoTranslateUiState
 import com.subtitleedit.model.SubtitleEntry
@@ -64,6 +66,7 @@ internal class AutoTranslateViewModel(application: Application) :
     private val aiTranslationService: AiTranslationService get() = dependencies.aiTranslationService
     private val files = CopyOnWriteArrayList<AutoTranslateFile>()
     private val activeJobs = ConcurrentHashMap<String, Job>()
+    private val queueStore = AutoTranslateQueueStore(application)
     private var queueRunning = false
     private var outputDirectoryUri: Uri? = null
     private var outputDirectoryLabel: String = ""
@@ -107,9 +110,18 @@ internal class AutoTranslateViewModel(application: Application) :
         var translationConversation: AiTranslationConversation? = null
         var translationConfig: TranslationConfig? = null
         var translationBatchSize: Int? = null
+        var translationResumeHistoryPending = false
         var punctuationEnabledForRun = false
         var translationEnabledForRun = false
         var translationResumeStart: Int? = null
+        var textTranslationCompletedTexts = mutableListOf<String>()
+        var textPunctuationCompletedTexts = mutableListOf<String>()
+        var punctuationCompletedTexts = mutableListOf<String>()
+        var punctuationHistoryMessages: List<ChatBackend.ChatMessage> = emptyList()
+        var translationHistoryMessages: List<ChatBackend.ChatMessage> = emptyList()
+        var historyLoaded = true
+        var historyLoadRequested = false
+        var resumeAfterHistoryLoad = false
         val translatedTexts = mutableListOf<String>()
         var overwriteOutput = false
         var lastStreamPublishedAt = 0L
@@ -120,6 +132,7 @@ internal class AutoTranslateViewModel(application: Application) :
         settingsManager = SettingsManager.getInstance(application)
         outputDirectoryLabel = defaultTranslateOutputDirectory().absolutePath
         restoreOutputDirectory()
+        restoreQueue()
         publish()
     }
 
@@ -130,6 +143,94 @@ internal class AutoTranslateViewModel(application: Application) :
         if (initialized) return
         initialized = true
         addFiles(initialUris)
+    }
+
+    private fun restoreQueue() {
+        val snapshot = queueStore.load() ?: return
+        setState {
+            copy(
+                punctuationPredictionEnabled = snapshot.punctuationPredictionEnabled,
+                translationEnabled = snapshot.translationEnabled
+            )
+        }
+        snapshot.files.forEach { persisted ->
+            val persistedStatus = runCatching { FileStatus.valueOf(persisted.status) }
+                .getOrDefault(FileStatus.WAITING)
+            if (persistedStatus == FileStatus.COMPLETED) return@forEach
+            val file = AutoTranslateFile(
+                uri = Uri.parse(persisted.uri),
+                fileName = persisted.fileName,
+                fileSize = persisted.fileSize,
+                sessionId = persisted.sessionId
+            )
+            file.status = if (persistedStatus == FileStatus.RUNNING) FileStatus.PAUSED else persistedStatus
+            file.processingStage = runCatching { ProcessingStage.valueOf(persisted.processingStage) }
+                .getOrDefault(ProcessingStage.READING)
+            file.totalLines = persisted.totalLines
+            file.processedLines = persisted.processedLines
+            file.progressStage = persisted.progressStage?.let { value ->
+                runCatching { ProcessingStage.valueOf(value) }.getOrNull()
+            }
+            file.document = persisted.documentContent?.let { content ->
+                runCatching {
+                    val format = SubtitleParser.detectFormat(content, file.fileName)
+                    SubtitleParser.parseDocument(content, file.fileName, format)
+                }.getOrNull()
+            }
+            file.translationSourceEntries = file.document?.entries
+            file.originalText = persisted.originalText
+            file.punctuationPredictionCompleted = persisted.punctuationPredictionCompleted
+            file.translatedTexts += persisted.translatedTexts
+            file.translationResumeStart = persisted.translationResumeStart
+            file.translationBatchSize = persisted.translationBatchSize
+            file.translationConfig = persisted.translationConfig?.toRuntimeConfig()
+            file.punctuationProvider = persisted.punctuationProvider
+            file.punctuationEnabledForRun = persisted.punctuationEnabled
+            file.translationEnabledForRun = persisted.translationEnabled
+            file.overwriteOutput = persisted.overwriteOutput
+            file.punctuationCompletedTexts += persisted.punctuationCompletedTexts
+            file.textPunctuationCompletedTexts += persisted.textPunctuationPredictions
+            file.textTranslationCompletedTexts += persisted.textTranslations
+            file.punctuationResumeConversationPending = persisted.punctuationResumeHistory
+            file.translationResumeHistoryPending = persisted.translationResumeHistory
+            file.historyLoaded = !persisted.punctuationResumeHistory && !persisted.translationResumeHistory
+            files += file
+            if (!file.historyLoaded) loadRestoredHistory(file)
+        }
+    }
+
+    private fun PersistedTranslationConfig.toRuntimeConfig(): TranslationConfig = TranslationConfig(
+        provider = provider,
+        apiKey = settingsManager.getAiApiKey(provider),
+        model = model,
+        targetLanguage = targetLanguage,
+        customPrompt = customPrompt,
+        baseUrl = baseUrl,
+        reasoningLevel = runCatching { AiProviderConfig.ReasoningLevel.valueOf(reasoningLevel) }
+            .getOrDefault(AiProviderConfig.defaultReasoningLevel(provider)),
+        thinkingEnabled = thinkingEnabled
+    )
+
+    private fun loadRestoredHistory(file: AutoTranslateFile) {
+        if (file.historyLoadRequested) return
+        file.historyLoadRequested = true
+        viewModelScope.launch(Dispatchers.IO) {
+            val store = ChatHistoryStore(app)
+            val punctuation = store.load("punctuation_${file.sessionId}")?.messages.orEmpty()
+            val translation = store.load(file.sessionId)?.messages.orEmpty()
+            withContext(Dispatchers.Main) {
+                if (files.contains(file)) {
+                    file.punctuationHistoryMessages = punctuation
+                    file.translationHistoryMessages = translation
+                    file.historyLoaded = true
+                    publish()
+                    if (file.resumeAfterHistoryLoad && file.status == FileStatus.PAUSED) {
+                        file.resumeAfterHistoryLoad = false
+                        startFile(file, retry = true)
+                    }
+                }
+            }
+        }
     }
 
     fun addFiles(uris: List<Uri>) {
@@ -144,10 +245,18 @@ internal class AutoTranslateViewModel(application: Application) :
             files += AutoTranslateFile(uri, fileName, getFileSizeFromUri(uri))
         }
         publish()
+        persistQueueSnapshot()
     }
 
-    fun setPunctuationPrediction(enabled: Boolean) = setState { copy(punctuationPredictionEnabled = enabled) }
-    fun setTranslation(enabled: Boolean) = setState { copy(translationEnabled = enabled) }
+    fun setPunctuationPrediction(enabled: Boolean) {
+        setState { copy(punctuationPredictionEnabled = enabled) }
+        persistQueueSnapshot()
+    }
+
+    fun setTranslation(enabled: Boolean) {
+        setState { copy(translationEnabled = enabled) }
+        persistQueueSnapshot()
+    }
 
     fun selectOutputDirectory(uri: Uri) {
         runCatching { app.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
@@ -155,6 +264,7 @@ internal class AutoTranslateViewModel(application: Application) :
         outputDirectoryLabel = DirectoryDisplayPath.fromUri(app, uri)
         settingsManager.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
         publish()
+        persistQueueSnapshot()
     }
 
     fun openSettings() = sendEvent(AutoTranslateEvent.OpenSettings)
@@ -220,6 +330,11 @@ internal class AutoTranslateViewModel(application: Application) :
     private fun startFile(file: AutoTranslateFile, retry: Boolean = false, config: TranslationConfig? = if (currentState.translationEnabled) readTranslationConfig() else null, output: Uri = outputDirectoryUri ?: Uri.fromFile(getTranslateOutputDirectory()), overwrite: Boolean = file.overwriteOutput) {
         val resuming = file.status == FileStatus.PAUSED
         if (activeJobs[file.sessionId]?.isActive == true || (!resuming && !validateSelectedFeatures(config))) return
+        if (resuming && !file.historyLoaded) {
+            file.resumeAfterHistoryLoad = true
+            loadRestoredHistory(file)
+            return
+        }
         queueRunning = true
         if (retry) file.message = ""
         file.cancellationRequested = false
@@ -236,6 +351,7 @@ internal class AutoTranslateViewModel(application: Application) :
         publish()
         val effectiveConfig = if (resuming) file.translationConfig ?: config else config
         activeJobs[file.sessionId] = viewModelScope.launch(Dispatchers.IO) { processFile(file, effectiveConfig, output, overwrite) }
+        persistQueueSnapshot()
     }
 
     fun retry(key: String) { files.firstOrNull { it.sessionId == key }?.let { startFile(it, retry = true) } }
@@ -251,6 +367,7 @@ internal class AutoTranslateViewModel(application: Application) :
         file.pauseRequested = true
         file.message = string(R.string.auto_translate_pause_requested)
         publish()
+        persistQueueSnapshot()
         file.activeConversation?.cancel()
     }
 
@@ -305,8 +422,10 @@ internal class AutoTranslateViewModel(application: Application) :
                 file.message = string(R.string.task_cancelled)
             }
             publish()
+            persistQueueSnapshot()
         } catch (error: Exception) {
             file.status = FileStatus.STOPPED; file.message = error.message ?: string(R.string.auto_translate_processing_failed); publish()
+            persistQueueSnapshot()
         } finally {
             if (file.status != FileStatus.PAUSED) {
                 file.activeConversation = null
@@ -319,6 +438,7 @@ internal class AutoTranslateViewModel(application: Application) :
                 activeJobs.remove(file.sessionId)
                 if (activeJobs.values.none { it.isActive }) queueRunning = false
                 publish()
+                persistQueueSnapshot()
             }
         }
     }
@@ -338,7 +458,8 @@ internal class AutoTranslateViewModel(application: Application) :
         val entriesPerBatch = settingsManager.getAiSubtitlesPerRequest(provider)
         val session = file.punctuationSession ?: SubtitlePunctuationPredictor.Session(
             preparedEntries,
-            entriesPerBatch = entriesPerBatch
+            entriesPerBatch = entriesPerBatch,
+            completedTexts = file.punctuationCompletedTexts
         ).also { file.punctuationSession = it }
         updateProcessingStage(file, ProcessingStage.PUNCTUATION_PREDICTION, session.processedCount, session.totalCount)
         if (session.totalCount == 0) return document
@@ -350,7 +471,7 @@ internal class AutoTranslateViewModel(application: Application) :
         } else if (file.punctuationConversation == null && (apiKey.isBlank() || model.isBlank() || baseUrl.isBlank())) {
             throw IllegalArgumentException(string(R.string.ai_processing_configuration_required))
         }
-        val conversation = file.punctuationConversation ?: aiTranslationService.createConversation(app, provider, apiKey, model, "", settingsManager.getAiPunctuationCustomPrompt(), baseUrl, document.format, settingsManager.getAiPunctuationReasoningLevel(provider), "punctuation_${file.sessionId}", string(R.string.auto_translate_punctuation_history_title, file.fileName), settingsManager.isAiLocalPunctuationThinkingEnabled()).also { file.punctuationConversation = it }
+        val conversation = file.punctuationConversation ?: aiTranslationService.createConversation(app, provider, apiKey, model, "", settingsManager.getAiPunctuationCustomPrompt(), baseUrl, document.format, settingsManager.getAiPunctuationReasoningLevel(provider), "punctuation_${file.sessionId}", string(R.string.auto_translate_punctuation_history_title, file.fileName), settingsManager.isAiLocalPunctuationThinkingEnabled(), file.punctuationHistoryMessages).also { file.punctuationConversation = it }
         file.activeConversation = conversation
         var preserveConversation = file.punctuationResumeConversationPending
         val punctuated = session.run(
@@ -358,6 +479,8 @@ internal class AutoTranslateViewModel(application: Application) :
                 file.processedLines = done
                 file.totalLines = total
                 publish()
+                file.punctuationCompletedTexts = session.completedTextsSnapshot().toMutableList()
+                persistQueueSnapshot()
             },
             onStreamProgress = { done, total ->
                 file.processedLines = done
@@ -406,6 +529,8 @@ internal class AutoTranslateViewModel(application: Application) :
                 }
             }
         )
+        file.punctuationCompletedTexts = file.punctuationSession?.completedTextsSnapshot()?.toMutableList() ?: mutableListOf()
+        persistQueueSnapshot()
         return document.copy(entries = punctuated)
     }
 
@@ -414,9 +539,11 @@ internal class AutoTranslateViewModel(application: Application) :
         document: SubtitleDocument
     ): SubtitleDocument {
         val source = file.originalText ?: document.entries.joinToString("\n") { it.text }
-        val session = file.textPunctuationSession ?: TxtPunctuationSession(source) { text, offset ->
-            SubtitleTextSplitOps.wordStartAt(app, text, offset)
-        }.also { file.textPunctuationSession = it }
+        val session = file.textPunctuationSession ?: TxtPunctuationSession(
+            source,
+            { text, offset -> SubtitleTextSplitOps.wordStartAt(app, text, offset) },
+            file.textPunctuationCompletedTexts
+        ).also { file.textPunctuationSession = it }
         val provider = file.punctuationProvider ?: settingsManager.getAiPunctuationProvider().also { file.punctuationProvider = it }
         updateProcessingStage(
             file,
@@ -447,7 +574,8 @@ internal class AutoTranslateViewModel(application: Application) :
             settingsManager.getAiPunctuationReasoningLevel(provider),
             "punctuation_${file.sessionId}",
             string(R.string.auto_translate_punctuation_history_title, file.fileName),
-            settingsManager.isAiLocalPunctuationThinkingEnabled()
+            settingsManager.isAiLocalPunctuationThinkingEnabled(),
+            file.punctuationHistoryMessages
         ).also { file.punctuationConversation = it }
         file.activeConversation = conversation
         var preserveConversation = file.punctuationResumeConversationPending
@@ -484,6 +612,8 @@ internal class AutoTranslateViewModel(application: Application) :
                 file.message = ""
                 consecutiveErrors = 0
                 publish()
+                file.textPunctuationCompletedTexts = session.completedPredictionsSnapshot().toMutableList()
+                persistQueueSnapshot()
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -496,6 +626,8 @@ internal class AutoTranslateViewModel(application: Application) :
                 delay((consecutiveErrors * 500L).coerceAtMost(3_000L))
             }
         }
+        file.textPunctuationCompletedTexts = session.completedPredictionsSnapshot().toMutableList()
+        persistQueueSnapshot()
         return document.copy(entries = listOf(document.entries.first().copy(text = session.predictedText)))
     }
 
@@ -505,7 +637,7 @@ internal class AutoTranslateViewModel(application: Application) :
         }
         val entries = file.translationSourceEntries ?: document.entries.also { file.translationSourceEntries = it }
         val resumeStart = file.translationResumeStart
-        val resumingConversation = file.translationConversation != null
+        val resumingConversation = file.translationConversation != null || file.translationResumeHistoryPending
         var requestStart = resumeStart ?: file.translatedTexts.size
         file.translationResumeStart = null
         updateProcessingStage(file, ProcessingStage.TRANSLATION, requestStart, entries.size)
@@ -521,7 +653,8 @@ internal class AutoTranslateViewModel(application: Application) :
             config.reasoningLevel,
             file.sessionId,
             string(R.string.auto_translate_translation_history_title, file.fileName, config.targetLanguage),
-            config.thinkingEnabled
+            config.thinkingEnabled,
+            file.translationHistoryMessages
         ).also { file.translationConversation = it }
         file.activeConversation = translator
         var consecutiveErrors = 0
@@ -542,6 +675,11 @@ internal class AutoTranslateViewModel(application: Application) :
                         file.processedLines = requestStart + current
                         publish()
                     },
+                    completedTranslationsCallback = { completedTranslations ->
+                        replaceTranslatedTail(file, resultStart, completedTranslations)
+                        file.processedLines = resultStart + completedTranslations.size
+                        persistQueueSnapshot()
+                    },
                     streamCallback = { content -> publishAiStream(file, content) },
                     streamProgressCallback = { current, _ ->
                         file.processedLines = requestStart + current
@@ -555,6 +693,7 @@ internal class AutoTranslateViewModel(application: Application) :
                     isCancelled = { file.cancellationRequested }
                 )
                 preserveConversation = false
+                file.translationResumeHistoryPending = false
                 file.message = ""
                 if (result.translations.isNotEmpty()) {
                     replaceTranslatedTail(file, requestStart, result.translations)
@@ -562,6 +701,7 @@ internal class AutoTranslateViewModel(application: Application) :
                 }
                 file.processedLines = requestStart
                 publish()
+                persistQueueSnapshot()
                 if (file.pauseRequested) pauseTranslation(file, resultStart, result.translations)
                 if (result.isComplete && result.translations.isNotEmpty()) {
                     consecutiveErrors = 0
@@ -609,7 +749,7 @@ internal class AutoTranslateViewModel(application: Application) :
 
     private suspend fun translateTextDocument(file: AutoTranslateFile, document: SubtitleDocument, config: TranslationConfig): SubtitleDocument {
         val session = file.textTranslationSession ?: TxtTranslationSession(
-            text = if (file.punctuationPredictionCompleted) {
+            if (file.punctuationPredictionCompleted) {
                 file.textPunctuationSession?.predictedText
                     ?: file.originalText?.let { source ->
                         restoreTxtLineLayout(source, document.entries.associate { it.index to it.text })
@@ -618,10 +758,11 @@ internal class AutoTranslateViewModel(application: Application) :
             } else {
                 file.originalText ?: document.entries.joinToString("\n") { it.text }
             },
-            wordStart = { text, offset -> SubtitleTextSplitOps.wordStartAt(app, text, offset) }
+            { text, offset -> SubtitleTextSplitOps.wordStartAt(app, text, offset) },
+            file.textTranslationCompletedTexts
         ).also { file.textTranslationSession = it }
         updateProcessingStage(file, ProcessingStage.TRANSLATION, session.completedCount, session.totalCount)
-        val resumingTranslationConversation = file.translationConversation != null
+        val resumingTranslationConversation = file.translationConversation != null || file.translationResumeHistoryPending
         val translator = file.translationConversation ?: aiTranslationService.createConversation(
             app,
             config.provider,
@@ -634,7 +775,8 @@ internal class AutoTranslateViewModel(application: Application) :
             config.reasoningLevel,
             file.sessionId,
             string(R.string.auto_translate_translation_history_title, file.fileName, config.targetLanguage),
-            config.thinkingEnabled
+            config.thinkingEnabled,
+            file.translationHistoryMessages
         ).also { file.translationConversation = it }
         file.activeConversation = translator
         var consecutiveErrors = 0
@@ -666,10 +808,13 @@ internal class AutoTranslateViewModel(application: Application) :
                 currentCoroutineContext().ensureActive()
                 session.appendTranslation(translated)
                 preserveConversation = false
+                file.translationResumeHistoryPending = false
                 file.processedLines = session.completedCount
                 file.message = ""
                 consecutiveErrors = 0
                 publish()
+                file.textTranslationCompletedTexts = session.completedTranslationsSnapshot().toMutableList()
+                persistQueueSnapshot()
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -753,6 +898,92 @@ internal class AutoTranslateViewModel(application: Application) :
         publish()
     }
 
+    private fun persistQueueSnapshot() {
+        runCatching {
+            queueStore.save(
+                AutoTranslateQueueSnapshot(
+                    punctuationPredictionEnabled = currentState.punctuationPredictionEnabled,
+                    translationEnabled = currentState.translationEnabled,
+                    files = files.filter { it.status != FileStatus.COMPLETED }.map { file ->
+                        val snapshotResumeStart = if (
+                            file.status == FileStatus.RUNNING &&
+                            file.processingStage == ProcessingStage.TRANSLATION &&
+                            file.document?.format != SubtitleParser.SubtitleFormat.TXT
+                        ) {
+                            SubtitleTranslationResumePolicy.resumeIndex(file.translatedTexts.size)
+                        } else {
+                            file.translationResumeStart
+                        }
+                        AutoTranslateFileSnapshot(
+                            uri = file.uri.toString(),
+                            fileName = file.fileName,
+                            fileSize = file.fileSize,
+                            sessionId = file.sessionId,
+                            status = if (file.status == FileStatus.RUNNING) FileStatus.PAUSED.name else file.status.name,
+                            processingStage = file.processingStage.name,
+                            totalLines = file.totalLines,
+                            processedLines = file.processedLines,
+                            progressStage = file.progressStage?.name,
+                            documentContent = file.document?.let { document ->
+                                runCatching { SubtitleParser.serialize(document) }.getOrNull()
+                            },
+                            originalText = file.originalText,
+                            punctuationPredictionCompleted = file.punctuationPredictionCompleted,
+                            translatedTexts = file.translatedTexts.toList(),
+                            translationResumeStart = snapshotResumeStart,
+                            translationBatchSize = file.translationBatchSize,
+                            translationConfig = file.translationConfig?.let { config ->
+                                PersistedTranslationConfig(
+                                    provider = config.provider,
+                                    model = config.model,
+                                    targetLanguage = config.targetLanguage,
+                                    customPrompt = config.customPrompt,
+                                    baseUrl = config.baseUrl,
+                                    reasoningLevel = config.reasoningLevel.name,
+                                    thinkingEnabled = config.thinkingEnabled
+                                )
+                            },
+                            punctuationProvider = file.punctuationProvider,
+                            punctuationEnabled = file.punctuationEnabledForRun,
+                            translationEnabled = file.translationEnabledForRun,
+                            overwriteOutput = file.overwriteOutput,
+                            punctuationCompletedTexts = file.punctuationSession?.completedTextsSnapshot()
+                                ?: file.punctuationCompletedTexts.toList(),
+                            textPunctuationPredictions = file.textPunctuationSession?.completedPredictionsSnapshot()
+                                ?: file.textPunctuationCompletedTexts.toList(),
+                            textTranslations = file.textTranslationSession?.completedTranslationsSnapshot()
+                                ?: file.textTranslationCompletedTexts.toList(),
+                            punctuationResumeHistory = file.punctuationResumeConversationPending ||
+                                file.punctuationConversation != null,
+                            translationResumeHistory = file.translationResumeHistoryPending ||
+                                file.translationConversation != null
+                        )
+                    }
+                )
+            )
+        }
+    }
+
+    private fun pauseRunningFilesForPersistence() {
+        files.filter { it.status == FileStatus.RUNNING }.forEach { file ->
+            file.pauseRequested = true
+            if (file.processingStage == ProcessingStage.PUNCTUATION_PREDICTION) {
+                file.punctuationResumeConversationPending = file.punctuationConversation != null
+            }
+            if (file.processingStage == ProcessingStage.TRANSLATION) {
+                if (file.document?.format == SubtitleParser.SubtitleFormat.TXT) {
+                    file.translationResumeHistoryPending = file.translationConversation != null
+                } else {
+                    checkpointTranslationForResume(file)
+                }
+            }
+            file.status = FileStatus.PAUSED
+            file.message = string(R.string.auto_translate_status_paused)
+            file.activeConversation?.cancel()
+        }
+        persistQueueSnapshot()
+    }
+
     fun requestRemove(key: String) {
         val file = files.firstOrNull { it.sessionId == key } ?: return
         if (file.status == FileStatus.RUNNING || file.status == FileStatus.PAUSED) {
@@ -765,7 +996,7 @@ internal class AutoTranslateViewModel(application: Application) :
     fun confirmRemove() { val file = files.firstOrNull { it.sessionId == pendingRemovalKey }; pendingRemovalKey = null; setState { copy(removeFileName = null) }; file?.let(::removeFile) }
     fun dismissRemove() { pendingRemovalKey = null; setState { copy(removeFileName = null) } }
     private fun cancelFile(file: AutoTranslateFile) { file.cancellationRequested = true; activeJobs[file.sessionId]?.cancel(); file.activeConversation?.cancel() }
-    private fun removeFile(file: AutoTranslateFile) { cancelFile(file); activeJobs.remove(file.sessionId); files.remove(file); queueRunning = activeJobs.values.any { it.isActive }; publish() }
+    private fun removeFile(file: AutoTranslateFile) { cancelFile(file); activeJobs.remove(file.sessionId); files.remove(file); queueRunning = activeJobs.values.any { it.isActive }; publish(); persistQueueSnapshot() }
 
     fun requestBack(): Boolean {
         if (!queueRunning) return true
@@ -773,7 +1004,13 @@ internal class AutoTranslateViewModel(application: Application) :
         return false
     }
     fun dismissExit() = setState { copy(showExitConfirmation = false) }
-    fun stopAndExit() { setState { copy(showExitConfirmation = false) }; files.forEach(::cancelFile); queueRunning = false; sendEvent(AutoTranslateEvent.Exit) }
+    fun stopAndExit() {
+        setState { copy(showExitConfirmation = false) }
+        pauseRunningFilesForPersistence()
+        activeJobs.values.forEach(Job::cancel)
+        queueRunning = false
+        sendEvent(AutoTranslateEvent.Exit)
+    }
 
     private fun restoreOutputDirectory() {
         val uri = settingsManager.getPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY)?.let(Uri::parse) ?: return
@@ -815,5 +1052,10 @@ internal class AutoTranslateViewModel(application: Application) :
     private fun getFileNameFromUri(uri: Uri): String? = runCatching { app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getString(0) else null } }.getOrNull() ?: when (uri.scheme) { "file" -> uri.path?.let(::File)?.name; else -> DocumentFile.fromSingleUri(app, uri)?.name }
     private fun getFileSizeFromUri(uri: Uri): Long = runCatching { app.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else 0L } ?: 0L }.getOrDefault(0L).let { size -> if (size > 0) size else if (uri.scheme == "file") uri.path?.let(::File)?.length() ?: 0L else 0L }
 
-    override fun onCleared() { files.forEach(::cancelFile); activeJobs.clear(); super.onCleared() }
+    override fun onCleared() {
+        pauseRunningFilesForPersistence()
+        activeJobs.values.forEach(Job::cancel)
+        activeJobs.clear()
+        super.onCleared()
+    }
 }

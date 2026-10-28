@@ -1,6 +1,7 @@
 package com.subtitleedit.repository
 
 import android.content.Context
+import com.subtitleedit.chat.ChatBackend
 import com.subtitleedit.util.AiProviderConfig
 import com.subtitleedit.util.AiTranslationConversation
 import com.subtitleedit.util.SubtitleParser
@@ -20,6 +21,7 @@ internal interface AiTranslationService {
         reasoningLevel: AiProviderConfig.ReasoningLevel,
         historySessionId: String,
         historyTitle: String? = null,
-        thinkingEnabled: Boolean = reasoningLevel != AiProviderConfig.ReasoningLevel.OFF
+        thinkingEnabled: Boolean = reasoningLevel != AiProviderConfig.ReasoningLevel.OFF,
+        initialMessages: List<ChatBackend.ChatMessage> = emptyList()
     ): AiTranslationConversation
 }
