@@ -13,6 +13,8 @@
     <string name="auto_translate_read_failed">无法读取文件</string>
     <string name="auto_translate_select_feature">请至少选择一项处理功能</string>
     <string name="auto_translate_status_waiting">等待</string>
+    <string name="auto_translate_status_paused">已暂停，点击此文件继续</string>
+    <string name="auto_translate_pause_requested">正在暂停...</string>
     <string name="auto_translate_status_completed">已完成</string>
     <string name="auto_translate_status_stopped">已停止，点击重试</string>
     <string name="auto_translate_stage_reading">读取字幕中</string>

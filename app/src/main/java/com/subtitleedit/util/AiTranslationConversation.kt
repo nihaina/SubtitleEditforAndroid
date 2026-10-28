@@ -94,25 +94,46 @@ class AiTranslationConversation(
         streamCallback: ((String) -> Unit)? = null,
         retryOnNoOutput: Boolean = false,
         onNoOutputRetry: ((Int) -> Unit)? = null,
+        preserveConversation: Boolean = false,
+        isPaused: () -> Boolean = { false },
         isCancelled: () -> Boolean = { false }
     ): Result<String> {
         if (text.isBlank()) return Result.success(text)
         return runCatching {
-            if (isCancelled()) throw CancellationException("翻译已取消")
+            if (isPaused() || isCancelled()) throw CancellationException("翻译已取消")
             val streamed = StringBuilder()
-            val result = sendUserPrompt(
-                content = buildTextTranslationUserContent(
-                    text, targetLanguage, customPrompt, indexTranslate2bModel
-                ),
-                clearConversation = localProvider,
-                streamCallback = streamCallback,
-                isCancelled = isCancelled,
-                cancellationMessage = "翻译已取消",
-                streamedContent = streamed,
-                streamedReasoning = StringBuilder(),
-                retryOnNoOutput = retryOnNoOutput,
-                onNoOutputRetry = onNoOutputRetry
-            )
+            val prompt = buildTextTranslationUserContent(text, targetLanguage, customPrompt, indexTranslate2bModel)
+            val reasoning = StringBuilder()
+            val result = try {
+                sendUserPrompt(
+                    content = prompt,
+                    clearConversation = localProvider && !preserveConversation,
+                    streamCallback = streamCallback,
+                    isCancelled = { isPaused() || isCancelled() },
+                    cancellationMessage = "翻译已取消",
+                    streamedContent = streamed,
+                    streamedReasoning = reasoning,
+                    retryOnNoOutput = retryOnNoOutput,
+                    onNoOutputRetry = onNoOutputRetry,
+                    isPaused = isPaused
+                )
+            } catch (error: Throwable) {
+                if (isPaused()) {
+                    val partial = streamed.toString()
+                    val partialReasoning = reasoning.toString()
+                    conversation.appendInterruptedTurn(prompt, partial, partialReasoning)
+                    historyStore.append(
+                        id = historySessionId,
+                        title = historyTitle ?: "翻译为$targetLanguage",
+                        type = ChatHistoryStore.TYPE_TRANSLATION,
+                        messages = listOf(
+                            ChatBackend.ChatMessage("user", prompt),
+                            ChatBackend.ChatMessage("assistant", partial, reasoningContent = partialReasoning)
+                        )
+                    )
+                }
+                throw error
+            }
             historyStore.append(
                 id = historySessionId,
                 title = historyTitle ?: "翻译为$targetLanguage",
@@ -138,6 +159,7 @@ class AiTranslationConversation(
         streamCallback: ((String) -> Unit)? = null,
         clearConversation: Boolean = true,
         recordInterruptedTurn: () -> Boolean = { false },
+        isPaused: () -> Boolean = { false },
         isCancelled: () -> Boolean = { false }
     ): Result<String> = processSubtitleText(
         text = text,
@@ -146,6 +168,7 @@ class AiTranslationConversation(
         streamCallback = streamCallback,
         clearConversation = clearConversation,
         recordInterruptedTurn = recordInterruptedTurn,
+        isPaused = isPaused,
         isCancelled = isCancelled
     )
 
@@ -156,6 +179,7 @@ class AiTranslationConversation(
         streamCallback: ((String) -> Unit)?,
         clearConversation: Boolean,
         recordInterruptedTurn: () -> Boolean,
+        isPaused: () -> Boolean,
         isCancelled: () -> Boolean
     ): Result<String> {
         if (text.isBlank()) return Result.success(text)
@@ -178,13 +202,14 @@ class AiTranslationConversation(
                     content = prompt,
                     clearConversation = clearConversation,
                     streamCallback = streamCallback,
-                    isCancelled = isCancelled,
+                    isCancelled = { isPaused() || isCancelled() },
                     cancellationMessage = "标点预测已取消",
                     streamedContent = streamedContent,
-                    streamedReasoning = streamedReasoning
+                    streamedReasoning = streamedReasoning,
+                    isPaused = isPaused
                 )
             } catch (error: Throwable) {
-                if (recordInterruptedTurn()) {
+                if (recordInterruptedTurn() || isPaused()) {
                     val partial = streamedContent.toString()
                     conversation.appendInterruptedTurn(
                         userContent = prompt,
@@ -207,7 +232,7 @@ class AiTranslationConversation(
                 }
                 throw error
             }
-            if (recordInterruptedTurn()) {
+            if (recordInterruptedTurn() || isPaused()) {
                 historyStore.append(
                     id = historySessionId,
                     title = historyTitle ?: defaultHistoryTitle,
@@ -246,6 +271,9 @@ class AiTranslationConversation(
         streamProgressCallback: ((Int, Int) -> Unit)? = null,
         retryOnNoOutput: Boolean = false,
         onNoOutputRetry: ((Int) -> Unit)? = null,
+        preserveConversationOnFirstBatch: Boolean = false,
+        maxSubtitlesPerBatch: Int? = null,
+        isPaused: () -> Boolean = { false },
         isCancelled: () -> Boolean = { false }
     ): TranslationRunResult {
         require(startPosition > 0) { "字幕起始位置必须大于 0" }
@@ -258,10 +286,10 @@ class AiTranslationConversation(
         try {
             splitSubtitleTranslationBatches(
                 subtitles,
-                maxSubtitlesPerBatch = settingsManager.getAiSubtitlesPerRequest(provider)
-            ).forEach { batch ->
-                if (isCancelled()) throw CancellationException("翻译已取消")
-                if (localProvider) {
+                maxSubtitlesPerBatch = maxSubtitlesPerBatch ?: settingsManager.getAiSubtitlesPerRequest(provider)
+            ).forEachIndexed { batchIndex, batch ->
+                if (isPaused() || isCancelled()) throw CancellationException("翻译已暂停或取消")
+                if (localProvider && !(preserveConversationOnFirstBatch && batchIndex == 0)) {
                     // Each batch contains its complete subtitle context. Keeping
                     // prior batches would eventually exceed the native context.
                     conversation.clear()
@@ -278,6 +306,7 @@ class AiTranslationConversation(
                     streamProgressCallback = streamProgressCallback,
                     retryOnNoOutput = retryOnNoOutput,
                     onNoOutputRetry = onNoOutputRetry,
+                    isPaused = isPaused,
                     isCancelled = isCancelled,
                     streamedContent = streamedContent
                 )
@@ -329,6 +358,7 @@ class AiTranslationConversation(
         streamProgressCallback: ((Int, Int) -> Unit)?,
         retryOnNoOutput: Boolean,
         onNoOutputRetry: ((Int) -> Unit)?,
+        isPaused: () -> Boolean,
         isCancelled: () -> Boolean,
         streamedContent: StringBuilder
     ): List<String> {
@@ -363,7 +393,7 @@ class AiTranslationConversation(
 
         try {
             while (pending.isNotEmpty()) {
-                if (isCancelled()) throw CancellationException("翻译已取消")
+                if (isPaused() || isCancelled()) throw CancellationException("翻译已暂停或取消")
                 val requestIndices = pending.removeFirst()
                 if (requestIndices.isEmpty()) continue
                 activeRequestIndices = requestIndices
@@ -374,6 +404,7 @@ class AiTranslationConversation(
                     streamCallback = streamCallback,
                     retryOnNoOutput = retryOnNoOutput,
                     onNoOutputRetry = onNoOutputRetry,
+                    isPaused = isPaused,
                     isCancelled = isCancelled,
                     streamedContent = streamedContent
                 )
@@ -439,7 +470,7 @@ class AiTranslationConversation(
                 }
             }
         } catch (error: CancellationException) {
-            if (isCancelled()) {
+            if (isPaused() || isCancelled()) {
                 activeRequestIndices?.let { requestIndices ->
                     val requestSubtitles = requestIndices.map(batch::get)
                     val completedPrefix = completedBatchPrefix(
@@ -475,6 +506,7 @@ class AiTranslationConversation(
         streamCallback: ((String) -> Unit)?,
         retryOnNoOutput: Boolean,
         onNoOutputRetry: ((Int) -> Unit)?,
+        isPaused: () -> Boolean,
         isCancelled: () -> Boolean,
         streamedContent: StringBuilder
     ): BatchAttempt {
@@ -521,7 +553,8 @@ class AiTranslationConversation(
                 content = userContent,
                 clearConversation = false,
                 streamCallback = streamCallback,
-                isCancelled = { isCancelled() || protocolIssue != null },
+                isCancelled = { isPaused() || isCancelled() || protocolIssue != null },
+                isPaused = isPaused,
                 cancellationMessage = "翻译已取消",
                 streamedContent = streamedContent,
                 streamedReasoning = streamedReasoning,
@@ -546,6 +579,10 @@ class AiTranslationConversation(
                 }
             )
         } catch (error: CancellationException) {
+            if (isPaused()) {
+                recordInterruptedAttempt()
+                throw error
+            }
             if (protocolIssue != null && !isCancelled()) {
                 recordInterruptedAttempt()
                 return BatchAttempt.Failure(
@@ -555,6 +592,10 @@ class AiTranslationConversation(
             }
             throw error
         } catch (error: Exception) {
+            if (isPaused()) {
+                recordInterruptedAttempt()
+                throw error
+            }
             if (protocolIssue != null && !isCancelled()) {
                 recordInterruptedAttempt()
                 return BatchAttempt.Failure(
@@ -629,11 +670,12 @@ class AiTranslationConversation(
         streamedReasoning: StringBuilder,
         retryOnNoOutput: Boolean = false,
         onNoOutputRetry: ((Int) -> Unit)? = null,
+        isPaused: () -> Boolean = { false },
         onTextDelta: (() -> Unit)? = null
     ): ChatBackend.SendResult {
         if (retryOnNoOutput) {
             return retryAiRequestWhenNoOutput(
-                isCancelled = isCancelled,
+                isCancelled = { isCancelled() || isPaused() },
                 onTimeout = conversation::cancel,
                 onRetry = { retries ->
                     streamedContent.setLength(0)
@@ -650,7 +692,8 @@ class AiTranslationConversation(
                     streamedContent = streamedContent,
                     streamedReasoning = streamedReasoning,
                     onTextDelta = onTextDelta,
-                    onOutput = onOutput
+                    onOutput = onOutput,
+                    isPaused = isPaused
                 )
             }
         }
@@ -663,7 +706,8 @@ class AiTranslationConversation(
             streamedContent = streamedContent,
             streamedReasoning = streamedReasoning,
             onTextDelta = onTextDelta,
-            onOutput = {}
+            onOutput = {},
+            isPaused = isPaused
         )
     }
 
@@ -676,9 +720,10 @@ class AiTranslationConversation(
         streamedContent: StringBuilder,
         streamedReasoning: StringBuilder,
         onTextDelta: (() -> Unit)?,
-        onOutput: () -> Unit
+        onOutput: () -> Unit,
+        isPaused: () -> Boolean
     ): ChatBackend.SendResult {
-        if (isCancelled()) throw CancellationException(cancellationMessage)
+        if (isCancelled() && !isPaused()) throw CancellationException(cancellationMessage)
         if (clearConversation) conversation.clear()
         val result = conversation.sendUserMessage(
             content = content,
@@ -699,7 +744,7 @@ class AiTranslationConversation(
             },
             isCancelled = isCancelled
         )
-        if (isCancelled()) throw CancellationException(cancellationMessage)
+        if (isCancelled() && !isPaused()) throw CancellationException(cancellationMessage)
         if (streamedContent.isEmpty()) {
             if (result.text.isNotEmpty()) onOutput()
             streamedContent.append(result.text)

@@ -45,7 +45,8 @@ data class AutoTranslateFileUi(
     val processedLines: Int,
     val progressLabel: String?,
     val showStageProgress: Boolean,
-    val canRetry: Boolean
+    val canRetry: Boolean,
+    val canPause: Boolean
 )
 
 data class AutoTranslateUiState(
@@ -71,7 +72,7 @@ fun AutoTranslateScreen(
     onTranslationChange: (Boolean) -> Unit,
     onSelectOutputDirectory: () -> Unit,
     onStart: () -> Unit,
-    onRetry: (String) -> Unit,
+    onFileClick: (String) -> Unit,
     onRemove: (String) -> Unit,
     onConfirmRemove: () -> Unit,
     onDismissRemove: () -> Unit,
@@ -97,7 +98,7 @@ fun AutoTranslateScreen(
                 AppPrimaryButton(
                     text = stringResource(R.string.activity_auto_translate_text_06),
                     onClick = onStart,
-                    enabled = state.hasWaitingFiles || state.files.isEmpty()
+                    enabled = !state.queueRunning && (state.hasWaitingFiles || state.files.isEmpty())
                 )
             }
         }
@@ -153,7 +154,7 @@ fun AutoTranslateScreen(
                     items(state.files, key = AutoTranslateFileUi::key) { file ->
                         AutoTranslateFileRow(
                             file = file,
-                            onClick = { if (file.canRetry) onRetry(file.key) },
+                            onClick = { if (file.canRetry || file.canPause) onFileClick(file.key) },
                             onRemove = { onRemove(file.key) }
                         )
                     }
@@ -231,7 +232,7 @@ private fun AutoTranslateFileRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (file.canRetry) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(if (file.canRetry || file.canPause) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(vertical = AppSpacing.Inner),
         verticalAlignment = Alignment.CenterVertically
     ) {

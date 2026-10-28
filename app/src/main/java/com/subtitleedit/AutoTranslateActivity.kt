@@ -48,7 +48,7 @@ class AutoTranslateActivity : AppComposeActivity() {
                     onTranslationChange = viewModel::setTranslation,
                     onSelectOutputDirectory = { directoryPickerLauncher.launch(viewModel.currentOutputDirectoryUri) },
                     onStart = viewModel::startQueuedFiles,
-                    onRetry = viewModel::retry,
+                    onFileClick = viewModel::handleFileClick,
                     onRemove = viewModel::requestRemove,
                     onConfirmRemove = viewModel::confirmRemove,
                     onDismissRemove = viewModel::dismissRemove,
