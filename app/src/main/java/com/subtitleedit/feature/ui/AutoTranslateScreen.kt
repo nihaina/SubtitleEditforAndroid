@@ -56,6 +56,7 @@ data class AutoTranslateUiState(
     val translationEnabled: Boolean = true,
     val queueRunning: Boolean = false,
     val hasWaitingFiles: Boolean = false,
+    val canStartQueue: Boolean = true,
     val progressSummary: String = "",
     val showOutputConflict: Boolean = false,
     val showExitConfirmation: Boolean = false,
@@ -98,7 +99,7 @@ fun AutoTranslateScreen(
                 AppPrimaryButton(
                     text = stringResource(R.string.activity_auto_translate_text_06),
                     onClick = onStart,
-                    enabled = !state.queueRunning && (state.hasWaitingFiles || state.files.isEmpty())
+                    enabled = state.canStartQueue && (state.hasWaitingFiles || state.files.isEmpty())
                 )
             }
         }

@@ -10,6 +10,7 @@ class AutoTranslateQueueCodecTest {
         val snapshot = AutoTranslateQueueSnapshot(
             punctuationPredictionEnabled = true,
             translationEnabled = true,
+            workRunning = true,
             files = listOf(
                 AutoTranslateFileSnapshot(
                     uri = "content://subtitle/1",
@@ -44,7 +45,8 @@ class AutoTranslateQueueCodecTest {
                     textPunctuationPredictions = emptyList(),
                     textTranslations = emptyList(),
                     punctuationResumeHistory = true,
-                    translationResumeHistory = true
+                    translationResumeHistory = true,
+                    message = "AI 长时间无响应，正在自动重试 1/3"
                 )
             )
         )
@@ -53,7 +55,9 @@ class AutoTranslateQueueCodecTest {
 
         assertEquals(snapshot.punctuationPredictionEnabled, restored.punctuationPredictionEnabled)
         assertEquals(snapshot.translationEnabled, restored.translationEnabled)
+        assertEquals(snapshot.workRunning, restored.workRunning)
         assertEquals(snapshot.files, restored.files)
         assertTrue(restored.files.single().translationResumeHistory)
+        assertEquals(snapshot.files.single().message, restored.files.single().message)
     }
 }

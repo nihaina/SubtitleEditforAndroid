@@ -296,6 +296,9 @@ class AiTranslationConversation(
                     // Each batch contains its complete subtitle context. Keeping
                     // prior batches would eventually exceed the native context.
                     conversation.clear()
+                    // Keep durable local history aligned with the in-memory batch reset.
+                    // Cloud conversations intentionally retain the complete session history.
+                    historyStore.delete(historySessionId)
                 }
                 activeBatch = batch
                 activeBatchStart = startPosition + translations.size
@@ -728,7 +731,14 @@ class AiTranslationConversation(
         isPaused: () -> Boolean
     ): ChatBackend.SendResult {
         if (isCancelled() && !isPaused()) throw CancellationException(cancellationMessage)
-        if (clearConversation) conversation.clear()
+        if (clearConversation) {
+            conversation.clear()
+            if (localProvider) {
+                // A local batch reset must also discard older persisted batches. When a
+                // paused batch resumes, clearConversation is false so its context survives.
+                historyStore.delete(historySessionId)
+            }
+        }
         val result = conversation.sendUserMessage(
             content = content,
             onEvent = { event ->

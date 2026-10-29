@@ -1,6 +1,7 @@
 package com.subtitleedit.util
 
 import com.subtitleedit.model.SubtitleEntry
+import kotlinx.coroutines.CancellationException
 import java.io.IOException
 
 internal const val PUNCTUATION_PREDICTION_PROMPT =
@@ -98,6 +99,19 @@ object SubtitlePunctuationPredictor {
                     }
                 }
 
+                fun commitContiguousPrefix() {
+                    var prefixCount = 0
+                    while (prefixCount < translated.size && translated[prefixCount] != null) {
+                        prefixCount++
+                    }
+                    if (prefixCount <= 0) return
+                    completed += batch.take(prefixCount).mapIndexed { index, entry ->
+                        entry.copy(text = translated[index]!!)
+                    }
+                    processedCount += prefixCount
+                    onProgress(processedCount, totalCount)
+                }
+
                 while (pending.isNotEmpty()) {
                     val requestIndices = pending.removeFirst()
                     if (requestIndices.isEmpty()) continue
@@ -155,6 +169,24 @@ object SubtitlePunctuationPredictor {
                         } else {
                             requestStreamingPrediction?.invoke(request, onPartial)
                         } ?: requestPredictionWithRetry?.invoke(request, isRetry) ?: requestPrediction(request)
+                    } catch (error: CancellationException) {
+                        if (streamingIssue != null && stopStreaming) {
+                            // A malformed streamed response is deliberately cancelled so the
+                            // existing protocol-recovery ladder can retry the affected range.
+                            ""
+                        } else {
+                            if (lastPartialResponse.isNotBlank()) {
+                                completedPrefixTexts(
+                                    requestEntries,
+                                    lastPartialResponse,
+                                    startPosition
+                                ).forEachIndexed { index, text ->
+                                    translated[requestIndices[index]] = text
+                                }
+                            }
+                            commitContiguousPrefix()
+                            throw error
+                        }
                     } catch (error: Throwable) {
                         if (streamingIssue != null && stopStreaming) "" else throw error
                     }

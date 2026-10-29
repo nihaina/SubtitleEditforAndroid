@@ -504,6 +504,61 @@ class SubtitlePunctuationPredictorTest {
     }
 
     @Test
+    fun cancellationAfterStreamingPrefixResumesAfterTheLastValidCue() = runBlocking {
+        val source = subtitleEntries(301)
+        val session = SubtitlePunctuationPredictor.Session(source)
+        var firstRequest = true
+        val error = runCatching {
+            session.run(
+                requestStreamingPredictionWithRetry = { text, _, onStream, _ ->
+                    val response = punctuateRequest(text, "！")
+                    if (firstRequest) {
+                        firstRequest = false
+                        onStream(response.lines().take(3).joinToString("\n"))
+                        throw CancellationException("已暂停")
+                    }
+                    response
+                }
+            )
+        }.exceptionOrNull()
+
+        assertTrue(error is CancellationException)
+        assertEquals(2, session.processedCount)
+
+        val requests = mutableListOf<String>()
+        val result = session.run(
+            requestStreamingPredictionWithRetry = { text, _, _, _ ->
+                requests += text
+                punctuateRequest(text, "？")
+            }
+        )
+
+        assertEquals("<start>\n[1003]第3条", requests.first().lines().take(2).joinToString("\n"))
+        assertEquals(source.mapIndexed { index, entry ->
+            entry.copy(text = if (index < 2) "${entry.text}！" else "${entry.text}？")
+        }, result)
+    }
+
+    @Test
+    fun malformedStreamingResponseStillUsesProtocolRecovery() = runBlocking {
+        val source = subtitleEntries(3)
+        var calls = 0
+        val result = SubtitlePunctuationPredictor.Session(source).run(
+            requestStreamingPredictionWithRetry = { text, _, onStream, shouldStop ->
+                calls++
+                val response = punctuateRequest(text, "。")
+                    .replace("第2条", if (calls == 1) "错误内容" else "第2条")
+                onStream(response)
+                if (shouldStop()) throw CancellationException("格式错误")
+                response
+            }
+        )
+
+        assertEquals(2, calls)
+        assertEquals(source.map { it.copy(text = "${it.text}。") }, result)
+    }
+
+    @Test
     fun numberedRepliesPreserveNumericAndMultilineSubtitleText() {
         val source = listOf(
             SubtitleEntry(index = 7, text = "你好\n\n123\n世界"),

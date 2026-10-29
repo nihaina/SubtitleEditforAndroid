@@ -5,9 +5,9 @@ import org.junit.Test
 
 class SubtitleTranslationResumePolicyTest {
     @Test
-    fun resumesFromOneCueBeforeLastValidOutput() {
+    fun resumesFromTheCueAfterTheLastValidOutput() {
         assertEquals(0, SubtitleTranslationResumePolicy.resumeIndex(0))
-        assertEquals(0, SubtitleTranslationResumePolicy.resumeIndex(1))
-        assertEquals(5, SubtitleTranslationResumePolicy.resumeIndex(7))
+        assertEquals(1, SubtitleTranslationResumePolicy.resumeIndex(1))
+        assertEquals(7, SubtitleTranslationResumePolicy.resumeIndex(7))
     }
 }

@@ -49,6 +49,28 @@ internal class TaskWorkScheduler(
         ASR_MODEL_WORK, ModelDownloadWorker.KIND_QWEN3_FORCED_ALIGNER
     )
 
+    suspend fun enqueueAiSubtitleProcessing(targetSessionId: String? = null): UUID =
+        withContext(Dispatchers.IO) {
+            val request = OneTimeWorkRequestBuilder<AiSubtitleWorker>()
+                .setInputData(
+                    Data.Builder().apply {
+                        targetSessionId?.let { putString(AiSubtitleWorker.KEY_TARGET_SESSION_ID, it) }
+                    }.build()
+                )
+                .addTag(AiSubtitleWorker.TAG_AI_SUBTITLE)
+                .build()
+            workManager.enqueueUniqueWork(
+                AI_SUBTITLE_WORK,
+                if (targetSessionId == null) ExistingWorkPolicy.KEEP else ExistingWorkPolicy.REPLACE,
+                request
+            ).result.get()
+            request.id
+        }
+
+    fun cancelAiSubtitleProcessing() {
+        workManager.cancelUniqueWork(AI_SUBTITLE_WORK)
+    }
+
     suspend fun retryModelDownload(workId: UUID): UUID {
         val previous = withContext(Dispatchers.IO) { workManager.getWorkInfoById(workId).get() }
         requireNotNull(previous) { "下载任务不存在，请重新选择模型下载" }
@@ -173,6 +195,7 @@ internal class TaskWorkScheduler(
         private const val GENERAL_MODEL_WORK = "download-demix-general"
         private const val ASR_MODEL_WORK = "download-asr-model"
         private const val LLM_MODEL_WORK_PREFIX = "download-llm-model"
+        private const val AI_SUBTITLE_WORK = "ai-subtitle-processing"
         private const val MODEL_KIND_TAG_PREFIX = "model-kind:"
         private const val MODEL_OPTION_TAG_PREFIX = "model-option:"
         fun progressData(message: String, current: Long, total: Long): Data = Data.Builder()

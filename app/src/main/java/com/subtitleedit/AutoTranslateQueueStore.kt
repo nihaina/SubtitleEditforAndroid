@@ -41,27 +41,29 @@ internal data class AutoTranslateFileSnapshot(
     val textPunctuationPredictions: List<String>,
     val textTranslations: List<String>,
     val punctuationResumeHistory: Boolean,
-    val translationResumeHistory: Boolean
+    val translationResumeHistory: Boolean,
+    val message: String = ""
 )
 
 internal data class AutoTranslateQueueSnapshot(
     val punctuationPredictionEnabled: Boolean,
     val translationEnabled: Boolean,
-    val files: List<AutoTranslateFileSnapshot>
+    val files: List<AutoTranslateFileSnapshot>,
+    val workRunning: Boolean = false
 )
 
 internal class AutoTranslateQueueStore(context: Context) {
     private val file = AtomicFile(File(context.applicationContext.filesDir, FILE_NAME))
 
-    @Synchronized
-    fun load(): AutoTranslateQueueSnapshot? = runCatching {
-        file.openRead().bufferedReader().use { reader ->
-            AutoTranslateQueueCodec.decode(reader.readText())
-        }
-    }.getOrNull()
+    fun load(): AutoTranslateQueueSnapshot? = synchronized(FILE_LOCK) {
+        runCatching {
+            file.openRead().bufferedReader().use { reader ->
+                AutoTranslateQueueCodec.decode(reader.readText())
+            }
+        }.getOrNull()
+    }
 
-    @Synchronized
-    fun save(snapshot: AutoTranslateQueueSnapshot) {
+    fun save(snapshot: AutoTranslateQueueSnapshot) = synchronized(FILE_LOCK) {
         val output = file.startWrite()
         try {
             output.write(AutoTranslateQueueCodec.encode(snapshot).toByteArray(Charsets.UTF_8))
@@ -73,6 +75,7 @@ internal class AutoTranslateQueueStore(context: Context) {
     }
 
     companion object {
+        private val FILE_LOCK = Any()
         private const val FILE_NAME = "auto_translate_queue.json"
     }
 }
@@ -81,6 +84,7 @@ internal object AutoTranslateQueueCodec {
     fun encode(snapshot: AutoTranslateQueueSnapshot): String = JSONObject()
         .put("punctuationPredictionEnabled", snapshot.punctuationPredictionEnabled)
         .put("translationEnabled", snapshot.translationEnabled)
+        .put("workRunning", snapshot.workRunning)
         .put("files", JSONArray().apply { snapshot.files.forEach { put(it.toJson()) } })
         .toString()
 
@@ -90,6 +94,7 @@ internal object AutoTranslateQueueCodec {
         return AutoTranslateQueueSnapshot(
             punctuationPredictionEnabled = json.optBoolean("punctuationPredictionEnabled", false),
             translationEnabled = json.optBoolean("translationEnabled", true),
+            workRunning = json.optBoolean("workRunning", false),
             files = buildList {
                 for (index in 0 until files.length()) {
                     files.optJSONObject(index)?.toSnapshot()?.let(::add)
@@ -124,6 +129,7 @@ internal object AutoTranslateQueueCodec {
         .put("textTranslations", JSONArray(textTranslations))
         .put("punctuationResumeHistory", punctuationResumeHistory)
         .put("translationResumeHistory", translationResumeHistory)
+        .put("message", message)
 
     private fun JSONObject.toSnapshot(): AutoTranslateFileSnapshot? {
         val uri = optString("uri").takeIf(String::isNotBlank) ?: return null
@@ -154,7 +160,8 @@ internal object AutoTranslateQueueCodec {
             textPunctuationPredictions = stringList("textPunctuationPredictions"),
             textTranslations = stringList("textTranslations"),
             punctuationResumeHistory = optBoolean("punctuationResumeHistory", false),
-            translationResumeHistory = optBoolean("translationResumeHistory", false)
+            translationResumeHistory = optBoolean("translationResumeHistory", false),
+            message = optString("message")
         )
     }
 
