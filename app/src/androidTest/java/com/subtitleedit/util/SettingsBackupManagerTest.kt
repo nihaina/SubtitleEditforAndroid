@@ -3,6 +3,7 @@ package com.subtitleedit.util
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -121,6 +122,120 @@ class SettingsBackupManagerTest {
         }
     }
 
+    @Test
+    fun asrPunctuationSplitSettingsAreExportedAndRestoredPerModel() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val settings = SettingsManager.getInstance(context)
+        val modelTypes = listOf(
+            SettingsManager.ASR_MODEL_SENSEVOICE,
+            SettingsManager.ASR_MODEL_PARAKEET_TDT
+        )
+        val original = modelTypes.associateWith { type ->
+            PunctuationSplitSnapshot(
+                enabled = settings.isSpeechTokenTimestampPunctuationSplitEnabled(type),
+                punctuation = settings.getSpeechTokenTimestampSplitPunctuation(type)
+            )
+        }
+        try {
+            settings.setSpeechTokenTimestampPunctuationSplitEnabled(
+                enabled = false,
+                type = SettingsManager.ASR_MODEL_SENSEVOICE
+            )
+            settings.setSpeechTokenTimestampSplitPunctuation(
+                punctuation = listOf("。", "？", "["),
+                type = SettingsManager.ASR_MODEL_SENSEVOICE
+            )
+            settings.setSpeechTokenTimestampPunctuationSplitEnabled(
+                enabled = true,
+                type = SettingsManager.ASR_MODEL_PARAKEET_TDT
+            )
+            settings.setSpeechTokenTimestampSplitPunctuation(
+                punctuation = listOf("！", "!", "…"),
+                type = SettingsManager.ASR_MODEL_PARAKEET_TDT
+            )
+
+            val backup = JSONObject(SettingsBackupManager.export(context))
+                .getJSONObject("settings")
+            assertTypedValue(
+                backup,
+                "asr_timeline_sensevoice_token_merge_punctuation_split_enabled",
+                "boolean",
+                false
+            )
+            assertTypedStringArray(
+                backup,
+                "asr_timeline_sensevoice_token_merge_split_punctuation",
+                listOf("。", "？", "[")
+            )
+            assertTypedValue(
+                backup,
+                "asr_timeline_parakeet_token_merge_punctuation_split_enabled",
+                "boolean",
+                true
+            )
+            assertTypedStringArray(
+                backup,
+                "asr_timeline_parakeet_token_merge_split_punctuation",
+                listOf("！", "!", "…")
+            )
+
+            settings.setSpeechTokenTimestampPunctuationSplitEnabled(
+                enabled = true,
+                type = SettingsManager.ASR_MODEL_SENSEVOICE
+            )
+            settings.setSpeechTokenTimestampSplitPunctuation(
+                punctuation = listOf("，"),
+                type = SettingsManager.ASR_MODEL_SENSEVOICE
+            )
+            settings.setSpeechTokenTimestampPunctuationSplitEnabled(
+                enabled = false,
+                type = SettingsManager.ASR_MODEL_PARAKEET_TDT
+            )
+            settings.setSpeechTokenTimestampSplitPunctuation(
+                punctuation = listOf("。"),
+                type = SettingsManager.ASR_MODEL_PARAKEET_TDT
+            )
+
+            SettingsBackupManager.restore(
+                context,
+                JSONObject()
+                    .put("schemaVersion", 1)
+                    .put("settings", backup)
+                    .toString()
+            )
+
+            assertEquals(
+                false,
+                settings.isSpeechTokenTimestampPunctuationSplitEnabled(
+                    SettingsManager.ASR_MODEL_SENSEVOICE
+                )
+            )
+            assertEquals(
+                listOf("。", "？", "["),
+                settings.getSpeechTokenTimestampSplitPunctuation(
+                    SettingsManager.ASR_MODEL_SENSEVOICE
+                )
+            )
+            assertEquals(
+                true,
+                settings.isSpeechTokenTimestampPunctuationSplitEnabled(
+                    SettingsManager.ASR_MODEL_PARAKEET_TDT
+                )
+            )
+            assertEquals(
+                listOf("！", "!", "…"),
+                settings.getSpeechTokenTimestampSplitPunctuation(
+                    SettingsManager.ASR_MODEL_PARAKEET_TDT
+                )
+            )
+        } finally {
+            original.forEach { (type, value) ->
+                settings.setSpeechTokenTimestampPunctuationSplitEnabled(value.enabled, type)
+                settings.setSpeechTokenTimestampSplitPunctuation(value.punctuation, type)
+            }
+        }
+    }
+
     private data class LlmSettingsSnapshot(
         val repackEnabled: Boolean,
         val contextSize: Int,
@@ -173,6 +288,11 @@ class SettingsBackupManagerTest {
         }
     }
 
+    private data class PunctuationSplitSnapshot(
+        val enabled: Boolean,
+        val punctuation: List<String>
+    )
+
     private fun assertTypedValue(
         settings: JSONObject,
         key: String,
@@ -186,6 +306,20 @@ class SettingsBackupManagerTest {
             is Int -> assertEquals(expected, value.getInt("value"))
             is Float -> assertEquals(expected.toDouble(), value.getDouble("value"), 0.0001)
             else -> assertTrue("Unsupported test value type", false)
+        }
+    }
+
+    private fun assertTypedStringArray(
+        settings: JSONObject,
+        key: String,
+        expected: List<String>
+    ) {
+        val value = settings.getJSONObject(key)
+        assertEquals("string", value.getString("type"))
+        val actual = JSONArray(value.getString("value"))
+        assertEquals(expected.size, actual.length())
+        expected.forEachIndexed { index, punctuation ->
+            assertEquals(punctuation, actual.getString(index))
         }
     }
 }

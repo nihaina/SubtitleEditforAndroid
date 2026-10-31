@@ -320,6 +320,25 @@ class SettingsManager private constructor(context: Context) {
                 snapshot[key] = isSpeechVadDynamicPaddingEnabled(type)
             }
         }
+        // Punctuation splitting is a timeline setting. Export its effective
+        // values for every model that owns a timeline key so a backup also
+        // carries the defaults when the user has not opened that settings
+        // page yet. Parakeet variants intentionally share one key.
+        listOf(
+            ASR_MODEL_SENSEVOICE,
+            ASR_MODEL_PARAKEET_TDT,
+            ASR_MODEL_PARAKEET_CTC_JA,
+            ASR_MODEL_QWEN3_ASR
+        ).forEach { type ->
+            timelineKey("token_merge_punctuation_split_enabled", type)?.let { key ->
+                snapshot[key] = isSpeechTokenTimestampPunctuationSplitEnabled(type)
+            }
+            timelineKey("token_merge_split_punctuation", type)?.let { key ->
+                val selected = JSONArray()
+                getSpeechTokenTimestampSplitPunctuation(type).forEach(selected::put)
+                snapshot[key] = selected.toString()
+            }
+        }
         // Include effective local LLM values even when the user has never
         // opened the LLM settings page and the defaults are not persisted yet.
         snapshot[KEY_LLM_REPACK_ENABLED] = isLlmRepackEnabled()

@@ -163,6 +163,53 @@ class ChatBackendTest {
     }
 
     @Test
+    fun apiContextOverLimit_isSummarizedAndOldMessagesAreRemovedFromFutureRequests() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody("data: {\"choices\":[{\"delta\":{\"content\":\"旧上下文摘要\"}}]}\n\n" +
+                    "data: [DONE]\n\n"))
+            server.enqueue(MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody("data: {\"choices\":[{\"delta\":{\"content\":\"翻译结果\"}}]}\n\n" +
+                    "data: [DONE]\n\n"))
+
+            val oldContent = "旧上下文".repeat(250_000)
+            val conversation = ChatConversation(
+                config = ChatBackendConfig(
+                    providerId = "custom",
+                    apiKey = "test-key",
+                    model = "test-model",
+                    baseUrl = server.url("/v1").toString(),
+                ),
+                systemPrompt = "翻译规则",
+                initialMessages = listOf(
+                    ChatBackend.ChatMessage("user", oldContent),
+                    ChatBackend.ChatMessage("assistant", oldContent)
+                )
+            )
+
+            val result = conversation.sendUserMessage("当前字幕")
+
+            // The maintenance summary request is internal; callers and the history archive only
+            // receive the actual user turn and its assistant reply.
+            assertEquals(2, result.messages.size)
+            assertEquals("当前字幕", result.messages.first().content)
+
+            val summaryRequest = JSONObject(server.takeRequest().body.readUtf8())
+            assertTrue(summaryRequest.getJSONArray("messages").toString().contains(oldContent))
+            val continuationRequest = JSONObject(server.takeRequest().body.readUtf8())
+            val messages = continuationRequest.getJSONArray("messages")
+            assertEquals(3, messages.length())
+            assertEquals("system", messages.getJSONObject(0).getString("role"))
+            assertEquals("assistant", messages.getJSONObject(1).getString("role"))
+            assertEquals("此前对话上下文摘要：旧上下文摘要", messages.getJSONObject(1).getString("content"))
+            assertEquals("当前字幕", messages.getJSONObject(2).getString("content"))
+            assertFalse(messages.toString().contains(oldContent))
+        }
+    }
+
+    @Test
     fun interruptedTurnIsIncludedInTheNextRequestContext() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse()

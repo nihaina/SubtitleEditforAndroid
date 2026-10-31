@@ -44,6 +44,10 @@ class ChatConversation(
                 isCancelled = isCancelled
             )
         } else {
+            compactApiContextIfNeeded(
+                userContent = content,
+                isCancelled = isCancelled
+            )
             cloudBackend!!.send(
                 conversation = history.toList(),
                 userContent = content,
@@ -55,6 +59,49 @@ class ChatConversation(
         history += result.messages
         result
     }
+
+    /**
+     * API providers do not have the local runtime's bounded context. Once the serialized request
+     * would exceed the safety threshold, summarize the old conversation in a hidden request and
+     * replace the in-memory request context with that summary plus the system prompt. The chat
+     * history store is owned by the caller and is therefore unaffected by this compaction.
+     */
+    private suspend fun compactApiContextIfNeeded(
+        userContent: String,
+        isCancelled: () -> Boolean
+    ) {
+        val backend = cloudBackend ?: return
+        val requestMessages = history + ChatBackend.ChatMessage(role = ROLE_USER, content = userContent)
+        if (requestMessages.isEmpty() || estimateRequestSize(requestMessages) <= API_CONTEXT_COMPACTION_THRESHOLD) {
+            return
+        }
+        if (history.none { it.role != ROLE_SYSTEM }) return
+
+        val summaryResult = backend.send(
+            conversation = history.toList(),
+            userContent = API_CONTEXT_SUMMARY_PROMPT,
+            // Summary generation is an internal maintenance request. Tool calls would add
+            // protocol messages to the compacted context and make the summary non-deterministic.
+            tools = emptyList(),
+            onEvent = {},
+            isCancelled = isCancelled
+        )
+        val summary = summaryResult.text
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        require(summary.isNotBlank()) { "API 上下文摘要为空" }
+
+        val systemMessages = history.filter { it.role == ROLE_SYSTEM }
+        history.clear()
+        history += systemMessages
+        history += ChatBackend.ChatMessage(
+            role = ROLE_ASSISTANT,
+            content = "此前对话上下文摘要：$summary"
+        )
+    }
+
+    private fun estimateRequestSize(messages: List<ChatBackend.ChatMessage>): Int =
+        cloudBackend?.buildRequestBody(messages, tools)?.toString()?.length ?: 0
 
     suspend fun snapshot(): List<ChatBackend.ChatMessage> = historyMutex.withLock { history.toList() }
 
@@ -98,5 +145,15 @@ class ChatConversation(
     fun cancel() {
         cloudBackend?.cancel()
         localBackend?.cancel()
+    }
+
+    companion object {
+        /** Serialized request size at which cloud conversation context is compacted. */
+        internal const val API_CONTEXT_COMPACTION_THRESHOLD = 900_000
+        private const val ROLE_SYSTEM = "system"
+        private const val ROLE_USER = "user"
+        private const val ROLE_ASSISTANT = "assistant"
+        private const val API_CONTEXT_SUMMARY_PROMPT =
+            "请将此前完整对话上下文压缩为一段话，保留与当前任务相关的事实、约束、已完成内容、待处理内容和术语。只输出一段纯文本摘要，不要列标题，不要解释。"
     }
 }
