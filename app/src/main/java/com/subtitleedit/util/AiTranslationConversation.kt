@@ -75,10 +75,25 @@ class AiTranslationConversation(
             localRepetitionPenalty = settingsManager.getLlmRepetitionPenalty()
         ),
         tools = if (provider == AiProviderConfig.LOCAL) emptyList() else ChatTools.create(context.applicationContext),
-        initialMessages = initialMessages,
+        initialMessages = if (localProvider) {
+            retainLastExchangeMessages(initialMessages)
+        } else {
+            initialMessages
+        },
         context = context.applicationContext
     )
     private val historyStore = ChatHistoryStore(context)
+
+    private fun retainLastExchangeMessages(
+        messages: List<ChatBackend.ChatMessage>
+    ): List<ChatBackend.ChatMessage> {
+        val lastUserIndex = messages.indexOfLast { it.role == "user" }
+        if (lastUserIndex < 0) return messages.filter { it.role == "system" }
+        return buildList {
+            addAll(messages.filter { it.role == "system" })
+            addAll(messages.subList(lastUserIndex, messages.size).filter { it.role != "system" })
+        }
+    }
 
     private fun isIndexTranslate2b(settings: SettingsManager): Boolean {
         // Downloaded and manually selected Index GGUF files expose their size in the
@@ -89,6 +104,32 @@ class AiTranslationConversation(
     }
 
     fun cancel() = conversation.cancel()
+
+    private suspend fun recordUserPrompt(
+        content: String,
+        title: String
+    ) {
+        historyStore.append(
+            id = historySessionId,
+            title = title,
+            type = ChatHistoryStore.TYPE_TRANSLATION,
+            messages = listOf(ChatBackend.ChatMessage(role = "user", content = content))
+        )
+    }
+
+    private suspend fun recordResponseMessages(
+        messages: List<ChatBackend.ChatMessage>,
+        title: String
+    ) {
+        val responseMessages = messages.dropWhile { it.role == "user" }
+        if (responseMessages.isEmpty()) return
+        historyStore.append(
+            id = historySessionId,
+            title = title,
+            type = ChatHistoryStore.TYPE_TRANSLATION,
+            messages = responseMessages
+        )
+    }
 
     /** TXT chunks use the same translation instruction without the cue/time-axis protocol. */
     suspend fun translateText(
@@ -106,6 +147,7 @@ class AiTranslationConversation(
             val streamed = StringBuilder()
             val prompt = buildTextTranslationUserContent(text, targetLanguage, customPrompt, indexTranslate2bModel)
             val reasoning = StringBuilder()
+            recordUserPrompt(prompt, historyTitle ?: "翻译为$targetLanguage")
             val result = try {
                 sendUserPrompt(
                     content = prompt,
@@ -129,19 +171,13 @@ class AiTranslationConversation(
                         title = historyTitle ?: "翻译为$targetLanguage",
                         type = ChatHistoryStore.TYPE_TRANSLATION,
                         messages = listOf(
-                            ChatBackend.ChatMessage("user", prompt),
                             ChatBackend.ChatMessage("assistant", partial, reasoningContent = partialReasoning)
                         )
                     )
                 }
                 throw error
             }
-            historyStore.append(
-                id = historySessionId,
-                title = historyTitle ?: "翻译为$targetLanguage",
-                type = ChatHistoryStore.TYPE_TRANSLATION,
-                messages = result.messages
-            )
+            recordResponseMessages(result.messages, historyTitle ?: "翻译为$targetLanguage")
             val translation = try {
                 extractTaggedTxtAiResponse(result.text)
             } catch (error: InvalidTxtAiResponseException) {
@@ -199,6 +235,7 @@ class AiTranslationConversation(
             }
             val streamedContent = StringBuilder()
             val streamedReasoning = StringBuilder()
+            recordUserPrompt(prompt, historyTitle ?: defaultHistoryTitle)
             val result = try {
                 sendUserPrompt(
                     content = prompt,
@@ -223,7 +260,6 @@ class AiTranslationConversation(
                         title = historyTitle ?: defaultHistoryTitle,
                         type = ChatHistoryStore.TYPE_TRANSLATION,
                         messages = listOf(
-                            ChatBackend.ChatMessage(role = "user", content = prompt),
                             ChatBackend.ChatMessage(
                                 role = "assistant",
                                 content = partial,
@@ -235,23 +271,13 @@ class AiTranslationConversation(
                 throw error
             }
             if (recordInterruptedTurn() || isPaused()) {
-                historyStore.append(
-                    id = historySessionId,
-                    title = historyTitle ?: defaultHistoryTitle,
-                    type = ChatHistoryStore.TYPE_TRANSLATION,
-                    messages = result.messages
-                )
+                recordResponseMessages(result.messages, historyTitle ?: defaultHistoryTitle)
                 throw CancellationException("标点预测响应格式错误")
             }
             if (streamedContent.isEmpty()) {
                 runCatching { streamCallback?.invoke(result.text) }
             }
-            historyStore.append(
-                id = historySessionId,
-                title = historyTitle ?: defaultHistoryTitle,
-                type = ChatHistoryStore.TYPE_TRANSLATION,
-                messages = result.messages
-            )
+            recordResponseMessages(result.messages, historyTitle ?: defaultHistoryTitle)
             if (subtitleFormat == SubtitleFormat.TXT) {
                 try {
                     extractTaggedTxtAiResponse(result.text)
@@ -293,12 +319,9 @@ class AiTranslationConversation(
             ).forEachIndexed { batchIndex, batch ->
                 if (isPaused() || isCancelled()) throw CancellationException("翻译已暂停或取消")
                 if (localProvider && !(preserveConversationOnFirstBatch && batchIndex == 0)) {
-                    // Each batch contains its complete subtitle context. Keeping
-                    // prior batches would eventually exceed the native context.
-                    conversation.clear()
-                    // Keep durable local history aligned with the in-memory batch reset.
-                    // Cloud conversations intentionally retain the complete session history.
-                    historyStore.delete(historySessionId)
+                    // Keep one previous local exchange as context, while dropping older batches
+                    // so the native context remains bounded.
+                    conversation.retainLastExchange()
                 }
                 activeBatch = batch
                 activeBatchStart = startPosition + translations.size
@@ -529,18 +552,17 @@ class AiTranslationConversation(
             includeBlockMarkers = true,
             indexTranslate = indexTranslate2bModel
         )
+        val historyTitleForRequest = historyTitle ?: "翻译为$targetLanguage · ${batch.size} 条字幕"
+        recordUserPrompt(userContent, historyTitleForRequest)
         streamedContent.setLength(0)
         val streamedReasoning = StringBuilder()
         var protocolIssue: TranslationProtocolIssue? = null
 
         suspend fun recordInterruptedAttempt() {
-            val messages = listOf(
-                ChatBackend.ChatMessage(role = "user", content = userContent),
-                ChatBackend.ChatMessage(
-                    role = "assistant",
-                    content = streamedContent.toString(),
-                    reasoningContent = streamedReasoning.toString()
-                )
+            val assistantMessage = ChatBackend.ChatMessage(
+                role = "assistant",
+                content = streamedContent.toString(),
+                reasoningContent = streamedReasoning.toString()
             )
             conversation.appendInterruptedTurn(
                 userContent = userContent,
@@ -549,9 +571,9 @@ class AiTranslationConversation(
             )
             historyStore.append(
                 id = historySessionId,
-                title = historyTitle ?: "翻译为$targetLanguage · ${batch.size} 条字幕",
+                title = historyTitleForRequest,
                 type = ChatHistoryStore.TYPE_TRANSLATION,
-                messages = messages
+                messages = listOf(assistantMessage)
             )
         }
 
@@ -628,23 +650,13 @@ class AiTranslationConversation(
             finalResponse = true
         )
         if (finalIssue != null) {
-            historyStore.append(
-                id = historySessionId,
-                title = historyTitle ?: "翻译为$targetLanguage",
-                type = ChatHistoryStore.TYPE_TRANSLATION,
-                messages = result.messages
-            )
+            recordResponseMessages(result.messages, historyTitle ?: "翻译为$targetLanguage")
             return BatchAttempt.Failure(
                 finalIssue,
                 completedBatchPrefix(result.text, requestSubtitles, requestStart)
             )
         }
-        historyStore.append(
-            id = historySessionId,
-            title = historyTitle ?: "翻译为$targetLanguage · ${batch.size} 条字幕",
-            type = ChatHistoryStore.TYPE_TRANSLATION,
-            messages = result.messages
-        )
+        recordResponseMessages(result.messages, historyTitleForRequest)
         val parsed = try {
             parseSubtitleTranslation(
                 content = result.text,
@@ -732,11 +744,10 @@ class AiTranslationConversation(
     ): ChatBackend.SendResult {
         if (isCancelled() && !isPaused()) throw CancellationException(cancellationMessage)
         if (clearConversation) {
-            conversation.clear()
             if (localProvider) {
-                // A local batch reset must also discard older persisted batches. When a
-                // paused batch resumes, clearConversation is false so its context survives.
-                historyStore.delete(historySessionId)
+                conversation.retainLastExchange()
+            } else {
+                conversation.clear()
             }
         }
         val result = conversation.sendUserMessage(

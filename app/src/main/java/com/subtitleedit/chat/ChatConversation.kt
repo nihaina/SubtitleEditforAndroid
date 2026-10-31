@@ -76,6 +76,25 @@ class ChatConversation(
         history.removeAll { it.role != "system" }
     }
 
+    /** Keeps the system prompt and only the most recent user exchange for local context. */
+    suspend fun retainLastExchange() = historyMutex.withLock {
+        retainLastExchangeLocked(history)
+    }
+
+    private fun retainLastExchangeLocked(messages: MutableList<ChatBackend.ChatMessage>) {
+        val lastUserIndex = messages.indexOfLast { it.role == "user" }
+        if (lastUserIndex < 0) {
+            messages.removeAll { it.role != "system" }
+            return
+        }
+        val retained = buildList {
+            addAll(messages.filter { it.role == "system" })
+            addAll(messages.subList(lastUserIndex, messages.size).filter { it.role != "system" })
+        }
+        messages.clear()
+        messages += retained
+    }
+
     fun cancel() {
         cloudBackend?.cancel()
         localBackend?.cancel()

@@ -140,6 +140,29 @@ class ChatBackendTest {
     }
 
     @Test
+    fun retainingLastExchangeKeepsOnlyThePreviousSegmentContext() = runBlocking {
+        val conversation = ChatConversation(
+            config = ChatBackendConfig(
+                providerId = "custom",
+                apiKey = "test-key",
+                model = "test-model",
+                baseUrl = "https://example.com/v1"
+            ),
+            systemPrompt = "字幕处理规则"
+        )
+
+        conversation.appendInterruptedTurn("上一段字幕", "上一段结果")
+        conversation.appendInterruptedTurn("当前段字幕", "当前段结果")
+        conversation.retainLastExchange()
+
+        val snapshot = conversation.snapshot()
+        assertEquals(3, snapshot.size)
+        assertEquals("system", snapshot[0].role)
+        assertEquals("当前段字幕", snapshot[1].content)
+        assertEquals("当前段结果", snapshot[2].content)
+    }
+
+    @Test
     fun interruptedTurnIsIncludedInTheNextRequestContext() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse()
