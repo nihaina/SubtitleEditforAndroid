@@ -158,6 +158,29 @@ internal class ArchiveProgressDialogController(
         }
     }
 
+    fun updateFileDeletion(progress: ProgressUi, message: String, completed: Long, total: Long) {
+        runOnUiThread {
+            if (!progress.dialog.isShowing) return@runOnUiThread
+            if (total > 0L) {
+                val ratio = completed.coerceIn(0L, total).toDouble() / total.toDouble()
+                val percent = (ratio * 100.0).toInt().coerceIn(0, 100)
+                progress.state.value = progress.state.value.copy(
+                    message = message,
+                    indeterminate = false,
+                    progress = ratio.toFloat(),
+                    percentLabel = "$percent% · 进度：$completed / $total"
+                )
+            } else {
+                progress.state.value = progress.state.value.copy(
+                    message = message,
+                    indeterminate = true,
+                    progress = null,
+                    percentLabel = null
+                )
+            }
+        }
+    }
+
     fun showError(title: String, error: Throwable) {
         val message = error.message ?: "未知错误"
         val activity = activityProvider() ?: return

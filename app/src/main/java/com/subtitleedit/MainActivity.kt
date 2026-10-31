@@ -46,6 +46,7 @@ import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.FileTransferManager
+import com.subtitleedit.util.FileDeletionManager
 import com.subtitleedit.util.FileBrowserNavigation
 import com.subtitleedit.util.ArchiveNamePolicy
 import com.subtitleedit.util.ArchiveErrorPolicy
@@ -1032,36 +1033,48 @@ class MainActivity : AppComposeActivity() {
     private fun deleteConfirmedSelection() {
         val files = pendingDeleteFiles ?: return
         dismissMainDialog()
+        val progress = showArchiveProgress(
+            title = "正在删除",
+            message = "正在准备删除..."
+        )
         stateModel.viewModelScope.launch {
-            val deleted = withContext(Dispatchers.IO) {
-                var allDeleted = true
-                files.forEach { file ->
-                    val mediaFiles = when {
-                        isAudioOrVideoFile(file) -> listOf(file)
-                        file.isDirectory -> file.walkTopDown().filter(::isAudioOrVideoFile).toList()
-                        else -> emptyList()
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val cacheSnapshots = files.associateWith { file ->
+                        val mediaFiles = when {
+                            isAudioOrVideoFile(file) -> listOf(file)
+                            file.isDirectory -> file.walkTopDown().filter(::isAudioOrVideoFile).toList()
+                            else -> emptyList()
+                        }
+                        mediaFiles.takeIf { it.isNotEmpty() }?.let {
+                            MediaCacheCleaner.snapshotForMedia(
+                                mediaFiles = it,
+                                kinds = MediaCacheCleaner.Kind.values().asList(),
+                                appCacheDir = cacheDir
+                            )
+                        }
                     }
-                    val cacheSnapshot = mediaFiles.takeIf { it.isNotEmpty() }?.let {
-                        MediaCacheCleaner.snapshotForMedia(
-                            mediaFiles = it,
-                            kinds = MediaCacheCleaner.Kind.values().asList(),
-                            appCacheDir = cacheDir
-                        )
-                    }
-                    if (!file.deleteRecursively()) {
-                        allDeleted = false
-                    } else {
-                        cacheSnapshot?.let(MediaCacheCleaner::clear)
+                    FileDeletionManager.delete(files) { message, completed, total ->
+                        updateFileDeletionProgress(progress, message, completed, total)
+                    }.also { deletionResult ->
+                        deletionResult.deletedSources.forEach { source ->
+                            cacheSnapshots[source]?.let(MediaCacheCleaner::clear)
+                        }
                     }
                 }
-                allDeleted
-            }
-            if (deleted) {
-                exitSelectionMode()
-                stateModel.documentState.currentDirectory?.let(::loadDirectory)
-                showShortToast("已删除")
-            } else {
-                showShortToast("删除失败")
+                if (result.allDeleted) {
+                    exitSelectionMode()
+                    stateModel.documentState.currentDirectory?.let(::loadDirectory)
+                    showShortToast("已删除")
+                } else {
+                    showShortToast("删除失败")
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                showShortToast("删除失败：${error.message ?: "未知错误"}")
+            } finally {
+                progress.dialog.dismiss()
             }
         }
     }
@@ -1797,6 +1810,13 @@ class MainActivity : AppComposeActivity() {
         completed: Long,
         total: Long
     ) = archiveProgressDialogController.updateFileCopy(progress, message, completed, total)
+
+    private fun updateFileDeletionProgress(
+        progress: ArchiveProgressDialogController.ProgressUi,
+        message: String,
+        completed: Long,
+        total: Long
+    ) = archiveProgressDialogController.updateFileDeletion(progress, message, completed, total)
 
     /**
      * 当存在多个同名字幕文件时，弹出选择对话框
