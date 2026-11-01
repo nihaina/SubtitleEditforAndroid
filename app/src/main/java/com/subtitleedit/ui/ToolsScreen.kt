@@ -35,8 +35,7 @@ enum class ToolDestination {
     VOCAL_SEPARATION,
     SPEECH_TO_SUBTITLE,
     TRANSCRIPT_MATCH,
-    MEDIA_CONVERT,
-    AUTO_TIMESTAMP
+    MEDIA_CONVERT
 }
 
 private data class ToolItem(
@@ -97,13 +96,6 @@ private val toolItems = listOf(
         R.string.activity_tools_contentdescription_05,
         ToolDestination.MEDIA_CONVERT
     ),
-    ToolItem(
-        R.string.activity_tools_contentdescription_06,
-        R.string.activity_tools_text_08,
-        R.drawable.ic_auto_timestamp,
-        R.string.activity_tools_contentdescription_06,
-        ToolDestination.AUTO_TIMESTAMP
-    )
 )
 
 @Composable

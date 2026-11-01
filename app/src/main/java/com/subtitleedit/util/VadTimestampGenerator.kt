@@ -7,10 +7,9 @@ import com.k2fsa.sherpa.onnx.Vad
 import com.k2fsa.sherpa.onnx.VadModelConfig
 import com.k2fsa.sherpa.onnx.SileroVadModelConfig
 import java.io.File
-import java.util.Locale
 
 /**
- * VAD 时间轴生成器 - 使用 VAD 检测语音段并生成字幕时间轴
+ * VAD 语音段生成器 - 使用 VAD 检测语音段并提供对齐窗口
  */
 class VadTimestampGenerator(private val context: Context) {
 
@@ -35,23 +34,6 @@ class VadTimestampGenerator(private val context: Context) {
         val segment: VadSegment,
         val tailSource: VadSegmentSource
     )
-
-    /**
-     * 生成时间轴
-     */
-    fun generateTimestamps(pcmFile: File): Result<String> {
-        return try {
-            val segments = generateSegments(pcmFile)
-            if (segments.isEmpty()) {
-                return Result.failure(Exception("未检测到任何语音段"))
-            }
-            val subtitle = generateSrtSubtitle(segments)
-            Result.success(subtitle)
-        } catch (e: Exception) {
-            Log.e(TAG, "生成时间轴失败", e)
-            Result.failure(e)
-        }
-    }
 
     /**
      * 生成语音段列表
@@ -149,7 +131,7 @@ class VadTimestampGenerator(private val context: Context) {
                 }
                 copyUriToCache(
                     Uri.parse(vadModelPath),
-                    if (secondary) "auto_timestamp_secondary_vad.onnx" else "auto_timestamp_vad.onnx"
+                    if (secondary) "vad_secondary.onnx" else "vad.onnx"
                 ) ?: return null
             }
             val vadConfig = VadModelConfig(
@@ -519,42 +501,6 @@ class VadTimestampGenerator(private val context: Context) {
                 )
             )
         }
-    }
-
-    /**
-     * 生成 SRT 格式字幕
-     */
-    private fun generateSrtSubtitle(segments: List<VadSegment>): String {
-        val builder = StringBuilder()
-
-        for ((index, segment) in segments.withIndex()) {
-            // 序号
-            builder.append(index + 1).append("\n")
-
-            // 时间轴
-            val startTime = formatSrtTime(segment.startTime)
-            val endTime = formatSrtTime(segment.endTime)
-            builder.append("$startTime --> $endTime\n")
-
-            // 字幕内容
-            builder.append("请输入文本\n")
-
-            // 空行分隔
-            builder.append("\n")
-        }
-
-        return builder.toString()
-    }
-
-    /**
-     * 格式化 SRT 时间
-     */
-    private fun formatSrtTime(milliseconds: Long): String {
-        val hours = milliseconds / 3600000
-        val minutes = (milliseconds % 3600000) / 60000
-        val seconds = (milliseconds % 60000) / 1000
-        val millis = milliseconds % 1000
-        return String.format(Locale.US, "%02d:%02d:%02d,%03d", hours, minutes, seconds, millis)
     }
 
     /**

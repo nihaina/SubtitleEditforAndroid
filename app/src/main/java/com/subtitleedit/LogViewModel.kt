@@ -225,7 +225,6 @@ internal class LogViewModel(
         "SenseVoiceSettingsActivity" -> string(R.string.log_section_sense_voice_settings)
         "ParakeetSettingsActivity" -> string(R.string.log_section_parakeet_settings)
         "SpeechToSubtitleSettingsActivity" -> string(R.string.log_section_speech_settings)
-        "AutoTimestampActivity" -> string(R.string.log_section_auto_timestamp)
         "EditorActivity" -> string(R.string.log_section_editor)
         "SettingsActivity" -> string(R.string.log_section_settings)
         "LogActivity" -> string(R.string.log_section_log)

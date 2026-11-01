@@ -110,7 +110,7 @@ fun SpeechToSubtitleScreen(
             subtitle = stringResource(R.string.activity_speech_to_subtitle_text_02)
         ) {
             OutlinedButton(onClick = onSelectFiles) {
-                Text(stringResource(R.string.activity_auto_timestamp_text_03))
+                Text(stringResource(R.string.activity_tool_select_files))
             }
             Text(
                 text = if (state.selectedFiles.isEmpty()) {
@@ -135,7 +135,7 @@ fun SpeechToSubtitleScreen(
             )
         }
 
-        AppSection(title = stringResource(R.string.activity_auto_timestamp_text_05)) {
+        AppSection(title = stringResource(R.string.activity_tool_output_format)) {
             AppOptionSelector(
                 label = stringResource(R.string.target_format),
                 value = state.formatOptions.firstOrNull { it.id == state.selectedFormat },
@@ -161,16 +161,16 @@ fun SpeechToSubtitleScreen(
             )
         }
 
-        AppSection(title = stringResource(R.string.activity_auto_timestamp_text_06)) {
+        AppSection(title = stringResource(R.string.activity_tool_output_directory)) {
             Text(
-                state.outputDirectory ?: stringResource(R.string.activity_auto_timestamp_text_07),
+                state.outputDirectory ?: stringResource(R.string.activity_tool_default_output_directory),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.MiddleEllipsis
             )
             OutlinedButton(onClick = onSelectOutputDirectory) {
-                Text(stringResource(R.string.activity_auto_timestamp_text_08))
+                Text(stringResource(R.string.activity_tool_select_directory))
             }
         }
 

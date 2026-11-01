@@ -340,7 +340,7 @@ internal class SpeechToSubtitleViewModel(
                 appendRuntimeLog(
                     string(
                         R.string.task_output_directory,
-                        currentState.outputDirectory ?: string(R.string.activity_auto_timestamp_text_07)
+                        currentState.outputDirectory ?: string(R.string.activity_tool_default_output_directory)
                     )
                 )
                 appendSpeechModelConfig()

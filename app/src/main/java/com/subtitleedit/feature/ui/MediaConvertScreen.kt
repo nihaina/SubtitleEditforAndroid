@@ -161,7 +161,7 @@ internal fun MediaConvertScreen(
             }
         }
 
-        AppSection(title = stringResource(R.string.activity_auto_timestamp_text_06)) {
+        AppSection(title = stringResource(R.string.activity_tool_output_directory)) {
             OutlinedButton(onClick = onSelectOutputDirectory, enabled = !isConverting, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.activity_batch_convert_text_02))
             }
@@ -169,7 +169,7 @@ internal fun MediaConvertScreen(
         }
 
         if (sourceSummary.isNotBlank()) {
-            AppSection(title = stringResource(R.string.activity_auto_timestamp_text_05)) {
+            AppSection(title = stringResource(R.string.activity_tool_output_format)) {
                 Text(stringResource(R.string.activity_media_convert_text_05), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 FormatGrid(videoFormats, selectedFormat, !isConverting, onFormatSelected)
                 HorizontalDivider()

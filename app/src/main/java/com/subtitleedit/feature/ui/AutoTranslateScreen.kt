@@ -106,7 +106,7 @@ fun AutoTranslateScreen(
     ) {
         AppSection(title = stringResource(R.string.batch_convert_select_subtitle_files)) {
             OutlinedButton(onClick = onSelectFiles) {
-                Text(stringResource(R.string.activity_auto_timestamp_text_03))
+                Text(stringResource(R.string.activity_tool_select_files))
             }
             Text(
                 if (state.files.isEmpty()) stringResource(R.string.activity_media_convert_text_03)
@@ -163,7 +163,7 @@ fun AutoTranslateScreen(
             }
         }
 
-        AppSection(title = stringResource(R.string.activity_auto_timestamp_text_06)) {
+        AppSection(title = stringResource(R.string.activity_tool_output_directory)) {
             Text(
                 state.outputDirectory,
                 style = MaterialTheme.typography.bodyMedium,
@@ -172,7 +172,7 @@ fun AutoTranslateScreen(
                 overflow = TextOverflow.MiddleEllipsis
             )
             OutlinedButton(onClick = onSelectOutputDirectory) {
-                Text(stringResource(R.string.activity_auto_timestamp_text_08))
+                Text(stringResource(R.string.activity_tool_select_directory))
             }
         }
     }

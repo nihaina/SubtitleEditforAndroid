@@ -36,7 +36,6 @@ class ToolsActivity : AppComposeActivity() {
             ToolDestination.SPEECH_TO_SUBTITLE -> SpeechToSubtitleActivity::class.java
             ToolDestination.TRANSCRIPT_MATCH -> TranscriptMatchActivity::class.java
             ToolDestination.MEDIA_CONVERT -> MediaConvertActivity::class.java
-            ToolDestination.AUTO_TIMESTAMP -> AutoTimestampActivity::class.java
         }
         startActivity(Intent(this, activity))
     }

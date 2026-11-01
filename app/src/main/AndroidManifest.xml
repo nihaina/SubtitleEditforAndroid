@@ -239,11 +239,6 @@
             android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
-            android:name=".AutoTimestampActivity"
-            android:exported="false"
-            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
-
-        <activity
             android:name=".SubtitleFormatSelectActivity"
             android:exported="false"
             android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />

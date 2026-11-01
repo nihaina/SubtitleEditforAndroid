@@ -197,22 +197,11 @@
     <string name="ai_api_key_auth_title">验证身份</string>
     <string name="ai_api_key_auth_subtitle">查看或复制 API Key</string>
     <string name="ai_api_key_auth_error">身份验证未完成</string>
-    <string name="activity_auto_timestamp_text_02">音频/视频文件（可多选）</string>
-    <string name="activity_auto_timestamp_text_03">选择文件（可多选）</string>
-    <string name="activity_auto_timestamp_text_04">未选择</string>
-    <string name="activity_auto_timestamp_text_05">输出格式</string>
-    <string name="activity_auto_timestamp_text_06">输出目录</string>
-    <string name="activity_auto_timestamp_text_07" translatable="false">软件目录/Convert</string>
-    <string name="activity_auto_timestamp_text_08">选择目录</string>
-    <string name="activity_auto_timestamp_text_09">生成时间轴</string>
-    <string name="activity_auto_timestamp_text_10">运行日志与预览</string>
-    <string name="activity_auto_timestamp_text_11">等待生成...</string>
-    <string name="activity_auto_timestamp_text_12">二次处理</string>
-    <string name="activity_auto_timestamp_text_13">以已有字幕时间段作为已覆盖区域，对音视频中的全部未覆盖区间再次自动打轴</string>
-    <string name="activity_auto_timestamp_text_14">字幕文件（SRT/LRC）</string>
-    <string name="activity_auto_timestamp_text_15">选择字幕文件</string>
-    <string name="activity_auto_timestamp_text_16">未选择字幕文件</string>
-    <string name="activity_auto_timestamp_text_17">ASR 模型打轴开启时不可使用二次处理</string>
+    <string name="activity_tool_select_files">选择文件（可多选）</string>
+    <string name="activity_tool_output_format">输出格式</string>
+    <string name="activity_tool_output_directory">输出目录</string>
+    <string name="activity_tool_default_output_directory" translatable="false">软件目录/Convert</string>
+    <string name="activity_tool_select_directory">选择目录</string>
     <string name="activity_batch_convert_text_01">转换设置</string>
     <string name="activity_batch_convert_text_02">选择输出目录</string>
     <string name="activity_batch_convert_text_04">待转换文件</string>
@@ -471,8 +460,6 @@
     <string name="activity_tools_text_06">音频/视频转字幕，支持多种语言识别</string>
     <string name="activity_tools_contentdescription_05">音视频转换</string>
     <string name="activity_tools_text_07">视频转音频/格式转换 (MP3/AAC/MP4 等)</string>
-    <string name="activity_tools_contentdescription_06">自动打轴</string>
-    <string name="activity_tools_text_08">自动检测语音段并生成时间轴</string>
     <string name="activity_tools_contentdescription_07">AI字幕处理</string>
     <string name="activity_tools_text_09">使用 AI 处理多个字幕文件</string>
     <string name="transcript_match_title">文稿匹配</string>
@@ -616,15 +603,11 @@
     <string name="media_convert_advanced_options">高级选项</string>
     <string name="media_convert_output_conflict">输出目录中已有同名文件，或所选文件会生成同名输出。请选择处理方式。</string>
     <string name="media_convert_select_format_required">请选择输出格式</string>
-    <string name="auto_timestamp_title">自动打轴</string>
-    <string name="auto_timestamp_settings">打轴设置</string>
     <string name="output_subtitle_conflict">输出目录中已存在同名字幕文件。请选择处理方式。</string>
     <string name="operation_confirm_cancel">确认取消</string>
-    <string name="auto_timestamp_cancel_message">自动打轴正在进行，确定要取消吗？</string>
     <string name="cancel_processing">取消处理</string>
     <string name="continue_processing">继续处理</string>
     <string name="processing_in_progress">正在处理中</string>
-    <string name="auto_timestamp_back_message">自动打轴正在进行，确定要返回吗？返回后处理将被取消。</string>
     <string name="back_and_cancel">返回并取消</string>
     <string name="ai_settings_content_description">AI 设置</string>
     <string name="speech_to_subtitle_title">语音转字幕</string>

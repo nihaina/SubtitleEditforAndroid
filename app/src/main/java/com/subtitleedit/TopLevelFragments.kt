@@ -459,7 +459,6 @@ private fun openTool(context: Context, destination: ToolDestination) {
         ToolDestination.SPEECH_TO_SUBTITLE -> SpeechToSubtitleActivity::class.java
         ToolDestination.TRANSCRIPT_MATCH -> TranscriptMatchActivity::class.java
         ToolDestination.MEDIA_CONVERT -> MediaConvertActivity::class.java
-        ToolDestination.AUTO_TIMESTAMP -> AutoTimestampActivity::class.java
     }
     context.openActivity(activity)
 }

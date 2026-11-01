@@ -115,10 +115,10 @@ internal fun VocalSeparationScreen(
             )
         }
 
-        AppSection(title = stringResource(R.string.activity_auto_timestamp_text_06)) {
+        AppSection(title = stringResource(R.string.activity_tool_output_directory)) {
             Text(state.outputDirectory, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedButton(onClick = onSelectOutputDirectory, enabled = !state.isRunning) {
-                Text(stringResource(R.string.activity_auto_timestamp_text_08))
+                Text(stringResource(R.string.activity_tool_select_directory))
             }
         }
 
