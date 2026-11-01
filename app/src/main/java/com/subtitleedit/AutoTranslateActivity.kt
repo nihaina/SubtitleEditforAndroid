@@ -47,6 +47,7 @@ class AutoTranslateActivity : AppComposeActivity() {
                     onPunctuationPredictionChange = viewModel::setPunctuationPrediction,
                     onTranslationChange = viewModel::setTranslation,
                     onSelectOutputDirectory = { directoryPickerLauncher.launch(viewModel.currentOutputDirectoryUri) },
+                    onSaveToSourceDirectoryChange = viewModel::setSaveToSourceDirectory,
                     onStart = viewModel::startQueuedFiles,
                     onFileClick = viewModel::handleFileClick,
                     onRemove = viewModel::requestRemove,

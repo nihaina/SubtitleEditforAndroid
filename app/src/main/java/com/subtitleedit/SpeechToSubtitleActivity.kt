@@ -45,6 +45,7 @@ class SpeechToSubtitleActivity : AppComposeActivity() {
                     onAddToAutoTranslateChange = viewModel::setAddToAutoTranslate,
                     onDisableVadForTxtChange = viewModel::setDisableVadForTxt,
                     onSelectOutputDirectory = { outputDirLauncher.launch(viewModel.outputDirUri) },
+                    onSaveToSourceDirectoryChange = viewModel::setSaveToSourceDirectory,
                     onStart = viewModel::start,
                     onCancel = viewModel::confirmCancelConversion,
                     onDismissDialog = viewModel::dismissDialog,

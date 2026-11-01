@@ -54,12 +54,14 @@ fun BatchConvertScreen(
     formats: List<AppOption<SubtitleParser.SubtitleFormat>>,
     selectedFormat: SubtitleParser.SubtitleFormat,
     outputDirectoryLabel: String,
+    saveToSourceDirectory: Boolean,
     dialog: BatchConvertDialogUi?,
     onNavigateBack: () -> Unit,
     onSelectFiles: () -> Unit,
     onRemoveFile: (String) -> Unit,
     onSelectFormat: (SubtitleParser.SubtitleFormat) -> Unit,
     onSelectOutputDirectory: () -> Unit,
+    onSaveToSourceDirectoryChange: (Boolean) -> Unit,
     onStartConversion: () -> Unit,
     onDismissDialog: () -> Unit,
     onOverwriteConflicts: () -> Unit,
@@ -128,18 +130,13 @@ fun BatchConvertScreen(
             }
         }
 
-            AppSection(title = stringResource(R.string.activity_tool_output_directory)) {
-            Text(
-                text = outputDirectoryLabel,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.MiddleEllipsis
-            )
-            OutlinedButton(onClick = onSelectOutputDirectory) {
-                Text(stringResource(R.string.activity_tool_select_directory))
-            }
-        }
+        ToolOutputDirectorySection(
+            outputDirectory = outputDirectoryLabel,
+            saveToSourceDirectory = saveToSourceDirectory,
+            enabled = dialog != BatchConvertDialogUi.Conflict,
+            onSelectOutputDirectory = onSelectOutputDirectory,
+            onSaveToSourceDirectoryChange = onSaveToSourceDirectoryChange
+        )
     }
 
     when (dialog) {

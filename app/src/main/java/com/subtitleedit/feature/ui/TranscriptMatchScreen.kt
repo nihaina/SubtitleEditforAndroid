@@ -29,6 +29,7 @@ internal fun TranscriptMatchScreen(
     textFileName: String,
     audioFileName: String,
     outputDirectory: String,
+    saveToSourceDirectory: Boolean,
     pendingFiles: String,
     formats: List<String>,
     selectedFormat: String,
@@ -47,6 +48,7 @@ internal fun TranscriptMatchScreen(
     onSelectText: () -> Unit,
     onSelectAudio: () -> Unit,
     onSelectOutputDirectory: () -> Unit,
+    onSaveToSourceDirectoryChange: (Boolean) -> Unit,
     onFormatSelected: (String) -> Unit,
     onLanguageSelected: (String) -> Unit,
     onStartOrCancel: () -> Unit,
@@ -97,12 +99,13 @@ internal fun TranscriptMatchScreen(
             Text(pendingFiles, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
-        AppSection(title = stringResource(R.string.activity_tool_output_directory)) {
-            Text(outputDirectory, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-            OutlinedButton(onClick = onSelectOutputDirectory, enabled = !isRunning) {
-                Text(stringResource(R.string.activity_tool_select_directory))
-            }
-        }
+        ToolOutputDirectorySection(
+            outputDirectory = outputDirectory,
+            saveToSourceDirectory = saveToSourceDirectory,
+            enabled = !isRunning,
+            onSelectOutputDirectory = onSelectOutputDirectory,
+            onSaveToSourceDirectoryChange = onSaveToSourceDirectoryChange
+        )
 
         if (isRunning) {
             AppSection(title = stringResource(R.string.transcript_match_pending)) {

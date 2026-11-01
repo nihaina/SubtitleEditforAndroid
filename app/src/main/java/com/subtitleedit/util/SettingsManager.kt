@@ -72,6 +72,7 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_CHECK_UPDATES_ON_STARTUP = "check_updates_on_startup"
         private const val KEY_PRESERVE_OUTPUT_DIRECTORIES = "preserve_output_directories"
         private const val KEY_OUTPUT_DIRECTORY_PREFIX = "output_directory_"
+        private const val KEY_SAVE_TO_SOURCE_DIRECTORY_PREFIX = "save_to_source_directory_"
         private const val KEY_WHISPER_ENCODER_PATH = "whisper_encoder_path"
         private const val KEY_WHISPER_DECODER_PATH = "whisper_decoder_path"
         private const val KEY_WHISPER_TOKENS_PATH = "whisper_tokens_path"
@@ -1528,6 +1529,13 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putString(outputDirectoryKey(tool), uri).apply()
     }
 
+    fun isSaveToSourceDirectoryEnabled(tool: String): Boolean =
+        prefs.getBoolean(saveToSourceDirectoryKey(tool), false)
+
+    fun setSaveToSourceDirectoryEnabled(tool: String, enabled: Boolean) {
+        prefs.edit().putBoolean(saveToSourceDirectoryKey(tool), enabled).apply()
+    }
+
     fun isShowAllFileTypesEnabled(): Boolean =
         prefs.getBoolean(KEY_SHOW_ALL_FILE_TYPES, true)
 
@@ -1653,6 +1661,9 @@ class SettingsManager private constructor(context: Context) {
     }
 
     private fun outputDirectoryKey(tool: String): String = KEY_OUTPUT_DIRECTORY_PREFIX + tool
+
+    private fun saveToSourceDirectoryKey(tool: String): String =
+        KEY_SAVE_TO_SOURCE_DIRECTORY_PREFIX + tool
 
     private fun migrateAiApiKeys() {
         AiProviderConfig.providers.forEach { providerConfig ->

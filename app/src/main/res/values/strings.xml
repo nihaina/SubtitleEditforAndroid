@@ -202,6 +202,10 @@
     <string name="activity_tool_output_directory">输出目录</string>
     <string name="activity_tool_default_output_directory" translatable="false">软件目录/Convert</string>
     <string name="activity_tool_select_directory">选择目录</string>
+    <string name="save_to_source_folder">保存到源文件夹</string>
+    <string name="save_to_source_folder_active">按各输入文件所在目录分别保存</string>
+    <string name="save_to_source_folder_failed">无法保存到源文件夹：%1$s</string>
+    <string name="save_to_source_folder_failed_generic">无法访问源文件所在目录</string>
     <string name="activity_batch_convert_text_01">转换设置</string>
     <string name="activity_batch_convert_text_02">选择输出目录</string>
     <string name="activity_batch_convert_text_04">待转换文件</string>

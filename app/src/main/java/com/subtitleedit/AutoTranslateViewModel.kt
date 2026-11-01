@@ -21,6 +21,7 @@ import com.subtitleedit.util.AI_NO_OUTPUT_MAX_RETRIES
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.util.SourceOutputDirectory
 import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.SubtitleFormatConverter
@@ -138,6 +139,9 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
 
     init {
         settingsManager = SettingsManager.getInstance(application)
+        setState {
+            copy(saveToSourceDirectory = settingsManager.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY))
+        }
         outputDirectoryLabel = defaultTranslateOutputDirectory().absolutePath
         restoreOutputDirectory()
         restoreQueue()
@@ -161,6 +165,7 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
         queueRunning = snapshot.workRunning
         setState {
             copy(
+                saveToSourceDirectory = settingsManager.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY),
                 punctuationPredictionEnabled = snapshot.punctuationPredictionEnabled,
                 translationEnabled = snapshot.translationEnabled
             )
@@ -285,6 +290,12 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
         outputDirectoryLabel = DirectoryDisplayPath.fromUri(app, uri)
         settingsManager.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
         publish()
+        persistQueueSnapshot()
+    }
+
+    fun setSaveToSourceDirectory(enabled: Boolean) {
+        settingsManager.setSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY, enabled)
+        setState { copy(saveToSourceDirectory = enabled) }
         persistQueueSnapshot()
     }
 
@@ -481,8 +492,13 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
         val config = if (hasWaitingFiles && currentState.translationEnabled) readTranslationConfig() else null
         if (hasWaitingFiles && !validateSelectedFeatures(config)) return
         val outputUri = outputDirectoryUri ?: Uri.fromFile(getTranslateOutputDirectory())
-        val hasConflict = files.filter { it.status == FileStatus.WAITING }.any { file ->
-            SubtitleOutputWriter.exists(app, outputUri, file.fileName.substringBeforeLast("."), outputExtension(file))
+        val hasConflict = runCatching {
+            files.filter { it.status == FileStatus.WAITING }.any { file ->
+                SubtitleOutputWriter.exists(app, outputDirectoryFor(file.uri, outputUri), file.fileName.substringBeforeLast("."), outputExtension(file))
+            }
+        }.getOrElse { error ->
+            toast(R.string.save_to_source_folder_failed, error.message.orEmpty())
+            return
         }
         if (hasConflict) {
             pendingConfig = config; pendingOutputUri = outputUri
@@ -616,7 +632,7 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
                 ?: file.textPunctuationSession?.predictedText
                 ?: SubtitleParser.serialize(document)
             currentCoroutineContext().ensureActive()
-            SubtitleOutputWriter.writeText(app, outputUri, file.fileName.substringBeforeLast("."), outputExtension(file), outputText, overwrite = overwriteOutput)
+            SubtitleOutputWriter.writeText(app, outputDirectoryFor(file.uri, outputUri), file.fileName.substringBeforeLast("."), outputExtension(file), outputText, overwrite = overwriteOutput)
             file.status = FileStatus.COMPLETED
             file.message = string(R.string.task_all_done)
             publish()
@@ -1286,6 +1302,10 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
         }
     }
     private fun outputExtension(file: AutoTranslateFile): String = when (file.document?.format) { SubtitleParser.SubtitleFormat.SRT -> "srt"; SubtitleParser.SubtitleFormat.LRC -> "lrc"; SubtitleParser.SubtitleFormat.VTT -> "vtt"; SubtitleParser.SubtitleFormat.TXT -> "txt"; SubtitleParser.SubtitleFormat.ASS -> "ass"; SubtitleParser.SubtitleFormat.SSA -> "ssa"; else -> file.fileName.substringAfterLast('.', "srt").lowercase() }
+    private fun outputDirectoryFor(sourceUri: Uri, fallback: Uri): Uri =
+        if (settingsManager.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)) {
+            SourceOutputDirectory.resolve(app, sourceUri)
+        } else fallback
     private fun defaultTranslateOutputDirectory() = File(com.subtitleedit.util.ModelDirectoryManager.softwareDirectory(), "Translate")
     private fun getTranslateOutputDirectory() = defaultTranslateOutputDirectory().apply { if (!exists()) mkdirs() }
     private fun getFileNameFromUri(uri: Uri): String? = runCatching { app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getString(0) else null } }.getOrNull() ?: when (uri.scheme) { "file" -> uri.path?.let(::File)?.name; else -> DocumentFile.fromSingleUri(app, uri)?.name }

@@ -33,6 +33,7 @@ class TranscriptMatchActivity : AppComposeActivity() {
                     textFileName = state.textFileName,
                     audioFileName = state.audioFileName,
                     outputDirectory = state.outputDirectory,
+                    saveToSourceDirectory = state.saveToSourceDirectory,
                     pendingFiles = state.pendingFiles,
                     formats = viewModel.formats,
                     selectedFormat = state.selectedFormat,
@@ -51,6 +52,7 @@ class TranscriptMatchActivity : AppComposeActivity() {
                     onSelectText = { textPicker.launch(arrayOf("text/*", "application/octet-stream")) },
                     onSelectAudio = { audioPicker.launch(arrayOf("audio/*", "application/octet-stream")) },
                     onSelectOutputDirectory = { directoryPicker.launch(viewModel.outputDirectoryUri) },
+                    onSaveToSourceDirectoryChange = viewModel::setSaveToSourceDirectory,
                     onFormatSelected = viewModel::setFormat,
                     onLanguageSelected = viewModel::setLanguage,
                     onStartOrCancel = {

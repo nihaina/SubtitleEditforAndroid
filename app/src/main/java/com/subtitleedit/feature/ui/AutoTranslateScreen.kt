@@ -52,6 +52,7 @@ data class AutoTranslateFileUi(
 data class AutoTranslateUiState(
     val files: List<AutoTranslateFileUi> = emptyList(),
     val outputDirectory: String = "",
+    val saveToSourceDirectory: Boolean = false,
     val punctuationPredictionEnabled: Boolean = false,
     val translationEnabled: Boolean = true,
     val queueRunning: Boolean = false,
@@ -72,6 +73,7 @@ fun AutoTranslateScreen(
     onPunctuationPredictionChange: (Boolean) -> Unit,
     onTranslationChange: (Boolean) -> Unit,
     onSelectOutputDirectory: () -> Unit,
+    onSaveToSourceDirectoryChange: (Boolean) -> Unit,
     onStart: () -> Unit,
     onFileClick: (String) -> Unit,
     onRemove: (String) -> Unit,
@@ -163,18 +165,13 @@ fun AutoTranslateScreen(
             }
         }
 
-        AppSection(title = stringResource(R.string.activity_tool_output_directory)) {
-            Text(
-                state.outputDirectory,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.MiddleEllipsis
-            )
-            OutlinedButton(onClick = onSelectOutputDirectory) {
-                Text(stringResource(R.string.activity_tool_select_directory))
-            }
-        }
+        ToolOutputDirectorySection(
+            outputDirectory = state.outputDirectory,
+            saveToSourceDirectory = state.saveToSourceDirectory,
+            enabled = !state.queueRunning && !state.showOutputConflict,
+            onSelectOutputDirectory = onSelectOutputDirectory,
+            onSaveToSourceDirectoryChange = onSaveToSourceDirectoryChange
+        )
     }
 
     if (state.showOutputConflict) {

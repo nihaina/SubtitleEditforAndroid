@@ -18,6 +18,7 @@ import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.util.ByteSizeFormat
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.util.SourceOutputDirectory
 import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.TaskLogBuffer
@@ -126,6 +127,11 @@ internal class SpeechToSubtitleViewModel(
     fun setAddToAutoTranslate(enabled: Boolean) = setState { copy(addToAutoTranslate = enabled) }
 
     fun setDisableVadForTxt(enabled: Boolean) = setState { copy(disableVadForTxt = enabled) }
+
+    fun setSaveToSourceDirectory(enabled: Boolean) {
+        settingsManager.setSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY, enabled)
+        setState { copy(saveToSourceDirectory = enabled) }
+    }
 
     fun dismissDialog() = setState { copy(dialog = null) }
 
@@ -257,7 +263,8 @@ internal class SpeechToSubtitleViewModel(
         setState {
             copy(
                 asrModelReady = hasAsrModel,
-                startEnabled = selectedMediaFiles.isNotEmpty() && hasAsrModel
+                startEnabled = selectedMediaFiles.isNotEmpty() && hasAsrModel,
+                saveToSourceDirectory = settingsManager.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)
             )
         }
     }
@@ -294,9 +301,15 @@ internal class SpeechToSubtitleViewModel(
         }
         val extension = selectedFormat.lowercase()
 
-        if (selectedMediaFiles.any { file ->
-                SubtitleOutputWriter.exists(app, outputDir, file.fileName.substringBeforeLast("."), extension)
-            }) {
+        val hasConflict = runCatching {
+            selectedMediaFiles.any { file ->
+                SubtitleOutputWriter.exists(app, outputDirectoryFor(file.uri, outputDir), file.fileName.substringBeforeLast("."), extension)
+            }
+        }.getOrElse { error ->
+            toast(R.string.save_to_source_folder_failed, error.message.orEmpty(), duration = Toast.LENGTH_LONG)
+            return
+        }
+        if (hasConflict) {
             setState { copy(dialog = SpeechToSubtitleDialogUi.OutputConflict) }
             return
         }
@@ -340,7 +353,11 @@ internal class SpeechToSubtitleViewModel(
                 appendRuntimeLog(
                     string(
                         R.string.task_output_directory,
-                        currentState.outputDirectory ?: string(R.string.activity_tool_default_output_directory)
+                        if (settingsManager.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)) {
+                            string(R.string.save_to_source_folder_active)
+                        } else {
+                            currentState.outputDirectory ?: string(R.string.activity_tool_default_output_directory)
+                        }
                     )
                 )
                 appendSpeechModelConfig()
@@ -353,7 +370,9 @@ internal class SpeechToSubtitleViewModel(
                 for ((index, file) in files.withIndex()) {
                     if (isCancelled) break
 
-                    val outputBaseName = file.fileName.substringBeforeLast(".").lowercase()
+                    val fallbackOutput = outputDirUri ?: throw IllegalStateException(string(R.string.output_directory_not_set))
+                    val outputDirectory = outputDirectoryFor(file.uri, fallbackOutput)
+                    val outputBaseName = "${outputDirectory}::${file.fileName.substringBeforeLast(".").lowercase()}"
                     val shouldOverwrite = overwriteOutput && writtenOutputBaseNames.add(outputBaseName)
                     val result = convertFile(file, index + 1, files.size, shouldOverwrite)
                     if (isCancelled) break
@@ -491,6 +510,11 @@ internal class SpeechToSubtitleViewModel(
         return !currentState.disableVadForTxt
     }
 
+    private fun outputDirectoryFor(sourceUri: Uri, fallback: Uri): Uri =
+        if (settingsManager.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)) {
+            SourceOutputDirectory.resolve(app, sourceUri)
+        } else fallback
+
     private fun updateVadOptionState() {
         val isTxt = selectedFormat == "TXT"
         setState { copy(isTxtSelected = isTxt) }
@@ -500,17 +524,19 @@ internal class SpeechToSubtitleViewModel(
      * 保存字幕文件
      */
     private fun saveSubtitleFile(
+        sourceUri: Uri,
         sourceFileName: String,
         content: String,
         overwrite: Boolean,
         segmentCount: Int
-    ): String {
-        val outputDir = outputDirUri ?: throw IllegalStateException(string(R.string.output_directory_not_set))
+    ): Pair<String, Uri> {
+        val fallbackOutputDir = outputDirUri ?: throw IllegalStateException(string(R.string.output_directory_not_set))
+        val outputDir = outputDirectoryFor(sourceUri, fallbackOutputDir)
         val baseFileName = sourceFileName.substringBeforeLast(".")
         val extension = selectedFormat.lowercase()
         val fileName = SubtitleOutputWriter.writeText(app, outputDir, baseFileName, extension, content, overwrite)
         toast(R.string.speech_to_subtitle_toast_saved, fileName, segmentCount, duration = Toast.LENGTH_LONG)
-        return fileName
+        return fileName to resolveOutputFileUri(fileName, outputDir)
     }
 
     private suspend fun convertFile(
@@ -599,10 +625,10 @@ internal class SpeechToSubtitleViewModel(
             showProgress(string(R.string.speech_to_subtitle_progress_generate, progressPrefix), 95)
             appendRuntimeLog(string(R.string.speech_to_subtitle_log_recognized, segments.size))
             val subtitleContent = generateSubtitle(segments)
-            val outputFileName = saveSubtitleFile(file.fileName, subtitleContent, overwriteOutput, segments.size)
+            val (outputFileName, outputUri) = saveSubtitleFile(file.uri, file.fileName, subtitleContent, overwriteOutput, segments.size)
             appendRuntimeLog(string(R.string.speech_to_subtitle_log_saved, outputFileName))
             showProgress(string(R.string.speech_to_subtitle_progress_done, progressPrefix), 100)
-            Result.success(resolveOutputFileUri(outputFileName))
+            Result.success(outputUri)
         } catch (e: Exception) {
             Result.failure(e)
         } finally {
@@ -905,8 +931,7 @@ internal class SpeechToSubtitleViewModel(
             TokenTimestampGenerator.isConfigured(app)
     }
 
-    private fun resolveOutputFileUri(fileName: String): Uri {
-        val directoryUri = outputDirUri ?: throw IllegalStateException(string(R.string.output_directory_not_set))
+    private fun resolveOutputFileUri(fileName: String, directoryUri: Uri): Uri {
         if (directoryUri.scheme == "file") {
             val path = directoryUri.path
                 ?: throw IllegalStateException(string(R.string.speech_to_subtitle_error_output_dir_invalid))

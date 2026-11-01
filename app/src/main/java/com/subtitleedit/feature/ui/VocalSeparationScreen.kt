@@ -31,6 +31,7 @@ internal data class VocalSeparationUiState(
     val selectedFilesText: String? = null,
     val hasSelectedFiles: Boolean = false,
     val outputDirectory: String = "",
+    val saveToSourceDirectory: Boolean = false,
     val selectedStems: Set<VocalSeparationEngine.Stem> = setOf(VocalSeparationEngine.Stem.VOCALS),
     val enabledStems: Set<VocalSeparationEngine.Stem> = emptySet(),
     val isRunning: Boolean = false,
@@ -55,6 +56,7 @@ internal fun VocalSeparationScreen(
     onSettings: () -> Unit,
     onSelectFiles: () -> Unit,
     onSelectOutputDirectory: () -> Unit,
+    onSaveToSourceDirectoryChange: (Boolean) -> Unit,
     onStemChange: (VocalSeparationEngine.Stem, Boolean) -> Unit,
     onStart: () -> Unit,
     onCancel: () -> Unit,
@@ -115,12 +117,13 @@ internal fun VocalSeparationScreen(
             )
         }
 
-        AppSection(title = stringResource(R.string.activity_tool_output_directory)) {
-            Text(state.outputDirectory, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedButton(onClick = onSelectOutputDirectory, enabled = !state.isRunning) {
-                Text(stringResource(R.string.activity_tool_select_directory))
-            }
-        }
+        ToolOutputDirectorySection(
+            outputDirectory = state.outputDirectory,
+            saveToSourceDirectory = state.saveToSourceDirectory,
+            enabled = !state.isRunning && state.dialog != VocalSeparationDialog.OUTPUT_CONFLICT,
+            onSelectOutputDirectory = onSelectOutputDirectory,
+            onSaveToSourceDirectoryChange = onSaveToSourceDirectoryChange
+        )
 
         if (state.progressVisible) {
             AppSection(title = stringResource(R.string.activity_speech_to_subtitle_text_06)) {

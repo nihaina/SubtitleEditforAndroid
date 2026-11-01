@@ -13,12 +13,14 @@ import com.subtitleedit.util.SubtitleFormatConverter
 import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.UriDisplayName
+import com.subtitleedit.util.SourceOutputDirectory
 import java.io.File
 
 internal data class BatchConvertUiState(
     val files: List<BatchConvertFileUi> = emptyList(),
     val targetFormat: SubtitleParser.SubtitleFormat = SubtitleParser.SubtitleFormat.LRC,
     val outputDirectoryLabel: String = "",
+    val saveToSourceDirectory: Boolean = false,
     val dialog: BatchConvertDialogUi? = null
 )
 
@@ -40,6 +42,7 @@ internal class BatchConvertViewModel(
         private set
 
     init {
+        setState { copy(saveToSourceDirectory = settingsManager.isSaveToSourceDirectoryEnabled("batch_convert")) }
         restoreOutputDirectory()
         if (outputDirectoryUri == null) {
             setState { copy(outputDirectoryLabel = defaultConvertOutputDirectory().absolutePath) }
@@ -67,6 +70,11 @@ internal class BatchConvertViewModel(
 
     fun selectFormat(format: SubtitleParser.SubtitleFormat) = setState { copy(targetFormat = format) }
 
+    fun setSaveToSourceDirectory(enabled: Boolean) {
+        settingsManager.setSaveToSourceDirectoryEnabled("batch_convert", enabled)
+        setState { copy(saveToSourceDirectory = enabled) }
+    }
+
     fun selectOutputDirectory(uri: Uri) {
         app.contentResolver.takePersistableUriPermission(
             uri,
@@ -85,10 +93,20 @@ internal class BatchConvertViewModel(
 
         val targetFormat = currentState.targetFormat
         val finalOutputUri = outputDirectoryUri ?: Uri.fromFile(getConvertOutputDirectory())
-        val hasConflict = convertFiles.any { convertFile ->
-            val targetExtension = SubtitleFormatConverter.extension(targetFormat)
-            val nameWithoutExt = convertFile.fileName.substringBeforeLast(".")
-            SubtitleOutputWriter.exists(app, finalOutputUri, nameWithoutExt, targetExtension)
+        val hasConflict = runCatching {
+            convertFiles.any { convertFile ->
+                val targetExtension = SubtitleFormatConverter.extension(targetFormat)
+                val nameWithoutExt = convertFile.fileName.substringBeforeLast(".")
+                SubtitleOutputWriter.exists(
+                    app,
+                    outputDirectoryFor(convertFile.uri, finalOutputUri),
+                    nameWithoutExt,
+                    targetExtension
+                )
+            }
+        }.getOrElse { error ->
+            toast(R.string.save_to_source_folder_failed, error.message.orEmpty())
+            return
         }
 
         if (hasConflict) {
@@ -175,7 +193,7 @@ internal class BatchConvertViewModel(
 
                 SubtitleOutputWriter.writeText(
                     app,
-                    finalOutputUri,
+                    outputDirectoryFor(convertFile.uri, finalOutputUri),
                     nameWithoutExt,
                     targetExtension,
                     convertedContent,
@@ -198,9 +216,12 @@ internal class BatchConvertViewModel(
             appendFileList(R.string.batch_convert_result_success_files, successFiles)
             appendFileList(R.string.batch_convert_result_skipped_files, skippedFiles)
             appendFileList(R.string.batch_convert_result_failed_files, failFiles)
-            val outputPath = outputDirectoryUri?.let {
-                DirectoryDisplayPath.fromUri(app, it)
-            } ?: defaultConvertOutputDirectory().absolutePath
+            val outputPath = if (currentState.saveToSourceDirectory) {
+                string(R.string.save_to_source_folder_active)
+            } else {
+                outputDirectoryUri?.let { DirectoryDisplayPath.fromUri(app, it) }
+                    ?: defaultConvertOutputDirectory().absolutePath
+            }
             append('\n').appendLine(string(R.string.task_output_directory, outputPath))
         }
         setState { copy(dialog = BatchConvertDialogUi.Result(message)) }
@@ -221,6 +242,11 @@ internal class BatchConvertViewModel(
 
     private fun defaultConvertOutputDirectory(): File =
         File(com.subtitleedit.util.ModelDirectoryManager.softwareDirectory(), "Convert")
+
+    private fun outputDirectoryFor(sourceUri: Uri, fallback: Uri): Uri =
+        if (currentState.saveToSourceDirectory) {
+            SourceOutputDirectory.resolve(app, sourceUri)
+        } else fallback
 
     /** 获取转换输出目录，如果目录不存在则创建。 */
     private fun getConvertOutputDirectory(): File {

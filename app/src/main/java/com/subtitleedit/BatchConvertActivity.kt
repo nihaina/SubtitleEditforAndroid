@@ -37,6 +37,7 @@ class BatchConvertActivity : AppComposeActivity() {
                     formats = formats,
                     selectedFormat = state.targetFormat,
                     outputDirectoryLabel = state.outputDirectoryLabel,
+                    saveToSourceDirectory = state.saveToSourceDirectory,
                     dialog = state.dialog,
                     onNavigateBack = { finish() },
                     onSelectFiles = {
@@ -47,6 +48,7 @@ class BatchConvertActivity : AppComposeActivity() {
                     onSelectOutputDirectory = {
                         directoryPickerLauncher.launch(viewModel.outputDirectoryUri)
                     },
+                    onSaveToSourceDirectoryChange = viewModel::setSaveToSourceDirectory,
                     onStartConversion = viewModel::startConversion,
                     onDismissDialog = viewModel::dismissDialog,
                     onOverwriteConflicts = viewModel::overwriteConflicts,

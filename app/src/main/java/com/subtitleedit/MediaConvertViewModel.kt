@@ -17,6 +17,7 @@ import com.subtitleedit.task.LongTaskController
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.util.SourceOutputDirectory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -59,6 +60,7 @@ internal data class MediaConvertUiState(
     val channelIndex: Int = 0,
     val advancedExpanded: Boolean = false,
     val outputDirectory: String = "",
+    val saveToSourceDirectory: Boolean = false,
     val progress: Int = 0,
     val log: String = "",
     val dialog: MediaConvertDialog = MediaConvertDialog.NONE,
@@ -149,7 +151,10 @@ internal class MediaConvertViewModel(application: Application) :
     val currentOutputDirectoryUri: Uri? get() = outputDirectoryUri
     val isRunning: Boolean get() = currentState.isConverting
 
-    init { restoreOutputDirectory() }
+    init {
+        setState { copy(saveToSourceDirectory = settingsManager.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)) }
+        restoreOutputDirectory()
+    }
 
     fun selectFiles(uris: List<Uri>) {
         if (isRunning) return
@@ -190,6 +195,11 @@ internal class MediaConvertViewModel(application: Application) :
             )
         }
     }
+
+    fun setSaveToSourceDirectory(enabled: Boolean) {
+        settingsManager.setSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY, enabled)
+        setState { copy(saveToSourceDirectory = enabled) }
+    }
     fun setVideoCodec(value: String) = setState { copy(selectedVideoCodec = value) }
     fun setAudioCodec(value: String) = setState { copy(selectedAudioCodec = value) }
     fun setResolution(value: Int) = setState { copy(resolutionIndex = value) }
@@ -208,7 +218,18 @@ internal class MediaConvertViewModel(application: Application) :
         if (format == null) return toast(R.string.media_convert_select_format_required)
         val output = outputDirectoryUri ?: return toast(R.string.activity_media_convert_text_04)
         val desired = selectedMediaFiles.map { desiredOutputName(it.fileName, format) }
-        if (desired.groupingBy { it.lowercase(Locale.ROOT) }.eachCount().any { it.value > 1 } || desired.any { outputFileExists(output, it) }) {
+        val hasConflict = runCatching {
+            val targets = selectedMediaFiles.zip(desired).map { (file, name) ->
+                outputDirectoryFor(file.uri, output) to name
+            }
+            targets.groupingBy { (directory, name) -> "${directory}::${name.lowercase(Locale.ROOT)}" }
+                .eachCount().any { it.value > 1 } ||
+                targets.any { (directory, name) -> outputFileExists(directory, name) }
+        }.getOrElse { error ->
+            toast(R.string.save_to_source_folder_failed, error.message.orEmpty())
+            return
+        }
+        if (hasConflict) {
             setState { copy(dialog = MediaConvertDialog.OUTPUT_CONFLICT) }
         } else beginConversion(false)
     }
@@ -307,12 +328,14 @@ internal class MediaConvertViewModel(application: Application) :
         setState { copy(isConverting = true, outputUris = emptyList(), progress = 0, log = "") }
         conversionJob = taskController.launch(viewModelScope) { task ->
             task.onCancel { currentSession?.cancel() }
-            val reserved = mutableSetOf<String>(); val failures = mutableListOf<String>(); var success = 0
+            val reservedByDirectory = mutableMapOf<String, MutableSet<String>>(); val failures = mutableListOf<String>(); var success = 0
             try {
                 files.forEachIndexed { index, file ->
                     task.ensureActive()
                     val desiredName = desiredOutputName(file.fileName, format)
-                    val result = convertFile(file, index, files.size, format, desiredName, overwriteOutput && reserved.add(desiredName.lowercase(Locale.ROOT)), reserved, output)
+                    val fileOutput = outputDirectoryFor(file.uri, output)
+                    val reserved = reservedByDirectory.getOrPut(fileOutput.toString()) { mutableSetOf() }
+                    val result = convertFile(file, index, files.size, format, desiredName, overwriteOutput && reserved.add(desiredName.lowercase(Locale.ROOT)), reserved, fileOutput)
                     result.onSuccess { success++; setState { copy(outputUris = outputUris + it.uri) } }
                         .onFailure {
                             failures += file.fileName
@@ -406,6 +429,10 @@ internal class MediaConvertViewModel(application: Application) :
     private fun probeSourceUri(uri: Uri): SourceProbe? { var input: String? = null; return try { input = FFmpegKitConfig.getSafParameterForRead(app, uri); val info = FFprobeKit.getMediaInformation(input).getMediaInformation() ?: return null; SourceProbe(info.getStreams().any { it.getType() == "video" }, info.getDuration()?.toDoubleOrNull()?.takeIf { it > 0 }) } catch (_: Exception) { null } finally { input?.let(FFmpegKitConfig::unregisterSafProtocolUrl) } }
     private fun isLikelyAudioFile(file: SelectedMediaFile) = app.contentResolver.getType(file.uri)?.startsWith("audio/") == true || file.fileName.substringAfterLast('.', "").lowercase(Locale.ROOT) in audioExtensions
     private fun desiredOutputName(name: String, format: MediaConvertFormatInfo) = "${name.substringBeforeLast('.', name).ifBlank { "media_file" }}.${format.extension}"
+    private fun outputDirectoryFor(sourceUri: Uri, fallback: Uri): Uri =
+        if (settingsManager.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)) {
+            SourceOutputDirectory.resolve(app, sourceUri)
+        } else fallback
     private fun outputFileExists(directoryUri: Uri, fileName: String): Boolean =
         if (directoryUri.scheme == "file") {
             directoryUri.path?.let { File(it, fileName).exists() } == true

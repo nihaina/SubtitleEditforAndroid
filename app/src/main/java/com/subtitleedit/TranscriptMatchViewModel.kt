@@ -16,6 +16,7 @@ import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.Qwen3ForcedAlignerModelFiles
 import com.subtitleedit.util.QwenHuggingFaceTokenizer
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.util.SourceOutputDirectory
 import com.subtitleedit.util.SubtitleOutputWriter
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.SubtitleFormatConverter
@@ -30,6 +31,7 @@ internal data class TranscriptMatchUiState(
     val textFileName: String,
     val audioFileName: String,
     val outputDirectory: String,
+    val saveToSourceDirectory: Boolean = false,
     val pendingFiles: String,
     val selectedFormat: String = "SRT",
     val selectedLanguage: String,
@@ -74,7 +76,9 @@ internal class TranscriptMatchViewModel(application: Application) :
     init {
         outputUri = settings.getPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY)?.let(Uri::parse)
         setState {
-            copy(outputDirectory = outputUri?.let { DirectoryDisplayPath.fromUri(app, it) }
+            copy(
+                saveToSourceDirectory = settings.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY),
+                outputDirectory = outputUri?.let { DirectoryDisplayPath.fromUri(app, it) }
                 ?: defaultOutputDirectory().absolutePath)
         }
         refreshModelState()
@@ -108,6 +112,11 @@ internal class TranscriptMatchViewModel(application: Application) :
         outputUri = uri
         settings.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
         setState { copy(outputDirectory = DirectoryDisplayPath.fromUri(app, uri)) }
+    }
+
+    fun setSaveToSourceDirectory(enabled: Boolean) {
+        settings.setSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY, enabled)
+        setState { copy(saveToSourceDirectory = enabled) }
     }
 
     fun setFormat(value: String) = setState { copy(selectedFormat = value) }
@@ -165,6 +174,20 @@ internal class TranscriptMatchViewModel(application: Application) :
         val format = currentState.selectedFormat
         val language = currentState.selectedLanguage
         val directory = outputUri ?: Uri.fromFile(defaultOutputDirectory())
+        val outputDirectory = runCatching {
+            if (settings.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)) {
+                SourceOutputDirectory.resolve(app, selectedAudio)
+            } else directory
+        }.getOrElse { error ->
+            setState {
+                copy(
+                    dialog = TranscriptMatchDialog.MESSAGE,
+                    dialogTitle = string(R.string.transcript_match_failed_title),
+                    dialogMessage = error.message ?: string(R.string.save_to_source_folder_failed_generic)
+                )
+            }
+            return
+        }
         taskController.launch(viewModelScope) { task ->
             setState { copy(isRunning = true, isCancelling = false, progress = 0, progressText = "") }
             val taskCache = File(app.cacheDir, "transcript_match_${task.id}").apply { mkdirs() }
@@ -216,14 +239,19 @@ internal class TranscriptMatchViewModel(application: Application) :
                     .replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_")
                     .trim().ifBlank { string(R.string.transcript_match_default_name) }
                 val name = withContext(Dispatchers.IO) {
-                    SubtitleOutputWriter.writeText(app, directory, baseName, format.lowercase(), content)
+                    SubtitleOutputWriter.writeText(app, outputDirectory, baseName, format.lowercase(), content)
                 }
                 updateProgress(100, string(R.string.transcript_match_completed))
                 setState {
                     copy(
                         dialog = TranscriptMatchDialog.MESSAGE,
                         dialogTitle = string(R.string.transcript_match_completed_title),
-                        dialogMessage = string(R.string.transcript_match_completed_message, entries.size, name, currentState.outputDirectory)
+                        dialogMessage = string(
+                            R.string.transcript_match_completed_message,
+                            entries.size,
+                            name,
+                            DirectoryDisplayPath.fromUri(app, outputDirectory)
+                        )
                     )
                 }
             } catch (error: CancellationException) {

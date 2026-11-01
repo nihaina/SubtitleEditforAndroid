@@ -18,6 +18,7 @@ import com.subtitleedit.util.ByteSizeFormat
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.RuntimeLogManager
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.util.SourceOutputDirectory
 import com.subtitleedit.util.TaskLogBuffer
 import com.subtitleedit.util.UriDisplayName
 import kotlinx.coroutines.CancellationException
@@ -65,7 +66,11 @@ internal class VocalSeparationViewModel(
         setState {
             var selected = selectedStems.intersect(enabled)
             if (!hasGeneral && selected.size > 1) selected = setOf(selected.first())
-            copy(enabledStems = enabled, selectedStems = selected)
+            copy(
+                enabledStems = enabled,
+                selectedStems = selected,
+                saveToSourceDirectory = settings.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)
+            )
         }
         if (outputDirUri == null) setupDefaultOutputDir()
     }
@@ -98,6 +103,11 @@ internal class VocalSeparationViewModel(
         }
     }
 
+    fun setSaveToSourceDirectory(enabled: Boolean) {
+        settings.setSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY, enabled)
+        setState { copy(saveToSourceDirectory = enabled) }
+    }
+
     fun setStemSelected(stem: VocalSeparationEngine.Stem, checked: Boolean) {
         val updated = currentState.selectedStems.toMutableSet().apply {
             if (checked) add(stem) else remove(stem)
@@ -123,11 +133,17 @@ internal class VocalSeparationViewModel(
             toast(R.string.vocal_separation_missing_inputs)
             return
         }
-        val expected = selectedFiles.flatMap { file ->
-            val base = file.fileName.substringBeforeLast(".")
-            stems.map { "${base}_${it.fileSuffix}.wav" }
+        val expected = runCatching {
+            selectedFiles.flatMap { file ->
+                val base = file.fileName.substringBeforeLast(".")
+                val outputForFile = outputDirectoryFor(file.uri, output)
+                stems.map { outputForFile to "${base}_${it.fileSuffix}.wav" }
+            }
+        }.getOrElse { error ->
+            toast(R.string.save_to_source_folder_failed, error.message.orEmpty(), duration = Toast.LENGTH_LONG)
+            return
         }
-        if (expected.any { DemixOutputWriter.exists(app, output, it) }) {
+        if (expected.any { (directory, name) -> DemixOutputWriter.exists(app, directory, name) }) {
             setState { copy(dialog = VocalSeparationDialog.OUTPUT_CONFLICT) }
         } else {
             runSeparation(output, stems, overwrite = false)
@@ -192,9 +208,10 @@ internal class VocalSeparationViewModel(
                 val overwrittenBaseNames = mutableSetOf<String>()
                 for ((index, selected) in files.withIndex()) {
                     if (isCancelled) break
-                    val baseName = selected.fileName.substringBeforeLast(".").lowercase(Locale.ROOT)
+                    val fileOutput = outputDirectoryFor(selected.uri, output)
+                    val baseName = "${fileOutput}::${selected.fileName.substringBeforeLast(".").lowercase(Locale.ROOT)}"
                     val shouldOverwrite = overwrite && overwrittenBaseNames.add(baseName)
-                    if (processOne(selected, index + 1, files.size, output, stems, shouldOverwrite)) success++
+                    if (processOne(selected, index + 1, files.size, fileOutput, stems, shouldOverwrite)) success++
                 }
                 if (isCancelled) {
                     appendRuntimeLog(string(R.string.vocal_separation_log_cancelled))
@@ -226,7 +243,14 @@ internal class VocalSeparationViewModel(
         appendRuntimeLog(string(R.string.vocal_separation_log_start))
         appendRuntimeLog(string(R.string.task_pending_files, files.size))
         appendRuntimeLog(string(R.string.vocal_separation_log_stems, stems.joinToString { it.displayName }))
-        appendRuntimeLog(string(R.string.task_output_directory, currentState.outputDirectory))
+        appendRuntimeLog(
+            string(
+                R.string.task_output_directory,
+                if (settings.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)) {
+                    string(R.string.save_to_source_folder_active)
+                } else currentState.outputDirectory
+            )
+        )
         if (stems.size > 1) {
             appendRuntimeLog(string(R.string.vocal_separation_log_route_general_multi, stems.size))
             appendRuntimeLog(
@@ -248,6 +272,11 @@ internal class VocalSeparationViewModel(
             }
         )
     }
+
+    private fun outputDirectoryFor(sourceUri: Uri, fallback: Uri): Uri =
+        if (settings.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)) {
+            SourceOutputDirectory.resolve(app, sourceUri)
+        } else fallback
 
     private suspend fun processOne(
         selected: SelectedMediaFile,

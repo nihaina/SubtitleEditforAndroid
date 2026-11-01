@@ -53,6 +53,7 @@ data class SpeechToSubtitleUiState(
     val formatOptions: List<AppOption<String>> = emptyList(),
     val selectedFiles: List<String> = emptyList(),
     val outputDirectory: String? = null,
+    val saveToSourceDirectory: Boolean = false,
     val selectedLanguage: String = "",
     val selectedFormat: String = "",
     val addToAutoTranslate: Boolean = false,
@@ -80,6 +81,7 @@ fun SpeechToSubtitleScreen(
     onAddToAutoTranslateChange: (Boolean) -> Unit,
     onDisableVadForTxtChange: (Boolean) -> Unit,
     onSelectOutputDirectory: () -> Unit,
+    onSaveToSourceDirectoryChange: (Boolean) -> Unit,
     onStart: () -> Unit,
     onCancel: () -> Unit,
     onDismissDialog: () -> Unit,
@@ -161,18 +163,13 @@ fun SpeechToSubtitleScreen(
             )
         }
 
-        AppSection(title = stringResource(R.string.activity_tool_output_directory)) {
-            Text(
-                state.outputDirectory ?: stringResource(R.string.activity_tool_default_output_directory),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.MiddleEllipsis
-            )
-            OutlinedButton(onClick = onSelectOutputDirectory) {
-                Text(stringResource(R.string.activity_tool_select_directory))
-            }
-        }
+        ToolOutputDirectorySection(
+            outputDirectory = state.outputDirectory ?: stringResource(R.string.activity_tool_default_output_directory),
+            saveToSourceDirectory = state.saveToSourceDirectory,
+            enabled = !state.isConverting && state.dialog != SpeechToSubtitleDialogUi.OutputConflict,
+            onSelectOutputDirectory = onSelectOutputDirectory,
+            onSaveToSourceDirectoryChange = onSaveToSourceDirectoryChange
+        )
 
         if (!state.asrModelReady) {
             Text(

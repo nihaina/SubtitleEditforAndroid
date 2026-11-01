@@ -66,6 +66,7 @@ internal fun MediaConvertScreen(
     sourceSummary: String,
     sourceInfo: String,
     outputDirectory: String,
+    saveToSourceDirectory: Boolean,
     videoFormats: List<MediaFormatOption>,
     audioFormats: List<MediaFormatOption>,
     selectedFormat: String?,
@@ -94,6 +95,7 @@ internal fun MediaConvertScreen(
     onBack: () -> Unit,
     onPickFiles: () -> Unit,
     onSelectOutputDirectory: () -> Unit,
+    onSaveToSourceDirectoryChange: (Boolean) -> Unit,
     onFormatSelected: (String) -> Unit,
     onVideoCodecSelected: (String) -> Unit,
     onAudioCodecSelected: (String) -> Unit,
@@ -138,7 +140,7 @@ internal fun MediaConvertScreen(
         }
     ) {
         AppSection(title = stringResource(R.string.activity_media_convert_text_01)) {
-            OutlinedButton(onClick = onPickFiles, enabled = !isConverting, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = onPickFiles, enabled = !isConverting) {
                 Text(stringResource(R.string.activity_media_convert_text_02), maxLines = 2)
             }
             if (sourceSummary.isBlank()) {
@@ -159,13 +161,6 @@ internal fun MediaConvertScreen(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-        }
-
-        AppSection(title = stringResource(R.string.activity_tool_output_directory)) {
-            OutlinedButton(onClick = onSelectOutputDirectory, enabled = !isConverting, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.activity_batch_convert_text_02))
-            }
-            Text(outputDirectory, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
         if (sourceSummary.isNotBlank()) {
@@ -255,6 +250,14 @@ internal fun MediaConvertScreen(
                 }
             }
         }
+
+        ToolOutputDirectorySection(
+            outputDirectory = outputDirectory,
+            saveToSourceDirectory = saveToSourceDirectory,
+            enabled = !isConverting && dialog != MediaConvertDialog.OUTPUT_CONFLICT,
+            onSelectOutputDirectory = onSelectOutputDirectory,
+            onSaveToSourceDirectoryChange = onSaveToSourceDirectoryChange
+        )
 
         AppTaskProgress(
             visible = isConverting,
