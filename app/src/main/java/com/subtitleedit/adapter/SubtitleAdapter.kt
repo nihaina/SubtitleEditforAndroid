@@ -65,12 +65,13 @@ class SubtitleAdapter(
     
     override fun onBindViewHolder(holder: SubtitleViewHolder, position: Int, payloads: MutableList<Any>) {
         if (payloads.isEmpty() || payloads.any {
-                it != PAYLOAD_PLAYING && it != PAYLOAD_SELECTION && it != PAYLOAD_TIME_CONFLICT
+                it != PAYLOAD_PLAYING && it != PAYLOAD_SELECTION && it != PAYLOAD_TIME_CONFLICT && it != PAYLOAD_INDEX
             }) {
             onBindViewHolder(holder, position)
             return
         }
         if (PAYLOAD_TIME_CONFLICT in payloads) holder.bindTimeColors(currentList, position)
+        if (PAYLOAD_INDEX in payloads) holder.bindIndex(getItem(position).index)
         if (PAYLOAD_PLAYING in payloads) holder.bindPlaying(position == currentPlayingPosition)
         if (PAYLOAD_SELECTION in payloads) holder.bindSelection(isSelected(position))
     }
@@ -92,6 +93,7 @@ class SubtitleAdapter(
         const val PAYLOAD_SELECTION = "selection"
         const val PAYLOAD_PLAYING   = "playing"
         const val PAYLOAD_TIME_CONFLICT = "time_conflict"
+        const val PAYLOAD_INDEX = "index"
         private const val SELECTION_REFRESH_THRESHOLD = 200
     }
 
@@ -322,6 +324,10 @@ class SubtitleAdapter(
             val endColor = if (markers.end) errorColor else normalColor
             if (tvStartTime.currentTextColor != startColor) tvStartTime.setTextColor(startColor)
             if (tvEndTime.currentTextColor != endColor) tvEndTime.setTextColor(endColor)
+        }
+
+        fun bindIndex(index: Int) {
+            tvIndex.text = String.format(Locale.getDefault(), "%d", index)
         }
 
         /**

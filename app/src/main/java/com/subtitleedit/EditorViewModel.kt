@@ -191,6 +191,12 @@ internal class EditorViewModel(
     private val applySubtitleEdit = ApplySubtitleEditUseCase()
     private val syncSourceDocument = SyncSourceDocumentUseCase()
     private val editSession = EditorEditSession(documentState, ::recordCommittedListEdit)
+    private val listEditSession = EditorListEditSession(
+        documentState, ::recordCommittedListEdit,
+        recordSource = { edit, before ->
+            recordSourceHistory(edit, EditorHistoryDescriptionFormatter.describeSourceTextChange(edit, before))
+        }
+    )
     private val timingDragSession = EditorTimingDragSession(documentState, ::recordCommittedListEdit) { edit, before ->
         recordSourceHistory(edit, EditorHistoryDescriptionFormatter.describeSourceTextChange(edit, before))
     }
@@ -217,11 +223,15 @@ internal class EditorViewModel(
     fun updateWaveformDrag(key: Long, range: EditorTimingRange): EditorEntryChange? = timingDragSession.update(key, range)
 
     fun finishWaveformDrag(key: Long, selectedIds: Set<Long>): EditorTimingDragEnd? =
-        timingDragSession.finish(key, selectedIds)?.also { if (it.change != null) publishChangedDocument() }
+        timingDragSession.finish(key, selectedIds)?.also { ended ->
+            ended.change?.let { publishChangedDocument(setOf(it.position)) }
+        }
 
     fun applyWaveformSource(drag: EditorTimingDrag, base: String, source: String, final: Boolean): Boolean {
         if (!isSourceViewMode) return false
         return timingDragSession.applySource(drag, base, source, final).also {
+            // A source gesture may finish while the next queued gesture already
+            // previews another row. Keep the published snapshot authoritative.
             if (it && final) publishChangedDocument()
         }
     }
@@ -233,17 +243,36 @@ internal class EditorViewModel(
     fun commitSingleEdit(edit: EditorEntryEdit, selectedIds: Set<Long>): EditorEntryChange? {
         if (isSourceViewMode || isSourceViewTransitioning) return null
         val change = editSession.commit(edit, selectedIds) ?: return null
-        publishChangedDocument()
+        publishChangedDocument(setOf(change.position))
         return change
     }
 
-    private fun publishChangedDocument() {
+    fun commitListEdit(
+        command: EditorCommand,
+        selectedIds: Set<Long>,
+        selectedAfter: Set<Long> = selectedIds,
+        allowSourceMode: Boolean = false
+    ): EditorListChange? {
+        if (isSourceViewTransitioning || (isSourceViewMode && !allowSourceMode)) return null
+        val change = listEditSession.commit(command, selectedIds, selectedAfter, isSourceViewMode) ?: return null
+        publishChangedDocument(change.result.changedPositions.takeUnless { change.result.structureChanged })
+        return change
+    }
+
+    private fun publishChangedDocument(changedPositions: Set<Int>? = null) {
         val previous = _document.value
         val current = documentState.subtitleEntries
         // Reuse already owned snapshot rows. A row edit allocates one row copy
         // and a shallow list instead of deep-copying the entire large document.
-        val entries = current.mapIndexed { index, entry ->
-            previous.entries.getOrNull(index)?.takeIf { it == entry } ?: entry.copy()
+        val entries = if (changedPositions != null && previous.entries.size == current.size) {
+            previous.entries.toMutableList().also { snapshot ->
+                changedPositions.forEach { position ->
+                    current.getOrNull(position)?.let { snapshot[position] = it.copy() }
+                }
+            }
+        } else {
+            val previousById = previous.entries.associateBy { it.stableId }
+            current.map { entry -> previousById[entry.stableId]?.takeIf { it == entry } ?: entry.copy() }
         }
         _document.value = previous.copy(
             format = documentState.currentFormat, entries = entries,
@@ -323,19 +352,20 @@ internal class EditorViewModel(
     /**
      * Keep the history baseline independent from mutable document rows. The owned baseline list
      * is updated in place for same-order edits, copying only rows whose editable fields changed.
-     * Inserts, deletes, and reorders still need a new full snapshot because their index mapping is
-     * structural.
+     * Structural changes rebuild the reference list while reusing still-equal owned rows.
      */
     @Suppress("UNCHECKED_CAST")
     private fun advanceHistorySnapshot(
         previous: List<SubtitleEntry>,
         current: List<SubtitleEntry>
     ): List<SubtitleEntry> {
-        if (previous.size != current.size) return current.map { it.copy() }.toMutableList()
+        if (previous.size != current.size || previous.indices.any { previous[it].stableId != current[it].stableId }) {
+            val byId = previous.associateBy { it.stableId }
+            return current.map { entry -> byId[entry.stableId]?.takeIf { it == entry } ?: entry.copy() }.toMutableList()
+        }
         var snapshot: MutableList<SubtitleEntry>? = previous as? MutableList<SubtitleEntry>
         current.forEachIndexed { index, entry ->
             val old = previous[index]
-            if (old.stableId != entry.stableId) return current.map { it.copy() }.toMutableList()
             if (EditorEditHistory.hasEditableDifference(old, entry)) {
                 if (snapshot == null) snapshot = previous.toMutableList()
                 snapshot!![index] = entry.copy()

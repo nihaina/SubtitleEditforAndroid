@@ -114,6 +114,23 @@ class EditorSourceLineEditControllerTest {
         assertTrue(controller.requiresFullParse(content, content.replace("500", "700"), SubtitleParser.SubtitleFormat.LRC, 8, 11, 11))
     }
 
+    @Test fun repeatedLocalEditsReuseTheUnchangedCueIndexPrefix() {
+        val lines = mutableListOf<String>()
+        repeat(1_000) { index -> lines += listOf("${index + 1}", "00:00:01,000 --> 00:00:02,000", "row $index", "") }
+        val entries = (0 until 1_000).map { SubtitleEntry(it + 1, 1_000, 2_000, "row $it") }
+        var reads = 0
+        val controller = EditorSourceLineEditController({ lines.size }, { reads++; lines[it] },
+            { SubtitleParser.SubtitleFormat.SRT }, { entries })
+        val targetLine = 800 * 4 + 2
+        assertNotNull(controller.resolve(targetLine, 1, 1))
+        val firstReads = reads
+        lines[targetLine] = "changed"
+        controller.invalidateLineIndex(targetLine)
+        assertNotNull(controller.resolve(targetLine, 1, 1))
+        assertTrue(firstReads > 3_000)
+        assertTrue("The second block edit must not scan its unchanged prefix", reads - firstReads < 20)
+    }
+
     private fun controller(
         format: SubtitleParser.SubtitleFormat,
         lines: List<String>,

@@ -22,7 +22,9 @@ internal class EditorSourceLineEditController(
         val entries: List<SubtitleEntry>
     )
 
-    private var cueIndexByLine: IntArray? = null
+    // Prefix counts are extended only as far as the edited block. Editing near
+    // EOF reuses the unchanged prefix instead of recounting the whole document.
+    private val cuePrefix = mutableListOf(0)
     private val lrcTimeTagPattern = Regex("\\[-?\\d{1,4}[:.]\\d{1,2}(?:[.:]\\d{1,3})?]")
     private val lrcOffsetLinePattern = Regex("^\\s*\\[offset:\\s*[+-]?\\d+(?:\\.\\d+)?]\\s*$", RegexOption.IGNORE_CASE)
     private val lrcOffsetPrefixPattern = Regex("\\[offset\\s*:", RegexOption.IGNORE_CASE)
@@ -30,8 +32,9 @@ internal class EditorSourceLineEditController(
     private var documentFormat: SubtitleParser.SubtitleFormat? = null
     private var documentHasGlobalCueContext = false
 
-    fun invalidateLineIndex() {
-        cueIndexByLine = null
+    fun invalidateLineIndex(fromLine: Int = 0) {
+        val retained = (fromLine.coerceAtLeast(0) + 1).coerceAtMost(cuePrefix.size)
+        if (retained < cuePrefix.size) cuePrefix.subList(retained, cuePrefix.size).clear()
     }
 
     /** Cache global cue features once when a source document is installed. */
@@ -453,21 +456,20 @@ internal class EditorSourceLineEditController(
 
     private fun cueIndexBeforeLine(lineIndex: Int): Int {
         val count = lineCount()
-        val map = cueIndexByLine ?: IntArray(count).also { result ->
-            var cueCount = 0
-            for (line in 0 until count) {
-                result[line] = cueCount
-                val text = lineText(line)
-                cueCount += when (currentFormat()) {
-                    SubtitleParser.SubtitleFormat.SRT,
-                    SubtitleParser.SubtitleFormat.VTT -> if (text.contains("-->")) 1 else 0
-                    SubtitleParser.SubtitleFormat.LRC -> lrcTimeTagPattern.findAll(text).count()
-                    SubtitleParser.SubtitleFormat.TXT -> if (text.isNotBlank()) 1 else 0
-                    else -> 0
-                }
+        if (lineIndex >= count) return entries().size
+        val target = lineIndex.coerceAtLeast(0)
+        while (cuePrefix.size <= target) {
+            val text = lineText(cuePrefix.lastIndex)
+            val added = when (currentFormat()) {
+                SubtitleParser.SubtitleFormat.SRT,
+                SubtitleParser.SubtitleFormat.VTT -> if (text.contains("-->")) 1 else 0
+                SubtitleParser.SubtitleFormat.LRC -> lrcTimeTagPattern.findAll(text).count()
+                SubtitleParser.SubtitleFormat.TXT -> if (text.isNotBlank()) 1 else 0
+                else -> 0
             }
-        }.also { cueIndexByLine = it }
-        return map.getOrElse(lineIndex) { entries().size }
+            cuePrefix += cuePrefix.last() + added
+        }
+        return cuePrefix[target]
     }
 
     private companion object {

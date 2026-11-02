@@ -28,9 +28,9 @@ internal class EditorListPresentationController(
         }
     }
 
-    fun notifyPositions(positions: Iterable<Int>, includeNeighbors: Boolean = true) {
+    fun notifyPositions(positions: Iterable<Int>, includeNeighbors: Boolean = true, allowFullRefresh: Boolean = true) {
         val list = positions.toList()
-        if (list.size > BULK_NOTIFY_THRESHOLD) {
+        if (allowFullRefresh && list.size > BULK_NOTIFY_THRESHOLD) {
             adapter().refreshAllItems()
         } else if (includeNeighbors) {
             val changed = list.filterTo(mutableSetOf()) { it in entries().indices }

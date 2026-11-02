@@ -2,6 +2,7 @@ package com.subtitleedit
 
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
+import com.subtitleedit.util.SubtitlePasteOps
 import com.subtitleedit.util.WebVttCuePolicy
 import com.subtitleedit.util.subtitle.WebVttSubtitleFormatHandler
 
@@ -15,7 +16,7 @@ internal sealed interface EditorCommand {
         override fun execute(state: EditorDocumentState): EditorCommandResult {
             val entry = state.subtitleEntries.getOrNull(position) ?: return EditorCommandResult()
             if (entry.text == text) return EditorCommandResult()
-            entry.text = text
+            editableEntry(state, position).text = text
             return EditorCommandResult(changedPositions = setOf(position))
         }
     }
@@ -30,10 +31,11 @@ internal sealed interface EditorCommand {
             val changed = entry.startTime != (startTime ?: entry.startTime) ||
                 entry.endTime != (endTime ?: entry.endTime)
             if (!changed) return EditorCommandResult()
-            startTime?.let { entry.startTime = it }
+            val editable = editableEntry(state, position)
+            startTime?.let { editable.startTime = it }
             endTime?.let {
-                entry.endTime = it
-                entry.endTimeModified = true
+                editable.endTime = it
+                editable.endTimeModified = true
             }
             return EditorCommandResult(changedPositions = setOf(position))
         }
@@ -54,7 +56,7 @@ internal sealed interface EditorCommand {
             val updated = entry.copy(cueIdentifier = id)
             WebVttSubtitleFormatHandler.updateCueSettings(updated, options)
             if (entry == updated) return EditorCommandResult()
-            EditorDocumentOperations.updateFields(entry, updated)
+            EditorDocumentOperations.updateFields(editableEntry(state, position), updated)
             return EditorCommandResult(changedPositions = setOf(position))
         }
     }
@@ -67,7 +69,6 @@ internal sealed interface EditorCommand {
         override fun execute(state: EditorDocumentState): EditorCommandResult {
             val validPositions = positions.filter { it in state.subtitleEntries.indices }.distinct()
             val updates = validPositions.mapNotNull { position ->
-                val entry = state.subtitleEntries[position]
                 if (towardPrevious) {
                     if (position == 0) null
                     else position to state.subtitleEntries[position - 1].endTime
@@ -82,7 +83,7 @@ internal sealed interface EditorCommand {
             }
             if (changedPositions.isEmpty()) return EditorCommandResult()
             changedPositions.forEach { (position, targetTime) ->
-                val entry = state.subtitleEntries[position]
+                val entry = editableEntry(state, position)
                 if (towardPrevious) {
                     entry.startTime = targetTime
                 } else {
@@ -102,7 +103,7 @@ internal sealed interface EditorCommand {
             val validPositions = positions.filter { it in state.subtitleEntries.indices }.toSet()
             if (validPositions.isEmpty() || offsetMs == 0L) return EditorCommandResult()
             validPositions.forEach { position ->
-                val entry = state.subtitleEntries[position]
+                val entry = editableEntry(state, position)
                 entry.startTime += offsetMs
                 entry.endTime += offsetMs
             }
@@ -126,15 +127,28 @@ internal sealed interface EditorCommand {
             } else {
                 emptyList()
             }
-            validUpdates
+            val changedPositions = validUpdates
                 .filter { (_, text) -> !removeBlankEntries || text.isNotBlank() }
-                .forEach { (position, text) -> state.subtitleEntries[position].text = text }
-            removedPositions.forEach { state.subtitleEntries.removeAt(it) }
-            if (removedPositions.isNotEmpty()) {
-                state.subtitleEntries.forEachIndexed { index, entry -> entry.index = index + 1 }
+                .filter { (position, text) -> state.subtitleEntries[position].text != text }
+                .keys
+            changedPositions.forEach { position ->
+                val entry = editableEntry(state, position)
+                entry.text = validUpdates.getValue(position)
+                // Preserve the original position until text and derived cue
+                // placement have changed together. Removing blank cues below
+                // can shift every later row.
+                normalizeTextMetadata(state, entry)
             }
+            removePositions(state, removedPositions)
+            if (removedPositions.isNotEmpty()) {
+                renumberFrom(state, removedPositions.last())
+            }
+            val ascendingRemoved = removedPositions.asReversed()
             return EditorCommandResult(
-                changedPositions = validUpdates.keys,
+                changedPositions = changedPositions.mapTo(mutableSetOf()) { position ->
+                    val precedingCount = ascendingRemoved.binarySearch(position).let { if (it >= 0) it else -it - 1 }
+                    position - precedingCount
+                },
                 structureChanged = removedPositions.isNotEmpty(),
                 removedCount = removedPositions.size
             )
@@ -146,10 +160,11 @@ internal sealed interface EditorCommand {
     ) : EditorCommand {
         override fun execute(state: EditorDocumentState): EditorCommandResult {
             val validPositions = positions.filter { it in state.subtitleEntries.indices }.toSet()
-            validPositions.sortedDescending().forEach { state.subtitleEntries.removeAt(it) }
+            removePositions(state, validPositions.sortedDescending())
             return EditorCommandResult(
                 changedPositions = validPositions,
-                structureChanged = validPositions.isNotEmpty()
+                structureChanged = validPositions.isNotEmpty(),
+                removedCount = validPositions.size
             )
         }
     }
@@ -165,6 +180,70 @@ internal sealed interface EditorCommand {
             return EditorCommandResult(
                 changedPositions = (insertPosition until insertPosition + entries.size).toSet(),
                 structureChanged = true
+            )
+        }
+    }
+
+    /** Replace the target text, inserting extra clipboard rows after it. */
+    data class PasteAt(
+        val position: Int,
+        val texts: List<String>,
+        val fallbackEntry: SubtitleEntry? = null
+    ) : EditorCommand {
+        override fun execute(state: EditorDocumentState): EditorCommandResult {
+            if (texts.isEmpty()) return EditorCommandResult()
+            val target = state.subtitleEntries.getOrNull(position)?.copy()
+                ?: fallbackEntry?.copy()?.takeIf { state.subtitleEntries.isEmpty() }
+                ?: return EditorCommandResult()
+            val restoredTarget = state.subtitleEntries.isEmpty()
+            if (restoredTarget) state.subtitleEntries.add(target)
+            val pastePosition = position.coerceIn(0, state.subtitleEntries.lastIndex)
+            editableEntry(state, pastePosition)
+            val result = SubtitlePasteOps.pasteAtPosition(state.subtitleEntries, pastePosition, texts)
+            result.affectedPositions.forEach { normalizeTextMetadata(state, editableEntry(state, it)) }
+            return EditorCommandResult(
+                changedPositions = result.affectedPositions,
+                structureChanged = restoredTarget || result.structureChanged
+            )
+        }
+    }
+
+    /** Fill selected rows in order, then insert surplus clipboard text after the last target. */
+    data class PasteToSelection(
+        val positions: List<Int>,
+        val texts: List<String>
+    ) : EditorCommand {
+        override fun execute(state: EditorDocumentState): EditorCommandResult {
+            val targets = positions.distinct().sorted().filter { it in state.subtitleEntries.indices }
+            if (targets.isEmpty() || texts.size < targets.size) {
+                return EditorCommandResult()
+            }
+            targets.forEach { editableEntry(state, it) }
+            val result = SubtitlePasteOps.pasteToSelection(state.subtitleEntries, targets, texts)
+            result.affectedPositions.forEach { normalizeTextMetadata(state, editableEntry(state, it)) }
+            return EditorCommandResult(
+                changedPositions = result.affectedPositions,
+                structureChanged = texts.size > targets.size
+            )
+        }
+    }
+
+    data class ReplaceEntries(val entries: List<SubtitleEntry>) : EditorCommand {
+        override fun execute(state: EditorDocumentState): EditorCommandResult {
+            if (state.subtitleEntries == entries) return EditorCommandResult()
+            val before = state.subtitleEntries
+            val beforeSize = before.size
+            val structureChanged = before.size != entries.size || before.indices.any { index ->
+                before[index].stableId != entries[index].stableId
+            }
+            val changedPositions = entries.indices.filterTo(mutableSetOf()) { index -> before.getOrNull(index) != entries[index] }
+            val prepared = state.subtitleEntries as? EditorPreparedEntryList
+            if (prepared != null) prepared.replaceEntries(entries)
+            else state.subtitleEntries = entries.map { it.copy() }.toMutableList()
+            return EditorCommandResult(
+                changedPositions = changedPositions,
+                structureChanged = structureChanged,
+                removedCount = (beforeSize - entries.size).coerceAtLeast(0)
             )
         }
     }
@@ -187,11 +266,9 @@ internal sealed interface EditorCommand {
                 endTimeModified = sourceEntries.any { it.endTimeModified }
             }
 
-            validPositions.drop(1).sortedDescending().forEach { position ->
-                state.subtitleEntries.removeAt(position)
-            }
+            removePositions(state, validPositions.drop(1).asReversed())
             state.subtitleEntries[validPositions.first()] = merged
-            state.subtitleEntries.forEachIndexed { index, entry -> entry.index = index + 1 }
+            renumberFrom(state, validPositions.first())
             return EditorCommandResult(
                 changedPositions = validPositions.toSet(),
                 structureChanged = true,
@@ -228,11 +305,51 @@ internal sealed interface EditorCommand {
             )
             state.subtitleEntries[position] = left
             state.subtitleEntries.add(position + 1, right)
-            state.subtitleEntries.forEachIndexed { index, subtitle -> subtitle.index = index + 1 }
+            renumberFrom(state, position)
             return EditorCommandResult(
                 changedPositions = setOf(position, position + 1),
                 structureChanged = true
             )
+        }
+    }
+
+    companion object {
+        private fun removePositions(state: EditorDocumentState, descending: List<Int>) {
+            if (descending.isEmpty()) return
+            val prepared = state.subtitleEntries as? EditorPreparedEntryList
+            fun removeRange(start: Int, end: Int) {
+                if (prepared != null) prepared.removeEntries(start, end)
+                else state.subtitleEntries.subList(start, end).clear()
+            }
+            var start = descending.first()
+            var end = start + 1
+            for (position in descending.drop(1)) {
+                if (position == start - 1) start = position
+                else {
+                    removeRange(start, end)
+                    start = position
+                    end = position + 1
+                }
+            }
+            removeRange(start, end)
+        }
+
+        private fun editableEntry(state: EditorDocumentState, position: Int): SubtitleEntry =
+            (state.subtitleEntries as? EditorPreparedEntryList)?.editableEntry(position)
+                ?: state.subtitleEntries[position]
+
+        private fun renumberFrom(state: EditorDocumentState, start: Int) {
+            // Prepared commands number the final suffix once, after every splice is known.
+            if (state.subtitleEntries is EditorPreparedEntryList) return
+            for (index in start.coerceAtLeast(0) until state.subtitleEntries.size) {
+                state.subtitleEntries[index].index = index + 1
+            }
+        }
+
+        private fun normalizeTextMetadata(state: EditorDocumentState, entry: SubtitleEntry) {
+            if (state.currentFormat == SubtitleParser.SubtitleFormat.VTT) {
+                entry.cueSettings = WebVttSubtitleFormatHandler.getCueSettings(entry)
+            }
         }
     }
 }

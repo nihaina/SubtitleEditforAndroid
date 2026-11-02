@@ -1740,25 +1740,7 @@ class SourceEditorView @JvmOverloads constructor(
         if (range.first >= range.second) return false
         if (!copyDocumentSelection()) return false
 
-        val oldText = getDocumentText()
-        val startLine = offsets.findLine(range.first.coerceIn(0, oldText.length))
-        val updatedText = oldText.removeRange(range.first, range.second)
-        val oldLineCount = lines.size
-        setDocumentText(updatedText, preserveScroll = true)
-        notifyDocumentChanged(
-            DocumentChange(
-                startLine = startLine,
-                oldLineCount = oldLineCount,
-                newLineCount = lines.size,
-                startOffset = range.first,
-                oldEndOffset = range.second,
-                newEndOffset = range.first
-            )
-        )
-        clearDocumentSelection()
-        val targetLine = offsets.findLine(range.first.coerceIn(0, offsets.documentLength))
-        val targetColumn = range.first - offsets.start(targetLine)
-        requestFocus(targetLine, targetColumn)
+        replaceDocumentRange(range, "")
         return true
     }
 
@@ -1772,29 +1754,58 @@ class SourceEditorView @JvmOverloads constructor(
 
     private fun replaceDocumentRange(range: Pair<Int, Int>, replacement: String) {
         val oldText = getDocumentText()
-        val startLine = offsets.findLine(range.first.coerceIn(0, oldText.length))
+        val caretLine = offsets.findLine(range.first.coerceIn(0, oldText.length))
+        val startLine = if (caretLine > 0 && range.first == offsets.start(caretLine) &&
+            range.first > 0 && oldText[range.first - 1] == '\r'
+        ) caretLine - 1 else caretLine
+        val endLine = offsets.findLine(range.second.coerceIn(0, oldText.length))
+        val blockStart = offsets.start(startLine)
+        val blockEnd = if (endLine + 1 < lines.size) offsets.start(endLine + 1) else oldText.length
+        // Include the terminal empty row when the edited block reaches EOF.
+        val oldAffectedLines = if (blockEnd == oldText.length) lines.size - startLine else endLine - startLine + 1
         val updatedText = buildString(oldText.length - (range.second - range.first) + replacement.length) {
             append(oldText, 0, range.first)
             append(replacement)
             append(oldText, range.second, oldText.length)
         }
-        val oldLineCount = lines.size
-        setDocumentText(updatedText, preserveScroll = true)
-        notifyDocumentChanged(
-            DocumentChange(
+        val newEndOffset = range.first + replacement.length
+        val newBlockEnd = blockEnd + replacement.length - (range.second - range.first)
+        val newAffectedLines = countPhysicalLineBreaks(updatedText, blockStart, newBlockEnd) +
+            if (newBlockEnd == updatedText.length) 1 else 0
+        val change = DocumentChange(
                 startLine = startLine,
-                oldLineCount = oldLineCount,
-                newLineCount = lines.size,
+                oldLineCount = oldAffectedLines,
+                newLineCount = newAffectedLines,
                 startOffset = range.first,
                 oldEndOffset = range.second,
-                newEndOffset = range.first + replacement.length
-            )
+                newEndOffset = newEndOffset
         )
+        // The physical-row patch begins at the block boundary even when the
+        // character edit splits a CRLF pair. History still receives the exact
+        // character range below.
+        setDocumentText(updatedText, preserveScroll = true, changeHint = change.copy(startOffset = blockStart))
+        notifyDocumentChanged(change)
         clearDocumentSelection()
         val targetOffset = (range.first + replacement.length).coerceIn(0, offsets.documentLength)
         val targetLine = offsets.findLine(targetOffset)
         val targetColumn = targetOffset - offsets.start(targetLine)
         requestFocus(targetLine, targetColumn)
+    }
+
+    private fun countPhysicalLineBreaks(content: String, start: Int, end: Int): Int {
+        var index = start
+        var count = 0
+        while (index < end) {
+            when (content[index]) {
+                '\r' -> {
+                    count++
+                    if (index + 1 < end && content[index + 1] == '\n') index++
+                }
+                '\n', '\u2028', '\u2029', '\u0085' -> count++
+            }
+            index++
+        }
+        return count
     }
 
     private fun selectAllDocument() {

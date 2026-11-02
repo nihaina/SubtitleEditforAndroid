@@ -12,9 +12,7 @@ internal class ApplySubtitleEditUseCase {
         command: EditorCommand
     ): EditorCommandResult {
         val result = command.execute(state)
-        if (state.currentFormat == SubtitleParser.SubtitleFormat.VTT &&
-            (command is EditorCommand.UpdateText || command is EditorCommand.UpdateTexts)
-        ) {
+        if (state.currentFormat == SubtitleParser.SubtitleFormat.VTT && command is EditorCommand.UpdateText) {
             // Text and derived alignment metadata must change together, including
             // when the command is prepared on a detached row before committing.
             result.changedPositions.forEach { position ->

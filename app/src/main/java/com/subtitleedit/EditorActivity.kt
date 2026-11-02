@@ -79,7 +79,6 @@ import com.subtitleedit.util.DraftManager
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.CutPasteController
-import com.subtitleedit.util.SubtitlePasteOps
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SubtitleEntryOps
 import com.subtitleedit.util.SubtitleTextSplitOps
@@ -649,7 +648,7 @@ class EditorActivity : AppCompatActivity() {
                 // SourceEditorView keeps one editable block per physical line. The history item
                 // itself retains only this edit's range.
                 updateFormatInfo()
-                sourceLineEditController.invalidateLineIndex()
+                sourceLineEditController.invalidateLineIndex(change.startLine)
                 if (interruptedDrag || sourceLineEditController.requiresFullParse(
                         before = beforeText,
                         after = updatedText,
@@ -728,19 +727,11 @@ class EditorActivity : AppCompatActivity() {
                 replaceSourceViewContent(content)
             },
             applyEntryUpdates = { updates ->
-                val result = stateModel.executeWithoutPublish(
+                val change = commitListEdit(
                     EditorCommand.UpdateTexts(updates.map { it.index to it.newText })
                 )
-                if (result.removedCount > 0) {
-                    submitSubtitleList(refreshAll = true, markChanged = true)
-                } else {
-                    notifyEntriesChanged(
-                        updates.map { it.index },
-                        includeNeighbors = false,
-                        refreshDocument = false
-                    )
-                }
-                result.removedCount
+                change?.let { renderCommittedListEdit(it, includeNeighbors = false) }
+                change?.result?.removedCount ?: 0
             },
             confirmReplaceAll = ::showReplaceAllConfirm,
             showMessage = ::showShortToast
@@ -1095,25 +1086,86 @@ class EditorActivity : AppCompatActivity() {
             oldStartOffset = oldStartOffset,
             newStartOffset = newStartOffset
         ) ?: return false
-        val target = stateModel.subtitleEntries.toMutableList()
-        if (update.entryIndex !in 0..target.size ||
-            update.entryIndex + update.oldEntryCount > target.size
+        val current = stateModel.subtitleEntries
+        if (update.entryIndex !in 0..current.size ||
+            update.entryIndex + update.oldEntryCount > current.size
         ) return false
-        repeat(update.oldEntryCount) { target.removeAt(update.entryIndex) }
-        target.addAll(
-            update.entryIndex,
-            normalizeSourceViewEntries(update.entries).map { it.copy() }
-        )
         // The block reconciler has already assigned fresh IDs to split rows and retained IDs
-        // for unaffected rows. Do not run the global content matcher again, which would otherwise
-        // reattach the original ID when the split occurs at the end of the document.
-        applySourceViewEntries(target, preserveProvidedStableIds = true)
+        // for unaffected rows. Consume its range directly: constructing a whole target document
+        // here would lose the block-local parse's allocation and notification benefits.
+        applySourceEntryRange(update.entryIndex, update.oldEntryCount, update.entries)
         stateModel.documentState.sourceViewEntriesGeneration =
             stateModel.documentState.sourceViewEditGeneration
         sourceViewHasPendingEdits = false
         if (::playbackController.isInitialized) playbackController.invalidateHighlightCache()
         if (::searchController.isInitialized) searchController.onDocumentChanged()
         return true
+    }
+
+    /** Applies a known source block without matching or copying the untouched document. */
+    private fun applySourceEntryRange(
+        start: Int,
+        removedCount: Int,
+        replacements: List<SubtitleEntry>
+    ) {
+        val current = stateModel.subtitleEntries
+        val sameOrder = removedCount == replacements.size && replacements.indices.all { offset ->
+            current[start + offset].stableId == replacements[offset].stableId
+        }
+        val changedPositions = mutableListOf<Int>()
+        // Only the replaced block needs an ID lookup. Prefix/suffix rows remain in the live list.
+        val previousById = if (sameOrder) emptyMap() else
+            current.subList(start, start + removedCount).associateBy { it.stableId }
+        val inserted = replacements.mapIndexed { offset, parsed ->
+            val position = start + offset
+            val previous = if (sameOrder) current[position] else previousById[parsed.stableId]
+            val next = replacements.getOrNull(offset + 1)
+                ?: current.getOrNull(start + removedCount)
+            val retainLrcBoundary = stateModel.currentFormat == SubtitleParser.SubtitleFormat.LRC &&
+                previous?.endTimeModified == true && !parsed.endTimeModified && next != null &&
+                parsed.endTime == next.startTime - 24L
+            val updated = if (retainLrcBoundary) parsed.copy(endTime = next!!.startTime) else parsed
+            if (previous != null) {
+                if (sourceEntryFieldsDiffer(previous, updated) || previous.index != position + 1) {
+                    EditorDocumentOperations.updateFields(previous, updated)
+                    previous.index = position + 1
+                    changedPositions += position
+                }
+                previous
+            } else {
+                changedPositions += position
+                updated.copy(index = position + 1)
+            }
+        }
+        if (!sameOrder) {
+            current.subList(start, start + removedCount).clear()
+            current.addAll(start, inserted)
+            if (removedCount != inserted.size) {
+                for (position in start + inserted.size until current.size) {
+                    current[position].index = position + 1
+                }
+            }
+            stateModel.lastIndexedEntryCount = current.size
+            pendingListIndexRefreshStart = minOf(pendingListIndexRefreshStart ?: start, start)
+            syncWaveformSubtitleRange(start, removedCount, inserted)
+        } else if (changedPositions.isNotEmpty()) {
+            refreshSourceEntryPositions(changedPositions)
+        }
+    }
+
+    private fun sourceEntryFieldsDiffer(current: SubtitleEntry, updated: SubtitleEntry): Boolean =
+        current.startTime != updated.startTime || current.endTime != updated.endTime ||
+            current.text != updated.text || current.endTimeModified != updated.endTimeModified ||
+            current.cueIdentifier != updated.cueIdentifier || current.cueSettings != updated.cueSettings
+
+    private fun refreshSourceEntryPositions(changedPositions: List<Int>) {
+        if (::subtitleAdapter.isInitialized && subtitleAdapter.itemCount == stateModel.subtitleEntries.size) {
+            notifyEntriesChanged(
+                changedPositions, includeNeighbors = true, syncWaveform = false,
+                markChanged = false, refreshDocument = false
+            )
+        }
+        syncWaveformSubtitles(preserveSelection = true, changedPositions = changedPositions)
     }
 
     private fun applySourcePreview(
@@ -2135,6 +2187,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun applyVttDocumentChanges(updated: SubtitleDocument, description: String) {
+        finishWaveformEdits()
         val beforeHeader = stateModel.documentHeader
         val result = stateModel.applyVttDocument(
             updated,
@@ -2435,13 +2488,11 @@ class EditorActivity : AppCompatActivity() {
             showShortToast("没有可删除的格式化标签")
             return
         }
-        val result = stateModel.executeWithoutPublish(
+        val change = commitListEdit(
             EditorCommand.UpdateTexts(updates, removeBlankEntries = false)
-        )
-        if (result.changedPositions.isNotEmpty()) {
-            notifyEntriesChanged(result.changedPositions, refreshDocument = false)
-            showShortToast("已删除格式化标签")
-        }
+        ) ?: return
+        renderCommittedListEdit(change)
+        showShortToast("已删除格式化标签")
     }
 
     private fun toggleSubtitleStyle(positions: Set<Int>, style: SubtitleStyleOps.Style) {
@@ -2457,10 +2508,8 @@ class EditorActivity : AppCompatActivity() {
             (target.first to updatedText).takeIf { updatedText != target.second }
         }
         if (updates.isEmpty()) return
-        val result = stateModel.executeWithoutPublish(EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
-        if (result.changedPositions.isNotEmpty()) {
-            notifyEntriesChanged(result.changedPositions, refreshDocument = false)
-        }
+        commitListEdit(EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
+            ?.let(::renderCommittedListEdit)
     }
 
     private fun showSubtitleColorPicker(positions: Set<Int>, parentDialog: AlertDialog) {
@@ -2477,6 +2526,7 @@ class EditorActivity : AppCompatActivity() {
                 applySubtitleColor(positions, color)
             }) return
         if (!ensureListMode()) return
+        finishWaveformEdits()
         val result = stateModel.applySubtitleColor(positions, color, currentHistoryListState().selectedIds)
         if (result.changedPositions.isNotEmpty()) {
             notifyEntriesChanged(
@@ -2535,10 +2585,8 @@ class EditorActivity : AppCompatActivity() {
             (target.first to updatedText).takeIf { updatedText != target.second }
         }
         if (updates.isEmpty()) return
-        val result = stateModel.executeWithoutPublish(EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
-        if (result.changedPositions.isNotEmpty()) {
-            notifyEntriesChanged(result.changedPositions, refreshDocument = false)
-        }
+        commitListEdit(EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
+            ?.let(::renderCommittedListEdit)
     }
 
     private fun showSubtitleAlignmentPicker(
@@ -2644,10 +2692,8 @@ class EditorActivity : AppCompatActivity() {
             (position to updatedText).takeIf { updatedText != text }
         }
         if (updates.isEmpty()) return
-        val result = stateModel.executeWithoutPublish(EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
-        if (result.changedPositions.isNotEmpty()) {
-            notifyEntriesChanged(result.changedPositions, refreshDocument = false)
-        }
+        commitListEdit(EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
+            ?.let(::renderCommittedListEdit)
     }
 
     private fun alignmentFromText(text: String): Int? = Regex("\\\\an([1-9])")
@@ -3068,16 +3114,16 @@ class EditorActivity : AppCompatActivity() {
                 extendSubtitleToAdjacent(positions, towardPrevious)
             }) return
         if (!ensureListMode()) return
-        val result = stateModel.executeWithoutPublish(
+        val change = commitListEdit(
             EditorCommand.ExtendToAdjacent(positions, towardPrevious)
         )
-        if (result.changedPositions.isEmpty()) {
+        if (change == null) {
             showShortToast("没有可延伸的字幕")
             return
         }
-        notifyEntriesChanged(result.changedPositions, refreshDocument = false)
+        renderCommittedListEdit(change)
         showShortToast(
-            if (positions.size > 1) "已延伸 ${result.changedPositions.size} 行字幕"
+            if (positions.size > 1) "已延伸 ${change.result.changedPositions.size} 行字幕"
             else if (towardPrevious) "已向前延伸至上一行" else "已向后延伸至下一行"
         )
     }
@@ -3093,23 +3139,18 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
-        val historyBefore = currentHistoryListState()
-        val result = stateModel.executeWithoutPublish(EditorCommand.Merge(sortedPositions))
-        if (!result.structureChanged) {
+        val mergedEntryIds = sortedPositions.mapNotNull { position ->
+            stateModel.subtitleEntries.getOrNull(position)?.stableId
+        }.toSet()
+        val change = commitListEdit(
+            EditorCommand.Merge(sortedPositions), selectedSubtitleIds() - mergedEntryIds
+        )
+        if (change == null) {
             showShortToast("没有可合并的字幕")
             return
         }
-        stateModel.historyEntriesSnapshot = historyBefore.entries
-        stateModel.historySelectionSnapshot = historyBefore.selectedIds
         cutPasteController.clear()
-        val mergedEntryIds = sortedPositions.mapNotNull { position ->
-            historyBefore.entries.getOrNull(position)?.stableId
-        }.toSet()
-        submitSubtitleList(
-            refreshAll = true,
-            selectedStableIds = historyBefore.selectedIds - mergedEntryIds,
-            markChanged = true
-        )
+        renderCommittedListEdit(change)
         showShortToast("已合并 ${sortedPositions.size} 行字幕")
     }
     
@@ -3156,13 +3197,18 @@ class EditorActivity : AppCompatActivity() {
     /**
      * 执行剪切删除操作（在粘贴后调用）
      */
-    private fun performCutDelete() {
-        if (!cutPasteController.hasPendingCut()) return
+    private fun performCutDelete(): Boolean {
+        if (!cutPasteController.hasPendingCut()) return true
 
-        val deletedIndices = cutPasteController.snapshotDeletedIndices()
-        val historyBefore = currentHistoryListState()
-        listOperationsController.removePendingCut(stateModel.subtitleEntries, cutPasteController)
-        syncAfterDelete(deletedIndices, historyBefore)
+        val deletedIndices = cutPasteController.snapshotDeletedIndices().filterTo(mutableSetOf()) {
+            it in stateModel.subtitleEntries.indices
+        }
+        if (deletedIndices.isNotEmpty()) {
+            val change = commitListEdit(EditorCommand.Delete(deletedIndices)) ?: return false
+            syncAfterDelete(deletedIndices, change)
+        }
+        cutPasteController.clear()
+        return true
     }
     
     /**
@@ -3180,24 +3226,18 @@ class EditorActivity : AppCompatActivity() {
             // 如果是剪切模式，先删除原字幕
             if (cutPasteController.hasPendingCut()) {
                 targetPosition = cutPasteController.adjustPastePositionAfterCut(position)
-                performCutDelete()
+                if (!performCutDelete()) return
             }
 
-            if (stateModel.subtitleEntries.isEmpty()) {
-                EditorDocumentOperations.addAt(stateModel.subtitleEntries, 0, targetSnapshot)
-                targetPosition = 0
-            }
-            targetPosition = targetPosition.coerceIn(0, stateModel.subtitleEntries.lastIndex)
-
-            val pasteResult = listOperationsController.pasteAt(stateModel.subtitleEntries, targetPosition, stateModel.clipboardTexts)
-            if (pasteResult.structureChanged) {
-                submitSubtitleList(refreshAll = true, markChanged = true)
+            targetPosition = if (stateModel.subtitleEntries.isEmpty()) 0
+                else targetPosition.coerceIn(0, stateModel.subtitleEntries.lastIndex)
+            val change = commitListEdit(
+                EditorCommand.PasteAt(targetPosition, stateModel.clipboardTexts, fallbackEntry = targetSnapshot)
+            ) ?: return
+            renderCommittedListEdit(change)
+            if (change.result.structureChanged) {
                 com.subtitleedit.util.OverwritingToast.makeText(this, "已粘贴 ${stateModel.clipboardTexts.size} 项", Toast.LENGTH_SHORT).show()
             } else {
-                notifyEntriesChanged(
-                    pasteResult.affectedPositions,
-                    refreshDocument = false
-                )
                 com.subtitleedit.util.OverwritingToast.makeText(this, "已粘贴", Toast.LENGTH_SHORT).show()
             }
         }
@@ -3220,9 +3260,8 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun deleteSingleSubtitleConfirmed(position: Int) {
-        val historyBefore = currentHistoryListState()
-        stateModel.executeWithoutPublish(EditorCommand.Delete(setOf(position)))
-        syncAfterDelete(setOf(position), historyBefore)
+        val change = commitListEdit(EditorCommand.Delete(setOf(position))) ?: return
+        syncAfterDelete(setOf(position), change)
         com.subtitleedit.util.OverwritingToast.makeText(this, "已删除", Toast.LENGTH_SHORT).show()
     }
     
@@ -3246,7 +3285,7 @@ class EditorActivity : AppCompatActivity() {
         var insertPosition = if (after) refPosition + 1 else refPosition
         if (pasteAfterInsert && cutPasteController.hasPendingCut()) {
             insertPosition = cutPasteController.adjustPastePositionAfterCut(insertPosition)
-            performCutDelete()
+            if (!performCutDelete()) return
         }
         insertPosition = insertPosition.coerceIn(0, stateModel.subtitleEntries.size)
 
@@ -3258,14 +3297,8 @@ class EditorActivity : AppCompatActivity() {
             if (pasteAfterInsert) stateModel.clipboardTexts else listOf("新字幕"), insertPosition,
             durationPerEntryMs
         )
-        stateModel.executeWithoutPublish(EditorCommand.Insert(insertPosition, insertedEntries))
-        renumberEntries(force = true)
-        submitSubtitleList(
-            refreshAll = true,
-            syncWaveform = false,
-            markChanged = true
-        )
-        setWaveformSubtitlesKeepSelection(insertPosition)
+        val change = commitListEdit(EditorCommand.Insert(insertPosition, insertedEntries)) ?: return
+        renderCommittedListEdit(change)
         val message = if (pasteAfterInsert) {
             "已${if (after) "向后" else "向前"}粘贴 ${stateModel.clipboardTexts.size} 项"
         } else {
@@ -3279,6 +3312,10 @@ class EditorActivity : AppCompatActivity() {
         val realStart = minOf(startMs, endMs)
         val realEnd = maxOf(startMs, endMs)
         if (realEnd - realStart < 100) return
+        if (stateModel.currentFormat.isSourceOnly) {
+            showShortToast("当前格式不支持打轴插入")
+            return
+        }
 
         val newEntry = SubtitleEntry().apply {
             this.startTime = realStart
@@ -3288,14 +3325,9 @@ class EditorActivity : AppCompatActivity() {
         val insertPos = stateModel.subtitleEntries.indexOfFirst { it.startTime > realStart }
             .let { if (it == -1) stateModel.subtitleEntries.size else it }
 
-        stateModel.executeWithoutPublish(EditorCommand.Insert(insertPos, listOf(newEntry)))
-        renumberEntries(force = true)
-        submitSubtitleList(
-            refreshAll = true,
-            syncWaveform = false,
-            markChanged = true
-        )
-        setWaveformSubtitlesKeepSelection(insertPos)
+        val change = commitListEdit(EditorCommand.Insert(insertPos, listOf(newEntry)), allowSourceMode = true)
+            ?: return
+        renderCommittedListEdit(change)
         com.subtitleedit.util.OverwritingToast.makeText(this, "已插入新字幕", Toast.LENGTH_SHORT).show()
     }
 
@@ -3318,11 +3350,9 @@ class EditorActivity : AppCompatActivity() {
         
         val selectedEntries = requireSelectedEntries("没有选中的字幕") ?: return
         
-        stateModel.executeWithoutPublish(EditorCommand.ApplyOffset(selectedEntries.map { it.second }.toSet(), offsetMs))
-        notifyEntriesChanged(
-            selectedEntries.map { it.second },
-            refreshDocument = false
-        )
+        val change = commitListEdit(EditorCommand.ApplyOffset(selectedEntries.map { it.second }.toSet(), offsetMs))
+            ?: return
+        renderCommittedListEdit(change)
         showShortToast("已对选中项应用 ${offsetMs}ms 偏移")
     }
     
@@ -3383,7 +3413,7 @@ class EditorActivity : AppCompatActivity() {
                 }
                 pos - deletedBefore
             }.filter { it >= 0 }
-            performCutDelete()
+            if (!performCutDelete()) return
         }
 
         if (selectedPositions.isEmpty()) {
@@ -3391,16 +3421,9 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
-        val pasteResult = SubtitlePasteOps.pasteToSelection(
-            entries = stateModel.subtitleEntries,
-            selectedPositions = selectedPositions,
-            clipboardTexts = stateModel.clipboardTexts
-        )
-
-        submitSubtitleList(
-            refreshAll = true,
-            markChanged = true
-        )
+        val change = commitListEdit(EditorCommand.PasteToSelection(selectedPositions, stateModel.clipboardTexts))
+            ?: return
+        renderCommittedListEdit(change)
         com.subtitleedit.util.OverwritingToast.makeText(this, "已粘贴 ${stateModel.clipboardTexts.size} 项", Toast.LENGTH_SHORT).show()
     }
     
@@ -3743,6 +3766,61 @@ class EditorActivity : AppCompatActivity() {
         return true
     }
 
+    private fun commitListEdit(
+        command: EditorCommand,
+        selectedAfter: Set<Long>? = null,
+        allowSourceMode: Boolean = false
+    ): EditorListChange? {
+        finishWaveformEdits()
+        if (sourceHistorySyncPending || sourceListHistorySyncPending ||
+            stateModel.isSourceViewTransitioning || sourceViewHasPendingEdits
+        ) {
+            showShortToast("正在同步，请稍候")
+            return null
+        }
+        val selection = selectedSubtitleIds()
+        val beforeSource = stateModel.sourceViewContent
+        val change = stateModel.commitListEdit(command, selection, selectedAfter ?: selection, allowSourceMode)
+            ?: return null
+        if (stateModel.isSourceViewMode) {
+            applySourceWaveformUpdatedSource(
+                stateModel.sourceViewContent,
+                EditorSourceTextEdit.between(beforeSource, stateModel.sourceViewContent)
+            )
+        }
+        invalidateOptionsMenu()
+        return change
+    }
+
+    /** The model already committed source, history, dirty state and its snapshot. */
+    private fun renderCommittedListEdit(
+        change: EditorListChange,
+        includeNeighbors: Boolean = true
+    ) {
+        if (change.result.structureChanged) {
+            val first = change.ranges.minOfOrNull { it.start } ?: 0
+            pendingListIndexRefreshStart = minOf(pendingListIndexRefreshStart ?: first, first)
+            submitSubtitleList(
+                refreshAll = false, selectedStableIds = change.selectedIds,
+                refreshDocument = false, syncWaveform = false,
+                afterSubmit = {
+                    listPresentationController.notifyPositions(change.updatedPositions, includeNeighbors, allowFullRefresh = false)
+                    if (first > 0 && first - 1 < subtitleAdapter.itemCount) {
+                        subtitleAdapter.notifyItemChanged(first - 1, SubtitleAdapter.PAYLOAD_TIME_CONFLICT)
+                    }
+                }
+            )
+            change.ranges.forEach { range -> syncWaveformSubtitleRange(range.start, range.removedCount, range.inserted) }
+            if (change.updatedPositions.isNotEmpty()) syncWaveformSubtitles(changedPositions = change.updatedPositions)
+            if (change.ranges.isEmpty()) syncWaveformSubtitles(preserveSelection = true)
+        } else {
+            notifyEntriesChanged(
+                change.result.changedPositions, includeNeighbors = includeNeighbors,
+                markChanged = false, refreshDocument = false
+            )
+        }
+    }
+
     private fun notifyEntriesChanged(
         positions: Iterable<Int>,
         includeNeighbors: Boolean = true,
@@ -3796,10 +3874,6 @@ class EditorActivity : AppCompatActivity() {
         if (!waveformController.replaceSubtitleRange(startIndex, removedCount, inserted)) {
             syncWaveformSubtitles()
         }
-    }
-
-    private fun setWaveformSubtitlesKeepSelection(selectedIndex: Int) {
-        waveformController.setSubtitlesKeepSelection(stateModel.subtitleEntries.toList(), selectedIndex)
     }
 
     private fun showListLoading() {
@@ -3858,14 +3932,17 @@ class EditorActivity : AppCompatActivity() {
         syncWaveform: Boolean = true,
         markChanged: Boolean = false,
         schedulePreview: Boolean = true,
+        refreshDocument: Boolean = true,
         afterSubmit: (() -> Unit)? = null
     ) {
         val renderVersion = ++listRenderVersion
         if (maxOf(stateModel.subtitleEntries.size, subtitleAdapter.itemCount) >= LARGE_LIST_LOADING_THRESHOLD) {
             showListLoading()
         }
-        renumberEntries(force = refreshAll)
-        stateModel.refreshDocument()
+        if (refreshDocument) {
+            renumberEntries(force = refreshAll)
+            stateModel.refreshDocument()
+        }
         val targetSelectedIds = listPresentationController.targetSelection(
             selectedIndices, selectedStableIds, clearSelection
         )
@@ -3883,7 +3960,7 @@ class EditorActivity : AppCompatActivity() {
                     val start = refreshStart.coerceIn(0, subtitleAdapter.itemCount)
                     val count = subtitleAdapter.itemCount - start
                     if (count > 0) {
-                        subtitleAdapter.notifyItemRangeChanged(start, count)
+                        subtitleAdapter.notifyItemRangeChanged(start, count, SubtitleAdapter.PAYLOAD_INDEX)
                     }
                 }
             }
@@ -4242,19 +4319,14 @@ class EditorActivity : AppCompatActivity() {
         val removedCount = stateModel.subtitleEntries.size - mergedEntries.size
 
         cutPasteController.clear()
-        val historyBefore = currentHistoryListState()
         val mergedEntryIds = groups
             .filter { it.entries.size > 1 && it.startPosition in appliedByStart }
             .flatMap { group -> group.entries }
             .mapTo(mutableSetOf()) { it.stableId }
-        replaceSubtitleEntries(mergedEntries)
-        stateModel.historyEntriesSnapshot = historyBefore.entries
-        stateModel.historySelectionSnapshot = historyBefore.selectedIds
-        submitSubtitleList(
-            refreshAll = true,
-            selectedStableIds = historyBefore.selectedIds - mergedEntryIds,
-            markChanged = true
-        )
+        val change = commitListEdit(
+            EditorCommand.ReplaceEntries(mergedEntries), selectedSubtitleIds() - mergedEntryIds
+        ) ?: return
+        renderCommittedListEdit(change)
         showShortToast(getString(R.string.merge_subtitles_result, removedCount))
     }
 
@@ -4331,26 +4403,21 @@ class EditorActivity : AppCompatActivity() {
         when {
             // 有长按位置，对长按的那一行应用偏移（无论是否有选中状态）
             longClickPos >= 0 && longClickPos < stateModel.subtitleEntries.size -> {
-                val entry = stateModel.subtitleEntries[longClickPos]
-                stateModel.executeWithoutPublish(EditorCommand.ApplyOffset(setOf(longClickPos), offsetMs))
-                
-                notifyEntriesChanged(listOf(longClickPos), refreshDocument = false)
+                val change = commitListEdit(EditorCommand.ApplyOffset(setOf(longClickPos), offsetMs)) ?: return
+                renderCommittedListEdit(change)
             }
             // 没有长按位置但有选中的字幕，对选中的字幕应用偏移
             subtitleAdapter.getSelectedCount() > 0 -> {
                 val selectedEntries = subtitleAdapter.getSelectedEntries()
-                stateModel.executeWithoutPublish(EditorCommand.ApplyOffset(selectedEntries.map { it.second }.toSet(), offsetMs))
-                
-                notifyEntriesChanged(
-                    selectedEntries.map { it.second },
-                    refreshDocument = false
-                )
+                val change = commitListEdit(EditorCommand.ApplyOffset(selectedEntries.map { it.second }.toSet(), offsetMs))
+                    ?: return
+                renderCommittedListEdit(change)
             }
             // 都没有，对所有字幕应用偏移
             else -> {
-                stateModel.executeWithoutPublish(EditorCommand.ApplyOffset(stateModel.subtitleEntries.indices.toSet(), offsetMs))
-                
-                submitSubtitleList(refreshAll = true, markChanged = true)
+                val change = commitListEdit(EditorCommand.ApplyOffset(stateModel.subtitleEntries.indices.toSet(), offsetMs))
+                    ?: return
+                renderCommittedListEdit(change)
             }
         }
         showShortToast("已应用 ${offsetMs}ms 偏移")
@@ -4370,10 +4437,9 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun deleteSelectedSubtitlesConfirmed(selectedEntries: List<Pair<SubtitleEntry, Int>>) {
-        val historyBefore = currentHistoryListState()
         val deletedIndices = selectedEntries.map { it.second }.toSet()
-        stateModel.executeWithoutPublish(EditorCommand.Delete(deletedIndices))
-        syncAfterDelete(deletedIndices, historyBefore)
+        val change = commitListEdit(EditorCommand.Delete(deletedIndices)) ?: return
+        syncAfterDelete(deletedIndices, change)
         com.subtitleedit.util.OverwritingToast.makeText(this, "已删除 ${selectedEntries.size} 条字幕", Toast.LENGTH_SHORT).show()
     }
 
@@ -4383,25 +4449,20 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun syncAfterDelete(
         deletedIndices: Set<Int>,
-        historyBefore: EditorEditHistory.ListState
+        change: EditorListChange
     ) {
-        stateModel.historyEntriesSnapshot = historyBefore.entries
-        stateModel.historySelectionSnapshot = historyBefore.selectedIds
-        val remainingIds = stateModel.subtitleEntries.mapTo(mutableSetOf()) { it.stableId }
         submitSubtitleList(
             refreshAll = false,
-            selectedStableIds = stateModel.historySelectionSnapshot.filterTo(mutableSetOf()) { selectedId ->
-                selectedId in remainingIds
-            },
+            selectedStableIds = change.selectedIds,
             syncWaveform = false,
-            markChanged = true,
+            refreshDocument = false,
             afterSubmit = {
                 val firstDeleted = deletedIndices.minOrNull()
                     ?.coerceAtMost(stateModel.subtitleEntries.size)
                     ?: stateModel.subtitleEntries.size
                 val remainingCount = stateModel.subtitleEntries.size - firstDeleted
                 if (remainingCount > 0) {
-                    subtitleAdapter.notifyItemRangeChanged(firstDeleted, remainingCount)
+                    subtitleAdapter.notifyItemRangeChanged(firstDeleted, remainingCount, SubtitleAdapter.PAYLOAD_INDEX)
                 }
                 if (deletedIndices.size <= BULK_NOTIFY_THRESHOLD) {
                     deletedIndices.sorted().forEachIndexed { offset, deletedIdx ->
@@ -4497,15 +4558,11 @@ class EditorActivity : AppCompatActivity() {
         if (deferLargeListEdit(stateModel.subtitleEntries.size) {
                 applyPreviewTexts(appliedItems, actionName)
             }) return
-        appliedItems.forEach { item ->
-            stateModel.subtitleEntries.getOrNull(item.entryPosition)?.text = item.translatedText
-        }
         if (appliedItems.isNotEmpty()) {
-            notifyEntriesChanged(
-                appliedItems.map { it.entryPosition },
-                includeNeighbors = false,
-                refreshDocument = false
-            )
+            val change = commitListEdit(EditorCommand.UpdateTexts(
+                appliedItems.map { it.entryPosition to it.translatedText }, removeBlankEntries = false
+            )) ?: return
+            renderCommittedListEdit(change, includeNeighbors = false)
         }
         showShortToast("已应用 ${appliedItems.size} 条$actionName")
     }
@@ -4528,98 +4585,67 @@ class EditorActivity : AppCompatActivity() {
         stateModel.lastIndexedEntryCount = currentCount
     }
 
-    private fun replaceSubtitleEntries(
-        entries: List<SubtitleEntry>,
-        preserveStableIds: Boolean = false
-    ) {
-        val previous = stateModel.subtitleEntries
-        stateModel.subtitleEntries = if (preserveStableIds) {
-            SubtitleEntryOps.retainStableIds(previous, entries).toMutableList()
-        } else {
-            entries.toMutableList()
-        }
-        renumberEntries(force = true)
-    }
-
-    /**
-     * Apply a parsed source document while preserving the list view's row objects whenever
-     * the number of subtitle blocks is unchanged.  Waveform and list-view consumers can then
-     * keep their existing block references, and only affected rows (plus their neighbours)
-     * are rebound.  A size change still replaces the list in one operation because every row
-     * after the edit has a new index.
-     */
+    /** Full-parse fallback; source block edits bypass this document-wide matching path. */
     private fun applySourceViewEntries(
         updatedEntries: List<SubtitleEntry>,
         preserveProvidedStableIds: Boolean = false
     ) {
         if (stateModel.subtitleEntries.size != updatedEntries.size) {
-            val previousEntries = stateModel.subtitleEntries.toList()
+            val previousEntries = stateModel.subtitleEntries
             val previousIds = previousEntries.mapTo(mutableSetOf()) { it.stableId }
             val associatedEntries = if (
                 preserveProvidedStableIds || updatedEntries.any { it.stableId in previousIds }
             ) {
-                updatedEntries.map { it.copy() }
+                updatedEntries
             } else {
                 SubtitleEntryOps.retainStableIds(previousEntries, updatedEntries)
             }
             val prefix = SubtitleStableRange.commonPrefix(previousEntries, associatedEntries)
             val suffix = SubtitleStableRange.commonSuffix(previousEntries, associatedEntries, prefix)
             val removedCount = previousEntries.size - prefix - suffix
-            val previousById = previousEntries.associateBy { it.stableId }
-            val retainedEntries = associatedEntries.map { parsedEntry ->
-                previousById[parsedEntry.stableId]?.also {
-                    EditorDocumentOperations.updateFields(it, parsedEntry)
+            val changedOutsideRange = mutableListOf<Int>()
+            for (position in 0 until prefix) {
+                val current = previousEntries[position]
+                val updated = associatedEntries[position]
+                if (sourceEntryFieldsDiffer(current, updated) || current.index != position + 1) {
+                    EditorDocumentOperations.updateFields(current, updated)
+                    current.index = position + 1
+                    changedOutsideRange += position
                 }
-                    ?: parsedEntry
             }
-            val inserted = retainedEntries.subList(prefix, retainedEntries.size - suffix)
-            stateModel.subtitleEntries = EditorDocumentOperations.replaceEntries(previousEntries)
-            stateModel.subtitleEntries.subList(prefix, prefix + removedCount).clear()
-            EditorDocumentOperations.addAllAt(stateModel.subtitleEntries, prefix, inserted)
-            renumberEntries(force = true)
-            pendingListIndexRefreshStart = minOf(
-                pendingListIndexRefreshStart ?: prefix,
-                prefix
+            // A fallback full parse may change fields outside the structural span too. Keep
+            // those surviving objects, but do not duplicate them merely to install the span.
+            for (offset in 0 until suffix) {
+                val oldPosition = previousEntries.size - suffix + offset
+                val newPosition = associatedEntries.size - suffix + offset
+                val current = previousEntries[oldPosition]
+                val updated = associatedEntries[newPosition]
+                if (sourceEntryFieldsDiffer(current, updated)) {
+                    EditorDocumentOperations.updateFields(current, updated)
+                    current.index = newPosition + 1
+                    changedOutsideRange += newPosition
+                }
+            }
+            applySourceEntryRange(
+                prefix, removedCount, associatedEntries.subList(prefix, associatedEntries.size - suffix)
             )
-            syncWaveformSubtitleRange(prefix, removedCount, inserted)
+            if (changedOutsideRange.isNotEmpty()) refreshSourceEntryPositions(changedOutsideRange)
             return
         }
 
         val changedPositions = updatedEntries.indices.filter { position ->
             val current = stateModel.subtitleEntries[position]
             val updated = updatedEntries[position]
-            current.index != updated.index ||
-                current.startTime != updated.startTime ||
-                current.endTime != updated.endTime ||
-                current.text != updated.text ||
-                current.endTimeModified != updated.endTimeModified ||
-                current.cueIdentifier != updated.cueIdentifier ||
-                current.cueSettings != updated.cueSettings
+            current.index != position + 1 || sourceEntryFieldsDiffer(current, updated)
         }
         changedPositions.forEach { position ->
             val target = stateModel.subtitleEntries[position]
             val source = updatedEntries[position]
             EditorDocumentOperations.updateFields(target, source)
+            target.index = position + 1
         }
-        renumberEntries(force = true)
-
-        if (changedPositions.isEmpty()) {
-            syncWaveformSubtitles(preserveSelection = true, changedPositions = changedPositions)
-        } else if (::subtitleAdapter.isInitialized && subtitleAdapter.itemCount == stateModel.subtitleEntries.size) {
-            // Reuse the same payload/neighbour refresh path as list-view edits.  The
-            // RecyclerView is hidden in source mode, but retaining its row references keeps
-            // the two editing modes consistent when the user switches back.
-            notifyEntriesChanged(
-                changedPositions,
-                includeNeighbors = true,
-                syncWaveform = false,
-                markChanged = false,
-                refreshDocument = false
-            )
-            syncWaveformSubtitles(preserveSelection = true, changedPositions = changedPositions)
-        } else {
-            syncWaveformSubtitles(preserveSelection = true, changedPositions = changedPositions)
-        }
+        stateModel.lastIndexedEntryCount = stateModel.subtitleEntries.size
+        if (changedPositions.isNotEmpty()) refreshSourceEntryPositions(changedPositions)
     }
 
     /**
@@ -4840,25 +4866,12 @@ class EditorActivity : AppCompatActivity() {
             entry.text,
             (playhead - entry.startTime).toFloat() / duration.toFloat()
         )
-        val historyBefore = currentHistoryListState()
         val splitEntryId = entry.stableId
-        val result = stateModel.executeWithoutPublish(
-            EditorCommand.Split(position, playhead, split.left, split.right)
-        )
-        if (!result.structureChanged) return
-        stateModel.historyEntriesSnapshot = historyBefore.entries
-        stateModel.historySelectionSnapshot = historyBefore.selectedIds
-        submitSubtitleList(
-            refreshAll = true,
-            selectedStableIds = historyBefore.selectedIds - splitEntryId,
-            syncWaveform = false,
-            markChanged = true
-        )
-        syncWaveformSubtitleRange(
-            position,
-            removedCount = 1,
-            inserted = stateModel.subtitleEntries.subList(position, position + 2).toList()
-        )
+        val change = commitListEdit(
+            EditorCommand.Split(position, playhead, split.left, split.right),
+            selectedSubtitleIds() - splitEntryId
+        ) ?: return
+        renderCommittedListEdit(change)
         showShortToast("已拆分字幕")
     }
 

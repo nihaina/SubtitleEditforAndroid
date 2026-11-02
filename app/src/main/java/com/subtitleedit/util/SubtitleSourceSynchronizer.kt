@@ -286,10 +286,11 @@ object SubtitleSourceSynchronizer {
         oldEntries: List<SubtitleEntry>,
         newEntries: List<SubtitleEntry>
     ): String? {
-        if (haveSameStableOrder(oldEntries, newEntries) ||
-            countCueTimelines(content, vtt = false) != oldEntries.size ||
-            containsSrtFrameTimeline(content)
-        ) return null
+        if (haveSameStableOrder(oldEntries, newEntries)) return null
+        // One source scan owns the cue boundaries, count and frame-timing guard.
+        // Renumbering a suffix must not parse every timeline three more times.
+        val scan = scanCueSpans(content, targetIndices = null, vtt = false)
+        if (scan.cueCount != oldEntries.size || scan.hasFrameTiming) return null
         if (oldEntries.isEmpty()) {
             if (newEntries.isEmpty()) return content
             val ending = preferredEndingFromContent(content)
@@ -307,7 +308,7 @@ object SubtitleSourceSynchronizer {
             commonOldOrder != commonNewOrder
         ) return null
 
-        val spans = findCueSpans(content, oldEntries.indices.toSet(), vtt = false)
+        val spans = scan.spans
         if (spans.size != oldEntries.size) return null
         val insertionsBeforeOld = Array(oldEntries.size) { mutableListOf<SubtitleEntry>() }
         val trailingInsertions = mutableListOf<SubtitleEntry>()
@@ -326,12 +327,21 @@ object SubtitleSourceSynchronizer {
         if (newEntries.isEmpty() && oldEntries.isEmpty()) return content
 
         val replacementsByOldIndex = HashMap<Int, String>()
+        val renumberedByOldIndex = HashMap<Int, Int>()
         for (oldIndex in oldEntries.indices) {
             val span = spans[oldIndex] ?: return null
             val newIndex = newIndexById[oldEntries[oldIndex].stableId] ?: continue
             val old = oldEntries[oldIndex]
             val new = newEntries[newIndex]
             if (sameSerializedEntry(old, new)) continue
+            if (sameCueFields(old, new)) {
+                // Inserting/deleting a row only changes the sequence numbers of
+                // surviving cues. Retain their raw timeline/body bytes and avoid
+                // splitting/reparsing the entire suffix merely to change a digit.
+                if (!srtBodyMatches(content, span, old)) return null
+                renumberedByOldIndex[oldIndex] = new.index
+                continue
+            }
             val block = splitLines(content.substring(span.start, span.endExclusive))
             val timelineOffset = block.indexOfFirst { SrtSubtitleFormatHandler.parseTimeLine(it.text) != null }
             if (timelineOffset < 0 ||
@@ -364,6 +374,9 @@ object SubtitleSourceSynchronizer {
                 if (newIndex != null) {
                     val patched = replacementsByOldIndex[oldIndex]
                     if (patched != null) append(patched)
+                    else if (oldIndex in renumberedByOldIndex) {
+                        appendRenumberedSrtCue(content, span, renumberedByOldIndex.getValue(oldIndex))
+                    }
                     else append(content, span.start, span.endExclusive)
                 }
                 cursor = span.endExclusive
@@ -383,9 +396,10 @@ object SubtitleSourceSynchronizer {
         newEntries: List<SubtitleEntry>
     ): String? {
         if (haveSameStableOrder(oldEntries, newEntries) ||
-            content.lineSequence().any { it.contains("X-TIMESTAMP-MAP", ignoreCase = true) } ||
-            countCueTimelines(content, vtt = true) != oldEntries.size
+            content.lineSequence().any { it.contains("X-TIMESTAMP-MAP", ignoreCase = true) }
         ) return null
+        val scan = scanCueSpans(content, targetIndices = null, vtt = true)
+        if (scan.cueCount != oldEntries.size) return null
         if (oldEntries.isEmpty()) {
             if (newEntries.isEmpty()) return content
             val ending = preferredEndingFromContent(content)
@@ -403,7 +417,7 @@ object SubtitleSourceSynchronizer {
             commonOldOrder != commonNewOrder
         ) return null
 
-        val spans = findCueSpans(content, oldEntries.indices.toSet(), vtt = true)
+        val spans = scan.spans
         if (spans.size != oldEntries.size) return null
         val insertionsBeforeOld = Array(oldEntries.size) { mutableListOf<SubtitleEntry>() }
         val trailingInsertions = mutableListOf<SubtitleEntry>()
@@ -433,7 +447,8 @@ object SubtitleSourceSynchronizer {
             val newIndex = newIndexById[oldEntries[oldIndex].stableId] ?: continue
             val old = oldEntries[oldIndex]
             val new = newEntries[newIndex]
-            if (sameSerializedEntry(old, new)) continue
+            // WebVTT does not serialize the editor's row number at all.
+            if (sameCueFields(old, new)) continue
             val block = splitLines(content.substring(span.start, span.endExclusive))
             val timelineOffset = block.indexOfFirst { WebVttSubtitleFormatHandler.parseTimeLine(it.text) != null }
             if (timelineOffset < 0 ||
@@ -553,9 +568,7 @@ object SubtitleSourceSynchronizer {
             val lineEnd = content.indexOfAny(charArrayOf('\r', '\n'), cursor)
                 .takeIf { it >= 0 } ?: content.length
             val line = content.substring(cursor, lineEnd)
-            if (if (vtt) WebVttSubtitleFormatHandler.parseTimeLine(line) != null
-                else SrtSubtitleFormatHandler.parseTimeLine(line) != null
-            ) count++
+            if (isCueTimeline(line, vtt)) count++
             if (lineEnd >= content.length) break
             cursor = lineEnd + if (content[lineEnd] == '\r' && content.getOrNull(lineEnd + 1) == '\n') 2 else 1
         }
@@ -580,7 +593,18 @@ object SubtitleSourceSynchronizer {
         return changedIndex.takeIf { it >= 0 }?.let { it to Unit }
     }
 
-    private data class RawCueSpan(val start: Int, val endExclusive: Int)
+    private data class RawCueSpan(
+        val start: Int,
+        val endExclusive: Int,
+        val timelineStart: Int = -1,
+        val bodyStart: Int = -1
+    )
+
+    private data class RawCueScan(
+        val spans: Map<Int, RawCueSpan>,
+        val cueCount: Int,
+        val hasFrameTiming: Boolean
+    )
 
     private data class RawReplacement(val start: Int, val endExclusive: Int, val text: String)
 
@@ -618,36 +642,54 @@ object SubtitleSourceSynchronizer {
         content: String,
         targetIndices: Set<Int>,
         vtt: Boolean
-    ): Map<Int, RawCueSpan> {
-        if (targetIndices.isEmpty()) return emptyMap()
-        val spans = HashMap<Int, RawCueSpan>(targetIndices.size)
+    ): Map<Int, RawCueSpan> = if (targetIndices.isEmpty()) emptyMap()
+        else scanCueSpans(content, targetIndices, vtt).spans
+
+    /** A null target set collects every cue without allocating an all-indices set. */
+    private fun scanCueSpans(
+        content: String,
+        targetIndices: Set<Int>?,
+        vtt: Boolean
+    ): RawCueScan {
+        val spans = HashMap<Int, RawCueSpan>(targetIndices?.size ?: 16)
         var cursor = 0
         var cueIndex = 0
         var activeIndex: Int? = null
         var activeStart = -1
+        var activeTimelineStart = -1
+        var activeBodyStart = -1
+        var hasFrameTiming = false
         var candidatePrefixStart = -1
         var blankSinceTimeline = true
         while (cursor <= content.length) {
             val lineEnd = content.indexOfAny(charArrayOf('\r', '\n'), cursor)
                 .takeIf { it >= 0 } ?: content.length
             val line = content.substring(cursor, lineEnd)
-            val timeline = if (vtt) WebVttSubtitleFormatHandler.parseTimeLine(line) != null
-            else SrtSubtitleFormatHandler.parseTimeLine(line) != null
+            val canonical = isCanonicalCueTimeline(line, vtt)
+            val srtTimeline = if (vtt || canonical || '>' !in line) null else SrtSubtitleFormatHandler.parseTimeLine(line)
+            val timeline = canonical || if (vtt) isCueTimeline(line, true) else srtTimeline != null
+            if (srtTimeline?.isFrameCandidate == true) hasFrameTiming = true
             val trimmed = line.trimStart('\uFEFF').trim()
             if (vtt && activeIndex != null && cueIndex > activeIndex &&
                 (trimmed == "NOTE" || trimmed.startsWith("NOTE ") ||
                     trimmed == "STYLE" || trimmed.startsWith("STYLE ") ||
                     trimmed == "REGION" || trimmed.startsWith("REGION "))
             ) {
-                spans[activeIndex] = RawCueSpan(activeStart, cursor)
+                spans[activeIndex] = RawCueSpan(activeStart, cursor, activeTimelineStart, activeBodyStart)
                 activeIndex = null
                 activeStart = -1
             }
             if (timeline) {
                 val start = candidatePrefixStart.takeIf { it >= 0 } ?: cursor
-                activeIndex?.let { spans[it] = RawCueSpan(activeStart, start) }
-                activeIndex = cueIndex.takeIf { it in targetIndices }
+                activeIndex?.let { spans[it] = RawCueSpan(activeStart, start, activeTimelineStart, activeBodyStart) }
+                activeIndex = cueIndex.takeIf { targetIndices == null || it in targetIndices }
                 activeStart = if (activeIndex != null) start else -1
+                activeTimelineStart = cursor
+                activeBodyStart = lineEnd + when {
+                    lineEnd >= content.length -> 0
+                    content[lineEnd] == '\r' && content.getOrNull(lineEnd + 1) == '\n' -> 2
+                    else -> 1
+                }
                 cueIndex++
                 candidatePrefixStart = -1
                 blankSinceTimeline = false
@@ -671,8 +713,8 @@ object SubtitleSourceSynchronizer {
             if (lineEnd >= content.length) break
             cursor = lineEnd + if (content[lineEnd] == '\r' && content.getOrNull(lineEnd + 1) == '\n') 2 else 1
         }
-        activeIndex?.let { spans[it] = RawCueSpan(activeStart, content.length) }
-        return spans
+        activeIndex?.let { spans[it] = RawCueSpan(activeStart, content.length, activeTimelineStart, activeBodyStart) }
+        return RawCueScan(spans, cueIndex, hasFrameTiming)
     }
 
     private fun findCueSpan(content: String, targetIndex: Int, vtt: Boolean): RawCueSpan? {
@@ -685,8 +727,7 @@ object SubtitleSourceSynchronizer {
             val lineEnd = content.indexOfAny(charArrayOf('\r', '\n'), cursor)
                 .takeIf { it >= 0 } ?: content.length
             val line = content.substring(cursor, lineEnd)
-            val timeline = if (vtt) WebVttSubtitleFormatHandler.parseTimeLine(line) != null
-            else SrtSubtitleFormatHandler.parseTimeLine(line) != null
+            val timeline = isCueTimeline(line, vtt)
             val trimmed = line.trimStart('\uFEFF').trim()
             if (vtt && activeStart >= 0 && cueIndex > targetIndex &&
                 (trimmed == "NOTE" || trimmed.startsWith("NOTE ") ||
@@ -739,14 +780,73 @@ object SubtitleSourceSynchronizer {
         return true
     }
 
+    /** Boundary scans need no timestamp objects for the ordinary fixed-width form. */
+    private fun isCanonicalCueTimeline(line: String, vtt: Boolean): Boolean {
+        if (line.length != 29 || line[2] != ':' || line[5] != ':' ||
+            line[19] != ':' || line[22] != ':' ||
+            line[8] != (if (vtt) '.' else ',') || line[25] != line[8] ||
+            !line.regionMatches(12, " --> ", 0, 5)
+        ) return false
+        for (index in line.indices) {
+            if (index == 2 || index == 5 || index == 8 || index in 12..16 ||
+                index == 19 || index == 22 || index == 25
+            ) continue
+            if (line[index] !in '0'..'9') return false
+        }
+        return true
+    }
+
+    private fun isCueTimeline(line: String, vtt: Boolean): Boolean =
+        isCanonicalCueTimeline(line, vtt) || ('>' in line &&
+            if (vtt) WebVttSubtitleFormatHandler.parseTimeLine(line) != null
+            else SrtSubtitleFormatHandler.parseTimeLine(line) != null)
+
     private fun sameSerializedEntry(old: SubtitleEntry, new: SubtitleEntry): Boolean =
-        old.index == new.index &&
-            old.startTime == new.startTime &&
+        old.index == new.index && sameCueFields(old, new)
+
+    private fun sameCueFields(old: SubtitleEntry, new: SubtitleEntry): Boolean =
+        old.startTime == new.startTime &&
             old.endTime == new.endTime &&
             old.text == new.text &&
             old.endTimeModified == new.endTimeModified &&
             old.cueIdentifier == new.cueIdentifier &&
             old.cueSettings == new.cueSettings
+
+    /** Compare normalized cue text in place, without allocating split-line/body lists. */
+    private fun srtBodyMatches(content: String, span: RawCueSpan, entry: SubtitleEntry): Boolean {
+        if (span.bodyStart < 0 || span.bodyStart > span.endExclusive) return false
+        var end = span.endExclusive
+        while (end > span.bodyStart && content[end - 1].isWhitespace()) end--
+        var expectedEnd = entry.text.length
+        while (expectedEnd > 0 && entry.text[expectedEnd - 1].isWhitespace()) expectedEnd--
+        var cursor = span.bodyStart
+        var expected = 0
+        while (cursor < end && expected < expectedEnd) {
+            var char = content[cursor++]
+            if (char == '\r') {
+                if (cursor < end && content[cursor] == '\n') cursor++
+                char = '\n'
+            }
+            if (char != entry.text[expected++]) return false
+        }
+        return cursor == end && expected == expectedEnd
+    }
+
+    private fun StringBuilder.appendRenumberedSrtCue(content: String, span: RawCueSpan, index: Int) {
+        if (span.start >= span.timelineStart) {
+            append(content, span.start, span.endExclusive)
+            return
+        }
+        val lineEnd = content.indexOfAny(charArrayOf('\r', '\n'), span.start)
+            .takeIf { it in span.start until span.timelineStart } ?: span.timelineStart
+        val number = content.substring(span.start, lineEnd)
+        if (number.trimStart('\uFEFF').trim().toIntOrNull() == null) {
+            append(content, span.start, span.endExclusive)
+            return
+        }
+        append(replaceSrtSequenceNumber(number, index))
+        append(content, lineEnd, span.endExclusive)
+    }
 
     private fun srtBodyMatches(block: List<RawLine>, timelineOffset: Int, entry: SubtitleEntry): Boolean {
         val trailing = block.drop(timelineOffset + 1).takeLastWhile { it.text.isBlank() }
@@ -761,20 +861,6 @@ object SubtitleSourceSynchronizer {
             .joinToString("\n") { it.text }
         val expected = WebVttTextFormatting.writeText(entry.text).replace("\r\n", "\n").trimEnd()
         return body.trimEnd() == expected
-    }
-
-    private fun containsSrtFrameTimeline(content: String): Boolean {
-        var cursor = 0
-        while (cursor <= content.length) {
-            val lineEnd = content.indexOfAny(charArrayOf('\r', '\n'), cursor)
-                .takeIf { it >= 0 } ?: content.length
-            if (SrtSubtitleFormatHandler.parseTimeLine(content.substring(cursor, lineEnd))?.isFrameCandidate == true) {
-                return true
-            }
-            if (lineEnd >= content.length) break
-            cursor = lineEnd + if (content[lineEnd] == '\r' && content.getOrNull(lineEnd + 1) == '\n') 2 else 1
-        }
-        return false
     }
 
     private fun preferredEndingFromContent(content: String): String {
