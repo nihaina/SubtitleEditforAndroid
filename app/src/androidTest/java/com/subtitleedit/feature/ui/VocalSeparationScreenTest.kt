@@ -36,6 +36,7 @@ class VocalSeparationScreenTest {
                     onSettings = { calls += "settings" },
                     onSelectFiles = { calls += "selectFiles" },
                     onSelectOutputDirectory = { calls += "selectOutput" },
+                    onSaveToSourceDirectoryChange = { calls += "saveToSource:$it" },
                     onStemChange = { stem, checked -> calls += "stem:$stem:$checked" },
                     onStart = { calls += "start" },
                     onCancel = { calls += "cancel" },

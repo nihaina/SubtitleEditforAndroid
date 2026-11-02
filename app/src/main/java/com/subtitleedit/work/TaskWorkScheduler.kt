@@ -61,7 +61,8 @@ internal class TaskWorkScheduler(
                 .build()
             workManager.enqueueUniqueWork(
                 AI_SUBTITLE_WORK,
-                if (targetSessionId == null) ExistingWorkPolicy.KEEP else ExistingWorkPolicy.REPLACE,
+                // Keep a start requested during worker shutdown; KEEP would discard it.
+                if (targetSessionId == null) ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.REPLACE,
                 request
             ).result.get()
             request.id

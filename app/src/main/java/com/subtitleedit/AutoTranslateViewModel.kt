@@ -46,7 +46,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.CopyOnWriteArrayList
 
 internal sealed interface AutoTranslateEvent {
@@ -70,8 +70,8 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
     private lateinit var settingsManager: SettingsManager
     private val aiTranslationService: AiTranslationService get() = dependencies.aiTranslationService
     private val files = CopyOnWriteArrayList<AutoTranslateFile>()
-    private val activeJobs = ConcurrentHashMap<String, Job>()
-    private val queueStore = AutoTranslateQueueStore(application)
+    private val queueController get() = dependencies.autoTranslateQueue
+    @Volatile private var activeExecution: AutoTranslateQueueController.Execution? = null
     private var queueRunning = false
     private var outputDirectoryUri: Uri? = null
     private var outputDirectoryLabel: String = ""
@@ -159,7 +159,7 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
     }
 
     private fun restoreQueue() {
-        val snapshot = queueStore.load() ?: return
+        val snapshot = queueController.snapshot()
         shouldObservePersistedWork = snapshot.workRunning ||
             snapshot.files.any { it.status == FileStatus.RUNNING.name }
         queueRunning = snapshot.workRunning
@@ -171,55 +171,60 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
             )
         }
         snapshot.files.forEach { persisted ->
-            val persistedStatus = runCatching { FileStatus.valueOf(persisted.status) }
-                .getOrDefault(FileStatus.WAITING)
-            if (persistedStatus == FileStatus.COMPLETED) return@forEach
-            val file = AutoTranslateFile(
-                uri = Uri.parse(persisted.uri),
-                fileName = persisted.fileName,
-                fileSize = persisted.fileSize,
-                sessionId = persisted.sessionId
-            )
-            file.status = if (persistedStatus == FileStatus.RUNNING && restoreRunningAsPaused) {
-                FileStatus.PAUSED
-            } else {
-                persistedStatus
-            }
-            file.processingStage = runCatching { ProcessingStage.valueOf(persisted.processingStage) }
-                .getOrDefault(ProcessingStage.READING)
-            file.totalLines = persisted.totalLines
-            file.processedLines = persisted.processedLines
-            file.message = persisted.message
-            file.progressStage = persisted.progressStage?.let { value ->
-                runCatching { ProcessingStage.valueOf(value) }.getOrNull()
-            }
-            file.document = persisted.documentContent?.let { content ->
-                runCatching {
-                    val format = SubtitleParser.detectFormat(content, file.fileName)
-                    SubtitleParser.parseDocument(content, file.fileName, format)
-                }.getOrNull()
-            }
-            file.lastObservedDocumentContent = persisted.documentContent
-            file.translationSourceEntries = file.document?.entries
-            file.originalText = persisted.originalText
-            file.punctuationPredictionCompleted = persisted.punctuationPredictionCompleted
-            file.translatedTexts += persisted.translatedTexts
-            file.translationResumeStart = persisted.translationResumeStart
-            file.translationBatchSize = persisted.translationBatchSize
-            file.translationConfig = persisted.translationConfig?.toRuntimeConfig()
-            file.punctuationProvider = persisted.punctuationProvider
-            file.punctuationEnabledForRun = persisted.punctuationEnabled
-            file.translationEnabledForRun = persisted.translationEnabled
-            file.overwriteOutput = persisted.overwriteOutput
-            file.punctuationCompletedTexts += persisted.punctuationCompletedTexts
-            file.textPunctuationCompletedTexts += persisted.textPunctuationPredictions
-            file.textTranslationCompletedTexts += persisted.textTranslations
-            file.punctuationResumeConversationPending = persisted.punctuationResumeHistory
-            file.translationResumeHistoryPending = persisted.translationResumeHistory
-            file.historyLoaded = !persisted.punctuationResumeHistory && !persisted.translationResumeHistory
+            if (persisted.status == FileStatus.COMPLETED.name) return@forEach
+            val file = restoreFile(persisted)
             files += file
-            if (!file.historyLoaded) loadRestoredHistory(file)
+            if (restoreRunningAsPaused && !file.historyLoaded) loadRestoredHistory(file)
         }
+    }
+
+    private fun restoreFile(persisted: AutoTranslateFileSnapshot): AutoTranslateFile {
+        val persistedStatus = runCatching { FileStatus.valueOf(persisted.status) }
+            .getOrDefault(FileStatus.WAITING)
+        val file = AutoTranslateFile(
+            uri = Uri.parse(persisted.uri),
+            fileName = persisted.fileName,
+            fileSize = persisted.fileSize,
+            sessionId = persisted.sessionId
+        )
+        file.status = if (persistedStatus == FileStatus.RUNNING && restoreRunningAsPaused) {
+            FileStatus.PAUSED
+        } else {
+            persistedStatus
+        }
+        file.processingStage = runCatching { ProcessingStage.valueOf(persisted.processingStage) }
+            .getOrDefault(ProcessingStage.READING)
+        file.totalLines = persisted.totalLines
+        file.processedLines = persisted.processedLines
+        file.message = persisted.message
+        file.progressStage = persisted.progressStage?.let { value ->
+            runCatching { ProcessingStage.valueOf(value) }.getOrNull()
+        }
+        file.document = persisted.documentContent?.let { content ->
+            runCatching {
+                val format = SubtitleParser.detectFormat(content, file.fileName)
+                SubtitleParser.parseDocument(content, file.fileName, format)
+            }.getOrNull()
+        }
+        file.lastObservedDocumentContent = persisted.documentContent
+        file.translationSourceEntries = file.document?.entries
+        file.originalText = persisted.originalText
+        file.punctuationPredictionCompleted = persisted.punctuationPredictionCompleted
+        file.translatedTexts += persisted.translatedTexts
+        file.translationResumeStart = persisted.translationResumeStart
+        file.translationBatchSize = persisted.translationBatchSize
+        file.translationConfig = persisted.translationConfig?.toRuntimeConfig()
+        file.punctuationProvider = persisted.punctuationProvider
+        file.punctuationEnabledForRun = persisted.punctuationEnabled
+        file.translationEnabledForRun = persisted.translationEnabled
+        file.overwriteOutput = persisted.overwriteOutput
+        file.punctuationCompletedTexts += persisted.punctuationCompletedTexts
+        file.textPunctuationCompletedTexts += persisted.textPunctuationPredictions
+        file.textTranslationCompletedTexts += persisted.textTranslations
+        file.punctuationResumeConversationPending = persisted.punctuationResumeHistory
+        file.translationResumeHistoryPending = persisted.translationResumeHistory
+        file.historyLoaded = !persisted.punctuationResumeHistory && !persisted.translationResumeHistory
+        return file
     }
 
     private fun PersistedTranslationConfig.toRuntimeConfig(): TranslationConfig = TranslationConfig(
@@ -268,20 +273,20 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
                 return@forEach
             }
             runCatching { app.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-            files += AutoTranslateFile(uri, fileName, getFileSizeFromUri(uri))
+            val file = AutoTranslateFile(uri, fileName, getFileSizeFromUri(uri))
+            if (queueController.add(file.toSnapshot())) files += file
         }
         publish()
-        persistQueueSnapshot()
     }
 
     fun setPunctuationPrediction(enabled: Boolean) {
+        queueController.setOptions(punctuationEnabled = enabled)
         setState { copy(punctuationPredictionEnabled = enabled) }
-        persistQueueSnapshot()
     }
 
     fun setTranslation(enabled: Boolean) {
+        queueController.setOptions(translationEnabled = enabled)
         setState { copy(translationEnabled = enabled) }
-        persistQueueSnapshot()
     }
 
     fun selectOutputDirectory(uri: Uri) {
@@ -290,102 +295,98 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
         outputDirectoryLabel = DirectoryDisplayPath.fromUri(app, uri)
         settingsManager.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
         publish()
-        persistQueueSnapshot()
     }
 
     fun setSaveToSourceDirectory(enabled: Boolean) {
         settingsManager.setSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY, enabled)
         setState { copy(saveToSourceDirectory = enabled) }
-        persistQueueSnapshot()
     }
 
     fun openSettings() = sendEvent(AutoTranslateEvent.OpenSettings)
 
     internal suspend fun runPersistedQueueForWork(targetSessionId: String? = null) {
-        files.filter { !it.historyLoaded }.forEach { file ->
-            val store = ChatHistoryStore(app)
-            file.punctuationHistoryMessages = store.load("punctuation_${file.sessionId}")?.messages.orEmpty()
-            file.translationHistoryMessages = store.load(file.sessionId)?.messages.orEmpty()
-            file.historyLoaded = true
+        queueController.withWorker {
+            val pending = queueController.snapshot().files.filter { file ->
+                (targetSessionId == null || file.sessionId == targetSessionId) &&
+                    (file.status == "WAITING" || file.status == "RUNNING" ||
+                        file.status == "PAUSED" && targetSessionId != null)
+            }.mapTo(linkedSetOf()) { it.sessionId }
+            queueRunning = true
+            while (pending.isNotEmpty()) {
+                currentCoroutineContext().ensureActive()
+                val sessionId = pending.first().also(pending::remove)
+                runQueuedFile(sessionId, resumePaused = targetSessionId == sessionId)
+                // Files explicitly started while this worker was active also belong to it.
+                queueController.snapshot().files.filter {
+                    it.status == "RUNNING" && (targetSessionId == null || it.sessionId == targetSessionId)
+                }.forEach { pending += it.sessionId }
+            }
+            queueRunning = false
         }
-        val runnable = files.filter { file ->
-            file.status == FileStatus.WAITING ||
-                file.status == FileStatus.RUNNING ||
-                (file.status == FileStatus.PAUSED && targetSessionId != null && file.sessionId == targetSessionId)
-        }.filter { targetSessionId == null || it.sessionId == targetSessionId }
-        if (runnable.isEmpty()) return
-        queueRunning = true
-        persistQueueSnapshot()
-        for (file in runnable) {
-            val resuming = file.status != FileStatus.WAITING
-            val config = file.translationConfig ?: readTranslationConfig()
-            if (!resuming) {
+    }
+
+    private suspend fun runQueuedFile(sessionId: String, resumePaused: Boolean) {
+        val activeFile = AtomicReference<AutoTranslateFile?>()
+        queueController.runFile(sessionId, resumePaused, onStop = { reason ->
+            activeFile.get()?.let { file ->
+                file.pauseRequested = reason == AutoTranslateQueueController.StopReason.PAUSED
+                file.cancellationRequested = reason == AutoTranslateQueueController.StopReason.REMOVED
+                file.activeConversation?.cancel()
+            }
+        }) { execution ->
+            val file = restoreFile(execution.initial)
+            activeFile.set(file)
+            files.clear()
+            files += file
+            activeExecution = execution
+            try {
+                if (!file.historyLoaded) {
+                    val store = ChatHistoryStore(app)
+                    file.punctuationHistoryMessages = store.load("punctuation_${file.sessionId}")?.messages.orEmpty()
+                    file.translationHistoryMessages = store.load(file.sessionId)?.messages.orEmpty()
+                    file.historyLoaded = true
+                }
+                val resuming = file.status != FileStatus.WAITING
+                val config = file.translationConfig ?: readTranslationConfig()
                 file.translationConfig = config
-                file.translationBatchSize = config?.provider?.let(settingsManager::getAiSubtitlesPerRequest)
-                file.translationEnabledForRun = currentState.translationEnabled
-                file.punctuationEnabledForRun = currentState.punctuationPredictionEnabled
-                file.punctuationProvider = settingsManager.getAiPunctuationProvider()
+                file.translationBatchSize = file.translationBatchSize ?: config?.provider?.let(settingsManager::getAiSubtitlesPerRequest)
+                file.status = FileStatus.RUNNING
+                if (!resuming) file.processingStage = ProcessingStage.READING
+                persistQueueSnapshot()
+                processFile(
+                    file = file,
+                    initialConfig = config,
+                    outputUri = outputDirectoryUri ?: Uri.fromFile(getTranslateOutputDirectory()),
+                    overwriteOutput = file.overwriteOutput,
+                    propagateCancellation = true
+                )
+            } catch (error: CancellationException) {
+                file.pauseRequested = execution.stopReason != AutoTranslateQueueController.StopReason.REMOVED
+                if (file.processingStage == ProcessingStage.TRANSLATION && file.document?.format != SubtitleParser.SubtitleFormat.TXT) {
+                    checkpointTranslationForResume(file)
+                }
+                file.status = FileStatus.PAUSED
+                file.message = string(R.string.auto_translate_status_paused)
+                persistQueueSnapshot()
+                throw error
+            } finally {
+                activeExecution = null
             }
-            file.cancellationRequested = false
-            file.pauseRequested = false
-            file.status = FileStatus.RUNNING
-            if (!resuming) file.processingStage = ProcessingStage.READING
-            publish()
-            persistQueueSnapshot()
-            processFile(
-                file = file,
-                initialConfig = config,
-                outputUri = outputDirectoryUri ?: Uri.fromFile(getTranslateOutputDirectory()),
-                overwriteOutput = file.overwriteOutput,
-                propagateCancellation = true
-            )
         }
-        queueRunning = false
-        persistQueueSnapshot()
     }
 
-    internal fun markPersistedWorkInterrupted(targetSessionId: String? = null) {
-        files.filter { file ->
-            (file.status == FileStatus.RUNNING || file.status == FileStatus.STOPPED) &&
-                (targetSessionId == null || file.sessionId == targetSessionId)
-        }.forEach { file ->
-            file.pauseRequested = true
-            if (file.processingStage == ProcessingStage.TRANSLATION &&
-                file.document?.format != SubtitleParser.SubtitleFormat.TXT
-            ) {
-                checkpointTranslationForResume(file)
-            }
-            file.status = FileStatus.PAUSED
-            file.message = string(R.string.auto_translate_status_paused)
-        }
-        queueRunning = false
-        persistQueueSnapshot()
-    }
-
-    /**
-     * The worker owns a separate ViewModel instance, so the page observes the atomic queue
-     * snapshot while work is active. This keeps stage/progress changes visible after the task
-     * moves out of the Activity process.
-     */
+    /** The page observes the shared queue; it never writes its progress snapshot back. */
     private fun startPersistedQueueRefresh() {
         synchronized(this) {
             if (persistedQueueRefreshJob?.isActive == true) return
             persistedQueueRefreshJob = viewModelScope.launch(Dispatchers.IO) {
-                var idlePolls = 0
                 while (isActive) {
-                    val snapshot = queueStore.load()
-                    if (snapshot != null) {
-                        val hasRunning = snapshot.files.any { it.status == FileStatus.RUNNING.name }
-                        idlePolls = if (hasRunning) 0 else idlePolls + 1
-                        withContext(Dispatchers.Main.immediate) {
-                            applyPersistedQueueSnapshot(snapshot, hasRunning)
-                        }
-                        val queueStillRunning = currentState.queueRunning
-                        if (!queueStillRunning && !hasRunning) break
-                        // A cancellation can leave the persisted status unchanged briefly. Do not
-                        // keep a page observer alive forever when the page already shows paused.
-                        if (!queueStillRunning && idlePolls >= 20) break
+                    val snapshot = queueController.snapshot()
+                    val hasRunning = snapshot.files.any { it.status == FileStatus.RUNNING.name }
+                    withContext(Dispatchers.Main.immediate) {
+                        applyPersistedQueueSnapshot(snapshot, hasRunning)
                     }
+                    if (!currentState.queueRunning && !hasRunning) break
                     delay(250L)
                 }
             }
@@ -461,6 +462,7 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
     }
 
     fun startQueuedFiles() {
+        if (queueRunning) return
         if (files.isEmpty()) return toast(R.string.auto_translate_no_files)
         if (files.any { it.status == FileStatus.PAUSED }) return
         val runnable = files.filter { it.status == FileStatus.WAITING }
@@ -519,6 +521,8 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
 
     private fun beginQueuedFiles(config: TranslationConfig?, output: Uri, overwrite: Boolean) {
         val waiting = files.filter { it.status == FileStatus.WAITING }
+        val first = waiting.firstOrNull() ?: return
+        queueController.prepare(waiting.mapTo(mutableSetOf()) { it.sessionId }, runConfiguration(config, overwrite), first.sessionId)
         waiting.forEach { file ->
             file.overwriteOutput = overwrite
             file.translationConfig = config
@@ -544,7 +548,7 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
 
     private fun startFile(file: AutoTranslateFile, retry: Boolean = false, config: TranslationConfig? = if (currentState.translationEnabled) readTranslationConfig() else null, output: Uri = outputDirectoryUri ?: Uri.fromFile(getTranslateOutputDirectory()), overwrite: Boolean = file.overwriteOutput) {
         val resuming = file.status == FileStatus.PAUSED
-        if (activeJobs[file.sessionId]?.isActive == true || (!resuming && !validateSelectedFeatures(config))) return
+        if (queueController.isExecuting(file.sessionId) || (!resuming && !validateSelectedFeatures(config))) return
         if (resuming && !file.historyLoaded) {
             file.resumeAfterHistoryLoad = true
             loadRestoredHistory(file)
@@ -563,8 +567,8 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
             file.punctuationEnabledForRun = currentState.punctuationPredictionEnabled
             file.punctuationProvider = settingsManager.getAiPunctuationProvider()
         }
+        queueController.prepare(setOf(file.sessionId), runConfiguration(config, overwrite), file.sessionId)
         publish()
-        persistQueueSnapshot()
     }
 
     fun retry(key: String) {
@@ -590,8 +594,8 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
         file.pauseRequested = true
         file.message = string(R.string.auto_translate_pause_requested)
         queueRunning = false
+        queueController.pause(key)
         publish()
-        persistQueueSnapshot()
         dependencies.taskWorkScheduler.cancelAiSubtitleProcessing()
         file.activeConversation?.cancel()
     }
@@ -632,11 +636,17 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
                 ?: file.textPunctuationSession?.predictedText
                 ?: SubtitleParser.serialize(document)
             currentCoroutineContext().ensureActive()
-            SubtitleOutputWriter.writeText(app, outputDirectoryFor(file.uri, outputUri), file.fileName.substringBeforeLast("."), outputExtension(file), outputText, overwrite = overwriteOutput)
+            val execution = checkNotNull(activeExecution)
+            queueController.writeOutput(execution) {
+                SubtitleOutputWriter.writeText(app, outputDirectoryFor(file.uri, outputUri), file.fileName.substringBeforeLast("."), outputExtension(file), outputText, overwrite = overwriteOutput)
+            }
             file.status = FileStatus.COMPLETED
             file.message = string(R.string.task_all_done)
             publish()
         } catch (error: CancellationException) {
+            // Preserve resume state for notification/system cancellation too,
+            // before finally releases the active conversations.
+            file.pauseRequested = activeExecution?.stopReason != AutoTranslateQueueController.StopReason.REMOVED
             if (file.pauseRequested) {
                 if (file.processingStage == ProcessingStage.PUNCTUATION_PREDICTION) {
                     file.punctuationResumeConversationPending = file.punctuationConversation != null
@@ -668,7 +678,6 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
                 file.translationResumeStart = null
             }
             withContext(NonCancellable + Dispatchers.Main) {
-                activeJobs.remove(file.sessionId)
                 publish()
                 persistQueueSnapshot()
             }
@@ -1145,96 +1154,50 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
     }
 
     private fun persistQueueSnapshot() {
-        runCatching {
-            queueStore.save(
-                AutoTranslateQueueSnapshot(
-                    punctuationPredictionEnabled = currentState.punctuationPredictionEnabled,
-                    translationEnabled = currentState.translationEnabled,
-                    workRunning = queueRunning,
-                    files = files.filter { it.status != FileStatus.COMPLETED }.map { file ->
-                        val snapshotResumeStart = if (
-                            file.status == FileStatus.RUNNING &&
-                            file.processingStage == ProcessingStage.TRANSLATION &&
-                            file.document?.format != SubtitleParser.SubtitleFormat.TXT
-                        ) {
-                            SubtitleTranslationResumePolicy.resumeIndex(file.translatedTexts.size)
-                        } else {
-                            file.translationResumeStart
-                        }
-                        AutoTranslateFileSnapshot(
-                            uri = file.uri.toString(),
-                            fileName = file.fileName,
-                            fileSize = file.fileSize,
-                            sessionId = file.sessionId,
-                            status = if (file.status == FileStatus.RUNNING && file.pauseRequested) {
-                                FileStatus.PAUSED.name
-                            } else {
-                                file.status.name
-                            },
-                            processingStage = file.processingStage.name,
-                            totalLines = file.totalLines,
-                            processedLines = file.processedLines,
-                            progressStage = file.progressStage?.name,
-                            documentContent = file.document?.let { document ->
-                                runCatching { SubtitleParser.serialize(document) }.getOrNull()
-                            },
-                            originalText = file.originalText,
-                            punctuationPredictionCompleted = file.punctuationPredictionCompleted,
-                            translatedTexts = file.translatedTexts.toList(),
-                            translationResumeStart = snapshotResumeStart,
-                            translationBatchSize = file.translationBatchSize,
-                            translationConfig = file.translationConfig?.let { config ->
-                                PersistedTranslationConfig(
-                                    provider = config.provider,
-                                    model = config.model,
-                                    targetLanguage = config.targetLanguage,
-                                    customPrompt = config.customPrompt,
-                                    baseUrl = config.baseUrl,
-                                    reasoningLevel = config.reasoningLevel.name,
-                                    thinkingEnabled = config.thinkingEnabled
-                                )
-                            },
-                            punctuationProvider = file.punctuationProvider,
-                            punctuationEnabled = file.punctuationEnabledForRun,
-                            translationEnabled = file.translationEnabledForRun,
-                            overwriteOutput = file.overwriteOutput,
-                            punctuationCompletedTexts = file.punctuationSession?.completedTextsSnapshot()
-                                ?: file.punctuationCompletedTexts.toList(),
-                            textPunctuationPredictions = file.textPunctuationSession?.completedPredictionsSnapshot()
-                                ?: file.textPunctuationCompletedTexts.toList(),
-                            textTranslations = file.textTranslationSession?.completedTranslationsSnapshot()
-                                ?: file.textTranslationCompletedTexts.toList(),
-                            punctuationResumeHistory = file.punctuationResumeConversationPending ||
-                                file.punctuationConversation != null,
-                            translationResumeHistory = file.translationResumeHistoryPending ||
-                                file.translationConversation != null,
-                            message = file.message
-                        )
-                    }
-                )
-            )
-        }
+        val execution = activeExecution ?: return
+        val file = files.firstOrNull { it.sessionId == execution.initial.sessionId } ?: return
+        queueController.progress(execution, file.toSnapshot())
     }
 
-    private fun pauseRunningFilesForPersistence() {
-        files.filter { it.status == FileStatus.RUNNING }.forEach { file ->
-            file.pauseRequested = true
-            if (file.processingStage == ProcessingStage.PUNCTUATION_PREDICTION) {
-                file.punctuationResumeConversationPending = file.punctuationConversation != null
-            }
-            if (file.processingStage == ProcessingStage.TRANSLATION) {
-                if (file.document?.format == SubtitleParser.SubtitleFormat.TXT) {
-                    file.translationResumeHistoryPending = file.translationConversation != null
-                } else {
-                    checkpointTranslationForResume(file)
-                }
-            }
-            file.status = FileStatus.PAUSED
-            file.message = string(R.string.auto_translate_status_paused)
-            file.activeConversation?.cancel()
-        }
-        persistQueueSnapshot()
-    }
+    private fun TranslationConfig.toPersisted() = PersistedTranslationConfig(
+        provider, model, targetLanguage, customPrompt, baseUrl, reasoningLevel.name, thinkingEnabled
+    )
+
+    private fun runConfiguration(config: TranslationConfig?, overwrite: Boolean) = AutoTranslateRunConfiguration(
+        translation = config?.toPersisted(),
+        batchSize = config?.provider?.let(settingsManager::getAiSubtitlesPerRequest),
+        punctuationProvider = settingsManager.getAiPunctuationProvider(),
+        punctuationEnabled = currentState.punctuationPredictionEnabled,
+        translationEnabled = currentState.translationEnabled,
+        overwriteOutput = overwrite
+    )
+
+    private fun AutoTranslateFile.toSnapshot() = AutoTranslateFileSnapshot(
+        uri = uri.toString(), fileName = fileName, fileSize = fileSize, sessionId = sessionId,
+        status = if (status == FileStatus.RUNNING && pauseRequested) FileStatus.PAUSED.name else status.name,
+        processingStage = processingStage.name, totalLines = totalLines, processedLines = processedLines,
+        progressStage = progressStage?.name,
+        documentContent = document?.let(SubtitleParser::serialize),
+        originalText = originalText,
+        punctuationPredictionCompleted = punctuationPredictionCompleted,
+        translatedTexts = translatedTexts.toList(),
+        translationResumeStart = if (status == FileStatus.RUNNING && processingStage == ProcessingStage.TRANSLATION &&
+            document?.format != SubtitleParser.SubtitleFormat.TXT) {
+            SubtitleTranslationResumePolicy.resumeIndex(translatedTexts.size)
+        } else translationResumeStart,
+        translationBatchSize = translationBatchSize,
+        translationConfig = translationConfig?.toPersisted(),
+        punctuationProvider = punctuationProvider,
+        punctuationEnabled = punctuationEnabledForRun,
+        translationEnabled = translationEnabledForRun,
+        overwriteOutput = overwriteOutput,
+        punctuationCompletedTexts = punctuationSession?.completedTextsSnapshot() ?: punctuationCompletedTexts.toList(),
+        textPunctuationPredictions = textPunctuationSession?.completedPredictionsSnapshot() ?: textPunctuationCompletedTexts.toList(),
+        textTranslations = textTranslationSession?.completedTranslationsSnapshot() ?: textTranslationCompletedTexts.toList(),
+        punctuationResumeHistory = punctuationResumeConversationPending || punctuationConversation != null,
+        translationResumeHistory = translationResumeHistoryPending || translationConversation != null,
+        message = message
+    )
 
     fun requestRemove(key: String) {
         val file = files.firstOrNull { it.sessionId == key } ?: return
@@ -1247,8 +1210,12 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
     }
     fun confirmRemove() { val file = files.firstOrNull { it.sessionId == pendingRemovalKey }; pendingRemovalKey = null; setState { copy(removeFileName = null) }; file?.let(::removeFile) }
     fun dismissRemove() { pendingRemovalKey = null; setState { copy(removeFileName = null) } }
-    private fun cancelFile(file: AutoTranslateFile) { file.cancellationRequested = true; activeJobs[file.sessionId]?.cancel(); file.activeConversation?.cancel() }
-    private fun removeFile(file: AutoTranslateFile) { cancelFile(file); activeJobs.remove(file.sessionId); files.remove(file); queueRunning = activeJobs.values.any { it.isActive }; publish(); persistQueueSnapshot() }
+    private fun removeFile(file: AutoTranslateFile) {
+        queueController.remove(file.sessionId)
+        files.remove(file)
+        queueRunning = queueController.snapshot().workRunning
+        publish()
+    }
 
     fun requestBack(): Boolean {
         if (!queueRunning) return true
@@ -1259,9 +1226,8 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
     fun stopAndExit() {
         setState { copy(showExitConfirmation = false) }
         queueRunning = false
-        pauseRunningFilesForPersistence()
+        queueController.pauseAll()
         dependencies.taskWorkScheduler.cancelAiSubtitleProcessing()
-        activeJobs.values.forEach(Job::cancel)
         sendEvent(AutoTranslateEvent.Exit)
     }
 
@@ -1311,9 +1277,4 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
     private fun getFileNameFromUri(uri: Uri): String? = runCatching { app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getString(0) else null } }.getOrNull() ?: when (uri.scheme) { "file" -> uri.path?.let(::File)?.name; else -> DocumentFile.fromSingleUri(app, uri)?.name }
     private fun getFileSizeFromUri(uri: Uri): Long = runCatching { app.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else 0L } ?: 0L }.getOrDefault(0L).let { size -> if (size > 0) size else if (uri.scheme == "file") uri.path?.let(::File)?.length() ?: 0L else 0L }
 
-    override fun onCleared() {
-        persistQueueSnapshot()
-        activeJobs.clear()
-        super.onCleared()
-    }
 }

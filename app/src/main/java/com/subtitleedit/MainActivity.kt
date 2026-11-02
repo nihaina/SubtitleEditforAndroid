@@ -915,6 +915,7 @@ class MainActivity : AppComposeActivity() {
             stateModel.viewModelScope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
+                        FileTransferManager.validateMove(sources, destination)
                         sources.forEach { source -> moveFile(source, destination) }
                     }
                 }
@@ -942,6 +943,14 @@ class MainActivity : AppComposeActivity() {
                     copyFiles(
                         sources = sources,
                         destination = destination,
+                        onConflict = { conflict ->
+                            try {
+                                archiveConflictDialogController.awaitResolution(conflict)
+                            } catch (error: CancellationException) {
+                                cancelledByUser.set(true)
+                                throw error
+                            }
+                        },
                         onProgress = { message, completed, total ->
                             updateFileCopyProgress(progress, message, completed, total)
                         }
@@ -983,8 +992,9 @@ class MainActivity : AppComposeActivity() {
     private suspend fun copyFiles(
         sources: List<File>,
         destination: File,
+        onConflict: suspend (ArchiveManager.DestinationConflict) -> ArchiveManager.ConflictResolution,
         onProgress: (message: String, completed: Long, total: Long) -> Unit
-    ) = FileTransferManager.copy(sources, destination, onProgress)
+    ) = FileTransferManager.copy(sources, destination, onConflict, onProgress)
 
     private fun renameSelectedFile() {
         val files = selectedFiles()

@@ -95,6 +95,9 @@ class LocalLlmBackend(
                 generationMs = generation.generationMs,
             )
         } finally {
+            // Awaiting a Deferred owned by this backend does not cancel it when
+            // the caller is cancelled (for example, by WorkManager).
+            deferred.cancel()
             activeRequest = null
         }
     }

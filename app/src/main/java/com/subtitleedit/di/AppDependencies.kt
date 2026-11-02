@@ -2,6 +2,8 @@ package com.subtitleedit.di
 
 import android.app.Application
 import android.net.Uri
+import com.subtitleedit.AutoTranslateQueueController
+import com.subtitleedit.AutoTranslateQueueStore
 import com.subtitleedit.nativebridge.DefaultNativeMediaEngine
 import com.subtitleedit.nativebridge.NativeMediaEngine
 import com.subtitleedit.demix.VocalSeparationEngine
@@ -63,6 +65,10 @@ internal class AppDependencies(application: Application) {
         DefaultSpeechRecognitionService()
     }
     val taskStateStore: TaskStateStore by lazy { TaskStateStore() }
+    val autoTranslateQueue: AutoTranslateQueueController by lazy {
+        val store = AutoTranslateQueueStore(appContext)
+        AutoTranslateQueueController(store::load, store::save)
+    }
     val downloadAsrModel: DownloadAsrModelUseCase by lazy {
         val installer = AsrModelDownloadInstaller(appContext, modelRepository)
         DownloadAsrModelUseCase(modelRepository, installer::prepareSenseVoice, installer::selectModel)

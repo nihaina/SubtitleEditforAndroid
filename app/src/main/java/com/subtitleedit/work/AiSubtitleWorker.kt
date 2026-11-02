@@ -15,7 +15,6 @@ import androidx.work.WorkerParameters
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.subtitleedit.AutoTranslateActivity
-import com.subtitleedit.AutoTranslateQueueStore
 import com.subtitleedit.AutoTranslateViewModel
 import com.subtitleedit.SubtitleEditApplication
 import kotlinx.coroutines.coroutineScope
@@ -46,10 +45,8 @@ internal class AiSubtitleWorker(
                 viewModel.runPersistedQueueForWork(targetSessionId)
                 Result.success()
             } catch (error: kotlinx.coroutines.CancellationException) {
-                viewModel.markPersistedWorkInterrupted(targetSessionId)
                 throw error
             } catch (_: Exception) {
-                viewModel.markPersistedWorkInterrupted(targetSessionId)
                 Result.failure()
             } finally {
                 progressReporter.cancel()
@@ -58,10 +55,9 @@ internal class AiSubtitleWorker(
     }
 
     private suspend fun reportProgress() {
-        val store = AutoTranslateQueueStore(applicationContext)
+        val queue = (applicationContext as SubtitleEditApplication).dependencies.autoTranslateQueue
         while (currentCoroutineContext().isActive) {
-            val snapshot = store.load()
-            val active = snapshot?.files?.firstOrNull { it.status == "RUNNING" }
+            val active = queue.snapshot().files.firstOrNull { it.status == "RUNNING" }
             val message = active?.message?.takeIf(String::isNotBlank) ?: "正在处理 AI 字幕"
             val current = active?.processedLines ?: 0
             val total = active?.totalLines ?: -1

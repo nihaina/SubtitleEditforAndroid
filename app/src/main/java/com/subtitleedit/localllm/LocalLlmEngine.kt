@@ -47,6 +47,20 @@ object LocalLlmEngine {
         return try {
             suspendCancellableCoroutine { continuation ->
                 val completed = AtomicBoolean(false)
+                val registration = pendingRequests.register(service.asBinder()) { error ->
+                    if (completed.compareAndSet(false, true) && continuation.isActive) {
+                        continuation.resumeWithException(error)
+                    }
+                }
+                continuation.invokeOnCancellation {
+                    completed.set(true)
+                    registration.close()
+                }
+                if (!continuation.isActive) {
+                    registration.close()
+                    source.pfd?.close()
+                    return@suspendCancellableCoroutine
+                }
                 val callback = object : ILocalLlmLoadCallback.Stub() {
                     override fun onProgress(progress: Float) {
                         if (continuation.isActive && !completed.get()) {
@@ -55,7 +69,9 @@ object LocalLlmEngine {
                     }
 
                     override fun onComplete(status: Int, memoryBytes: Long, error: String) {
-                        if (!completed.compareAndSet(false, true) || !continuation.isActive) return
+                        if (!completed.compareAndSet(false, true)) return
+                        registration.close()
+                        if (!continuation.isActive) return
                         continuation.resume(
                             LoadResult(
                                 loaded = status == 0,
@@ -75,10 +91,12 @@ object LocalLlmEngine {
                             callback,
                         )
                         if (requestId <= 0 && completed.compareAndSet(false, true) && continuation.isActive) {
+                            registration.close()
                             continuation.resume(LoadResult(false, error = "本地模型加载请求未启动"))
                         }
                     }
                 } catch (t: Throwable) {
+                    registration.close()
                     if (completed.compareAndSet(false, true) && continuation.isActive) {
                         continuation.resume(LoadResult(false, error = t.message ?: "无法加载本地模型"))
                     }
@@ -121,9 +139,27 @@ object LocalLlmEngine {
         val service = service(context)
         val requestId = AtomicInteger(0)
         val cancelled = AtomicBoolean(false)
+        val completed = AtomicBoolean(false)
 
         return try {
             suspendCancellableCoroutine { continuation ->
+                val registration = pendingRequests.register(service.asBinder()) { error ->
+                    if (completed.compareAndSet(false, true) && continuation.isActive) {
+                        continuation.resumeWithException(error)
+                    }
+                }
+                continuation.invokeOnCancellation {
+                    completed.set(true)
+                    registration.close()
+                    cancelled.set(true)
+                    requestId.get().takeIf { it > 0 }?.let { id ->
+                        runCatching { service.cancel(id) }
+                    }
+                }
+                if (!continuation.isActive) {
+                    registration.close()
+                    return@suspendCancellableCoroutine
+                }
                 val callback = object : ILocalLlmCallback.Stub() {
                     override fun onDelta(text: String) {
                         if (!continuation.isActive || cancelled.get()) return
@@ -144,6 +180,8 @@ object LocalLlmEngine {
                         outputTokens: Int,
                         generationMs: Long,
                     ) {
+                        if (!completed.compareAndSet(false, true)) return
+                        registration.close()
                         if (!continuation.isActive) return
                         if (status == 0) {
                             continuation.resume(GenerationResult(response, outputTokens, generationMs))
@@ -171,7 +209,8 @@ object LocalLlmEngine {
                         thinkingEnabled,
                         callback,
                     )
-                    if (id <= 0 && continuation.isActive) {
+                    if (id <= 0 && completed.compareAndSet(false, true) && continuation.isActive) {
+                        registration.close()
                         continuation.resumeWithException(
                             IllegalStateException("本地模型请求未启动"),
                         )
@@ -182,13 +221,9 @@ object LocalLlmEngine {
                         }
                     }
                 } catch (t: Throwable) {
-                    if (continuation.isActive) continuation.resumeWithException(t)
-                }
-
-                continuation.invokeOnCancellation {
-                    cancelled.set(true)
-                    requestId.get().takeIf { it > 0 }?.let { id ->
-                        runCatching { service.cancel(id) }
+                    registration.close()
+                    if (completed.compareAndSet(false, true) && continuation.isActive) {
+                        continuation.resumeWithException(t)
                     }
                 }
             }
@@ -253,21 +288,28 @@ object LocalLlmEngine {
     }
 
     private val connectionLock = Any()
+    private val pendingRequests = ServiceRequestRegistry()
+    private var connectedBinder: IBinder? = null
     private var serviceDeferred: CompletableDeferred<ILocalLlmService>? = null
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             synchronized(connectionLock) {
+                connectedBinder = binder
+                pendingRequests.connected(binder)
                 serviceDeferred?.complete(ILocalLlmService.Stub.asInterface(binder))
             }
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
-            synchronized(connectionLock) {
+            val error = IllegalStateException("本地 LLM 服务已断开")
+            val binder = synchronized(connectionLock) {
                 serviceDeferred?.completeExceptionally(
-                    IllegalStateException("本地 LLM 服务已断开"),
+                    error,
                 )
                 serviceDeferred = null
+                connectedBinder.also { connectedBinder = null }
             }
+            pendingRequests.disconnected(binder, error)
         }
 
         override fun onBindingDied(name: ComponentName) {

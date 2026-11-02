@@ -1,11 +1,18 @@
 package com.subtitleedit
 
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.subtitleedit.model.ArchiveConflictDialogModel
 import com.subtitleedit.model.ArchiveConflictFileMetadata
 import com.subtitleedit.util.ArchiveManager
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 
-/** Owns the destination-conflict decision dialog used during extraction. */
+/** Owns the destination-conflict dialog shared by extraction and file copying. */
 internal class ArchiveConflictDialogController(
     private val activityProvider: () -> AppCompatActivity?
 ) {
@@ -13,10 +20,10 @@ internal class ArchiveConflictDialogController(
         conflict: ArchiveManager.DestinationConflict,
         onPolicySelected: (ArchiveManager.ConflictPolicy, Boolean) -> Unit,
         onCancelled: () -> Unit = {}
-    ) {
+    ): ComposeDialogHandle? {
         val activity = activityProvider() ?: run {
             onCancelled()
-            return
+            return null
         }
         val model = ArchiveConflictDialogModel(
             entryName = conflict.entryName,
@@ -29,7 +36,7 @@ internal class ArchiveConflictDialogController(
                 modifiedAtMillis = conflict.existingModifiedTimeMillis.takeIf { it > 0L }
             )
         )
-        ComposeDialogHost.show(activity) { dialog ->
+        return ComposeDialogHost.show(activity) { dialog ->
             ArchiveConflictDialog(
                 model = model,
                 archiveInternal = conflict.archiveInternal,
@@ -49,4 +56,33 @@ internal class ArchiveConflictDialogController(
             )
         }
     }
+
+    suspend fun awaitResolution(conflict: ArchiveManager.DestinationConflict): ArchiveManager.ConflictResolution =
+        withContext(Dispatchers.Main.immediate) {
+            val activity = activityProvider()?.takeUnless { it.isFinishing || it.isDestroyed }
+                ?: throw CancellationException("文件操作页面已关闭")
+            suspendCancellableCoroutine { continuation ->
+                if (!continuation.isActive) return@suspendCancellableCoroutine
+                val observer = LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_DESTROY) continuation.cancel()
+                }
+                activity.lifecycle.addObserver(observer)
+                val dialog = show(
+                    conflict,
+                    onPolicySelected = { policy, applyToAll ->
+                        if (continuation.isActive) continuation.resume(ArchiveManager.ConflictResolution(policy, applyToAll))
+                    },
+                    onCancelled = { continuation.cancel() }
+                )
+                fun cleanup() {
+                    activity.lifecycle.removeObserver(observer)
+                    dialog?.dismiss()
+                }
+                continuation.invokeOnCancellation { activity.runOnUiThread { cleanup() } }
+                dialog?.addOnDismissListener {
+                    activity.lifecycle.removeObserver(observer)
+                }
+                if (!continuation.isActive) cleanup()
+            }
+        }
 }
