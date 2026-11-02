@@ -14,6 +14,7 @@ internal class EditorNavigationCoordinator(
     private val exitVideoFullscreen: () -> Unit,
     private val cancelSelection: () -> Unit,
     private val documentState: EditorDocumentState,
+    private val finishPendingEdits: () -> Unit,
     private val saveAndFinish: () -> Unit,
     private val finishWithoutSaving: () -> Unit
 ) {
@@ -29,6 +30,7 @@ internal class EditorNavigationCoordinator(
     }
 
     fun onBackPressed() {
+        finishPendingEdits()
         when (EditorNavigationPolicy.decide(
             isVideoFullscreen = isVideoFullscreen(),
             selectedCount = subtitleAdapter.getSelectedCount(),

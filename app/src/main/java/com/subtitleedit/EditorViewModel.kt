@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import com.subtitleedit.editor.EditorMediaType
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.editor.EditorSourceTextEdit
+import com.subtitleedit.editor.EditorHistoryDescriptionFormatter
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.SubtitleColorOps
 import com.subtitleedit.util.subtitle.SubtitleDocument
@@ -65,6 +66,7 @@ internal class EditorViewModel(
     var subtitleEntries: MutableList<SubtitleEntry>
         get() = documentState.subtitleEntries
         set(value) {
+            timingDragSession.discardAll()
             documentState.subtitleEntries = value
             publishDocument()
         }
@@ -188,6 +190,67 @@ internal class EditorViewModel(
     private val saveSubtitleDocument = SaveSubtitleDocumentUseCase(subtitleRepository)
     private val applySubtitleEdit = ApplySubtitleEditUseCase()
     private val syncSourceDocument = SyncSourceDocumentUseCase()
+    private val editSession = EditorEditSession(documentState, ::recordCommittedListEdit)
+    private val timingDragSession = EditorTimingDragSession(documentState, ::recordCommittedListEdit) { edit, before ->
+        recordSourceHistory(edit, EditorHistoryDescriptionFormatter.describeSourceTextChange(edit, before))
+    }
+
+    private fun recordCommittedListEdit(
+        before: EditorEditHistory.ListState, after: EditorEditHistory.ListState,
+        beforeSource: String, afterSource: String
+    ) {
+        val difference = EditorEditHistory.difference(before, after)
+        recordListHistory(
+            before, after, EditorHistoryDescriptionFormatter.describeListStateChange(difference),
+            beforeSource, afterSource, difference = difference
+        )
+    }
+
+    fun beginWaveformDrag(key: Long, stableId: Long, selectedIds: Set<Long>): Boolean =
+        !isSourceViewTransitioning && timingDragSession.begin(key, stableId, isSourceViewMode, selectedIds)
+
+    fun waveformDrag(key: Long): EditorTimingDrag? = timingDragSession.current(key)
+
+    fun isCurrentWaveformDrag(drag: EditorTimingDrag): Boolean =
+        drag.sourceMode == isSourceViewMode && timingDragSession.isCurrent(drag)
+
+    fun updateWaveformDrag(key: Long, range: EditorTimingRange): EditorEntryChange? = timingDragSession.update(key, range)
+
+    fun finishWaveformDrag(key: Long, selectedIds: Set<Long>): EditorTimingDragEnd? =
+        timingDragSession.finish(key, selectedIds)?.also { if (it.change != null) publishChangedDocument() }
+
+    fun applyWaveformSource(drag: EditorTimingDrag, base: String, source: String, final: Boolean): Boolean {
+        if (!isSourceViewMode) return false
+        return timingDragSession.applySource(drag, base, source, final).also {
+            if (it && final) publishChangedDocument()
+        }
+    }
+
+    fun discardWaveformSourceEdits(): Boolean = timingDragSession.discardSourceDrags()
+
+    val waveformSourceEditsPending: Boolean get() = timingDragSession.hasPendingSource
+
+    fun commitSingleEdit(edit: EditorEntryEdit, selectedIds: Set<Long>): EditorEntryChange? {
+        if (isSourceViewMode || isSourceViewTransitioning) return null
+        val change = editSession.commit(edit, selectedIds) ?: return null
+        publishChangedDocument()
+        return change
+    }
+
+    private fun publishChangedDocument() {
+        val previous = _document.value
+        val current = documentState.subtitleEntries
+        // Reuse already owned snapshot rows. A row edit allocates one row copy
+        // and a shallow list instead of deep-copying the entire large document.
+        val entries = current.mapIndexed { index, entry ->
+            previous.entries.getOrNull(index)?.takeIf { it == entry } ?: entry.copy()
+        }
+        _document.value = previous.copy(
+            format = documentState.currentFormat, entries = entries,
+            header = documentState.documentHeader, footer = documentState.documentFooter,
+            lrcVariant = documentState.documentLrcVariant
+        )
+    }
 
     fun peekUndo(): EditorEditHistory.Operation? = editHistory.peekUndo()
 
@@ -304,12 +367,14 @@ internal class EditorViewModel(
         documentState.saveUriSubtitleDocument(uri, subtitleTitle)
 
     fun replaceDocument(document: SubtitleDocument) {
+        timingDragSession.discardAll()
         documentState.replaceDocument(document)
         publishDocument()
     }
 
     fun loadSubtitleContent(content: String, fileName: String? = null): SubtitleDocument {
         val document = loadSubtitleDocument(content, fileName)
+        timingDragSession.discardAll()
         documentState.replaceDocument(document)
         documentState.originalFileContent = content
         documentState.sourceViewContent = content
@@ -358,19 +423,6 @@ internal class EditorViewModel(
         publish: Boolean
     ): EditorCommandResult {
         val result = applySubtitleEdit(documentState, command)
-        if (currentFormat == SubtitleParser.SubtitleFormat.VTT &&
-            (command is EditorCommand.UpdateText || command is EditorCommand.UpdateTexts)
-        ) {
-            // The editor stores the derived {\\anN} prefix in cue text while
-            // keeping the precise WebVTT placement in cueSettings. If a text
-            // edit removes that prefix, clear position/line immediately so
-            // the live list metadata and the eventual source stay in sync.
-            result.changedPositions.forEach { position ->
-                documentState.subtitleEntries.getOrNull(position)?.let { entry ->
-                    entry.cueSettings = WebVttSubtitleFormatHandler.getCueSettings(entry)
-                }
-            }
-        }
         if (publish && (result.changedPositions.isNotEmpty() || result.structureChanged)) {
             publishDocument()
         }

@@ -15,10 +15,13 @@ import android.util.LruCache
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import com.subtitleedit.EditorTimingRange
+import com.subtitleedit.EditorWaveformDragEvent
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleEntryOps
 import com.subtitleedit.util.SubtitleFormattingTagOps
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
@@ -97,6 +100,7 @@ class WaveformTimelineView @JvmOverloads constructor(
 
         private const val MIN_SPECTROGRAM_CACHE_BYTES = 16 * 1024 * 1024
         private const val MAX_SPECTROGRAM_CACHE_BYTES = 48 * 1024 * 1024
+        private val nextSubtitleDragKey = AtomicLong(1L)
     }
 
     // ==================== 数据 ====================
@@ -127,6 +131,8 @@ class WaveformTimelineView @JvmOverloads constructor(
     private var currentSubtitle: SubtitleEntry? = null
     private var currentSubtitleIndex = -1
     private var currentSubtitleDragKey = 0L
+    private var subtitleDragActive = false
+    private var draggedSourceEntry: SubtitleEntry? = null
     private var dragStartX = 0f
     private var dragStartStartTime = 0L
     private var dragStartEndTime = 0L
@@ -212,7 +218,7 @@ class WaveformTimelineView @JvmOverloads constructor(
 
     var onSelectedIndicesChangeListener: ((Set<Int>) -> Unit)? = null
     var onTimelineClickListener: ((Float) -> Unit)? = null
-    var onSubtitleChangeListener: ((Int, SubtitleEntry, Long, Boolean) -> Unit)? = null
+    internal var onSubtitleDragListener: ((EditorWaveformDragEvent) -> Boolean)? = null
     var onDraggedViewportPlayheadCorrection: ((positionMs: Long) -> Unit)? = null
     var onLimitedPlaybackRangeChange: ((subtitleIndex: Int?) -> Unit)? = null
     var onLimitedPlaybackStartRequest: ((subtitleIndex: Int) -> Unit)? = null
@@ -400,6 +406,7 @@ class WaveformTimelineView @JvmOverloads constructor(
     // ==================== 生命周期 ====================
 
     fun release() {
+        finishSubtitleDrag()
         cancelPendingSingleTap()
         waveformCache?.recycle()
         waveformCache = null
@@ -1032,6 +1039,7 @@ class WaveformTimelineView @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) finishSubtitleDrag()
         if (!isTimestampingMode && discardTouchSequenceAfterTimestamping) {
             if (event.actionMasked == MotionEvent.ACTION_UP ||
                 event.actionMasked == MotionEvent.ACTION_CANCEL) {
@@ -1137,7 +1145,6 @@ class WaveformTimelineView @JvmOverloads constructor(
                     if (sub != null && idx >= 0) {
                         currentSubtitle = sub
                         currentSubtitleIndex = idx
-                        currentSubtitleDragKey++
                         if (idx in selectedIndices) {
                             // 已选中：DOWN 时保持 NONE，等 MOVE 时确认真正拖动再设置 dragMode
                             downOnSelectedSubtitle = true
@@ -1207,6 +1214,7 @@ class WaveformTimelineView @JvmOverloads constructor(
                 // 已选中字幕的延迟拖拽激活：位移超过 8px 才确认为拖拽操作
                 if (downOnSelectedSubtitle && dragMode == DragMode.NONE && currentSubtitle != null) {
                     if (Math.abs(dx) > 8f) {
+                        if (!beginSubtitleDrag()) return true
                         dragMode = detectDragMode(dragStartX, currentSubtitle!!)
                         suppressTapSelection = true
                     } else {
@@ -1262,33 +1270,29 @@ class WaveformTimelineView @JvmOverloads constructor(
                     DragMode.NONE -> {}
                 }
                 if (changed) {
-                    onSubtitleChangeListener?.invoke(
-                        currentSubtitleIndex,
-                        s.copy(),
+                    val accepted = onSubtitleDragListener?.invoke(EditorWaveformDragEvent.Update(
                         currentSubtitleDragKey,
-                        false
-                    )
+                        EditorTimingRange(s.startTime, s.endTime, s.endTimeModified)
+                    )) ?: false
+                    if (!accepted) {
+                        // The host can reject a stale gesture after a document or mode change.
+                        // Restore the last authoritative row, never leave the private preview
+                        // installed as an uncommitted document mutation.
+                        draggedSourceEntry?.let { source ->
+                            if (subtitles.getOrNull(currentSubtitleIndex)?.stableId == source.stableId) {
+                                subtitles[currentSubtitleIndex] = source
+                            }
+                        }
+                        finishSubtitleDrag()
+                    }
                 }
                 invalidate()
                 return true
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (dragMode != DragMode.NONE && currentSubtitleIndex >= 0) {
-                    subtitles.getOrNull(currentSubtitleIndex)?.let { subtitle ->
-                        onSubtitleChangeListener?.invoke(
-                            currentSubtitleIndex,
-                            subtitle.copy(),
-                            currentSubtitleDragKey,
-                            true
-                        )
-                    }
-                }
-
-                downOnSelectedSubtitle = false
-                dragMode = DragMode.NONE
-                currentSubtitle = null
-                currentSubtitleIndex = -1
+                // CANCEL has always committed the current timing, just like UP.
+                finishSubtitleDrag()
                 isDraggingWaveform = false
                 isPinching = false
                 activePointerId = MotionEvent.INVALID_POINTER_ID
@@ -1296,6 +1300,60 @@ class WaveformTimelineView @JvmOverloads constructor(
             }
         }
         return super.onTouchEvent(event)
+    }
+
+    private fun beginSubtitleDrag(): Boolean {
+        if (subtitleDragActive) return true
+        val source = currentSubtitle ?: return false
+        val index = currentSubtitleIndex
+        val key = nextSubtitleDragKey.getAndIncrement()
+        if (onSubtitleDragListener?.invoke(EditorWaveformDragEvent.Begin(key, source.stableId)) != true) {
+            downOnSelectedSubtitle = false
+            currentSubtitle = null
+            currentSubtitleIndex = -1
+            return false
+        }
+        if (subtitles.getOrNull(index)?.stableId != source.stableId) {
+            onSubtitleDragListener?.invoke(EditorWaveformDragEvent.Finish(key))
+            return false
+        }
+        // initialize()/setSubtitles() borrow live model rows. Only the dragged
+        // row is detached, before any MOVE can change its timing fields.
+        draggedSourceEntry = source
+        currentSubtitle = source.copy().also { subtitles[index] = it }
+        currentSubtitleDragKey = key
+        subtitleDragActive = true
+        return true
+    }
+
+    /** Finish once before a touch, lifecycle or document replacement abandons the gesture. */
+    fun finishSubtitleDrag() {
+        val key = currentSubtitleDragKey
+        val wasActive = subtitleDragActive
+        val draggedList = subtitles
+        val index = currentSubtitleIndex
+        val preview = currentSubtitle
+        val source = draggedSourceEntry
+        // A finish callback may immediately rebind subtitle data. Clear our
+        // session first so that reentrant replacements cannot finish it twice.
+        subtitleDragActive = false
+        currentSubtitleDragKey = 0L
+        draggedSourceEntry = null
+        downOnSelectedSubtitle = false
+        dragMode = DragMode.NONE
+        currentSubtitle = null
+        currentSubtitleIndex = -1
+        try {
+            if (wasActive) onSubtitleDragListener?.invoke(EditorWaveformDragEvent.Finish(key))
+        } finally {
+            // The model may normalize the preview (for example, a resize back
+            // to its original range). Borrow its authoritative row again so
+            // the next gesture starts with those normalized fields. A Finish
+            // callback can replace the document or start a new gesture.
+            if (wasActive && source != null && !subtitleDragActive &&
+                subtitles === draggedList && subtitles.getOrNull(index) === preview
+            ) subtitles[index] = source
+        }
     }
 
     /** 用户拖动视口使播放头离开屏幕时，将播放头强制移到当前视口左边缘。 */
@@ -1483,6 +1541,7 @@ class WaveformTimelineView @JvmOverloads constructor(
      * 调用后立即可渲染，波形区域显示占位灰线，chunk 数据按需加载后自动刷新。
      */
     fun initialize(durationMs: Long, subtitles: List<SubtitleEntry>) {
+        finishSubtitleDrag()
         this.durationMs = durationMs
         this.subtitles = subtitles.toMutableList()
         this.limitedPlaybackIndex = null
@@ -1590,6 +1649,7 @@ class WaveformTimelineView @JvmOverloads constructor(
     }
 
     fun setSubtitles(list: List<SubtitleEntry>) {
+        finishSubtitleDrag()
         subtitles = list.toMutableList()
         selectedIndices = emptySet()
         if (limitedPlaybackIndex?.let { it !in subtitles.indices } == true) {
@@ -1604,6 +1664,7 @@ class WaveformTimelineView @JvmOverloads constructor(
         if (startIndex !in 0..subtitles.size || removedCount < 0 ||
             startIndex + removedCount > subtitles.size
         ) return false
+        finishSubtitleDrag()
         val delta = inserted.size - removedCount
         var dirtyLeft = Float.POSITIVE_INFINITY
         var dirtyRight = Float.NEGATIVE_INFINITY
@@ -1641,13 +1702,28 @@ class WaveformTimelineView @JvmOverloads constructor(
     fun updateSubtitleEntries(changes: Map<Int, SubtitleEntry>, totalCount: Int): Boolean {
         if (subtitles.size != totalCount) return false
         if (changes.keys.any { it !in subtitles.indices }) return false
+        if (subtitleDragActive && changes[currentSubtitleIndex]?.let {
+                it.stableId != currentSubtitle?.stableId
+            } == true) finishSubtitleDrag()
         var dirtyLeft = Float.POSITIVE_INFINITY
         var dirtyRight = Float.NEGATIVE_INFINITY
         changes.forEach { (index, entry) ->
             val previous = subtitles[index]
             dirtyLeft = min(dirtyLeft, min(timeToX(previous.startTime), timeToX(entry.startTime)))
             dirtyRight = max(dirtyRight, max(timeToX(previous.endTime), timeToX(entry.endTime)))
-            subtitles[index] = entry
+            val preview = currentSubtitle.takeIf { subtitleDragActive && index == currentSubtitleIndex }
+            if (preview != null) {
+                // A source preview or row refresh must not reconnect the dragged
+                // row to the live model or replace its private timing preview.
+                preview.index = entry.index
+                preview.text = entry.text
+                preview.cueIdentifier = entry.cueIdentifier
+                preview.cueSettings = entry.cueSettings
+                draggedSourceEntry = entry
+                subtitles[index] = preview
+            } else {
+                subtitles[index] = entry
+            }
         }
         if (changes.isNotEmpty()) invalidateSubtitleRegion(dirtyLeft, dirtyRight)
         return true
@@ -1656,6 +1732,7 @@ class WaveformTimelineView @JvmOverloads constructor(
     fun removeSubtitleIndices(deletedIndices: Set<Int>): Boolean {
         if (deletedIndices.isEmpty()) return true
         if (deletedIndices.any { it !in subtitles.indices }) return false
+        finishSubtitleDrag()
 
         val sortedDeleted = deletedIndices.sorted()
         var dirtyLeft = Float.POSITIVE_INFINITY
@@ -1729,6 +1806,7 @@ class WaveformTimelineView @JvmOverloads constructor(
 
     /** Refresh subtitle data without dropping the block currently selected on the timeline. */
     fun setSubtitlesPreserveSelection(list: List<SubtitleEntry>) {
+        finishSubtitleDrag()
         val previousSelection = selectedIndices
         val previousLimitedPlayback = limitedPlaybackIndex
         subtitles = list.toMutableList()
@@ -1744,6 +1822,7 @@ class WaveformTimelineView @JvmOverloads constructor(
     }
 
     fun setSubtitlesKeepSelection(list: List<SubtitleEntry>, insertedAt: Int) {
+        finishSubtitleDrag()
         subtitles = list.toMutableList()
         // 插入位置在选中索引之前或等于时，选中索引 +1
         selectedIndices = selectedIndices.map { if (it >= insertedAt) it + 1 else it }.toSet()
@@ -1758,6 +1837,7 @@ class WaveformTimelineView @JvmOverloads constructor(
      * @param deletedIndices 被删除的索引集合（删除前的索引）
      */
     fun setSubtitlesAfterDelete(list: List<SubtitleEntry>, deletedIndices: Set<Int>) {
+        finishSubtitleDrag()
         subtitles = list.toMutableList()
         // 移除被删除的索引，并调整剩余索引
         val sortedDeleted = deletedIndices.sorted()
@@ -1785,6 +1865,7 @@ class WaveformTimelineView @JvmOverloads constructor(
     // ==================== 打轴模式 ====================
 
     fun startTimestamping(startMs: Long) {
+        finishSubtitleDrag()
         cancelPendingSingleTap()
         discardTouchSequenceAfterTimestamping = activePointerId != MotionEvent.INVALID_POINTER_ID
         if (discardTouchSequenceAfterTimestamping) {

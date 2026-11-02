@@ -1,6 +1,9 @@
 package com.subtitleedit
 
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.util.SubtitleParser
+import com.subtitleedit.util.WebVttCuePolicy
+import com.subtitleedit.util.subtitle.WebVttSubtitleFormatHandler
 
 internal sealed interface EditorCommand {
     fun execute(state: EditorDocumentState): EditorCommandResult
@@ -32,6 +35,26 @@ internal sealed interface EditorCommand {
                 entry.endTime = it
                 entry.endTimeModified = true
             }
+            return EditorCommandResult(changedPositions = setOf(position))
+        }
+    }
+
+    data class UpdateCue(
+        val position: Int,
+        val identifier: String,
+        val settings: String
+    ) : EditorCommand {
+        override fun execute(state: EditorDocumentState): EditorCommandResult {
+            if (state.currentFormat != SubtitleParser.SubtitleFormat.VTT) return EditorCommandResult()
+            val entry = state.subtitleEntries.getOrNull(position) ?: return EditorCommandResult()
+            val id = identifier.trim()
+            val options = settings.trim()
+            val error = WebVttCuePolicy.validate(id, options)
+            require(error == null) { error.orEmpty() }
+            val updated = entry.copy(cueIdentifier = id)
+            WebVttSubtitleFormatHandler.updateCueSettings(updated, options)
+            if (entry == updated) return EditorCommandResult()
+            EditorDocumentOperations.updateFields(entry, updated)
             return EditorCommandResult(changedPositions = setOf(position))
         }
     }

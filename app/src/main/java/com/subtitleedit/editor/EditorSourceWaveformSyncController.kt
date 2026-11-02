@@ -1,124 +1,81 @@
 package com.subtitleedit.editor
 
-import com.subtitleedit.model.SubtitleEntry
-import com.subtitleedit.util.SubtitleParser
-import com.subtitleedit.util.SubtitleSourceSynchronizer
+import com.subtitleedit.EditorTimingDrag
+import com.subtitleedit.EditorTimingDragSession
+import com.subtitleedit.EditorTimingRange
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Coalesces waveform drags and writes timing changes back to source text off the UI thread. */
+/** Coalesces previews within a gesture, but commits ended gestures in order. */
 internal class EditorSourceWaveformSyncController(
     private val scope: CoroutineScope,
-    private val isSourceViewMode: () -> Boolean,
-    private val hasPendingSourceEdits: () -> Boolean,
-    private val isPreviewActive: () -> Boolean,
-    private val editGeneration: () -> Long,
-    private val currentFormat: () -> SubtitleParser.SubtitleFormat,
     private val sourceContent: () -> String,
-    private val snapshotSourceContent: () -> String,
-    private val currentEntries: () -> List<SubtitleEntry>,
-    private val cancelPreview: () -> Unit,
-    private val schedulePreview: () -> Unit,
-    private val recordHistory: (String, String) -> Unit,
-    private val onSourceUpdated: (String, EditorSourceTextEdit) -> Unit
+    private val editGeneration: () -> Long,
+    private val isCurrent: (EditorTimingDrag) -> Boolean,
+    private val applySource: (EditorTimingDrag, String, String, Boolean) -> Boolean,
+    private val onSourceUpdated: (String, EditorSourceTextEdit) -> Unit,
+    private val debounceMillis: Long = 40L,
+    private val buildSource: (EditorTimingDrag, EditorTimingRange, String) -> String = EditorTimingDragSession::sourceFor
 ) {
-    private data class Request(
-        val content: String,
-        val entries: List<SubtitleEntry>,
-        val generation: Long,
-        val indices: IntArray,
-        val starts: LongArray,
-        val ends: LongArray,
-        val modified: BooleanArray,
-        val dragKey: Long?,
-        val recordHistory: Boolean,
-        val historyStart: String?,
-        val historyEntries: List<SubtitleEntry>?
-    )
+    private data class Request(val drag: EditorTimingDrag, val range: EditorTimingRange, val final: Boolean)
+    private data class Result(val source: String, val edit: EditorSourceTextEdit)
 
+    private val commits = ArrayDeque<Request>()
+    private var preview: Request? = null
+    private val baselines = mutableMapOf<Long, String>()
     private var job: Job? = null
-    private var pending: Request? = null
-    private var historyKey: Long? = null
-    private var historyStart: String? = null
-    private var historyEntries: List<SubtitleEntry>? = null
+    private var epoch = 0L
+    private var visiblePreview: Request? = null
 
-    fun schedule(updated: List<SubtitleEntry>, dragKey: Long?, shouldRecord: Boolean, initialEntries: List<SubtitleEntry>?) {
-        val inFlight = hasPendingSourceEdits() || isPreviewActive()
-        val content = if (hasPendingSourceEdits()) snapshotSourceContent() else sourceContent()
-        if (inFlight) cancelPreview()
-        if (dragKey != null && historyKey != dragKey) {
-            historyKey = dragKey
-            historyStart = content
-            historyEntries = initialEntries ?: currentEntries().map { it.copy() }
-        }
-        pending = Request(
-            content = content,
-            entries = (historyEntries ?: currentEntries()).map { it.copy() },
-            generation = editGeneration(),
-            indices = IntArray(updated.size) { updated[it].index },
-            starts = LongArray(updated.size) { updated[it].startTime },
-            ends = LongArray(updated.size) { updated[it].endTime },
-            modified = BooleanArray(updated.size) { updated[it].endTimeModified },
-            dragKey = dragKey,
-            recordHistory = shouldRecord,
-            historyStart = historyStart,
-            historyEntries = historyEntries
-        )
+    val hasPending: Boolean get() = commits.isNotEmpty() || preview != null || job?.isActive == true
+
+    fun preview(drag: EditorTimingDrag, range: EditorTimingRange) {
+        preview = Request(drag, range, false)
+        start()
+    }
+
+    fun commit(drag: EditorTimingDrag) {
+        if (preview?.drag === drag) preview = null
+        commits.addLast(Request(drag, drag.range, true))
+        start()
+    }
+
+    private fun start() {
         if (job?.isActive == true) return
+        val scheduledEpoch = epoch
         job = scope.launch {
-            val running = coroutineContext[Job]
+            val running = currentCoroutineContext()[Job]
             try {
-                while (isActive) {
-                    delay(40L)
-                    val request = pending ?: break
-                    pending = null
-                    if (!isSourceViewMode() || request.generation != editGeneration()) continue
-                    val result = withContext(Dispatchers.Default) {
-                        if (request.entries.size != request.indices.size) null
-                        else {
-                            val updatedEntries = request.entries.mapIndexed { index, entry ->
-                                entry.copy(
-                                    index = request.indices[index],
-                                    startTime = request.starts[index],
-                                    endTime = request.ends[index],
-                                    endTimeModified = request.modified[index]
-                                )
-                            }
-                            SubtitleSourceSynchronizer.apply(
-                                content = request.content,
-                                format = currentFormat(),
-                                oldEntries = request.entries,
-                                newEntries = updatedEntries
-                            )?.let { updatedSource ->
-                                updatedSource to EditorSourceTextEdit.between(
-                                    request.content,
-                                    updatedSource
-                                )
-                            }
-                        }
-                    }
-                    if (!isActive || !isSourceViewMode() || request.generation != editGeneration()) continue
-                    if (pending != null) continue
-                    if (result == null) {
-                        schedulePreview()
+                while (isActive && scheduledEpoch == epoch) {
+                    delay(debounceMillis)
+                    val request = commits.firstOrNull() ?: preview ?: break
+                    if (!isCurrent(request.drag)) {
+                        remove(request)
                         continue
                     }
-                    val (updatedSource, sourceEdit) = result
-                    if (request.recordHistory) {
-                        recordHistory(request.historyStart ?: request.content, updatedSource)
-                        if (request.dragKey != null && historyKey == request.dragKey) {
-                            historyKey = null
-                            historyStart = null
-                            historyEntries = null
-                        }
+                    val source = sourceContent()
+                    val generation = editGeneration()
+                    val base = baselines.getOrPut(request.drag.key) { source }
+                    val result = withContext(Dispatchers.Default) { calculate(request, base, source) }
+                    currentCoroutineContext().ensureActive()
+                    if (scheduledEpoch != epoch) break
+                    if (!isCurrent(request.drag) || generation != editGeneration()) {
+                        remove(request)
+                        continue
                     }
-                    onSourceUpdated(updatedSource, sourceEdit)
+                    // A newer preview/final supersedes only this gesture's preview.
+                    // Never discard a final because another gesture was queued.
+                    if (!request.final && (preview !== request || commits.any { it.drag === request.drag })) continue
+                    apply(request, base, result)
+                    remove(request)
                 }
             } finally {
                 if (job === running) job = null
@@ -126,16 +83,65 @@ internal class EditorSourceWaveformSyncController(
         }
     }
 
-    fun cancel() {
-        job?.cancel()
-        job = null
-        pending = null
+    private fun calculate(request: Request, base: String, visible: String): Result {
+        val updated = buildSource(request.drag, request.range, base)
+        return Result(updated, EditorSourceTextEdit.between(visible, updated))
     }
 
-    suspend fun cancelAndJoin() {
-        val active = job ?: return
-        active.cancelAndJoin()
-        if (job === active) job = null
-        pending = null
+    private fun apply(request: Request, base: String, result: Result) {
+        if (applySource(request.drag, base, result.source, request.final)) {
+            visiblePreview = request.takeUnless { it.final }
+            onSourceUpdated(result.source, result.edit)
+        }
+    }
+
+    private fun remove(request: Request) {
+        if (request.final) {
+            if (commits.firstOrNull() === request) commits.removeFirst()
+            baselines.remove(request.drag.key)
+        } else if (preview === request) preview = null
+    }
+
+    /** Lifecycle/mode/save barriers finish queued gestures before leaving their document. */
+    fun flushNow() {
+        epoch++
+        job?.cancel()
+        job = null
+        while (commits.isNotEmpty()) {
+            val request = commits.first()
+            if (isCurrent(request.drag)) {
+                val source = sourceContent()
+                val base = baselines.getOrPut(request.drag.key) { source }
+                apply(request, base, calculate(request, base, source))
+            }
+            remove(request)
+        }
+        preview = null
+    }
+
+    suspend fun flushAndJoin() {
+        val running = job
+        flushNow()
+        running?.cancelAndJoin()
+    }
+
+    fun finishVisibleAndCancel() {
+        visiblePreview?.takeIf { isCurrent(it.drag) }?.let { request ->
+            baselines[request.drag.key]?.let { base ->
+                applySource(request.drag, base, sourceContent(), true)
+            }
+        }
+        cancel()
+    }
+
+    /** External source edits/document replacement take ownership over queued drag results. */
+    fun cancel() {
+        epoch++
+        job?.cancel()
+        job = null
+        commits.clear()
+        preview = null
+        baselines.clear()
+        visiblePreview = null
     }
 }

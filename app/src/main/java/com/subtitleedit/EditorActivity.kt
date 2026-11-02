@@ -425,6 +425,7 @@ class EditorActivity : AppCompatActivity() {
             exitVideoFullscreen = ::exitVideoFullscreen,
             cancelSelection = ::cancelSelection,
             documentState = stateModel.documentState,
+            finishPendingEdits = ::finishWaveformEdits,
             saveAndFinish = { saveFile(SaveContinuation.FINISH) },
             finishWithoutSaving = ::finish
         )
@@ -565,8 +566,8 @@ class EditorActivity : AppCompatActivity() {
             onJumpToTimeClick = { entry, _ ->
                 jumpToSubtitleTime(entry)
             },
-            onSetTimeClick = { entry, position ->
-                setSubtitleTimeToCurrentPosition(entry, position)
+            onSetTimeClick = { entry, _ ->
+                setSubtitleTimeToCurrentPosition(entry)
             },
             hasPlayableMedia = stateModel.mediaType.hasPlayableMedia,
             onFormatMetadataClick = { _, position ->
@@ -619,6 +620,14 @@ class EditorActivity : AppCompatActivity() {
         )
         binding.etSourceView.addOnDocumentChangeListener { change ->
             if (stateModel.isSourceViewMode && !suppressSourceViewChanges && !sourceHistorySyncPending) {
+                // Keep the last displayed timing preview in history, then let
+                // the user's source edit supersede any queued timing results.
+                val interruptedDrag = stateModel.waveformSourceEditsPending
+                if (interruptedDrag) {
+                    sourceWaveformSyncController.finishVisibleAndCancel()
+                    stateModel.discardWaveformSourceEdits()
+                    waveformController.finishSubtitleDrag()
+                }
                 val beforeText = stateModel.sourceHistoryTextSnapshot
                 val updatedText = binding.etSourceView.getDocumentText()
                 val edit = EditorSourceTextEdit.fromRanges(
@@ -641,7 +650,7 @@ class EditorActivity : AppCompatActivity() {
                 // itself retains only this edit's range.
                 updateFormatInfo()
                 sourceLineEditController.invalidateLineIndex()
-                if (sourceLineEditController.requiresFullParse(
+                if (interruptedDrag || sourceLineEditController.requiresFullParse(
                         before = beforeText,
                         after = updatedText,
                         format = stateModel.currentFormat,
@@ -685,31 +694,9 @@ class EditorActivity : AppCompatActivity() {
             context = this,
             ensureListMode = ::ensureListMode,
             currentFormat = { stateModel.currentFormat },
-            entryAt = { position -> stateModel.subtitleEntries.getOrNull(position) },
-            updateTime = { position, start, value ->
-                val result = if (start) {
-                    stateModel.executeWithoutPublish(EditorCommand.UpdateTime(position, startTime = value))
-                } else {
-                    stateModel.executeWithoutPublish(EditorCommand.UpdateTime(position, endTime = value))
-                }
-                result.changedPositions.isNotEmpty()
-            },
-            updateText = { position, value ->
-                stateModel.executeWithoutPublish(EditorCommand.UpdateText(position, value))
-                    .changedPositions.isNotEmpty()
-            },
-            updateCue = { position, identifier, settings ->
-                stateModel.subtitleEntries.getOrNull(position)?.apply {
-                    cueIdentifier = identifier
-                    WebVttSubtitleFormatHandler.updateCueSettings(this, settings)
-                }
-            },
-            // The dialog callbacks use executeWithoutPublish; the adapter and history baseline
-            // are updated by notifyEntriesChanged below, so do not deep-copy the whole document
-            // into StateFlow for every single row edit.
-            onUpdated = { position, message ->
-                onEntryUpdated(position, message, documentAlreadyPublished = true)
-            },
+            entryAt = { position -> stateModel.subtitleEntries.getOrNull(position)?.copy() },
+            commitEdit = ::commitSingleEdit,
+            onUpdated = ::showShortToast,
             showMessage = ::showShortToast
         )
     }
@@ -786,19 +773,10 @@ class EditorActivity : AppCompatActivity() {
     private fun setupWaveformController() {
         sourceWaveformSyncController = EditorSourceWaveformSyncController(
             scope = lifecycleScope,
-            isSourceViewMode = { stateModel.isSourceViewMode },
-            hasPendingSourceEdits = { sourceViewHasPendingEdits },
-            isPreviewActive = { sourcePreviewController.isActive },
-            editGeneration = { stateModel.documentState.sourceViewEditGeneration },
-            currentFormat = { stateModel.currentFormat },
             sourceContent = { stateModel.sourceViewContent },
-            snapshotSourceContent = ::snapshotSourceViewContentIfNeeded,
-            currentEntries = { stateModel.subtitleEntries },
-            cancelPreview = ::cancelSourcePreview,
-            // Waveform timing edits already mutate the affected SubtitleEntry objects. They only
-            // need the media preview refreshed; never reparse the complete source document.
-            schedulePreview = ::scheduleSubtitlePreview,
-            recordHistory = ::recordSourceTextChange,
+            editGeneration = { stateModel.documentState.sourceViewEditGeneration },
+            isCurrent = stateModel::isCurrentWaveformDrag,
+            applySource = stateModel::applyWaveformSource,
             onSourceUpdated = { updatedSource, sourceEdit ->
                 applySourceWaveformUpdatedSource(updatedSource, sourceEdit)
             }
@@ -811,42 +789,7 @@ class EditorActivity : AppCompatActivity() {
             appCacheDir = cacheDir,
             mediaRepository = mediaRepository,
             currentPlaybackPositionMs = { playbackController.currentPositionMs },
-            onSubtitleChanged = { changedIndex, updatedEntry, dragSessionKey, isFinal ->
-                if (sourceHistorySyncPending || sourceListHistorySyncPending) {
-                    showShortToast("正在同步，请稍候")
-                    return@EditorWaveformController
-                }
-                val currentEntry = stateModel.subtitleEntries.getOrNull(changedIndex)
-                    ?: return@EditorWaveformController
-                if (stateModel.isSourceViewMode) {
-                    val updatedEntries = stateModel.subtitleEntries.toMutableList().apply {
-                        set(changedIndex, updatedEntry.copy())
-                    }
-                    waveformController.updateSubtitleEntries(
-                        mapOf(changedIndex to updatedEntry.copy()),
-                        stateModel.subtitleEntries.size
-                    )
-                    sourceWaveformSyncController.schedule(
-                        updatedEntries,
-                        dragSessionKey,
-                        isFinal,
-                        null
-                    )
-                    stateModel.subtitleEntries[changedIndex] = updatedEntry.copy()
-                    markAsChanged()
-                } else {
-                    currentEntry.startTime = updatedEntry.startTime
-                    currentEntry.endTime = updatedEntry.endTime
-                    currentEntry.endTimeModified = updatedEntry.endTimeModified
-                    notifyEntriesChanged(
-                        positions = listOf(changedIndex),
-                        includeNeighbors = true,
-                        syncWaveform = false,
-                        markChanged = isFinal,
-                        refreshDocument = false,
-                    )
-                }
-            },
+            onSubtitleDrag = ::handleWaveformDrag,
             onSelectedIndexChanged = { index ->
                 if (index in stateModel.subtitleEntries.indices) {
                     (binding.rvSubtitles.layoutManager as? LinearLayoutManager)?.let { manager ->
@@ -861,6 +804,48 @@ class EditorActivity : AppCompatActivity() {
             showMessage = ::showShortToast
         )
         waveformController.bind()
+    }
+
+    private fun handleWaveformDrag(event: EditorWaveformDragEvent): Boolean = when (event) {
+        is EditorWaveformDragEvent.Begin -> {
+            if (sourceHistorySyncPending || sourceListHistorySyncPending ||
+                stateModel.isSourceViewTransitioning || sourceViewHasPendingEdits
+            ) {
+                showShortToast("正在同步，请稍候")
+                false
+            } else {
+                if (stateModel.isSourceViewMode) cancelSourcePreview()
+                stateModel.beginWaveformDrag(event.key, event.stableId, selectedSubtitleIds())
+            }
+        }
+        is EditorWaveformDragEvent.Update -> {
+            val drag = stateModel.waveformDrag(event.key)
+            val change = stateModel.updateWaveformDrag(event.key, event.range)
+            if (drag == null || change == null) false else {
+                if (drag.sourceMode) sourceWaveformSyncController.preview(drag, drag.range)
+                else notifyEntriesChanged(listOf(change.position), syncWaveform = false, markChanged = false, refreshDocument = false)
+                true
+            }
+        }
+        is EditorWaveformDragEvent.Finish -> {
+            val ended = stateModel.finishWaveformDrag(event.key, selectedSubtitleIds())
+            if (ended == null) false else {
+                if (ended.drag.sourceMode) sourceWaveformSyncController.commit(ended.drag)
+                else if (ended.change != null) {
+                    notifyEntriesChanged(listOf(ended.change.position), syncWaveform = false, markChanged = false, refreshDocument = false)
+                    invalidateOptionsMenu()
+                }
+                true
+            }
+        }
+    }
+
+    private fun selectedSubtitleIds(): Set<Long> =
+        subtitleAdapter.getSelectedEntries().mapTo(mutableSetOf()) { it.first.stableId }
+
+    private fun finishWaveformEdits() {
+        if (::waveformController.isInitialized) waveformController.finishSubtitleDrag()
+        if (::sourceWaveformSyncController.isInitialized) sourceWaveformSyncController.flushNow()
     }
 
     private fun setupSubtitlePreviewController() {
@@ -1194,18 +1179,14 @@ class EditorActivity : AppCompatActivity() {
         updatedSource: String,
         sourceEdit: EditorSourceTextEdit? = null
     ) {
-        stateModel.originalFileContent = updatedSource
-        stateModel.sourceViewContent = updatedSource
-        stateModel.sourceHistoryTextSnapshot = updatedSource
         sourceViewHasPendingEdits = false
-        stateModel.documentState.sourceViewEditGeneration++
-        stateModel.documentState.sourceViewEntriesGeneration = stateModel.documentState.sourceViewEditGeneration
         setSourceViewEditorText(
             updatedSource,
             preserveScroll = true,
             changeHint = sourceEdit?.let { sourceEditToDocumentChange(it) }
         )
         updateFormatInfo()
+        invalidateOptionsMenu()
         scheduleSubtitlePreview()
     }
     private fun setupAiControllers() {
@@ -1668,6 +1649,7 @@ class EditorActivity : AppCompatActivity() {
 
     /** 将列表条目定点写回内存中的原始文本后进入源视图。 */
     private fun enterSourceViewFromMemory() {
+        finishWaveformEdits()
         sourceViewTransitionJob?.cancel()
         showShortToast("正在切换到源视图…")
         sourceViewTransitionJob = lifecycleScope.launch {
@@ -1717,6 +1699,7 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun doExitSourceView() {
         if (sourceViewTransitionJob?.isActive == true) return
+        finishWaveformEdits()
         val sourceScrollPosition = binding.etSourceView.getDocumentScrollOffset()
         var editedContent = stateModel.sourceViewContent
         // 先禁用源行编辑，再在后台构建字幕条目列表，避免切换期间两套编辑状态并存。
@@ -1724,7 +1707,7 @@ class EditorActivity : AppCompatActivity() {
         showShortToast("正在切换到列表视图…")
         sourceViewTransitionJob = lifecycleScope.launch {
             try {
-                sourceWaveformSyncController.cancelAndJoin()
+                sourceWaveformSyncController.flushAndJoin()
                 editedContent = stateModel.sourceViewContent
                 cancelSourcePreview()
                 if (stateModel.documentState.sourceViewEntriesGeneration != stateModel.documentState.sourceViewEditGeneration) {
@@ -3292,6 +3275,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun insertSubtitleFromTimestamp(startMs: Long, endMs: Long) {
+        finishWaveformEdits()
         val realStart = minOf(startMs, endMs)
         val realEnd = maxOf(startMs, endMs)
         if (realEnd - realStart < 100) return
@@ -3469,6 +3453,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun undoEdit() {
+        finishWaveformEdits()
         if (sourceHistorySyncPending || sourceListHistorySyncPending) {
             showShortToast("正在同步，请稍候")
             return
@@ -3493,6 +3478,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun redoEdit() {
+        finishWaveformEdits()
         if (sourceHistorySyncPending || sourceListHistorySyncPending) {
             showShortToast("正在同步，请稍候")
             return
@@ -3740,16 +3726,21 @@ class EditorActivity : AppCompatActivity() {
         )
     }
 
-    private fun onEntryUpdated(
-        position: Int,
-        message: String = "已更新",
-        documentAlreadyPublished: Boolean = false
-    ) {
+    private fun commitSingleEdit(edit: EditorEntryEdit): Boolean {
+        finishWaveformEdits()
+        if (sourceHistorySyncPending || sourceListHistorySyncPending) {
+            showShortToast("正在同步，请稍候")
+            return false
+        }
+        val selection = selectedSubtitleIds()
+        val change = stateModel.commitSingleEdit(edit, selection) ?: return false
+        // Source, history, dirty state and the document snapshot have already
+        // committed. This consumer only refreshes existing view/cache paths.
         notifyEntriesChanged(
-            listOf(position),
-            refreshDocument = !documentAlreadyPublished
+            listOf(change.position), markChanged = false, refreshDocument = false
         )
-        showShortToast(message)
+        invalidateOptionsMenu()
+        return true
     }
 
     private fun notifyEntriesChanged(
@@ -4690,6 +4681,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun getCurrentEditableContent(requireNonEmptyList: Boolean = false): String? {
+        finishWaveformEdits()
         val sourceContent = if (stateModel.isSourceViewMode) snapshotSourceViewContentIfNeeded() else null
         val content = stateModel.buildSaveContent(sourceContent, requireNonEmptyList)
         if (content == null) {
@@ -4748,6 +4740,7 @@ class EditorActivity : AppCompatActivity() {
         message: String,
         action: () -> Unit
     ) {
+        finishWaveformEdits()
         confirmationDialogController.runAfterUnsavedChangesConfirmed(message, action)
     }
 
@@ -5083,13 +5076,11 @@ class EditorActivity : AppCompatActivity() {
     /**
      * 将字幕的开始时间设置为当前音频进度
      */
-    private fun setSubtitleTimeToCurrentPosition(entry: SubtitleEntry, position: Int) {
+    private fun setSubtitleTimeToCurrentPosition(entry: SubtitleEntry) {
         if (!ensureMediaMode()) return
         
         val newStartTime = playbackController.currentPositionMs
-        stateModel.executeWithoutPublish(EditorCommand.UpdateTime(position, startTime = newStartTime))
-        
-        notifyEntriesChanged(listOf(position), refreshDocument = false)
+        if (!commitSingleEdit(EditorEntryEdit.Time(entry.stableId, startTime = newStartTime))) return
         
         if (newStartTime >= entry.endTime) {
             com.subtitleedit.util.OverwritingToast.makeText(this, "开始时间已设置，但大于结束时间，请调整结束时间", Toast.LENGTH_LONG).show()

@@ -13,6 +13,7 @@ import com.arthenica.ffmpegkit.FFmpegSession
 import com.subtitleedit.audio.FfmpegWaveformChunkLoader
 import com.subtitleedit.databinding.ActivityEditorBinding
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.EditorWaveformDragEvent
 import com.subtitleedit.repository.MediaRepository
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.view.WaveformTimelineView
@@ -43,7 +44,7 @@ internal class EditorWaveformController(
     private val appCacheDir: File,
     private val mediaRepository: MediaRepository,
     private val currentPlaybackPositionMs: () -> Long,
-    private val onSubtitleChanged: (Int, SubtitleEntry, Long, Boolean) -> Unit,
+    private val onSubtitleDrag: (EditorWaveformDragEvent) -> Boolean,
     private val onSelectedIndexChanged: (Int) -> Unit,
     private val onTimestampInserted: (Long, Long) -> Unit,
     private val onCollapsed: () -> Unit,
@@ -83,7 +84,7 @@ internal class EditorWaveformController(
     fun bind() {
         binding.mediaPlayerContainer.visibility =
             if (hasPlayableMedia) View.VISIBLE else View.GONE
-        binding.waveformTimelineView.onSubtitleChangeListener = onSubtitleChanged
+        binding.waveformTimelineView.onSubtitleDragListener = onSubtitleDrag
         binding.waveformTimelineView.onSelectedIndicesChangeListener = { indices ->
             indices.firstOrNull()?.let(onSelectedIndexChanged)
         }
@@ -170,6 +171,8 @@ internal class EditorWaveformController(
     fun expand() {
         setExpanded(true)
     }
+
+    fun finishSubtitleDrag() = binding.waveformTimelineView.finishSubtitleDrag()
 
     private fun setExpanded(expanded: Boolean) {
         if (isWaveformExpanded == expanded) return

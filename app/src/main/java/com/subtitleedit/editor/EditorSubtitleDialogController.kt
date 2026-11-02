@@ -7,6 +7,7 @@ import android.view.View
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.subtitleedit.EditorEntryEdit
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.TimeUtils
@@ -19,10 +20,8 @@ internal class EditorSubtitleDialogController(
     private val ensureListMode: () -> Boolean,
     private val currentFormat: () -> SubtitleParser.SubtitleFormat,
     private val entryAt: (Int) -> SubtitleEntry?,
-    private val updateTime: (Int, Boolean, Long) -> Boolean,
-    private val updateText: (Int, String) -> Boolean,
-    private val updateCue: (Int, String, String) -> Unit,
-    private val onUpdated: (Int, String) -> Unit,
+    private val commitEdit: (EditorEntryEdit) -> Boolean,
+    private val onUpdated: (String) -> Unit,
     private val showMessage: (String) -> Unit
 ) {
     fun showTime(position: Int, start: Boolean) {
@@ -40,8 +39,12 @@ internal class EditorSubtitleDialogController(
             .setPositiveButton("确定") { _, _ ->
                 val value = TimeUtils.parseFromInput(input.text.toString())
                 if (value == null) showMessage("时间格式无效")
-                else if (updateTime(position, start, value)) {
-                    onUpdated(position, "已更新")
+                else if (commitEdit(EditorEntryEdit.Time(
+                    entry.stableId,
+                    startTime = value.takeIf { start },
+                    endTime = value.takeUnless { start }
+                ))) {
+                    onUpdated("已更新")
                 }
             }
             .setNegativeButton("取消", null)
@@ -59,8 +62,8 @@ internal class EditorSubtitleDialogController(
             .setTitle("编辑字幕文本")
             .setView(input)
             .setPositiveButton("确定") { _, _ ->
-                if (updateText(position, input.text.toString())) {
-                    onUpdated(position, "已更新")
+                if (commitEdit(EditorEntryEdit.Text(entry.stableId, input.text.toString()))) {
+                    onUpdated("已更新")
                 }
             }
             .setNegativeButton("取消", null)
@@ -105,8 +108,9 @@ internal class EditorSubtitleDialogController(
                     showMessage(error)
                     return@setOnClickListener
                 }
-                updateCue(position, id, options)
-                onUpdated(position, "WebVTT Cue 属性已更新")
+                if (commitEdit(EditorEntryEdit.Cue(entry.stableId, id, options))) {
+                    onUpdated("WebVTT Cue 属性已更新")
+                }
                 dialog.dismiss()
             }
         }

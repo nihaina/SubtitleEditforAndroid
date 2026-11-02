@@ -33,11 +33,12 @@ internal class EditorLifecycleCoordinator(
     private val saveListScroll: (Int, Int) -> Unit
 ) {
     fun onStop() {
+        waveform.finishSubtitleDrag()
+        sourceWaveformSync.flushNow()
         // Full source synchronization is intentionally allowed to continue in lifecycleScope
         // while the Activity is backgrounded. Record the request so onStart can restart it only
         // if the previous job was cancelled or otherwise became inactive.
         recordSourceSyncBackground()
-        sourceWaveformSync.cancel()
         subtitlePreview?.cancelPending()
         cancelSourceParse()
         if (isSourceMode() && hasPendingSourceEdits()) snapshotSource()
@@ -67,6 +68,8 @@ internal class EditorLifecycleCoordinator(
     }
 
     fun onDestroy() {
+        waveform.finishSubtitleDrag()
+        sourceWaveformSync.flushNow()
         sourcePreview.cancel()
         sourceWaveformSync.cancel()
         tts.release()
