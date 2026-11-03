@@ -252,7 +252,7 @@ object WebVttSubtitleFormatHandler : SubtitleFormatHandler {
         line == it || line.startsWith("$it ")
     }
 
-    private fun isTimestampMap(line: String): Boolean =
+    internal fun isTimestampMap(line: String): Boolean =
         timestampMapPattern.matches(line) && mpegTsKey.containsMatchIn(line)
 
     private fun appendBlock(destination: MutableList<String>, block: List<String>) {

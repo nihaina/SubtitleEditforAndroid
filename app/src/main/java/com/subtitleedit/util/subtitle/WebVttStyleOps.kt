@@ -74,7 +74,10 @@ object WebVttStyleOps {
             oldName.equals(newName, ignoreCase = true)
         ) return document
         val header = replaceClassToken(document.header, oldName, newName)
-        val entries = document.entries.map { entry -> entry.copy(text = replaceCueClassToken(entry.text, oldName, newName)) }
+        val entries = document.entries.map { entry ->
+            val text = replaceCueClassToken(entry.text, oldName, newName)
+            if (text == entry.text) entry else entry.copy(text = text)
+        }
         return document.copy(header = header, entries = entries)
     }
 
@@ -83,7 +86,10 @@ object WebVttStyleOps {
         if (!isVtt(document) || !isClassName(styleName)) return document
         val header = removeRule(document.header, styleName)
         val entries = if (removeCueReferences) {
-            document.entries.map { entry -> entry.copy(text = removeClass(entry.text, styleName)) }
+            document.entries.map { entry ->
+                val text = removeClass(entry.text, styleName)
+                if (text == entry.text) entry else entry.copy(text = text)
+            }
         } else document.entries
         return document.copy(header = header, entries = entries)
     }

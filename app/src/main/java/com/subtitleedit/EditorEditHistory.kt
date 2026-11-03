@@ -127,7 +127,8 @@ internal class EditorEditHistory {
 
         override fun isSelectionOnly(): Boolean = when (this) {
             is ListChange -> sourceEdit == null && added.isEmpty() && deleted.isEmpty() &&
-                updated.isEmpty() && beforeOrder == null && afterOrder == null
+                updated.isEmpty() && beforeOrder == null && afterOrder == null &&
+                beforeHeader == afterHeader && beforeFooter == afterFooter
             is SourceChange -> false
         }
 
@@ -371,7 +372,8 @@ internal class EditorEditHistory {
     private fun Operation.isNoOp(): Boolean = when (this) {
         is Operation.ListChange -> sourceEdit == null && added.isEmpty() && deleted.isEmpty() &&
             updated.isEmpty() && beforeOrder == null && afterOrder == null &&
-            selected.isEmpty() && deselected.isEmpty()
+            selected.isEmpty() && deselected.isEmpty() &&
+            beforeHeader == afterHeader && beforeFooter == afterFooter
         is Operation.SourceChange -> edit.isNoOp
     }
 

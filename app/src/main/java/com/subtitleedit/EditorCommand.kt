@@ -357,5 +357,6 @@ internal sealed interface EditorCommand {
 internal data class EditorCommandResult(
     val changedPositions: Set<Int> = emptySet(),
     val structureChanged: Boolean = false,
-    val removedCount: Int = 0
+    val removedCount: Int = 0,
+    val documentMetadataChanged: Boolean = false
 )

@@ -1,6 +1,7 @@
 package com.subtitleedit.util.subtitle
 
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.util.SubtitleParser.SubtitleFormat
 import java.util.Locale
 import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
@@ -25,15 +26,21 @@ internal object WebVttPreviewWriter {
     private val cueLine = Regex(
         """(?:^|\s)line:(\d+(?:\.\d+)?)%""", RegexOption.IGNORE_CASE
     )
+    private val leadingAssOverride = Regex("""^\{\\[^}]*\}""")
+    private val assPosition = Regex(
+        """\\pos\s*\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)""", RegexOption.IGNORE_CASE
+    )
+    private val assAlignment = Regex("""\\an([1-9])(?!\d)""", RegexOption.IGNORE_CASE)
 
     fun write(document: SubtitleDocument): String {
         val styles = parseStyles(document.header)
+        val inlineCoordinates = document.format == SubtitleFormat.SRT || document.format == SubtitleFormat.LRC
         return buildString {
             appendHeader()
             document.entries.forEach { entry ->
                 append("Dialogue: 0,")
                 append(formatTime(entry.startTime)).append(',').append(formatTime(entry.endTime))
-                append(",Default,,0,0,0,,").append(renderCue(entry, styles)).append('\n')
+                append(",Default,,0,0,0,,").append(renderCue(entry, styles, inlineCoordinates)).append('\n')
             }
         }
     }
@@ -52,7 +59,7 @@ internal object WebVttPreviewWriter {
         append("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
     }
 
-    private fun renderCue(entry: SubtitleEntry, styles: Styles): String = buildString {
+    private fun renderCue(entry: SubtitleEntry, styles: Styles, inlineCoordinates: Boolean): String = buildString {
         var text = entry.text
         val x = cuePosition.find(entry.cueSettings)?.groupValues?.get(1)?.toDoubleOrNull()
         val y = cueLine.find(entry.cueSettings)?.groupValues?.get(1)?.toDoubleOrNull()
@@ -62,6 +69,21 @@ internal object WebVttPreviewWriter {
                 .append(',')
                 .append((y * 288.0 / 100.0).roundToInt())
                 .append(")}")
+        }
+        // SRT/LRC store picker coordinates in a leading ASS override. Extract
+        // only placement; other overrides and literal VTT braces stay escaped.
+        if (inlineCoordinates) {
+            leadingAssOverride.find(text)?.let { prefix ->
+                assPosition.find(prefix.value)?.let { position ->
+                    append("{\\pos(").append(position.groupValues[1]).append(',')
+                        .append(position.groupValues[2]).append(")}")
+                    assAlignment.find(prefix.value)?.let { alignment ->
+                        append("{\\an").append(alignment.groupValues[1]).append('}')
+                    }
+                    val remaining = assAlignment.replace(assPosition.replace(prefix.value, ""), "")
+                    text = (if (remaining == "{}") "" else remaining) + text.substring(prefix.range.last + 1)
+                }
+            }
         }
         alignmentPrefix.find(text)?.let { prefix ->
             append("{\\an").append(prefix.groupValues[2]).append('}')

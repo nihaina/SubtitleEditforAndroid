@@ -94,8 +94,6 @@ import com.subtitleedit.audio.Mp3FileIssues
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.subtitle.WebVttSubtitleFormatHandler
 import com.subtitleedit.util.subtitle.WebVttBrowserPreview
-import com.subtitleedit.util.subtitle.WebVttStyleOps
-import com.subtitleedit.util.subtitle.WebVttVoiceOps
 import com.subtitleedit.util.SubtitleSourceSynchronizer
 import com.subtitleedit.view.SourceEditorView
 import com.subtitleedit.util.TimeUtils
@@ -208,11 +206,10 @@ class EditorActivity : AppCompatActivity() {
     // the user confirms the alignment dialog after returning from the picker.
     private var coordinatePickerView: EditorCoordinatePickerView? = null
     private var coordinatePickerBottomBar: LinearLayout? = null
-    private var coordinatePickerPositions: Set<Int> = emptySet()
     private var coordinatePickerWasPlaying = false
     private var coordinatePickerOverlayVisibility = View.VISIBLE
     private var coordinatePickerOverlayAlpha = 1f
-    private var coordinatePickerOriginalEntries: List<SubtitleEntry> = emptyList()
+    private var coordinatePreview: EditorCoordinatePreview? = null
     private var coordinatePickerInitialAlignment: Int? = null
     private var coordinatePickerInitialCoordinate: SubtitleCoordinate? = null
     private var coordinatePickerInitialCoordinateEnabled: Boolean = false
@@ -934,12 +931,16 @@ class EditorActivity : AppCompatActivity() {
 
     private fun scheduleSubtitlePreview(debounceMs: Long) {
         if (stateModel.mediaType != EditorMediaType.VIDEO || !::subtitlePreviewController.isInitialized) return
+        val previewEntries = coordinatePickerView?.coordinate()?.let { coordinate ->
+            coordinatePreview?.entries(stateModel.subtitleEntries, stateModel.currentFormat, stateModel.document.value, coordinate)
+        }
         subtitlePreviewController.schedule(
             format = stateModel.currentFormat,
-            entries = stateModel.subtitleEntries,
+            entries = previewEntries ?: stateModel.subtitleEntries,
             sourceViewMode = stateModel.isSourceViewMode,
             sourceContent = if (stateModel.isSourceViewMode) stateModel.sourceViewContent else stateModel.originalFileContent,
-            debounceMs = debounceMs
+            debounceMs = debounceMs,
+            entriesHaveStableStructure = previewEntries != null
         )
     }
 
@@ -2055,7 +2056,7 @@ class EditorActivity : AppCompatActivity() {
 
         var refreshStyles: (() -> Unit)? = null
         fun showStyleEditor(existing: com.subtitleedit.util.subtitle.WebVttStyleDefinition? = null) {
-            val usedNames = WebVttStyleOps.list(stateModel.subtitleDocument).map { it.name }
+            val usedNames = stateModel.vttStyles().map { it.name }
             var nextName = "new"
             var suffix = 2
             while (usedNames.any { it.equals(nextName, true) }) nextName = "new${suffix++}"
@@ -2064,18 +2065,19 @@ class EditorActivity : AppCompatActivity() {
                 existing = existing,
                 initialName = existing?.name ?: nextName,
                 onSave = { styleName, declarations ->
-                    val current = stateModel.subtitleDocument
-                    if (WebVttStyleOps.list(current).any {
+                    if (stateModel.vttStyles().any {
                             it.name.equals(styleName, true) && !it.name.equals(savedName, true)
                         }) {
                         showShortToast(getString(R.string.vtt_style_duplicate_name))
                         false
                     } else {
-                        val renamed = savedName?.let { WebVttStyleOps.rename(current, it, styleName) } ?: current
-                        applyVttDocumentChanges(WebVttStyleOps.upsert(renamed, styleName, declarations), "编辑 VTT 样式")
-                        savedName = styleName
-                        refreshStyles?.invoke()
-                        true
+                        if (applyVttDocumentChanges(EditorVttEdit.SaveStyle(savedName, styleName, declarations)) == null) {
+                            false
+                        } else {
+                            savedName = styleName
+                            refreshStyles?.invoke()
+                            true
+                        }
                     }
                 },
                 onClosed = { refreshStyles?.invoke() },
@@ -2087,7 +2089,7 @@ class EditorActivity : AppCompatActivity() {
 
         fun rebuild() {
             rows.removeAllViews()
-            val styles = WebVttStyleOps.list(stateModel.subtitleDocument)
+            val styles = stateModel.vttStyles()
             if (styles.isEmpty()) {
                 rows.addView(TextView(this).apply {
                     text = "暂无样式"
@@ -2109,16 +2111,16 @@ class EditorActivity : AppCompatActivity() {
                     setPadding(menuDp(10), menuDp(8), menuDp(10), menuDp(8))
                     setOnClickListener {
                         val positions = vttTargetPositions()
-                        applyVttDocumentChanges(WebVttStyleOps.apply(stateModel.subtitleDocument, positions, style.name), "应用 VTT 样式")
-                        dialog.dismiss()
+                        if (applyVttDocumentChanges(EditorVttEdit.ApplyStyle(positions, style.name)) != null) {
+                            dialog.dismiss()
+                        }
                     }
                 })
                 row.addView(TextView(this).apply {
                     text = "删除"
                     setPadding(menuDp(10), menuDp(8), menuDp(10), menuDp(8))
                     setOnClickListener {
-                        applyVttDocumentChanges(WebVttStyleOps.delete(stateModel.subtitleDocument, style.name, true), "删除 VTT 样式")
-                        rebuild()
+                        if (applyVttDocumentChanges(EditorVttEdit.DeleteStyle(style.name)) != null) rebuild()
                     }
                 })
                 row.setOnClickListener { showStyleEditor(style) }
@@ -2150,9 +2152,9 @@ class EditorActivity : AppCompatActivity() {
             .create()
 
         fun applyVoice(voice: String?) {
-            val updated = WebVttVoiceOps.set(stateModel.subtitleDocument, vttTargetPositions(), voice)
-            applyVttDocumentChanges(updated, "设置说话人")
-            dialog.dismiss()
+            if (applyVttDocumentChanges(EditorVttEdit.Voice(vttTargetPositions(), voice)) != null) {
+                dialog.dismiss()
+            }
         }
         fun addVoice() {
             val input = EditText(this).apply { hint = "说话人名称"; setSingleLine(true) }
@@ -2170,7 +2172,7 @@ class EditorActivity : AppCompatActivity() {
             setPadding(menuDp(12), menuDp(12), menuDp(12), menuDp(12))
             setOnClickListener { applyVoice(null) }
         })
-        WebVttVoiceOps.list(stateModel.subtitleDocument).forEach { voice ->
+        stateModel.vttVoices().forEach { voice ->
             rows.addView(TextView(this).apply {
                 text = voice
                 setPadding(menuDp(12), menuDp(12), menuDp(12), menuDp(12))
@@ -2186,14 +2188,23 @@ class EditorActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun applyVttDocumentChanges(updated: SubtitleDocument, description: String) {
+    private fun applyVttDocumentChanges(edit: EditorVttEdit): EditorCommandResult? {
+        if (!prepareFormatEdit()) return null
+        val result = stateModel.applyVttEdit(edit, selectedSubtitleIds())
+        renderFormatChange(result)
+        return result
+    }
+
+    private fun prepareFormatEdit(): Boolean {
         finishWaveformEdits()
-        val beforeHeader = stateModel.documentHeader
-        val result = stateModel.applyVttDocument(
-            updated,
-            currentHistoryListState().selectedIds,
-            description
-        )
+        if (sourceHistorySyncPending || sourceListHistorySyncPending || stateModel.isSourceViewTransitioning || sourceViewHasPendingEdits) {
+            showShortToast("正在同步，请稍候")
+            return false
+        }
+        return ensureListMode()
+    }
+
+    private fun renderFormatChange(result: EditorCommandResult) {
         if (result.changedPositions.isNotEmpty()) {
             notifyEntriesChanged(
                 result.changedPositions,
@@ -2201,12 +2212,10 @@ class EditorActivity : AppCompatActivity() {
                 refreshDocument = false
             )
         }
-        if (result.changedPositions.isNotEmpty() || updated.header != beforeHeader) {
-            markAsChanged()
-            updateFormatInfo()
+        if (result.changedPositions.isNotEmpty() || result.documentMetadataChanged) {
+            if (result.documentMetadataChanged) updateFormatInfo()
             invalidateOptionsMenu()
             if (result.changedPositions.isEmpty()) {
-                stateModel.refreshDocument()
                 if (::searchController.isInitialized) searchController.onDocumentChanged()
                 scheduleSubtitlePreview()
             }
@@ -2453,29 +2462,11 @@ class EditorActivity : AppCompatActivity() {
         if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.VTT &&
             (kind == SubtitleFormattingTagOps.Kind.ALIGNMENT || kind == SubtitleFormattingTagOps.Kind.ALL)
         ) {
-            val updated = stateModel.subtitleDocument.copy(
-                entries = stateModel.subtitleDocument.entries.mapIndexed { index, entry ->
-                    if (index !in positions) {
-                        entry
-                    } else {
-                        entry.copy().also { copy ->
-                            copy.text = SubtitleFormattingTagOps.remove(copy.text, kind)
-                            WebVttSubtitleFormatHandler.clearCueAlignment(copy)
-                        }
-                    }
-                }
-            )
-            val changed = updated.entries.mapIndexedNotNull { index, entry ->
-                val before = stateModel.subtitleEntries.getOrNull(index)
-                index.takeIf {
-                    before != null && (before.text != entry.text || before.cueSettings != entry.cueSettings)
-                }
-            }
-            if (changed.isEmpty()) {
+            val result = applyVttDocumentChanges(EditorVttEdit.RemoveTags(positions, kind)) ?: return
+            if (result.changedPositions.isEmpty() && !result.documentMetadataChanged) {
                 showShortToast("没有可删除的格式化标签")
                 return
             }
-            applyVttDocumentChanges(updated, "删除格式化标签")
             showShortToast("已删除格式化标签")
             return
         }
@@ -2525,18 +2516,8 @@ class EditorActivity : AppCompatActivity() {
         if (deferLargeListEdit(stateModel.subtitleEntries.size) {
                 applySubtitleColor(positions, color)
             }) return
-        if (!ensureListMode()) return
-        finishWaveformEdits()
-        val result = stateModel.applySubtitleColor(positions, color, currentHistoryListState().selectedIds)
-        if (result.changedPositions.isNotEmpty()) {
-            notifyEntriesChanged(
-                result.changedPositions,
-                markChanged = false,
-                refreshDocument = false
-            )
-            markAsChanged()
-            invalidateOptionsMenu()
-        }
+        if (!prepareFormatEdit()) return
+        renderFormatChange(stateModel.applySubtitleColor(positions, color, selectedSubtitleIds()))
     }
 
     private fun showSubtitleFontPicker(
@@ -2660,25 +2641,7 @@ class EditorActivity : AppCompatActivity() {
             }) return
         if (!ensureListMode()) return
         if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.VTT) {
-            val updated = stateModel.subtitleDocument.copy(
-                entries = stateModel.subtitleDocument.entries.mapIndexed { index, entry ->
-                    if (index !in positions) {
-                        entry
-                    } else {
-                        entry.copy().also {
-                            alignment?.let { value ->
-                                WebVttSubtitleFormatHandler.updateCueAlignment(it, value)
-                            }
-                            coordinate?.let { value ->
-                                WebVttSubtitleFormatHandler.updateCueCoordinate(
-                                    it, value.xPercent, value.yPercent
-                                )
-                            }
-                        }
-                    }
-                }
-            )
-            applyVttDocumentChanges(updated, if (coordinate == null) "排列" else "排列和坐标")
+            applyVttDocumentChanges(EditorVttEdit.Placement(positions, alignment, coordinate))
             return
         }
         val targets = positions.sorted().mapNotNull { position ->
@@ -2715,16 +2678,18 @@ class EditorActivity : AppCompatActivity() {
         if (coordinatePickerView != null) return
         val firstAttempt = !coordinatePickerPending
         if (firstAttempt) {
+            finishWaveformEdits()
             // Capture the mixed/fullscreen state before normalizing the video layout.
             // The normalizer clears isVideoMixed, so reading it afterwards would lose
             // the user's layout and the picker could never restore it.
             coordinatePickerPending = true
             coordinatePickerGeneration++
-            coordinatePickerPositions = positions.toSet()
             coordinatePickerInitialAlignment = initialAlignment
             coordinatePickerInitialCoordinate = initialCoordinate
             coordinatePickerInitialCoordinateEnabled = initialCoordinateEnabled
-            coordinatePickerOriginalEntries = stateModel.subtitleEntries.map { it.copy() }
+            coordinatePreview = EditorCoordinatePreview(
+                stateModel.subtitleEntries, stateModel.currentFormat, positions, stateModel.document.value
+            )
             coordinatePickerWasMixed = stateModel.isVideoMixed
             coordinatePickerWasFullscreen = stateModel.isVideoFullscreen
             coordinatePickerWasPlaying = playbackController.isCurrentlyPlaying
@@ -2840,33 +2805,27 @@ class EditorActivity : AppCompatActivity() {
 
     private fun updateCoordinatePickerPreview(coordinate: SubtitleCoordinate) {
         if (coordinatePickerView == null) return
-        coordinatePickerPositions.forEach { position ->
-            val entry = stateModel.subtitleEntries.getOrNull(position) ?: return@forEach
-            if (stateModel.currentFormat == SubtitleParser.SubtitleFormat.VTT) {
-                WebVttSubtitleFormatHandler.updateCueCoordinate(
-                    entry, coordinate.xPercent, coordinate.yPercent
-                )
-            } else {
-                entry.text = SubtitleCoordinateOps.set(entry.text, coordinate)
-            }
-        }
-        stateModel.refreshDocument()
+        val entries = coordinatePreview?.entries(
+            stateModel.subtitleEntries, stateModel.currentFormat, stateModel.document.value, coordinate
+        ) ?: return
         // Dragging can generate dozens of motion events. Keep the preview responsive while
         // avoiding an mpv subtitle-track replacement for every event.
         subtitlePreviewController.schedule(
             format = stateModel.currentFormat,
-            entries = stateModel.subtitleEntries,
+            entries = entries,
             sourceViewMode = stateModel.isSourceViewMode,
             sourceContent = if (stateModel.isSourceViewMode) stateModel.sourceViewContent else stateModel.originalFileContent,
-            debounceMs = 70L
+            debounceMs = 70L,
+            entriesHaveStableStructure = true
         )
     }
 
     private fun finishCoordinatePicker(confirm: Boolean) {
         val picker = coordinatePickerView ?: return
         val selectedCoordinate = picker.coordinate()
-        val positions = coordinatePickerPositions
-        val originalEntries = coordinatePickerOriginalEntries
+        val positions = coordinatePreview?.positions(
+            stateModel.subtitleEntries, stateModel.currentFormat, stateModel.document.value
+        ).orEmpty()
         val selectedAlignment = coordinatePickerInitialAlignment
         val coordinateWasEnabled = coordinatePickerInitialCoordinateEnabled
 
@@ -2878,18 +2837,7 @@ class EditorActivity : AppCompatActivity() {
         coordinatePickerBottomBar = null
         (picker.parent as? ViewGroup)?.removeView(picker)
 
-        // The drag preview is intentionally not a document edit. Restore the original rows
-        // before reopening the alignment dialog, then commit only after its final confirmation.
-        stateModel.subtitleEntries = originalEntries.map { it.copy() }.toMutableList()
-        // The picker mutates the same row objects held by the adapter while previewing. Rebind
-        // the restored copies so the list and its identity-based selection set do not retain the
-        // transient coordinate preview after cancel or when returning to the alignment dialog.
-        submitSubtitleList(
-            refreshAll = false,
-            syncWaveform = false,
-            markChanged = false,
-            schedulePreview = false
-        )
+        coordinatePreview = null
         scheduleSubtitlePreview()
         binding.videoControlsOverlay.animate().cancel()
         binding.videoControlsOverlay.alpha = coordinatePickerOverlayAlpha
@@ -2899,8 +2847,6 @@ class EditorActivity : AppCompatActivity() {
             videoFullscreenController.setMixedDisplay(true)
         }
 
-        coordinatePickerPositions = emptySet()
-        coordinatePickerOriginalEntries = emptyList()
         coordinatePickerInitialAlignment = null
         val coordinateForDialog = if (confirm) selectedCoordinate else coordinatePickerInitialCoordinate
         // The picker only stages a value. Keep the checkbox state from the
@@ -2919,6 +2865,7 @@ class EditorActivity : AppCompatActivity() {
         }
         // Return to the alignment dialog in both cases. Confirm fills the newly picked
         // coordinate; cancel keeps the value that was shown before entering the picker.
+        if (positions.isEmpty()) return
         showSubtitleAlignmentPicker(
             positions,
             null,
@@ -2931,7 +2878,9 @@ class EditorActivity : AppCompatActivity() {
     /** Cancels a picker that is waiting for the video viewport to obtain a size. */
     private fun cancelPendingCoordinatePicker() {
         if (!coordinatePickerPending || coordinatePickerView != null) return
-        val positions = coordinatePickerPositions
+        val positions = coordinatePreview?.positions(
+            stateModel.subtitleEntries, stateModel.currentFormat, stateModel.document.value
+        ).orEmpty()
         val initialCoordinate = coordinatePickerInitialCoordinate
         val initialAlignment = coordinatePickerInitialAlignment
         val initialCoordinateEnabled = coordinatePickerInitialCoordinateEnabled
@@ -2939,8 +2888,7 @@ class EditorActivity : AppCompatActivity() {
         val restoreFullscreen = coordinatePickerWasFullscreen
         coordinatePickerPending = false
         coordinatePickerGeneration++
-        coordinatePickerPositions = emptySet()
-        coordinatePickerOriginalEntries = emptyList()
+        coordinatePreview = null
         coordinatePickerInitialAlignment = null
         coordinatePickerInitialCoordinate = null
         coordinatePickerInitialCoordinateEnabled = false
@@ -2952,6 +2900,7 @@ class EditorActivity : AppCompatActivity() {
         if (restoreFullscreen && ::videoFullscreenController.isInitialized) {
             videoFullscreenController.toggle()
         }
+        if (positions.isEmpty()) return
         showSubtitleAlignmentPicker(
             positions,
             null,

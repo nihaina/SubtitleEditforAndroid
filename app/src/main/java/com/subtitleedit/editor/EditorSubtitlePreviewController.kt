@@ -45,14 +45,18 @@ internal class EditorSubtitlePreviewController(
         entries: List<SubtitleEntry>,
         sourceViewMode: Boolean,
         sourceContent: String,
-        debounceMs: Long = 300L
+        debounceMs: Long = 300L,
+        entriesHaveStableStructure: Boolean = false
     ) {
         if (released) return
         val generation = ++requestGeneration
         // Keep the list structure stable for the worker, but defer the expensive per-entry copy
         // until the serialized IO dispatcher.  Previously this map { copy() } ran on the main
         // thread after the debounce and caused a visible pause for large subtitle files.
-        val request = PreviewRequest(format, entries.toList(), sourceViewMode, sourceContent)
+        // Coordinate overlays already capture a fixed reference list once per
+        // document revision. Reuse it across MOVE events instead of copying N
+        // references on the UI thread again for every coordinate update.
+        val request = PreviewRequest(format, if (entriesHaveStableStructure) entries else entries.toList(), sourceViewMode, sourceContent)
         updateJob?.cancel()
         updateJob = scope.launch {
             delay(debounceMs.coerceAtLeast(0L))
@@ -147,7 +151,7 @@ internal class EditorSubtitlePreviewController(
                     entries
                 }
                 WebVttPreviewWriter.write(
-                    SubtitleDocument(SubtitleParser.SubtitleFormat.VTT, previewEntries)
+                    SubtitleDocument(format, previewEntries)
                 )
             }
             sourceViewMode -> if (entries.isNotEmpty() || sourceContent.isBlank()) {

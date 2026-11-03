@@ -2,6 +2,8 @@ package com.subtitleedit.util.subtitle
 
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleColorOps
+import com.subtitleedit.util.SubtitleCoordinate
+import com.subtitleedit.util.SubtitleCoordinateOps
 import com.subtitleedit.util.SubtitleParser.SubtitleFormat
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -118,6 +120,25 @@ class WebVttPreviewWriterTest {
         assertFalse(output.contains("{\\pos"))
         assertFalse(output.contains("literal\\N"))
         assertFalse(output.contains("{\\i1}"))
+    }
+
+    @Test
+    fun srtAndLrcPickerCoordinatesKeepTheAnchorAndHtmlFormatting() {
+        val placed = SubtitleCoordinateOps.set("<i>one</i>", SubtitleCoordinate(20f, 20f))
+        listOf(SubtitleFormat.SRT, SubtitleFormat.LRC).forEach { format ->
+            assertEquals(
+                "{\\pos(77,58)}{\\an7}{\\i1}one{\\i0}",
+                text(document(placed).copy(format = format))
+            )
+        }
+    }
+
+    @Test
+    fun srtCoordinatesDoNotEnableOtherOverridesOrPositionTagsInTheBody() {
+        val output = text(document("{\\an7\\pos(77,58)\\b1}one {\\pos(0,0)}").copy(format = SubtitleFormat.SRT))
+        assertTrue(output.startsWith("{\\pos(77,58)}{\\an7}"))
+        assertTrue(output.contains("\\{\\\u2060b1\\}"))
+        assertTrue(output.endsWith("one \\{\\\u2060pos(0,0)\\}"))
     }
 
     @Test

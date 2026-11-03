@@ -5,6 +5,8 @@ import com.subtitleedit.util.subtitle.SubtitleDocument
 import com.subtitleedit.util.subtitle.WebVttStyleOps
 import com.subtitleedit.util.subtitle.WebVttVoiceOps
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -40,6 +42,27 @@ class WebVttStyleVoiceOpsTest {
         val removed = WebVttStyleOps.delete(renamed, "strong", removeCueReferences = true)
         assertTrue("::cue(.strong)" !in removed.header)
         assertEquals("A", removed.entries.single().text)
+    }
+
+    @Test
+    fun renameAndDeleteReuseEveryCueWhoseTextDidNotChange() {
+        val source = document(listOf("<c.emphasis>One</c>", "<v Alice><c.red>Two</c></v>", "plain"))
+
+        val renamed = WebVttStyleOps.rename(source, "emphasis", "strong")
+
+        assertNotSame(source.entries[0], renamed.entries[0])
+        assertEquals("<c.strong>One</c>", renamed.entries[0].text)
+        assertSame(source.entries[1], renamed.entries[1])
+        assertSame(source.entries[2], renamed.entries[2])
+        assertEquals("<c.emphasis>One</c>", source.entries[0].text)
+
+        val deleted = WebVttStyleOps.delete(renamed, "strong", removeCueReferences = true)
+
+        assertNotSame(renamed.entries[0], deleted.entries[0])
+        assertEquals("One", deleted.entries[0].text)
+        assertSame(source.entries[1], deleted.entries[1])
+        assertSame(source.entries[2], deleted.entries[2])
+        assertEquals("<c.strong>One</c>", renamed.entries[0].text)
     }
 
     @Test

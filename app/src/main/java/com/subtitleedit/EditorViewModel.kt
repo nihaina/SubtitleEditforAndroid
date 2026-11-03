@@ -7,10 +7,7 @@ import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.editor.EditorSourceTextEdit
 import com.subtitleedit.editor.EditorHistoryDescriptionFormatter
 import com.subtitleedit.util.SubtitleParser
-import com.subtitleedit.util.SubtitleColorOps
 import com.subtitleedit.util.subtitle.SubtitleDocument
-import com.subtitleedit.util.subtitle.WebVttSubtitleFormatHandler
-import com.subtitleedit.util.subtitle.toSubtitleLines
 import com.subtitleedit.repository.DefaultSubtitleRepository
 import com.subtitleedit.repository.SubtitleRepository
 import com.subtitleedit.usecase.ApplySubtitleEditUseCase
@@ -191,6 +188,13 @@ internal class EditorViewModel(
     private val applySubtitleEdit = ApplySubtitleEditUseCase()
     private val syncSourceDocument = SyncSourceDocumentUseCase()
     private val editSession = EditorEditSession(documentState, ::recordCommittedListEdit)
+    private val formatEditSession = EditorFormatEditSession(documentState, recordHistory = { history ->
+        recordListHistory(
+            history.before, history.after, history.description, history.beforeSource, history.afterSource,
+            beforeHeader = history.beforeHeader, afterHeader = history.afterHeader,
+            beforeFooter = history.beforeFooter, afterFooter = history.afterFooter
+        )
+    })
     private val listEditSession = EditorListEditSession(
         documentState, ::recordCommittedListEdit,
         recordSource = { edit, before ->
@@ -264,7 +268,9 @@ internal class EditorViewModel(
         val current = documentState.subtitleEntries
         // Reuse already owned snapshot rows. A row edit allocates one row copy
         // and a shallow list instead of deep-copying the entire large document.
-        val entries = if (changedPositions != null && previous.entries.size == current.size) {
+        val entries = if (changedPositions?.isEmpty() == true && previous.entries.size == current.size) {
+            previous.entries
+        } else if (changedPositions != null && previous.entries.size == current.size) {
             previous.entries.toMutableList().also { snapshot ->
                 changedPositions.forEach { position ->
                     current.getOrNull(position)?.let { snapshot[position] = it.copy() }
@@ -326,10 +332,12 @@ internal class EditorViewModel(
         afterSourceText: String?,
         beforeHeader: String? = null,
         afterHeader: String? = null,
-        difference: EditorEditHistory.ListDifference? = null
+        difference: EditorEditHistory.ListDifference? = null,
+        beforeFooter: String? = null,
+        afterFooter: String? = null
     ): Boolean {
         val resolvedDifference = difference ?: EditorEditHistory.difference(before, after)
-        if (resolvedDifference.isEmpty && beforeHeader == afterHeader) return false
+        if (resolvedDifference.isEmpty && beforeHeader == afterHeader && beforeFooter == afterFooter) return false
         editHistory.record(
             EditorEditHistory.Operation.ListChange.fromStates(
                 before = before,
@@ -338,7 +346,9 @@ internal class EditorViewModel(
                 beforeSourceText = beforeSourceText,
                 afterSourceText = afterSourceText,
                 beforeHeader = beforeHeader,
-                afterHeader = afterHeader
+                afterHeader = afterHeader,
+                beforeFooter = beforeFooter,
+                afterFooter = afterFooter
             )
         )
         documentState.historyEntriesSnapshot = advanceHistorySnapshot(
@@ -459,143 +469,47 @@ internal class EditorViewModel(
         return result
     }
 
-    /** Color may add WebVTT CSS, so source, header and text share one history record. */
+    /** Formatting commits own their source, metadata, history and dirty state together. */
     fun applySubtitleColor(positions: Set<Int>, argb: Int, selectedIds: Set<Long>): EditorCommandResult {
-        val beforeDocument = documentState.subtitleDocument
-        val updated = SubtitleColorOps.apply(beforeDocument, positions, argb)
-        val updates = updated.entries.mapIndexedNotNull { index, entry ->
-            (index to entry.text).takeIf { entry.text != beforeDocument.entries[index].text }
-        }
-        val headerChanged = updated.header != beforeDocument.header
-        if (updates.isEmpty() && !headerChanged) return EditorCommandResult()
-        val rawSource = documentState.originalFileContent
-        val beforeSource = if (documentState.sourceViewNeedsListSync) {
-            // Pending list edits must be present in both the color result and its undo
-            // snapshot. The history baseline is the entry mapping for the current source; do
-            // not reparsed the entire raw document during an edit.
-            syncSourceDocument(
-                rawSource,
-                currentFormat,
-                documentState.historyEntriesSnapshot,
-                beforeDocument.entries
-            )
-        } else {
-            rawSource
-        }
-        val result = applySubtitleEdit(documentState, EditorCommand.UpdateTexts(updates, removeBlankEntries = false))
-        var source = syncSourceDocument(beforeSource, currentFormat, beforeDocument.entries, updated.entries)
-        if (currentFormat == SubtitleParser.SubtitleFormat.VTT && headerChanged) {
-            source = SubtitleColorOps.syncVttHeader(source, beforeDocument.header, updated.header)
-        }
-        documentState.documentHeader = updated.header
-        documentState.originalFileContent = source
-        documentState.sourceViewContent = source
-        documentState.sourceViewNeedsListSync = false
-        documentState.sourceHistoryTextSnapshot = source
-        recordListHistory(
-            before = EditorEditHistory.ListState(beforeDocument.entries, selectedIds),
-            after = EditorEditHistory.ListState(documentState.subtitleEntries.map { it.copy() }, selectedIds),
-            description = "颜色",
-            beforeSourceText = beforeSource,
-            afterSourceText = source,
-            beforeHeader = beforeDocument.header,
-            afterHeader = updated.header
-        )
-        publishDocument()
-        return if (headerChanged && result.changedPositions.isEmpty()) {
-            result.copy(changedPositions = positions.filterTo(mutableSetOf()) { it in updated.entries.indices })
-        } else result
+        if (isSourceViewMode || isSourceViewTransitioning) return EditorCommandResult()
+        return publishFormatChange(formatEditSession.applyColor(positions, argb, selectedIds))
     }
 
-    /** Applies a VTT-specific header/text edit as one undoable document operation. */
     fun applyVttDocument(
         updated: SubtitleDocument,
         selectedIds: Set<Long>,
         description: String
     ): EditorCommandResult {
-        if (currentFormat != SubtitleParser.SubtitleFormat.VTT) return EditorCommandResult()
-        val beforeDocument = documentState.subtitleDocument
-        if (beforeDocument == updated) return EditorCommandResult()
-        val metadataChanged = updated.entries.mapIndexedNotNull { index, entry ->
-            val before = beforeDocument.entries.getOrNull(index)
-            index.takeIf {
-                before == null ||
-                    entry.cueIdentifier != before.cueIdentifier ||
-                    entry.cueSettings != before.cueSettings
-            }
-        }.toSet()
-        val updates = updated.entries.mapIndexedNotNull { index, entry ->
-            val before = beforeDocument.entries.getOrNull(index)
-            (index to entry.text).takeIf {
-                before == null ||
-                    entry.text != before.text ||
-                    entry.cueIdentifier != before.cueIdentifier ||
-                    entry.cueSettings != before.cueSettings
-            }
-        }
-        val beforeSource = if (documentState.sourceViewNeedsListSync) {
-            syncSourceDocument(
-                documentState.originalFileContent,
-                currentFormat,
-                documentState.historyEntriesSnapshot,
-                beforeDocument.entries
-            )
-        } else documentState.originalFileContent
-        val result = applySubtitleEdit(
-            documentState,
-            EditorCommand.UpdateTexts(updates, removeBlankEntries = false)
-        )
-        // UpdateTexts owns text edits; keep VTT cue metadata in the live list in sync too.
-        // Alignment edits change cueSettings while preserving each entry's stable identity.
-        updated.entries.forEachIndexed { index, updatedEntry ->
-            documentState.subtitleEntries.getOrNull(index)?.let { currentEntry ->
-                currentEntry.cueIdentifier = updatedEntry.cueIdentifier
-                currentEntry.cueSettings = updatedEntry.cueSettings
-            }
-        }
-        var source = syncSourceDocument(beforeSource, currentFormat, beforeDocument.entries, updated.entries)
-        if (updated.header != beforeDocument.header) {
-            source = replaceVttSourceHeader(source, updated.header)
-        }
-        documentState.documentHeader = updated.header
-        documentState.documentFooter = updated.footer
-        documentState.originalFileContent = source
-        documentState.sourceViewContent = source
-        documentState.sourceViewNeedsListSync = false
-        documentState.sourceHistoryTextSnapshot = source
-        recordListHistory(
-            before = EditorEditHistory.ListState(beforeDocument.entries, selectedIds),
-            after = EditorEditHistory.ListState(documentState.subtitleEntries.map { it.copy() }, selectedIds),
-            description = description,
-            beforeSourceText = beforeSource,
-            afterSourceText = source,
-            beforeHeader = beforeDocument.header,
-            afterHeader = updated.header
-        )
-        publishDocument()
-        val changedPositions = result.changedPositions + metadataChanged
-        return if (updated.header != beforeDocument.header && changedPositions.isEmpty()) {
-            result.copy(changedPositions = updated.entries.indices.toSet())
-        } else {
-            result.copy(changedPositions = changedPositions)
-        }
+        if (isSourceViewMode || isSourceViewTransitioning) return EditorCommandResult()
+        return publishFormatChange(formatEditSession.applyVtt(updated, selectedIds, description))
     }
 
-    private fun replaceVttSourceHeader(source: String, header: String): String {
-        val parsed = com.subtitleedit.util.subtitle.WebVttSubtitleFormatHandler.parse(
-            source.toSubtitleLines()
-        )
-        val firstCue = parsed.rawCues.firstOrNull()
-        if (firstCue == null) return header.trimEnd()
-        val lines = Regex("[^\\r\\n]*(?:\\r\\n|\\r|\\n|$)").findAll(source)
-            .filter { it.value.isNotEmpty() }
-            .toList()
-        val cueStart = firstCue.identifierLineIndex ?: firstCue.timeLineIndex
-        val insertAt = lines.getOrNull(cueStart)?.range?.first ?: return source
-        val newline = if ("\r\n" in source) "\r\n" else if ('\r' in source && '\n' !in source) "\r" else "\n"
-        val bom = if (source.startsWith('\uFEFF')) "\uFEFF" else ""
-        val cleanHeader = header.removePrefix("\uFEFF").trimEnd().replace("\n", newline)
-        return bom + cleanHeader + newline + newline + source.substring(insertAt)
+    /** Existing pure VTT operations borrow the current document only during preparation. */
+    fun applyVttEdit(edit: EditorVttEdit, selectedIds: Set<Long>): EditorCommandResult =
+        applyVttDocumentEdit(selectedIds, edit.description, edit::prepare)
+
+    fun vttStyles() = com.subtitleedit.util.subtitle.WebVttStyleOps.list(formatDocumentView())
+
+    fun vttVoices() = com.subtitleedit.util.subtitle.WebVttVoiceOps.list(formatDocumentView())
+
+    private fun formatDocumentView() = SubtitleDocument(
+        currentFormat, subtitleEntries, documentHeader, documentFooter, documentState.documentLrcVariant
+    )
+
+    fun applyVttDocumentEdit(
+        selectedIds: Set<Long>,
+        description: String,
+        transform: (SubtitleDocument) -> SubtitleDocument
+    ): EditorCommandResult {
+        if (isSourceViewMode || isSourceViewTransitioning) return EditorCommandResult()
+        return publishFormatChange(formatEditSession.applyVttEdit(selectedIds, description, transform))
+    }
+
+    private fun publishFormatChange(result: EditorCommandResult): EditorCommandResult {
+        if (result.changedPositions.isNotEmpty() || result.documentMetadataChanged) {
+            publishChangedDocument(result.changedPositions)
+        }
+        return result
     }
 
     fun executeHistoryCommand(

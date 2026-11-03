@@ -1,7 +1,10 @@
 package com.subtitleedit.editor
 
+import com.subtitleedit.EditorCoordinatePreview
+import com.subtitleedit.EditorEditHistory
 import com.subtitleedit.EditorViewModel
 import com.subtitleedit.model.SubtitleEntry
+import com.subtitleedit.util.SubtitleCoordinate
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.SubtitleParser.SubtitleFormat
 import java.io.File
@@ -15,10 +18,61 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EditorSubtitlePreviewControllerTest {
+    @Test
+    fun srtCoordinateOverlayReachesThePlaybackTrackWithoutChangingTheDocument() = runBlocking {
+        assertCoordinateOverlay(
+            SubtitleFormat.SRT, "1\n00:00:01,000 --> 00:00:02,000\nHello\n", "test.srt"
+        )
+    }
+
+    @Test
+    fun vttCoordinateOverlayReachesThePlaybackTrackWithoutChangingTheDocument() = runBlocking {
+        assertCoordinateOverlay(
+            SubtitleFormat.VTT, "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello\n", "test.vtt"
+        )
+    }
+
+    @Test
+    fun aQueuedCoordinateOverlayCannotReplaceTheRestoredDocumentTrack() = runBlocking {
+        val source = "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+        val model = EditorViewModel().apply { loadSubtitleContent(source, "test.srt") }
+        val document = model.document.value
+        val overlay = EditorCoordinatePreview(model.subtitleEntries, SubtitleFormat.SRT, setOf(0), document)
+            .entries(model.subtitleEntries, SubtitleFormat.SRT, document, SubtitleCoordinate(25f, 75f))!!
+        val cache = Files.createTempDirectory("subtitle-preview-coordinate-cancel-test-").toFile()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val track = CompletableDeferred<File?>()
+        val controller = EditorSubtitlePreviewController(cache, scope) { track.complete(it) }
+        try {
+            controller.schedule(
+                SubtitleFormat.SRT, overlay, sourceViewMode = false, sourceContent = source,
+                debounceMs = 5_000L, entriesHaveStableStructure = true
+            )
+            controller.schedule(
+                SubtitleFormat.SRT, model.subtitleEntries, sourceViewMode = false,
+                sourceContent = source, debounceMs = 0L
+            )
+
+            val file = withTimeout(5_000) { track.await() } ?: error("Preview track missing")
+            val content = file.readText()
+            assertTrue(content.contains("Hello"))
+            assertFalse(content.contains("pos("))
+            assertEquals("Hello", model.subtitleEntries.single().text)
+            assertEquals(source, model.originalFileContent)
+            assertSame(document, model.document.value)
+            assertFalse(model.hasUnsavedChanges)
+        } finally {
+            controller.release()
+            scope.cancel()
+            cache.deleteRecursively()
+        }
+    }
+
     @Test
     fun vttMenuColorCreatesAColoredAssPlaybackTrackWithoutChangingTheVttDocument() = runBlocking {
         val model = EditorViewModel()
@@ -218,18 +272,42 @@ class EditorSubtitlePreviewControllerTest {
 
     private data class Preview(val extension: String, val content: String)
 
+    private suspend fun assertCoordinateOverlay(format: SubtitleFormat, source: String, fileName: String) {
+        val model = EditorViewModel().apply {
+            loadSubtitleContent(source, fileName)
+            setHistoryBaseline(EditorEditHistory.ListState(subtitleEntries, emptySet()), source, true)
+        }
+        val document = model.document.value
+        val history = model.historyEntriesSnapshot
+        val row = model.subtitleEntries.single().copy()
+        val overlay = EditorCoordinatePreview(model.subtitleEntries, format, setOf(0), document)
+            .entries(model.subtitleEntries, format, document, SubtitleCoordinate(25f, 75f))!!
+
+        val preview = preview(format, overlay, false, source, entriesHaveStableStructure = true)
+
+        assertEquals("ass", preview.extension)
+        assertTrue(preview.content.contains("{\\pos(96,216)}Hello"))
+        assertEquals(row, model.subtitleEntries.single())
+        assertSame(document, model.document.value)
+        assertSame(history, model.historyEntriesSnapshot)
+        assertEquals(source, model.originalFileContent)
+        assertEquals(source, model.sourceViewContent)
+        assertFalse(model.hasUnsavedChanges)
+    }
+
     private suspend fun preview(
         format: SubtitleFormat,
         entries: List<SubtitleEntry>,
         sourceViewMode: Boolean,
-        source: String
+        source: String,
+        entriesHaveStableStructure: Boolean = false
     ): Preview {
         val cache = Files.createTempDirectory("subtitle-preview-test-").toFile()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val track = CompletableDeferred<File?>()
         val controller = EditorSubtitlePreviewController(cache, scope) { track.complete(it) }
         try {
-            controller.schedule(format, entries, sourceViewMode, source)
+            controller.schedule(format, entries, sourceViewMode, source, entriesHaveStableStructure = entriesHaveStableStructure)
             val file = withTimeout(5_000) { track.await() } ?: error("Preview track missing")
             return Preview(file.extension, file.readText())
         } finally {
