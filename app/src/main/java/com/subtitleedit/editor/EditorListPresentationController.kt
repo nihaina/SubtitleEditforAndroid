@@ -55,4 +55,13 @@ internal class EditorListPresentationController(
         adapter().setSelectionByStableIds(ids)
         updateSelectedCount()
     }
+
+    fun notifyTimeConflicts(positions: Set<Int>) {
+        val currentAdapter = adapter()
+        positions.forEach { position ->
+            if (position in 0 until currentAdapter.itemCount) {
+                currentAdapter.notifyItemChanged(position, SubtitleAdapter.PAYLOAD_TIME_CONFLICT)
+            }
+        }
+    }
 }

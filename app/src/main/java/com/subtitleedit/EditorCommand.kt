@@ -289,20 +289,23 @@ internal sealed interface EditorCommand {
             if (splitTime <= entry.startTime || splitTime >= entry.endTime) {
                 return EditorCommandResult()
             }
-            val originalEnd = entry.endTime
-            val originalEndModified = entry.endTimeModified
             val left = entry.copyWithNewStableId().apply {
                 endTime = splitTime
                 endTimeModified = true
                 text = leftText
             }
-            val right = SubtitleEntry(
-                index = position + 2,
-                startTime = splitTime,
-                endTime = originalEnd,
-                text = rightText,
-                endTimeModified = originalEndModified
-            )
+            val right = entry.copyWithNewStableId().apply {
+                index = position + 2
+                startTime = splitTime
+                text = rightText
+            }
+            if (state.currentFormat == SubtitleParser.SubtitleFormat.VTT) {
+                // The right text may no longer contain the derived placement prefix.
+                // Keep it consistent with the inherited settings so saving preserves them.
+                WebVttSubtitleFormatHandler.updateCueSettings(
+                    right, WebVttSubtitleFormatHandler.getCueSettings(entry)
+                )
+            }
             state.subtitleEntries[position] = left
             state.subtitleEntries.add(position + 1, right)
             renumberFrom(state, position)

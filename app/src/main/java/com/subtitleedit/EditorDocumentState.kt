@@ -5,7 +5,7 @@ import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.util.SubtitleParser
 import com.subtitleedit.util.subtitle.LrcVariant
 import com.subtitleedit.util.subtitle.SubtitleDocument
-import com.subtitleedit.util.subtitle.WebVttSubtitleFormatHandler
+import com.subtitleedit.util.subtitle.WebVttSourceHeader
 import java.io.File
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
@@ -55,21 +55,11 @@ internal class EditorDocumentState {
             lrcVariant = documentLrcVariant
         )
 
-    /** Update only VTT sections when a source edit touches the header/footer. */
+    /** Refresh the VTT metadata prefix without treating its first cue identifier as header text. */
     fun updateVttMetadataForSourceEdit(content: String, editedLine: Int) {
         if (currentFormat != SubtitleParser.SubtitleFormat.VTT) return
-        var cursor = 0
-        var lineIndex = 0
-        while (cursor <= content.length) {
-            val lineEnd = content.indexOfAny(charArrayOf('\r', '\n'), cursor)
-                .takeIf { it >= 0 } ?: content.length
-            if (WebVttSubtitleFormatHandler.parseTimeLine(content.substring(cursor, lineEnd)) != null) {
-                if (editedLine < lineIndex) documentHeader = content.substring(0, cursor).trimEnd()
-                return
-            }
-            if (lineEnd >= content.length) return
-            cursor = lineEnd + if (content[lineEnd] == '\r' && content.getOrNull(lineEnd + 1) == '\n') 2 else 1
-            lineIndex++
+        WebVttSourceHeader.forSourceEdit(content, editedLine, subtitleEntries.isNotEmpty())?.let {
+            documentHeader = it
         }
     }
 

@@ -1189,6 +1189,9 @@ class EditorActivity : AppCompatActivity() {
                 stateModel.documentState.documentLrcVariant = parsedDocument.lrcVariant
             }
             applySourceViewEntries(normalizeSourceViewEntries(parsedDocument.entries))
+            // Re-evaluate global cue features once this full parse is accepted.
+            // Removing an offset/roll-up marker must let later edits stay local.
+            sourceLineEditController.prepareDocument(sourceSnapshot, stateModel.currentFormat)
             stateModel.documentState.sourceViewEntriesGeneration = editGeneration
             sourceViewHasPendingEdits = false
         }
@@ -1788,6 +1791,7 @@ class EditorActivity : AppCompatActivity() {
                             stateModel.documentState.documentLrcVariant = parsed.lrcVariant
                         }
                         applySourceViewEntries(normalizeSourceViewEntries(parsed.entries))
+                        sourceLineEditController.prepareDocument(editedContent, stateModel.currentFormat)
                         stateModel.documentState.sourceViewEntriesGeneration =
                             stateModel.documentState.sourceViewEditGeneration
                         sourceViewHasPendingEdits = false
@@ -1872,6 +1876,7 @@ class EditorActivity : AppCompatActivity() {
             stateModel.documentState.documentLrcVariant = document.lrcVariant
         }
         applySourceViewEntries(normalizeSourceViewEntries(document.entries))
+        sourceLineEditController.prepareDocument(content, stateModel.currentFormat)
         stateModel.documentState.sourceViewEntriesGeneration = generation
         stateModel.sourceViewNeedsListSync = false
         syncEditHistoryBaseline()
@@ -3526,11 +3531,7 @@ class EditorActivity : AppCompatActivity() {
                 schedulePreview = false
             ) {
                 listPresentationController.notifyPositions(result.updatedPositions, allowFullRefresh = false)
-                result.timeConflictPositions.forEach { position ->
-                    if (position in 0 until subtitleAdapter.itemCount) {
-                        subtitleAdapter.notifyItemChanged(position, SubtitleAdapter.PAYLOAD_TIME_CONFLICT)
-                    }
-                }
+                listPresentationController.notifyTimeConflicts(result.timeConflictPositions)
             }
         } else {
             listPresentationController.notifyPositions(result.updatedPositions, allowFullRefresh = false)
@@ -3771,9 +3772,7 @@ class EditorActivity : AppCompatActivity() {
                 refreshDocument = false, syncWaveform = false,
                 afterSubmit = {
                     listPresentationController.notifyPositions(change.updatedPositions, includeNeighbors, allowFullRefresh = false)
-                    if (first > 0 && first - 1 < subtitleAdapter.itemCount) {
-                        subtitleAdapter.notifyItemChanged(first - 1, SubtitleAdapter.PAYLOAD_TIME_CONFLICT)
-                    }
+                    listPresentationController.notifyTimeConflicts(change.timeConflictPositions)
                 }
             )
             change.ranges.forEach { range -> syncWaveformSubtitleRange(range.start, range.removedCount, range.inserted) }
@@ -3958,8 +3957,11 @@ class EditorActivity : AppCompatActivity() {
             endTime = 3000L,
             text = "请输入文本"
         ))
-        stateModel.sourceViewContent = ""
-        stateModel.originalFileContent = ""
+        // The initial row is already a document. Establish its raw-source baseline
+        // before any history is recorded, including an edit undone before saving.
+        val initialSource = SubtitleParser.toSRT(stateModel.subtitleEntries)
+        stateModel.sourceViewContent = initialSource
+        stateModel.originalFileContent = initialSource
         stateModel.sourceViewNeedsListSync = false
         stateModel.currentCharset = StandardCharsets.UTF_8
         stateModel.currentFormat = SubtitleParser.SubtitleFormat.SRT
@@ -4020,12 +4022,7 @@ class EditorActivity : AppCompatActivity() {
             val saved = result.success
             if (!saved) showShortToast("保存失败：${result.error?.message}")
             if (saved) {
-                stateModel.originalFileContent = content
-                stateModel.sourceViewContent = content
-                stateModel.sourceHistoryTextSnapshot = content
-                stateModel.sourceViewNeedsListSync = false
-                sourceViewHasPendingEdits = false
-                stateModel.hasUnsavedChanges = false
+                stateModel.markDocumentSaved()
                 showShortToast("保存成功")
             }
             executeSaveContinuation(stateModel.saveCoordinator.complete(saved))
@@ -4058,12 +4055,7 @@ class EditorActivity : AppCompatActivity() {
             val saved = result.success
             if (!saved) showShortToast("保存失败：${result.error?.message}")
             if (saved) {
-                stateModel.originalFileContent = content
-                stateModel.sourceViewContent = content
-                stateModel.sourceHistoryTextSnapshot = content
-                stateModel.sourceViewNeedsListSync = false
-                sourceViewHasPendingEdits = false
-                stateModel.hasUnsavedChanges = false
+                stateModel.markDocumentSaved()
                 val fileName = withContext(Dispatchers.IO) {
                     getFileNameFromUri(uri)
                 }
@@ -4430,14 +4422,7 @@ class EditorActivity : AppCompatActivity() {
                 if (remainingCount > 0) {
                     subtitleAdapter.notifyItemRangeChanged(firstDeleted, remainingCount, SubtitleAdapter.PAYLOAD_INDEX)
                 }
-                if (deletedIndices.size <= BULK_NOTIFY_THRESHOLD) {
-                    deletedIndices.sorted().forEachIndexed { offset, deletedIdx ->
-                        val prevIdx = (deletedIdx - offset) - 1
-                        if (prevIdx >= 0 && prevIdx < stateModel.subtitleEntries.size) {
-                            subtitleAdapter.notifyItemChanged(prevIdx)
-                        }
-                    }
-                }
+                listPresentationController.notifyTimeConflicts(change.timeConflictPositions)
             }
         )
         if (!waveformController.removeSubtitleIndices(deletedIndices)) {

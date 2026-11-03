@@ -16,6 +16,7 @@ internal data class EditorListChange(
     val selectedIds: Set<Long>,
     val ranges: List<EditorListRangeChange> = emptyList(),
     val updatedPositions: Set<Int> = result.changedPositions,
+    val timeConflictPositions: Set<Int> = emptySet(),
     internal val copiedEntryCount: Int = 0
 )
 
@@ -29,6 +30,7 @@ internal class EditorPreparedEntryList(private val source: List<SubtitleEntry>) 
     private val originals = IdentityHashMap<SubtitleEntry, SubtitleEntry>()
     private val owned = java.util.Collections.newSetFromMap(IdentityHashMap<SubtitleEntry, Boolean>())
     private val splices = mutableListOf<EditorListRangeChange>()
+    private val timeConflictEntries = mutableMapOf<Long, SubtitleEntry>()
     var copiedEntryCount = 0
         private set
     val firstStructuralPosition: Int? get() = splices.minOfOrNull { it.start }
@@ -60,6 +62,9 @@ internal class EditorPreparedEntryList(private val source: List<SubtitleEntry>) 
     }
 
     private fun recordSplice(splice: EditorListRangeChange) {
+        // The splice is already applied. Both surviving neighbors now have a new adjacency.
+        getOrNull(splice.start - 1)?.let { timeConflictEntries[it.stableId] = it }
+        getOrNull(splice.start + splice.inserted.size)?.let { timeConflictEntries[it.stableId] = it }
         val previous = splices.lastOrNull()
         val combined = when {
             previous == null -> null
@@ -138,14 +143,19 @@ internal class EditorPreparedEntryList(private val source: List<SubtitleEntry>) 
         while (suffix < source.size - prefix && suffix < replacement.size - prefix &&
             source[source.lastIndex - suffix].stableId == replacement[replacement.lastIndex - suffix].stableId
         ) suffix++
-        if (prefix < source.size - suffix || prefix < replacement.size - suffix) {
-            splices += EditorListRangeChange(
+        val splice = if (prefix < source.size - suffix || prefix < replacement.size - suffix) {
+            EditorListRangeChange(
                 prefix, source.size - prefix - suffix,
                 replacement.subList(prefix, replacement.size - suffix).toList()
             )
-        }
+        } else null
         structure = replacement.toMutableList()
         fields.clear()
+        if (splice != null) {
+            recordSplice(splice)
+            // Reordered surviving rows can keep their holders while their neighbors change.
+            splice.inserted.forEach { timeConflictEntries[it.stableId] = it }
+        }
     }
 
     fun hasChanges(): Boolean = splices.isNotEmpty() || originals.any { (updated, original) -> updated != original }
@@ -157,6 +167,16 @@ internal class EditorPreparedEntryList(private val source: List<SubtitleEntry>) 
                 (EditorEditHistory.hasEditableDifference(original, updated) ||
                     original.endTimeModified != updated.endTimeModified)
         }
+    }
+
+    /** Call after commitTo has updated the surviving suffix rows' final sequence numbers. */
+    fun timeConflictPositions(committed: List<SubtitleEntry>): Set<Int> {
+        val positions = timeConflictEntries.values.mapNotNullTo(mutableSetOf()) { entry ->
+            (entry.index - 1).takeIf { committed.getOrNull(it)?.stableId == entry.stableId }
+        }
+        // The untouched prefix may retain non-sequential cue numbers from the source file.
+        firstStructuralPosition?.minus(1)?.takeIf { it in committed.indices }?.let(positions::add)
+        return positions
     }
 
     fun commitTo(target: MutableList<SubtitleEntry>): List<EditorListRangeChange> {
@@ -242,6 +262,10 @@ internal class EditorListEditSession(
             state.sourceViewEditGeneration++
             state.sourceViewEntriesGeneration = state.sourceViewEditGeneration
         }
-        return EditorListChange(result, selection, ranges, updatedPositions, entries.copiedEntryCount)
+        return EditorListChange(
+            result, selection, ranges, updatedPositions,
+            timeConflictPositions = entries.timeConflictPositions(current),
+            copiedEntryCount = entries.copiedEntryCount
+        )
     }
 }

@@ -442,6 +442,11 @@ internal class EditorViewModel(
         )
     }
 
+    /** Disk serialization may normalize layout; history patches still address the edit buffer. */
+    fun markDocumentSaved() {
+        documentState.hasUnsavedChanges = false
+    }
+
     fun execute(command: EditorCommand): EditorCommandResult {
         return execute(command, publish = true)
     }

@@ -31,16 +31,33 @@ internal class EditorSourceLineEditController(
     private val vttWordTimestampPattern = Regex("<\\d+:\\d+:\\d+\\.\\d+>")
     private var documentFormat: SubtitleParser.SubtitleFormat? = null
     private var documentHasGlobalCueContext = false
+    private var documentHasTimestampMap: Boolean? = null
+    private class VttPrefixContext {
+        var nextLine = 0
+        var nextOffset = 0
+        var mapLine: String? = null
+        var insideMetadata = false
+        var previousBlank = true
+        var cueActive = false
+    }
+    private var vttPrefixContext = VttPrefixContext()
+    internal var vttPrefixLinesRead = 0L
+        private set
 
     fun invalidateLineIndex(fromLine: Int = 0) {
         val retained = (fromLine.coerceAtLeast(0) + 1).coerceAtMost(cuePrefix.size)
         if (retained < cuePrefix.size) cuePrefix.subList(retained, cuePrefix.size).clear()
+        if (fromLine < vttPrefixContext.nextLine) vttPrefixContext = VttPrefixContext()
     }
 
     /** Cache global cue features once when a source document is installed. */
     fun prepareDocument(content: String, format: SubtitleParser.SubtitleFormat) {
         documentFormat = format
         documentHasGlobalCueContext = hasGlobalCueContext(content, format)
+        documentHasTimestampMap = format == SubtitleParser.SubtitleFormat.VTT &&
+            content.contains("X-TIMESTAMP-MAP", ignoreCase = true)
+        vttPrefixContext = VttPrefixContext()
+        vttPrefixLinesRead = 0L
         invalidateLineIndex()
     }
 
@@ -64,19 +81,26 @@ internal class EditorSourceLineEditController(
         if (documentFormat != format) prepareDocument(before, format)
         if (documentHasGlobalCueContext) return true
 
-        val oldStartLine = lineTextAtOffset(before, startOffset)
-        val oldEndLine = lineTextAtOffset(before, oldEndOffset)
-        val newStartLine = lineTextAtOffset(after, startOffset)
-        val newEndLine = lineTextAtOffset(after, newEndOffset)
-        val touchedLines = listOf(oldStartLine, oldEndLine, newStartLine, newEndLine)
+        val touchedLines = linesInEditRange(before, startOffset, oldEndOffset) +
+            linesInEditRange(after, startOffset, newEndOffset)
         val globalMarkerChanged = when (format) {
             SubtitleParser.SubtitleFormat.LRC ->
                 touchedLines.any(lrcOffsetPrefixPattern::containsMatchIn)
-            SubtitleParser.SubtitleFormat.VTT ->
-                touchedLines.any { it.contains("X-TIMESTAMP-MAP", ignoreCase = true) } ||
-                    touchedLines.any(vttWordTimestampPattern::containsMatchIn) ||
-                    (touchedLines.any { WebVttSubtitleFormatHandler.parseTimeLine(it) != null } &&
-                        (hasDuplicateVttTimelines(before) || hasDuplicateVttTimelines(after)))
+            SubtitleParser.SubtitleFormat.VTT -> {
+                var timelineTouched = false
+                val markerTouched = touchedLines.any { line ->
+                    if (line.contains("X-TIMESTAMP-MAP", ignoreCase = true) ||
+                        vttWordTimestampPattern.containsMatchIn(line)
+                    ) true else {
+                        if (!timelineTouched && "-->" in line &&
+                            WebVttSubtitleFormatHandler.parseTimeLine(line) != null
+                        ) timelineTouched = true
+                        false
+                    }
+                }
+                markerTouched || (timelineTouched &&
+                    (hasDuplicateVttTimelines(before) || hasDuplicateVttTimelines(after)))
+            }
             else -> false
         }
         if (globalMarkerChanged) {
@@ -124,9 +148,16 @@ internal class EditorSourceLineEditController(
         return false
     }
 
-    private fun lineTextAtOffset(content: String, offset: Int): String {
-        val start = lineStartAtOffset(content, offset)
-        return content.substring(start, lineEnd(content, start))
+    /** Include markers inside a multi-line paste, scanning only the affected physical lines. */
+    private fun linesInEditRange(content: String, startOffset: Int, endOffset: Int): Sequence<String> = sequence {
+        var cursor = lineStartAtOffset(content, startOffset)
+        val limit = endOffset.coerceIn(cursor, content.length)
+        while (cursor <= content.length) {
+            val end = lineEnd(content, cursor)
+            yield(content.substring(cursor, end))
+            if (end >= limit) break
+            cursor = nextLineStart(content, end) ?: break
+        }
     }
 
     fun resolve(startLine: Int, oldLineCount: Int, newLineCount: Int): Update? {
@@ -201,8 +232,8 @@ internal class EditorSourceLineEditController(
         val newLines = splitLines(after)
         val oldBounds = blockBounds(oldLines, startLine, oldLineCount, format)
         val newBounds = blockBounds(newLines, startLine, newLineCount, format)
-        val oldBlock = slice(oldLines, oldBounds, format)
-        val newBlock = slice(newLines, newBounds, format)
+        val oldBlock = slice(before, oldLines, oldBounds, format)
+        val newBlock = slice(after, newLines, newBounds, format)
         val oldParsed = SubtitleParser.parseDocument(oldBlock, format = format).entries
         val newParsed = SubtitleParser.parseDocument(newBlock, format = format).entries
         val entryIndex = countEntriesBefore(oldLines, oldBounds.first, format)
@@ -309,20 +340,47 @@ internal class EditorSourceLineEditController(
         val body = content.substring(start, end)
         return TextBlock(
             if (format == SubtitleParser.SubtitleFormat.VTT &&
-                !body.trimStart('\uFEFF').startsWith("WEBVTT", ignoreCase = true)
-            ) vttParsePrefix(content.lineSequence()) + body else body,
+                (start != 0 || !body.trimStart('\uFEFF').startsWith("WEBVTT", ignoreCase = true))
+            ) vttParsePrefix(content, startLine) + body else body,
             startLine
         )
     }
 
-    /** Keep a VTT timestamp map in the block-local parse so cue times remain media-relative. */
-    private fun vttParsePrefix(lines: Sequence<String>): String {
-        val mapLine = lines.firstOrNull {
-            it.contains("X-TIMESTAMP-MAP", ignoreCase = true)
+    /** Carry the active map, extending the unchanged prefix only as far as this block. */
+    private fun vttParsePrefix(content: String, startLine: Int): String {
+        if (documentHasTimestampMap == false) return "WEBVTT\n\n"
+        val target = startLine.coerceAtLeast(0)
+        if (target < vttPrefixContext.nextLine) vttPrefixContext = VttPrefixContext()
+        val context = vttPrefixContext
+        while (context.nextLine < target && context.nextOffset < content.length) {
+            val end = lineEnd(content, context.nextOffset)
+            val line = content.substring(context.nextOffset, end)
+            val trimmed = (if (context.nextLine == 0) line.removePrefix("\uFEFF") else line).trim()
+            vttPrefixLinesRead++
+            when {
+                trimmed.isEmpty() -> context.insideMetadata = false
+                context.insideMetadata -> Unit
+                (context.previousBlank || !context.cueActive) && VTT_METADATA_MARKERS.any {
+                    trimmed == it || trimmed.startsWith("$it ")
+                } -> {
+                    context.insideMetadata = true
+                    context.cueActive = false
+                }
+                trimmed.startsWith("X-TIMESTAMP-MAP", ignoreCase = true) &&
+                    WebVttSubtitleFormatHandler.isTimestampMap(trimmed) -> {
+                    context.mapLine = trimmed
+                    context.cueActive = false
+                }
+                !context.cueActive && "-->" in line &&
+                    WebVttSubtitleFormatHandler.parseTimeLine(line) != null -> context.cueActive = true
+            }
+            context.previousBlank = trimmed.isEmpty()
+            context.nextLine++
+            context.nextOffset = nextLineStart(content, end) ?: content.length
         }
         return buildString {
             append("WEBVTT\n")
-            if (mapLine != null) append(mapLine).append('\n')
+            context.mapLine?.let { append(it).append('\n') }
             append('\n')
         }
     }
@@ -372,6 +430,7 @@ internal class EditorSourceLineEditController(
         content.replace("\r\n", "\n").replace('\r', '\n').split('\n')
 
     private fun slice(
+        content: String,
         lines: List<String>,
         bounds: IntRange,
         format: SubtitleParser.SubtitleFormat
@@ -382,9 +441,9 @@ internal class EditorSourceLineEditController(
             lines.subList(bounds.first, (bounds.last + 1).coerceAtMost(lines.size)).joinToString("\n")
         }
         return if (format == SubtitleParser.SubtitleFormat.VTT &&
-            !body.trimStart('\uFEFF').startsWith("WEBVTT", ignoreCase = true)
+            (bounds.first != 0 || !body.trimStart('\uFEFF').startsWith("WEBVTT", ignoreCase = true))
         ) {
-            vttParsePrefix(lines.asSequence()) + body
+            vttParsePrefix(content, bounds.first) + body
         } else body
     }
     private fun blockBounds(
@@ -474,5 +533,6 @@ internal class EditorSourceLineEditController(
 
     private companion object {
         const val TXT_ENTRY_DURATION_MS = 3_000L
+        val VTT_METADATA_MARKERS = listOf("NOTE", "STYLE", "REGION")
     }
 }

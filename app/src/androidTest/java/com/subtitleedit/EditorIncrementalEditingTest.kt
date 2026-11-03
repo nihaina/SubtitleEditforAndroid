@@ -1,6 +1,7 @@
 package com.subtitleedit
 
 import android.util.Log
+import android.os.SystemClock
 import android.view.View
 import android.widget.EditText
 import android.widget.TextView
@@ -10,6 +11,8 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.subtitleedit.view.SourceEditorView
+import com.subtitleedit.util.SubtitleParser
+import java.io.File
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -272,6 +275,253 @@ class EditorIncrementalEditingTest {
                 rows.indices.forEach { assertSame(rows[it], model.subtitleEntries[it]) }
             }
         }
+    }
+
+    @Test fun newDocumentKeepsItsSourceBaselineAcrossSaveAndRedo() {
+        ActivityScenario.launch(EditorActivity::class.java).use { scenario ->
+            scenario.onActivity { activity -> invoke(activity, "doNewFile", emptyArray()) }
+            idle()
+            lateinit var sourceAfterRedo: String
+            scenario.onActivity { activity ->
+                val model = ViewModelProvider(activity)[EditorViewModel::class.java]
+                val list = model.subtitleEntries
+                val row = list.single()
+                val initialSource = model.originalFileContent
+                assertTrue(initialSource.contains("请输入文本"))
+                assertEquals(initialSource, model.sourceViewContent)
+                assertEquals(initialSource, model.sourceHistoryTextSnapshot)
+                assertEquals(row.text, SubtitleParser.parseSRT(initialSource).single().text)
+
+                assertEquals(true, invoke(activity, "commitSingleEdit", arrayOf(EditorEntryEdit::class.java),
+                    EditorEntryEdit.Text(row.stableId, "saved-history-edit")))
+                sourceAfterRedo = model.originalFileContent
+                invoke(activity, "undoEdit", emptyArray())
+                assertEquals(initialSource, model.originalFileContent)
+                assertEquals("请输入文本", row.text)
+                val redoOperation = model.peekRedo()
+                assertNotNull(redoOperation)
+
+                // Model the successful I/O completion without replacing the editing buffer.
+                assertNotNull(model.buildSaveContent())
+                model.markDocumentSaved()
+                assertFalse(model.hasUnsavedChanges)
+                assertSame(redoOperation, model.peekRedo())
+                assertEquals(initialSource, model.originalFileContent)
+                invoke(activity, "redoEdit", emptyArray())
+                assertEquals("saved-history-edit", row.text)
+                assertEquals(sourceAfterRedo, model.originalFileContent)
+                assertSame(list, model.subtitleEntries)
+                assertSame(row, model.subtitleEntries.single())
+                assertCommittedHistory(model)
+
+                model.markDocumentSaved()
+                invoke(activity, "enterSourceViewMode", arrayOf(kotlin.jvm.functions.Function0::class.java), null)
+            }
+            idle()
+            scenario.onActivity { activity ->
+                val editor = activity.findViewById<SourceEditorView>(R.id.etSourceView)
+                assertEquals(sourceAfterRedo, editor.getDocumentText())
+                assertTrue(editor.getDocumentText().contains("saved-history-edit"))
+            }
+        }
+    }
+
+    @Test fun normalizedSaveOutputDoesNotInvalidateActivityUndoOrRebindTheWholeList() {
+        ActivityScenario.launch(EditorActivity::class.java).use { scenario ->
+            val originalSource = "\uFEFF" + source(30).replace("\n", "\r\n")
+            scenario.onActivity { activity ->
+                invoke(activity, "parseContent", arrayOf(String::class.java, String::class.java), originalSource, "test.srt")
+            }
+            idle()
+            var fullRefreshes = 0
+            scenario.onActivity { activity ->
+                val model = ViewModelProvider(activity)[EditorViewModel::class.java]
+                val list = model.subtitleEntries
+                val rows = list.toList()
+                val target = rows[15]
+                activity.findViewById<RecyclerView>(R.id.rvSubtitles).adapter!!
+                    .registerAdapterDataObserver(object : RecyclerView.AdapterDataObserver() {
+                        override fun onChanged() { fullRefreshes++ }
+                    })
+                assertEquals(true, invoke(activity, "commitSingleEdit", arrayOf(EditorEntryEdit::class.java),
+                    EditorEntryEdit.Text(target.stableId, "saved row")))
+                val editedSource = model.originalFileContent
+                val published = model.document.value
+                val history = model.historyEntriesSnapshot
+                val operation = model.peekUndo()
+                val output = model.buildSaveContent()!!
+                assertNotEquals(editedSource, output)
+                val savedFile = File.createTempFile("saved-history-", ".srt", activity.cacheDir)
+                try {
+                    savedFile.writeText(output)
+                    model.markDocumentSaved()
+                    assertEquals(output, savedFile.readText())
+                    assertEquals(editedSource, model.originalFileContent)
+                    assertEquals(editedSource, model.sourceViewContent)
+                    assertEquals(editedSource, model.sourceHistoryTextSnapshot)
+                    assertSame(operation, model.peekUndo())
+                    assertSame(published, model.document.value)
+                    assertSame(history, model.historyEntriesSnapshot)
+                    assertFalse(model.hasUnsavedChanges)
+
+                    invoke(activity, "undoEdit", emptyArray())
+                    assertEquals("row 15", target.text)
+                    assertEquals(originalSource, model.originalFileContent)
+                    assertCommittedHistory(model)
+                    invoke(activity, "redoEdit", emptyArray())
+                    assertEquals("saved row", target.text)
+                    assertEquals(editedSource, model.originalFileContent)
+                    assertCommittedHistory(model)
+                    assertSame(list, model.subtitleEntries)
+                    rows.indices.forEach { assertSame(rows[it], model.subtitleEntries[it]) }
+                    assertEquals(0, fullRefreshes)
+                } finally { savedFile.delete() }
+            }
+        }
+    }
+
+    @Test fun removingGlobalSourceMarkersRestoresLocalEditsAfterTheFullParseIsInstalled() {
+        val samples = listOf(
+            Triple("[offset:500]\n[00:01.00]body\n[00:02.00]\n", "test.lrc", "[offset:500]\n"),
+            Triple("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<00:00:01.500>body\n", "test.vtt", "<00:00:01.500>")
+        )
+        ActivityScenario.launch(EditorActivity::class.java).use { scenario ->
+            samples.forEach { (original, fileName, marker) ->
+                scenario.onActivity { activity ->
+                    invoke(activity, "parseContent", arrayOf(String::class.java, String::class.java), original, fileName)
+                    invoke(activity, "enterSourceViewMode", arrayOf(kotlin.jvm.functions.Function0::class.java), null)
+                }
+                idle()
+                scenario.onActivity { activity ->
+                    val editor = activity.findViewById<SourceEditorView>(R.id.etSourceView)
+                    val start = editor.getDocumentText().indexOf(marker)
+                    assertTrue(start >= 0)
+                    replaceRange(editor, start, start + marker.length, "")
+                    assertTrue(sourceSyncPending(activity))
+                }
+                awaitSourceInstallation(scenario)
+                scenario.onActivity { activity ->
+                    val model = ViewModelProvider(activity)[EditorViewModel::class.java]
+                    val editor = activity.findViewById<SourceEditorView>(R.id.etSourceView)
+                    val list = model.subtitleEntries
+                    val row = list.single()
+                    val snapshot = model.document.value
+                    assertEquals(1_000L, row.startTime)
+                    val start = editor.getDocumentText().indexOf("body")
+                    assertTrue(start >= 0)
+
+                    replaceRange(editor, start, start + "body".length, "changed")
+
+                    assertEquals("changed", row.text)
+                    assertSame(list, model.subtitleEntries)
+                    assertSame(row, model.subtitleEntries.single())
+                    assertSame(snapshot, model.document.value)
+                    assertFalse(sourceSyncPending(activity))
+                    assertTrue(editor.isEnabled)
+                    assertEquals(model.documentState.sourceViewEditGeneration,
+                        model.documentState.sourceViewEntriesGeneration)
+                }
+            }
+        }
+    }
+
+    @Test fun editingTheSecondVttMapSegmentKeepsItsOffsetThroughSourceUndoAndRedo() {
+        val original = "\uFEFFWEBVTT\r\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000\r\n\r\n" +
+            "first-id\r\n00:00:01.000 --> 00:00:02.000\r\nfirst\r\n\r\n" +
+            "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:1800000\r\n\r\n" +
+            "second-id\r\n00:00:03.000 --> 00:00:04.000\r\nsecond\r\n"
+        ActivityScenario.launch(EditorActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                invoke(activity, "parseContent", arrayOf(String::class.java, String::class.java), original, "test.vtt")
+                invoke(activity, "enterSourceViewMode", arrayOf(kotlin.jvm.functions.Function0::class.java), null)
+            }
+            idle()
+            scenario.onActivity { activity ->
+                val model = ViewModelProvider(activity)[EditorViewModel::class.java]
+                val editor = activity.findViewById<SourceEditorView>(R.id.etSourceView)
+                val first = model.subtitleEntries[0]
+                val second = model.subtitleEntries[1]
+                val snapshot = model.document.value
+                val start = editor.getDocumentText().lastIndexOf("second\r\n")
+                assertTrue(start >= 0)
+                assertEquals(23_000L, second.startTime)
+
+                replaceRange(editor, start, start + "second".length, "changed")
+
+                assertEquals("changed", second.text)
+                assertEquals(23_000L, second.startTime)
+                assertEquals(24_000L, second.endTime)
+                assertEquals(11_000L, first.startTime)
+                assertSame(second, model.subtitleEntries[1])
+                assertSame(snapshot, model.document.value)
+                assertFalse(sourceSyncPending(activity))
+                invoke(activity, "undoEdit", emptyArray())
+                assertEquals("second", second.text)
+                assertEquals(23_000L, second.startTime)
+                assertEquals(original, editor.getDocumentText())
+                invoke(activity, "redoEdit", emptyArray())
+                assertEquals("changed", second.text)
+                assertEquals(23_000L, second.startTime)
+                assertSame(second, model.subtitleEntries[1])
+                assertFalse(sourceSyncPending(activity))
+                assertTrue(editor.isEnabled)
+            }
+        }
+    }
+
+    @Test fun sourceIdentifierUndoAndRedoDoNotDuplicateTheFirstCueInTheSavedVtt() {
+        val original = "\uFEFFWEBVTT\r\n\r\nfirst-id\r\n00:00:01.000 --> 00:00:02.000\r\nbody\r\n"
+        ActivityScenario.launch(EditorActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                invoke(activity, "parseContent", arrayOf(String::class.java, String::class.java), original, "test.vtt")
+                invoke(activity, "enterSourceViewMode", arrayOf(kotlin.jvm.functions.Function0::class.java), null)
+            }
+            idle()
+            scenario.onActivity { activity ->
+                val model = ViewModelProvider(activity)[EditorViewModel::class.java]
+                val editor = activity.findViewById<SourceEditorView>(R.id.etSourceView)
+                val start = original.indexOf("first-id")
+                replaceRange(editor, start, start + "first-id".length, "renamed-id")
+                assertEquals("renamed-id", model.subtitleEntries.single().cueIdentifier)
+                assertFalse(sourceSyncPending(activity))
+
+                invoke(activity, "undoEdit", emptyArray())
+                assertEquals("first-id", model.subtitleEntries.single().cueIdentifier)
+                assertFalse(model.documentHeader.contains("first-id"))
+                invoke(activity, "redoEdit", emptyArray())
+                assertEquals("renamed-id", model.subtitleEntries.single().cueIdentifier)
+                assertFalse(model.documentHeader.contains("renamed-id"))
+                invoke(activity, "doExitSourceView", emptyArray())
+            }
+            awaitSourceInstallation(scenario)
+            scenario.onActivity { activity ->
+                val model = ViewModelProvider(activity)[EditorViewModel::class.java]
+                assertFalse(model.isSourceViewMode)
+                val saved = model.buildSaveContent()!!
+                assertEquals(1, saved.lineSequence().count { it == "renamed-id" })
+                assertEquals("renamed-id", SubtitleParser.parseVTT(saved).single().cueIdentifier)
+                assertFalse(model.documentHeader.contains("renamed-id"))
+            }
+        }
+    }
+
+    private fun sourceSyncPending(activity: EditorActivity): Boolean =
+        activity.javaClass.getDeclaredField("sourceHistorySyncPending").apply { isAccessible = true }.getBoolean(activity)
+
+    private fun awaitSourceInstallation(scenario: ActivityScenario<EditorActivity>) {
+        val deadline = SystemClock.elapsedRealtime() + 5_000L
+        while (SystemClock.elapsedRealtime() < deadline) {
+            var complete = false
+            scenario.onActivity { activity ->
+                val model = ViewModelProvider(activity)[EditorViewModel::class.java]
+                complete = !sourceSyncPending(activity) && !model.isSourceViewTransitioning &&
+                    model.documentState.sourceViewEntriesGeneration == model.documentState.sourceViewEditGeneration &&
+                    activity.findViewById<SourceEditorView>(R.id.etSourceView).isEnabled
+            }
+            if (complete) return
+            SystemClock.sleep(20L)
+        }
+        fail("Source parsing did not install the current generation before the timeout")
     }
 
     private fun assertCommittedHistory(model: EditorViewModel) {
