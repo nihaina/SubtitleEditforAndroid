@@ -517,7 +517,22 @@ internal class EditorViewModel(
         undo: Boolean
     ): EditorHistoryCommandResult {
         val result = command.execute(documentState, undo)
-        publishDocument()
+        if (result.entriesResolved) {
+            if (command.isSelectionOnly()) {
+                documentState.historySelectionSnapshot = result.selectedIds
+                return result
+            }
+            // List history has already finished all fallible source work. Advance
+            // the owned baseline and snapshot here; renderers only consume the result.
+            syncHistoryBaseline(
+                EditorEditHistory.ListState(result.entries, result.selectedIds),
+                result.sourceText, isSourceViewMode
+            )
+            documentState.hasUnsavedChanges = true
+            publishChangedDocument(result.updatedPositions.takeUnless { result.structureChanged })
+        } else {
+            publishDocument()
+        }
         return result
     }
 

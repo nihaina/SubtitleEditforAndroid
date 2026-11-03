@@ -2,8 +2,6 @@ package com.subtitleedit
 
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.editor.EditorSourceTextEdit
-import com.subtitleedit.util.SubtitleParser
-import com.subtitleedit.util.SubtitleSourceSynchronizer
 
 /**
  * In-memory undo/redo stacks shared by the list and source editors.
@@ -137,111 +135,7 @@ internal class EditorEditHistory {
             undo: Boolean
         ): EditorHistoryCommandResult {
             return when (this) {
-                is ListChange -> {
-                    val entries = state.subtitleEntries
-                    val targetOrder = if (undo) beforeOrder else afterOrder
-                    val structureChanged = added.isNotEmpty() || deleted.isNotEmpty() || targetOrder != null
-                    // The history baseline is an owned snapshot of the document before this
-                    // command. Reuse it as the synchronizer's old state on the common row-edit
-                    // path; taking another full shallow list here still allocates O(file size)
-                    // on every undo/redo. Structural commands retain the defensive fallback.
-                    val historySnapshot = state.historyEntriesSnapshot
-                    val historySnapshotIsCurrent = !structureChanged &&
-                        historySnapshot.size == entries.size &&
-                        historySnapshot.indices.all { historySnapshot[it].stableId == entries[it].stableId } &&
-                        updated.all { update ->
-                            val expected = if (undo) update.after else update.before
-                            historySnapshot.getOrNull(update.beforePosition) == expected
-                        }
-                    val previousEntries = if (historySnapshotIsCurrent) {
-                        historySnapshot
-                    } else {
-                        entries.toMutableList().also { snapshot ->
-                            updated.forEach { update ->
-                                val index = update.beforePosition.takeIf { candidate ->
-                                    candidate in entries.indices &&
-                                        entries[candidate].stableId == update.before.stableId
-                                } ?: entries.indexOfFirst { it.stableId == update.before.stableId }
-                                if (index >= 0) snapshot[index] = entries[index].copy()
-                            }
-                        }
-                    }
-                    if (!structureChanged) {
-                        updated.forEach { update ->
-                            val target = if (undo) update.before else update.after
-                            val index = update.beforePosition.takeIf { candidate ->
-                                candidate in entries.indices && entries[candidate].stableId == target.stableId
-                            } ?: entries.indexOfFirst { it.stableId == target.stableId }
-                            if (index >= 0) EditorDocumentOperations.updateFields(entries[index], target)
-                        }
-                    } else {
-                        val byId = entries.associateBy { it.stableId }
-                        updated.map { if (undo) it.before else it.after }.forEach { target ->
-                            byId[target.stableId]?.let { current ->
-                                EditorDocumentOperations.updateFields(current, target)
-                            }
-                        }
-                    }
-                    val removeIds = (if (undo) added else deleted).mapTo(mutableSetOf()) { it.entry.stableId }
-                    if (removeIds.isNotEmpty()) {
-                        for (position in entries.indices.reversed()) {
-                            if (entries[position].stableId in removeIds) entries.removeAt(position)
-                        }
-                    }
-                    val positioned = (if (undo) deleted else added).sortedBy { it.position }
-                    positioned.forEach { item ->
-                        entries.add(item.position.coerceIn(0, entries.size), item.entry.copy())
-                    }
-                    if (targetOrder != null) {
-                        val currentById = entries.associateBy { it.stableId }
-                        val ordered = targetOrder.mapNotNull { currentById[it] }
-                        entries.clear()
-                        entries.addAll(ordered)
-                    }
-                    if (structureChanged) EditorDocumentOperations.renumber(entries)
-
-                    val changedPositions = buildSet {
-                        (if (undo) added else deleted).forEach { add(it.position) }
-                        (if (undo) deleted else added).forEach { add(it.position) }
-                        updated.forEach { add(if (undo) it.beforePosition else it.afterPosition) }
-                        targetOrder?.indices?.forEach { add(it) }
-                    }
-                    val source = when {
-                        sourceEdit != null -> applySourceEdit(state, sourceEdit, undo)
-                        added.isNotEmpty() || deleted.isNotEmpty() || updated.isNotEmpty() || targetOrder != null ->
-                            SubtitleSourceSynchronizer.apply(
-                                content = state.originalFileContent,
-                                format = state.currentFormat,
-                                oldEntries = previousEntries,
-                                newEntries = entries
-                            )
-                        else -> state.originalFileContent
-                    }
-                    state.originalFileContent = source
-                    state.sourceViewContent = source
-                    state.sourceHistoryTextSnapshot = source
-                    state.sourceViewNeedsListSync = false
-                    if (state.currentFormat == SubtitleParser.SubtitleFormat.VTT) {
-                        if (beforeHeader != null || afterHeader != null) {
-                            state.documentHeader = if (undo) beforeHeader.orEmpty() else afterHeader.orEmpty()
-                        }
-                        if (beforeFooter != null || afterFooter != null) {
-                            state.documentFooter = if (undo) beforeFooter.orEmpty() else afterFooter.orEmpty()
-                        }
-                    }
-                    val currentSelection = state.historySelectionSnapshot
-                    EditorHistoryCommandResult(
-                        // The command mutates the document list in place. Returning the current
-                        // list lets the UI rebind only changed rows instead of cloning the file.
-                        entries = entries,
-                        sourceText = source,
-                        selectedIds = (currentSelection -
-                            (if (undo) selected else deselected) +
-                            (if (undo) deselected else selected)),
-                        changedPositions = changedPositions,
-                        structureChanged = structureChanged
-                    )
-                }
+                is ListChange -> EditorListHistorySession(state).execute(this, undo)
                 is SourceChange -> {
                     val targetText = edit.applyTo(state.originalFileContent, undo)
                     state.originalFileContent = targetText
@@ -379,15 +273,6 @@ internal class EditorEditHistory {
 
     companion object {
         private const val SOURCE_DELETE_MERGE_WINDOW_MS = 400L
-
-        private fun applySourceEdit(
-            state: EditorDocumentState,
-            edit: EditorSourceTextEdit,
-            undo: Boolean
-        ): String {
-            return runCatching { edit.applyTo(state.originalFileContent, undo) }
-                .getOrElse { edit.applyTo(state.sourceViewContent, undo) }
-        }
 
         fun difference(before: ListState, after: ListState): ListDifference {
             // Most list edits change fields in place without changing row order.  This branch

@@ -3,6 +3,7 @@ package com.subtitleedit.editor
 import com.subtitleedit.EditorDocumentState
 import com.subtitleedit.EditorEditHistory
 import com.subtitleedit.EditorEditHistory.Operation
+import com.subtitleedit.EditorHistoryCommandResult
 import com.subtitleedit.EditorViewModel
 import com.subtitleedit.model.SubtitleEntry
 
@@ -13,7 +14,8 @@ internal class EditorHistoryCoordinator(
     private val selectedIds: () -> Set<Long>,
     private val sourceMode: () -> Boolean,
     private val applyOperation: (Operation, Boolean) -> Unit,
-    private val invalidateMenu: () -> Unit
+    private val invalidateMenu: () -> Unit,
+    private val renderListResult: (EditorHistoryCommandResult, Operation.ListChange, Boolean) -> Unit = { _, _, _ -> }
 ) {
     /**
      * Build a history state from the document model.  The current state used while recording an
@@ -84,14 +86,29 @@ internal class EditorHistoryCoordinator(
     fun redo(): Boolean = move(false)
 
     private fun move(undo: Boolean): Boolean {
-        var applied = false
+        var listResult: EditorHistoryCommandResult? = null
+        var listOperation: Operation.ListChange? = null
+        var sourceApplied = false
         val callback: (Operation, Boolean) -> Unit = { operation, reversed ->
-            applyOperation(operation, reversed)
-            applied = true
+            when (operation) {
+                is Operation.ListChange -> {
+                    listResult = stateModel.executeHistoryCommand(operation, reversed)
+                    listOperation = operation
+                }
+                is Operation.SourceChange -> {
+                    applyOperation(operation, reversed)
+                    sourceApplied = true
+                }
+            }
         }
         val result = if (undo) stateModel.undo(sourceMode(), callback)
         else stateModel.redo(sourceMode(), callback)
-        if (result && applied) sync()
+        if (result) {
+            if (sourceApplied) sync()
+            // Rendering happens after stack movement. A view failure must not put
+            // an already committed model operation back on its original stack.
+            listResult?.let { renderListResult(it, checkNotNull(listOperation), undo) }
+        }
         return result
     }
 }

@@ -1684,6 +1684,7 @@ class WaveformTimelineView @JvmOverloads constructor(
                 else -> null
             }
         }.filter { it in 0 until (subtitles.size + delta) }.toSet()
+        val previousLimitedPlayback = limitedPlaybackIndex
         limitedPlaybackIndex = limitedPlaybackIndex?.let { index ->
             when {
                 index < startIndex -> index
@@ -1693,6 +1694,9 @@ class WaveformTimelineView @JvmOverloads constructor(
         }
         subtitles.subList(startIndex, startIndex + removedCount).clear()
         subtitles.addAll(startIndex, inserted)
+        if (previousLimitedPlayback != null && limitedPlaybackIndex == null) {
+            onLimitedPlaybackRangeChange?.invoke(null)
+        }
         onSelectedIndicesChangeListener?.invoke(selectedIndices)
         invalidateSubtitleRegion(dirtyLeft, dirtyRight)
         return true

@@ -707,8 +707,9 @@ class EditorActivity : AppCompatActivity() {
                 } else emptySet()
             },
             sourceMode = { stateModel.isSourceViewMode },
-            applyOperation = ::applyHistoryOperation,
-            invalidateMenu = ::invalidateOptionsMenu
+            applyOperation = ::applySourceHistoryOperation,
+            invalidateMenu = ::invalidateOptionsMenu,
+            renderListResult = ::applyListHistoryResult
         )
     }
 
@@ -3444,8 +3445,6 @@ class EditorActivity : AppCompatActivity() {
             invalidateOptionsMenu()
             return
         }
-        syncEditHistoryBaseline()
-        stateModel.hasUnsavedChanges = true
         invalidateOptionsMenu()
     }
 
@@ -3469,47 +3468,45 @@ class EditorActivity : AppCompatActivity() {
             invalidateOptionsMenu()
             return
         }
-        syncEditHistoryBaseline()
-        stateModel.hasUnsavedChanges = true
         invalidateOptionsMenu()
     }
 
-    private fun applyHistoryOperation(
-        command: EditorHistoryCommand,
+    private fun applySourceHistoryOperation(
+        operation: EditorEditHistory.Operation,
         undo: Boolean
     ) {
-        val operation = command as? EditorEditHistory.Operation ?: return
-        when (operation) {
-            is EditorEditHistory.Operation.ListChange -> {
-                val result = operation.execute(stateModel.documentState, undo)
-                applyListHistoryResult(result)
-            }
-            is EditorEditHistory.Operation.SourceChange -> {
-                val targetText = operation.edit.applyTo(stateModel.sourceViewContent, undo)
-                applySourceHistoryText(targetText, sourceEdit = operation.edit, undo = undo)
-            }
-        }
+        val source = operation as? EditorEditHistory.Operation.SourceChange ?: return
+        val targetText = source.edit.applyTo(stateModel.sourceViewContent, undo)
+        applySourceHistoryText(targetText, sourceEdit = source.edit, undo = undo)
     }
 
-    private fun applyListHistoryResult(result: EditorHistoryCommandResult) {
+    private fun applyListHistoryResult(
+        result: EditorHistoryCommandResult,
+        operation: EditorEditHistory.Operation.ListChange,
+        undo: Boolean
+    ) {
         val updatedSource = result.sourceText ?: stateModel.sourceViewContent
-        // ListChange.execute() already applied fields to the live entries. Reuse that list so an
-        // ordinary row undo/redo does not deep-copy the entire document a second time.
-        val targetEntries = result.entries
+        if (operation.isSelectionOnly()) {
+            listPresentationController.bindSelection(result.selectedIds)
+            return
+        }
+        // The model owns source, dirty state, baseline and incremental publication.
+        // Keep both editor views on the same committed rows without installing copies.
         if (stateModel.isSourceViewMode) {
             sourceWaveformSyncController.cancel()
             cancelSourcePreview()
             stateModel.documentState.sourceViewEditGeneration++
             sourceViewHasPendingEdits = false
-            setSourceViewEditorText(updatedSource, preserveScroll = true)
-            if (result.structureChanged) {
-                syncWaveformSubtitles(preserveSelection = true)
-            } else {
-                syncWaveformSubtitles(preserveSelection = true, changedPositions = result.changedPositions)
-            }
+            setSourceViewEditorText(
+                updatedSource, preserveScroll = true,
+                changeHint = operation.sourceEdit?.let { sourceEditToDocumentChange(it, undo) }
+            )
+            syncHistoryWaveform(result)
             stateModel.documentState.sourceViewEntriesGeneration =
                 stateModel.documentState.sourceViewEditGeneration
             updateFormatInfo()
+            if (::playbackController.isInitialized) playbackController.invalidateHighlightCache()
+            if (::searchController.isInitialized) searchController.onDocumentChanged()
             // History already installed the target entries locally. Refresh the video track
             // with those entries; waiting for a source parse here leaves the old subtitle track
             // visible even though the editor has been reverted.
@@ -3517,26 +3514,45 @@ class EditorActivity : AppCompatActivity() {
             return
         }
 
-        val previousCount = subtitleAdapter.itemCount
-        if (previousCount != targetEntries.size || result.structureChanged) {
+        if (subtitleAdapter.itemCount != result.entries.size || result.structureChanged) {
+            val first = result.ranges.minOfOrNull { it.start } ?: 0
+            pendingListIndexRefreshStart = minOf(pendingListIndexRefreshStart ?: first, first)
             submitSubtitleList(
-                refreshAll = true,
+                refreshAll = false,
                 selectedStableIds = result.selectedIds,
                 syncWaveform = false,
-                markChanged = false
-            ) { updateSelectedCountDisplay() }
-            syncWaveformSubtitles(preserveSelection = true)
-        } else {
-            result.changedPositions.forEach { position ->
-                if (position in 0 until subtitleAdapter.itemCount) subtitleAdapter.notifyItemChanged(position)
+                markChanged = false,
+                refreshDocument = false,
+                schedulePreview = false
+            ) {
+                listPresentationController.notifyPositions(result.updatedPositions, allowFullRefresh = false)
+                result.timeConflictPositions.forEach { position ->
+                    if (position in 0 until subtitleAdapter.itemCount) {
+                        subtitleAdapter.notifyItemChanged(position, SubtitleAdapter.PAYLOAD_TIME_CONFLICT)
+                    }
+                }
             }
-            subtitleAdapter.setSelectionByStableIds(result.selectedIds)
-            updateSelectedCountDisplay()
-            syncWaveformSubtitles(preserveSelection = true, changedPositions = result.changedPositions)
+        } else {
+            listPresentationController.notifyPositions(result.updatedPositions, allowFullRefresh = false)
+            listPresentationController.bindSelection(result.selectedIds)
+            if (result.documentMetadataChanged) updateFormatInfo()
+            if (::playbackController.isInitialized) playbackController.invalidateHighlightCache()
+            if (::searchController.isInitialized) searchController.onDocumentChanged()
         }
-        // List undo/redo mutates the live rows directly. Keep the video track on the same
-        // snapshot instead of waiting for a later list-to-source synchronization.
+        syncHistoryWaveform(result)
         scheduleSubtitlePreview(debounceMs = 0L)
+    }
+
+    private fun syncHistoryWaveform(result: EditorHistoryCommandResult) {
+        result.ranges.forEach { range ->
+            syncWaveformSubtitleRange(range.start, range.removedCount, range.inserted)
+        }
+        if (result.updatedPositions.isNotEmpty()) {
+            syncWaveformSubtitles(preserveSelection = true, changedPositions = result.updatedPositions)
+        }
+        if (result.structureChanged && result.ranges.isEmpty()) {
+            syncWaveformSubtitles(preserveSelection = true)
+        }
     }
 
     private fun applySourceHistoryText(
@@ -3546,11 +3562,12 @@ class EditorActivity : AppCompatActivity() {
         undo: Boolean = false
     ) {
         val previousText = stateModel.sourceViewContent
-        val selectedIds = currentHistoryListState().selectedIds
+        val selectedIds = selectedSubtitleIds()
         val previousCount = stateModel.subtitleEntries.size
         stateModel.originalFileContent = targetText
         stateModel.sourceViewContent = targetText
         stateModel.sourceHistoryTextSnapshot = targetText
+        stateModel.hasUnsavedChanges = true
         sourceEdit?.let { stateModel.documentState.updateVttMetadataForSourceEdit(targetText, it.lineNumber) }
         if (stateModel.isSourceViewMode) {
             sourceWaveformSyncController.cancel()

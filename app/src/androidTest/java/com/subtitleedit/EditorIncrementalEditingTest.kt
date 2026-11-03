@@ -1,6 +1,9 @@
 package com.subtitleedit
 
 import android.util.Log
+import android.view.View
+import android.widget.EditText
+import android.widget.TextView
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.RecyclerView
 import androidx.test.core.app.ActivityScenario
@@ -140,6 +143,144 @@ class EditorIncrementalEditingTest {
                 }
             }
         }
+    }
+
+    @Test fun listInsertionUndoAndRedoKeepLocalNotificationsAndCommittedState() {
+        ActivityScenario.launch(EditorActivity::class.java).use { scenario ->
+            val originalSource = source(30)
+            scenario.onActivity { activity ->
+                invoke(activity, "parseContent", arrayOf(String::class.java, String::class.java), originalSource, "test.srt")
+            }
+            idle()
+            var fullRefreshes = 0
+            var fullSuffixBinds = 0
+            lateinit var originalRows: List<com.subtitleedit.model.SubtitleEntry>
+            lateinit var originalList: MutableList<com.subtitleedit.model.SubtitleEntry>
+            lateinit var insertedSource: String
+            var insertedId = 0L
+            scenario.onActivity { activity ->
+                val model = ViewModelProvider(activity)[EditorViewModel::class.java]
+                originalList = model.subtitleEntries
+                originalRows = originalList.toList()
+                activity.findViewById<RecyclerView>(R.id.rvSubtitles).adapter!!
+                    .registerAdapterDataObserver(object : RecyclerView.AdapterDataObserver() {
+                        override fun onChanged() { fullRefreshes++ }
+                        override fun onItemRangeChanged(start: Int, count: Int, payload: Any?) {
+                            if (payload == null && count > 3) fullSuffixBinds++
+                        }
+                    })
+                invoke(activity, "insertSubtitle", arrayOf(Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!,
+                    Boolean::class.javaPrimitiveType!!), true, 15, false)
+                insertedSource = model.originalFileContent
+                insertedId = model.subtitleEntries[16].stableId
+                assertEquals(31, model.subtitleEntries.size)
+                assertCommittedHistory(model)
+            }
+            idle()
+            scenario.onActivity { activity ->
+                val model = ViewModelProvider(activity)[EditorViewModel::class.java]
+                invoke(activity, "undoEdit", emptyArray())
+                assertSame(originalList, model.subtitleEntries)
+                assertEquals(30, model.subtitleEntries.size)
+                assertEquals(originalSource, model.originalFileContent)
+                originalRows.indices.forEach { assertSame(originalRows[it], model.subtitleEntries[it]) }
+                assertCommittedHistory(model)
+                assertNotNull(model.peekRedo())
+            }
+            idle()
+            scenario.onActivity { activity ->
+                val model = ViewModelProvider(activity)[EditorViewModel::class.java]
+                invoke(activity, "redoEdit", emptyArray())
+                assertSame(originalList, model.subtitleEntries)
+                assertEquals(31, model.subtitleEntries.size)
+                assertEquals(insertedId, model.subtitleEntries[16].stableId)
+                assertEquals(insertedSource, model.originalFileContent)
+                originalRows.indices.forEach { index ->
+                    assertSame(originalRows[index], model.subtitleEntries[if (index > 15) index + 1 else index])
+                }
+                assertCommittedHistory(model)
+            }
+            idle()
+            scenario.onActivity {
+                assertEquals(0, fullRefreshes)
+                assertEquals(0, fullSuffixBinds)
+            }
+        }
+    }
+
+    @Test fun sameCountUndoAndRedoRefreshPublishedRowsAndVisibleSearchResults() {
+        ActivityScenario.launch(EditorActivity::class.java).use { scenario ->
+            val originalSource = source(30)
+            scenario.onActivity { activity ->
+                invoke(activity, "parseContent", arrayOf(String::class.java, String::class.java), originalSource, "test.srt")
+            }
+            idle()
+            scenario.onActivity { activity ->
+                val model = ViewModelProvider(activity)[EditorViewModel::class.java]
+                val originalList = model.subtitleEntries
+                val rows = originalList.toList()
+                val target = rows[15]
+                val original = target.copy()
+                val query = "history-search-marker"
+                activity.findViewById<View>(R.id.searchBar).visibility = View.VISIBLE
+                activity.findViewById<EditText>(R.id.etSearch).setText(query)
+                fun assertSearchCount(count: Int) {
+                    assertEquals(
+                        activity.getString(R.string.search_result_position, if (count == 0) 0 else 1, count),
+                        activity.findViewById<TextView>(R.id.tvSearchResultCount).text.toString()
+                    )
+                }
+                assertSearchCount(0)
+                assertEquals(true, invoke(activity, "commitSingleEdit", arrayOf(EditorEntryEdit::class.java),
+                    EditorEntryEdit.Text(target.stableId, query)))
+                val afterTextSource = model.originalFileContent
+                assertSearchCount(1)
+                assertEquals(true, invoke(activity, "commitSingleEdit", arrayOf(EditorEntryEdit::class.java),
+                    EditorEntryEdit.Time(target.stableId, 3_000, 4_500)))
+                val afterTimeSource = model.originalFileContent
+                val afterTimeDocument = model.document.value
+
+                invoke(activity, "undoEdit", emptyArray())
+                assertEquals(original.startTime, target.startTime)
+                assertEquals(original.endTime, target.endTime)
+                assertEquals(afterTextSource, model.originalFileContent)
+                assertEquals(query, model.document.value.entries[15].text)
+                assertEquals(original.startTime, model.document.value.entries[15].startTime)
+                assertEquals(3_000L, afterTimeDocument.entries[15].startTime)
+                assertSearchCount(1)
+                assertCommittedHistory(model)
+
+                invoke(activity, "undoEdit", emptyArray())
+                assertEquals(original, target)
+                assertEquals(originalSource, model.originalFileContent)
+                assertSearchCount(0)
+                assertCommittedHistory(model)
+
+                invoke(activity, "redoEdit", emptyArray())
+                assertEquals(query, target.text)
+                assertEquals(afterTextSource, model.originalFileContent)
+                assertSearchCount(1)
+                assertCommittedHistory(model)
+
+                invoke(activity, "redoEdit", emptyArray())
+                assertEquals(3_000L, target.startTime)
+                assertEquals(4_500L, target.endTime)
+                assertEquals(afterTimeSource, model.originalFileContent)
+                assertSearchCount(1)
+                assertCommittedHistory(model)
+                assertSame(originalList, model.subtitleEntries)
+                rows.indices.forEach { assertSame(rows[it], model.subtitleEntries[it]) }
+            }
+        }
+    }
+
+    private fun assertCommittedHistory(model: EditorViewModel) {
+        assertTrue(model.hasUnsavedChanges)
+        assertFalse(model.sourceViewNeedsListSync)
+        assertEquals(model.originalFileContent, model.sourceViewContent)
+        assertEquals(model.originalFileContent, model.sourceHistoryTextSnapshot)
+        assertEquals(model.subtitleEntries, model.historyEntriesSnapshot)
+        assertEquals(model.subtitleEntries, model.document.value.entries)
     }
 
     private fun replaceRange(editor: SourceEditorView, start: Int, end: Int, replacement: String) {
