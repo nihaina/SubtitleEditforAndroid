@@ -5,7 +5,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,7 +23,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.BasicTextField
@@ -171,6 +169,7 @@ internal fun MainActivityScreen(
     onSelectAll: () -> Unit,
     onSelectRange: () -> Unit,
     onToolbarBack: () -> Unit,
+    onDirectoryBreadcrumbClick: (File) -> Boolean,
     onFileClick: (File) -> Unit,
     onFileLongClick: (File) -> Unit,
     onCopy: () -> Unit,
@@ -490,6 +489,7 @@ internal fun MainActivityScreen(
                     DirectoryBrowserContent(
                         state = state,
                         listState = listState,
+                        onDirectoryBreadcrumbClick = onDirectoryBreadcrumbClick,
                         onFileClick = onFileClick,
                         onFileLongClick = onFileLongClick
                     )
@@ -680,6 +680,7 @@ internal fun MainActivityScreen(
 private fun DirectoryBrowserContent(
     state: MainActivityScreenState,
     listState: LazyListState,
+    onDirectoryBreadcrumbClick: (File) -> Boolean,
     onFileClick: (File) -> Unit,
     onFileLongClick: (File) -> Unit
 ) {
@@ -700,24 +701,11 @@ private fun DirectoryBrowserContent(
     }
     Column(Modifier.fillMaxSize()) {
         state.currentDirectory?.let { directory ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .clip(MaterialTheme.shapes.medium)
-                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                    .padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = directory.absolutePath,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    softWrap = false
-                )
-            }
+            DirectoryBreadcrumbBar(
+                directory = directory,
+                enabled = state.selectedPaths.isEmpty() || state.pendingOperation != null,
+                onNavigate = onDirectoryBreadcrumbClick
+            )
         }
         // The legacy directory screen only exposed progress while a recursive
         // search was running. Loading a directory kept the existing list and

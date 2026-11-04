@@ -296,6 +296,7 @@ class MainActivity : AppComposeActivity() {
                         onSelectAll = ::selectAllVisibleFiles,
                         onSelectRange = ::selectRangeBetweenSelectedFiles,
                         onToolbarBack = ::onToolbarBack,
+                        onDirectoryBreadcrumbClick = ::navigateToDirectoryBreadcrumb,
                         onFileClick = ::onFileClicked,
                         onFileLongClick = ::enterSelectionMode,
                         onCopy = { startDestinationSelection(FileOperation.COPY) },
@@ -796,6 +797,35 @@ class MainActivity : AppComposeActivity() {
         } else {
             com.subtitleedit.util.OverwritingToast.makeText(this, "不支持的文件格式", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun navigateToDirectoryBreadcrumb(directory: File): Boolean {
+        val current = stateModel.documentState.currentDirectory ?: return false
+        if (stateModel.documentState.selectedPaths.isNotEmpty() &&
+            stateModel.documentState.pendingFileOperation == null
+        ) return false
+        if (!directory.isAbsolute || !directory.isDirectory) {
+            showShortToast(getString(R.string.directory_not_found))
+            return false
+        }
+        val target = File(directoryPath(directory))
+        if (isRestrictedAndroidDirectory(target)) {
+            showShortToast(getString(R.string.android_directory_access_denied))
+            return false
+        }
+        if (directoryPath(current) == directoryPath(target)) {
+            if (searchExpanded || isFileSearchQueryActive()) clearFileSearch(refreshDirectory = true)
+            return true
+        }
+
+        saveCurrentDirectoryScrollPosition()
+        if (loadDirectory(target, restoreScrollPosition = true)) {
+            // Back should continue to the target's parent, not a skipped descendant.
+            stateModel.documentState.directoryHistory.clear()
+            clearFileSearch(refreshDirectory = false)
+            return true
+        }
+        return false
     }
 
     private fun navigateIntoDirectory(directory: File) {

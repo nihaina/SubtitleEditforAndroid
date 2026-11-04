@@ -709,6 +709,10 @@
     <string name="draft_delete">删除草稿</string>
     <string name="draft_delete_folder_confirm">确定要删除此文件夹及其所有内容吗？</string>
     <string name="open_folder">打开文件夹</string>
+    <string name="directory_storage_root">手机存储（%1$s）</string>
+    <string name="directory_edit_path">编辑路径</string>
+    <string name="directory_jump_title">跳转</string>
+    <string name="directory_not_found">未找到该目录</string>
     <string name="ai_base_url_required">请先在 AI 平台设置中填写 API 请求地址</string>
     <string name="ai_models_empty">模型列表为空</string>
     <string name="ai_models_fetch_failed">获取模型列表失败</string>
