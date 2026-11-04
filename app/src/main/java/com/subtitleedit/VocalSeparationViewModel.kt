@@ -2,6 +2,7 @@ package com.subtitleedit
 
 import android.app.Application
 import android.content.Intent
+import com.subtitleedit.util.PickedUriAccess
 import android.net.Uri
 import android.os.Environment
 import android.widget.Toast
@@ -89,7 +90,7 @@ internal class VocalSeparationViewModel(
 
     fun selectOutputDirectory(uri: Uri) {
         val permissionSaved = runCatching {
-            app.contentResolver.takePersistableUriPermission(
+            PickedUriAccess.retainPermission(app,
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )

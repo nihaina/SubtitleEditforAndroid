@@ -3,7 +3,7 @@ package com.subtitleedit
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import androidx.activity.result.contract.ActivityResultContracts
+import com.subtitleedit.filepicker.AppFilePickerContracts
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.runtime.collectAsState
@@ -17,7 +17,7 @@ class SettingsActivity : AppComposeActivity() {
     private val viewModel: SettingsViewModel by viewModels()
     private var softwareDirectoryPickerActive = false
     private val softwareDirectoryPicker = registerForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
+        AppFilePickerContracts.OpenDocumentTree()
     ) { uri: Uri? ->
         softwareDirectoryPickerActive = false
         uri?.let(viewModel::selectSoftwareDirectory)
@@ -60,11 +60,11 @@ class SettingsActivity : AppComposeActivity() {
     }
 
     private val backupExporter = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json")
+        AppFilePickerContracts.CreateDocument("application/json")
     ) { uri -> uri?.let(viewModel::exportBackup) }
 
     private val backupImporter = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
+        AppFilePickerContracts.OpenDocument()
     ) { uri -> uri?.let(viewModel::restoreBackup) }
 
     override fun onResume() {

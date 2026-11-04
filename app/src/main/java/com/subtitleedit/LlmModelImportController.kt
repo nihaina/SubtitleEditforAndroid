@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import com.subtitleedit.util.PickedUriAccess
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
@@ -85,7 +86,7 @@ internal class LlmModelImportController(
             return
         }
         try {
-            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            PickedUriAccess.retainPermission(context, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
                 check(descriptor.statSize != 0L) { host.text(R.string.model_mgmt_llm_model_empty) }
             } ?: error(host.text(R.string.model_mgmt_llm_model_unreadable))

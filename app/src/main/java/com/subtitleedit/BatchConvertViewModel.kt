@@ -2,6 +2,7 @@ package com.subtitleedit
 
 import android.app.Application
 import android.content.Intent
+import com.subtitleedit.util.PickedUriAccess
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.subtitleedit.feature.ui.BatchConvertDialogUi
@@ -76,7 +77,7 @@ internal class BatchConvertViewModel(
     }
 
     fun selectOutputDirectory(uri: Uri) {
-        app.contentResolver.takePersistableUriPermission(
+        PickedUriAccess.retainPermission(app,
             uri,
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         )
@@ -154,6 +155,7 @@ internal class BatchConvertViewModel(
     }
 
     private fun getFileSizeFromUri(uri: Uri): Long {
+        PickedUriAccess.file(uri)?.let { return it.length() }
         var size = 0L
         try {
             val projection = arrayOf(OpenableColumns.SIZE)

@@ -3,7 +3,7 @@ package com.subtitleedit
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
+import com.subtitleedit.filepicker.AppFilePickerContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -54,7 +54,7 @@ class DraftsActivity : AppComposeActivity() {
     private val viewModel: DraftsViewModel by viewModels()
 
     private val exportFileLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("*/*")
+        AppFilePickerContracts.CreateDocument("*/*")
     ) { uri -> viewModel.onExportTargetSelected(uri) }
 
     override fun onCreate(savedInstanceState: Bundle?) {

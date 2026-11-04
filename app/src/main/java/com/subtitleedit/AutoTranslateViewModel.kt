@@ -2,6 +2,7 @@ package com.subtitleedit
 
 import android.app.Application
 import android.content.Intent
+import com.subtitleedit.util.PickedUriAccess
 import android.net.Uri
 import android.os.SystemClock
 import android.provider.OpenableColumns
@@ -272,7 +273,7 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
                 toast(R.string.auto_translate_unsupported_file, fileName)
                 return@forEach
             }
-            runCatching { app.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            runCatching { PickedUriAccess.retainPermission(app, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             val file = AutoTranslateFile(uri, fileName, getFileSizeFromUri(uri))
             if (queueController.add(file.toSnapshot())) files += file
         }
@@ -290,7 +291,7 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
     }
 
     fun selectOutputDirectory(uri: Uri) {
-        runCatching { app.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+        runCatching { PickedUriAccess.retainPermission(app, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
         outputDirectoryUri = uri
         outputDirectoryLabel = DirectoryDisplayPath.fromUri(app, uri)
         settingsManager.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
@@ -1274,7 +1275,10 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
         } else fallback
     private fun defaultTranslateOutputDirectory() = File(com.subtitleedit.util.ModelDirectoryManager.softwareDirectory(), "Translate")
     private fun getTranslateOutputDirectory() = defaultTranslateOutputDirectory().apply { if (!exists()) mkdirs() }
-    private fun getFileNameFromUri(uri: Uri): String? = runCatching { app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getString(0) else null } }.getOrNull() ?: when (uri.scheme) { "file" -> uri.path?.let(::File)?.name; else -> DocumentFile.fromSingleUri(app, uri)?.name }
-    private fun getFileSizeFromUri(uri: Uri): Long = runCatching { app.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else 0L } ?: 0L }.getOrDefault(0L).let { size -> if (size > 0) size else if (uri.scheme == "file") uri.path?.let(::File)?.length() ?: 0L else 0L }
+    private fun getFileNameFromUri(uri: Uri): String? = PickedUriAccess.file(uri)?.name
+        ?: runCatching { app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getString(0) else null } }.getOrNull()
+        ?: DocumentFile.fromSingleUri(app, uri)?.name
+    private fun getFileSizeFromUri(uri: Uri): Long = PickedUriAccess.file(uri)?.length()
+        ?: runCatching { app.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else 0L } ?: 0L }.getOrDefault(0L)
 
 }

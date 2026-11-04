@@ -2,7 +2,7 @@ package com.subtitleedit
 
 import android.os.Bundle
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
+import com.subtitleedit.filepicker.AppFilePickerContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -16,11 +16,11 @@ class BatchConvertActivity : AppComposeActivity() {
     private val viewModel: BatchConvertViewModel by viewModels()
 
     private val filePickerLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments()
+        AppFilePickerContracts.OpenMultipleDocuments()
     ) { uris -> viewModel.addFiles(uris) }
 
     private val directoryPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
+        AppFilePickerContracts.OpenDocumentTree()
     ) { uri -> uri?.let(viewModel::selectOutputDirectory) }
 
     override fun onCreate(savedInstanceState: Bundle?) {

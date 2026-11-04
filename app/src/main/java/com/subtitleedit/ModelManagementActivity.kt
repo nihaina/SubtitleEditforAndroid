@@ -9,6 +9,7 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import com.subtitleedit.filepicker.AppFilePickerContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -20,17 +21,17 @@ class ModelManagementActivity : AppComposeActivity() {
     private val viewModel: ModelManagementViewModel by viewModels()
 
     private val documentPickers = ModelPickTarget.entries.associateWith { target ->
-        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        registerForActivityResult(AppFilePickerContracts.OpenDocument()) { uri ->
             uri?.let { viewModel.onDocumentPicked(target, it) }
         }
     }
 
     private val tokenizerFolderPicker = registerForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
+        AppFilePickerContracts.OpenDocumentTree()
     ) { uri -> uri?.let(viewModel::onTokenizerFolderPicked) }
 
     private val forcedAlignerPicker = registerForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments()
+        AppFilePickerContracts.OpenMultipleDocuments()
     ) { uris -> if (uris.isNotEmpty()) viewModel.onForcedAlignerPicked(uris) }
 
     private val manageStorageLauncher = registerForActivityResult(

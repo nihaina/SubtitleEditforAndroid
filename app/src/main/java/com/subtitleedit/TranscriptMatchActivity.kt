@@ -4,7 +4,7 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
+import com.subtitleedit.filepicker.AppFilePickerContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -14,13 +14,13 @@ import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 class TranscriptMatchActivity : AppComposeActivity() {
     private val viewModel: TranscriptMatchViewModel by viewModels()
 
-    private val textPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+    private val textPicker = registerForActivityResult(AppFilePickerContracts.OpenDocument()) { uri: Uri? ->
         uri?.let(viewModel::selectText)
     }
-    private val audioPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+    private val audioPicker = registerForActivityResult(AppFilePickerContracts.OpenDocument()) { uri: Uri? ->
         uri?.let(viewModel::selectAudio)
     }
-    private val directoryPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+    private val directoryPicker = registerForActivityResult(AppFilePickerContracts.OpenDocumentTree()) { uri: Uri? ->
         uri?.let(viewModel::selectOutputDirectory)
     }
 

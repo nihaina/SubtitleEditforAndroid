@@ -2,6 +2,7 @@ package com.subtitleedit
 
 import android.app.Application
 import android.content.Intent
+import com.subtitleedit.util.PickedUriAccess
 import android.net.Uri
 import android.widget.Toast
 import androidx.documentfile.provider.DocumentFile
@@ -144,11 +145,11 @@ internal class LogViewModel(
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    app.contentResolver.takePersistableUriPermission(
+                    PickedUriAccess.retainPermission(app,
                         uri,
                         Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                     )
-                    val dir = DocumentFile.fromTreeUri(app, uri)
+                    val dir = PickedUriAccess.directory(app, uri)
                         ?: throw IllegalStateException(string(R.string.log_export_dir_inaccessible))
                     val fileName = uniqueFileName(dir, RuntimeLogManager.exportFileName())
                     val file = dir.createFile("text/plain", fileName)

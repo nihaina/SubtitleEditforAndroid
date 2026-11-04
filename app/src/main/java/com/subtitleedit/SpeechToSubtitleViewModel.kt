@@ -2,6 +2,7 @@ package com.subtitleedit
 
 import android.app.Application
 import android.content.Intent
+import com.subtitleedit.util.PickedUriAccess
 import android.net.Uri
 import android.os.Environment
 import android.util.Log
@@ -213,7 +214,7 @@ internal class SpeechToSubtitleViewModel(
      */
     fun selectOutputDirectory(uri: Uri) {
         try {
-            app.contentResolver.takePersistableUriPermission(
+            PickedUriAccess.retainPermission(app,
                 uri,
                 Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION
             )

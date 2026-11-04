@@ -5,7 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
+import com.subtitleedit.filepicker.AppFilePickerContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -21,11 +21,11 @@ class MediaConvertActivity : AppComposeActivity() {
     private val viewModel: MediaConvertViewModel by viewModels()
 
     private val pickFileLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments()
+        AppFilePickerContracts.OpenMultipleDocuments()
     ) { uris -> if (uris.isNotEmpty()) viewModel.selectFiles(uris) }
 
     private val directoryPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
+        AppFilePickerContracts.OpenDocumentTree()
     ) { uri -> uri?.let(viewModel::selectOutputDirectory) }
 
     override fun onCreate(savedInstanceState: Bundle?) {

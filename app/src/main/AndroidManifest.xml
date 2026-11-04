@@ -38,6 +38,11 @@
         android:requestLegacyExternalStorage="true"
         tools:targetApi="34">
 
+        <activity
+            android:name=".filepicker.FilePickerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
+
         <uses-native-library
             android:name="libcdsprpc.so"
             android:required="false" />

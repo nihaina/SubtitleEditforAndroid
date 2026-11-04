@@ -4,7 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
+import com.subtitleedit.filepicker.AppFilePickerContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -22,12 +22,12 @@ class SpeechToSubtitleActivity : AppComposeActivity() {
 
     // 文件选择器
     private val filePickerLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments()
+        AppFilePickerContracts.OpenMultipleDocuments()
     ) { uris -> if (uris.isNotEmpty()) viewModel.selectFiles(uris) }
 
     // 输出目录选择器
     private val outputDirLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
+        AppFilePickerContracts.OpenDocumentTree()
     ) { uri -> uri?.let(viewModel::selectOutputDirectory) }
 
     override fun onCreate(savedInstanceState: Bundle?) {

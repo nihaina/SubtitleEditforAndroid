@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import com.subtitleedit.util.PickedUriAccess
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
@@ -572,7 +573,7 @@ internal class AsrModelImportController(
             val fileName = getFileNameFromUri(uri)
             val senseVoiceNpu = isSenseVoiceNpu()
             if (!senseVoiceNpu) {
-                context.contentResolver.takePersistableUriPermission(
+                PickedUriAccess.retainPermission(context,
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
@@ -736,7 +737,7 @@ internal class AsrModelImportController(
 
     private fun handleSelectedDecoder(uri: Uri) {
         try {
-            context.contentResolver.takePersistableUriPermission(
+            PickedUriAccess.retainPermission(context,
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
@@ -764,7 +765,7 @@ internal class AsrModelImportController(
 
     private fun handleSelectedJoiner(uri: Uri) {
         try {
-            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            PickedUriAccess.retainPermission(context, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             val fileName = getFileNameFromUri(uri)
             val expectedName = if (isQwen3Asr()) "conv_frontend" else "joiner"
             if (!fileName.contains(expectedName, ignoreCase = true) ||
@@ -785,7 +786,7 @@ internal class AsrModelImportController(
     private fun handleSelectedTokens(uri: Uri) {
         try {
             if (isSenseVoiceNpu() && !ensureQnnRuntimeAvailable()) return
-            context.contentResolver.takePersistableUriPermission(
+            PickedUriAccess.retainPermission(context,
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
@@ -817,7 +818,7 @@ internal class AsrModelImportController(
             "chat_template.json", "config.json", "merges.txt",
             "preprocessor_config.json", "tokenizer_config.json", "vocab.json"
         )
-        val source = DocumentFile.fromTreeUri(context, uri)
+        val source = PickedUriAccess.directory(context, uri)
         val sourceFiles = source?.listFiles()?.associateBy { it.name?.lowercase(Locale.ROOT) }
         val selectedFiles = requiredFiles.mapNotNull { name ->
             sourceFiles?.get(name.lowercase(Locale.ROOT))?.takeIf { it.isFile }
@@ -915,7 +916,7 @@ internal class AsrModelImportController(
             try {
                 val graph = withContext(Dispatchers.IO) {
                     val files = uris.map { uri ->
-                        val document = DocumentFile.fromSingleUri(context, uri)
+                        val document = PickedUriAccess.document(context, uri)
                             ?: error(host.text(R.string.model_mgmt_asr_aligner_read_info_failed))
                         val name = document.name
                             ?: error(host.text(R.string.model_mgmt_asr_aligner_read_name_failed))
@@ -956,7 +957,7 @@ internal class AsrModelImportController(
 
     private fun handleSelectedVad(uri: Uri) {
         try {
-            context.contentResolver.takePersistableUriPermission(
+            PickedUriAccess.retainPermission(context,
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )

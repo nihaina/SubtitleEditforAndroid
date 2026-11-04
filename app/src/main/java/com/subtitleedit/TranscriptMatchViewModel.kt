@@ -2,6 +2,7 @@ package com.subtitleedit
 
 import android.app.Application
 import android.content.Intent
+import com.subtitleedit.util.PickedUriAccess
 import android.net.Uri
 import androidx.lifecycle.viewModelScope
 import com.subtitleedit.feature.ui.TranscriptMatchDialog
@@ -105,7 +106,7 @@ internal class TranscriptMatchViewModel(application: Application) :
 
     fun selectOutputDirectory(uri: Uri) {
         runCatching {
-            app.contentResolver.takePersistableUriPermission(
+            PickedUriAccess.retainPermission(app,
                 uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
         }
@@ -327,10 +328,8 @@ internal class TranscriptMatchViewModel(application: Application) :
         } else localFile(path)?.let { it.isFile && it.canRead() } == true
     }
 
-    private fun displayName(uri: Uri): String = app.contentResolver.query(
-        uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null
-    )?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
-        ?: uri.lastPathSegment ?: string(R.string.transcript_match_unknown_file)
+    private fun displayName(uri: Uri): String =
+        com.subtitleedit.util.UriDisplayName.of(app, uri, string(R.string.transcript_match_unknown_file))
 
     private fun defaultOutputDirectory(): File =
         File(com.subtitleedit.util.ModelDirectoryManager.softwareDirectory(), "TranscriptMatch")

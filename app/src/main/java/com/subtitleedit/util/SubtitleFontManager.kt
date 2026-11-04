@@ -124,6 +124,7 @@ object SubtitleFontManager {
     }
 
     private fun documentDisplayName(context: Context, uri: Uri): String? {
+        PickedUriAccess.file(uri)?.let { return it.name }
         val projection = arrayOf(android.provider.OpenableColumns.DISPLAY_NAME)
         runCatching {
             context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->

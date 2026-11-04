@@ -2,6 +2,7 @@ package com.subtitleedit
 
 import android.app.Application
 import android.content.Intent
+import com.subtitleedit.util.PickedUriAccess
 import android.net.Uri
 import android.os.SystemClock
 import android.provider.OpenableColumns
@@ -160,7 +161,7 @@ internal class MediaConvertViewModel(application: Application) :
         if (isRunning) return
         probeJob?.cancel()
         selectedMediaFiles = uris.distinct().map { uri ->
-            runCatching { app.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            runCatching { PickedUriAccess.retainPermission(app, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             SelectedMediaFile(uri, getFileName(uri), app.getString(R.string.media_convert_reading_info))
         }
         setState {
@@ -176,7 +177,7 @@ internal class MediaConvertViewModel(application: Application) :
     }
 
     fun selectOutputDirectory(uri: Uri) {
-        runCatching { app.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+        runCatching { PickedUriAccess.retainPermission(app, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
             .onFailure { toast(R.string.directory_permission_save_failed, it.message.orEmpty(), duration = android.widget.Toast.LENGTH_LONG) }
         outputDirectoryUri = uri
         settingsManager.setPersistedOutputDirectory(OUTPUT_DIRECTORY_KEY, uri.toString())
@@ -281,12 +282,12 @@ internal class MediaConvertViewModel(application: Application) :
     private fun probeUri(uri: Uri): String {
         var input: String? = null
         return try {
-            input = FFmpegKitConfig.getSafParameterForRead(app, uri)
+            input = ffmpegInput(uri)
             readMediaInfo(input) ?: string(R.string.media_convert_probe_failed)
         } catch (e: Exception) {
             string(R.string.media_convert_probe_exception, e.message ?: string(R.string.media_convert_unknown))
         }
-        finally { input?.let(FFmpegKitConfig::unregisterSafProtocolUrl) }
+        finally { releaseFfmpegInput(input) }
     }
 
     private fun readMediaInfo(path: String): String? {
@@ -366,7 +367,7 @@ internal class MediaConvertViewModel(application: Application) :
             val prefix = "[${index + 1}/$total]"
             appendLog(string(R.string.media_convert_start_file, prefix, file.fileName))
             val sourceProbe = if (format.isAudioOnly) null else withContext(Dispatchers.IO) { probeSourceUri(file.uri)?.let { if (isLikelyAudioFile(file)) SourceProbe(false, it.durationSeconds) else it } ?: SourceProbe(true, null) }
-            input = withContext(Dispatchers.IO) { FFmpegKitConfig.getSafParameterForRead(app, file.uri) }
+            input = withContext(Dispatchers.IO) { ffmpegInput(file.uri) }
             if (sourceProbe?.hasVideo == false) {
                 appendLog(string(R.string.media_convert_no_video_stream, prefix))
             }
@@ -387,7 +388,7 @@ internal class MediaConvertViewModel(application: Application) :
             Result.success(copied)
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { Result.failure(e) }
-        finally { input?.let(FFmpegKitConfig::unregisterSafProtocolUrl); withContext(NonCancellable + Dispatchers.IO) { cache.deleteRecursively() } }
+        finally { releaseFfmpegInput(input); withContext(NonCancellable + Dispatchers.IO) { cache.deleteRecursively() } }
     }
 
     private suspend fun executeConversion(input: String, output: File, format: MediaConvertFormatInfo, probe: SourceProbe?, index: Int, total: Int): FFmpegSession {
@@ -426,7 +427,12 @@ internal class MediaConvertViewModel(application: Application) :
     }
     private fun selectedQuality(): Int? { val state = currentState; val number = if (state.selectedQualityId == "custom") state.customQuality.toIntOrNull() else state.selectedQualityId.toIntOrNull(); return number?.coerceIn(1, 31)?.takeIf { state.selectedQualityId != "-1" } }
     private fun fallbackVideoCodec(format: MediaConvertFormatInfo) = format.videoCodecs.firstOrNull { it != "copy" } ?: "mpeg4"
-    private fun probeSourceUri(uri: Uri): SourceProbe? { var input: String? = null; return try { input = FFmpegKitConfig.getSafParameterForRead(app, uri); val info = FFprobeKit.getMediaInformation(input).getMediaInformation() ?: return null; SourceProbe(info.getStreams().any { it.getType() == "video" }, info.getDuration()?.toDoubleOrNull()?.takeIf { it > 0 }) } catch (_: Exception) { null } finally { input?.let(FFmpegKitConfig::unregisterSafProtocolUrl) } }
+    private fun ffmpegInput(uri: Uri): String = PickedUriAccess.file(uri)?.absolutePath
+        ?: FFmpegKitConfig.getSafParameterForRead(app, uri)
+    private fun releaseFfmpegInput(input: String?) {
+        if (input?.startsWith("saf:") == true) FFmpegKitConfig.unregisterSafProtocolUrl(input)
+    }
+    private fun probeSourceUri(uri: Uri): SourceProbe? { var input: String? = null; return try { input = ffmpegInput(uri); val info = FFprobeKit.getMediaInformation(input).getMediaInformation() ?: return null; SourceProbe(info.getStreams().any { it.getType() == "video" }, info.getDuration()?.toDoubleOrNull()?.takeIf { it > 0 }) } catch (_: Exception) { null } finally { releaseFfmpegInput(input) } }
     private fun isLikelyAudioFile(file: SelectedMediaFile) = app.contentResolver.getType(file.uri)?.startsWith("audio/") == true || file.fileName.substringAfterLast('.', "").lowercase(Locale.ROOT) in audioExtensions
     private fun desiredOutputName(name: String, format: MediaConvertFormatInfo) = "${name.substringBeforeLast('.', name).ifBlank { "media_file" }}.${format.extension}"
     private fun outputDirectoryFor(sourceUri: Uri, fallback: Uri): Uri =
@@ -474,7 +480,7 @@ internal class MediaConvertViewModel(application: Application) :
     }.getOrNull()
     private fun getMimeType(name: String) = when (name.substringAfterLast('.', "").lowercase(Locale.ROOT)) { "mp4", "m4v" -> "video/mp4"; "mkv" -> "video/x-matroska"; "avi" -> "video/x-msvideo"; "mov" -> "video/quicktime"; "webm" -> "video/webm"; "flv" -> "video/x-flv"; "ts" -> "video/mp2t"; "3gp" -> "video/3gpp"; "wmv" -> "video/x-ms-wmv"; "mp3" -> "audio/mpeg"; "aac" -> "audio/aac"; "m4a" -> "audio/mp4"; "wav" -> "audio/wav"; "flac" -> "audio/flac"; "ogg" -> "audio/ogg"; "opus" -> "audio/opus"; "wma" -> "audio/x-ms-wma"; "ac3" -> "audio/ac3"; else -> "application/octet-stream" }
     private fun createTaskCache(purpose: String) = File(app.cacheDir, "media_convert_${purpose}_${System.currentTimeMillis()}_${System.nanoTime()}").apply { mkdirs() }
-    private fun getFileName(uri: Uri): String = app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor -> val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME); if (cursor.moveToFirst() && index >= 0) cursor.getString(index) else null } ?: uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { null } ?: "media_file"
+    private fun getFileName(uri: Uri): String = com.subtitleedit.util.UriDisplayName.of(app, uri, "media_file")
     private fun formatDuration(seconds: Double): String { val h = (seconds / 3600).toInt(); val m = ((seconds % 3600) / 60).toInt(); val s = (seconds % 60).toInt(); return if (h > 0) "%d:%02d:%02d".format(Locale.getDefault(), h, m, s) else "%d:%02d".format(Locale.getDefault(), m, s) }
     private fun appendLog(message: String) { if (message.isNotBlank()) setState { copy(log = (log + message).takeLast(16000)) } }
 

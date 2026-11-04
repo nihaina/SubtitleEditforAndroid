@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import com.subtitleedit.util.PickedUriAccess
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
@@ -298,7 +299,7 @@ internal class DemucsModelImportController(
     }
 
     private fun persistAndVerifyModel(uri: Uri) {
-        context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        PickedUriAccess.retainPermission(context, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
             if (descriptor.statSize == 0L) throw IllegalStateException(host.text(R.string.model_mgmt_demucs_model_empty))
         } ?: throw IllegalStateException(host.text(R.string.model_mgmt_demucs_model_unreadable))

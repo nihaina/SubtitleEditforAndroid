@@ -23,6 +23,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import com.subtitleedit.filepicker.AppFilePickerContracts
 import androidx.activity.viewModels
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
@@ -219,7 +220,7 @@ class EditorActivity : AppCompatActivity() {
     private var coordinatePickerGeneration = 0L
 
     private val fontFileLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
+        AppFilePickerContracts.OpenDocument()
     ) { uri ->
         val positions = pendingFontPositions
         val name = pendingFontName
@@ -239,7 +240,7 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private val styleFontFileLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
+        AppFilePickerContracts.OpenDocument()
     ) { uri ->
         val name = pendingStyleFontName
         val onSelected = pendingStyleFontSelection
@@ -259,14 +260,14 @@ class EditorActivity : AppCompatActivity() {
 
     // 文件选择器
     private val openFileLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
+        AppFilePickerContracts.OpenDocument()
     ) { uri ->
         uri?.let { openFileFromUri(it) }
     }
     
     // 保存文件选择器
     private val saveFileLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("*/*")
+        AppFilePickerContracts.CreateDocument("*/*")
     ) { uri ->
         if (uri == null) {
             stateModel.saveCoordinator.cancel()
@@ -4070,7 +4071,7 @@ class EditorActivity : AppCompatActivity() {
 
     private fun takePersistableWritePermission(uri: Uri) {
         runCatching {
-            contentResolver.takePersistableUriPermission(
+            com.subtitleedit.util.PickedUriAccess.retainPermission(this,
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )

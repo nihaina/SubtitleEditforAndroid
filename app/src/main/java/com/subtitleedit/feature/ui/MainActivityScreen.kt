@@ -23,9 +23,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -48,7 +45,6 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateDpAsState
@@ -85,7 +81,6 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.appcompat.R as AppCompatR
 import com.subtitleedit.FileOperation
 import com.subtitleedit.DirectoryScrollPosition
 import com.subtitleedit.MainTopLevelPages
@@ -269,80 +264,10 @@ internal fun MainActivityScreen(
                 scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
             ),
             title = {
-                androidx.compose.animation.AnimatedContent(
-                    targetState = state.isSearchExpanded && isDirectoryPage && !isSelectionActive,
-                    transitionSpec = {
-                        androidx.compose.animation.fadeIn(AppMotion.enter()) togetherWith
-                            androidx.compose.animation.fadeOut(AppMotion.exit())
-                    },
-                    label = "directory-search"
-                ) { searchOpen ->
-                if (searchOpen) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .padding(horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        BasicTextField(
-                            value = state.searchQuery,
-                            onValueChange = onSearchChanged,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(36.dp)
-                                .focusRequester(searchFocusRequester),
-                            singleLine = true,
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(
-                                color = MaterialTheme.colorScheme.onSurface
-                            ),
-                            keyboardOptions = KeyboardOptions.Default.copy(
-                                autoCorrectEnabled = false,
-                                imeAction = androidx.compose.ui.text.input.ImeAction.Search
-                            ),
-                            // SearchView's submit listener returned true without
-                            // changing the query or collapsing the action view.
-                            keyboardActions = KeyboardActions(onSearch = {}),
-                            decorationBox = { innerTextField ->
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clip(MaterialTheme.shapes.extraLarge)
-                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                                        .padding(horizontal = 8.dp),
-                                    contentAlignment = Alignment.CenterStart
-                                ) {
-                                    if (state.searchQuery.isEmpty()) {
-                                        Text(
-                                            text = stringResource(R.string.file_search_hint),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            style = MaterialTheme.typography.bodyLarge
-                                        )
-                                    }
-                                    innerTextField()
-                                }
-                            }
-                        )
-                        IconButton(
-                            onClick = {
-                                if (state.searchQuery.isEmpty()) onToolbarBack()
-                                else onSearchChanged("")
-                            },
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(
-                                painterResource(AppCompatR.drawable.abc_ic_clear_material),
-                                contentDescription = if (state.searchQuery.isEmpty()) {
-                                    stringResource(R.string.cancel)
-                                } else {
-                                    "清除搜索"
-                                },
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-                } else {
-                    val title = when {
+                DirectoryToolbarTitle(
+                    searchOpen = state.isSearchExpanded && isDirectoryPage && !isSelectionActive,
+                    query = state.searchQuery,
+                    title = when {
                         state.toolbarTitle.isNotBlank() -> state.toolbarTitle
                         isSelectionActive -> FileOperationUiPolicy.selectionTitle(
                             state.pendingOperation,
@@ -350,24 +275,11 @@ internal fun MainActivityScreen(
                         )
                         isDirectoryPage -> stringResource(R.string.nav_directory)
                         else -> stringResource(MainNavigationPolicy.titleRes(state.selectedTopLevelItem))
-                    }
-                    AnimatedContent(
-                        targetState = title,
-                        transitionSpec = {
-                            fadeIn(animationSpec = AppMotion.fast()) +
-                                slideInVertically(animationSpec = AppMotion.fast()) { 8 } togetherWith
-                                fadeOut(animationSpec = AppMotion.fast())
-                        },
-                        label = "main-toolbar-title"
-                    ) { animatedTitle ->
-                        Text(
-                            text = animatedTitle,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-                }
+                    },
+                    onQueryChanged = onSearchChanged,
+                    onCloseSearch = onToolbarBack,
+                    focusRequester = searchFocusRequester
+                )
             },
             navigationIcon = {
                 if (state.toolbarHasBack || isSelectionActive) {

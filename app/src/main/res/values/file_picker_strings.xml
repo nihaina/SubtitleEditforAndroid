@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="file_picker_open_file">选择文件</string>
+    <string name="file_picker_open_files">选择多个文件</string>
+    <string name="file_picker_select_directory">选择目录</string>
+    <string name="file_picker_use_directory">选择此目录</string>
+    <string name="file_picker_confirm_count">选择（%1$d）</string>
+    <string name="file_picker_clear_selection">清空选择</string>
+    <string name="file_picker_file_name">文件名</string>
+    <string name="file_picker_directory_name">目录名称</string>
+    <string name="file_picker_create_directory">新建目录</string>
+    <string name="file_picker_search">搜索</string>
+    <string name="file_picker_search_hint">搜索当前目录</string>
+    <string name="file_picker_locations">存储位置与收藏</string>
+    <string name="file_picker_more">更多选项</string>
+    <string name="file_picker_sort">排序</string>
+    <string name="file_picker_sort_ascending">升序</string>
+    <string name="file_picker_sort_descending">降序</string>
+    <string name="file_picker_show_hidden">显示隐藏文件</string>
+    <string name="file_picker_refresh">刷新</string>
+    <string name="file_picker_empty">此目录没有可选择的项目</string>
+    <string name="file_picker_internal_storage">内部存储</string>
+    <string name="file_picker_favorite">收藏 · %1$s</string>
+    <string name="file_picker_permission_message">允许访问所有文件后，即可使用应用内文件选择器浏览和保存本地文件。</string>
+    <string name="file_picker_grant_permission">授权文件访问</string>
+    <string name="file_picker_directory_inaccessible">无法访问该目录</string>
+    <string name="file_picker_directory_not_writable">所选目录不可写入</string>
+    <string name="file_picker_file_inaccessible">文件不存在或无法读取</string>
+    <string name="file_picker_invalid_name">名称不能为空、. 或 ..，也不能包含 / 或空字符</string>
+    <string name="file_picker_create_directory_failed">无法新建目录，请检查名称冲突或访问权限</string>
+    <string name="file_picker_overwrite_message">文件“%1$s”已存在，请选择覆盖或自动重命名。</string>
+</resources>

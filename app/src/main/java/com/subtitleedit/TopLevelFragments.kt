@@ -8,7 +8,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import com.subtitleedit.filepicker.AppFilePickerContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -106,10 +106,10 @@ internal fun MainTopLevelPages(
         }
     }
 
-    val directoryPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+    val directoryPicker = rememberLauncherForActivityResult(AppFilePickerContracts.OpenDocumentTree()) { uri ->
         if (uri != null) addFavoriteDirectory(context, preferences, state, uri)
     }
-    val softwareDirectoryPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+    val softwareDirectoryPicker = rememberLauncherForActivityResult(AppFilePickerContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
             val target = File(DirectoryDisplayPath.fromUri(context, uri)).absoluteFile
             if (target.canonicalFile != settings.getSoftwareDirectory().absoluteFile.canonicalFile) {
@@ -125,7 +125,7 @@ internal fun MainTopLevelPages(
             }
         }
     }
-    val draftExporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
+    val draftExporter = rememberLauncherForActivityResult(AppFilePickerContracts.CreateDocument("*/*")) { uri ->
         exportDraft(context, state, uri)
     }
 
@@ -138,7 +138,7 @@ internal fun MainTopLevelPages(
     }
 
     val backupExporter = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json")
+        AppFilePickerContracts.CreateDocument("application/json")
     ) { uri ->
         if (uri != null) {
             runCatching {
@@ -150,7 +150,7 @@ internal fun MainTopLevelPages(
         }
     }
     val backupImporter = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
+        AppFilePickerContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
             runCatching {
@@ -407,7 +407,7 @@ private fun addFavoriteDirectory(
     uri: Uri
 ) {
     runCatching {
-        context.contentResolver.takePersistableUriPermission(
+        com.subtitleedit.util.PickedUriAccess.retainPermission(context,
             uri,
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         )

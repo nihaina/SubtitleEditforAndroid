@@ -3,7 +3,7 @@ package com.subtitleedit
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
+import com.subtitleedit.filepicker.AppFilePickerContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -13,7 +13,7 @@ import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 class SubtitleFormatSelectActivity : AppComposeActivity() {
     private val viewModel: SubtitleFormatSelectViewModel by viewModels()
 
-    private val filePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    private val filePicker = registerForActivityResult(AppFilePickerContracts.OpenDocument()) { uri ->
         uri?.let(viewModel::onFilePicked)
     }
 
