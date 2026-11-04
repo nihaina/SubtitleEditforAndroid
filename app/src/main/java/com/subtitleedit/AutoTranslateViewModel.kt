@@ -235,7 +235,7 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
         customPrompt = customPrompt,
         baseUrl = baseUrl,
         reasoningLevel = runCatching { AiProviderConfig.ReasoningLevel.valueOf(reasoningLevel) }
-            .getOrDefault(AiProviderConfig.defaultReasoningLevel(provider)),
+            .getOrDefault(AiProviderConfig.defaultReasoningLevel(settingsManager.getAiProviderConfig(provider).templateId)),
         thinkingEnabled = thinkingEnabled
     )
 
@@ -468,8 +468,8 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
         val runnable = files.filter { it.status == FileStatus.WAITING }
         if (runnable.isEmpty()) return
         val needsLocalModel = runnable.any { file ->
-            (currentState.translationEnabled && settingsManager.getAiTranslationProvider() == AiProviderConfig.LOCAL) ||
-                (currentState.punctuationPredictionEnabled && settingsManager.getAiPunctuationProvider() == AiProviderConfig.LOCAL)
+            (currentState.translationEnabled && settingsManager.isLocalAiProvider(settingsManager.getAiTranslationProvider())) ||
+                (currentState.punctuationPredictionEnabled && settingsManager.isLocalAiProvider(settingsManager.getAiPunctuationProvider()))
         }
         if (needsLocalModel) {
             val modelPath = settingsManager.getLlmModelPath()
@@ -705,7 +705,7 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
         updateProcessingStage(file, ProcessingStage.PUNCTUATION_PREDICTION, session.processedCount, session.totalCount)
         if (session.totalCount == 0) return document
         val apiKey = settingsManager.getAiApiKey(provider); val model = settingsManager.getAiPunctuationModel(provider); val baseUrl = settingsManager.getAiBaseUrl(provider)
-        if (file.punctuationConversation == null && provider == AiProviderConfig.LOCAL) {
+        if (file.punctuationConversation == null && settingsManager.isLocalAiProvider(provider)) {
             if (settingsManager.getLlmModelPath().isBlank()) {
                 throw IllegalArgumentException(string(R.string.ai_processing_configuration_required))
             }
@@ -737,7 +737,7 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
                 resetAiStream(file)
                 conversation.predictPunctuation(
                     text = text,
-                    clearConversation = provider == AiProviderConfig.LOCAL && !isRetry && !preserveConversation,
+                    clearConversation = settingsManager.isLocalAiProvider(provider) && !isRetry && !preserveConversation,
                     recordInterruptedTurn = { shouldStop() || file.pauseRequested },
                     streamCallback = { content ->
                         publishAiStream(file, content)
@@ -762,7 +762,7 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
                 resetAiStream(file)
                 conversation.predictPunctuation(
                     text = text,
-                    clearConversation = provider == AiProviderConfig.LOCAL && !isRetry && !preserveConversation,
+                    clearConversation = settingsManager.isLocalAiProvider(provider) && !isRetry && !preserveConversation,
                     isPaused = { file.pauseRequested },
                     isCancelled = { file.cancellationRequested || file.pauseRequested }
                 ).getOrElse { throw it }.also {
@@ -797,7 +797,7 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
         val apiKey = settingsManager.getAiApiKey(provider)
         val model = settingsManager.getAiPunctuationModel(provider)
         val baseUrl = settingsManager.getAiBaseUrl(provider)
-        if (file.punctuationConversation == null && provider == AiProviderConfig.LOCAL) {
+        if (file.punctuationConversation == null && settingsManager.isLocalAiProvider(provider)) {
             if (settingsManager.getLlmModelPath().isBlank()) {
                 throw IllegalArgumentException(string(R.string.ai_processing_configuration_required))
             }
@@ -834,7 +834,7 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
                     request = {
                         conversation.predictPunctuation(
                             text = session.nextText,
-                            clearConversation = provider == AiProviderConfig.LOCAL && !preserveConversation,
+                            clearConversation = settingsManager.isLocalAiProvider(provider) && !preserveConversation,
                             streamCallback = { publishAiStream(file, it) },
                             isPaused = { file.pauseRequested },
                             isCancelled = { file.cancellationRequested || file.pauseRequested }
@@ -1090,7 +1090,7 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
     }
     private fun readTranslationConfig(): TranslationConfig? {
         val provider = settingsManager.getAiTranslationProvider(); val apiKey = settingsManager.getAiApiKey(provider); val model = settingsManager.getAiModel(provider); val target = settingsManager.getAiTargetLanguage(); val base = settingsManager.getAiBaseUrl(provider)
-        if (provider == AiProviderConfig.LOCAL) {
+        if (settingsManager.isLocalAiProvider(provider)) {
             if (settingsManager.getLlmModelPath().isBlank() || target.isBlank()) return null
         } else if (apiKey.isBlank() || model.isBlank() || target.isBlank() || base.isBlank()) {
             return null
@@ -1099,7 +1099,7 @@ internal class AutoTranslateViewModel @JvmOverloads constructor(
     }
     private fun isPunctuationAiConfigured(): Boolean {
         val provider = settingsManager.getAiPunctuationProvider()
-        return if (provider == AiProviderConfig.LOCAL) {
+        return if (settingsManager.isLocalAiProvider(provider)) {
             settingsManager.getLlmModelPath().isNotBlank()
         } else {
             settingsManager.getAiApiKey(provider).isNotBlank() && settingsManager.getAiPunctuationModel(provider).isNotBlank() && settingsManager.getAiBaseUrl(provider).isNotBlank()

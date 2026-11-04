@@ -47,6 +47,8 @@ class AiSettingsActivity : AppComposeActivity() {
                     onSelectProvider = viewModel::selectProvider,
                     onSelectTranslationProvider = viewModel::selectTranslationProvider,
                     onSelectPunctuationProvider = viewModel::selectPunctuationProvider,
+                    onAddProvider = viewModel::addProvider,
+                    onDeleteProvider = viewModel::deleteProvider,
                     onRevealApiKey = viewModel::revealApiKey,
                     onCopyApiKey = viewModel::requestCopyApiKey,
                     onLoadLocalModel = viewModel::loadLocalModel,

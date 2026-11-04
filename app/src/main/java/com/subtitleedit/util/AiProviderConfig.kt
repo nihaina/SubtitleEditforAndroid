@@ -30,8 +30,13 @@ object AiProviderConfig {
         val websiteUrl: String,
         val defaultModel: String,
         val models: List<String> = emptyList(),
-        val customEndpoint: Boolean = false
-    )
+        val customEndpoint: Boolean = false,
+        /** Built-in template controlling this entry's fields and runtime behavior. */
+        val templateId: String = id
+    ) {
+        val isUserAdded: Boolean get() = id != templateId
+        val isLocal: Boolean get() = templateId == LOCAL
+    }
 
     val providers = listOf(
         Provider(
@@ -73,7 +78,7 @@ object AiProviderConfig {
         )
     )
 
-    fun getProvider(id: String): Provider {
+    fun getProvider(id: String, providers: List<Provider> = this.providers): Provider {
         return providers.firstOrNull { it.id == id } ?: providers.first()
     }
 

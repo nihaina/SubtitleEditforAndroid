@@ -52,13 +52,13 @@ internal class EditorTranslationController(
     fun start(selectedEntries: List<Pair<SubtitleEntry, Int>>) {
         val settingsManager = SettingsManager.getInstance(activity)
         val provider = settingsManager.getAiTranslationProvider()
-        val providerName = AiProviderConfig.getProvider(provider).displayName
+        val providerName = settingsManager.getAiProviderConfig(provider).displayName
         val apiKey = settingsManager.getAiApiKey(provider)
-        if (provider == AiProviderConfig.LOCAL && settingsManager.getLlmModelPath().isBlank()) {
+        if (settingsManager.isLocalAiProvider(provider) && settingsManager.getLlmModelPath().isBlank()) {
             showTranslationError("请先在模型管理中导入本地 LLM 模型")
             return
         }
-        if (provider != AiProviderConfig.LOCAL && apiKey.isEmpty()) {
+        if (!settingsManager.isLocalAiProvider(provider) && apiKey.isEmpty()) {
             OverwritingToast.makeText(
                 activity,
                 "请先在设置中配置 $providerName API Key",
@@ -77,7 +77,7 @@ internal class EditorTranslationController(
         }
         val baseUrl = settingsManager.getAiBaseUrl(provider)
         val reasoningLevel = settingsManager.getAiReasoningLevel(provider)
-        if (provider != AiProviderConfig.LOCAL && baseUrl.isBlank()) {
+        if (!settingsManager.isLocalAiProvider(provider) && baseUrl.isBlank()) {
             showTranslationError("请先在设置中填写自定义 API 请求地址")
             return
         }

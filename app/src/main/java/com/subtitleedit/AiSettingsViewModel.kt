@@ -18,6 +18,8 @@ import com.subtitleedit.util.AiProviderConfig
 import com.subtitleedit.util.SettingsManager
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 
 internal sealed interface AiSettingsEvent {
     /** Ask the Activity to show the biometric / device credential prompt. */
@@ -38,6 +40,7 @@ internal class AiSettingsViewModel(
     private var authenticationInProgress = false
     private var pendingSensitiveAction: SensitiveAction? = null
     @Volatile private var localModelOperation = 0L
+    private val modelFetchJobs = mutableMapOf<AiModelTarget, Job>()
 
     /** Applies [transform] and persists the fields it changed. */
     fun updateScreenState(transform: (AiSettingsScreenState) -> AiSettingsScreenState) {
@@ -214,7 +217,7 @@ internal class AiSettingsViewModel(
                 settingsManager.setAiCustomPrompt(next.translationPrompt)
             }
             if (current.translationLocalThinkingEnabled != next.translationLocalThinkingEnabled) {
-                settingsManager.setAiLocalTranslationThinkingEnabled(next.translationLocalThinkingEnabled)
+                settingsManager.setAiLocalTranslationThinkingEnabled(next.translationLocalThinkingEnabled, provider)
             }
         }
 
@@ -230,8 +233,36 @@ internal class AiSettingsViewModel(
                 settingsManager.setAiPunctuationCustomPrompt(next.punctuationPrompt)
             }
             if (current.punctuationLocalThinkingEnabled != next.punctuationLocalThinkingEnabled) {
-                settingsManager.setAiLocalPunctuationThinkingEnabled(next.punctuationLocalThinkingEnabled)
+                settingsManager.setAiLocalPunctuationThinkingEnabled(next.punctuationLocalThinkingEnabled, provider)
             }
+        }
+    }
+
+    fun addProvider(name: String, templateId: String): String? {
+        val provider = try {
+            settingsManager.addAiProvider(name, templateId)
+        } catch (error: IllegalArgumentException) {
+            return error.message
+        }
+        setState { copy(providers = settingsManager.getAiProviders()) }
+        selectProvider(provider.id)
+        return null
+    }
+
+    fun deleteProvider(provider: String) {
+        if (!settingsManager.removeAiProvider(provider)) return
+        modelFetchJobs.values.forEach { it.cancel() }
+        modelFetchJobs.clear()
+        pendingSensitiveAction = null
+        val refreshed = AiSettingsScreenState.from(settingsManager)
+        setState {
+            refreshed.copy(
+                localModelLoaded = localModelLoaded,
+                localModelLoading = localModelLoading,
+                localModelLoadProgress = localModelLoadProgress,
+                localModelMemoryBytes = localModelMemoryBytes,
+                localModelStatus = localModelStatus
+            )
         }
     }
 
@@ -246,7 +277,7 @@ internal class AiSettingsViewModel(
                 provider = provider,
                 apiKey = settingsManager.getAiApiKey(provider),
                 subtitlesPerRequest = settingsManager.getAiSubtitlesPerRequest(provider),
-                baseUrl = if (AiProviderConfig.getProvider(provider).customEndpoint) {
+                baseUrl = if (settingsManager.getAiProviderConfig(provider).customEndpoint) {
                     settingsManager.getAiBaseUrl(provider)
                 } else {
                     ""
@@ -266,7 +297,7 @@ internal class AiSettingsViewModel(
                 translationProvider = provider,
                 translationModel = settingsManager.getAiModel(provider),
                 translationReasoning = settingsManager.getAiReasoningLevel(provider),
-                translationLocalThinkingEnabled = settingsManager.isAiLocalTranslationThinkingEnabled(),
+                translationLocalThinkingEnabled = settingsManager.isAiLocalTranslationThinkingEnabled(provider),
                 targetLanguage = settingsManager.getAiTargetLanguage(),
                 translationPrompt = settingsManager.getAiCustomPrompt(),
                 modelChooser = null
@@ -284,7 +315,7 @@ internal class AiSettingsViewModel(
                 punctuationProvider = provider,
                 punctuationModel = settingsManager.getAiPunctuationModel(provider),
                 punctuationReasoning = settingsManager.getAiPunctuationReasoningLevel(provider),
-                punctuationLocalThinkingEnabled = settingsManager.isAiLocalPunctuationThinkingEnabled(),
+                punctuationLocalThinkingEnabled = settingsManager.isAiLocalPunctuationThinkingEnabled(provider),
                 punctuationPrompt = settingsManager.getAiPunctuationCustomPrompt(),
                 modelChooser = null
             )
@@ -293,20 +324,20 @@ internal class AiSettingsViewModel(
 
     private fun persistDedicatedFields(state: AiSettingsScreenState) {
         val translationProvider = state.translationProvider
-        if (AiProviderConfig.getProvider(translationProvider).models.isEmpty()) {
+        if (settingsManager.getAiProviderConfig(translationProvider).models.isEmpty()) {
             settingsManager.setAiModel(translationProvider, state.translationModel.trim())
         }
         settingsManager.setAiTargetLanguage(state.targetLanguage.trim())
         settingsManager.setAiReasoningLevel(state.translationReasoning, translationProvider)
-        settingsManager.setAiLocalTranslationThinkingEnabled(state.translationLocalThinkingEnabled)
+        settingsManager.setAiLocalTranslationThinkingEnabled(state.translationLocalThinkingEnabled, translationProvider)
         settingsManager.setAiCustomPrompt(state.translationPrompt)
 
         val punctuationProvider = state.punctuationProvider
-        if (AiProviderConfig.getProvider(punctuationProvider).models.isEmpty()) {
+        if (settingsManager.getAiProviderConfig(punctuationProvider).models.isEmpty()) {
             settingsManager.setAiPunctuationModel(punctuationProvider, state.punctuationModel.trim())
         }
         settingsManager.setAiPunctuationReasoningLevel(state.punctuationReasoning, punctuationProvider)
-        settingsManager.setAiLocalPunctuationThinkingEnabled(state.punctuationLocalThinkingEnabled)
+        settingsManager.setAiLocalPunctuationThinkingEnabled(state.punctuationLocalThinkingEnabled, punctuationProvider)
         settingsManager.setAiPunctuationCustomPrompt(state.punctuationPrompt)
     }
 
@@ -316,7 +347,7 @@ internal class AiSettingsViewModel(
             AiModelTarget.TRANSLATION -> state.translationProvider
             AiModelTarget.PUNCTUATION -> state.punctuationProvider
         }
-        if (!AiProviderConfig.getProvider(provider).customEndpoint) return
+        if (!settingsManager.getAiProviderConfig(provider).customEndpoint) return
 
         val baseUrl = settingsManager.getAiBaseUrl(provider)
         if (baseUrl.isBlank()) {
@@ -330,9 +361,11 @@ internal class AiSettingsViewModel(
                 AiModelTarget.PUNCTUATION -> it.copy(fetchingPunctuationModels = true)
             }
         }
-        viewModelScope.launch {
+        modelFetchJobs[target]?.cancel()
+        modelFetchJobs[target] = viewModelScope.launch {
             try {
                 val models = aiTranslationService.fetchModels(baseUrl, settingsManager.getAiApiKey(provider))
+                if (settingsManager.getAiProviders().none { it.id == provider }) return@launch
                 if (models.isEmpty()) {
                     toast(R.string.ai_models_empty)
                 } else {
@@ -340,6 +373,8 @@ internal class AiSettingsViewModel(
                         it.copy(modelChooser = AiModelChooserUi(provider, target, models))
                     }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Exception) {
                 toast(error.message ?: string(R.string.ai_models_fetch_failed))
             } finally {
@@ -355,6 +390,10 @@ internal class AiSettingsViewModel(
 
     fun chooseModel(model: String) {
         val chooser = currentState.modelChooser ?: return
+        if (settingsManager.getAiProviders().none { it.id == chooser.provider }) {
+            dismissModelChooser()
+            return
+        }
         when (chooser.target) {
             AiModelTarget.TRANSLATION -> {
                 settingsManager.setAiModel(chooser.provider, model)
@@ -450,27 +489,27 @@ internal class AiSettingsViewModel(
         persistDedicatedFields(state)
 
         val chatProvider = settingsManager.getAiTranslationProvider()
-        val config = AiProviderConfig.getProvider(chatProvider)
+        val config = settingsManager.getAiProviderConfig(chatProvider)
         val apiKey = settingsManager.getAiApiKey(chatProvider)
-        if (chatProvider != AiProviderConfig.LOCAL && apiKey.isBlank()) {
+        if (!config.isLocal && apiKey.isBlank()) {
             toast(R.string.ai_api_key_empty)
             return
         }
         val baseUrl = settingsManager.getAiBaseUrl(chatProvider)
-        if (chatProvider != AiProviderConfig.LOCAL && baseUrl.isBlank()) {
+        if (!config.isLocal && baseUrl.isBlank()) {
             toast(R.string.ai_base_url_required)
             return
         }
         val model = settingsManager.getAiModel(chatProvider)
-        if (chatProvider == AiProviderConfig.LOCAL && settingsManager.getLlmModelPath().isBlank()) {
+        if (config.isLocal && settingsManager.getLlmModelPath().isBlank()) {
             toast(R.string.ai_local_model_required)
             return
         }
-        if (chatProvider == AiProviderConfig.LOCAL && !currentState.localModelLoaded) {
+        if (config.isLocal && !currentState.localModelLoaded) {
             toast(R.string.ai_local_model_not_loaded)
             return
         }
-        if (chatProvider != AiProviderConfig.LOCAL && model.isBlank()) {
+        if (!config.isLocal && model.isBlank()) {
             toast(R.string.ai_model_name_required)
             return
         }
@@ -479,7 +518,8 @@ internal class AiSettingsViewModel(
                 ChatLaunchConfiguration(
                     providerName = config.displayName,
                     backendConfig = ChatBackendConfig(
-                        providerId = chatProvider,
+                        // Dispatch by template while credentials remain scoped to chatProvider.
+                        providerId = config.templateId,
                         apiKey = apiKey,
                         model = model,
                         baseUrl = baseUrl,
@@ -487,14 +527,14 @@ internal class AiSettingsViewModel(
                             settingsManager.getAiReasoningLevel(chatProvider).name
                         ),
                         modelSupportsReasoning = AiProviderConfig
-                            .modelCapabilities(chatProvider, model)
+                            .modelCapabilities(config.templateId, model)
                             .reasoning,
-                        thinkingEnabled = if (chatProvider == AiProviderConfig.LOCAL) {
+                        thinkingEnabled = if (config.isLocal) {
                             settingsManager.isAiLocalTranslationThinkingEnabled()
                         } else {
                             settingsManager.getAiReasoningLevel(chatProvider) != AiProviderConfig.ReasoningLevel.OFF
                         },
-                        localModelPath = if (chatProvider == AiProviderConfig.LOCAL) {
+                        localModelPath = if (config.isLocal) {
                             settingsManager.getLlmModelPath()
                         } else {
                             ""

@@ -161,6 +161,11 @@
     <string name="activity_settings_ai_entry">AI 设置</string>
     <string name="activity_ai_settings_text_02">平台</string>
     <string name="activity_ai_settings_provider_heading">AI 平台设置（%1$s）</string>
+    <string name="ai_provider_add_title">添加 AI 平台</string>
+    <string name="ai_provider_name">平台名称</string>
+    <string name="ai_provider_type">平台类型</string>
+    <string name="ai_provider_delete_title">删除 AI 平台</string>
+    <string name="ai_provider_delete_message">确定删除“%1$s”及其配置吗？</string>
     <string name="activity_ai_settings_default_model">默认 %1$s</string>
     <string name="activity_ai_settings_hint_01" translatable="false">API Key</string>
     <string name="activity_ai_settings_hint_02">模型名称</string>

@@ -39,6 +39,7 @@ class SettingsManager private constructor(context: Context) {
         
         private const val KEY_DEFAULT_ENCODING = "default_encoding"
         private const val KEY_AI_PROVIDER = "ai_provider"
+        private const val KEY_AI_CUSTOM_PROVIDERS = "ai_custom_providers"
         private const val KEY_AI_API_KEY = "ai_api_key"
         private const val KEY_AI_MODEL = "ai_model"
         private const val KEY_AI_TARGET_LANGUAGE = "ai_target_language"
@@ -307,6 +308,7 @@ class SettingsManager private constructor(context: Context) {
     /** Snapshot all persisted user settings, including dynamically named keys. */
     fun exportSettingsSnapshot(): Map<String, Any?> {
         val snapshot = prefs.all.toMutableMap()
+        snapshot[KEY_AI_CUSTOM_PROVIDERS] = CustomAiProviders.encode(getCustomAiProviders())
         // Dynamic Padding defaults to enabled and therefore may not have a
         // persisted key until the user changes it. Export the effective value
         // for every ASR timeline so the backup is complete even in that case.
@@ -360,6 +362,13 @@ class SettingsManager private constructor(context: Context) {
     /** Restore primitive settings after the caller has filtered path-like values. */
     fun restoreSettingsSnapshot(values: Map<String, Any?>) {
         val editor = prefs.edit()
+        val restoredProviders = (values[KEY_AI_CUSTOM_PROVIDERS] as? String)?.let(CustomAiProviders::decode)
+        if (restoredProviders != null) {
+            val restoredIds = restoredProviders.map { it.id }.toSet()
+            getCustomAiProviders().filter { it.id !in restoredIds }.forEach { provider ->
+                removeAiProviderPreferences(provider.id, editor)
+            }
+        }
         values.forEach { (key, value) ->
             when (value) {
                 null -> editor.remove(key)
@@ -371,11 +380,12 @@ class SettingsManager private constructor(context: Context) {
                 is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
             }
         }
+        restoredProviders?.let { editor.putString(KEY_AI_CUSTOM_PROVIDERS, CustomAiProviders.encode(it)) }
         editor.apply()
     }
 
     /** Export decrypted provider API keys so a backup can be restored on another install. */
-    fun exportAiApiKeys(): Map<String, String> = AiProviderConfig.providers
+    fun exportAiApiKeys(): Map<String, String> = getAiProviders()
         .mapNotNull { provider ->
             getAiApiKey(provider.id).takeIf { it.isNotBlank() }?.let { provider.id to it }
         }
@@ -383,7 +393,7 @@ class SettingsManager private constructor(context: Context) {
 
     fun restoreAiApiKeys(keys: Map<String, String>) {
         keys.forEach { (provider, key) ->
-            if (AiProviderConfig.providers.any { it.id == provider }) setAiApiKey(provider, key)
+            if (getAiProviders().any { it.id == provider }) setAiApiKey(provider, key)
         }
     }
 
@@ -419,9 +429,55 @@ class SettingsManager private constructor(context: Context) {
     /**
      * 获取 AI 平台
      */
-    fun getAiProvider(): String {
-        return prefs.getString(KEY_AI_PROVIDER, AiProviderConfig.SILICONFLOW) ?: AiProviderConfig.SILICONFLOW
+    fun getAiProviders(): List<AiProviderConfig.Provider> = AiProviderConfig.providers + getCustomAiProviders()
+
+    fun getAiProviderConfig(provider: String): AiProviderConfig.Provider =
+        AiProviderConfig.getProvider(provider, getAiProviders())
+
+    fun isLocalAiProvider(provider: String): Boolean = getAiProviderConfig(provider).isLocal
+
+    private fun getCustomAiProviders(): List<AiProviderConfig.Provider> =
+        CustomAiProviders.decode(prefs.getString(KEY_AI_CUSTOM_PROVIDERS, "[]").orEmpty())
+
+    fun addAiProvider(name: String, templateId: String): AiProviderConfig.Provider {
+        require(getAiProviders().none { it.displayName.equals(name.trim(), ignoreCase = true) }) {
+            "平台名称已存在"
+        }
+        val provider = CustomAiProviders.create(name, templateId)
+        prefs.edit().putString(
+            KEY_AI_CUSTOM_PROVIDERS,
+            CustomAiProviders.encode(getCustomAiProviders() + provider)
+        ).apply()
+        return provider
     }
+
+    fun removeAiProvider(provider: String): Boolean {
+        val customProviders = getCustomAiProviders()
+        if (customProviders.none { it.id == provider }) return false
+        val editor = prefs.edit().putString(
+            KEY_AI_CUSTOM_PROVIDERS,
+            CustomAiProviders.encode(customProviders.filterNot { it.id == provider })
+        )
+        removeAiProviderPreferences(provider, editor)
+        listOf(KEY_AI_PROVIDER, KEY_AI_TRANSLATION_PROVIDER, KEY_AI_PUNCTUATION_PROVIDER).forEach { key ->
+            if (prefs.getString(key, null) == provider) editor.putString(key, AiProviderConfig.SILICONFLOW)
+        }
+        editor.apply()
+        return true
+    }
+
+    private fun removeAiProviderPreferences(provider: String, editor: SharedPreferences.Editor) {
+        listOf(
+            KEY_AI_API_KEY, KEY_AI_MODEL, KEY_AI_CUSTOM_BASE_URL, KEY_AI_REASONING_LEVEL,
+            KEY_AI_PUNCTUATION_MODEL, KEY_AI_PUNCTUATION_REASONING_LEVEL, KEY_AI_SUBTITLES_PER_REQUEST,
+            KEY_AI_LOCAL_TRANSLATION_THINKING, KEY_AI_LOCAL_PUNCTUATION_THINKING
+        ).forEach { editor.remove(providerKey(it, provider)) }
+        credentialPrefs.edit().remove(providerKey(KEY_AI_API_KEY, provider)).apply()
+    }
+
+    fun getAiProvider(): String =
+        prefs.getString(KEY_AI_PROVIDER, null)?.takeIf { id -> getAiProviders().any { it.id == id } }
+            ?: AiProviderConfig.SILICONFLOW
 
     /**
      * 设置 AI 平台
@@ -431,7 +487,7 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun getAiTranslationProvider(): String =
-        prefs.getString(KEY_AI_TRANSLATION_PROVIDER, null)?.takeIf { AiProviderConfig.providers.any { p -> p.id == it } }
+        prefs.getString(KEY_AI_TRANSLATION_PROVIDER, null)?.takeIf { getAiProviders().any { p -> p.id == it } }
             ?: getAiProvider()
 
     fun setAiTranslationProvider(provider: String) {
@@ -439,7 +495,7 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun getAiPunctuationProvider(): String =
-        prefs.getString(KEY_AI_PUNCTUATION_PROVIDER, null)?.takeIf { AiProviderConfig.providers.any { p -> p.id == it } }
+        prefs.getString(KEY_AI_PUNCTUATION_PROVIDER, null)?.takeIf { getAiProviders().any { p -> p.id == it } }
             ?: getAiProvider()
 
     fun setAiPunctuationProvider(provider: String) {
@@ -487,10 +543,10 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun getAiModel(provider: String): String {
-        if (provider == AiProviderConfig.LOCAL) {
+        if (isLocalAiProvider(provider)) {
             return getLlmModelDisplayName()
         }
-        val defaultModel = AiProviderConfig.getProvider(provider).defaultModel
+        val defaultModel = getAiProviderConfig(provider).defaultModel
         val stored = prefs.getString(providerKey(KEY_AI_MODEL, provider), null)
             ?: if (provider == AiProviderConfig.SILICONFLOW) {
                 prefs.getString(KEY_AI_MODEL, defaultModel) ?: defaultModel
@@ -498,7 +554,7 @@ class SettingsManager private constructor(context: Context) {
                 defaultModel
             }
         val model = stored.ifBlank { defaultModel }
-        return if (provider == AiProviderConfig.DEEPSEEK &&
+        return if (getAiProviderConfig(provider).templateId == AiProviderConfig.DEEPSEEK &&
             model in setOf("deepseek-v4-flash", "deepseek-v4-flash-vision-exp")
         ) {
             // DeepSeek retired the V4 Flash aliases; the official API model name is now
@@ -510,7 +566,7 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun setAiModel(provider: String, model: String) {
-        if (provider == AiProviderConfig.LOCAL) return
+        if (isLocalAiProvider(provider)) return
         prefs.edit().putString(providerKey(KEY_AI_MODEL, provider), model).apply()
     }
 
@@ -548,75 +604,81 @@ class SettingsManager private constructor(context: Context) {
         prefs.edit().putString(KEY_AI_PUNCTUATION_CUSTOM_PROMPT, prompt).apply()
     }
 
-    fun isAiLocalTranslationThinkingEnabled(): Boolean =
-        prefs.getBoolean(KEY_AI_LOCAL_TRANSLATION_THINKING, false)
+    private fun localAiThinkingKey(base: String, provider: String): String =
+        if (getAiProviderConfig(provider).isUserAdded) providerKey(base, provider) else base
 
-    fun setAiLocalTranslationThinkingEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_AI_LOCAL_TRANSLATION_THINKING, enabled).apply()
+    fun isAiLocalTranslationThinkingEnabled(provider: String = getAiTranslationProvider()): Boolean =
+        prefs.getBoolean(localAiThinkingKey(KEY_AI_LOCAL_TRANSLATION_THINKING, provider), false)
+
+    fun setAiLocalTranslationThinkingEnabled(enabled: Boolean, provider: String = getAiTranslationProvider()) {
+        prefs.edit().putBoolean(localAiThinkingKey(KEY_AI_LOCAL_TRANSLATION_THINKING, provider), enabled).apply()
     }
 
-    fun isAiLocalPunctuationThinkingEnabled(): Boolean =
-        prefs.getBoolean(KEY_AI_LOCAL_PUNCTUATION_THINKING, false)
+    fun isAiLocalPunctuationThinkingEnabled(provider: String = getAiPunctuationProvider()): Boolean =
+        prefs.getBoolean(localAiThinkingKey(KEY_AI_LOCAL_PUNCTUATION_THINKING, provider), false)
 
-    fun setAiLocalPunctuationThinkingEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_AI_LOCAL_PUNCTUATION_THINKING, enabled).apply()
+    fun setAiLocalPunctuationThinkingEnabled(enabled: Boolean, provider: String = getAiPunctuationProvider()) {
+        prefs.edit().putBoolean(localAiThinkingKey(KEY_AI_LOCAL_PUNCTUATION_THINKING, provider), enabled).apply()
     }
 
     fun getAiReasoningLevel(provider: String = getAiProvider()): AiProviderConfig.ReasoningLevel =
         prefs.getString(
             providerKey(KEY_AI_REASONING_LEVEL, provider),
-            AiProviderConfig.defaultReasoningLevel(provider).name
+            AiProviderConfig.defaultReasoningLevel(getAiProviderConfig(provider).templateId).name
         )
             ?.let { value ->
                 runCatching { AiProviderConfig.ReasoningLevel.valueOf(value) }.getOrNull()
             }
-            ?: AiProviderConfig.defaultReasoningLevel(provider)
+            ?: AiProviderConfig.defaultReasoningLevel(getAiProviderConfig(provider).templateId)
 
     fun setAiReasoningLevel(
         level: AiProviderConfig.ReasoningLevel,
         provider: String = getAiProvider()
     ) {
-        if (provider == AiProviderConfig.LOCAL) return
+        if (isLocalAiProvider(provider)) return
         prefs.edit().putString(providerKey(KEY_AI_REASONING_LEVEL, provider), level.name).apply()
     }
 
     fun getAiPunctuationModel(provider: String = getAiPunctuationProvider()): String {
-        if (provider == AiProviderConfig.LOCAL) {
+        if (isLocalAiProvider(provider)) {
             return getLlmModelDisplayName()
         }
-        val defaultModel = AiProviderConfig.getProvider(provider).defaultModel
+        val defaultModel = getAiProviderConfig(provider).defaultModel
         return prefs.getString(providerKey(KEY_AI_PUNCTUATION_MODEL, provider), null)
             ?.takeIf { it.isNotBlank() } ?: defaultModel
     }
 
     fun setAiPunctuationModel(provider: String, model: String) {
-        if (provider == AiProviderConfig.LOCAL) return
+        if (isLocalAiProvider(provider)) return
         prefs.edit().putString(providerKey(KEY_AI_PUNCTUATION_MODEL, provider), model).apply()
     }
 
     fun getAiPunctuationReasoningLevel(provider: String = getAiPunctuationProvider()): AiProviderConfig.ReasoningLevel =
         prefs.getString(providerKey(KEY_AI_PUNCTUATION_REASONING_LEVEL, provider), null)
             ?.let { runCatching { AiProviderConfig.ReasoningLevel.valueOf(it) }.getOrNull() }
-            ?: AiProviderConfig.defaultReasoningLevel(provider)
+            ?: AiProviderConfig.defaultReasoningLevel(getAiProviderConfig(provider).templateId)
 
     fun setAiPunctuationReasoningLevel(level: AiProviderConfig.ReasoningLevel, provider: String = getAiPunctuationProvider()) {
-        if (provider == AiProviderConfig.LOCAL) return
+        if (isLocalAiProvider(provider)) return
         prefs.edit().putString(providerKey(KEY_AI_PUNCTUATION_REASONING_LEVEL, provider), level.name).apply()
     }
 
     fun getAiBaseUrl(provider: String = getAiProvider()): String {
-        val config = AiProviderConfig.getProvider(provider)
-        if (provider == AiProviderConfig.LOCAL) return ""
+        val config = getAiProviderConfig(provider)
+        if (config.isLocal) return ""
         return if (config.customEndpoint) {
-            prefs.getString(KEY_AI_CUSTOM_BASE_URL, "") ?: ""
+            val key = if (config.isUserAdded) providerKey(KEY_AI_CUSTOM_BASE_URL, provider) else KEY_AI_CUSTOM_BASE_URL
+            prefs.getString(key, config.baseUrl) ?: config.baseUrl
         } else {
             config.baseUrl
         }
     }
 
     fun setAiBaseUrl(provider: String, baseUrl: String) {
-        if (AiProviderConfig.getProvider(provider).customEndpoint) {
-            prefs.edit().putString(KEY_AI_CUSTOM_BASE_URL, baseUrl).apply()
+        val config = getAiProviderConfig(provider)
+        if (config.customEndpoint) {
+            val key = if (config.isUserAdded) providerKey(KEY_AI_CUSTOM_BASE_URL, provider) else KEY_AI_CUSTOM_BASE_URL
+            prefs.edit().putString(key, baseUrl).apply()
         }
     }
     
@@ -1034,14 +1096,15 @@ class SettingsManager private constructor(context: Context) {
     }
 
     fun getAiSubtitlesPerRequest(provider: String): Int {
+        val templateId = getAiProviderConfig(provider).templateId
         val key = if (provider == AiProviderConfig.LOCAL) {
             KEY_LLM_SUBTITLES_PER_REQUEST
         } else {
             providerKey(KEY_AI_SUBTITLES_PER_REQUEST, provider)
         }
         return normalizeAiSubtitlesPerRequest(
-            provider,
-            prefs.getInt(key, defaultAiSubtitlesPerRequest(provider))
+            templateId,
+            prefs.getInt(key, defaultAiSubtitlesPerRequest(templateId))
         )
     }
 
@@ -1051,7 +1114,7 @@ class SettingsManager private constructor(context: Context) {
         } else {
             providerKey(KEY_AI_SUBTITLES_PER_REQUEST, provider)
         }
-        prefs.edit().putInt(key, normalizeAiSubtitlesPerRequest(provider, count)).apply()
+        prefs.edit().putInt(key, normalizeAiSubtitlesPerRequest(getAiProviderConfig(provider).templateId, count)).apply()
     }
 
     /**
@@ -1666,7 +1729,7 @@ class SettingsManager private constructor(context: Context) {
         KEY_SAVE_TO_SOURCE_DIRECTORY_PREFIX + tool
 
     private fun migrateAiApiKeys() {
-        AiProviderConfig.providers.forEach { providerConfig ->
+        getAiProviders().forEach { providerConfig ->
             val provider = providerConfig.id
             val scopedKey = providerKey(KEY_AI_API_KEY, provider)
             val credentialValue = credentialPrefs.getString(scopedKey, null)

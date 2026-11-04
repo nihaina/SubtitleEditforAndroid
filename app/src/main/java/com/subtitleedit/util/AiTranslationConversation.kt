@@ -34,8 +34,9 @@ class AiTranslationConversation(
     private val historySessionId: String = UUID.randomUUID().toString(),
     private val historyTitle: String? = null
 ) {
-    private val localProvider = provider == AiProviderConfig.LOCAL
     private val settingsManager = SettingsManager.getInstance(context)
+    private val providerConfig = settingsManager.getAiProviderConfig(provider)
+    private val localProvider = providerConfig.isLocal
     private val indexTranslate2bModel = localProvider &&
         settingsManager.getLlmModelFamily() == SettingsManager.LLM_MODEL_INDEX_TRANSLATE &&
         isIndexTranslate2b(settingsManager)
@@ -55,14 +56,15 @@ class AiTranslationConversation(
 
     private val conversation = ChatConversation(
         config = ChatBackendConfig(
-            providerId = provider,
+            // Runtime dispatch follows the template; the settings identity remains provider.
+            providerId = providerConfig.templateId,
             apiKey = apiKey,
             model = model,
             baseUrl = baseUrl,
             reasoningLevel = ChatReasoningLevel.valueOf(reasoningLevel.name),
-            modelSupportsReasoning = AiProviderConfig.modelCapabilities(provider, model).reasoning,
+            modelSupportsReasoning = AiProviderConfig.modelCapabilities(providerConfig.templateId, model).reasoning,
             thinkingEnabled = thinkingEnabled,
-            localModelPath = if (provider == AiProviderConfig.LOCAL) {
+            localModelPath = if (localProvider) {
                 settingsManager.getLlmModelPath()
             } else {
                 ""
@@ -74,7 +76,7 @@ class AiTranslationConversation(
             localTopP = settingsManager.getLlmTopP(),
             localRepetitionPenalty = settingsManager.getLlmRepetitionPenalty()
         ),
-        tools = if (provider == AiProviderConfig.LOCAL) emptyList() else ChatTools.create(context.applicationContext),
+        tools = if (localProvider) emptyList() else ChatTools.create(context.applicationContext),
         initialMessages = if (localProvider) {
             retainLastExchangeMessages(initialMessages)
         } else {

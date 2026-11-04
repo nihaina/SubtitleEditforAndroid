@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -97,7 +98,8 @@ data class AiSettingsScreenState(
     val punctuationPrompt: String,
     val fetchingTranslationModels: Boolean = false,
     val fetchingPunctuationModels: Boolean = false,
-    val modelChooser: AiModelChooserUi? = null
+    val modelChooser: AiModelChooserUi? = null,
+    val providers: List<AiProviderConfig.Provider> = AiProviderConfig.providers
 ) {
     companion object {
         fun from(settings: SettingsManager): AiSettingsScreenState {
@@ -106,10 +108,11 @@ data class AiSettingsScreenState(
             val punctuationProvider = settings.getAiPunctuationProvider()
             return AiSettingsScreenState(
                 provider = provider,
+                providers = settings.getAiProviders(),
                 localModelName = settings.getLlmModelDisplayName(),
                 subtitlesPerRequest = settings.getAiSubtitlesPerRequest(provider),
                 apiKey = settings.getAiApiKey(provider),
-                baseUrl = if (AiProviderConfig.getProvider(provider).customEndpoint) {
+                baseUrl = if (settings.getAiProviderConfig(provider).customEndpoint) {
                     settings.getAiBaseUrl(provider)
                 } else {
                     ""
@@ -140,6 +143,8 @@ fun AiSettingsScreen(
     onSelectProvider: (String) -> Unit,
     onSelectTranslationProvider: (String) -> Unit,
     onSelectPunctuationProvider: (String) -> Unit,
+    onAddProvider: (String, String) -> String?,
+    onDeleteProvider: (String) -> Unit,
     onRevealApiKey: () -> Unit,
     onCopyApiKey: () -> Unit,
     onLoadLocalModel: () -> Unit = {},
@@ -150,6 +155,8 @@ fun AiSettingsScreen(
     onOpenChat: () -> Unit,
     onNavigateBack: () -> Unit
 ) {
+    var showAddProvider by rememberSaveable { mutableStateOf(false) }
+    var deletingProviderId by rememberSaveable { mutableStateOf<String?>(null) }
     AppToolScaffold(
         title = stringResource(R.string.activity_settings_ai_entry),
         onBack = onNavigateBack,
@@ -167,6 +174,8 @@ fun AiSettingsScreen(
             ProviderCard(
                 state = state,
                 onSelectProvider = onSelectProvider,
+                onAddProvider = { showAddProvider = true },
+                onDeleteProvider = { deletingProviderId = state.provider },
                 onApiKeyChange = { value -> onStateChange { it.copy(apiKey = value) } },
                 onBaseUrlChange = { value -> onStateChange { it.copy(baseUrl = value) } },
                 onRevealApiKey = onRevealApiKey,
@@ -197,6 +206,26 @@ fun AiSettingsScreen(
                 onPromptChange = { value -> onStateChange { it.copy(punctuationPrompt = value) } },
                 onFetchModels = { onFetchModels(AiModelTarget.PUNCTUATION) }
             )
+    }
+
+    if (showAddProvider) {
+        AddAiProviderDialog(onDismiss = { showAddProvider = false }, onAdd = onAddProvider)
+    }
+    state.providers.firstOrNull { it.id == deletingProviderId && it.isUserAdded }?.let { provider ->
+        AlertDialog(
+            onDismissRequest = { deletingProviderId = null },
+            title = { Text(stringResource(R.string.ai_provider_delete_title)) },
+            text = { Text(stringResource(R.string.ai_provider_delete_message, provider.displayName)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDeleteProvider(provider.id)
+                    deletingProviderId = null
+                }) { Text(stringResource(android.R.string.ok)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingProviderId = null }) { Text(stringResource(R.string.cancel)) }
+            }
+        )
     }
 
     state.modelChooser?.let { chooser ->
@@ -237,6 +266,8 @@ fun AiSettingsScreen(
 private fun ProviderCard(
     state: AiSettingsScreenState,
     onSelectProvider: (String) -> Unit,
+    onAddProvider: () -> Unit,
+    onDeleteProvider: () -> Unit,
     onApiKeyChange: (String) -> Unit,
     onBaseUrlChange: (String) -> Unit,
     onRevealApiKey: () -> Unit,
@@ -246,16 +277,40 @@ private fun ProviderCard(
     onLoadLocalModel: () -> Unit,
     onUnloadLocalModel: () -> Unit
 ) {
-    val provider = AiProviderConfig.getProvider(state.provider)
+    val provider = AiProviderConfig.getProvider(state.provider, state.providers)
     val uriHandler = LocalUriHandler.current
     AppSection {
-        SectionHeader(stringResource(R.string.activity_ai_settings_provider_heading, provider.displayName))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            SectionHeader(
+                stringResource(R.string.activity_ai_settings_provider_heading, provider.displayName),
+                modifier = Modifier.weight(1f)
+            )
+            if (provider.isUserAdded) {
+                IconButton(onClick = onDeleteProvider, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_delete),
+                        contentDescription = stringResource(R.string.ai_provider_delete_title),
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+            IconButton(onClick = onAddProvider, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_add),
+                    contentDescription = stringResource(R.string.ai_provider_add_title),
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
         ProviderSelector(
             label = stringResource(R.string.activity_ai_settings_text_02),
             selectedProvider = state.provider,
+            providers = state.providers,
             onSelect = onSelectProvider
         )
-        val maxSubtitlesPerRequest = if (provider.id == AiProviderConfig.LOCAL) 100 else 1000
+        val maxSubtitlesPerRequest = if (provider.isLocal) 100 else 1000
         var subtitlesPerRequestText by remember(state.subtitlesPerRequest) {
             mutableStateOf(state.subtitlesPerRequest.toString())
         }
@@ -282,13 +337,13 @@ private fun ProviderCard(
             text = stringResource(
                 R.string.activity_ai_settings_subtitles_per_request_hint,
                 maxSubtitlesPerRequest,
-                defaultAiSubtitlesPerRequest(provider.id)
+                defaultAiSubtitlesPerRequest(provider.templateId)
             ),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 2.dp)
         )
-        if (provider.id == AiProviderConfig.LOCAL) {
+        if (provider.isLocal) {
             Text(
                 text = stringResource(R.string.activity_ai_settings_local_model_label),
                 style = MaterialTheme.typography.bodySmall,
@@ -510,15 +565,16 @@ private fun TranslationSettingsCard(
     onPromptChange: (String) -> Unit,
     onFetchModels: () -> Unit
 ) {
-    val provider = AiProviderConfig.getProvider(state.translationProvider)
+    val provider = AiProviderConfig.getProvider(state.translationProvider, state.providers)
     AppSection {
         SectionHeader(stringResource(R.string.activity_ai_settings_translation_title))
         ProviderSelector(
             label = stringResource(R.string.activity_ai_settings_text_02),
             selectedProvider = state.translationProvider,
+            providers = state.providers,
             onSelect = onSelectProvider
         )
-        if (provider.id != AiProviderConfig.LOCAL) {
+        if (!provider.isLocal) {
             ModelField(
                 label = stringResource(R.string.activity_ai_settings_hint_02),
                 provider = provider,
@@ -538,7 +594,7 @@ private fun TranslationSettingsCard(
             label = { Text(stringResource(R.string.activity_ai_settings_hint_04)) },
             singleLine = true
         )
-        if (provider.id == AiProviderConfig.LOCAL) {
+        if (provider.isLocal) {
             SettingsSwitchRow(
                 title = stringResource(R.string.activity_ai_settings_local_thinking_title),
                 checked = state.translationLocalThinkingEnabled,
@@ -571,7 +627,7 @@ private fun PunctuationSettingsCard(
     onPromptChange: (String) -> Unit,
     onFetchModels: () -> Unit
 ) {
-    val provider = AiProviderConfig.getProvider(state.punctuationProvider)
+    val provider = AiProviderConfig.getProvider(state.punctuationProvider, state.providers)
     AppSection {
         SectionHeader(stringResource(R.string.activity_ai_settings_punctuation_title))
         Text(
@@ -582,9 +638,10 @@ private fun PunctuationSettingsCard(
         ProviderSelector(
             label = stringResource(R.string.activity_ai_settings_text_02),
             selectedProvider = state.punctuationProvider,
+            providers = state.providers,
             onSelect = onSelectProvider
         )
-        if (provider.id != AiProviderConfig.LOCAL) {
+        if (!provider.isLocal) {
             ModelField(
                 label = stringResource(R.string.activity_ai_settings_hint_02),
                 provider = provider,
@@ -664,17 +721,18 @@ private fun ReasoningSelector(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProviderSelector(
+internal fun ProviderSelector(
     label: String,
     selectedProvider: String,
+    providers: List<AiProviderConfig.Provider> = AiProviderConfig.providers,
     onSelect: (String) -> Unit
 ) {
     ChoiceField(
         label = label,
-        selected = AiProviderConfig.getProvider(selectedProvider).let {
+        selected = AiProviderConfig.getProvider(selectedProvider, providers).let {
             AppOption(it.id, it.displayName)
         },
-        options = AiProviderConfig.providers.map { AppOption(it.id, it.displayName) },
+        options = providers.map { AppOption(it.id, it.displayName) },
         onSelect = onSelect
     )
 }
