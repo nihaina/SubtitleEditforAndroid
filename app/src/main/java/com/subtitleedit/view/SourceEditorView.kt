@@ -89,15 +89,12 @@ class SourceEditorView @JvmOverloads constructor(
     private var burstScrollAnchor: ScrollAnchor? = null
 
     private val lineLayoutManager = LinearLayoutManager(context).apply {
-        // Source rows may wrap to different visual heights. Smooth scrollbar metrics estimate
-        // the document range from the currently visible rows, so that estimate can change while
-        // dragging and make the thumb move backwards after a quick reverse drag. Item-based
-        // metrics remain monotonic as rows are recycled.
+        // Preserve the document-position metrics used by existing source-view callers.
+        // The custom scrollbar has its own exact rendered-height metrics below.
         isSmoothScrollbarEnabled = false
     }
 
-    // Item-based extent is the number of visible source lines, which varies as wrapped rows
-    // enter the viewport. Keep the handle size stable for both drawing and drag mapping.
+    // Keep the existing handle size; only its content mapping changes.
     protected override val useFixedSizeScrollThumb: Boolean
         get() = true
 
@@ -275,6 +272,36 @@ class SourceEditorView @JvmOverloads constructor(
         onEditorFocusChanged = ::onEditorFocusChanged,
         onEditorSelectionChanged = ::onEditorSelectionChanged
     )
+
+    private val scrollHeights = SourceScrollHeightIndex(this, lines)
+
+    protected override fun onScrollThumbDragStateChanged(dragging: Boolean) {
+        scrollHeights.setDragging(dragging)
+    }
+
+    protected override fun computeScrollThumbMetrics(): ScrollThumbMetrics {
+        scrollHeights.ensure(width - paddingLeft - paddingRight)
+        val extent = (height - paddingTop - paddingBottom).coerceAtLeast(0)
+        val maxOffset = (scrollHeights.totalHeight - extent).coerceAtLeast(0L)
+        val position = lineLayoutManager.findFirstVisibleItemPosition()
+        val child = lineLayoutManager.findViewByPosition(position)
+        val offset = if (position >= 0 && child != null) {
+            scrollHeights.start(position) + paddingTop - lineLayoutManager.getDecoratedTop(child)
+        } else {
+            0L
+        }
+        return ScrollThumbMetrics(scrollHeights.totalHeight, extent, offset.coerceIn(0L, maxOffset))
+    }
+
+    protected override fun scrollToThumbRatio(ratio: Float): Boolean {
+        val metrics = computeScrollThumbMetrics()
+        val maxOffset = (metrics.range - metrics.extent).coerceAtLeast(0L)
+        val target = (ratio.coerceIn(0f, 1f).toDouble() * maxOffset).toLong()
+        val position = scrollHeights.positionAt(target)
+        val rowOffset = (target - scrollHeights.start(position)).toInt()
+        lineLayoutManager.scrollToPositionWithOffset(position, -rowOffset)
+        return true
+    }
 
     init {
         setBackgroundColor(context.getColor(R.color.surface))
@@ -529,6 +556,7 @@ class SourceEditorView @JvmOverloads constructor(
             lineAdapter.notifyDataSetChanged()
             false
         }
+        scrollHeights.invalidate()
         previousSelection?.let(::restoreSelectionSnapshot)
         previousAnchor?.let(::scheduleScrollAnchorRestore)
     }
@@ -675,6 +703,16 @@ class SourceEditorView @JvmOverloads constructor(
         lineLayoutManager.scrollToPositionWithOffset(position, -(offset % rowHeight))
     }
 
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        scrollHeights.ensure(width - paddingLeft - paddingRight)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        scrollHeights.attach()
+    }
+
     override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
         super.onSizeChanged(width, height, oldWidth, oldHeight)
         if (imeVisible && height != oldHeight) scheduleImeEnsure()
@@ -701,6 +739,7 @@ class SourceEditorView @JvmOverloads constructor(
     }
 
     override fun onDetachedFromWindow() {
+        scrollHeights.detach()
         removeCallbacks(internalSelectionLongPressRunnable)
         removeCallbacks(selectionAutoScrollRunnable)
         internalSelectionLongPressPosted = false
@@ -2713,6 +2752,7 @@ class SourceEditorView @JvmOverloads constructor(
     }
 
     private fun notifyDocumentChanged(change: DocumentChange) {
+        scrollHeights.invalidate()
         documentChangedListeners.forEach { it.invoke() }
         documentChangeListeners.forEach { it.invoke(change) }
     }

@@ -65,7 +65,7 @@ internal class SourceLineEditText @JvmOverloads constructor(
     }
     private val leftWrapMarker = "↳"
     private val rightWrapMarker = "↲"
-    private val wrapContinuationMarginPx =
+    internal val wrapContinuationMarginPx =
         (wrapMarkerPaint.measureText(leftWrapMarker) + resources.displayMetrics.density * 4f)
             .roundToInt()
     private val backgroundHighlightPaint = Paint(Paint.ANTI_ALIAS_FLAG)

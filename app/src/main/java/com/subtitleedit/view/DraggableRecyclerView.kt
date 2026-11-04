@@ -42,6 +42,20 @@ open class DraggableRecyclerView @JvmOverloads constructor(
     protected open val useFixedSizeScrollThumb: Boolean
         get() = false
 
+    /** Custom metrics affect only this view's drawn/dragged thumb, not RecyclerView scrolling. */
+    protected data class ScrollThumbMetrics(val range: Long, val extent: Int, val offset: Long)
+
+    protected open fun computeScrollThumbMetrics(): ScrollThumbMetrics = ScrollThumbMetrics(
+        computeVerticalScrollRange().toLong(),
+        computeVerticalScrollExtent(),
+        computeVerticalScrollOffset().toLong()
+    )
+
+    /** Return true when a subclass has applied its own thumb-to-content mapping. */
+    protected open fun scrollToThumbRatio(ratio: Float): Boolean = false
+
+    protected open fun onScrollThumbDragStateChanged(dragging: Boolean) = Unit
+
     private data class ThumbGeometry(
         val trackTop: Float,
         val trackHeight: Float,
@@ -155,6 +169,7 @@ open class DraggableRecyclerView @JvmOverloads constructor(
                     dragThumbTop = (drawnThumbTop - geometry.trackTop)
                         .coerceIn(0f, geometry.maxThumbTop)
                     captureThumbDragAnchor(geometry)
+                    onScrollThumbDragStateChanged(true)
                     parent?.requestDisallowInterceptTouchEvent(true)
                     showThumb()
                     return true
@@ -180,6 +195,7 @@ open class DraggableRecyclerView @JvmOverloads constructor(
                         dragGeometry = geometry
                         dragThumbTop = geometry.thumbTop
                         captureThumbDragAnchor(geometry)
+                        onScrollThumbDragStateChanged(true)
                     }
                     // Keep the scroll-range snapshot captured at the start of this track
                     // geometry. LinearLayoutManager estimates pixel ranges from currently
@@ -302,6 +318,7 @@ open class DraggableRecyclerView @JvmOverloads constructor(
         val targetRatio = pendingScrollRatio ?: return
         pendingScrollRatio = null
         if (!isDraggingThumb || !canDragThumb()) return
+        if (scrollToThumbRatio(targetRatio)) return
 
         val linearLayoutManager = layoutManager as? LinearLayoutManager
         val itemCount = adapter?.itemCount ?: 0
@@ -334,6 +351,7 @@ open class DraggableRecyclerView @JvmOverloads constructor(
 
     private fun finishThumbDrag() {
         isDraggingThumb = false
+        onScrollThumbDragStateChanged(false)
         dragGeometry = null
         dragThumbTop = null
         pendingScrollRatio = null
@@ -388,8 +406,9 @@ open class DraggableRecyclerView @JvmOverloads constructor(
     }
 
     private fun calculateThumbGeometry(): ThumbGeometry {
-        val scrollRange = computeVerticalScrollRange().toFloat().coerceAtLeast(0f)
-        val scrollExtent = computeVerticalScrollExtent().toFloat().coerceAtLeast(0f)
+        val metrics = computeScrollThumbMetrics()
+        val scrollRange = metrics.range.toFloat().coerceAtLeast(0f)
+        val scrollExtent = metrics.extent.toFloat().coerceAtLeast(0f)
         val trackTop = paddingTop.toFloat()
         val trackHeight = (height - paddingTop - paddingBottom).toFloat().coerceAtLeast(0f)
         val minThumbHeight = thumbMinHeightPx.coerceAtMost(trackHeight)
@@ -406,7 +425,7 @@ open class DraggableRecyclerView @JvmOverloads constructor(
         val maxThumbTop = (trackHeight - thumbHeight).coerceAtLeast(0f)
         val maxScroll = (scrollRange - scrollExtent).coerceAtLeast(0f)
         val thumbTop = (dragThumbTop ?: if (maxScroll > 0f && maxThumbTop > 0f) {
-            computeVerticalScrollOffset().toFloat() / maxScroll * maxThumbTop
+            metrics.offset.toFloat() / maxScroll * maxThumbTop
         } else {
             0f
         }).coerceIn(0f, maxThumbTop)

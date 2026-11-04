@@ -114,4 +114,18 @@ class BatchRenameDialogTest {
         field("替换").performTextReplacement("renamed")
         compose.onNodeWithText("renamed(1).txt").assertExists()
     }
+
+    @Test
+    fun duplicateNamesCanBeSubmittedToTheExistingConflictResolutionFlow() {
+        val sources = listOf(files.newFile("first.txt"), files.newFile("second.txt"))
+        var submitted: BatchRename.Options? = null
+        compose.setContent {
+            SubtitleEditComposeTheme {
+                BatchRenameDialog(BatchRenameDialogUi(sources), onDismiss = {}, onConfirm = { submitted = it })
+            }
+        }
+        field("文件名").performTextReplacement("same")
+        confirm()
+        compose.runOnIdle { assertEquals("same", submitted?.pattern) }
+    }
 }

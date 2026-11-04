@@ -13,11 +13,15 @@ class BatchRenameHistoryTest {
     fun rulesWhoseReplacementSuppliesTheNameRemainReusableAfterSuccessfulRename() {
         val sources = listOf(File("first.txt"), File("second.srt"))
         val rules = listOf(
+            BatchRename.Options(pattern = ""),
             BatchRename.Options(pattern = " ", find = " ", replacement = "renamed"),
             BatchRename.Options(pattern = "", find = "^", replacement = "renamed", regexEnabled = true)
         )
         rules.forEach { options ->
-            assertEquals(listOf("renamed.txt", "renamed.srt"), BatchRename.preview(sources, options).map { it.target.name })
+            val expected = if (options.pattern.isEmpty() && options.find.isEmpty()) {
+                listOf(".txt", ".srt")
+            } else listOf("renamed.txt", "renamed.srt")
+            assertEquals(expected, BatchRename.preview(sources, options).map { it.target.name })
             val recorded = BatchRenameHistory.record(emptyList(), options)
             assertEquals(recorded, BatchRenameHistory.decode(BatchRenameHistory.encode(recorded)))
         }

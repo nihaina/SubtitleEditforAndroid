@@ -55,21 +55,78 @@ class BatchRenameTest {
     }
 
     @Test
-    fun emptyOrErasedBaseNamesAreRejectedEvenWhenDifferentExtensionsPreventDuplicates() {
-        val first = temporaryFolder.newFile("first.srt")
-        val second = temporaryFolder.newFile("second.txt")
+    fun emptyBaseNamesProduceHiddenFilesAndPreserveTheirContents() {
+        val first = temporaryFolder.newFile("first.srt").apply { writeText("subtitle") }
+        val second = temporaryFolder.newFile("second.txt").apply { writeText("text") }
+        val entries = BatchRename.preview(listOf(first, second), BatchRename.Options(pattern = ""))
+
+        assertEquals(listOf(".srt", ".txt"), entries.map { it.target.name })
+        assertEquals(2, BatchRename.execute(entries))
+        assertEquals("subtitle", File(temporaryFolder.root, ".srt").readText())
+        assertEquals("text", File(temporaryFolder.root, ".txt").readText())
+        assertEquals(listOf(".srt", ".txt"), children())
+    }
+
+    @Test
+    fun replacingTheEntireBaseNameWithEmptyTextCanCreateAHiddenFile() {
+        val source = temporaryFolder.newFile("first.srt")
+        val entries = BatchRename.preview(listOf(source), BatchRename.Options(
+            pattern = BatchRename.FILE_NAME_TOKEN,
+            find = "first",
+            replacement = "",
+            extension = "txt"
+        ))
+
+        assertEquals(".txt", entries.single().target.name)
+        assertEquals(1, BatchRename.execute(entries))
+        assertEquals(listOf(".txt"), children())
+    }
+
+    @Test
+    fun hiddenTargetsStillRejectExistingFilesAndDuplicateNamesInTheSameDirectory() {
+        val first = temporaryFolder.newFile("first.txt").apply { writeText("first") }
+        val second = temporaryFolder.newFile("second.srt").apply { writeText("second") }
+        val occupied = temporaryFolder.newFile(".txt").apply { writeText("hidden") }
 
         assertThrows(IllegalArgumentException::class.java) {
-            BatchRename.preview(listOf(first, second), BatchRename.Options(pattern = ""))
+            BatchRename.execute(BatchRename.preview(listOf(first, second), BatchRename.Options(pattern = "")))
         }
         assertThrows(IllegalArgumentException::class.java) {
-            BatchRename.preview(listOf(first), BatchRename.Options(
-                pattern = BatchRename.FILE_NAME_TOKEN,
-                find = "first",
-                replacement = ""
-            ))
+            BatchRename.execute(BatchRename.preview(listOf(first, second), BatchRename.Options(pattern = "", extension = "txt")))
         }
-        assertEquals(listOf("first.srt", "second.txt"), children())
+
+        assertEquals("first", first.readText())
+        assertEquals("second", second.readText())
+        assertEquals("hidden", occupied.readText())
+        assertEquals(listOf(".txt", "first.txt", "second.srt"), children())
+    }
+
+    @Test
+    fun emptyOrReservedFinalNamesRemainInvalidForFilesAndDirectories() {
+        val source = temporaryFolder.newFile("file.txt")
+        val directory = temporaryFolder.newFolder("folder")
+        listOf("", ".", "..").forEach { name ->
+            assertThrows(IllegalArgumentException::class.java) {
+                BatchRename.preview(listOf(source), BatchRename.Options(pattern = name, extension = ""))
+            }
+            assertThrows(IllegalArgumentException::class.java) {
+                BatchRename.preview(listOf(directory), BatchRename.Options(pattern = name))
+            }
+        }
+        assertEquals(listOf("file.txt", "folder"), children())
+    }
+
+    @Test
+    fun singleRenameKeepsItsExistingAndroidNameRules() {
+        BatchRename.validateTargetName("episode:01.srt", strictNames = false)
+        assertThrows(IllegalArgumentException::class.java) {
+            BatchRename.validateTargetName("episode:01.srt")
+        }
+        listOf("", ".", "..", "dir/file.txt", "dir\\file.txt").forEach { name ->
+            assertThrows(IllegalArgumentException::class.java) {
+                BatchRename.validateTargetName(name, strictNames = false)
+            }
+        }
     }
 
     @Test
@@ -106,17 +163,20 @@ class BatchRenameTest {
             BatchRename.Options(numberWidth = 19),
             BatchRename.Options(startNumber = -1),
             BatchRename.Options(startNumber = Long.MAX_VALUE),
-            BatchRename.Options(pattern = ""),
             BatchRename.Options(pattern = "bad/name"),
             BatchRename.Options(pattern = "bad\u0000name"),
             BatchRename.Options(extension = "bad/name"),
             BatchRename.Options(find = "[", regexEnabled = true),
-            BatchRename.Options(find = "(.)", replacement = "\$2", regexEnabled = true),
-            BatchRename.Options(pattern = "same-name")
+            BatchRename.Options(find = "(.)", replacement = "\$2", regexEnabled = true)
         )
 
         invalidOptions.forEach { options ->
             assertThrows(IllegalArgumentException::class.java) { BatchRename.preview(listOf(first, second), options) }
+        }
+        listOf("", "same-name").forEach { pattern ->
+            assertThrows(IllegalArgumentException::class.java) {
+                BatchRename.execute(BatchRename.preview(listOf(first, second), BatchRename.Options(pattern = pattern)))
+            }
         }
 
         assertEquals("first", first.readText())

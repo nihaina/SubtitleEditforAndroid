@@ -5,6 +5,10 @@ import java.io.File
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.LinkOption
+import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.FileVisitResult
+import java.nio.file.attribute.BasicFileAttributes
 import java.util.Locale
 import java.util.UUID
 
@@ -70,14 +74,13 @@ internal object BatchRename {
                     throw IllegalArgumentException("正则替换内容无效：${error.message}", error)
                 }
             }
-            validateName(name)
             val targetExtension = if (isDirectory) "" else extension ?: originalExtension
             val targetName = if (targetExtension.isEmpty()) name else "$name.$targetExtension"
+            // An empty base name is valid when the extension produces a hidden name such as .txt.
             validateName(targetName)
             Entry(source, File(parent, targetName))
         }
         requireDistinct(entries.map { it.source }, "重复选择了同一文件或目录")
-        requireDistinct(entries.map { it.target }, "多个项目重命名后名称相同")
         return entries
     }
 
@@ -86,25 +89,48 @@ internal object BatchRename {
     }
 
     /** The move seam lets filesystem tests exercise failures after a real partial transaction. */
-    internal fun execute(entries: List<Entry>, move: (File, File) -> Unit): Int {
-        requireDistinct(entries.map { it.source }, "重复选择了同一文件或目录")
+    internal fun execute(entries: List<Entry>, move: (File, File) -> Unit): Int =
+        execute(BatchRenameConflictResolver.Plan(entries), move)
+
+    fun execute(plan: BatchRenameConflictResolver.Plan): Int = execute(plan) { source, target ->
+        Files.move(source.toPath(), target.toPath())
+    }
+
+    internal fun execute(plan: BatchRenameConflictResolver.Plan, move: (File, File) -> Unit): Int {
+        val entries = plan.entries
+        val allSources = entries.map { it.source } + plan.discardedSources
+        requireDistinct(allSources, "重复选择了同一文件或目录")
         requireDistinct(entries.map { it.target }, "多个项目重命名后名称相同")
+        allSources.forEach { source ->
+            require(exists(source)) { "未找到源文件或目录：${source.name}" }
+        }
         entries.forEach { entry ->
-            require(exists(entry.source)) { "未找到源文件或目录：${entry.source.name}" }
-            validateName(entry.target.name)
+            validateTargetName(entry.target.name, plan.strictNames)
             require(entry.source.absoluteFile.parentFile?.let(::pathKey) ==
                 entry.target.absoluteFile.parentFile?.let(::pathKey)
             ) { "批量重命名不能更改所在目录" }
         }
-        val sources = entries.map { pathKey(it.source) }.toSet()
+        val sources = allSources.map(::pathKey).toSet()
+        val overwritten = plan.overwritten.distinctBy(::pathKey)
+        val overwritePaths = overwritten.map(::pathKey).toSet()
+        overwritten.forEach { target ->
+            val targetPath = pathKey(target)
+            require(sources.none { sourcePath ->
+                sourcePath == targetPath || sourcePath.startsWith(targetPath + File.separator) ||
+                    targetPath.startsWith(sourcePath + File.separator)
+            }) { "不能覆盖源文件或源文件所在目录" }
+            require(entries.any { pathKey(it.target) == targetPath }) { "覆盖目标不在重命名计划中" }
+        }
         entries.forEach { entry ->
             val sameFileCaseChange = entry.source.name.equals(entry.target.name, ignoreCase = true) &&
                 runCatching { Files.isSameFile(entry.source.toPath(), entry.target.toPath()) }.getOrDefault(false)
-            require(!exists(entry.target) || pathKey(entry.target) in sources || sameFileCaseChange) {
+            require(!exists(entry.target) || pathKey(entry.target) in sources || sameFileCaseChange ||
+                pathKey(entry.target) in overwritePaths
+            ) {
                 "目标已存在：${entry.target.name}"
             }
         }
-        val sourcePaths = entries.map { pathKey(it.source) }
+        val sourcePaths = allSources.map(::pathKey)
         sourcePaths.forEachIndexed { index, sourcePath ->
             require(sourcePaths.withIndex().none { (otherIndex, otherPath) ->
                 otherIndex != index && otherPath.startsWith(sourcePath + File.separator)
@@ -112,22 +138,31 @@ internal object BatchRename {
         }
 
         val changed = entries.filter { it.source.absoluteFile.path != it.target.absoluteFile.path }
-        val reservedPaths = (sourcePaths + entries.map { pathKey(it.target) }).toMutableSet()
-        val staged = changed.map { entry ->
-            val parent = requireNotNull(entry.source.absoluteFile.parentFile)
+        val reservedPaths = (sourcePaths + entries.map { pathKey(it.target) } + overwritePaths).toMutableSet()
+        fun temporaryFor(source: File): File {
+            val parent = requireNotNull(source.absoluteFile.parentFile)
             var temporary: File
             do {
                 temporary = File(parent, ".subtitleedit-rename-${UUID.randomUUID()}")
             } while (exists(temporary) || !reservedPaths.add(pathKey(temporary)))
-            StagedEntry(entry, temporary)
+            return temporary
+        }
+        val staged = changed.map { entry -> StagedEntry(entry.source, entry.target, temporaryFor(entry.source)) } +
+            plan.discardedSources.map { source -> StagedEntry(source, null, temporaryFor(source)) }
+        val backups = overwritten.filter(::exists).map { target ->
+            StagedEntry(target, null, temporaryFor(target))
         }
         try {
             staged.forEach { item ->
-                move(item.entry.source, item.temporary)
+                move(item.source, item.temporary)
                 item.phase = Phase.TEMPORARY
             }
-            staged.forEach { item ->
-                move(item.temporary, item.entry.target)
+            backups.forEach { backup ->
+                move(backup.source, backup.temporary)
+                backup.phase = Phase.TEMPORARY
+            }
+            staged.filter { it.target != null }.forEach { item ->
+                move(item.temporary, requireNotNull(item.target))
                 item.phase = Phase.TARGET
             }
         } catch (error: Exception) {
@@ -141,15 +176,15 @@ internal object BatchRename {
                     rollbackErrors += rollbackError
                 }
             }
-            staged.asReversed().filter { it.phase == Phase.TEMPORARY }.forEach { item ->
+            (staged + backups).asReversed().filter { it.phase == Phase.TEMPORARY }.forEach { item ->
                 try {
-                    move(item.temporary, item.entry.source)
+                    move(item.temporary, item.source)
                     item.phase = Phase.SOURCE
                 } catch (rollbackError: Exception) {
                     rollbackErrors += rollbackError
                 }
             }
-            val remaining = staged.filter { it.phase != Phase.SOURCE }
+            val remaining = (staged + backups).filter { it.phase != Phase.SOURCE }
             val recovery = if (remaining.isEmpty()) "，已恢复原名称" else {
                 "；部分项目未能恢复，当前位置：" + remaining.joinToString { it.location.absolutePath }
             }
@@ -157,7 +192,14 @@ internal object BatchRename {
                 rollbackErrors.forEach(::addSuppressed)
             }
         }
-        return changed.size
+        // Keep overwritten targets and displaced batch entries recoverable until every name is committed.
+        val cleanupErrors = (backups + staged.filter { it.target == null }).mapNotNull { item ->
+            runCatching { deleteBackup(item.temporary) }.exceptionOrNull()?.let { item.temporary to it }
+        }
+        if (cleanupErrors.isNotEmpty()) {
+            throw IOException("重命名已完成，但无法清理覆盖备份：" + cleanupErrors.joinToString { it.first.absolutePath }, cleanupErrors.first().second)
+        }
+        return changed.size + plan.discardedSources.size
     }
 
     fun sourceExtension(source: File): String =
@@ -166,15 +208,41 @@ internal object BatchRename {
 
     private enum class Phase { SOURCE, TEMPORARY, TARGET }
 
-    private data class StagedEntry(val entry: Entry, val temporary: File, var phase: Phase = Phase.SOURCE) {
+    private data class StagedEntry(val source: File, val target: File?, val temporary: File, var phase: Phase = Phase.SOURCE) {
         val location: File get() = when (phase) {
-            Phase.SOURCE -> entry.source
+            Phase.SOURCE -> source
             Phase.TEMPORARY -> temporary
-            Phase.TARGET -> entry.target
+            Phase.TARGET -> requireNotNull(target)
         }
     }
 
+    /** Delete staged data without following directory symlinks outside the renamed item. */
+    private fun deleteBackup(file: File) {
+        Files.walkFileTree(file.toPath(), object : SimpleFileVisitor<Path>() {
+            override fun visitFile(path: Path, attributes: BasicFileAttributes): FileVisitResult {
+                Files.delete(path)
+                return FileVisitResult.CONTINUE
+            }
+
+            override fun postVisitDirectory(directory: Path, error: IOException?): FileVisitResult {
+                if (error != null) throw error
+                Files.delete(directory)
+                return FileVisitResult.CONTINUE
+            }
+        })
+    }
+
     private fun validateName(name: String) {
+        validateTargetName(name)
+    }
+
+    internal fun validateTargetName(name: String, strictNames: Boolean = true) {
+        if (!strictNames) {
+            require(name.isNotBlank() && name != "." && name != ".." && '/' !in name && '\\' !in name) {
+                "文件名无效"
+            }
+            return
+        }
         FileBrowserOrder.validateName(name)?.let { throw IllegalArgumentException(it) }
         require(name.none { it.isISOControl() }) { "名称不能包含控制字符" }
     }

@@ -42,6 +42,7 @@ import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.ArchiveManager
 import com.subtitleedit.util.BatchRename
+import com.subtitleedit.util.BatchRenameConflictResolver
 import com.subtitleedit.util.ArchivePreviewCache
 import com.subtitleedit.model.FileBrowserOrder
 import com.subtitleedit.model.FileSortDirection
@@ -77,6 +78,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
@@ -1078,11 +1080,15 @@ class MainActivity : AppComposeActivity() {
         stateModel.batchRenameDialog = dialog.copy(running = true, error = null)
         directoryWatcher.stop()
         stateModel.viewModelScope.launch {
-            // Finish or roll back the filesystem transaction even if the screen is recreated.
-            val result = withContext(Dispatchers.IO + NonCancellable) {
-                runCatching { BatchRename.execute(BatchRename.preview(dialog.sources, options)) }
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    val plan = resolveRenameConflicts(BatchRename.preview(dialog.sources, options))
+                    ensureActive()
+                    // Conflict prompts remain cancellable; finish or roll back once file changes start.
+                    withContext(NonCancellable) { BatchRename.execute(plan) }
+                }
             }
-            val current = activeInstance?.get()
+            val current = activeInstance?.get()?.takeIf { it.stateModel === stateModel }
             result.fold(
                 onSuccess = { count ->
                     val historySaved = runCatching {
@@ -1098,7 +1104,9 @@ class MainActivity : AppComposeActivity() {
                 },
                 onFailure = { error ->
                     stateModel.batchRenameDialog = dialog.copy(
-                        error = getString(R.string.batch_rename_failed, error.message ?: getString(R.string.error))
+                        error = if (error is CancellationException) null else {
+                            getString(R.string.batch_rename_failed, error.message ?: getString(R.string.error))
+                        }
                     )
                 }
             )
@@ -1108,9 +1116,17 @@ class MainActivity : AppComposeActivity() {
         }
     }
 
-    private fun showRenameDialog(file: File) {
+    private suspend fun resolveRenameConflicts(
+        entries: List<BatchRename.Entry>,
+        strictNames: Boolean = true
+    ): BatchRenameConflictResolver.Plan =
+        BatchRenameConflictResolver.resolve(entries, strictNames) { conflict ->
+            archiveConflictDialogController.awaitResolution(conflict)
+        }
+
+    private fun showRenameDialog(file: File, initialName: String = file.name) {
         pendingRenameFile = file
-        mainDialog = MainActivityDialogUi.Rename(file.name)
+        mainDialog = MainActivityDialogUi.Rename(initialName)
     }
 
     private fun confirmRename(rawName: String) {
@@ -1123,14 +1139,31 @@ class MainActivity : AppComposeActivity() {
             newName == file.name -> Unit
             else -> {
                 val target = File(file.parentFile, newName)
-                if (target.exists()) {
-                    showShortToast("目标名称已存在")
-                } else if (file.renameTo(target)) {
-                    exitSelectionMode()
-                    stateModel.documentState.currentDirectory?.let(::loadDirectory)
-                    showShortToast("已重命名")
-                } else {
-                    showShortToast("重命名失败")
+                stateModel.viewModelScope.launch {
+                    val result = runCatching {
+                        withContext(Dispatchers.IO) {
+                            val plan = resolveRenameConflicts(listOf(BatchRename.Entry(file, target)), strictNames = false)
+                            ensureActive()
+                            withContext(NonCancellable) { BatchRename.execute(plan) }
+                        }
+                    }
+                    val current = activeInstance?.get()?.takeIf { it.stateModel === stateModel } ?: return@launch
+                    result.fold(
+                        onSuccess = { count ->
+                            if (count > 0) {
+                                current.exitSelectionMode()
+                                current.stateModel.documentState.currentDirectory?.let { current.loadDirectory(it) }
+                                current.showShortToast("已重命名")
+                            }
+                        },
+                        onFailure = { error ->
+                            if (error is CancellationException) {
+                                if (file.exists()) current.showRenameDialog(file, newName)
+                            } else {
+                                current.showShortToast(getString(R.string.batch_rename_failed, error.message ?: getString(R.string.error)))
+                            }
+                        }
+                    )
                 }
             }
         }
