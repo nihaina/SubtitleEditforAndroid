@@ -156,7 +156,7 @@ class FilePickerViewModelTest {
         }
     }
 
-    @Test fun mimeFilterKeepsFoldersAndHiddenFilesCanBeRevealed() =
+    @Test fun unsupportedFilesAreVisibleAndDisabledUntilFilteringIsEnabled() =
         withPicker(FilePickerMode.OPEN_FILE, mimeTypes = listOf("audio/*"), setup = {
             File(it, "folder").mkdir()
             File(it, "music.mp3").writeText("audio")
@@ -165,10 +165,110 @@ class FilePickerViewModelTest {
         }) { fixture ->
             onMain { fixture.model.setShowHidden(false) }
             fixture.awaitLoaded()
-            assertEquals(setOf("folder", "music.mp3"), fixture.model.state.value.files.map { it.name }.toSet())
+            assertFalse(fixture.model.state.value.filterUnsupported)
+            assertEquals(setOf("folder", "music.mp3", "subtitles.srt"),
+                fixture.model.state.value.files.map { it.name }.toSet())
+            assertEquals(setOf(File(fixture.directory, "subtitles.srt").path),
+                fixture.model.state.value.unsupportedPaths)
             onMain { fixture.model.setShowHidden(true) }
             fixture.awaitLoaded()
-            assertEquals(setOf("folder", "music.mp3", ".secret.mp3"), fixture.model.state.value.files.map { it.name }.toSet())
+            assertEquals(setOf("folder", "music.mp3", ".secret.mp3", "subtitles.srt"),
+                fixture.model.state.value.files.map { it.name }.toSet())
+            onMain { fixture.model.setFilterUnsupported(true) }
+            fixture.awaitLoaded()
+            assertEquals(setOf("folder", "music.mp3", ".secret.mp3"),
+                fixture.model.state.value.files.map { it.name }.toSet())
+            assertTrue(fixture.recreate().state.value.filterUnsupported)
+            onMain { fixture.model.setFilterUnsupported(false) }
+            fixture.awaitLoaded()
+            assertTrue(File(fixture.directory, "subtitles.srt") in fixture.model.state.value.files)
+        }
+
+    @Test fun subtitleWhitelistPreventsClickAndSelectAllBypassesEvenWithBroadMimeTypes() =
+        withPicker(FilePickerMode.OPEN_FILES, mimeTypes = listOf("text/*", "application/*"),
+            allowedExtensions = listOf("srt", "lrc", "vtt", "txt"), setup = {
+                listOf("one.SRT", "two.lrc", "three.vtt", "four.txt", "unsupported.ass",
+                    "unsupported.ssa", "backup.json", "audio.mp3").forEach { name -> File(it, name).writeText(name) }
+                File(it, "folder").mkdir()
+            }) { fixture ->
+            fixture.awaitLoaded()
+            val validPaths = listOf("one.SRT", "two.lrc", "three.vtt", "four.txt")
+                .map { File(fixture.directory, it).path }.toSet()
+            val invalidPaths = listOf("unsupported.ass", "unsupported.ssa", "backup.json", "audio.mp3")
+                .map { File(fixture.directory, it).path }.toSet()
+            assertEquals(invalidPaths, fixture.model.state.value.unsupportedPaths)
+            assertEquals(9, fixture.model.state.value.files.size)
+            onMain { fixture.model.select(File(fixture.directory, "unsupported.ass")) }
+            assertTrue(fixture.model.state.value.selectedPaths.isEmpty())
+            onMain { fixture.model.selectAll() }
+            assertEquals(validPaths, fixture.model.state.value.selectedPaths)
+            onMain { fixture.model.setFilterUnsupported(true) }
+            fixture.awaitLoaded()
+            assertEquals(validPaths, fixture.model.state.value.selectedPaths)
+            assertEquals(validPaths + File(fixture.directory, "folder").path,
+                fixture.model.state.value.files.map { it.path }.toSet())
+            onMain { fixture.model.confirm() }
+            assertEquals(validPaths, fixture.nextSelection().map { it.path }.toSet())
+        }
+
+    @Test fun unsupportedSingleFileClickCannotEmitAResultBeforeAValidFile() =
+        withPicker(FilePickerMode.OPEN_FILE, allowedExtensions = listOf("srt", "lrc", "vtt", "txt"), setup = {
+            File(it, "unsupported.ass").writeText("not supported here")
+            File(it, "valid.srt").writeText("supported")
+        }) { fixture ->
+            fixture.awaitLoaded()
+            val valid = File(fixture.directory, "valid.srt")
+            onMain {
+                fixture.model.select(File(fixture.directory, "unsupported.ass"))
+                fixture.model.select(valid)
+            }
+            assertEquals(listOf(valid), fixture.nextSelection())
+        }
+
+    @Test fun rangeSkipsUnsupportedFilesBetweenValidEndpoints() =
+        withPicker(FilePickerMode.OPEN_FILES, allowedExtensions = listOf("srt", "lrc", "vtt", "txt"), setup = {
+            listOf("a.srt", "b.json", "c.lrc", "d.ass", "e.vtt").forEach { name -> File(it, name).writeText(name) }
+        }) { fixture ->
+            onMain { fixture.model.sort(FileSortField.NAME, FileSortDirection.ASCENDING) }
+            fixture.awaitLoaded()
+            onMain {
+                fixture.model.select(File(fixture.directory, "a.srt"))
+                fixture.model.select(File(fixture.directory, "e.vtt"))
+                fixture.model.selectRange()
+            }
+            assertEquals(setOf("a.srt", "c.lrc", "e.vtt").map { File(fixture.directory, it).path }.toSet(),
+                fixture.model.state.value.selectedPaths)
+        }
+
+    @Test fun mediaPickerDisablesTextAndBinaryWhileTranscriptAudioAlsoDisablesVideo() {
+        for ((types, expected) in listOf(
+            listOf("audio/*", "video/*") to setOf("sound.mp3", "movie.mp4"),
+            listOf("audio/*") to setOf("sound.mp3")
+        )) {
+            withPicker(FilePickerMode.OPEN_FILES, mimeTypes = types, setup = {
+                listOf("sound.mp3", "movie.mp4", "subtitles.srt", "model.bin").forEach { name -> File(it, name).writeText(name) }
+            }) { fixture ->
+                fixture.awaitLoaded()
+                onMain { fixture.model.selectAll() }
+                assertEquals(expected.map { File(fixture.directory, it).path }.toSet(),
+                    fixture.model.state.value.selectedPaths)
+            }
+        }
+    }
+
+    @Test fun restoredSelectionsCannotReintroduceUnsupportedFiles() =
+        withPicker(FilePickerMode.OPEN_FILES, allowedExtensions = listOf("srt", "lrc", "vtt", "txt"), setup = {
+            File(it, "valid.srt").writeText("subtitle")
+            File(it, "unsupported.json").writeText("config")
+        }) { fixture ->
+            val valid = File(fixture.directory, "valid.srt")
+            val unsupported = File(fixture.directory, "unsupported.json")
+            onMain { fixture.saved["selected"] = arrayListOf(valid.path, unsupported.path) }
+            val restored = fixture.recreate()
+            assertEquals(setOf(valid.path), restored.state.value.selectedPaths)
+            onMain { restored.confirm() }
+            val result = runBlocking { withTimeout(5_000) { restored.events.first() } }
+            assertEquals(listOf(valid), (result as FilePickerEvent.Selected).files)
         }
 
     @Test fun savingANewHiddenFileOnlyReturnsAPathWithoutCreatingIt() =
@@ -229,12 +329,14 @@ class FilePickerViewModelTest {
                 fixture.model.navigate(child)
                 fixture.model.search("needle")
                 fixture.model.setName("remembered.srt")
+                fixture.model.setFilterUnsupported(true)
             }
             val restored = fixture.recreate()
             assertEquals(child, restored.state.value.directory)
             assertEquals(setOf(source.path), restored.state.value.selectedPaths)
             assertEquals("needle", restored.state.value.query)
             assertEquals("remembered.srt", restored.state.value.suggestedName)
+            assertTrue(restored.state.value.filterUnsupported)
         }
 
     @Test fun newDirectoryCreationUsesTheSameBrowserAndKeepsExistingEntries() =
@@ -253,12 +355,13 @@ class FilePickerViewModelTest {
         mode: FilePickerMode,
         mimeTypes: List<String> = listOf("*/*"),
         suggestedName: String? = null,
+        allowedExtensions: List<String> = emptyList(),
         setup: (File) -> Unit = {},
         block: (Fixture) -> Unit
     ) {
         val directory = File(app.cacheDir, "picker_test_${System.nanoTime()}").apply { mkdirs() }
         val saved = SavedStateHandle()
-        val request = FilePickerRequest(mode, mimeTypes, directory.path, suggestedName)
+        val request = FilePickerRequest(mode, mimeTypes, directory.path, suggestedName, allowedExtensions)
         val store = ViewModelStore()
         try {
             setup(directory)

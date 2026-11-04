@@ -152,7 +152,7 @@ internal class LogViewModel(
                     val dir = PickedUriAccess.directory(app, uri)
                         ?: throw IllegalStateException(string(R.string.log_export_dir_inaccessible))
                     val fileName = uniqueFileName(dir, RuntimeLogManager.exportFileName())
-                    val file = dir.createFile("text/plain", fileName)
+                    val file = PickedUriAccess.createFile(dir, "text/plain", fileName)
                         ?: throw IllegalStateException(string(R.string.log_export_create_failed))
                     app.contentResolver.openOutputStream(file.uri, "wt")?.use { output ->
                         RuntimeLogManager.exportRecent(app, mode, output)

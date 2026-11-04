@@ -73,6 +73,7 @@ internal fun FilePickerScreen(
     onSearch: (String) -> Unit,
     onSort: (FileSortField, FileSortDirection) -> Unit,
     onShowHidden: (Boolean) -> Unit,
+    onFilterUnsupported: (Boolean) -> Unit,
     onNameChanged: (String) -> Unit,
     onConfirm: () -> Unit,
     onClearSelection: () -> Unit,
@@ -170,6 +171,9 @@ internal fun FilePickerScreen(
                                 DropdownMenuItem(text = { Text(stringResource(R.string.file_picker_show_hidden)) },
                                     trailingIcon = { Checkbox(state.showHidden, null) },
                                     onClick = { onShowHidden(!state.showHidden); menuExpanded = false })
+                                DropdownMenuItem(text = { Text(stringResource(R.string.file_picker_filter_unsupported)) },
+                                    trailingIcon = { Checkbox(state.filterUnsupported, null) },
+                                    onClick = { onFilterUnsupported(!state.filterUnsupported); menuExpanded = false })
                                 DropdownMenuItem(text = { Text(stringResource(R.string.file_picker_refresh)) },
                                     onClick = { onRefresh(); menuExpanded = false })
                             }
@@ -237,13 +241,15 @@ internal fun FilePickerScreen(
                     LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState,
                         contentPadding = PaddingValues(8.dp)) {
                         items(state.files, key = { it.absolutePath }) { file ->
+                            val supported = file.absolutePath !in state.unsupportedPaths
                             BrowserFileRow(
                                 file = file,
                                 relativePathRoot = null,
-                                isSelected = file.absolutePath in state.selectedPaths,
+                                isSelected = supported && file.absolutePath in state.selectedPaths,
                                 isSelectionMode = selectionActive,
                                 onClick = { onFileClick(file) },
-                                onLongClick = { onFileClick(file) }
+                                onLongClick = { onFileClick(file) },
+                                enabled = supported
                             )
                         }
                     }

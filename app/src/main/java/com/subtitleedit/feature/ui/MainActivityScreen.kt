@@ -689,7 +689,8 @@ internal fun BrowserFileRow(
     isSelectionMode: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
-    restrictedOverride: Boolean? = null
+    restrictedOverride: Boolean? = null,
+    enabled: Boolean = true
 ) {
     val context = LocalContext.current
     val locale = LocalLocale.current.platformLocale
@@ -723,6 +724,7 @@ internal fun BrowserFileRow(
         SimpleDateFormat("yyyy-MM-dd", locale).format(Date(file.lastModified()))
     }
     val alpha = when {
+        !enabled -> 0.38f
         isSelectionMode && !isSelected -> 0.72f
         restricted -> 0.55f
         else -> 1f
@@ -749,6 +751,7 @@ internal fun BrowserFileRow(
             .alpha(alpha)
             .clip(rowShape)
             .combinedClickable(
+                enabled = enabled,
                 onClick = onClick,
                 onLongClick = { if (restricted) onClick() else onLongClick() }
             ),
@@ -761,14 +764,14 @@ internal fun BrowserFileRow(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            FileRowIcon(file, preview?.bitmap, restricted)
+            FileRowIcon(file, preview?.bitmap, restricted || !enabled)
             Column(
                 modifier = Modifier.weight(1f).padding(start = 8.dp),
                 verticalArrangement = Arrangement.Center
             ) {
                 Text(
                     text = displayName,
-                    color = if (restricted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    color = if (restricted || !enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.MiddleEllipsis

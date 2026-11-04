@@ -7,6 +7,8 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -14,6 +16,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.subtitleedit.R
@@ -24,6 +28,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -118,11 +123,43 @@ class FilePickerScreenTest {
         compose.runOnIdle { assertEquals("matching", state.value.query) }
     }
 
-    private fun show(files: List<File>) {
+    @Test fun unsupportedFilesRemainVisibleButCannotBeSelectedByTapOrLongPress() {
+        val supported = temporary.newFile("supported.srt")
+        val unsupported = temporary.newFile("unsupported.zip")
+        show(listOf(supported, unsupported), setOf(unsupported.path))
+
+        compose.onNodeWithText(unsupported.name).assertExists().assertIsNotEnabled()
+            .performTouchInput { click() }
+        compose.onNodeWithText(unsupported.name).performTouchInput { longClick() }
+        compose.runOnIdle { assertTrue(state.value.selectedPaths.isEmpty()) }
+
+        compose.onNodeWithText(supported.name).performClick()
+        compose.onNodeWithText("已选择 1 项").assertExists()
+        compose.onNodeWithText(unsupported.name).assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(setOf(supported.path), state.value.selectedPaths) }
+    }
+
+    @Test fun unsupportedFilterDefaultsOffAndFollowsTheHiddenFilesOptionInMoreMenu() {
+        show(listOf(temporary.newFile("subtitle.srt")))
+        compose.runOnIdle { assertFalse(state.value.filterUnsupported) }
+        compose.onNodeWithContentDescription(context.getString(R.string.file_picker_more)).performClick()
+        val hidden = compose.onNodeWithText(context.getString(R.string.file_picker_show_hidden))
+        val filter = compose.onNodeWithText(context.getString(R.string.file_picker_filter_unsupported))
+        assertTrue(filter.fetchSemanticsNode().boundsInRoot.top > hidden.fetchSemanticsNode().boundsInRoot.top)
+        filter.performClick()
+        compose.runOnIdle { assertTrue(state.value.filterUnsupported) }
+
+        compose.onNodeWithContentDescription(context.getString(R.string.file_picker_more)).performClick()
+        compose.onNodeWithText(context.getString(R.string.file_picker_filter_unsupported)).performClick()
+        compose.runOnIdle { assertFalse(state.value.filterUnsupported) }
+    }
+
+    private fun show(files: List<File>, unsupportedPaths: Set<String> = emptySet()) {
         state = mutableStateOf(FilePickerUiState(
             mode = FilePickerMode.OPEN_FILES,
             directory = temporary.root,
             files = files,
+            unsupportedPaths = unsupportedPaths,
             hasStoragePermission = true
         ))
         compose.setContent {
@@ -141,6 +178,7 @@ class FilePickerScreenTest {
                     onSearch = { state.value = state.value.copy(query = it) },
                     onSort = { _, _ -> },
                     onShowHidden = {},
+                    onFilterUnsupported = { state.value = state.value.copy(filterUnsupported = it) },
                     onNameChanged = {},
                     onConfirm = {},
                     onClearSelection = { state.value = state.value.copy(selectedPaths = emptySet()) },

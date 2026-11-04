@@ -28,17 +28,23 @@ internal object AppFilePickerContracts {
         return uris.distinct().filter { it.scheme == "file" }
     }
 
-    class OpenDocument : ActivityResultContract<Array<String>, Uri?>() {
+    class OpenDocument(
+        private val allowedExtensions: Set<String> = emptySet()
+    ) : ActivityResultContract<Array<String>, Uri?>() {
         override fun createIntent(context: Context, input: Array<String>): Intent =
-            FilePickerRequest(FilePickerMode.OPEN_FILE, input.toList()).toIntent(context)
+            FilePickerRequest(FilePickerMode.OPEN_FILE, input.toList(),
+                allowedExtensions = allowedExtensions.toList()).toIntent(context)
 
         override fun parseResult(resultCode: Int, intent: Intent?): Uri? =
             selectedUris(resultCode, intent).firstOrNull()
     }
 
-    class OpenMultipleDocuments : ActivityResultContract<Array<String>, List<Uri>>() {
+    class OpenMultipleDocuments(
+        private val allowedExtensions: Set<String> = emptySet()
+    ) : ActivityResultContract<Array<String>, List<Uri>>() {
         override fun createIntent(context: Context, input: Array<String>): Intent =
-            FilePickerRequest(FilePickerMode.OPEN_FILES, input.toList()).toIntent(context)
+            FilePickerRequest(FilePickerMode.OPEN_FILES, input.toList(),
+                allowedExtensions = allowedExtensions.toList()).toIntent(context)
 
         override fun parseResult(resultCode: Int, intent: Intent?): List<Uri> =
             selectedUris(resultCode, intent)
@@ -73,26 +79,30 @@ internal data class FilePickerRequest(
     val mode: FilePickerMode,
     val mimeTypes: List<String> = emptyList(),
     val initialPath: String? = null,
-    val suggestedName: String? = null
+    val suggestedName: String? = null,
+    val allowedExtensions: List<String> = emptyList()
 ) {
     fun toIntent(context: Context): Intent = Intent(context, FilePickerActivity::class.java)
         .putExtra(MODE, mode.name)
         .putStringArrayListExtra(MIME_TYPES, ArrayList(mimeTypes))
         .putExtra(INITIAL_PATH, initialPath)
         .putExtra(SUGGESTED_NAME, suggestedName)
+        .putStringArrayListExtra(ALLOWED_EXTENSIONS, ArrayList(allowedExtensions))
 
     companion object {
         private const val MODE = "picker_mode"
         private const val MIME_TYPES = "picker_mime_types"
         private const val INITIAL_PATH = "picker_initial_path"
         private const val SUGGESTED_NAME = "picker_suggested_name"
+        private const val ALLOWED_EXTENSIONS = "picker_allowed_extensions"
 
         fun fromIntent(intent: Intent): FilePickerRequest = FilePickerRequest(
             mode = runCatching { FilePickerMode.valueOf(intent.getStringExtra(MODE).orEmpty()) }
                 .getOrDefault(FilePickerMode.OPEN_FILE),
             mimeTypes = intent.getStringArrayListExtra(MIME_TYPES).orEmpty(),
             initialPath = intent.getStringExtra(INITIAL_PATH),
-            suggestedName = intent.getStringExtra(SUGGESTED_NAME)
+            suggestedName = intent.getStringExtra(SUGGESTED_NAME),
+            allowedExtensions = intent.getStringArrayListExtra(ALLOWED_EXTENSIONS).orEmpty()
         )
     }
 }

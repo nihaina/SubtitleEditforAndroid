@@ -21,9 +21,9 @@ object SubtitleFormatConverter {
     /**
      * Source file extensions accepted by the conversion workflow.
      *
-     * Keep this check filename based: document providers may expose a generic MIME type,
-     * while the format picker still allows the user to select the file. The selected item
-     * is then rejected before it is added to the conversion queue.
+     * Keep this check filename based: MIME types can be generic. The file picker uses this
+     * same extension set, and consumers still validate restored queues and other entry points
+     * before a file is added to the conversion queue.
      */
     val supportedSourceExtensions = setOf("srt", "lrc", "txt", "vtt")
 

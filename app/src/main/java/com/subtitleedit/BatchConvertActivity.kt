@@ -16,7 +16,7 @@ class BatchConvertActivity : AppComposeActivity() {
     private val viewModel: BatchConvertViewModel by viewModels()
 
     private val filePickerLauncher = registerForActivityResult(
-        AppFilePickerContracts.OpenMultipleDocuments()
+        AppFilePickerContracts.OpenMultipleDocuments(SubtitleFormatConverter.supportedSourceExtensions)
     ) { uris -> viewModel.addFiles(uris) }
 
     private val directoryPickerLauncher = registerForActivityResult(

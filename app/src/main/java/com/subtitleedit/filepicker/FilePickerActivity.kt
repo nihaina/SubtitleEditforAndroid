@@ -45,6 +45,7 @@ class FilePickerActivity : AppComposeActivity() {
                     onSearch = model::search,
                     onSort = model::sort,
                     onShowHidden = model::setShowHidden,
+                    onFilterUnsupported = model::setFilterUnsupported,
                     onNameChanged = model::setName,
                     onConfirm = model::confirm,
                     onClearSelection = model::clearSelection,

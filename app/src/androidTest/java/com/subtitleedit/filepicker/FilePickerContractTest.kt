@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.subtitleedit.util.SubtitleFormatConverter
 import java.io.File
 import org.junit.Assert.*
 import org.junit.Test
@@ -49,6 +50,19 @@ class FilePickerContractTest {
             AppFilePickerContracts.OpenDocument().parseResult(Activity.RESULT_OK, result))
         assertEquals(Uri.fromFile(first),
             AppFilePickerContracts.CreateDocument("*/*").parseResult(Activity.RESULT_OK, result))
+    }
+
+    @Test fun explicitSubtitleExtensionsSurviveSingleAndMultiplePickerRequests() {
+        val extensions = SubtitleFormatConverter.supportedSourceExtensions
+        val single = AppFilePickerContracts.OpenDocument(extensions)
+            .createIntent(context, arrayOf("text/*", "application/*"))
+        val multiple = AppFilePickerContracts.OpenMultipleDocuments(extensions)
+            .createIntent(context, arrayOf("*/*"))
+        assertEquals(extensions, FilePickerRequest.fromIntent(single).allowedExtensions.toSet())
+        assertEquals(extensions, FilePickerRequest.fromIntent(multiple).allowedExtensions.toSet())
+        assertEquals(listOf("*/*"), FilePickerRequest.fromIntent(multiple).mimeTypes)
+        val unrestricted = AppFilePickerContracts.OpenDocument().createIntent(context, arrayOf("audio/*"))
+        assertTrue(FilePickerRequest.fromIntent(unrestricted).allowedExtensions.isEmpty())
     }
 
     @Test fun cancellingAnyPickerDiscardsItsPendingSelection() {

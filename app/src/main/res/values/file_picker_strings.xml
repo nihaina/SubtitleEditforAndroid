@@ -17,6 +17,7 @@
     <string name="file_picker_sort_ascending">升序</string>
     <string name="file_picker_sort_descending">降序</string>
     <string name="file_picker_show_hidden">显示隐藏文件</string>
+    <string name="file_picker_filter_unsupported">过滤不支持文件</string>
     <string name="file_picker_refresh">刷新</string>
     <string name="file_picker_empty">此目录没有可选择的项目</string>
     <string name="file_picker_internal_storage">内部存储</string>
@@ -26,6 +27,7 @@
     <string name="file_picker_directory_inaccessible">无法访问该目录</string>
     <string name="file_picker_directory_not_writable">所选目录不可写入</string>
     <string name="file_picker_file_inaccessible">文件不存在或无法读取</string>
+    <string name="file_picker_unsupported_file">不支持的文件格式</string>
     <string name="file_picker_invalid_name">名称不能为空、. 或 ..，也不能包含 / 或空字符</string>
     <string name="file_picker_create_directory_failed">无法新建目录，请检查名称冲突或访问权限</string>
     <string name="file_picker_overwrite_message">文件“%1$s”已存在，请选择覆盖或自动重命名。</string>

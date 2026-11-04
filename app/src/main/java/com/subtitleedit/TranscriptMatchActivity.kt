@@ -10,11 +10,14 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import com.subtitleedit.feature.ui.TranscriptMatchScreen
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
+import com.subtitleedit.util.SubtitleFormatConverter
 
 class TranscriptMatchActivity : AppComposeActivity() {
     private val viewModel: TranscriptMatchViewModel by viewModels()
 
-    private val textPicker = registerForActivityResult(AppFilePickerContracts.OpenDocument()) { uri: Uri? ->
+    private val textPicker = registerForActivityResult(
+        AppFilePickerContracts.OpenDocument(SubtitleFormatConverter.supportedSourceExtensions)
+    ) { uri: Uri? ->
         uri?.let(viewModel::selectText)
     }
     private val audioPicker = registerForActivityResult(AppFilePickerContracts.OpenDocument()) { uri: Uri? ->
@@ -50,7 +53,7 @@ class TranscriptMatchActivity : AppComposeActivity() {
                     dialogMessage = state.dialogMessage,
                     onBack = { onBackPressedDispatcher.onBackPressed() },
                     onSelectText = { textPicker.launch(arrayOf("text/*", "application/octet-stream")) },
-                    onSelectAudio = { audioPicker.launch(arrayOf("audio/*", "application/octet-stream")) },
+                    onSelectAudio = { audioPicker.launch(arrayOf("audio/*")) },
                     onSelectOutputDirectory = { directoryPicker.launch(viewModel.outputDirectoryUri) },
                     onSaveToSourceDirectoryChange = viewModel::setSaveToSourceDirectory,
                     onFormatSelected = viewModel::setFormat,

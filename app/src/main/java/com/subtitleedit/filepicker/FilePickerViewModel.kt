@@ -30,6 +30,8 @@ internal data class FilePickerUiState(
     val selectedPaths: Set<String> = emptySet(),
     val query: String = "",
     val showHidden: Boolean = false,
+    val filterUnsupported: Boolean = false,
+    val unsupportedPaths: Set<String> = emptySet(),
     val sortField: FileSortField = FileSortField.NAME,
     val sortDirection: FileSortDirection = FileSortDirection.ASCENDING,
     val suggestedName: String = "",
@@ -60,13 +62,17 @@ internal class FilePickerViewModel(
         if (request != null) return
         request = value
         val initial = FilePickerPolicy.initialDirectory(app, savedState["directory"] ?: value.initialPath)
+        val restoredSelection = savedState.get<ArrayList<String>>("selected").orEmpty()
+            .filter { isSelectableFile(File(it)) }.toSet()
+        savedState["selected"] = ArrayList(restoredSelection)
         setState {
             copy(
                 mode = value.mode,
                 directory = initial,
-                selectedPaths = savedState.get<ArrayList<String>>("selected")?.toSet().orEmpty(),
+                selectedPaths = restoredSelection,
                 query = savedState["query"] ?: "",
                 showHidden = savedState["hidden"] ?: settings.isShowHiddenFilesEnabled(),
+                filterUnsupported = savedState["filterUnsupported"] ?: false,
                 sortField = savedState.get<String>("sortField")?.let { runCatching { FileSortField.valueOf(it) }.getOrNull() }
                     ?: settings.getFileSortField(),
                 sortDirection = savedState.get<String>("sortDirection")?.let { runCatching { FileSortDirection.valueOf(it) }.getOrNull() }
@@ -138,6 +144,12 @@ internal class FilePickerViewModel(
         refresh()
     }
 
+    fun setFilterUnsupported(enabled: Boolean) {
+        savedState["filterUnsupported"] = enabled
+        setState { copy(filterUnsupported = enabled) }
+        refresh()
+    }
+
     fun sort(field: FileSortField, direction: FileSortDirection) {
         savedState["sortField"] = field.name
         savedState["sortDirection"] = direction.name
@@ -157,6 +169,10 @@ internal class FilePickerViewModel(
         }
         if (!file.isFile || !file.canRead()) {
             toast(R.string.file_picker_file_inaccessible)
+            return
+        }
+        if (!isSupported(file)) {
+            toast(R.string.file_picker_unsupported_file)
             return
         }
         when (currentState.mode) {
@@ -180,7 +196,7 @@ internal class FilePickerViewModel(
     fun selectAll() {
         val snapshot = currentState
         if (snapshot.mode != FilePickerMode.OPEN_FILES) return
-        val selectable = snapshot.files.filter { it.isFile && it.canRead() }
+        val selectable = snapshot.files.filter(::isSelectableFile)
         if (selectable.isEmpty()) return
         if (selectable.all { it.absolutePath in snapshot.selectedPaths }) {
             clearSelection()
@@ -193,7 +209,7 @@ internal class FilePickerViewModel(
         val snapshot = currentState
         if (snapshot.mode != FilePickerMode.OPEN_FILES) return
         val selectedIndices = snapshot.files.mapIndexedNotNull { index, file ->
-            index.takeIf { file.absolutePath in snapshot.selectedPaths && file.isFile && file.canRead() }
+            index.takeIf { file.absolutePath in snapshot.selectedPaths && isSelectableFile(file) }
         }
         val range = SelectionRangePolicy.contiguousRange(selectedIndices)
         if (range == null) {
@@ -201,7 +217,7 @@ internal class FilePickerViewModel(
             return
         }
         val paths = snapshot.files.subList(range.first, range.last + 1)
-            .filter { it.isFile && it.canRead() }
+            .filter(::isSelectableFile)
             .map { it.absolutePath }
         updateSelection(snapshot.selectedPaths + paths)
     }
@@ -210,6 +226,10 @@ internal class FilePickerViewModel(
         savedState["selected"] = ArrayList(paths)
         setState { copy(selectedPaths = paths) }
     }
+
+    private fun isSupported(file: File): Boolean = request?.let { FilePickerPolicy.isSupported(file, it) } ?: true
+
+    private fun isSelectableFile(file: File): Boolean = file.isFile && file.canRead() && isSupported(file)
 
     fun confirm() {
         if (actionJob?.isActive == true) return
@@ -228,6 +248,12 @@ internal class FilePickerViewModel(
                 FilePickerMode.OPEN_FILE -> return@launch
             }
             if (selected.isEmpty()) return@launch
+            // A restored result or an external rename may have invalidated an earlier selection.
+            if (snapshot.mode == FilePickerMode.OPEN_FILES && selected.any { !isSupported(it) }) {
+                updateSelection(selected.filter(::isSupported).map { it.absolutePath }.toSet())
+                toast(R.string.file_picker_unsupported_file)
+                return@launch
+            }
             val accessible = withContext(Dispatchers.IO) {
                 selected.all { file ->
                     when (snapshot.mode) {
@@ -295,26 +321,34 @@ internal class FilePickerViewModel(
         loadJob?.cancel()
         val generation = ++loadGeneration
         val snapshot = currentState
-        val mimeTypes = request!!.mimeTypes
+        val pickerRequest = request!!
         setState { copy(loading = true, error = null) }
         loadJob = viewModelScope.launch {
             try {
-                val files = withContext(Dispatchers.IO) {
+                val listing = withContext(Dispatchers.IO) {
                     val children = snapshot.directory.listFiles()
                         ?: throw IllegalStateException(string(R.string.file_picker_directory_inaccessible))
+                    val unsupported = mutableSetOf<String>()
                     val filtered = children.filter { file ->
                         ensureActive()
-                        (snapshot.showHidden || !file.name.startsWith('.')) &&
-                            (file.isDirectory || (snapshot.mode != FilePickerMode.DIRECTORY &&
-                                (snapshot.mode == FilePickerMode.SAVE_FILE || FilePickerPolicy.matchesMimeType(file, mimeTypes))))
+                        if (!snapshot.showHidden && file.name.startsWith('.')) return@filter false
+                        if (file.isDirectory) return@filter true
+                        if (snapshot.mode == FilePickerMode.DIRECTORY) return@filter false
+                        val supported = FilePickerPolicy.isSupported(file, pickerRequest)
+                        if (!supported) unsupported += file.absolutePath
+                        !snapshot.filterUnsupported || supported
                     }
-                    FileBrowserOrder.sort(FileBrowserOrder.filter(filtered, snapshot.query), snapshot.sortField, snapshot.sortDirection)
+                    FileBrowserOrder.sort(FileBrowserOrder.filter(filtered, snapshot.query), snapshot.sortField, snapshot.sortDirection) to unsupported
                 }
-                if (generation == loadGeneration) setState { copy(files = files, loading = false) }
+                if (generation == loadGeneration) setState {
+                    copy(files = listing.first, unsupportedPaths = listing.second, loading = false)
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                if (generation == loadGeneration) setState { copy(files = emptyList(), loading = false, error = error.message) }
+                if (generation == loadGeneration) setState {
+                    copy(files = emptyList(), unsupportedPaths = emptySet(), loading = false, error = error.message)
+                }
             }
         }
     }

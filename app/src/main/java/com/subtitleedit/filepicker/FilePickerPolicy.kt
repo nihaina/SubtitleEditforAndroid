@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.Environment
 import android.webkit.MimeTypeMap
 import com.subtitleedit.util.SettingsManager
-import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.FileUtils
 import java.io.File
 import java.util.Locale
@@ -30,6 +29,15 @@ internal object FilePickerPolicy {
     fun validateFileName(name: String): Boolean = name.isNotBlank() && name != "." && name != ".." &&
         name.none { it == '/' || it == '\u0000' }
 
+    /** One support rule for list visibility, disabled rows and every selection entry point. */
+    fun isSupported(file: File, request: FilePickerRequest): Boolean {
+        if (file.isDirectory || request.mode == FilePickerMode.SAVE_FILE) return true
+        if (request.allowedExtensions.isNotEmpty()) {
+            return request.allowedExtensions.any { it.equals(file.extension, ignoreCase = true) }
+        }
+        return matchesMimeType(file, request.mimeTypes)
+    }
+
     fun matchesMimeType(file: File, mimeTypes: List<String>): Boolean {
         if (file.isDirectory) return true
         if (mimeTypes.isEmpty() || "*/*" in mimeTypes) return true
@@ -37,13 +45,13 @@ internal object FilePickerPolicy {
         // Subtitle pickers use a broad text filter. SRT is commonly registered as
         // application/x-subrip, but remains selectable alongside LRC/TXT/VTT here.
         if (extension in FileUtils.SUBTITLE_EXTENSIONS && matchesMime("text/plain", mimeTypes)) return true
-        if (extension in FileUtils.AUDIO_EXTENSIONS && matchesMime("audio/x-$extension", mimeTypes)) return true
-        if (extension in FileTypePolicy.videoExtensions && matchesMime("video/x-$extension", mimeTypes)) return true
+        if (extension in FilePickerFormats.audioExtensions && matchesMime("audio/x-$extension", mimeTypes)) return true
+        if (extension in FilePickerFormats.videoExtensions && matchesMime("video/x-$extension", mimeTypes)) return true
         val actual = extensionMimeTypes[extension]
             ?: MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
             ?: when (extension) {
-                in FileUtils.AUDIO_EXTENSIONS -> "audio/x-$extension"
-                in FileTypePolicy.videoExtensions -> "video/x-$extension"
+                in FilePickerFormats.audioExtensions -> "audio/x-$extension"
+                in FilePickerFormats.videoExtensions -> "video/x-$extension"
                 else -> null
             }
             ?: "application/octet-stream"

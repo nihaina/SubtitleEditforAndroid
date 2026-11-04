@@ -9,11 +9,14 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import com.subtitleedit.feature.ui.SubtitleFormatSelectScreen
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
+import com.subtitleedit.util.SubtitleFormatConverter
 
 class SubtitleFormatSelectActivity : AppComposeActivity() {
     private val viewModel: SubtitleFormatSelectViewModel by viewModels()
 
-    private val filePicker = registerForActivityResult(AppFilePickerContracts.OpenDocument()) { uri ->
+    private val filePicker = registerForActivityResult(
+        AppFilePickerContracts.OpenDocument(SubtitleFormatConverter.supportedSourceExtensions)
+    ) { uri ->
         uri?.let(viewModel::onFilePicked)
     }
 

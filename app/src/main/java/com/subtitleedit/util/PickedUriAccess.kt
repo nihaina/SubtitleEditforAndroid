@@ -23,4 +23,12 @@ internal object PickedUriAccess {
 
     fun document(context: Context, uri: Uri): DocumentFile? = file(uri)?.let(DocumentFile::fromFile)
         ?: DocumentFile.fromSingleUri(context, uri)
+
+    /** RawDocumentFile appends a MIME suffix; local exports already include their extension. */
+    fun createFile(directory: DocumentFile, mimeType: String, name: String): DocumentFile? {
+        val localDirectory = file(directory.uri) ?: return directory.createFile(mimeType, name)
+        if (!localDirectory.isDirectory || File(name).name != name) return null
+        val target = File(localDirectory, name)
+        return if (target.createNewFile()) DocumentFile.fromFile(target) else null
+    }
 }

@@ -7,6 +7,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -32,9 +33,10 @@ class PickedUriAccessTest {
         val selected = PickedUriAccess.directory(context, Uri.fromFile(directory))!!
         assertTrue(selected.isDirectory)
         assertEquals(setOf(source.name), selected.listFiles().map { it.name }.toSet())
-        val output = selected.createFile("text/plain", "log.txt")!!
+        val output = PickedUriAccess.createFile(selected, "text/plain", "log.txt")!!
         context.contentResolver.openOutputStream(output.uri, "wt")!!.bufferedWriter().use { it.write("log data") }
         assertEquals("log data", File(directory, "log.txt").readText())
+        assertNull(PickedUriAccess.createFile(selected, "text/plain", "log.txt"))
         assertEquals(source.canonicalFile,
             Qwen3ForcedAlignerPathResolver.resolve(context, Uri.fromFile(source))!!.canonicalFile)
     }

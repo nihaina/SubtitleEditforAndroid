@@ -12,6 +12,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import com.subtitleedit.feature.ui.AutoTranslateScreen
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
+import com.subtitleedit.util.SubtitleFormatConverter
 
 /** 多文件 AI 字幕处理页面；队列和任务由 [AutoTranslateViewModel] 持有。 */
 class AutoTranslateActivity : AppComposeActivity() {
@@ -21,7 +22,7 @@ class AutoTranslateActivity : AppComposeActivity() {
 
     private val viewModel: AutoTranslateViewModel by viewModels()
     private val filePickerLauncher = registerForActivityResult(
-        AppFilePickerContracts.OpenMultipleDocuments()
+        AppFilePickerContracts.OpenMultipleDocuments(SubtitleFormatConverter.supportedSourceExtensions)
     ) { uris -> viewModel.addFiles(uris.toList()) }
     private val directoryPickerLauncher = registerForActivityResult(
         AppFilePickerContracts.OpenDocumentTree()
