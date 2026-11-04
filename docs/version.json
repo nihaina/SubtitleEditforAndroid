@@ -1,7 +1,7 @@
 {
-  "versionCode": 14,
-  "versionName": "1.2.4",
+  "versionCode": 15,
+  "versionName": "1.2.5",
   "downloadUrl": "https://github.com/nihaina/SubtitleEditforAndroid/releases/latest",
-  "releaseNotes": "1. 优化翻译重试流程，翻译失败概率大幅降低\n2. 优化人声分离，提速约 1 倍到 1.5 倍\n3. 智能合并可设置时间间隔\n4. 一键翻译支持 TXT 文本\n5. 修复 Qwen3-ASR 字幕智能合并异常",
+  "releaseNotes": "1. 按标点切分可自行选择切分标点\n2. 优化编辑器，现在可以编辑2w行超大字幕不卡顿\n3. AI字幕处理，点击可以暂停正在处理的字幕，退出应用时不会清除待处理文件\n4. 输出目录可以快速选择保存到源文件夹，避免频繁选择目录\n5. 移除自动打轴功能\n6. AI设置现在可以自行添加更多平台，便于切换\n7. 支持文件批量重命名",
   "forceUpdate": false
 }
