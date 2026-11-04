@@ -70,6 +70,7 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
         private const val KEY_FILE_SORT_FIELD = "file_sort_field"
         private const val KEY_FILE_SORT_DIRECTION = "file_sort_direction"
+        private const val KEY_BATCH_RENAME_HISTORY = "batch_rename_history"
         private const val KEY_CHECK_UPDATES_ON_STARTUP = "check_updates_on_startup"
         private const val KEY_PRESERVE_OUTPUT_DIRECTORIES = "preserve_output_directories"
         private const val KEY_OUTPUT_DIRECTORY_PREFIX = "output_directory_"
@@ -1632,6 +1633,19 @@ class SettingsManager private constructor(context: Context) {
 
     fun setFileSortDirection(direction: com.subtitleedit.model.FileSortDirection) {
         prefs.edit().putString(KEY_FILE_SORT_DIRECTION, direction.name).apply()
+    }
+
+    internal fun getBatchRenameHistory(): List<BatchRenameHistory.Entry> =
+        BatchRenameHistory.decode(prefs.getString(KEY_BATCH_RENAME_HISTORY, "[]").orEmpty())
+
+    internal fun recordBatchRenameHistory(options: BatchRename.Options) {
+        val entries = BatchRenameHistory.record(getBatchRenameHistory(), options)
+        prefs.edit().putString(KEY_BATCH_RENAME_HISTORY, BatchRenameHistory.encode(entries)).apply()
+    }
+
+    internal fun removeBatchRenameHistory(id: String) {
+        val entries = BatchRenameHistory.remove(getBatchRenameHistory(), id)
+        prefs.edit().putString(KEY_BATCH_RENAME_HISTORY, BatchRenameHistory.encode(entries)).apply()
     }
 
     /** 空字符串表示跟随系统默认 TTS 引擎。 */

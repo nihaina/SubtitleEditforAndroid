@@ -26,6 +26,7 @@ import com.subtitleedit.feature.ui.ArchiveCreateSubmission
 import com.subtitleedit.feature.ui.ArchiveCreationDialogUi
 import com.subtitleedit.feature.ui.ArchiveFormatOptionUi
 import com.subtitleedit.feature.ui.ArchiveSplitOptionUi
+import com.subtitleedit.feature.ui.BatchRenameDialogUi
 import com.subtitleedit.feature.ui.MainCreateItemError
 import com.subtitleedit.feature.ui.MainCreateItemField
 import com.subtitleedit.feature.ui.MainCreateItemKind
@@ -40,6 +41,7 @@ import com.subtitleedit.repository.ArchiveRepository
 import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.ArchiveManager
+import com.subtitleedit.util.BatchRename
 import com.subtitleedit.util.ArchivePreviewCache
 import com.subtitleedit.model.FileBrowserOrder
 import com.subtitleedit.model.FileSortDirection
@@ -74,6 +76,7 @@ import java.lang.ref.WeakReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
@@ -324,6 +327,11 @@ class MainActivity : AppComposeActivity() {
                         onDismissMainDialog = ::dismissMainDialog,
                         onPermissionDialogConfirm = ::confirmPermissionDialog,
                         onRenameConfirm = ::confirmRename,
+                        batchRename = stateModel.batchRenameDialog,
+                        onDismissBatchRename = ::dismissBatchRename,
+                        onBatchRenameConfirm = ::confirmBatchRename,
+                        onBatchRenameOrderChanged = ::changeBatchRenameOrder,
+                        onDeleteBatchRenameHistory = ::deleteBatchRenameHistory,
                         onDeleteConfirm = ::deleteConfirmedSelection,
                         onCacheItemSelected = ::confirmSelectedMediaCacheClear,
                         onCacheClearConfirm = ::clearSelectedMediaCache
@@ -739,6 +747,7 @@ class MainActivity : AppComposeActivity() {
     }
 
     private fun refreshWatchedDirectory() {
+        if (stateModel.batchRenameDialog?.running == true) return
         val directory = stateModel.documentState.currentDirectory ?: return
         if (directory.exists() && directory.canRead()) loadDirectory(directory)
     }
@@ -1028,11 +1037,75 @@ class MainActivity : AppComposeActivity() {
 
     private fun renameSelectedFile() {
         val files = selectedFiles()
-        if (files.size != 1) {
-            showShortToast("请只选择一个文件或文件夹进行重命名")
-            return
+        if (files.isEmpty()) return
+        if (files.size == 1) {
+            showRenameDialog(files.first())
+        } else {
+            // Number in the same order as the visible list, including search results.
+            val selectedPaths = files.map { it.absolutePath }.toSet()
+            val ordered = displayedFiles.filter { it.absolutePath in selectedPaths }
+            val remaining = files.filterNot { file -> ordered.any { it.absolutePath == file.absolutePath } }
+            stateModel.batchRenameDialog = BatchRenameDialogUi(
+                sources = ordered + remaining,
+                history = SettingsManager.getInstance(this).getBatchRenameHistory()
+            )
         }
-        showRenameDialog(files.first())
+    }
+
+    private fun dismissBatchRename() {
+        if (stateModel.batchRenameDialog?.running != true) stateModel.batchRenameDialog = null
+    }
+
+    private fun changeBatchRenameOrder(sources: List<File>) {
+        val dialog = stateModel.batchRenameDialog ?: return
+        if (dialog.running || sources.size != dialog.sources.size ||
+            sources.map { it.absolutePath }.toSet() != dialog.sources.map { it.absolutePath }.toSet()
+        ) return
+        stateModel.batchRenameDialog = dialog.copy(sources = sources, error = null)
+    }
+
+    private fun deleteBatchRenameHistory(id: String) {
+        val dialog = stateModel.batchRenameDialog ?: return
+        if (dialog.running) return
+        val settings = SettingsManager.getInstance(this)
+        settings.removeBatchRenameHistory(id)
+        stateModel.batchRenameDialog = dialog.copy(history = settings.getBatchRenameHistory())
+    }
+
+    private fun confirmBatchRename(options: BatchRename.Options) {
+        val dialog = stateModel.batchRenameDialog ?: return
+        if (dialog.running) return
+        stateModel.batchRenameDialog = dialog.copy(running = true, error = null)
+        directoryWatcher.stop()
+        stateModel.viewModelScope.launch {
+            // Finish or roll back the filesystem transaction even if the screen is recreated.
+            val result = withContext(Dispatchers.IO + NonCancellable) {
+                runCatching { BatchRename.execute(BatchRename.preview(dialog.sources, options)) }
+            }
+            val current = activeInstance?.get()
+            result.fold(
+                onSuccess = { count ->
+                    val historySaved = runCatching {
+                        SettingsManager.getInstance(application).recordBatchRenameHistory(options)
+                    }.isSuccess
+                    stateModel.batchRenameDialog = null
+                    stateModel.documentState.selectedPaths.clear()
+                    current?.publishScreenState()
+                    current?.showShortToast(getString(
+                        if (historySaved) R.string.batch_rename_success else R.string.batch_rename_history_save_failed,
+                        count
+                    ))
+                },
+                onFailure = { error ->
+                    stateModel.batchRenameDialog = dialog.copy(
+                        error = getString(R.string.batch_rename_failed, error.message ?: getString(R.string.error))
+                    )
+                }
+            )
+            if (current?.stateModel?.documentState?.selectedTopLevelItem == R.id.nav_directory) {
+                current.stateModel.documentState.currentDirectory?.let { current.loadDirectory(it) }
+            }
+        }
     }
 
     private fun showRenameDialog(file: File) {

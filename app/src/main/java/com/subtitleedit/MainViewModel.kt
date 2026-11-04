@@ -1,6 +1,10 @@
 package com.subtitleedit
 
 import androidx.lifecycle.ViewModel
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.subtitleedit.feature.ui.BatchRenameDialogUi
 import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
 import java.io.File
@@ -15,6 +19,7 @@ internal data class DirectoryScrollPosition(
 
 internal class MainViewModel : ViewModel() {
     val documentState = MainDocumentState()
+    var batchRenameDialog by mutableStateOf<BatchRenameDialogUi?>(null)
 
     /** Compatibility accessors for existing tests and integrations; new code uses documentState. */
     var currentDirectory: File?

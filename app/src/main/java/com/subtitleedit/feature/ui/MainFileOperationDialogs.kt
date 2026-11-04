@@ -45,6 +45,8 @@ import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.settings.SettingsCacheItem
 import com.subtitleedit.util.ArchiveManager
+import com.subtitleedit.util.BatchRename
+import java.io.File
 
 internal sealed interface MainActivityDialogUi {
     data class Message(val title: String, val message: String) : MainActivityDialogUi
@@ -112,10 +114,24 @@ internal fun MainFileOperationDialogs(
     onDismissMainDialog: () -> Unit,
     onPermissionDialogConfirm: () -> Unit,
     onRenameConfirm: (String) -> Unit,
+    batchRename: BatchRenameDialogUi?,
+    onDismissBatchRename: () -> Unit,
+    onBatchRenameConfirm: (BatchRename.Options) -> Unit,
+    onBatchRenameOrderChanged: (List<File>) -> Unit,
+    onDeleteBatchRenameHistory: (String) -> Unit,
     onDeleteConfirm: () -> Unit,
     onCacheItemSelected: (SettingsCacheItem) -> Unit,
     onCacheClearConfirm: (SettingsCacheItem) -> Unit
 ) {
+    batchRename?.let { dialog ->
+        BatchRenameDialog(
+            state = dialog,
+            onDismiss = onDismissBatchRename,
+            onConfirm = onBatchRenameConfirm,
+            onOrderChanged = onBatchRenameOrderChanged,
+            onDeleteHistory = onDeleteBatchRenameHistory
+        )
+    }
     subtitleConversion?.let { dialog ->
         SubtitleConversionDialog(
             dialog = dialog,

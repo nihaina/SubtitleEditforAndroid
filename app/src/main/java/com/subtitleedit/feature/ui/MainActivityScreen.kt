@@ -92,6 +92,7 @@ import com.subtitleedit.MainTopLevelPages
 import com.subtitleedit.MainTopLevelPagesState
 import com.subtitleedit.R
 import com.subtitleedit.util.AndroidDirectoryPolicy
+import com.subtitleedit.util.BatchRename
 import com.subtitleedit.util.FileOperationUiPolicy
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.FilePathPolicy
@@ -197,6 +198,11 @@ internal fun MainActivityScreen(
     onDismissMainDialog: () -> Unit,
     onPermissionDialogConfirm: () -> Unit,
     onRenameConfirm: (String) -> Unit,
+    batchRename: BatchRenameDialogUi?,
+    onDismissBatchRename: () -> Unit,
+    onBatchRenameConfirm: (BatchRename.Options) -> Unit,
+    onBatchRenameOrderChanged: (List<File>) -> Unit,
+    onDeleteBatchRenameHistory: (String) -> Unit,
     onDeleteConfirm: () -> Unit,
     onCacheItemSelected: (com.subtitleedit.ui.settings.SettingsCacheItem) -> Unit,
     onCacheClearConfirm: (com.subtitleedit.ui.settings.SettingsCacheItem) -> Unit
@@ -670,6 +676,11 @@ internal fun MainActivityScreen(
         onDismissMainDialog = onDismissMainDialog,
         onPermissionDialogConfirm = onPermissionDialogConfirm,
         onRenameConfirm = onRenameConfirm,
+        batchRename = batchRename,
+        onDismissBatchRename = onDismissBatchRename,
+        onBatchRenameConfirm = onBatchRenameConfirm,
+        onBatchRenameOrderChanged = onBatchRenameOrderChanged,
+        onDeleteBatchRenameHistory = onDeleteBatchRenameHistory,
         onDeleteConfirm = onDeleteConfirm,
         onCacheItemSelected = onCacheItemSelected,
         onCacheClearConfirm = onCacheClearConfirm
@@ -937,7 +948,7 @@ internal fun BrowserFileRow(
 }
 
 @Composable
-private fun FileRowIcon(file: File, bitmap: android.graphics.Bitmap?, restricted: Boolean) {
+internal fun FileRowIcon(file: File, bitmap: android.graphics.Bitmap?, restricted: Boolean) {
     val iconDescription = stringResource(R.string.file_name)
     Box(
         modifier = Modifier.size(48.dp).alpha(
