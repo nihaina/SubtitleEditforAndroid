@@ -98,6 +98,7 @@ internal object MediaConvertCommand {
                 parameters.sampleRate?.let { addAll(listOf("-ar", it.toString())) }
                 parameters.channels?.let { addAll(listOf("-ac", it.toString())) }
                 parameters.channelLayout?.let { addAll(listOf("-channel_layout:a", it)) }
+                MediaConvertAudioVolume.filter(options.audioVolumePercent)?.let { addAll(listOf("-af", it)) }
                 if (audio == "aac" && format.formatName == "adts" && (parameters.channels ?: source?.audioChannels ?: 2) > 6) {
                     addAll(listOf("-aac_pce", "1"))
                 }

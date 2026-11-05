@@ -87,17 +87,7 @@ internal fun MediaConvertResolutionDialog(
             color = MaterialTheme.colorScheme.surface
         ) {
             Column {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
-                    Text(stringResource(R.string.media_convert_resolution_title), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                    TextButton(onClick = { onConfirm(settings) }, enabled = settings.isValid, modifier = Modifier.testTag("resolution-confirm")) {
-                        Text(stringResource(R.string.media_convert_resolution_done))
-                    }
-                }
-                HorizontalDivider()
+                MediaConvertDialogTitle(stringResource(R.string.media_convert_resolution_title))
                 LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
                     item {
                         Text(stringResource(R.string.media_convert_resolution_original), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 20.dp))
@@ -191,6 +181,7 @@ internal fun MediaConvertResolutionDialog(
                     Text(stringResource(R.string.media_convert_resolution_fit_rule), modifier = Modifier.weight(1f))
                     Text(stringResource(fitModeTitle(settings.fitMode)))
                 }
+                MediaConvertDialogActions(onDismiss, { onConfirm(settings) }, settings.isValid, Modifier.testTag("resolution-confirm"))
             }
         }
     }

@@ -17,7 +17,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -78,21 +77,7 @@ internal fun MediaConvertAudioBitrateDialog(
             color = MaterialTheme.colorScheme.surface
         ) {
             Column {
-                Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
-                    Text(stringResource(R.string.media_convert_audio_bitrate_title), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                    TextButton(onClick = {
-                        onConfirm(when (mode) {
-                            MediaConvertBitrateMode.AUTO -> ""
-                            MediaConvertBitrateMode.ORIGINAL -> MediaConvertAudioBitrate.ORIGINAL
-                            MediaConvertBitrateMode.CUSTOM -> custom
-                            MediaConvertBitrateMode.PRESET -> preset
-                        })
-                    }, enabled = canConfirm, modifier = Modifier.testTag("audio-bitrate-confirm")) {
-                        Text(stringResource(R.string.media_convert_bitrate_done))
-                    }
-                }
-                HorizontalDivider()
+                MediaConvertDialogTitle(stringResource(R.string.media_convert_audio_bitrate_title))
                 LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
                     item {
                         Text(stringResource(R.string.media_convert_bitrate_original), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 20.dp))
@@ -166,6 +151,19 @@ internal fun MediaConvertAudioBitrateDialog(
                     stringResource(R.string.media_convert_audio_bitrate_target_hint),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(16.dp)
+                )
+                MediaConvertDialogActions(
+                    onDismiss = onDismiss,
+                    onConfirm = {
+                        onConfirm(when (mode) {
+                            MediaConvertBitrateMode.AUTO -> ""
+                            MediaConvertBitrateMode.ORIGINAL -> MediaConvertAudioBitrate.ORIGINAL
+                            MediaConvertBitrateMode.CUSTOM -> custom
+                            MediaConvertBitrateMode.PRESET -> preset
+                        })
+                    },
+                    canConfirm = canConfirm,
+                    confirmModifier = Modifier.testTag("audio-bitrate-confirm")
                 )
             }
         }

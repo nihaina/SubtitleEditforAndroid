@@ -79,5 +79,6 @@ internal data class MediaConvertOptions(
     val audioBitrate: String = "",
     val sampleRateIndex: Int = 0,
     val channelIndex: Int = 0,
+    val audioVolumePercent: Int = MediaConvertAudioVolume.DEFAULT,
     val advancedExpanded: Boolean = false
 )

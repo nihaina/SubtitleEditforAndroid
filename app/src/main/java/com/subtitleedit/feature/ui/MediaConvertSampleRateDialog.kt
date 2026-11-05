@@ -15,7 +15,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -49,14 +48,7 @@ internal fun MediaConvertSampleRateDialog(
             color = MaterialTheme.colorScheme.surface
         ) {
             Column {
-                Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
-                    Text(stringResource(R.string.media_convert_sample_rate_title), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                    TextButton(onClick = { onConfirm(selected) }, enabled = options.any { it.id == selected }, modifier = Modifier.testTag("sample-rate-confirm")) {
-                        Text(stringResource(R.string.media_convert_bitrate_done))
-                    }
-                }
-                HorizontalDivider()
+                MediaConvertDialogTitle(stringResource(R.string.media_convert_sample_rate_title))
                 LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
                     item {
                         Text(stringResource(R.string.media_convert_sample_rate_original), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 20.dp))
@@ -94,6 +86,7 @@ internal fun MediaConvertSampleRateDialog(
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(16.dp)
                 )
+                MediaConvertDialogActions(onDismiss, { onConfirm(selected) }, options.any { it.id == selected }, Modifier.testTag("sample-rate-confirm"))
             }
         }
     }

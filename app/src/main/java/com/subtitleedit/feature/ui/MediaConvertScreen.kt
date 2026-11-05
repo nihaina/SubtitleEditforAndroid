@@ -137,13 +137,16 @@ internal fun MediaConvertScreen(
     effectiveAudioCodec: String = selectedAudioCodec,
     audioMuxer: String = "",
     sourceAudioSampleRate: Int? = null,
-    sourceAudioChannelLabel: String = ""
+    sourceAudioChannelLabel: String = "",
+    audioVolumePercent: Int = 100,
+    onAudioVolumeChange: (Int) -> Unit = {}
 ) {
     var showResolutionDialog by rememberSaveable { mutableStateOf(false) }
     var showBitrateDialog by rememberSaveable { mutableStateOf(false) }
     var showAudioBitrateDialog by rememberSaveable { mutableStateOf(false) }
     var showSampleRateDialog by rememberSaveable { mutableStateOf(false) }
     var showChannelDialog by rememberSaveable { mutableStateOf(false) }
+    var showVolumeDialog by rememberSaveable { mutableStateOf(false) }
     AppToolScaffold(
         title = stringResource(R.string.media_convert_title),
         onBack = onBack,
@@ -356,6 +359,17 @@ internal fun MediaConvertScreen(
                             Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
                         }
                     }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+                    ) {
+                        Text(stringResource(R.string.media_convert_volume), modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
+                        OutlinedButton(onClick = { showVolumeDialog = true }, enabled = audioEnabled, modifier = Modifier.weight(1f)) {
+                            Text("$audioVolumePercent%", modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
+                        }
+                    }
                 }
             }
         }
@@ -376,6 +390,14 @@ internal fun MediaConvertScreen(
         AppSection(title = stringResource(R.string.activity_settings_text_06)) {
             AppLogBox(log)
         }
+    }
+
+    if (showVolumeDialog && !isConverting && selectedAudioCodec != "copy") {
+        MediaConvertVolumeDialog(
+            initialPercent = audioVolumePercent,
+            onDismiss = { showVolumeDialog = false },
+            onConfirm = { onAudioVolumeChange(it); showVolumeDialog = false }
+        )
     }
 
     if (showChannelDialog && !isConverting && selectedAudioCodec != "copy") {

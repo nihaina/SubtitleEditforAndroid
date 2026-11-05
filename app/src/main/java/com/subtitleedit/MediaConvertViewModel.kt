@@ -201,6 +201,9 @@ internal class MediaConvertViewModel(application: Application) :
     fun setAudioBitrate(value: String) = updateOptions { copy(audioBitrate = value) }
     fun setSampleRate(value: Int) = updateOptions { copy(sampleRateIndex = value) }
     fun setChannel(value: Int) = updateOptions { copy(channelIndex = value) }
+    fun setAudioVolume(value: Int) {
+        if (value in MediaConvertAudioVolume.MIN..MediaConvertAudioVolume.MAX) updateOptions { copy(audioVolumePercent = value) }
+    }
     fun toggleAdvanced() = updateOptions { copy(advancedExpanded = !advancedExpanded) }
     fun dismissDialog() = setState { copy(dialog = MediaConvertDialog.NONE) }
 

@@ -18,7 +18,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -66,17 +65,7 @@ internal fun MediaConvertBitrateDialog(
             color = MaterialTheme.colorScheme.surface
         ) {
             Column {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
-                    Text(stringResource(R.string.media_convert_bitrate_title), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                    TextButton(onClick = { onConfirm(settings) }, enabled = canConfirm, modifier = Modifier.testTag("bitrate-confirm")) {
-                        Text(stringResource(R.string.media_convert_bitrate_done))
-                    }
-                }
-                HorizontalDivider()
+                MediaConvertDialogTitle(stringResource(R.string.media_convert_bitrate_title))
                 LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
                     item {
                         Text(stringResource(R.string.media_convert_bitrate_original), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 20.dp))
@@ -163,6 +152,7 @@ internal fun MediaConvertBitrateDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(16.dp)
                 )
+                MediaConvertDialogActions(onDismiss, { onConfirm(settings) }, canConfirm, Modifier.testTag("bitrate-confirm"))
             }
         }
     }

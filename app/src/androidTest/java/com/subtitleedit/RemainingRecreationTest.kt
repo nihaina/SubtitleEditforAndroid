@@ -59,13 +59,16 @@ class RemainingRecreationTest {
                 before.toggleVideoFormats()
                 before.selectFormat("mp4")
                 before.setAudioBitrate("192")
+                before.setAudioVolume(200)
                 before.setResolution(MediaConvertResolutionSettings(presetIndex = 3))
                 before.setVideoBitrate(MediaConvertVideoBitrateSettings(MediaConvertBitrateMode.CUSTOM, "3000"))
                 before.toggleAdvanced()
                 before.selectFormat("mp3")
                 before.setAudioBitrate("128")
+                before.setAudioVolume(50)
                 before.selectFormat("mp4")
                 assertEquals("192", before.state.value.options.audioBitrate)
+                assertEquals(200, before.state.value.options.audioVolumePercent)
             }
 
             scenario.recreate()
@@ -81,10 +84,12 @@ class RemainingRecreationTest {
                 assertTrue(after.state.value.options.advancedExpanded)
                 after.selectFormat("mp3")
                 assertEquals("128", after.state.value.options.audioBitrate)
+                assertEquals(50, after.state.value.options.audioVolumePercent)
                 assertEquals(0, after.state.value.options.resolution.presetIndex)
                 assertEquals(MediaConvertVideoBitrateSettings(), after.state.value.options.videoBitrate)
                 after.selectFormat("mp4")
                 assertEquals("192", after.state.value.options.audioBitrate)
+                assertEquals(200, after.state.value.options.audioVolumePercent)
             }
         }
     }

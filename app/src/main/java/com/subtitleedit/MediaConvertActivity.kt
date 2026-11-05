@@ -165,6 +165,8 @@ class MediaConvertActivity : AppComposeActivity() {
                     audioMuxer = format?.formatName.orEmpty(),
                     sourceAudioSampleRate = state.selectedFiles.firstOrNull()?.audioSampleRate,
                     sourceAudioChannelLabel = sourceChannelLabel,
+                    audioVolumePercent = state.options.audioVolumePercent,
+                    onAudioVolumeChange = viewModel::setAudioVolume,
                     qualityHint = getString(R.string.media_convert_quality_range, qualityRange.first, qualityRange.last, if (effectiveVideoCodec == "libtheora") getString(R.string.media_convert_quality_larger) else getString(R.string.media_convert_quality_smaller))
                 )
             }

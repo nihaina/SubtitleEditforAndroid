@@ -1,7 +1,6 @@
 package com.subtitleedit.feature.ui
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -12,13 +11,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -45,14 +42,7 @@ internal fun MediaConvertChannelDialog(
             color = MaterialTheme.colorScheme.surface
         ) {
             Column {
-                Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
-                    Text(stringResource(R.string.media_convert_channel_title), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                    TextButton(onClick = { onConfirm(selected) }, enabled = options.any { it.id == selected }, modifier = Modifier.testTag("channel-confirm")) {
-                        Text(stringResource(R.string.media_convert_bitrate_done))
-                    }
-                }
-                HorizontalDivider()
+                MediaConvertDialogTitle(stringResource(R.string.media_convert_channel_title))
                 LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
                     item {
                         Text(stringResource(R.string.media_convert_channel_original), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 20.dp))
@@ -90,6 +80,7 @@ internal fun MediaConvertChannelDialog(
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(16.dp)
                 )
+                MediaConvertDialogActions(onDismiss, { onConfirm(selected) }, options.any { it.id == selected }, Modifier.testTag("channel-confirm"))
             }
         }
     }
