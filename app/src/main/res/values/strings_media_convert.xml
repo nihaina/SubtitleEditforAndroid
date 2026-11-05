@@ -81,4 +81,19 @@
     <string name="media_convert_fit_fill_description">保持比例充满画布，居中裁剪超出的画面。</string>
     <string name="media_convert_fit_stretch_description">按目标宽高铺满画布，画面比例可能发生变形。</string>
     <string name="media_convert_fit_center_description">按原尺寸居中放置，不缩放画面；不足补黑边，超出则裁剪。</string>
+    <string name="media_convert_bitrate_title">选择目标码率</string>
+    <string name="media_convert_bitrate_done">完成</string>
+    <string name="media_convert_bitrate_original">原始码率</string>
+    <string name="media_convert_bitrate_auto">自动（编码器默认）</string>
+    <string name="media_convert_bitrate_custom">自定义码率</string>
+    <string name="media_convert_bitrate_limits">自定义码率范围：128–999999 kbps。</string>
+    <string name="media_convert_bitrate_presets">常规码率</string>
+    <string name="media_convert_bitrate_sd">标清</string>
+    <string name="media_convert_bitrate_hd">高清</string>
+    <string name="media_convert_bitrate_fhd">超清</string>
+    <string name="media_convert_bitrate_bluray">蓝光</string>
+    <string name="media_convert_bitrate_source_unavailable">无法读取源视频码率，请选择自动、预设或自定义码率。</string>
+    <string name="media_convert_bitrate_batch">以上显示首个文件的视频轨码率；原始码率按每个文件分别读取，全部文件均可读取时才能选择。</string>
+    <string name="media_convert_bitrate_average_hint">原始、预设和自定义均作为平均码率目标，实际输出会随内容和编码器变化。</string>
+    <string name="media_convert_bitrate_quality_hint">指定目标码率时，质量参数不参与编码；切回自动码率后恢复。</string>
 </resources>

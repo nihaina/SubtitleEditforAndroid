@@ -46,6 +46,9 @@ import com.subtitleedit.R
 import com.subtitleedit.MediaConvertResolution
 import com.subtitleedit.MediaConvertResolutionSettings
 import com.subtitleedit.MediaConvertVideoSize
+import com.subtitleedit.MediaConvertBitrateMode
+import com.subtitleedit.MediaConvertVideoBitrate
+import com.subtitleedit.MediaConvertVideoBitrateSettings
 import com.subtitleedit.ui.components.AppChoiceTile
 import com.subtitleedit.ui.components.AppConflictDialog
 import com.subtitleedit.ui.components.AppLogBox
@@ -80,7 +83,7 @@ internal fun MediaConvertScreen(
     audioCodecs: List<AppOption<String>>,
     selectedAudioCodec: String,
     resolution: MediaConvertResolutionSettings,
-    videoBitrate: String,
+    videoBitrate: MediaConvertVideoBitrateSettings,
     qualityOptions: List<AppOption<String>>,
     selectedQualityId: String,
     customQuality: String,
@@ -104,7 +107,7 @@ internal fun MediaConvertScreen(
     onVideoCodecSelected: (String) -> Unit,
     onAudioCodecSelected: (String) -> Unit,
     onResolutionSelected: (MediaConvertResolutionSettings) -> Unit,
-    onVideoBitrateChange: (String) -> Unit,
+    onVideoBitrateChange: (MediaConvertVideoBitrateSettings) -> Unit,
     onQualitySelected: (String) -> Unit,
     onCustomQualityChange: (String) -> Unit,
     onAudioBitrateChange: (String) -> Unit,
@@ -123,9 +126,12 @@ internal fun MediaConvertScreen(
     onToggleAudioFormats: () -> Unit = {},
     qualityHint: String = "",
     sourceVideoSize: MediaConvertVideoSize? = null,
-    multipleSources: Boolean = false
+    multipleSources: Boolean = false,
+    sourceVideoBitrateBps: Long? = null,
+    canUseOriginalVideoBitrate: Boolean = false
 ) {
     var showResolutionDialog by rememberSaveable { mutableStateOf(false) }
+    var showBitrateDialog by rememberSaveable { mutableStateOf(false) }
     AppToolScaffold(
         title = stringResource(R.string.media_convert_title),
         onBack = onBack,
@@ -230,7 +236,11 @@ internal fun MediaConvertScreen(
                     if (videoCodecs.isNotEmpty()) {
                         AppOptionSelector(stringResource(R.string.activity_media_convert_text_08), videoCodecs.firstOrNull { it.id == selectedVideoCodec }, videoCodecs, !isConverting, onVideoCodecSelected)
                         val videoEnabled = !isConverting && selectedVideoCodec != "copy"
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+                        ) {
                             Text(stringResource(R.string.activity_media_convert_text_09), modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
                             OutlinedButton(onClick = { showResolutionDialog = true }, enabled = videoEnabled, modifier = Modifier.weight(1f)) {
                                 Text(
@@ -241,12 +251,35 @@ internal fun MediaConvertScreen(
                                 Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
                             }
                         }
-                        MediaConvertNumberField(stringResource(R.string.activity_media_convert_text_10), videoBitrate, stringResource(R.string.activity_media_convert_hint_01), videoEnabled, onVideoBitrateChange)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+                        ) {
+                            Text(stringResource(R.string.activity_media_convert_text_10), modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
+                            OutlinedButton(onClick = { showBitrateDialog = true }, enabled = videoEnabled, modifier = Modifier.weight(1f)) {
+                                val label = when (videoBitrate.mode) {
+                                    MediaConvertBitrateMode.AUTO -> stringResource(R.string.media_convert_bitrate_auto)
+                                    MediaConvertBitrateMode.ORIGINAL -> stringResource(R.string.media_convert_bitrate_original) +
+                                        (sourceVideoBitrateBps?.let { " (${MediaConvertVideoBitrate.label(it)})" } ?: "")
+                                    MediaConvertBitrateMode.CUSTOM -> "${videoBitrate.customKbps} kbps"
+                                    MediaConvertBitrateMode.PRESET -> "${videoBitrate.presetKbps} kbps"
+                                }
+                                Text(label, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                        val qualityEnabled = videoEnabled && videoBitrate.mode == MediaConvertBitrateMode.AUTO
+                        if (videoBitrate.mode != MediaConvertBitrateMode.AUTO) Text(
+                            stringResource(R.string.media_convert_bitrate_quality_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         AppOptionSelector(
                             stringResource(R.string.activity_media_convert_text_11),
                             qualityOptions.firstOrNull { it.id == selectedQualityId },
                             qualityOptions,
-                            videoEnabled,
+                            qualityEnabled,
                             onSelected = onQualitySelected
                         )
                         if (selectedQualityId == "custom") {
@@ -256,7 +289,7 @@ internal fun MediaConvertScreen(
                                 placeholder = { Text(qualityHint) },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
-                                enabled = videoEnabled,
+                                enabled = qualityEnabled,
                                 modifier = Modifier.fillMaxWidth().padding(start = AppSpacing.FormLabelWidth)
                             )
                         }
@@ -301,6 +334,17 @@ internal fun MediaConvertScreen(
         AppSection(title = stringResource(R.string.activity_settings_text_06)) {
             AppLogBox(log)
         }
+    }
+
+    if (showBitrateDialog && !isConverting && videoCodecs.isNotEmpty() && selectedVideoCodec != "copy") {
+        MediaConvertBitrateDialog(
+            initial = videoBitrate,
+            sourceBitsPerSecond = sourceVideoBitrateBps,
+            canUseOriginal = canUseOriginalVideoBitrate,
+            multipleSources = multipleSources,
+            onDismiss = { showBitrateDialog = false },
+            onConfirm = { onVideoBitrateChange(it); showBitrateDialog = false }
+        )
     }
 
     if (showResolutionDialog && !isConverting && videoCodecs.isNotEmpty() && selectedVideoCodec != "copy") {

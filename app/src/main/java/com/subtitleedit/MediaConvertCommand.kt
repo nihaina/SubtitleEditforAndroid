@@ -6,7 +6,8 @@ import kotlin.math.abs
 internal data class MediaConvertSource(
     val hasVideo: Boolean,
     val durationSeconds: Double?,
-    val frameRate: Double? = null
+    val frameRate: Double? = null,
+    val videoBitrateBps: Long? = null
 )
 
 /** Builds argument arrays so SAF URLs and file names remain single arguments. */
@@ -57,8 +58,8 @@ internal object MediaConvertCommand {
             if (!format.isAudioOnly) {
                 addAll(listOf("-sn", "-dn"))
                 if (video != "copy") {
-                    val bitrate = options.videoBitrate.trim().toIntOrNull()?.takeIf { it > 0 }
-                    val q = quality(video, options)
+                    val bitrate = options.videoBitrate.targetBitsPerSecond(source?.videoBitrateBps)
+                    val q = if (bitrate == null) quality(video, options) else null
                     if (q != null) {
                         addAll(listOf(if (video in setOf("libx264", "libx265", "libvpx", "libvpx-vp9", "libaom-av1")) "-crf" else "-q:v", q.toString()))
                         if (bitrate == null && video in setOf("libvpx", "libvpx-vp9", "libaom-av1")) addAll(listOf("-b:v", "0"))
@@ -79,7 +80,7 @@ internal object MediaConvertCommand {
                         addAll(listOf("-r", String.format(Locale.US, "%.6f", rate)))
                         if (bitrate == null && q == null) addAll(listOf("-b:v", "2000k"))
                     }
-                    if (bitrate != null) addAll(listOf("-b:v", "${bitrate}k"))
+                    if (bitrate != null) addAll(listOf("-b:v", MediaConvertVideoBitrate.ffmpegValue(bitrate)))
                     if (video == "libx265" && format.formatName in setOf("mp4", "mov")) addAll(listOf("-tag:v", "hvc1"))
                 }
             }

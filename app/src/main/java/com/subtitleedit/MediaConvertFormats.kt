@@ -74,7 +74,7 @@ internal data class MediaConvertOptions(
     val selectedVideoCodec: String = "auto",
     val selectedAudioCodec: String = "auto",
     val resolution: MediaConvertResolutionSettings = MediaConvertResolutionSettings(),
-    val videoBitrate: String = "",
+    val videoBitrate: MediaConvertVideoBitrateSettings = MediaConvertVideoBitrateSettings(),
     val selectedQualityId: String = "-1",
     val customQuality: String = "",
     val audioBitrate: String = "",

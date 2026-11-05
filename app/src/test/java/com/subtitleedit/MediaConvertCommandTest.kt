@@ -41,7 +41,7 @@ class MediaConvertCommandTest {
     @Test
     fun copyIgnoresAllEncodingAndFilterSettings() {
         val args = build("mkv", MediaConvertOptions(selectedVideoCodec = "copy", selectedAudioCodec = "copy", resolution = MediaConvertResolutionSettings(presetIndex = 3),
-            videoBitrate = "3000", audioBitrate = "192", selectedQualityId = "23", sampleRateIndex = 2, channelIndex = 1))
+            videoBitrate = MediaConvertVideoBitrateSettings(MediaConvertBitrateMode.CUSTOM, "3000"), audioBitrate = "192", selectedQualityId = "23", sampleRateIndex = 2, channelIndex = 1))
         assertEquals("copy", args.value("-c:v"))
         assertEquals("copy", args.value("-c:a"))
         listOf("-vf", "-pix_fmt", "-crf", "-q:v", "-b:v", "-b:a", "-ar", "-ac").forEach { assertFalse(it, it in args) }
@@ -50,7 +50,7 @@ class MediaConvertCommandTest {
 
     @Test
     fun audioOutputDoesNotApplyVideoSettings() {
-        val args = build("mp3", MediaConvertOptions(resolution = MediaConvertResolutionSettings(presetIndex = 3), selectedQualityId = "23", videoBitrate = "3000", audioBitrate = "192"))
+        val args = build("mp3", MediaConvertOptions(resolution = MediaConvertResolutionSettings(presetIndex = 3), selectedQualityId = "23", videoBitrate = MediaConvertVideoBitrateSettings(MediaConvertBitrateMode.CUSTOM, "3000"), audioBitrate = "192"))
         assertEquals("0:a:0", args.value("-map"))
         assertEquals("192k", args.value("-b:a"))
         assertTrue("-vn" in args)
@@ -82,8 +82,9 @@ class MediaConvertCommandTest {
         val automatic = build("webm", MediaConvertOptions(selectedVideoCodec = "libaom-av1"))
         assertEquals("6", automatic.value("-cpu-used"))
         assertEquals("30", automatic.value("-crf"))
-        val limited = build("webm", MediaConvertOptions(selectedVideoCodec = "libaom-av1", videoBitrate = "1000", selectedQualityId = "23"))
+        val limited = build("webm", MediaConvertOptions(selectedVideoCodec = "libaom-av1", videoBitrate = MediaConvertVideoBitrateSettings(MediaConvertBitrateMode.CUSTOM, "1000"), selectedQualityId = "23"))
         assertEquals(listOf("1000k"), limited.withIndex().filter { it.value == "-b:v" }.map { limited[it.index + 1] })
+        assertNull(limited.value("-crf"))
     }
 
     @Test

@@ -117,6 +117,8 @@ class MediaConvertActivity : AppComposeActivity() {
                     onToggleAudioFormats = viewModel::toggleAudioFormats,
                     sourceVideoSize = state.selectedFiles.firstNotNullOfOrNull { it.videoSize },
                     multipleSources = state.selectedFiles.size > 1,
+                    sourceVideoBitrateBps = state.selectedFiles.firstOrNull()?.videoBitrateBps,
+                    canUseOriginalVideoBitrate = state.selectedFiles.isNotEmpty() && state.selectedFiles.all { (it.videoBitrateBps ?: 0) > 0 },
                     qualityHint = getString(R.string.media_convert_quality_range, qualityRange.first, qualityRange.last, if (effectiveVideoCodec == "libtheora") getString(R.string.media_convert_quality_larger) else getString(R.string.media_convert_quality_smaller))
                 )
             }

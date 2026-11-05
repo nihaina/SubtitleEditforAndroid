@@ -35,7 +35,8 @@ internal data class MediaConvertFileUi(
     val uri: Uri,
     val fileName: String,
     val mediaInfo: String,
-    val videoSize: MediaConvertVideoSize? = null
+    val videoSize: MediaConvertVideoSize? = null,
+    val videoBitrateBps: Long? = null
 )
 
 internal data class MediaConvertUiState(
@@ -73,8 +74,8 @@ internal class MediaConvertViewModel(application: Application) :
         private const val OUTPUT_DIRECTORY_KEY = "media_convert"
     }
 
-    private data class SelectedMediaFile(val uri: Uri, val fileName: String, val mediaInfo: String, val videoSize: MediaConvertVideoSize? = null)
-    private data class SourceDescription(val text: String, val videoSize: MediaConvertVideoSize? = null)
+    private data class SelectedMediaFile(val uri: Uri, val fileName: String, val mediaInfo: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null)
+    private data class SourceDescription(val text: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null)
     private data class OutputResult(val uri: Uri, val fileName: String)
 
     val formatList: List<MediaConvertFormatInfo>
@@ -130,7 +131,7 @@ internal class MediaConvertViewModel(application: Application) :
         }
         setState {
             copy(
-                selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo, it.videoSize) },
+                selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo, it.videoSize, it.videoBitrateBps) },
                 selectedFormat = null,
                 log = ""
             )
@@ -184,7 +185,9 @@ internal class MediaConvertViewModel(application: Application) :
     fun setResolution(value: MediaConvertResolutionSettings) {
         if (value.isValid) updateOptions { copy(resolution = value) }
     }
-    fun setVideoBitrate(value: String) = updateOptions { copy(videoBitrate = value) }
+    fun setVideoBitrate(value: MediaConvertVideoBitrateSettings) {
+        if (value.isValid) updateOptions { copy(videoBitrate = value) }
+    }
     fun setQuality(value: String) = updateOptions { copy(selectedQualityId = value) }
     fun setCustomQuality(value: String) = updateOptions { copy(customQuality = value) }
     fun setAudioBitrate(value: String) = updateOptions { copy(audioBitrate = value) }
@@ -244,13 +247,15 @@ internal class MediaConvertViewModel(application: Application) :
         probeJob = viewModelScope.launch {
             snapshot.forEachIndexed { index, uri ->
                 val selected = selectedMediaFiles.firstOrNull { it.uri == uri } ?: return@forEachIndexed
-                val info = withContext(Dispatchers.IO) { probeUri(uri) }
+                val info = withContext(Dispatchers.IO) {
+                    probeUri(uri).let { if (isLikelyAudioFile(selected)) it.copy(videoBitrateBps = null) else it }
+                }
                 val current = selectedMediaFiles.indexOfFirst { it.uri == uri }
                 if (current < 0) return@forEachIndexed
-                selectedMediaFiles = selectedMediaFiles.toMutableList().also { list -> list[current] = list[current].copy(mediaInfo = info.text, videoSize = info.videoSize) }
+                selectedMediaFiles = selectedMediaFiles.toMutableList().also { list -> list[current] = list[current].copy(mediaInfo = info.text, videoSize = info.videoSize, videoBitrateBps = info.videoBitrateBps) }
                 setState {
                     copy(
-                        selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo, it.videoSize) },
+                        selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo, it.videoSize, it.videoBitrateBps) },
                         log = (log + string(R.string.media_convert_probe_summary, index + 1, snapshot.size, selected.fileName))
                             .takeLast(16000)
                     )
@@ -299,8 +304,13 @@ internal class MediaConvertViewModel(application: Application) :
                 }
             }
         }.trimEnd()
-        return SourceDescription(text, info.getStreams().firstOrNull { it.getType() == "video" }?.let(::videoSize))
+        val video = info.getStreams().firstOrNull { it.getType() == "video" }
+        return SourceDescription(text, video?.let(::videoSize), video?.let(::videoBitrateBps))
     }
+
+    private fun videoBitrateBps(stream: StreamInformation): Long? = MediaConvertVideoBitrate.sourceBitsPerSecond(
+        stream.getBitrate(), stream.getTags()?.optString("BPS"), stream.getTags()?.optString("BPS-eng")
+    )
 
     private fun videoSize(stream: StreamInformation): MediaConvertVideoSize? {
         val properties = stream.getAllProperties()
@@ -363,6 +373,11 @@ internal class MediaConvertViewModel(application: Application) :
             val prefix = "[${index + 1}/$total]"
             appendLog(string(R.string.media_convert_start_file, prefix, file.fileName))
             val sourceProbe = if (format.isAudioOnly) null else withContext(Dispatchers.IO) { probeSourceUri(file.uri)?.let { if (isLikelyAudioFile(file)) MediaConvertSource(false, it.durationSeconds) else it } ?: MediaConvertSource(true, null) }
+            val options = currentState.options
+            if (!format.isAudioOnly && options.videoBitrate.mode == MediaConvertBitrateMode.ORIGINAL &&
+                (options.selectedVideoCodec != "copy" || sourceProbe?.hasVideo == false) && sourceProbe?.videoBitrateBps == null) {
+                return Result.failure(IllegalStateException(string(R.string.media_convert_bitrate_source_unavailable)))
+            }
             input = withContext(Dispatchers.IO) { ffmpegInput(file.uri) }
             if (sourceProbe?.hasVideo == false) {
                 appendLog(string(R.string.media_convert_no_video_stream, prefix))
@@ -423,7 +438,7 @@ internal class MediaConvertViewModel(application: Application) :
                 val denominator = parts.getOrNull(1)?.toDoubleOrNull() ?: 1.0
                 if (numerator != null && denominator > 0) (numerator / denominator).takeIf { it > 0 } else null
             }
-            MediaConvertSource(video != null, info.getDuration()?.toDoubleOrNull()?.takeIf { it > 0 }, rate)
+            MediaConvertSource(video != null, info.getDuration()?.toDoubleOrNull()?.takeIf { it > 0 }, rate, video?.let(::videoBitrateBps))
         } catch (_: Exception) { null }
         finally { releaseFfmpegInput(input) }
     }
