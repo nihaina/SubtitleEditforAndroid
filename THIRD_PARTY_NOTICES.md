@@ -70,7 +70,8 @@ license text is distributed at `assets/licenses/mpv-android-LICENSE.txt`.
 FFmpegKit Next 8.1.0 is used to build FFmpeg n8.1.2 and the Java/JNI command
 API. libmpv is linked against the same FFmpeg shared libraries packaged by
 FFmpegKit Next. The local build enables libmp3lame, libx264, libvpx, libvorbis,
-libopus, x265 4.2, Xvid 1.3.7, libaom 3.12.1 and Theora 1.1.1. x264, x265
+libopus, x265 4.2, Xvid 1.3.7, libaom 3.12.1, Theora 1.1.1, Speex 1.2.1,
+OpenCORE AMR 0.1.6 and VisualOn AMR-WB 0.1.3. x264, x265
 and Xvid are GPL-licensed, so this FFmpegKit build and the combined
 application are distributed under GPLv3. The reproducible build options are
 documented in `app/libs/README.md`, `native/mpv/README.md` and
@@ -79,7 +80,10 @@ patent notice are included as `res/raw/license_x265.txt`,
 `res/raw/license_xvidcore.txt`, `res/raw/license_libaom.txt`,
 `res/raw/patents_libaom.txt` and `res/raw/license_libtheora.txt` in the AAR.
 libaom is distributed under its BSD 2-Clause license and patent grant;
-Theora uses its BSD-style license.
+Theora and Speex use BSD-style licenses. OpenCORE AMR and VisualOn AMR-WB
+use Apache License 2.0. Their complete notices are included in the AAR as
+`res/raw/license_speex.txt`, `res/raw/license_opencore_amr.txt` and
+`res/raw/license_vo_amrwbenc.txt`.
 
 ## libass and libplacebo
 

@@ -45,7 +45,7 @@ class MediaConvertActivity : AppComposeActivity() {
         }
         setContent {
             val state by viewModel.state.collectAsState()
-            val formats = remember(state.availableEncoders) { viewModel.formatList }
+            val formats = remember(state.availableEncoders, state.availableAudioEncoders) { viewModel.formatList }
             val videoFormats = formats.filterNot { it.isAudioOnly }.map {
                 MediaFormatOption(it.extension, it.displayName, it.isAudioOnly)
             }
@@ -60,6 +60,22 @@ class MediaConvertActivity : AppComposeActivity() {
             })
             val effectiveVideoCodec = format?.takeUnless { it.isAudioOnly }?.videoEncoder(state.options.selectedVideoCodec).orEmpty()
             val qualityRange = MediaConvertCommand.qualityRange(effectiveVideoCodec)
+            val effectiveAudioCodec = format?.audioEncoder(state.options.selectedAudioCodec).orEmpty()
+            val audioProfile = MediaConvertAudioCodecs.profile(effectiveAudioCodec, format?.formatName.orEmpty())
+            val restrictedAudio = format?.isAudioOnly == false && effectiveAudioCodec != "copy"
+            val sampleRateOptions = viewModel.sampleRates.mapIndexed { index, label -> AppOption(index, label) }.filter {
+                (format?.isAudioOnly != true || it.id <= 5) &&
+                    (!restrictedAudio || audioProfile.sampleRates.isEmpty() || it.id == 0 || MediaConvertCommand.sampleRates[it.id] in audioProfile.sampleRates)
+            }.map { if (restrictedAudio && it.id == 0 && audioProfile.sampleRates.isNotEmpty()) AppOption(0, getString(R.string.media_convert_audio_auto_adapt)) else it }
+            val channelOptions = viewModel.channels.mapIndexed { index, label -> AppOption(index, label) }.filter {
+                !restrictedAudio || audioProfile.channels.isEmpty() || it.id == 0 || (if (it.id == 1) 2 else 1) in audioProfile.channels
+            }.map { if (restrictedAudio && it.id == 0 && audioProfile.channels.isNotEmpty()) AppOption(0, getString(R.string.media_convert_audio_auto_adapt)) else it }
+            val audioHints = buildList {
+                if (restrictedAudio && (audioProfile.sampleRates.isNotEmpty() || audioProfile.channels.isNotEmpty())) add(getString(R.string.media_convert_audio_constraints_hint))
+                if (restrictedAudio && (audioProfile.bitrateValues.isNotEmpty() || effectiveAudioCodec in setOf("libspeex", "dca", "mp2"))) add(getString(R.string.media_convert_audio_bitrate_adapt_hint))
+                if (restrictedAudio && !audioProfile.adjustableBitrate) add(getString(R.string.media_convert_audio_derived_bitrate_hint))
+                if (restrictedAudio && audioProfile.experimental) add(getString(R.string.media_convert_audio_experimental_hint))
+            }.joinToString("\n")
             SubtitleEditComposeTheme {
                 MediaConvertScreen(
                     sourceSummary = if (state.selectedFiles.isEmpty()) "" else getString(R.string.files_selected_header, state.selectedFiles.size),
@@ -79,9 +95,9 @@ class MediaConvertActivity : AppComposeActivity() {
                     selectedQualityId = state.options.selectedQualityId,
                     customQuality = state.options.customQuality,
                     audioBitrate = state.options.audioBitrate,
-                    sampleRates = viewModel.sampleRates.mapIndexed { index, label -> AppOption(index, label) },
+                    sampleRates = sampleRateOptions,
                     sampleRateIndex = state.options.sampleRateIndex,
-                    channels = viewModel.channels.mapIndexed { index, label -> AppOption(index, label) },
+                    channels = channelOptions,
                     channelIndex = state.options.channelIndex,
                     advancedExpanded = state.options.advancedExpanded,
                     isConverting = state.isConverting,
@@ -115,6 +131,8 @@ class MediaConvertActivity : AppComposeActivity() {
                     audioFormatsExpanded = state.audioFormatsExpanded,
                     onToggleVideoFormats = viewModel::toggleVideoFormats,
                     onToggleAudioFormats = viewModel::toggleAudioFormats,
+                    audioBitrateEditable = !restrictedAudio || audioProfile.adjustableBitrate,
+                    audioCodecHint = audioHints,
                     sourceVideoSize = state.selectedFiles.firstNotNullOfOrNull { it.videoSize },
                     multipleSources = state.selectedFiles.size > 1,
                     sourceVideoBitrateBps = state.selectedFiles.firstOrNull()?.videoBitrateBps,

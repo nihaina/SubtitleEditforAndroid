@@ -10,6 +10,7 @@ cd "${ffmpeg_kit_dir}"
   --enable-lame --enable-libiconv --enable-libvorbis --enable-libvpx \
   --enable-x264 --enable-opus --enable-android-zlib --enable-android-media-codec \
   --enable-x265 --enable-xvidcore --enable-libaom --enable-libtheora \
+  --enable-speex --enable-opencore-amr --enable-vo-amrwbenc \
   --rebuild-ffmpeg --no-archive "$@"
 
 python3 "${script_dir}/package-codecs.py" "${ffmpeg_kit_dir}"

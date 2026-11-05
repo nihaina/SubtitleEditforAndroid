@@ -7,12 +7,14 @@ internal data class MediaConvertSource(
     val hasVideo: Boolean,
     val durationSeconds: Double?,
     val frameRate: Double? = null,
-    val videoBitrateBps: Long? = null
+    val videoBitrateBps: Long? = null,
+    val audioSampleRate: Int? = null,
+    val audioChannels: Int? = null
 )
 
 /** Builds argument arrays so SAF URLs and file names remain single arguments. */
 internal object MediaConvertCommand {
-    val sampleRates = listOf(0, 48000, 44100, 22050, 16000, 8000)
+    val sampleRates = listOf(0, 48000, 44100, 22050, 16000, 8000, 32000, 96000, 88200, 192000, 176400, 24000, 11025, 12000)
 
     fun qualityRange(codec: String): IntRange = when (codec) {
         "libx264", "libx265" -> 0..51
@@ -84,7 +86,14 @@ internal object MediaConvertCommand {
                     if (video == "libx265" && format.formatName in setOf("mp4", "mov")) addAll(listOf("-tag:v", "hvc1"))
                 }
             }
-            if (audio != "copy") {
+            if (audio != "copy" && !format.isAudioOnly) {
+                val profile = MediaConvertAudioCodecs.profile(audio, format.formatName)
+                val parameters = MediaConvertAudioCodecs.parameters(audio, format.formatName, options, source)
+                if (profile.experimental) addAll(listOf("-strict", "-2"))
+                parameters.bitrate?.let { addAll(listOf("-b:a", MediaConvertVideoBitrate.ffmpegValue(it))) }
+                parameters.sampleRate?.let { addAll(listOf("-ar", it.toString())) }
+                parameters.channels?.let { addAll(listOf("-ac", it.toString())) }
+            } else if (audio != "copy") {
                 if (!audio.startsWith("pcm_") && audio != "flac") options.audioBitrate.trim().toIntOrNull()?.takeIf { it > 0 }?.let {
                     addAll(listOf("-b:a", "${it}k"))
                 }

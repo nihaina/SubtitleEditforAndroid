@@ -48,6 +48,7 @@ internal data class MediaConvertUiState(
     val videoFormatsExpanded: Boolean = false,
     val audioFormatsExpanded: Boolean = false,
     val availableEncoders: Set<String> = MediaConvertFormats.baselineEncoders,
+    val availableAudioEncoders: Set<String> = MediaConvertAudioCodecs.baselineEncoders,
     val outputDirectory: String = "",
     val saveToSourceDirectory: Boolean = false,
     val progress: Int = 0,
@@ -79,11 +80,10 @@ internal class MediaConvertViewModel(application: Application) :
     private data class OutputResult(val uri: Uri, val fileName: String)
 
     val formatList: List<MediaConvertFormatInfo>
-        get() = MediaConvertFormats.create(currentState.availableEncoders)
-    val sampleRates = listOf(
-        application.getString(R.string.media_convert_sample_rate_original),
-        "48000 Hz", "44100 Hz", "22050 Hz", "16000 Hz", "8000 Hz"
-    )
+        get() = MediaConvertFormats.create(currentState.availableEncoders, currentState.availableAudioEncoders)
+    val sampleRates = MediaConvertCommand.sampleRates.map { rate ->
+        if (rate == 0) application.getString(R.string.media_convert_sample_rate_original) else "$rate Hz"
+    }
     val channels = listOf(
         application.getString(R.string.media_convert_channel_original),
         application.getString(R.string.media_convert_channel_stereo),
@@ -114,11 +114,13 @@ internal class MediaConvertViewModel(application: Application) :
         setState { copy(saveToSourceDirectory = settingsManager.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)) }
         restoreOutputDirectory()
         viewModelScope.launch {
-            val encoders = withContext(Dispatchers.IO) {
-                runCatching { MediaConvertFormats.parseEncoders(FFmpegKit.execute("-hide_banner -encoders").getAllLogsAsString()) }
-                    .getOrDefault(emptySet())
+            val (videoEncoders, audioEncoders) = withContext(Dispatchers.IO) {
+                runCatching {
+                    val log = FFmpegKit.execute("-hide_banner -encoders").getAllLogsAsString()
+                    MediaConvertFormats.parseEncoders(log) to MediaConvertAudioCodecs.parseEncoders(log)
+                }.getOrDefault(emptySet<String>() to emptySet())
             }
-            setState { copy(availableEncoders = availableEncoders + encoders) }
+            setState { copy(availableEncoders = availableEncoders + videoEncoders, availableAudioEncoders = availableAudioEncoders + audioEncoders) }
         }
     }
 
@@ -372,7 +374,7 @@ internal class MediaConvertViewModel(application: Application) :
         return try {
             val prefix = "[${index + 1}/$total]"
             appendLog(string(R.string.media_convert_start_file, prefix, file.fileName))
-            val sourceProbe = if (format.isAudioOnly) null else withContext(Dispatchers.IO) { probeSourceUri(file.uri)?.let { if (isLikelyAudioFile(file)) MediaConvertSource(false, it.durationSeconds) else it } ?: MediaConvertSource(true, null) }
+            val sourceProbe = if (format.isAudioOnly) null else withContext(Dispatchers.IO) { probeSourceUri(file.uri)?.let { if (isLikelyAudioFile(file)) it.copy(hasVideo = false, videoBitrateBps = null) else it } ?: MediaConvertSource(true, null) }
             val options = currentState.options
             if (!format.isAudioOnly && options.videoBitrate.mode == MediaConvertBitrateMode.ORIGINAL &&
                 (options.selectedVideoCodec != "copy" || sourceProbe?.hasVideo == false) && sourceProbe?.videoBitrateBps == null) {
@@ -438,7 +440,9 @@ internal class MediaConvertViewModel(application: Application) :
                 val denominator = parts.getOrNull(1)?.toDoubleOrNull() ?: 1.0
                 if (numerator != null && denominator > 0) (numerator / denominator).takeIf { it > 0 } else null
             }
-            MediaConvertSource(video != null, info.getDuration()?.toDoubleOrNull()?.takeIf { it > 0 }, rate, video?.let(::videoBitrateBps))
+            val audio = info.getStreams().firstOrNull { it.getType() == "audio" }
+            MediaConvertSource(video != null, info.getDuration()?.toDoubleOrNull()?.takeIf { it > 0 }, rate, video?.let(::videoBitrateBps),
+                audio?.getSampleRate()?.toIntOrNull(), audio?.getNumberProperty("channels")?.toInt())
         } catch (_: Exception) { null }
         finally { releaseFfmpegInput(input) }
     }

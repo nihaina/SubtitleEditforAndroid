@@ -10,17 +10,20 @@ import zipfile
 
 PROJECT = pathlib.Path(__file__).resolve().parents[2]
 KIT = pathlib.Path(sys.argv[1]).resolve()
-VERSION = "8.1.0-mpv2"
+VERSION = "8.1.0-mpv3"
 ROOT = PROJECT / "app/libs/ffmpeg-kit-next-maven/com/arthenica/ffmpeg-kit-next"
-BASE = ROOT / "8.1.0-mpv1/ffmpeg-kit-next-8.1.0-mpv1.aar"
+BASE = ROOT / "8.1.0-mpv2/ffmpeg-kit-next-8.1.0-mpv2.aar"
 ABIS = ("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-FLAGS = ("--enable-libx264", "--enable-libx265", "--enable-libxvid", "--enable-libaom", "--enable-libtheora", "--enable-libopus", "--enable-libvpx", "--enable-libvorbis")
+FLAGS = ("--enable-libx264", "--enable-libx265", "--enable-libxvid", "--enable-libaom", "--enable-libtheora", "--enable-libopus", "--enable-libvpx", "--enable-libvorbis", "--enable-libspeex", "--enable-libopencore-amrnb", "--enable-libvo-amrwbenc")
 LICENSES = {
     "license_x265": "src/x265/COPYING",
     "license_xvidcore": "src/xvidcore/xvidcore/LICENSE",
     "license_libaom": "src/libaom/LICENSE",
     "patents_libaom": "src/libaom/PATENTS",
     "license_libtheora": "src/libtheora/COPYING",
+    "license_speex": "src/speex/COPYING",
+    "license_opencore_amr": "src/opencore-amr/LICENSE",
+    "license_vo_amrwbenc": "src/vo-amrwbenc/COPYING",
 }
 
 
@@ -61,7 +64,7 @@ with zipfile.ZipFile(BASE) as base, tempfile.TemporaryDirectory(prefix="subtitle
     staged = pathlib.Path(work) / output.name
     with zipfile.ZipFile(staged, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as archive:
         for name in base.namelist():
-            if name.endswith("/") or name.startswith("jni/") or name == "R.txt":
+            if name.endswith("/") or name.startswith("jni/") or name in ("R.txt", "META-INF/subtitleedit-codecs.json") or name in {f"res/raw/{key}.txt" for key in LICENSES}:
                 continue
             archive.writestr(name, base.read(name))
         for abi in ABIS:
@@ -69,11 +72,15 @@ with zipfile.ZipFile(BASE) as base, tempfile.TemporaryDirectory(prefix="subtitle
                 archive.write(library, f"jni/{abi}/{library.name}")
         for resource, source in LICENSES.items():
             archive.write(KIT / source, f"res/raw/{resource}.txt")
-        archive.writestr("R.txt", base.read("R.txt").decode().rstrip() + "\n" +
-                         "".join(f"int raw {name} 0x0\n" for name in LICENSES))
+        resource_lines = base.read("R.txt").decode().splitlines()
+        existing_resources = {line.split()[2] for line in resource_lines if len(line.split()) >= 3}
+        resource_lines += [f"int raw {name} 0x0" for name in LICENSES if name not in existing_resources]
+        archive.writestr("R.txt", "\n".join(resource_lines) + "\n")
         archive.writestr("META-INF/subtitleedit-codecs.json", json.dumps({"ffmpeg": "n8.1.2", "configurations": configs}, indent=2))
+    with zipfile.ZipFile(staged) as archive:
+        assert len(archive.namelist()) == len(set(archive.namelist())), "Duplicate AAR entries"
     output.write_bytes(staged.read_bytes())
-    pom = (ROOT / "8.1.0-mpv1/ffmpeg-kit-next-8.1.0-mpv1.pom").read_text()
-    (destination / f"ffmpeg-kit-next-{VERSION}.pom").write_text(pom.replace("8.1.0-mpv1", VERSION))
+    pom = (ROOT / "8.1.0-mpv2/ffmpeg-kit-next-8.1.0-mpv2.pom").read_text()
+    (destination / f"ffmpeg-kit-next-{VERSION}.pom").write_text(pom.replace("8.1.0-mpv2", VERSION))
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
     print(f"Verified all four ABIs, public symbols and 16 KB alignment.\n{output}\nSHA-256: {digest}")

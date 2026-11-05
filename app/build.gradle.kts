@@ -239,7 +239,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
     // FFmpegKitNext is built locally because upstream does not publish Android artifacts.
-    implementation("com.arthenica:ffmpeg-kit-next:8.1.0-mpv2")
+    implementation("com.arthenica:ffmpeg-kit-next:8.1.0-mpv3")
     implementation("com.subtitleedit.native:mpv-android-runtime:0.41.0-ffmpeg8.1.2-2")
 
     // OkHttp

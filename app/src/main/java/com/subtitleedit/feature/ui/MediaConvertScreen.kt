@@ -128,7 +128,9 @@ internal fun MediaConvertScreen(
     sourceVideoSize: MediaConvertVideoSize? = null,
     multipleSources: Boolean = false,
     sourceVideoBitrateBps: Long? = null,
-    canUseOriginalVideoBitrate: Boolean = false
+    canUseOriginalVideoBitrate: Boolean = false,
+    audioBitrateEditable: Boolean = true,
+    audioCodecHint: String = ""
 ) {
     var showResolutionDialog by rememberSaveable { mutableStateOf(false) }
     var showBitrateDialog by rememberSaveable { mutableStateOf(false) }
@@ -296,20 +298,21 @@ internal fun MediaConvertScreen(
                         HorizontalDivider()
                     }
                     AppOptionSelector(stringResource(R.string.activity_media_convert_text_12), audioCodecs.firstOrNull { it.id == selectedAudioCodec }, audioCodecs, !isConverting, onAudioCodecSelected)
+                    if (audioCodecHint.isNotBlank()) Text(audioCodecHint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     val audioEnabled = !isConverting && selectedAudioCodec != "copy"
                     val audioLossless = selectedAudioCodec.startsWith("pcm_") || selectedAudioCodec == "flac" ||
                         (selectedAudioCodec == "auto" && selectedFormat in setOf("wav", "flac"))
-                    MediaConvertNumberField(stringResource(R.string.activity_media_convert_text_13), audioBitrate, stringResource(R.string.activity_media_convert_hint_01), audioEnabled && !audioLossless, onAudioBitrateChange)
+                    MediaConvertNumberField(stringResource(R.string.activity_media_convert_text_13), audioBitrate, stringResource(R.string.activity_media_convert_hint_01), audioEnabled && !audioLossless && audioBitrateEditable, onAudioBitrateChange)
                     AppOptionSelector(
                         stringResource(R.string.activity_media_convert_text_14),
-                        sampleRates.getOrNull(sampleRateIndex),
+                        sampleRates.firstOrNull { it.id == sampleRateIndex } ?: sampleRates.firstOrNull(),
                         sampleRates,
                         audioEnabled,
                         onSelected = onSampleRateSelected
                     )
                     AppOptionSelector(
                         stringResource(R.string.activity_media_convert_text_15),
-                        channels.getOrNull(channelIndex),
+                        channels.firstOrNull { it.id == channelIndex } ?: channels.firstOrNull(),
                         channels,
                         audioEnabled,
                         onSelected = onChannelSelected

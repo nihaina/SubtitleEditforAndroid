@@ -20,30 +20,30 @@ internal data class MediaConvertFormatInfo(
 internal object MediaConvertFormats {
     val baselineEncoders = setOf("libx264", "mpeg1video", "mpeg2video", "mpeg4", "libvpx", "libvpx-vp9", "wmv2", "msmpeg4v3", "flv")
 
-    fun create(encoders: Set<String>): List<MediaConvertFormatInfo> {
+    fun create(encoders: Set<String>, audioEncoders: Set<String> = MediaConvertAudioCodecs.baselineEncoders): List<MediaConvertFormatInfo> {
         fun video(ext: String, muxer: String, codecs: List<String>, audio: List<String>, mime: String) =
             MediaConvertFormatInfo(ext, if (ext == "webm") "WebM" else ext.uppercase(java.util.Locale.ROOT), muxer,
-                listOf("auto") + codecs.filter { it in encoders } + "copy", listOf("auto") + audio + "copy", mimeType = mime)
+                listOf("auto") + codecs.filter { it in encoders } + "copy", listOf("auto") + audio.distinct().filter { it in audioEncoders } + "copy", mimeType = mime)
         fun audio(ext: String, muxer: String, codecs: List<String>, mime: String) =
             MediaConvertFormatInfo(ext, ext.uppercase(java.util.Locale.ROOT), muxer, emptyList(), listOf("auto") + codecs, true, mime)
         return listOf(
-            video("mp4", "mp4", listOf("libx264", "libx265", "mpeg4", "libaom-av1"), listOf("aac", "libmp3lame"), "video/mp4"),
-            video("mkv", "matroska", listOf("libx264", "libx265", "mpeg1video", "mpeg2video", "mpeg4", "libxvid", "libvpx", "libvpx-vp9", "libaom-av1"), listOf("aac", "libmp3lame", "libopus", "libvorbis", "flac", "ac3"), "video/x-matroska"),
-            video("avi", "avi", listOf("mpeg4", "libxvid", "libx264", "mpeg1video", "mpeg2video"), listOf("libmp3lame", "ac3", "pcm_s16le"), "video/x-msvideo"),
-            video("mov", "mov", listOf("libx264", "libx265", "mpeg4"), listOf("aac", "libmp3lame", "ac3", "pcm_s16le"), "video/quicktime"),
-            video("mpg", "mpeg", listOf("mpeg2video", "mpeg1video"), listOf("mp2", "ac3"), "video/mpeg"),
-            video("mpeg", "mpeg", listOf("mpeg2video", "mpeg1video"), listOf("mp2", "ac3"), "video/mpeg"),
-            video("m4v", "ipod", listOf("libx264", "mpeg4"), listOf("aac"), "video/mp4"),
-            video("wmv", "asf", listOf("wmv2", "msmpeg4v3"), listOf("wmav2"), "video/x-ms-wmv"),
-            video("flv", "flv", listOf("libx264", "flv"), listOf("aac", "libmp3lame"), "video/x-flv"),
-            video("vob", "vob", listOf("mpeg2video", "mpeg1video"), listOf("ac3", "mp2"), "video/mpeg"),
-            video("ts", "mpegts", listOf("libx264", "libx265", "mpeg2video", "mpeg1video", "mpeg4"), listOf("aac", "libmp3lame", "ac3", "mp2"), "video/mp2t"),
+            video("mp4", "mp4", listOf("libx264", "libx265", "mpeg4", "libaom-av1"), MediaConvertAudioCodecs.mp4, "video/mp4"),
+            video("mkv", "matroska", listOf("libx264", "libx265", "mpeg1video", "mpeg2video", "mpeg4", "libxvid", "libvpx", "libvpx-vp9", "libaom-av1"), MediaConvertAudioCodecs.matroska, "video/x-matroska"),
+            video("avi", "avi", listOf("mpeg4", "libxvid", "libx264", "mpeg1video", "mpeg2video"), listOf("libmp3lame", "ac3", "pcm_s16le") + MediaConvertAudioCodecs.riffAudio, "video/x-msvideo"),
+            video("mov", "mov", listOf("libx264", "libx265", "mpeg4"), MediaConvertAudioCodecs.mov, "video/quicktime"),
+            video("mpg", "mpeg", listOf("mpeg2video", "mpeg1video"), listOf("mp2", "ac3", "libmp3lame", "dca", "pcm_dvd"), "video/mpeg"),
+            video("mpeg", "mpeg", listOf("mpeg2video", "mpeg1video"), listOf("mp2", "ac3", "libmp3lame", "dca", "pcm_dvd"), "video/mpeg"),
+            video("m4v", "ipod", listOf("libx264", "mpeg4"), listOf("aac", "alac", "ac3"), "video/mp4"),
+            video("wmv", "asf", listOf("wmv2", "msmpeg4v3"), listOf("wmav2", "wmav1") + MediaConvertAudioCodecs.riffAudio, "video/x-ms-wmv"),
+            video("flv", "flv", listOf("libx264", "flv"), listOf("aac", "libmp3lame", "libspeex", "adpcm_swf", "nellymoser", "pcm_alaw", "pcm_mulaw", "pcm_u8", "pcm_s16le", "libopus", "flac", "ac3", "eac3"), "video/x-flv"),
+            video("vob", "vob", listOf("mpeg2video", "mpeg1video"), listOf("ac3", "mp2", "libmp3lame", "dca", "pcm_dvd"), "video/mpeg"),
+            video("ts", "mpegts", listOf("libx264", "libx265", "mpeg2video", "mpeg1video", "mpeg4"), listOf("aac", "libmp3lame", "ac3", "mp2", "eac3", "dca", "libopus", "truehd"), "video/mp2t"),
             video("webm", "webm", listOf("libvpx-vp9", "libvpx", "libaom-av1"), listOf("libopus", "libvorbis"), "video/webm"),
-            video("asf", "asf", listOf("wmv2", "msmpeg4v3"), listOf("wmav2", "libmp3lame"), "video/x-ms-asf"),
-            video("3gp", "3gp", listOf("mpeg4", "libx264"), listOf("aac"), "video/3gpp"),
+            video("asf", "asf", listOf("wmv2", "msmpeg4v3"), listOf("wmav2", "wmav1", "libmp3lame") + MediaConvertAudioCodecs.riffAudio, "video/x-ms-asf"),
+            video("3gp", "3gp", listOf("mpeg4", "libx264"), listOf("aac", "libopencore_amrnb", "libvo_amrwbenc"), "video/3gpp"),
             video("f4v", "f4v", listOf("libx264"), listOf("aac", "libmp3lame"), "video/mp4"),
-            video("3g2", "3g2", listOf("mpeg4", "libx264"), listOf("aac"), "video/3gpp2"),
-            video("ogv", "ogg", listOf("libtheora", "libvpx"), listOf("libvorbis", "libopus"), "video/ogg"),
+            video("3g2", "3g2", listOf("mpeg4", "libx264"), listOf("aac", "libopencore_amrnb", "libvo_amrwbenc"), "video/3gpp2"),
+            video("ogv", "ogg", listOf("libtheora", "libvpx"), listOf("libvorbis", "libopus", "flac", "libspeex"), "video/ogg"),
             audio("mp3", "mp3", listOf("libmp3lame"), "audio/mpeg"),
             audio("aac", "adts", listOf("aac"), "audio/aac"),
             audio("m4a", "ipod", listOf("aac"), "audio/mp4"),
@@ -63,7 +63,16 @@ internal object MediaConvertFormats {
         "libaom-av1" to "AV1", "libtheora" to "Theora", "wmv2" to "WMV 8", "msmpeg4v3" to "MS MPEG-4 v3",
         "flv" to "FLV1 (Sorenson Spark)", "aac" to "AAC", "libmp3lame" to "MP3",
         "libopus" to "Opus", "libvorbis" to "Vorbis", "flac" to "FLAC", "ac3" to "AC-3",
-        "mp2" to "MP2", "wmav2" to "WMA 2", "pcm_s16le" to "PCM 16-bit", "pcm_s24le" to "PCM 24-bit", "pcm_f32le" to "PCM Float 32-bit"
+        "mp2" to "MP2", "wmav1" to "WMA v1", "wmav2" to "WMA v2",
+        "eac3" to "E-AC-3 (Dolby Digital Plus)", "dca" to "DTS (DCA)", "alac" to "ALAC (Apple Lossless)",
+        "adpcm_swf" to "SWF ADPCM", "adpcm_ima_wav" to "IMA ADPCM (WAV)", "adpcm_ms" to "Microsoft ADPCM", "adpcm_ima_qt" to "IMA ADPCM (QuickTime)",
+        "libopencore_amrnb" to "AMR-NB", "libvo_amrwbenc" to "AMR-WB", "libspeex" to "Speex",
+        "real_144" to "RealAudio 1.0 (14.4K)", "tta" to "TTA (True Audio Lossless)", "wavpack" to "WavPack (Lossless)",
+        "truehd" to "Dolby TrueHD", "mlp" to "MLP (Meridian Lossless)", "nellymoser" to "Nellymoser",
+        "pcm_alaw" to "PCM A-Law (G.711)", "pcm_mulaw" to "PCM μ-Law (G.711)", "pcm_s8" to "PCM S8", "pcm_u8" to "PCM U8",
+        "pcm_s16le" to "PCM S16LE", "pcm_s16be" to "PCM S16BE", "pcm_s24le" to "PCM S24LE", "pcm_s24be" to "PCM S24BE",
+        "pcm_s32le" to "PCM S32LE", "pcm_s32be" to "PCM S32BE", "pcm_f32le" to "PCM Float 32LE", "pcm_f32be" to "PCM Float 32BE",
+        "pcm_f64le" to "PCM Float 64LE", "pcm_f64be" to "PCM Float 64BE", "pcm_dvd" to "DVD LPCM"
     )
 
     fun parseEncoders(log: String): Set<String> = Regex("(?m)^\\s*V[A-Z.]{5}\\s+(\\S+)\\s")
