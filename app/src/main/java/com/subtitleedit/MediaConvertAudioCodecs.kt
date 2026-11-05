@@ -39,6 +39,8 @@ internal object MediaConvertAudioCodecs {
         "libopus" to MediaConvertAudioProfile(listOf(8000, 12000, 16000, 24000, 48000), (1..8).toList()),
         "libopencore_amrnb" to MediaConvertAudioProfile(listOf(8000), listOf(1), bitrateValues = amrNbBitrates, defaultBitrate = 12200),
         "libvo_amrwbenc" to MediaConvertAudioProfile(listOf(16000), listOf(1), bitrateValues = amrWbBitrates, defaultBitrate = 23850),
+        "libgsm" to MediaConvertAudioProfile(listOf(8000), listOf(1), adjustableBitrate = false),
+        "libgsm_ms" to MediaConvertAudioProfile(listOf(8000), listOf(1), adjustableBitrate = false),
         "libspeex" to MediaConvertAudioProfile(listOf(8000, 16000, 32000), monoStereo, defaultBitrate = 27000),
         "libvorbis" to MediaConvertAudioProfile(sampleRateRange = 1..200000),
         "real_144" to MediaConvertAudioProfile(listOf(8000), listOf(1), adjustableBitrate = false),
@@ -64,6 +66,12 @@ internal object MediaConvertAudioCodecs {
 
     fun profile(codec: String, muxer: String): MediaConvertAudioProfile {
         val base = profiles[codec] ?: MediaConvertAudioProfile(adjustableBitrate = !codec.startsWith("pcm_"))
+        if (muxer == "voc") return base.copy(
+            channels = monoStereo,
+            // Legacy unsigned-8-bit VOC uses a time constant; 8 kHz is exact for mono and stereo.
+            sampleRates = if (codec == "pcm_u8") listOf(8000) else base.sampleRates,
+            sampleRateRange = 1..65535
+        )
         if (muxer != "flv") return base
         return when (codec) {
             "libspeex" -> base.copy(sampleRates = listOf(16000), channels = listOf(1))
@@ -77,7 +85,7 @@ internal object MediaConvertAudioCodecs {
         val profile = profile(codec, muxer)
         val explicitRate = MediaConvertCommand.sampleRates.getOrNull(options.sampleRateIndex)?.takeIf { it > 0 }
         val requestedRate = explicitRate ?: source?.audioSampleRate
-        val rate = if (profile.sampleRates.isNotEmpty()) {
+        var rate = if (profile.sampleRates.isNotEmpty()) {
             profile.sampleRates.minBy { abs(it - (requestedRate ?: 44100)) }
         } else if (requestedRate != null && profile.sampleRateRange != null && requestedRate !in profile.sampleRateRange) {
             requestedRate.coerceIn(profile.sampleRateRange)
@@ -87,11 +95,17 @@ internal object MediaConvertAudioCodecs {
         val requestedBitrate = if (profile.adjustableBitrate) {
             MediaConvertAudioBitrate.targetBitsPerSecond(options.audioBitrate, source?.audioBitrateBps)
         } else null
+        if (codec == "libvorbis" && requestedBitrate != null) {
+            // libvorbis's nominal-bitrate templates cover 8–50 kHz; higher rates only support quality mode.
+            rate = (rate ?: source?.audioSampleRate ?: 44100).coerceIn(8000, 48000)
+        }
         val bitrate = when {
             !profile.adjustableBitrate -> null
             profile.bitrateValues.isNotEmpty() -> profile.bitrateValues.minBy { abs(it.toLong() - (requestedBitrate ?: profile.defaultBitrate!!.toLong())) }.toLong()
             codec == "libspeex" -> (requestedBitrate ?: profile.defaultBitrate!!.toLong()).coerceIn(2150, if (rate == 8000) 24600 else 44000)
+            codec == "libopus" && requestedBitrate != null -> requestedBitrate.coerceIn(500, 256000L * (channels ?: source?.audioChannels ?: 2))
             codec == "dca" -> dtsBitrate(rate ?: 48000, channels ?: 2, requestedBitrate ?: 1411200L)
+            codec == "libvorbis" && requestedBitrate != null -> vorbisBitrate(rate ?: 44100, channels ?: source?.audioChannels ?: 2, requestedBitrate)
             codec == "mp2" && requestedBitrate != null -> {
                 val kbps = if ((rate ?: 44100) >= 32000) listOf(32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384)
                     else listOf(8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160)
@@ -100,6 +114,21 @@ internal object MediaConvertAudioCodecs {
             else -> requestedBitrate
         }
         return MediaConvertAudioParameters(rate, channels, bitrate, channelParameters.layout)
+    }
+
+    private fun vorbisBitrate(rate: Int, channels: Int, requested: Long): Long {
+        // Rate mappings in libvorbis/lib/modes/setup_{8,11,16,22,32,44,44u,44p51}.h are per channel.
+        val bounds = when {
+            rate < 9000 -> if (channels == 2) 6000..32000 else 8000..42000
+            rate < 15000 -> if (channels == 2) 8000..44000 else 12000..50000
+            rate < 19000 -> if (channels == 2) 12000..86000 else 16000..100000
+            rate <= 26000 -> if (channels == 2) 15000..86000 else 16000..90000
+            rate < 40000 -> if (channels == 2) 18000..190000 else 30000..190000
+            channels == 2 -> 22500..250000
+            channels == 6 -> 14000..240000
+            else -> 32000..240000
+        }
+        return requested.coerceIn(bounds.first.toLong() * channels, bounds.last.toLong() * channels)
     }
 
     fun sampleRateIndices(codec: String, muxer: String): List<Int> {

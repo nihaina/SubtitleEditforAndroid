@@ -14,6 +14,34 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class MediaConvertNativeTest {
     @Test
+    fun audioOnlyOutputsUseBundledEncodersAndSharedSettings() {
+        val log = FFmpegKit.execute("-hide_banner -encoders").getAllLogsAsString()
+        val encoders = MediaConvertAudioCodecs.parseEncoders(log)
+        assertTrue("Missing speech encoders", encoders.containsAll(setOf("libgsm", "libgsm_ms", "libspeex", "libopencore_amrnb", "libvo_amrwbenc")))
+        val formats = MediaConvertAudioFormats.create(encoders)
+        val root = File(ApplicationProvider.getApplicationContext<Context>().cacheDir, "audio-output-native-${System.nanoTime()}").apply { mkdirs() }
+        fun run(arguments: List<String>) {
+            val session = FFmpegKit.executeWithArguments(arguments.toTypedArray())
+            assertTrue(session.getAllLogsAsString().takeLast(3000), ReturnCode.isSuccess(session.getReturnCode()))
+        }
+        try {
+            val input = File(root, "source.wav")
+            run(listOf("-y", "-f", "lavfi", "-i", "anullsrc=r=96000:cl=7.1", "-t", "1.2", "-c:a", "pcm_s24le", input.path))
+            for (format in formats) for (codec in format.audioCodecs.filter { it != "auto" && it != "copy" }) {
+                val output = File(root, "output.${format.extension}")
+                run(MediaConvertCommand.build(input.path, output.path, format,
+                    MediaConvertOptions(selectedAudioCodec = codec, audioBitrate = "192", channelIndex = 8),
+                    MediaConvertSource(false, 1.2, audioSampleRate = 96000, audioChannels = 8, audioChannelLayout = "7.1")))
+                run(listOf("-i", output.path, "-map", "0:a:0", "-vn", "-f", "null", "-"))
+                val info = FFprobeKit.getMediaInformation(output.path).getMediaInformation()
+                    ?: throw AssertionError("Unrecognizable ${format.extension}/$codec")
+                assertTrue(info.getStreams().none { it.getType() == "video" })
+                assertTrue(info.getStreams().any { it.getType() == "audio" })
+            }
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
     fun bundledAudioEncodersMuxAndDecodeInVideoContainers() {
         val log = FFmpegKit.execute("-hide_banner -encoders").getAllLogsAsString()
         val audioEncoders = MediaConvertAudioCodecs.parseEncoders(log)

@@ -310,77 +310,51 @@ internal fun MediaConvertScreen(
                     AppOptionSelector(stringResource(R.string.activity_media_convert_text_12), audioCodecs.firstOrNull { it.id == selectedAudioCodec }, audioCodecs, !isConverting, onAudioCodecSelected)
                     if (audioCodecHint.isNotBlank()) Text(audioCodecHint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     val audioEnabled = !isConverting && selectedAudioCodec != "copy"
-                    val audioLossless = selectedAudioCodec.startsWith("pcm_") || selectedAudioCodec == "flac" ||
-                        (selectedAudioCodec == "auto" && selectedFormat in setOf("wav", "flac"))
-                    if (videoCodecs.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
-                        ) {
-                            Text(stringResource(R.string.activity_media_convert_text_13), modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
-                            OutlinedButton(onClick = { showAudioBitrateDialog = true }, enabled = audioEnabled && !audioLossless && audioBitrateEditable, modifier = Modifier.weight(1f)) {
-                                val label = when {
-                                    !audioBitrateEditable -> stringResource(R.string.media_convert_audio_bitrate_derived)
-                                    audioBitrate == MediaConvertAudioBitrate.ORIGINAL -> stringResource(R.string.media_convert_bitrate_original) +
-                                        (sourceAudioBitrateBps?.let { " (${MediaConvertAudioBitrate.label(it)})" } ?: "")
-                                    audioBitrate.isBlank() -> stringResource(R.string.media_convert_bitrate_auto)
-                                    else -> "$audioBitrate kbps"
-                                }
-                                Text(label, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+                    ) {
+                        Text(stringResource(R.string.activity_media_convert_text_13), modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
+                        OutlinedButton(onClick = { showAudioBitrateDialog = true }, enabled = audioEnabled && audioBitrateEditable, modifier = Modifier.weight(1f)) {
+                            val label = when {
+                                !audioBitrateEditable -> stringResource(R.string.media_convert_audio_bitrate_derived)
+                                audioBitrate == MediaConvertAudioBitrate.ORIGINAL -> stringResource(R.string.media_convert_bitrate_original) +
+                                    (sourceAudioBitrateBps?.let { " (${MediaConvertAudioBitrate.label(it)})" } ?: "")
+                                audioBitrate.isBlank() -> stringResource(R.string.media_convert_bitrate_auto)
+                                else -> "$audioBitrate kbps"
                             }
+                            Text(label, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
                         }
-                    } else {
-                        MediaConvertNumberField(stringResource(R.string.activity_media_convert_text_13), audioBitrate, stringResource(R.string.activity_media_convert_hint_01), audioEnabled && !audioLossless && audioBitrateEditable, onAudioBitrateChange)
                     }
-                    if (videoCodecs.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
-                        ) {
-                            Text(stringResource(R.string.activity_media_convert_text_14), modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
-                            OutlinedButton(onClick = { showSampleRateDialog = true }, enabled = audioEnabled, modifier = Modifier.weight(1f)) {
-                                val label = if (sampleRateIndex == 0) {
-                                    stringResource(R.string.media_convert_sample_rate_original) + (sourceAudioSampleRate?.let { " ($it Hz)" } ?: "")
-                                } else sampleRates.firstOrNull { it.id == sampleRateIndex }?.label ?: stringResource(R.string.media_convert_audio_auto_adapt)
-                                Text(label, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
-                            }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+                    ) {
+                        Text(stringResource(R.string.activity_media_convert_text_14), modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
+                        OutlinedButton(onClick = { showSampleRateDialog = true }, enabled = audioEnabled, modifier = Modifier.weight(1f)) {
+                            val label = if (sampleRateIndex == 0) {
+                                stringResource(R.string.media_convert_sample_rate_original) + (sourceAudioSampleRate?.let { " ($it Hz)" } ?: "")
+                            } else sampleRates.firstOrNull { it.id == sampleRateIndex }?.label ?: stringResource(R.string.media_convert_audio_auto_adapt)
+                            Text(label, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
                         }
-                    } else {
-                        AppOptionSelector(
-                            stringResource(R.string.activity_media_convert_text_14),
-                            sampleRates.firstOrNull { it.id == sampleRateIndex } ?: sampleRates.firstOrNull(),
-                            sampleRates,
-                            audioEnabled,
-                            onSelected = onSampleRateSelected
-                        )
                     }
-                    if (videoCodecs.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
-                        ) {
-                            Text(stringResource(R.string.activity_media_convert_text_15), modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
-                            OutlinedButton(onClick = { showChannelDialog = true }, enabled = audioEnabled, modifier = Modifier.weight(1f)) {
-                                val label = if (channelIndex == 0) {
-                                    stringResource(R.string.media_convert_channel_original) + sourceAudioChannelLabel.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
-                                } else channels.firstOrNull { it.id == channelIndex }?.label ?: stringResource(R.string.media_convert_audio_auto_adapt)
-                                Text(label, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
-                            }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+                    ) {
+                        Text(stringResource(R.string.activity_media_convert_text_15), modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
+                        OutlinedButton(onClick = { showChannelDialog = true }, enabled = audioEnabled, modifier = Modifier.weight(1f)) {
+                            val label = if (channelIndex == 0) {
+                                stringResource(R.string.media_convert_channel_original) + sourceAudioChannelLabel.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+                            } else channels.firstOrNull { it.id == channelIndex }?.label ?: stringResource(R.string.media_convert_audio_auto_adapt)
+                            Text(label, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
                         }
-                    } else {
-                        AppOptionSelector(
-                            stringResource(R.string.activity_media_convert_text_15),
-                            channels.firstOrNull { it.id == channelIndex } ?: channels.firstOrNull(),
-                            channels,
-                            audioEnabled,
-                            onSelected = onChannelSelected
-                        )
                     }
                 }
             }
@@ -404,7 +378,7 @@ internal fun MediaConvertScreen(
         }
     }
 
-    if (showChannelDialog && !isConverting && videoCodecs.isNotEmpty() && selectedAudioCodec != "copy") {
+    if (showChannelDialog && !isConverting && selectedAudioCodec != "copy") {
         MediaConvertChannelDialog(
             initialIndex = channelIndex,
             options = channels,
@@ -415,7 +389,7 @@ internal fun MediaConvertScreen(
         )
     }
 
-    if (showSampleRateDialog && !isConverting && videoCodecs.isNotEmpty() && selectedAudioCodec != "copy") {
+    if (showSampleRateDialog && !isConverting && selectedAudioCodec != "copy") {
         MediaConvertSampleRateDialog(
             initialIndex = sampleRateIndex,
             options = sampleRates,
@@ -426,7 +400,7 @@ internal fun MediaConvertScreen(
         )
     }
 
-    if (showAudioBitrateDialog && !isConverting && videoCodecs.isNotEmpty() && selectedAudioCodec != "copy" && audioBitrateEditable) {
+    if (showAudioBitrateDialog && !isConverting && selectedAudioCodec != "copy" && audioBitrateEditable) {
         MediaConvertAudioBitrateDialog(
             initial = audioBitrate,
             codec = effectiveAudioCodec,
@@ -466,28 +440,6 @@ internal fun MediaConvertScreen(
             onOverwrite = onOverwrite,
             onRename = onAutoRename,
             onCancel = onDismissDialog
-        )
-    }
-}
-
-@Composable
-private fun MediaConvertNumberField(
-    label: String,
-    value: String,
-    hint: String,
-    enabled: Boolean,
-    onValueChange: (String) -> Unit
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            placeholder = { Text(hint) },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            singleLine = true,
-            enabled = enabled,
-            modifier = Modifier.weight(1f)
         )
     }
 }

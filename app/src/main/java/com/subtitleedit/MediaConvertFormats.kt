@@ -24,8 +24,6 @@ internal object MediaConvertFormats {
         fun video(ext: String, muxer: String, codecs: List<String>, audio: List<String>, mime: String) =
             MediaConvertFormatInfo(ext, if (ext == "webm") "WebM" else ext.uppercase(java.util.Locale.ROOT), muxer,
                 listOf("auto") + codecs.filter { it in encoders } + "copy", listOf("auto") + audio.distinct().filter { it in audioEncoders } + "copy", mimeType = mime)
-        fun audio(ext: String, muxer: String, codecs: List<String>, mime: String) =
-            MediaConvertFormatInfo(ext, ext.uppercase(java.util.Locale.ROOT), muxer, emptyList(), listOf("auto") + codecs, true, mime)
         return listOf(
             video("mp4", "mp4", listOf("libx264", "libx265", "mpeg4", "libaom-av1"), MediaConvertAudioCodecs.mp4, "video/mp4"),
             video("mkv", "matroska", listOf("libx264", "libx265", "mpeg1video", "mpeg2video", "mpeg4", "libxvid", "libvpx", "libvpx-vp9", "libaom-av1"), MediaConvertAudioCodecs.matroska, "video/x-matroska"),
@@ -43,17 +41,8 @@ internal object MediaConvertFormats {
             video("3gp", "3gp", listOf("mpeg4", "libx264"), listOf("aac", "libopencore_amrnb", "libvo_amrwbenc"), "video/3gpp"),
             video("f4v", "f4v", listOf("libx264"), listOf("aac", "libmp3lame"), "video/mp4"),
             video("3g2", "3g2", listOf("mpeg4", "libx264"), listOf("aac", "libopencore_amrnb", "libvo_amrwbenc"), "video/3gpp2"),
-            video("ogv", "ogg", listOf("libtheora", "libvpx"), listOf("libvorbis", "libopus", "flac", "libspeex"), "video/ogg"),
-            audio("mp3", "mp3", listOf("libmp3lame"), "audio/mpeg"),
-            audio("aac", "adts", listOf("aac"), "audio/aac"),
-            audio("m4a", "ipod", listOf("aac"), "audio/mp4"),
-            audio("wav", "wav", listOf("pcm_s16le", "pcm_s24le", "pcm_f32le"), "audio/wav"),
-            audio("flac", "flac", listOf("flac"), "audio/flac"),
-            audio("ogg", "ogg", listOf("libvorbis", "libopus"), "audio/ogg"),
-            audio("opus", "opus", listOf("libopus"), "audio/opus"),
-            audio("wma", "asf", listOf("wmav2"), "audio/x-ms-wma"),
-            audio("ac3", "ac3", listOf("ac3"), "audio/ac3")
-        )
+            video("ogv", "ogg", listOf("libtheora", "libvpx"), listOf("libvorbis", "libopus", "flac", "libspeex"), "video/ogg")
+        ) + MediaConvertAudioFormats.create(audioEncoders)
     }
 
     val codecNames = mapOf(
@@ -72,7 +61,8 @@ internal object MediaConvertFormats {
         "pcm_alaw" to "PCM A-Law (G.711)", "pcm_mulaw" to "PCM μ-Law (G.711)", "pcm_s8" to "PCM S8", "pcm_u8" to "PCM U8",
         "pcm_s16le" to "PCM S16LE", "pcm_s16be" to "PCM S16BE", "pcm_s24le" to "PCM S24LE", "pcm_s24be" to "PCM S24BE",
         "pcm_s32le" to "PCM S32LE", "pcm_s32be" to "PCM S32BE", "pcm_f32le" to "PCM Float 32LE", "pcm_f32be" to "PCM Float 32BE",
-        "pcm_f64le" to "PCM Float 64LE", "pcm_f64be" to "PCM Float 64BE", "pcm_dvd" to "DVD LPCM"
+        "pcm_f64le" to "PCM Float 64LE", "pcm_f64be" to "PCM Float 64BE", "pcm_dvd" to "DVD LPCM",
+        "libgsm" to "GSM 06.10", "libgsm_ms" to "GSM (Microsoft)"
     )
 
     fun parseEncoders(log: String): Set<String> = Regex("(?m)^\\s*V[A-Z.]{5}\\s+(\\S+)\\s")

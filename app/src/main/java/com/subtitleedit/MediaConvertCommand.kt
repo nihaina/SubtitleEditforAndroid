@@ -90,7 +90,7 @@ internal object MediaConvertCommand {
                     if (video == "libx265" && format.formatName in setOf("mp4", "mov")) addAll(listOf("-tag:v", "hvc1"))
                 }
             }
-            if (audio != "copy" && !format.isAudioOnly) {
+            if (audio != "copy") {
                 val profile = MediaConvertAudioCodecs.profile(audio, format.formatName)
                 val parameters = MediaConvertAudioCodecs.parameters(audio, format.formatName, options, source)
                 if (profile.experimental) addAll(listOf("-strict", "-2"))
@@ -98,16 +98,13 @@ internal object MediaConvertCommand {
                 parameters.sampleRate?.let { addAll(listOf("-ar", it.toString())) }
                 parameters.channels?.let { addAll(listOf("-ac", it.toString())) }
                 parameters.channelLayout?.let { addAll(listOf("-channel_layout:a", it)) }
+                if (audio == "aac" && format.formatName == "adts" && (parameters.channels ?: source?.audioChannels ?: 2) > 6) {
+                    addAll(listOf("-aac_pce", "1"))
+                }
                 if (audio == "wavpack" && (parameters.sampleRate ?: source?.audioSampleRate ?: 48000) < 8000) {
                     // Very low rates can produce an automatic frame size below WavPack's minimum of 128.
                     addAll(listOf("-frame_size:a", "1024"))
                 }
-            } else if (audio != "copy") {
-                if (!audio.startsWith("pcm_") && audio != "flac") options.audioBitrate.trim().toIntOrNull()?.takeIf { it > 0 }?.let {
-                    addAll(listOf("-b:a", "${it}k"))
-                }
-                sampleRates.getOrNull(options.sampleRateIndex)?.takeIf { it > 0 }?.let { addAll(listOf("-ar", it.toString())) }
-                if (options.channelIndex > 0) addAll(listOf("-ac", if (options.channelIndex == 1) "2" else "1"))
             }
             addAll(listOf("-f", format.formatName, output))
         }

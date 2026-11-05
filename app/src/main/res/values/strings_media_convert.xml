@@ -124,4 +124,5 @@
     <string name="media_convert_channel_batch">以上显示首个文件的音轨声道；选择原始声道时，每个文件分别读取。</string>
     <string name="media_convert_channel_adapt_hint">仅显示当前编码器支持的声道布局；不兼容的原始布局会自动适配。</string>
     <string name="media_convert_channel_count_only_hint">此编码器与封装组合仅记录声道数量，播放器可能无法识别具体的扬声器布局。</string>
+    <string name="media_convert_vorbis_bitrate_rate_hint">Vorbis 指定目标码率时，采样率自动匹配至 8–48 kHz，码率按声道数调整；自动码率可使用更高采样率。</string>
 </resources>

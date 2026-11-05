@@ -62,8 +62,8 @@ class MediaConvertActivity : AppComposeActivity() {
             val qualityRange = MediaConvertCommand.qualityRange(effectiveVideoCodec)
             val effectiveAudioCodec = format?.audioEncoder(state.options.selectedAudioCodec).orEmpty()
             val audioProfile = MediaConvertAudioCodecs.profile(effectiveAudioCodec, format?.formatName.orEmpty())
-            val restrictedAudio = format?.isAudioOnly == false && effectiveAudioCodec != "copy"
-            val sampleRateIndices = if (format?.isAudioOnly == false) {
+            val restrictedAudio = format != null && effectiveAudioCodec != "copy"
+            val sampleRateIndices = if (format != null) {
                 MediaConvertAudioCodecs.sampleRateIndices(effectiveAudioCodec, format.formatName)
             } else (0..5).toList()
             val sampleRateOptions = sampleRateIndices.map { index -> AppOption(index, viewModel.sampleRates[index]) }
@@ -72,7 +72,7 @@ class MediaConvertActivity : AppComposeActivity() {
                 2 -> getString(R.string.media_convert_channel_mono_layout)
                 else -> viewModel.channels[index]
             }
-            val channelOptions = if (format?.isAudioOnly == false) {
+            val channelOptions = if (format != null) {
                 listOf(AppOption(0, channelLabel(0))) + MediaConvertAudioChannels.available(effectiveAudioCodec, format.formatName).map { preset ->
                     val layout = MediaConvertAudioChannels.layout(effectiveAudioCodec, preset)
                     val suffix = when {
@@ -92,7 +92,8 @@ class MediaConvertActivity : AppComposeActivity() {
             }
             val audioHints = buildList {
                 if (restrictedAudio && (audioProfile.sampleRates.isNotEmpty() || audioProfile.channels.isNotEmpty())) add(getString(R.string.media_convert_audio_constraints_hint))
-                if (restrictedAudio && (audioProfile.bitrateValues.isNotEmpty() || effectiveAudioCodec in setOf("libspeex", "dca", "mp2"))) add(getString(R.string.media_convert_audio_bitrate_adapt_hint))
+                if (restrictedAudio && (audioProfile.bitrateValues.isNotEmpty() || effectiveAudioCodec in setOf("libspeex", "libopus", "dca", "mp2", "libvorbis"))) add(getString(R.string.media_convert_audio_bitrate_adapt_hint))
+                if (restrictedAudio && effectiveAudioCodec == "libvorbis") add(getString(R.string.media_convert_vorbis_bitrate_rate_hint))
                 if (restrictedAudio && !audioProfile.adjustableBitrate) add(getString(R.string.media_convert_audio_derived_bitrate_hint))
                 if (restrictedAudio && audioProfile.experimental) add(getString(R.string.media_convert_audio_experimental_hint))
                 if (restrictedAudio && !MediaConvertAudioChannels.recordsLayout(effectiveAudioCodec, format?.formatName.orEmpty())) add(getString(R.string.media_convert_channel_count_only_hint))

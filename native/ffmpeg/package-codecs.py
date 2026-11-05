@@ -10,11 +10,11 @@ import zipfile
 
 PROJECT = pathlib.Path(__file__).resolve().parents[2]
 KIT = pathlib.Path(sys.argv[1]).resolve()
-VERSION = "8.1.0-mpv3"
+VERSION = "8.1.0-mpv4"
 ROOT = PROJECT / "app/libs/ffmpeg-kit-next-maven/com/arthenica/ffmpeg-kit-next"
-BASE = ROOT / "8.1.0-mpv2/ffmpeg-kit-next-8.1.0-mpv2.aar"
+BASE = ROOT / "8.1.0-mpv3/ffmpeg-kit-next-8.1.0-mpv3.aar"
 ABIS = ("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-FLAGS = ("--enable-libx264", "--enable-libx265", "--enable-libxvid", "--enable-libaom", "--enable-libtheora", "--enable-libopus", "--enable-libvpx", "--enable-libvorbis", "--enable-libspeex", "--enable-libopencore-amrnb", "--enable-libvo-amrwbenc")
+FLAGS = ("--enable-libx264", "--enable-libx265", "--enable-libxvid", "--enable-libaom", "--enable-libtheora", "--enable-libopus", "--enable-libvpx", "--enable-libvorbis", "--enable-libspeex", "--enable-libopencore-amrnb", "--enable-libvo-amrwbenc", "--enable-libgsm")
 LICENSES = {
     "license_x265": "src/x265/COPYING",
     "license_xvidcore": "src/xvidcore/xvidcore/LICENSE",
@@ -24,6 +24,7 @@ LICENSES = {
     "license_speex": "src/speex/COPYING",
     "license_opencore_amr": "src/opencore-amr/LICENSE",
     "license_vo_amrwbenc": "src/vo-amrwbenc/COPYING",
+    "license_gsm": "src/gsm/COPYRIGHT",
 }
 
 
@@ -80,7 +81,7 @@ with zipfile.ZipFile(BASE) as base, tempfile.TemporaryDirectory(prefix="subtitle
     with zipfile.ZipFile(staged) as archive:
         assert len(archive.namelist()) == len(set(archive.namelist())), "Duplicate AAR entries"
     output.write_bytes(staged.read_bytes())
-    pom = (ROOT / "8.1.0-mpv2/ffmpeg-kit-next-8.1.0-mpv2.pom").read_text()
-    (destination / f"ffmpeg-kit-next-{VERSION}.pom").write_text(pom.replace("8.1.0-mpv2", VERSION))
+    pom = (ROOT / "8.1.0-mpv3/ffmpeg-kit-next-8.1.0-mpv3.pom").read_text()
+    (destination / f"ffmpeg-kit-next-{VERSION}.pom").write_text(pom.replace("8.1.0-mpv3", VERSION))
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
     print(f"Verified all four ABIs, public symbols and 16 KB alignment.\n{output}\nSHA-256: {digest}")

@@ -103,7 +103,8 @@ internal class MediaConvertViewModel(application: Application) :
         application.getString(R.string.media_convert_quality_custom)
     )
     val qualityValues = listOf("-1", "18", "23", "28", "33", "custom")
-    private val audioExtensions = setOf("mp3", "aac", "m4a", "m4b", "wav", "flac", "ogg", "oga", "opus", "wma", "ac3", "amr", "aif", "aiff", "ape", "mka", "alac", "tta", "wv", "mid", "midi", "3ga")
+    private val audioExtensions = setOf("mp3", "aac", "m4a", "m4b", "wav", "flac", "ogg", "oga", "opus", "wma", "ac3", "amr", "aif", "aiff", "ape", "mka", "alac", "tta", "wv", "mid", "midi", "3ga",
+        "awb", "mp2", "gsm", "dts", "au", "snd", "caf", "w64", "voc", "spx", "ircam", "eac3", "mlp", "thd")
     private val settingsManager = SettingsManager.getInstance(application)
     private val taskController = LongTaskController(dependencies.taskStateStore, "media-convert")
     private var selectedMediaFiles: List<SelectedMediaFile> = emptyList()
@@ -381,19 +382,19 @@ internal class MediaConvertViewModel(application: Application) :
         return try {
             val prefix = "[${index + 1}/$total]"
             appendLog(string(R.string.media_convert_start_file, prefix, file.fileName))
-            val sourceProbe = if (format.isAudioOnly) null else withContext(Dispatchers.IO) { probeSourceUri(file.uri)?.let { if (isLikelyAudioFile(file)) it.copy(hasVideo = false, videoBitrateBps = null) else it } ?: MediaConvertSource(true, null) }
+            val sourceProbe = withContext(Dispatchers.IO) { probeSourceUri(file.uri)?.let { if (isLikelyAudioFile(file)) it.copy(hasVideo = false, videoBitrateBps = null) else it } ?: MediaConvertSource(true, null) }
             val options = currentState.options
             if (!format.isAudioOnly && options.videoBitrate.mode == MediaConvertBitrateMode.ORIGINAL &&
-                (options.selectedVideoCodec != "copy" || sourceProbe?.hasVideo == false) && sourceProbe?.videoBitrateBps == null) {
+                (options.selectedVideoCodec != "copy" || !sourceProbe.hasVideo) && sourceProbe.videoBitrateBps == null) {
                 return Result.failure(IllegalStateException(string(R.string.media_convert_bitrate_source_unavailable)))
             }
             val audioCodec = format.audioEncoder(options.selectedAudioCodec)
-            if (!format.isAudioOnly && options.audioBitrate == MediaConvertAudioBitrate.ORIGINAL && audioCodec != "copy" &&
-                MediaConvertAudioCodecs.profile(audioCodec, format.formatName).adjustableBitrate && sourceProbe?.audioBitrateBps == null) {
+            if (options.audioBitrate == MediaConvertAudioBitrate.ORIGINAL && audioCodec != "copy" &&
+                MediaConvertAudioCodecs.profile(audioCodec, format.formatName).adjustableBitrate && sourceProbe.audioBitrateBps == null) {
                 return Result.failure(IllegalStateException(string(R.string.media_convert_audio_bitrate_source_unavailable)))
             }
             input = withContext(Dispatchers.IO) { ffmpegInput(file.uri) }
-            if (sourceProbe?.hasVideo == false) {
+            if (!format.isAudioOnly && !sourceProbe.hasVideo) {
                 appendLog(string(R.string.media_convert_no_video_stream, prefix))
             }
             appendLog(string(R.string.media_convert_converting, prefix))

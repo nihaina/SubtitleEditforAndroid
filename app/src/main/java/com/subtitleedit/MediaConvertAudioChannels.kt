@@ -44,9 +44,10 @@ internal object MediaConvertAudioChannels {
         return presets.filter { (counts.isEmpty() || it.channels in counts) && layout(codec, it) != null }
     }
 
-    // Matroska's raw PCM codec IDs carry a channel count without a speaker-position mask.
+    // These headers record a channel count without a speaker-position mask.
     fun recordsLayout(codec: String, muxer: String): Boolean =
-        muxer != "matroska" || !codec.startsWith("pcm_") || codec in setOf("pcm_alaw", "pcm_mulaw", "pcm_dvd")
+        muxer !in setOf("au", "ircam", "voc") &&
+            (muxer != "matroska" || !codec.startsWith("pcm_") || codec in setOf("pcm_alaw", "pcm_mulaw", "pcm_dvd"))
 
     fun parameters(codec: String, muxer: String, index: Int, source: MediaConvertSource?): MediaConvertChannelParameters {
         val requested = presets.firstOrNull { it.index == index }

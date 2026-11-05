@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RUNTIME_VERSION="0.41.0-ffmpeg8.1.2-2"
-FFMPEG_VERSION="${FFMPEG_VERSION:-8.1.0-mpv3}"
+FFMPEG_VERSION="${FFMPEG_VERSION:-8.1.0-mpv4}"
 APK_FLAVOR="${APK_FLAVOR:-standard}"
 RUNTIME_AAR="${PROJECT_ROOT}/app/libs/mpv-runtime-maven/com/subtitleedit/native/mpv-android-runtime/${RUNTIME_VERSION}/mpv-android-runtime-${RUNTIME_VERSION}.aar"
 FFMPEG_AAR="${PROJECT_ROOT}/app/libs/ffmpeg-kit-next-maven/com/arthenica/ffmpeg-kit-next/${FFMPEG_VERSION}/ffmpeg-kit-next-${FFMPEG_VERSION}.aar"
