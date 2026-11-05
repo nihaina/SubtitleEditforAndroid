@@ -101,4 +101,15 @@
     <string name="media_convert_audio_bitrate_adapt_hint">码率按编码器支持的范围或档位匹配。</string>
     <string name="media_convert_audio_derived_bitrate_hint">此编码器的码率由音频参数决定，不使用自定义码率。</string>
     <string name="media_convert_audio_experimental_hint">此音频编码器为实验性实现。</string>
+    <string name="media_convert_audio_bitrate_title">选择目标音频码率</string>
+    <string name="media_convert_audio_bitrate_limits">自定义码率范围：%1$s–%2$s kbps，最多支持 3 位小数。</string>
+    <string name="media_convert_audio_bitrate_source_unavailable">无法读取源音轨码率，请选择自动、预设或自定义码率。</string>
+    <string name="media_convert_audio_bitrate_batch">以上显示首个文件的音轨码率；原始码率按每个文件分别读取，全部文件均可读取时才能选择。</string>
+    <string name="media_convert_audio_bitrate_target_hint">码率作为音频编码目标；编码器有档位或参数限制时会自动匹配，实际输出码率可能有所不同。</string>
+    <string name="media_convert_audio_bitrate_derived">由编码器决定</string>
+    <string name="media_convert_sample_rate_title">选择目标采样率</string>
+    <string name="media_convert_sample_rate_presets">常规采样率</string>
+    <string name="media_convert_sample_rate_source_unavailable">未读取到源音轨采样率，转换时将重新读取并自动适配。</string>
+    <string name="media_convert_sample_rate_batch">以上显示首个文件的音轨采样率；选择原始采样率时，每个文件分别读取。</string>
+    <string name="media_convert_sample_rate_adapt_hint">仅显示当前编码器支持的常规采样率；原始采样率不兼容时会自动匹配支持的值。</string>
 </resources>

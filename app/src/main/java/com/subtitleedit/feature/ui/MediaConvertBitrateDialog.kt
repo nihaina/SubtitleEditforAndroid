@@ -169,7 +169,7 @@ internal fun MediaConvertBitrateDialog(
 }
 
 @Composable
-private fun BitrateChoice(
+internal fun BitrateChoice(
     text: String,
     detail: String,
     selected: Boolean,

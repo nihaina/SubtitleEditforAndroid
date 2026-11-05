@@ -49,6 +49,7 @@ import com.subtitleedit.MediaConvertVideoSize
 import com.subtitleedit.MediaConvertBitrateMode
 import com.subtitleedit.MediaConvertVideoBitrate
 import com.subtitleedit.MediaConvertVideoBitrateSettings
+import com.subtitleedit.MediaConvertAudioBitrate
 import com.subtitleedit.ui.components.AppChoiceTile
 import com.subtitleedit.ui.components.AppConflictDialog
 import com.subtitleedit.ui.components.AppLogBox
@@ -130,10 +131,17 @@ internal fun MediaConvertScreen(
     sourceVideoBitrateBps: Long? = null,
     canUseOriginalVideoBitrate: Boolean = false,
     audioBitrateEditable: Boolean = true,
-    audioCodecHint: String = ""
+    audioCodecHint: String = "",
+    sourceAudioBitrateBps: Long? = null,
+    canUseOriginalAudioBitrate: Boolean = false,
+    effectiveAudioCodec: String = selectedAudioCodec,
+    audioMuxer: String = "",
+    sourceAudioSampleRate: Int? = null
 ) {
     var showResolutionDialog by rememberSaveable { mutableStateOf(false) }
     var showBitrateDialog by rememberSaveable { mutableStateOf(false) }
+    var showAudioBitrateDialog by rememberSaveable { mutableStateOf(false) }
+    var showSampleRateDialog by rememberSaveable { mutableStateOf(false) }
     AppToolScaffold(
         title = stringResource(R.string.media_convert_title),
         onBack = onBack,
@@ -302,14 +310,52 @@ internal fun MediaConvertScreen(
                     val audioEnabled = !isConverting && selectedAudioCodec != "copy"
                     val audioLossless = selectedAudioCodec.startsWith("pcm_") || selectedAudioCodec == "flac" ||
                         (selectedAudioCodec == "auto" && selectedFormat in setOf("wav", "flac"))
-                    MediaConvertNumberField(stringResource(R.string.activity_media_convert_text_13), audioBitrate, stringResource(R.string.activity_media_convert_hint_01), audioEnabled && !audioLossless && audioBitrateEditable, onAudioBitrateChange)
-                    AppOptionSelector(
-                        stringResource(R.string.activity_media_convert_text_14),
-                        sampleRates.firstOrNull { it.id == sampleRateIndex } ?: sampleRates.firstOrNull(),
-                        sampleRates,
-                        audioEnabled,
-                        onSelected = onSampleRateSelected
-                    )
+                    if (videoCodecs.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+                        ) {
+                            Text(stringResource(R.string.activity_media_convert_text_13), modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
+                            OutlinedButton(onClick = { showAudioBitrateDialog = true }, enabled = audioEnabled && !audioLossless && audioBitrateEditable, modifier = Modifier.weight(1f)) {
+                                val label = when {
+                                    !audioBitrateEditable -> stringResource(R.string.media_convert_audio_bitrate_derived)
+                                    audioBitrate == MediaConvertAudioBitrate.ORIGINAL -> stringResource(R.string.media_convert_bitrate_original) +
+                                        (sourceAudioBitrateBps?.let { " (${MediaConvertAudioBitrate.label(it)})" } ?: "")
+                                    audioBitrate.isBlank() -> stringResource(R.string.media_convert_bitrate_auto)
+                                    else -> "$audioBitrate kbps"
+                                }
+                                Text(label, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    } else {
+                        MediaConvertNumberField(stringResource(R.string.activity_media_convert_text_13), audioBitrate, stringResource(R.string.activity_media_convert_hint_01), audioEnabled && !audioLossless && audioBitrateEditable, onAudioBitrateChange)
+                    }
+                    if (videoCodecs.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+                        ) {
+                            Text(stringResource(R.string.activity_media_convert_text_14), modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
+                            OutlinedButton(onClick = { showSampleRateDialog = true }, enabled = audioEnabled, modifier = Modifier.weight(1f)) {
+                                val label = if (sampleRateIndex == 0) {
+                                    stringResource(R.string.media_convert_sample_rate_original) + (sourceAudioSampleRate?.let { " ($it Hz)" } ?: "")
+                                } else sampleRates.firstOrNull { it.id == sampleRateIndex }?.label ?: stringResource(R.string.media_convert_audio_auto_adapt)
+                                Text(label, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    } else {
+                        AppOptionSelector(
+                            stringResource(R.string.activity_media_convert_text_14),
+                            sampleRates.firstOrNull { it.id == sampleRateIndex } ?: sampleRates.firstOrNull(),
+                            sampleRates,
+                            audioEnabled,
+                            onSelected = onSampleRateSelected
+                        )
+                    }
                     AppOptionSelector(
                         stringResource(R.string.activity_media_convert_text_15),
                         channels.firstOrNull { it.id == channelIndex } ?: channels.firstOrNull(),
@@ -337,6 +383,30 @@ internal fun MediaConvertScreen(
         AppSection(title = stringResource(R.string.activity_settings_text_06)) {
             AppLogBox(log)
         }
+    }
+
+    if (showSampleRateDialog && !isConverting && videoCodecs.isNotEmpty() && selectedAudioCodec != "copy") {
+        MediaConvertSampleRateDialog(
+            initialIndex = sampleRateIndex,
+            options = sampleRates,
+            sourceSampleRate = sourceAudioSampleRate,
+            multipleSources = multipleSources,
+            onDismiss = { showSampleRateDialog = false },
+            onConfirm = { onSampleRateSelected(it); showSampleRateDialog = false }
+        )
+    }
+
+    if (showAudioBitrateDialog && !isConverting && videoCodecs.isNotEmpty() && selectedAudioCodec != "copy" && audioBitrateEditable) {
+        MediaConvertAudioBitrateDialog(
+            initial = audioBitrate,
+            codec = effectiveAudioCodec,
+            muxer = audioMuxer,
+            sourceBitsPerSecond = sourceAudioBitrateBps,
+            canUseOriginal = canUseOriginalAudioBitrate,
+            multipleSources = multipleSources,
+            onDismiss = { showAudioBitrateDialog = false },
+            onConfirm = { onAudioBitrateChange(it); showAudioBitrateDialog = false }
+        )
     }
 
     if (showBitrateDialog && !isConverting && videoCodecs.isNotEmpty() && selectedVideoCodec != "copy") {

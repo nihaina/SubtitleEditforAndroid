@@ -8,7 +8,8 @@ internal data class MediaConvertAudioProfile(
     val adjustableBitrate: Boolean = true,
     val bitrateValues: List<Int> = emptyList(),
     val defaultBitrate: Int? = null,
-    val experimental: Boolean = false
+    val experimental: Boolean = false,
+    val sampleRateRange: IntRange? = null
 )
 
 internal data class MediaConvertAudioParameters(val sampleRate: Int?, val channels: Int?, val bitrate: Long?)
@@ -39,6 +40,7 @@ internal object MediaConvertAudioCodecs {
         "libopencore_amrnb" to MediaConvertAudioProfile(listOf(8000), listOf(1), bitrateValues = amrNbBitrates, defaultBitrate = 12200),
         "libvo_amrwbenc" to MediaConvertAudioProfile(listOf(16000), listOf(1), bitrateValues = amrWbBitrates, defaultBitrate = 23850),
         "libspeex" to MediaConvertAudioProfile(listOf(8000, 16000, 32000), monoStereo, defaultBitrate = 27000),
+        "libvorbis" to MediaConvertAudioProfile(sampleRateRange = 1..200000),
         "real_144" to MediaConvertAudioProfile(listOf(8000), listOf(1), adjustableBitrate = false),
         "adpcm_swf" to MediaConvertAudioProfile(listOf(11025, 22050, 44100), monoStereo, adjustableBitrate = false),
         "adpcm_ima_wav" to MediaConvertAudioProfile(channels = monoStereo, adjustableBitrate = false),
@@ -77,13 +79,17 @@ internal object MediaConvertAudioCodecs {
         val requestedRate = explicitRate ?: source?.audioSampleRate
         val rate = if (profile.sampleRates.isNotEmpty()) {
             profile.sampleRates.minBy { abs(it - (requestedRate ?: 44100)) }
+        } else if (requestedRate != null && profile.sampleRateRange != null && requestedRate !in profile.sampleRateRange) {
+            requestedRate.coerceIn(profile.sampleRateRange)
         } else explicitRate
         val explicitChannels = when (options.channelIndex) { 1 -> 2; 2 -> 1; else -> null }
         val requestedChannels = explicitChannels ?: source?.audioChannels
         val channels = if (profile.channels.isNotEmpty()) {
             profile.channels.lastOrNull { it <= (requestedChannels ?: 2) } ?: profile.channels.first()
         } else explicitChannels
-        val requestedBitrate = options.audioBitrate.trim().toLongOrNull()?.takeIf { it in 1..Long.MAX_VALUE / 1000 }?.times(1000)
+        val requestedBitrate = if (profile.adjustableBitrate) {
+            MediaConvertAudioBitrate.targetBitsPerSecond(options.audioBitrate, source?.audioBitrateBps)
+        } else null
         val bitrate = when {
             !profile.adjustableBitrate -> null
             profile.bitrateValues.isNotEmpty() -> profile.bitrateValues.minBy { abs(it.toLong() - (requestedBitrate ?: profile.defaultBitrate!!.toLong())) }.toLong()
@@ -97,6 +103,15 @@ internal object MediaConvertAudioCodecs {
             else -> requestedBitrate
         }
         return MediaConvertAudioParameters(rate, channels, bitrate)
+    }
+
+    fun sampleRateIndices(codec: String, muxer: String): List<Int> {
+        val profile = profile(codec, muxer)
+        return MediaConvertCommand.sampleRates.indices.filter { index ->
+            val rate = MediaConvertCommand.sampleRates[index]
+            index == 0 || ((profile.sampleRates.isEmpty() || rate in profile.sampleRates) &&
+                (profile.sampleRateRange == null || rate in profile.sampleRateRange))
+        }.sortedBy { MediaConvertCommand.sampleRates[it] }
     }
 
     private fun dtsBitrate(sampleRate: Int, channels: Int, requested: Long): Long {

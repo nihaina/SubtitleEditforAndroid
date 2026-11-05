@@ -65,4 +65,28 @@ class MediaConvertAudioCodecsTest {
         assertEquals(768000L, MediaConvertAudioCodecs.parameters("dca", "matroska", options,
             MediaConvertSource(true, 1.0, audioSampleRate = 96000, audioChannels = 6)).bitrate)
     }
+
+    @Test
+    fun expandedSampleRatesKeepSavedIndicesAndFilterByCodecAndContainer() {
+        assertEquals(listOf(0, 48000, 44100, 22050, 16000, 8000, 32000, 96000, 88200, 192000, 176400, 24000, 11025, 12000),
+            MediaConvertCommand.sampleRates.take(14))
+        fun offered(codec: String, muxer: String = "matroska") = MediaConvertAudioCodecs.sampleRateIndices(codec, muxer).map { MediaConvertCommand.sampleRates[it] }
+        assertTrue(offered("pcm_s16le").containsAll(listOf(1000, 2000, 4000, 6000, 7350, 64000, 352800, 384000)))
+        assertTrue(offered("aac").containsAll(listOf(7350, 64000)))
+        assertFalse(1000 in offered("aac"))
+        assertEquals(listOf(0, 8000), offered("libopencore_amrnb"))
+        assertEquals(listOf(0, 16000), offered("libspeex", "flv"))
+        assertEquals(listOf(0, 11025, 22050, 44100), offered("pcm_s16le", "flv"))
+        assertFalse(384000 in offered("libvorbis"))
+        assertEquals(offered("pcm_s16le").sorted(), offered("pcm_s16le"))
+    }
+
+    @Test
+    fun originalSamplingRateStaysPerInputAndOnlyAdaptsWhenUnsupported() {
+        val options = MediaConvertOptions()
+        assertEquals(7350, MediaConvertAudioCodecs.parameters("aac", "mp4", options, MediaConvertSource(true, 1.0, audioSampleRate = 1000)).sampleRate)
+        assertEquals(64000, MediaConvertAudioCodecs.parameters("aac", "mp4", options, MediaConvertSource(true, 1.0, audioSampleRate = 64000)).sampleRate)
+        assertNull(MediaConvertAudioCodecs.parameters("libvorbis", "matroska", options, MediaConvertSource(true, 1.0, audioSampleRate = 45000)).sampleRate)
+        assertEquals(200000, MediaConvertAudioCodecs.parameters("libvorbis", "matroska", options, MediaConvertSource(true, 1.0, audioSampleRate = 384000)).sampleRate)
+    }
 }

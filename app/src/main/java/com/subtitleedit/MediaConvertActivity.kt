@@ -63,10 +63,10 @@ class MediaConvertActivity : AppComposeActivity() {
             val effectiveAudioCodec = format?.audioEncoder(state.options.selectedAudioCodec).orEmpty()
             val audioProfile = MediaConvertAudioCodecs.profile(effectiveAudioCodec, format?.formatName.orEmpty())
             val restrictedAudio = format?.isAudioOnly == false && effectiveAudioCodec != "copy"
-            val sampleRateOptions = viewModel.sampleRates.mapIndexed { index, label -> AppOption(index, label) }.filter {
-                (format?.isAudioOnly != true || it.id <= 5) &&
-                    (!restrictedAudio || audioProfile.sampleRates.isEmpty() || it.id == 0 || MediaConvertCommand.sampleRates[it.id] in audioProfile.sampleRates)
-            }.map { if (restrictedAudio && it.id == 0 && audioProfile.sampleRates.isNotEmpty()) AppOption(0, getString(R.string.media_convert_audio_auto_adapt)) else it }
+            val sampleRateIndices = if (format?.isAudioOnly == false) {
+                MediaConvertAudioCodecs.sampleRateIndices(effectiveAudioCodec, format.formatName)
+            } else (0..5).toList()
+            val sampleRateOptions = sampleRateIndices.map { index -> AppOption(index, viewModel.sampleRates[index]) }
             val channelOptions = viewModel.channels.mapIndexed { index, label -> AppOption(index, label) }.filter {
                 !restrictedAudio || audioProfile.channels.isEmpty() || it.id == 0 || (if (it.id == 1) 2 else 1) in audioProfile.channels
             }.map { if (restrictedAudio && it.id == 0 && audioProfile.channels.isNotEmpty()) AppOption(0, getString(R.string.media_convert_audio_auto_adapt)) else it }
@@ -137,6 +137,11 @@ class MediaConvertActivity : AppComposeActivity() {
                     multipleSources = state.selectedFiles.size > 1,
                     sourceVideoBitrateBps = state.selectedFiles.firstOrNull()?.videoBitrateBps,
                     canUseOriginalVideoBitrate = state.selectedFiles.isNotEmpty() && state.selectedFiles.all { (it.videoBitrateBps ?: 0) > 0 },
+                    sourceAudioBitrateBps = state.selectedFiles.firstOrNull()?.audioBitrateBps,
+                    canUseOriginalAudioBitrate = state.selectedFiles.isNotEmpty() && state.selectedFiles.all { (it.audioBitrateBps ?: 0) > 0 },
+                    effectiveAudioCodec = effectiveAudioCodec,
+                    audioMuxer = format?.formatName.orEmpty(),
+                    sourceAudioSampleRate = state.selectedFiles.firstOrNull()?.audioSampleRate,
                     qualityHint = getString(R.string.media_convert_quality_range, qualityRange.first, qualityRange.last, if (effectiveVideoCodec == "libtheora") getString(R.string.media_convert_quality_larger) else getString(R.string.media_convert_quality_smaller))
                 )
             }

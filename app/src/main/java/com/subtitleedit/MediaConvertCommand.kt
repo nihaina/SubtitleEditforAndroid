@@ -9,12 +9,15 @@ internal data class MediaConvertSource(
     val frameRate: Double? = null,
     val videoBitrateBps: Long? = null,
     val audioSampleRate: Int? = null,
-    val audioChannels: Int? = null
+    val audioChannels: Int? = null,
+    val audioBitrateBps: Long? = null
 )
 
 /** Builds argument arrays so SAF URLs and file names remain single arguments. */
 internal object MediaConvertCommand {
-    val sampleRates = listOf(0, 48000, 44100, 22050, 16000, 8000, 32000, 96000, 88200, 192000, 176400, 24000, 11025, 12000)
+    // Keep existing indices stable; the video settings present these values in ascending order.
+    val sampleRates = listOf(0, 48000, 44100, 22050, 16000, 8000, 32000, 96000, 88200, 192000, 176400, 24000, 11025, 12000,
+        1000, 2000, 4000, 6000, 7350, 64000, 352800, 384000)
 
     fun qualityRange(codec: String): IntRange = when (codec) {
         "libx264", "libx265" -> 0..51
@@ -93,6 +96,10 @@ internal object MediaConvertCommand {
                 parameters.bitrate?.let { addAll(listOf("-b:a", MediaConvertVideoBitrate.ffmpegValue(it))) }
                 parameters.sampleRate?.let { addAll(listOf("-ar", it.toString())) }
                 parameters.channels?.let { addAll(listOf("-ac", it.toString())) }
+                if (audio == "wavpack" && (parameters.sampleRate ?: source?.audioSampleRate ?: 48000) < 8000) {
+                    // Very low rates can produce an automatic frame size below WavPack's minimum of 128.
+                    addAll(listOf("-frame_size:a", "1024"))
+                }
             } else if (audio != "copy") {
                 if (!audio.startsWith("pcm_") && audio != "flac") options.audioBitrate.trim().toIntOrNull()?.takeIf { it > 0 }?.let {
                     addAll(listOf("-b:a", "${it}k"))
