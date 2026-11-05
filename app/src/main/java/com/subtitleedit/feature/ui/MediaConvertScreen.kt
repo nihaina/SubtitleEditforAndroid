@@ -136,12 +136,14 @@ internal fun MediaConvertScreen(
     canUseOriginalAudioBitrate: Boolean = false,
     effectiveAudioCodec: String = selectedAudioCodec,
     audioMuxer: String = "",
-    sourceAudioSampleRate: Int? = null
+    sourceAudioSampleRate: Int? = null,
+    sourceAudioChannelLabel: String = ""
 ) {
     var showResolutionDialog by rememberSaveable { mutableStateOf(false) }
     var showBitrateDialog by rememberSaveable { mutableStateOf(false) }
     var showAudioBitrateDialog by rememberSaveable { mutableStateOf(false) }
     var showSampleRateDialog by rememberSaveable { mutableStateOf(false) }
+    var showChannelDialog by rememberSaveable { mutableStateOf(false) }
     AppToolScaffold(
         title = stringResource(R.string.media_convert_title),
         onBack = onBack,
@@ -356,13 +358,30 @@ internal fun MediaConvertScreen(
                             onSelected = onSampleRateSelected
                         )
                     }
-                    AppOptionSelector(
-                        stringResource(R.string.activity_media_convert_text_15),
-                        channels.firstOrNull { it.id == channelIndex } ?: channels.firstOrNull(),
-                        channels,
-                        audioEnabled,
-                        onSelected = onChannelSelected
-                    )
+                    if (videoCodecs.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+                        ) {
+                            Text(stringResource(R.string.activity_media_convert_text_15), modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
+                            OutlinedButton(onClick = { showChannelDialog = true }, enabled = audioEnabled, modifier = Modifier.weight(1f)) {
+                                val label = if (channelIndex == 0) {
+                                    stringResource(R.string.media_convert_channel_original) + sourceAudioChannelLabel.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+                                } else channels.firstOrNull { it.id == channelIndex }?.label ?: stringResource(R.string.media_convert_audio_auto_adapt)
+                                Text(label, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    } else {
+                        AppOptionSelector(
+                            stringResource(R.string.activity_media_convert_text_15),
+                            channels.firstOrNull { it.id == channelIndex } ?: channels.firstOrNull(),
+                            channels,
+                            audioEnabled,
+                            onSelected = onChannelSelected
+                        )
+                    }
                 }
             }
         }
@@ -383,6 +402,17 @@ internal fun MediaConvertScreen(
         AppSection(title = stringResource(R.string.activity_settings_text_06)) {
             AppLogBox(log)
         }
+    }
+
+    if (showChannelDialog && !isConverting && videoCodecs.isNotEmpty() && selectedAudioCodec != "copy") {
+        MediaConvertChannelDialog(
+            initialIndex = channelIndex,
+            options = channels,
+            sourceLabel = sourceAudioChannelLabel,
+            multipleSources = multipleSources,
+            onDismiss = { showChannelDialog = false },
+            onConfirm = { onChannelSelected(it); showChannelDialog = false }
+        )
     }
 
     if (showSampleRateDialog && !isConverting && videoCodecs.isNotEmpty() && selectedAudioCodec != "copy") {

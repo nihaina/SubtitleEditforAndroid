@@ -112,4 +112,16 @@
     <string name="media_convert_sample_rate_source_unavailable">未读取到源音轨采样率，转换时将重新读取并自动适配。</string>
     <string name="media_convert_sample_rate_batch">以上显示首个文件的音轨采样率；选择原始采样率时，每个文件分别读取。</string>
     <string name="media_convert_sample_rate_adapt_hint">仅显示当前编码器支持的常规采样率；原始采样率不兼容时会自动匹配支持的值。</string>
+    <string name="media_convert_channel_title">选择目标声道</string>
+    <string name="media_convert_channel_presets">常规声道</string>
+    <string name="media_convert_channel_mono_layout">单声道（1.0）</string>
+    <string name="media_convert_channel_stereo_layout">立体声（2.0）</string>
+    <string name="media_convert_channel_four">四声道（4.0）</string>
+    <string name="media_convert_channel_side">（侧环绕）</string>
+    <string name="media_convert_channel_wide">（宽声场）</string>
+    <string name="media_convert_channel_count">%1$d 声道</string>
+    <string name="media_convert_channel_source_unavailable">未读取到源音轨声道，转换时将重新读取并自动适配。</string>
+    <string name="media_convert_channel_batch">以上显示首个文件的音轨声道；选择原始声道时，每个文件分别读取。</string>
+    <string name="media_convert_channel_adapt_hint">仅显示当前编码器支持的声道布局；不兼容的原始布局会自动适配。</string>
+    <string name="media_convert_channel_count_only_hint">此编码器与封装组合仅记录声道数量，播放器可能无法识别具体的扬声器布局。</string>
 </resources>

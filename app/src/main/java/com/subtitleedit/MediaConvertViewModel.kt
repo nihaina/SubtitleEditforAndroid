@@ -38,7 +38,9 @@ internal data class MediaConvertFileUi(
     val videoSize: MediaConvertVideoSize? = null,
     val videoBitrateBps: Long? = null,
     val audioBitrateBps: Long? = null,
-    val audioSampleRate: Int? = null
+    val audioSampleRate: Int? = null,
+    val audioChannels: Int? = null,
+    val audioChannelLayout: String? = null
 )
 
 internal data class MediaConvertUiState(
@@ -77,8 +79,8 @@ internal class MediaConvertViewModel(application: Application) :
         private const val OUTPUT_DIRECTORY_KEY = "media_convert"
     }
 
-    private data class SelectedMediaFile(val uri: Uri, val fileName: String, val mediaInfo: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null)
-    private data class SourceDescription(val text: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null)
+    private data class SelectedMediaFile(val uri: Uri, val fileName: String, val mediaInfo: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null)
+    private data class SourceDescription(val text: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null)
     private data class OutputResult(val uri: Uri, val fileName: String)
 
     val formatList: List<MediaConvertFormatInfo>
@@ -89,7 +91,8 @@ internal class MediaConvertViewModel(application: Application) :
     val channels = listOf(
         application.getString(R.string.media_convert_channel_original),
         application.getString(R.string.media_convert_channel_stereo),
-        application.getString(R.string.media_convert_channel_mono)
+        application.getString(R.string.media_convert_channel_mono),
+        "2.1", application.getString(R.string.media_convert_channel_four), "5.0", "5.1", "7.0", "7.1"
     )
     val qualityLabels = listOf(
         application.getString(R.string.media_convert_quality_original),
@@ -135,7 +138,7 @@ internal class MediaConvertViewModel(application: Application) :
         }
         setState {
             copy(
-                selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo, it.videoSize, it.videoBitrateBps, it.audioBitrateBps, it.audioSampleRate) },
+                selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo, it.videoSize, it.videoBitrateBps, it.audioBitrateBps, it.audioSampleRate, it.audioChannels, it.audioChannelLayout) },
                 selectedFormat = null,
                 log = ""
             )
@@ -256,10 +259,10 @@ internal class MediaConvertViewModel(application: Application) :
                 }
                 val current = selectedMediaFiles.indexOfFirst { it.uri == uri }
                 if (current < 0) return@forEachIndexed
-                selectedMediaFiles = selectedMediaFiles.toMutableList().also { list -> list[current] = list[current].copy(mediaInfo = info.text, videoSize = info.videoSize, videoBitrateBps = info.videoBitrateBps, audioBitrateBps = info.audioBitrateBps, audioSampleRate = info.audioSampleRate) }
+                selectedMediaFiles = selectedMediaFiles.toMutableList().also { list -> list[current] = list[current].copy(mediaInfo = info.text, videoSize = info.videoSize, videoBitrateBps = info.videoBitrateBps, audioBitrateBps = info.audioBitrateBps, audioSampleRate = info.audioSampleRate, audioChannels = info.audioChannels, audioChannelLayout = info.audioChannelLayout) }
                 setState {
                     copy(
-                        selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo, it.videoSize, it.videoBitrateBps, it.audioBitrateBps, it.audioSampleRate) },
+                        selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo, it.videoSize, it.videoBitrateBps, it.audioBitrateBps, it.audioSampleRate, it.audioChannels, it.audioChannelLayout) },
                         log = (log + string(R.string.media_convert_probe_summary, index + 1, snapshot.size, selected.fileName))
                             .takeLast(16000)
                     )
@@ -310,7 +313,8 @@ internal class MediaConvertViewModel(application: Application) :
         }.trimEnd()
         val video = info.getStreams().firstOrNull { it.getType() == "video" }
         val audio = info.getStreams().firstOrNull { it.getType() == "audio" }
-        return SourceDescription(text, video?.let(::videoSize), video?.let(::streamBitrateBps), audio?.let(::streamBitrateBps), audio?.getSampleRate()?.toIntOrNull()?.takeIf { it > 0 })
+        return SourceDescription(text, video?.let(::videoSize), video?.let(::streamBitrateBps), audio?.let(::streamBitrateBps),
+            audio?.getSampleRate()?.toIntOrNull()?.takeIf { it > 0 }, audio?.getNumberProperty("channels")?.toInt(), audio?.getChannelLayout())
     }
 
     private fun streamBitrateBps(stream: StreamInformation): Long? = MediaConvertVideoBitrate.sourceBitsPerSecond(
@@ -450,7 +454,7 @@ internal class MediaConvertViewModel(application: Application) :
             }
             val audio = info.getStreams().firstOrNull { it.getType() == "audio" }
             MediaConvertSource(video != null, info.getDuration()?.toDoubleOrNull()?.takeIf { it > 0 }, rate, video?.let(::streamBitrateBps),
-                audio?.getSampleRate()?.toIntOrNull(), audio?.getNumberProperty("channels")?.toInt(), audio?.let(::streamBitrateBps))
+                audio?.getSampleRate()?.toIntOrNull(), audio?.getNumberProperty("channels")?.toInt(), audio?.let(::streamBitrateBps), audio?.getChannelLayout())
         } catch (_: Exception) { null }
         finally { releaseFfmpegInput(input) }
     }

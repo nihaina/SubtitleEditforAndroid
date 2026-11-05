@@ -10,7 +10,8 @@ internal data class MediaConvertSource(
     val videoBitrateBps: Long? = null,
     val audioSampleRate: Int? = null,
     val audioChannels: Int? = null,
-    val audioBitrateBps: Long? = null
+    val audioBitrateBps: Long? = null,
+    val audioChannelLayout: String? = null
 )
 
 /** Builds argument arrays so SAF URLs and file names remain single arguments. */
@@ -96,6 +97,7 @@ internal object MediaConvertCommand {
                 parameters.bitrate?.let { addAll(listOf("-b:a", MediaConvertVideoBitrate.ffmpegValue(it))) }
                 parameters.sampleRate?.let { addAll(listOf("-ar", it.toString())) }
                 parameters.channels?.let { addAll(listOf("-ac", it.toString())) }
+                parameters.channelLayout?.let { addAll(listOf("-channel_layout:a", it)) }
                 if (audio == "wavpack" && (parameters.sampleRate ?: source?.audioSampleRate ?: 48000) < 8000) {
                     // Very low rates can produce an automatic frame size below WavPack's minimum of 128.
                     addAll(listOf("-frame_size:a", "1024"))

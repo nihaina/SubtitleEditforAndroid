@@ -12,7 +12,7 @@ internal data class MediaConvertAudioProfile(
     val sampleRateRange: IntRange? = null
 )
 
-internal data class MediaConvertAudioParameters(val sampleRate: Int?, val channels: Int?, val bitrate: Long?)
+internal data class MediaConvertAudioParameters(val sampleRate: Int?, val channels: Int?, val bitrate: Long?, val channelLayout: String? = null)
 
 internal object MediaConvertAudioCodecs {
     val pcmInteger = listOf("pcm_s16le", "pcm_s16be", "pcm_s24le", "pcm_s24be", "pcm_s32le", "pcm_s32be")
@@ -82,11 +82,8 @@ internal object MediaConvertAudioCodecs {
         } else if (requestedRate != null && profile.sampleRateRange != null && requestedRate !in profile.sampleRateRange) {
             requestedRate.coerceIn(profile.sampleRateRange)
         } else explicitRate
-        val explicitChannels = when (options.channelIndex) { 1 -> 2; 2 -> 1; else -> null }
-        val requestedChannels = explicitChannels ?: source?.audioChannels
-        val channels = if (profile.channels.isNotEmpty()) {
-            profile.channels.lastOrNull { it <= (requestedChannels ?: 2) } ?: profile.channels.first()
-        } else explicitChannels
+        val channelParameters = MediaConvertAudioChannels.parameters(codec, muxer, options.channelIndex, source)
+        val channels = channelParameters.channels
         val requestedBitrate = if (profile.adjustableBitrate) {
             MediaConvertAudioBitrate.targetBitsPerSecond(options.audioBitrate, source?.audioBitrateBps)
         } else null
@@ -102,7 +99,7 @@ internal object MediaConvertAudioCodecs {
             }
             else -> requestedBitrate
         }
-        return MediaConvertAudioParameters(rate, channels, bitrate)
+        return MediaConvertAudioParameters(rate, channels, bitrate, channelParameters.layout)
     }
 
     fun sampleRateIndices(codec: String, muxer: String): List<Int> {

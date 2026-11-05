@@ -67,14 +67,35 @@ class MediaConvertActivity : AppComposeActivity() {
                 MediaConvertAudioCodecs.sampleRateIndices(effectiveAudioCodec, format.formatName)
             } else (0..5).toList()
             val sampleRateOptions = sampleRateIndices.map { index -> AppOption(index, viewModel.sampleRates[index]) }
-            val channelOptions = viewModel.channels.mapIndexed { index, label -> AppOption(index, label) }.filter {
-                !restrictedAudio || audioProfile.channels.isEmpty() || it.id == 0 || (if (it.id == 1) 2 else 1) in audioProfile.channels
-            }.map { if (restrictedAudio && it.id == 0 && audioProfile.channels.isNotEmpty()) AppOption(0, getString(R.string.media_convert_audio_auto_adapt)) else it }
+            fun channelLabel(index: Int): String = when (index) {
+                1 -> getString(R.string.media_convert_channel_stereo_layout)
+                2 -> getString(R.string.media_convert_channel_mono_layout)
+                else -> viewModel.channels[index]
+            }
+            val channelOptions = if (format?.isAudioOnly == false) {
+                listOf(AppOption(0, channelLabel(0))) + MediaConvertAudioChannels.available(effectiveAudioCodec, format.formatName).map { preset ->
+                    val layout = MediaConvertAudioChannels.layout(effectiveAudioCodec, preset)
+                    val suffix = when {
+                        layout?.endsWith("(side)") == true -> getString(R.string.media_convert_channel_side)
+                        layout?.contains("(wide") == true -> getString(R.string.media_convert_channel_wide)
+                        else -> ""
+                    }
+                    AppOption(preset.index, channelLabel(preset.index) + suffix)
+                }
+            } else viewModel.channels.take(3).mapIndexed { index, label -> AppOption(index, label) }
+            val source = state.selectedFiles.firstOrNull()
+            val sourceChannelLabel = when (val layout = source?.audioChannelLayout) {
+                "mono" -> channelLabel(2)
+                "stereo" -> channelLabel(1)
+                null, "", "unknown" -> source?.audioChannels?.takeIf { it > 0 }?.let { getString(R.string.media_convert_channel_count, it) }.orEmpty()
+                else -> layout
+            }
             val audioHints = buildList {
                 if (restrictedAudio && (audioProfile.sampleRates.isNotEmpty() || audioProfile.channels.isNotEmpty())) add(getString(R.string.media_convert_audio_constraints_hint))
                 if (restrictedAudio && (audioProfile.bitrateValues.isNotEmpty() || effectiveAudioCodec in setOf("libspeex", "dca", "mp2"))) add(getString(R.string.media_convert_audio_bitrate_adapt_hint))
                 if (restrictedAudio && !audioProfile.adjustableBitrate) add(getString(R.string.media_convert_audio_derived_bitrate_hint))
                 if (restrictedAudio && audioProfile.experimental) add(getString(R.string.media_convert_audio_experimental_hint))
+                if (restrictedAudio && !MediaConvertAudioChannels.recordsLayout(effectiveAudioCodec, format?.formatName.orEmpty())) add(getString(R.string.media_convert_channel_count_only_hint))
             }.joinToString("\n")
             SubtitleEditComposeTheme {
                 MediaConvertScreen(
@@ -142,6 +163,7 @@ class MediaConvertActivity : AppComposeActivity() {
                     effectiveAudioCodec = effectiveAudioCodec,
                     audioMuxer = format?.formatName.orEmpty(),
                     sourceAudioSampleRate = state.selectedFiles.firstOrNull()?.audioSampleRate,
+                    sourceAudioChannelLabel = sourceChannelLabel,
                     qualityHint = getString(R.string.media_convert_quality_range, qualityRange.first, qualityRange.last, if (effectiveVideoCodec == "libtheora") getString(R.string.media_convert_quality_larger) else getString(R.string.media_convert_quality_smaller))
                 )
             }
