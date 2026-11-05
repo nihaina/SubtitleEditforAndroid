@@ -73,8 +73,7 @@ class MediaConvertActivity : AppComposeActivity() {
                     selectedVideoCodec = state.options.selectedVideoCodec,
                     audioCodecs = format?.audioCodecs.orEmpty().map(::codecOption),
                     selectedAudioCodec = state.options.selectedAudioCodec,
-                    resolutions = viewModel.resolutions.mapIndexed { index, label -> AppOption(index, label) },
-                    resolutionIndex = state.options.resolutionIndex,
+                    resolution = state.options.resolution,
                     videoBitrate = state.options.videoBitrate,
                     qualityOptions = viewModel.qualityValues.mapIndexed { index, id -> AppOption(id, viewModel.qualityLabels[index]) },
                     selectedQualityId = state.options.selectedQualityId,
@@ -116,6 +115,8 @@ class MediaConvertActivity : AppComposeActivity() {
                     audioFormatsExpanded = state.audioFormatsExpanded,
                     onToggleVideoFormats = viewModel::toggleVideoFormats,
                     onToggleAudioFormats = viewModel::toggleAudioFormats,
+                    sourceVideoSize = state.selectedFiles.firstNotNullOfOrNull { it.videoSize },
+                    multipleSources = state.selectedFiles.size > 1,
                     qualityHint = getString(R.string.media_convert_quality_range, qualityRange.first, qualityRange.last, if (effectiveVideoCodec == "libtheora") getString(R.string.media_convert_quality_larger) else getString(R.string.media_convert_quality_smaller))
                 )
             }

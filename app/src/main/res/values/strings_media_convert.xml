@@ -59,4 +59,26 @@
     <string name="media_convert_quality_range">范围 %1$d–%2$d，%3$s</string>
     <string name="media_convert_quality_larger">越大质量越高</string>
     <string name="media_convert_quality_smaller">越小质量越高</string>
+    <string name="media_convert_resolution_title">选择目标分辨率</string>
+    <string name="media_convert_resolution_done">完成</string>
+    <string name="media_convert_resolution_source">原始</string>
+    <string name="media_convert_resolution_custom">自定义分辨率</string>
+    <string name="media_convert_resolution_custom_suffix">（自定义）</string>
+    <string name="media_convert_resolution_lock">锁定比例</string>
+    <string name="media_convert_resolution_width">宽（像素）</string>
+    <string name="media_convert_resolution_height">高（像素）</string>
+    <string name="media_convert_resolution_limits">宽、高均须为 2–4096 的偶数；锁定比例时另一边自动按偶数取整。</string>
+    <string name="media_convert_resolution_presets">常规分辨率</string>
+    <string name="media_convert_resolution_portrait">竖屏</string>
+    <string name="media_convert_resolution_landscape">横屏</string>
+    <string name="media_convert_resolution_batch">以上显示首个视频的尺寸；选择原始分辨率时，每个文件保留各自的尺寸。</string>
+    <string name="media_convert_resolution_fit_rule">画面适配规则</string>
+    <string name="media_convert_fit_fit">适应（显示全部）</string>
+    <string name="media_convert_fit_fill">填充（充满画面）</string>
+    <string name="media_convert_fit_stretch">拉伸（画面变形）</string>
+    <string name="media_convert_fit_center">平铺（分辨率适配）</string>
+    <string name="media_convert_fit_fit_description">保持比例，完整保留画面，空白区域填充黑色。</string>
+    <string name="media_convert_fit_fill_description">保持比例充满画布，居中裁剪超出的画面。</string>
+    <string name="media_convert_fit_stretch_description">按目标宽高铺满画布，画面比例可能发生变形。</string>
+    <string name="media_convert_fit_center_description">按原尺寸居中放置，不缩放画面；不足补黑边，超出则裁剪。</string>
 </resources>

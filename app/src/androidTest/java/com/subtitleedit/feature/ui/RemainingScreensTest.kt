@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.subtitleedit.R
+import com.subtitleedit.MediaConvertResolutionSettings
 import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import org.junit.Assert.assertEquals
@@ -36,8 +37,7 @@ class RemainingScreensTest {
                     selectedVideoCodec = "",
                     audioCodecs = emptyList(),
                     selectedAudioCodec = "",
-                    resolutions = listOf(AppOption(0, "Original")),
-                    resolutionIndex = 0,
+                    resolution = MediaConvertResolutionSettings(),
                     videoBitrate = "",
                     qualityOptions = listOf(AppOption("-1", "Original")),
                     selectedQualityId = "-1",

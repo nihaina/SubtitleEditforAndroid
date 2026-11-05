@@ -40,7 +40,7 @@ class MediaConvertCommandTest {
 
     @Test
     fun copyIgnoresAllEncodingAndFilterSettings() {
-        val args = build("mkv", MediaConvertOptions(selectedVideoCodec = "copy", selectedAudioCodec = "copy", resolutionIndex = 3,
+        val args = build("mkv", MediaConvertOptions(selectedVideoCodec = "copy", selectedAudioCodec = "copy", resolution = MediaConvertResolutionSettings(presetIndex = 3),
             videoBitrate = "3000", audioBitrate = "192", selectedQualityId = "23", sampleRateIndex = 2, channelIndex = 1))
         assertEquals("copy", args.value("-c:v"))
         assertEquals("copy", args.value("-c:a"))
@@ -50,7 +50,7 @@ class MediaConvertCommandTest {
 
     @Test
     fun audioOutputDoesNotApplyVideoSettings() {
-        val args = build("mp3", MediaConvertOptions(resolutionIndex = 3, selectedQualityId = "23", videoBitrate = "3000", audioBitrate = "192"))
+        val args = build("mp3", MediaConvertOptions(resolution = MediaConvertResolutionSettings(presetIndex = 3), selectedQualityId = "23", videoBitrate = "3000", audioBitrate = "192"))
         assertEquals("0:a:0", args.value("-map"))
         assertEquals("192k", args.value("-b:a"))
         assertTrue("-vn" in args)

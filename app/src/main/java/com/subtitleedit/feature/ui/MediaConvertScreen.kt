@@ -27,6 +27,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -40,6 +43,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
+import com.subtitleedit.MediaConvertResolution
+import com.subtitleedit.MediaConvertResolutionSettings
+import com.subtitleedit.MediaConvertVideoSize
 import com.subtitleedit.ui.components.AppChoiceTile
 import com.subtitleedit.ui.components.AppConflictDialog
 import com.subtitleedit.ui.components.AppLogBox
@@ -73,8 +79,7 @@ internal fun MediaConvertScreen(
     selectedVideoCodec: String,
     audioCodecs: List<AppOption<String>>,
     selectedAudioCodec: String,
-    resolutions: List<AppOption<Int>>,
-    resolutionIndex: Int,
+    resolution: MediaConvertResolutionSettings,
     videoBitrate: String,
     qualityOptions: List<AppOption<String>>,
     selectedQualityId: String,
@@ -98,7 +103,7 @@ internal fun MediaConvertScreen(
     onFormatSelected: (String) -> Unit,
     onVideoCodecSelected: (String) -> Unit,
     onAudioCodecSelected: (String) -> Unit,
-    onResolutionSelected: (Int) -> Unit,
+    onResolutionSelected: (MediaConvertResolutionSettings) -> Unit,
     onVideoBitrateChange: (String) -> Unit,
     onQualitySelected: (String) -> Unit,
     onCustomQualityChange: (String) -> Unit,
@@ -116,8 +121,11 @@ internal fun MediaConvertScreen(
     audioFormatsExpanded: Boolean = false,
     onToggleVideoFormats: () -> Unit = {},
     onToggleAudioFormats: () -> Unit = {},
-    qualityHint: String = ""
+    qualityHint: String = "",
+    sourceVideoSize: MediaConvertVideoSize? = null,
+    multipleSources: Boolean = false
 ) {
+    var showResolutionDialog by rememberSaveable { mutableStateOf(false) }
     AppToolScaffold(
         title = stringResource(R.string.media_convert_title),
         onBack = onBack,
@@ -222,13 +230,17 @@ internal fun MediaConvertScreen(
                     if (videoCodecs.isNotEmpty()) {
                         AppOptionSelector(stringResource(R.string.activity_media_convert_text_08), videoCodecs.firstOrNull { it.id == selectedVideoCodec }, videoCodecs, !isConverting, onVideoCodecSelected)
                         val videoEnabled = !isConverting && selectedVideoCodec != "copy"
-                        AppOptionSelector(
-                            stringResource(R.string.activity_media_convert_text_09),
-                            resolutions.getOrNull(resolutionIndex),
-                            resolutions,
-                            videoEnabled,
-                            onSelected = onResolutionSelected
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(stringResource(R.string.activity_media_convert_text_09), modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
+                            OutlinedButton(onClick = { showResolutionDialog = true }, enabled = videoEnabled, modifier = Modifier.weight(1f)) {
+                                Text(
+                                    if (resolution.presetIndex == 0) stringResource(R.string.media_convert_resolution_original)
+                                    else resolution.size?.label.orEmpty() + if (resolution.presetIndex == MediaConvertResolution.CUSTOM) stringResource(R.string.media_convert_resolution_custom_suffix) else "",
+                                    modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis
+                                )
+                                Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
+                            }
+                        }
                         MediaConvertNumberField(stringResource(R.string.activity_media_convert_text_10), videoBitrate, stringResource(R.string.activity_media_convert_hint_01), videoEnabled, onVideoBitrateChange)
                         AppOptionSelector(
                             stringResource(R.string.activity_media_convert_text_11),
@@ -289,6 +301,16 @@ internal fun MediaConvertScreen(
         AppSection(title = stringResource(R.string.activity_settings_text_06)) {
             AppLogBox(log)
         }
+    }
+
+    if (showResolutionDialog && !isConverting && videoCodecs.isNotEmpty() && selectedVideoCodec != "copy") {
+        MediaConvertResolutionDialog(
+            initial = resolution,
+            sourceSize = sourceVideoSize,
+            multipleSources = multipleSources,
+            onDismiss = { showResolutionDialog = false },
+            onConfirm = { onResolutionSelected(it); showResolutionDialog = false }
+        )
     }
 
     if (dialog == MediaConvertDialog.OUTPUT_CONFLICT) {

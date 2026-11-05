@@ -12,6 +12,7 @@ import com.arthenica.ffmpegkit.FFmpegKitConfig
 import com.arthenica.ffmpegkit.FFmpegSession
 import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
+import com.arthenica.ffmpegkit.StreamInformation
 import com.subtitleedit.feature.ui.MediaConvertDialog
 import com.subtitleedit.task.LongTaskController
 import com.subtitleedit.util.DirectoryDisplayPath
@@ -33,7 +34,8 @@ import java.util.concurrent.atomic.AtomicLong
 internal data class MediaConvertFileUi(
     val uri: Uri,
     val fileName: String,
-    val mediaInfo: String
+    val mediaInfo: String,
+    val videoSize: MediaConvertVideoSize? = null
 )
 
 internal data class MediaConvertUiState(
@@ -71,21 +73,12 @@ internal class MediaConvertViewModel(application: Application) :
         private const val OUTPUT_DIRECTORY_KEY = "media_convert"
     }
 
-    private data class SelectedMediaFile(val uri: Uri, val fileName: String, val mediaInfo: String)
+    private data class SelectedMediaFile(val uri: Uri, val fileName: String, val mediaInfo: String, val videoSize: MediaConvertVideoSize? = null)
+    private data class SourceDescription(val text: String, val videoSize: MediaConvertVideoSize? = null)
     private data class OutputResult(val uri: Uri, val fileName: String)
 
     val formatList: List<MediaConvertFormatInfo>
         get() = MediaConvertFormats.create(currentState.availableEncoders)
-    val resolutions = listOf(
-        application.getString(R.string.media_convert_resolution_original),
-        application.getString(R.string.media_convert_resolution_4k),
-        application.getString(R.string.media_convert_resolution_2k),
-        application.getString(R.string.media_convert_resolution_1080p),
-        application.getString(R.string.media_convert_resolution_720p),
-        application.getString(R.string.media_convert_resolution_480p),
-        application.getString(R.string.media_convert_resolution_360p),
-        application.getString(R.string.media_convert_resolution_240p)
-    )
     val sampleRates = listOf(
         application.getString(R.string.media_convert_sample_rate_original),
         "48000 Hz", "44100 Hz", "22050 Hz", "16000 Hz", "8000 Hz"
@@ -137,7 +130,7 @@ internal class MediaConvertViewModel(application: Application) :
         }
         setState {
             copy(
-                selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo) },
+                selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo, it.videoSize) },
                 selectedFormat = null,
                 log = ""
             )
@@ -188,7 +181,9 @@ internal class MediaConvertViewModel(application: Application) :
     }
     fun setVideoCodec(value: String) = updateOptions { copy(selectedVideoCodec = value) }
     fun setAudioCodec(value: String) = updateOptions { copy(selectedAudioCodec = value) }
-    fun setResolution(value: Int) = updateOptions { copy(resolutionIndex = value) }
+    fun setResolution(value: MediaConvertResolutionSettings) {
+        if (value.isValid) updateOptions { copy(resolution = value) }
+    }
     fun setVideoBitrate(value: String) = updateOptions { copy(videoBitrate = value) }
     fun setQuality(value: String) = updateOptions { copy(selectedQualityId = value) }
     fun setCustomQuality(value: String) = updateOptions { copy(customQuality = value) }
@@ -252,10 +247,10 @@ internal class MediaConvertViewModel(application: Application) :
                 val info = withContext(Dispatchers.IO) { probeUri(uri) }
                 val current = selectedMediaFiles.indexOfFirst { it.uri == uri }
                 if (current < 0) return@forEachIndexed
-                selectedMediaFiles = selectedMediaFiles.toMutableList().also { list -> list[current] = list[current].copy(mediaInfo = info) }
+                selectedMediaFiles = selectedMediaFiles.toMutableList().also { list -> list[current] = list[current].copy(mediaInfo = info.text, videoSize = info.videoSize) }
                 setState {
                     copy(
-                        selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo) },
+                        selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo, it.videoSize) },
                         log = (log + string(R.string.media_convert_probe_summary, index + 1, snapshot.size, selected.fileName))
                             .takeLast(16000)
                     )
@@ -264,20 +259,20 @@ internal class MediaConvertViewModel(application: Application) :
         }
     }
 
-    private fun probeUri(uri: Uri): String {
+    private fun probeUri(uri: Uri): SourceDescription {
         var input: String? = null
         return try {
             input = ffmpegInput(uri)
-            readMediaInfo(input) ?: string(R.string.media_convert_probe_failed)
+            readMediaInfo(input) ?: SourceDescription(string(R.string.media_convert_probe_failed))
         } catch (e: Exception) {
-            string(R.string.media_convert_probe_exception, e.message ?: string(R.string.media_convert_unknown))
+            SourceDescription(string(R.string.media_convert_probe_exception, e.message ?: string(R.string.media_convert_unknown)))
         }
         finally { releaseFfmpegInput(input) }
     }
 
-    private fun readMediaInfo(path: String): String? {
+    private fun readMediaInfo(path: String): SourceDescription? {
         val info = FFprobeKit.getMediaInformation(path).getMediaInformation() ?: return null
-        return buildString {
+        val text = buildString {
             append(string(R.string.media_convert_duration, formatDuration(info.getDuration()?.toDoubleOrNull() ?: 0.0)))
             append('\n')
             append(string(R.string.media_convert_bitrate, info.getBitrate() ?: string(R.string.media_convert_unknown)))
@@ -304,6 +299,22 @@ internal class MediaConvertViewModel(application: Application) :
                 }
             }
         }.trimEnd()
+        return SourceDescription(text, info.getStreams().firstOrNull { it.getType() == "video" }?.let(::videoSize))
+    }
+
+    private fun videoSize(stream: StreamInformation): MediaConvertVideoSize? {
+        val properties = stream.getAllProperties()
+        val sideData = properties?.optJSONArray("side_data_list")
+        var rotation = stream.getTags()?.optString("rotate")?.toDoubleOrNull() ?: 0.0
+        if (sideData != null) for (index in 0 until sideData.length()) {
+            val entry = sideData.optJSONObject(index) ?: continue
+            if (entry.has("rotation")) { rotation = entry.optDouble("rotation", 0.0); break }
+        }
+        return MediaConvertVideoSize.fromStream(
+            stream.getWidth()?.toInt() ?: return null,
+            stream.getHeight()?.toInt() ?: return null,
+            stream.getSampleAspectRatio(), rotation
+        )
     }
 
     private fun beginConversion(overwriteOutput: Boolean) {

@@ -11,7 +11,6 @@ internal data class MediaConvertSource(
 
 /** Builds argument arrays so SAF URLs and file names remain single arguments. */
 internal object MediaConvertCommand {
-    val sizes = listOf("1280x720", "3840x2160", "2560x1440", "1920x1080", "1280x720", "854x480", "640x360", "426x240")
     val sampleRates = listOf(0, 48000, 44100, 22050, 16000, 8000)
 
     fun qualityRange(codec: String): IntRange = when (codec) {
@@ -37,11 +36,13 @@ internal object MediaConvertCommand {
         val synthetic = !format.isAudioOnly && source?.hasVideo == false
         val selectedVideo = if (format.isAudioOnly) "" else format.videoEncoder(options.selectedVideoCodec)
         val video = if (synthetic && selectedVideo == "copy") format.videoEncoder("auto") else selectedVideo
+        if (!format.isAudioOnly && video != "copy") require(options.resolution.isValid) { "Invalid video resolution" }
         val audio = format.audioEncoder(options.selectedAudioCodec)
         return buildList {
             addAll(listOf("-y", "-hide_banner"))
             if (synthetic) {
-                val size = sizes.getOrElse(options.resolutionIndex) { sizes[0] }
+                val target = options.resolution.size ?: MediaConvertVideoSize(1280, 720)
+                val size = "${target.width}x${target.height}"
                 addAll(listOf("-f", "lavfi", "-i", "color=c=black:s=$size:r=30"))
             }
             addAll(listOf("-i", input))
@@ -70,9 +71,7 @@ internal object MediaConvertCommand {
                             if (q == null && bitrate == null) addAll(listOf("-crf", "30", "-b:v", "0"))
                         }
                     }
-                    val scale = if (options.resolutionIndex > 0) sizes.getOrNull(options.resolutionIndex)
-                        else "trunc(iw/2)*2:trunc(ih/2)*2"
-                    if (!synthetic && scale != null) addAll(listOf("-vf", "scale=$scale"))
+                    if (!synthetic) addAll(listOf("-vf", MediaConvertResolution.filter(options.resolution)))
                     addAll(listOf("-pix_fmt", "yuv420p"))
                     if (video == "mpeg1video" || video == "mpeg2video") {
                         val rates = listOf(24000.0 / 1001, 24.0, 25.0, 30000.0 / 1001, 30.0, 50.0, 60000.0 / 1001, 60.0)
