@@ -69,10 +69,17 @@ license text is distributed at `assets/licenses/mpv-android-LICENSE.txt`.
 
 FFmpegKit Next 8.1.0 is used to build FFmpeg n8.1.2 and the Java/JNI command
 API. libmpv is linked against the same FFmpeg shared libraries packaged by
-FFmpegKit Next. The local build enables libmp3lame, libx264, libvpx, libvorbis
-and libopus; x264 is GPL-licensed, so this FFmpegKit build and the combined
+FFmpegKit Next. The local build enables libmp3lame, libx264, libvpx, libvorbis,
+libopus, x265 4.2, Xvid 1.3.7, libaom 3.12.1 and Theora 1.1.1. x264, x265
+and Xvid are GPL-licensed, so this FFmpegKit build and the combined
 application are distributed under GPLv3. The reproducible build options are
-documented in `app/libs/README.md` and `native/mpv/README.md`.
+documented in `app/libs/README.md`, `native/mpv/README.md` and
+`native/ffmpeg/README.md`. The additional upstream license texts and libaom
+patent notice are included as `res/raw/license_x265.txt`,
+`res/raw/license_xvidcore.txt`, `res/raw/license_libaom.txt`,
+`res/raw/patents_libaom.txt` and `res/raw/license_libtheora.txt` in the AAR.
+libaom is distributed under its BSD 2-Clause license and patent grant;
+Theora uses its BSD-style license.
 
 ## libass and libplacebo
 

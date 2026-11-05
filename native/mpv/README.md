@@ -28,8 +28,15 @@ codecs `libmp3lame`, `libx264`, `libvpx`, `libvorbis` and `libopus` enabled,
 plus Android zlib and MediaCodec support. Rebuild that prefix with the same
 options before regenerating this runtime.
 
-The generated mpv AAR intentionally excludes all `libav*.so` files. They are
-provided only by `ffmpeg-kit-next:8.1.0-mpv1`.
+The generated mpv AAR intentionally excludes all `libav*.so` files. The original
+runtime used the shared libraries from `ffmpeg-kit-next:8.1.0-mpv1`.
+
+Media conversion now uses `ffmpeg-kit-next:8.1.0-mpv2`, built from the same
+FFmpeg version with additional software encoders. See `../ffmpeg/README.md`.
+Its packager checks that all old exported symbols remain available before
+publishing, so the existing mpv runtime can keep using those shared libraries.
+The commands below describe rebuilding the original mpv/FFmpeg baseline;
+run `../ffmpeg/rebuild-codecs.sh` afterwards to produce the current codec AAR.
 
 The patched runtime is published locally as `0.41.0-ffmpeg8.1.2-2`.
 

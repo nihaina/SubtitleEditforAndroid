@@ -56,6 +56,15 @@ class RemainingRecreationTest {
             scenario.onActivity { activity ->
                 before = ViewModelProvider(activity)[MediaConvertViewModel::class.java]
                 before.selectFiles(listOf(Uri.parse("file:///nonexistent/video.mp4")))
+                before.toggleVideoFormats()
+                before.selectFormat("mp4")
+                before.setAudioBitrate("192")
+                before.setResolution(3)
+                before.toggleAdvanced()
+                before.selectFormat("mp3")
+                before.setAudioBitrate("128")
+                before.selectFormat("mp4")
+                assertEquals("192", before.state.value.options.audioBitrate)
             }
 
             scenario.recreate()
@@ -65,6 +74,14 @@ class RemainingRecreationTest {
                 assertSame(before, after)
                 assertEquals(1, after.state.value.selectedFiles.size)
                 assertTrue(after.state.value.selectedFiles.single().fileName.contains("video.mp4"))
+                assertTrue(after.state.value.videoFormatsExpanded)
+                assertEquals(3, after.state.value.options.resolutionIndex)
+                assertTrue(after.state.value.options.advancedExpanded)
+                after.selectFormat("mp3")
+                assertEquals("128", after.state.value.options.audioBitrate)
+                assertEquals(0, after.state.value.options.resolutionIndex)
+                after.selectFormat("mp4")
+                assertEquals("192", after.state.value.options.audioBitrate)
             }
         }
     }

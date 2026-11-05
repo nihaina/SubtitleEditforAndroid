@@ -1,0 +1,2 @@
+/native/ffmpeg/*.sh text eol=lf
+/native/mpv/verify-runtime.sh text eol=lf

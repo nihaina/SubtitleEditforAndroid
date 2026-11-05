@@ -17,12 +17,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -34,6 +31,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -70,9 +69,9 @@ internal fun MediaConvertScreen(
     videoFormats: List<MediaFormatOption>,
     audioFormats: List<MediaFormatOption>,
     selectedFormat: String?,
-    videoCodecs: List<String>,
+    videoCodecs: List<AppOption<String>>,
     selectedVideoCodec: String,
-    audioCodecs: List<String>,
+    audioCodecs: List<AppOption<String>>,
     selectedAudioCodec: String,
     resolutions: List<AppOption<Int>>,
     resolutionIndex: Int,
@@ -112,7 +111,12 @@ internal fun MediaConvertScreen(
     onShare: () -> Unit,
     onOverwrite: () -> Unit,
     onAutoRename: () -> Unit,
-    onDismissDialog: () -> Unit
+    onDismissDialog: () -> Unit,
+    videoFormatsExpanded: Boolean = false,
+    audioFormatsExpanded: Boolean = false,
+    onToggleVideoFormats: () -> Unit = {},
+    onToggleAudioFormats: () -> Unit = {},
+    qualityHint: String = ""
 ) {
     AppToolScaffold(
         title = stringResource(R.string.media_convert_title),
@@ -165,15 +169,29 @@ internal fun MediaConvertScreen(
 
         if (sourceSummary.isNotBlank()) {
             AppSection(title = stringResource(R.string.activity_tool_output_format)) {
-                Text(stringResource(R.string.activity_media_convert_text_05), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                FormatGrid(videoFormats, selectedFormat, !isConverting, onFormatSelected)
+                FormatExpander(
+                    title = stringResource(R.string.activity_media_convert_text_05),
+                    formats = videoFormats,
+                    selectedFormat = selectedFormat,
+                    expanded = videoFormatsExpanded,
+                    enabled = !isConverting,
+                    onToggle = onToggleVideoFormats,
+                    onSelected = onFormatSelected
+                )
                 HorizontalDivider()
-                Text(stringResource(R.string.activity_media_convert_text_06), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                FormatGrid(audioFormats, selectedFormat, !isConverting, onFormatSelected)
+                FormatExpander(
+                    title = stringResource(R.string.media_convert_audio_formats),
+                    formats = audioFormats,
+                    selectedFormat = selectedFormat,
+                    expanded = audioFormatsExpanded,
+                    enabled = !isConverting,
+                    onToggle = onToggleAudioFormats,
+                    onSelected = onFormatSelected
+                )
             }
         }
 
-        AppSection {
+        if (selectedFormat != null) AppSection {
             val rotation by animateFloatAsState(
                 targetValue = if (advancedExpanded) 90f else 0f,
                 animationSpec = AppMotion.fast(),
@@ -202,49 +220,53 @@ internal fun MediaConvertScreen(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)) {
                     if (videoCodecs.isNotEmpty()) {
-                        AppOptionSelector(stringResource(R.string.activity_media_convert_text_08), selectedVideoCodec, videoCodecs, !isConverting, onVideoCodecSelected)
+                        AppOptionSelector(stringResource(R.string.activity_media_convert_text_08), videoCodecs.firstOrNull { it.id == selectedVideoCodec }, videoCodecs, !isConverting, onVideoCodecSelected)
+                        val videoEnabled = !isConverting && selectedVideoCodec != "copy"
                         AppOptionSelector(
                             stringResource(R.string.activity_media_convert_text_09),
                             resolutions.getOrNull(resolutionIndex),
                             resolutions,
-                            !isConverting,
+                            videoEnabled,
                             onSelected = onResolutionSelected
                         )
-                        MediaConvertNumberField(stringResource(R.string.activity_media_convert_text_10), videoBitrate, stringResource(R.string.activity_media_convert_hint_01), !isConverting, onVideoBitrateChange)
+                        MediaConvertNumberField(stringResource(R.string.activity_media_convert_text_10), videoBitrate, stringResource(R.string.activity_media_convert_hint_01), videoEnabled, onVideoBitrateChange)
                         AppOptionSelector(
                             stringResource(R.string.activity_media_convert_text_11),
                             qualityOptions.firstOrNull { it.id == selectedQualityId },
                             qualityOptions,
-                            !isConverting,
+                            videoEnabled,
                             onSelected = onQualitySelected
                         )
                         if (selectedQualityId == "custom") {
                             OutlinedTextField(
                                 value = customQuality,
                                 onValueChange = onCustomQualityChange,
-                                placeholder = { Text(stringResource(R.string.activity_media_convert_hint_02)) },
+                                placeholder = { Text(qualityHint) },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
-                                enabled = !isConverting,
+                                enabled = videoEnabled,
                                 modifier = Modifier.fillMaxWidth().padding(start = AppSpacing.FormLabelWidth)
                             )
                         }
                         HorizontalDivider()
                     }
-                    AppOptionSelector(stringResource(R.string.activity_media_convert_text_12), selectedAudioCodec, audioCodecs, !isConverting, onAudioCodecSelected)
-                    MediaConvertNumberField(stringResource(R.string.activity_media_convert_text_13), audioBitrate, stringResource(R.string.activity_media_convert_hint_01), !isConverting, onAudioBitrateChange)
+                    AppOptionSelector(stringResource(R.string.activity_media_convert_text_12), audioCodecs.firstOrNull { it.id == selectedAudioCodec }, audioCodecs, !isConverting, onAudioCodecSelected)
+                    val audioEnabled = !isConverting && selectedAudioCodec != "copy"
+                    val audioLossless = selectedAudioCodec.startsWith("pcm_") || selectedAudioCodec == "flac" ||
+                        (selectedAudioCodec == "auto" && selectedFormat in setOf("wav", "flac"))
+                    MediaConvertNumberField(stringResource(R.string.activity_media_convert_text_13), audioBitrate, stringResource(R.string.activity_media_convert_hint_01), audioEnabled && !audioLossless, onAudioBitrateChange)
                     AppOptionSelector(
                         stringResource(R.string.activity_media_convert_text_14),
                         sampleRates.getOrNull(sampleRateIndex),
                         sampleRates,
-                        !isConverting,
+                        audioEnabled,
                         onSelected = onSampleRateSelected
                     )
                     AppOptionSelector(
                         stringResource(R.string.activity_media_convert_text_15),
                         channels.getOrNull(channelIndex),
                         channels,
-                        !isConverting,
+                        audioEnabled,
                         onSelected = onChannelSelected
                     )
                 }
@@ -298,6 +320,41 @@ private fun MediaConvertNumberField(
             enabled = enabled,
             modifier = Modifier.weight(1f)
         )
+    }
+}
+
+@Composable
+private fun FormatExpander(
+    title: String,
+    formats: List<MediaFormatOption>,
+    selectedFormat: String?,
+    expanded: Boolean,
+    enabled: Boolean,
+    onToggle: () -> Unit,
+    onSelected: (String) -> Unit
+) {
+    val selection = formats.firstOrNull { it.extension == selectedFormat }?.displayName
+    val description = stringResource(if (expanded) R.string.media_convert_expanded else R.string.media_convert_collapsed)
+    val rotation by animateFloatAsState(if (expanded) 90f else 0f, AppMotion.fast(), label = "format-chevron")
+    TextButton(
+        onClick = onToggle,
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth().semantics { stateDescription = description }
+    ) {
+        Text(title, modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+        if (selection != null) Text(selection, modifier = Modifier.padding(end = AppSpacing.Inner))
+        Icon(
+            painter = painterResource(R.drawable.ic_arrow_right),
+            contentDescription = null,
+            modifier = Modifier.size(18.dp).graphicsLayer(rotationZ = rotation)
+        )
+    }
+    AnimatedVisibility(
+        visible = expanded,
+        enter = expandVertically(AppMotion.enter()) + fadeIn(AppMotion.enter()),
+        exit = shrinkVertically(AppMotion.exit()) + fadeOut(AppMotion.exit())
+    ) {
+        FormatGrid(formats, selectedFormat, enabled, onSelected)
     }
 }
 

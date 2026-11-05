@@ -9,6 +9,7 @@ import com.subtitleedit.filepicker.AppFilePickerContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.core.content.FileProvider
 import com.subtitleedit.feature.ui.MediaConvertScreen
 import com.subtitleedit.feature.ui.MediaFormatOption
@@ -44,12 +45,21 @@ class MediaConvertActivity : AppComposeActivity() {
         }
         setContent {
             val state by viewModel.state.collectAsState()
-            val videoFormats = viewModel.formatList.filterNot { it.isAudioOnly }.map {
+            val formats = remember(state.availableEncoders) { viewModel.formatList }
+            val videoFormats = formats.filterNot { it.isAudioOnly }.map {
                 MediaFormatOption(it.extension, it.displayName, it.isAudioOnly)
             }
-            val audioFormats = viewModel.formatList.filter { it.isAudioOnly }.map {
+            val audioFormats = formats.filter { it.isAudioOnly }.map {
                 MediaFormatOption(it.extension, it.displayName, it.isAudioOnly)
             }
+            val format = formats.firstOrNull { it.extension == state.selectedFormat }
+            fun codecOption(id: String) = AppOption(id, when (id) {
+                "auto" -> getString(R.string.media_convert_codec_auto)
+                "copy" -> getString(R.string.media_convert_codec_copy)
+                else -> MediaConvertFormats.codecNames[id] ?: id
+            })
+            val effectiveVideoCodec = format?.takeUnless { it.isAudioOnly }?.videoEncoder(state.options.selectedVideoCodec).orEmpty()
+            val qualityRange = MediaConvertCommand.qualityRange(effectiveVideoCodec)
             SubtitleEditComposeTheme {
                 MediaConvertScreen(
                     sourceSummary = if (state.selectedFiles.isEmpty()) "" else getString(R.string.files_selected_header, state.selectedFiles.size),
@@ -59,22 +69,22 @@ class MediaConvertActivity : AppComposeActivity() {
                     videoFormats = videoFormats,
                     audioFormats = audioFormats,
                     selectedFormat = state.selectedFormat,
-                    videoCodecs = viewModel.formatList.firstOrNull { it.extension == state.selectedFormat }?.videoCodecs.orEmpty(),
-                    selectedVideoCodec = state.selectedVideoCodec,
-                    audioCodecs = viewModel.formatList.firstOrNull { it.extension == state.selectedFormat }?.audioCodecs.orEmpty(),
-                    selectedAudioCodec = state.selectedAudioCodec,
+                    videoCodecs = format?.videoCodecs.orEmpty().map(::codecOption),
+                    selectedVideoCodec = state.options.selectedVideoCodec,
+                    audioCodecs = format?.audioCodecs.orEmpty().map(::codecOption),
+                    selectedAudioCodec = state.options.selectedAudioCodec,
                     resolutions = viewModel.resolutions.mapIndexed { index, label -> AppOption(index, label) },
-                    resolutionIndex = state.resolutionIndex,
-                    videoBitrate = state.videoBitrate,
+                    resolutionIndex = state.options.resolutionIndex,
+                    videoBitrate = state.options.videoBitrate,
                     qualityOptions = viewModel.qualityValues.mapIndexed { index, id -> AppOption(id, viewModel.qualityLabels[index]) },
-                    selectedQualityId = state.selectedQualityId,
-                    customQuality = state.customQuality,
-                    audioBitrate = state.audioBitrate,
+                    selectedQualityId = state.options.selectedQualityId,
+                    customQuality = state.options.customQuality,
+                    audioBitrate = state.options.audioBitrate,
                     sampleRates = viewModel.sampleRates.mapIndexed { index, label -> AppOption(index, label) },
-                    sampleRateIndex = state.sampleRateIndex,
+                    sampleRateIndex = state.options.sampleRateIndex,
                     channels = viewModel.channels.mapIndexed { index, label -> AppOption(index, label) },
-                    channelIndex = state.channelIndex,
-                    advancedExpanded = state.advancedExpanded,
+                    channelIndex = state.options.channelIndex,
+                    advancedExpanded = state.options.advancedExpanded,
                     isConverting = state.isConverting,
                     canConvert = state.selectedFiles.isNotEmpty() && state.selectedFormat != null,
                     canShare = state.outputUris.isNotEmpty(),
@@ -101,7 +111,12 @@ class MediaConvertActivity : AppComposeActivity() {
                     onShare = viewModel::share,
                     onOverwrite = viewModel::overwrite,
                     onAutoRename = viewModel::rename,
-                    onDismissDialog = viewModel::dismissDialog
+                    onDismissDialog = viewModel::dismissDialog,
+                    videoFormatsExpanded = state.videoFormatsExpanded,
+                    audioFormatsExpanded = state.audioFormatsExpanded,
+                    onToggleVideoFormats = viewModel::toggleVideoFormats,
+                    onToggleAudioFormats = viewModel::toggleAudioFormats,
+                    qualityHint = getString(R.string.media_convert_quality_range, qualityRange.first, qualityRange.last, if (effectiveVideoCodec == "libtheora") getString(R.string.media_convert_quality_larger) else getString(R.string.media_convert_quality_smaller))
                 )
             }
         }

@@ -5,7 +5,6 @@ import android.content.Intent
 import com.subtitleedit.util.PickedUriAccess
 import android.net.Uri
 import android.os.SystemClock
-import android.provider.OpenableColumns
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.viewModelScope
 import com.arthenica.ffmpegkit.FFmpegKit
@@ -16,7 +15,6 @@ import com.arthenica.ffmpegkit.ReturnCode
 import com.subtitleedit.feature.ui.MediaConvertDialog
 import com.subtitleedit.task.LongTaskController
 import com.subtitleedit.util.DirectoryDisplayPath
-import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SourceOutputDirectory
 import kotlinx.coroutines.CancellationException
@@ -32,15 +30,6 @@ import java.io.FileOutputStream
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
 
-internal data class MediaConvertFormatInfo(
-    val extension: String,
-    val displayName: String,
-    val formatName: String,
-    val videoCodecs: List<String>,
-    val audioCodecs: List<String>,
-    val isAudioOnly: Boolean = false
-)
-
 internal data class MediaConvertFileUi(
     val uri: Uri,
     val fileName: String,
@@ -50,16 +39,12 @@ internal data class MediaConvertFileUi(
 internal data class MediaConvertUiState(
     val selectedFiles: List<MediaConvertFileUi> = emptyList(),
     val selectedFormat: String? = null,
-    val selectedVideoCodec: String = "",
-    val selectedAudioCodec: String = "",
-    val resolutionIndex: Int = 0,
-    val videoBitrate: String = "",
-    val selectedQualityId: String = "-1",
-    val customQuality: String = "",
-    val audioBitrate: String = "",
-    val sampleRateIndex: Int = 0,
-    val channelIndex: Int = 0,
-    val advancedExpanded: Boolean = false,
+    val videoOptions: MediaConvertOptions = MediaConvertOptions(),
+    val audioOptions: MediaConvertOptions = MediaConvertOptions(),
+    val isAudioOutput: Boolean = false,
+    val videoFormatsExpanded: Boolean = false,
+    val audioFormatsExpanded: Boolean = false,
+    val availableEncoders: Set<String> = MediaConvertFormats.baselineEncoders,
     val outputDirectory: String = "",
     val saveToSourceDirectory: Boolean = false,
     val progress: Int = 0,
@@ -67,7 +52,9 @@ internal data class MediaConvertUiState(
     val dialog: MediaConvertDialog = MediaConvertDialog.NONE,
     val outputUris: List<Uri> = emptyList(),
     val isConverting: Boolean = false
-)
+) {
+    val options: MediaConvertOptions get() = if (isAudioOutput) audioOptions else videoOptions
+}
 
 internal sealed interface MediaConvertEvent {
     data class ShareOutputs(val uris: List<Uri>) : MediaConvertEvent
@@ -77,10 +64,7 @@ internal sealed interface MediaConvertEvent {
 internal class MediaConvertViewModel(application: Application) :
     AppViewModel<MediaConvertUiState, MediaConvertEvent>(
         application,
-        MediaConvertUiState(
-            selectedVideoCodec = application.getString(R.string.media_convert_codec_video_required),
-            selectedAudioCodec = application.getString(R.string.media_convert_codec_format_required)
-        )
+        MediaConvertUiState()
     ) {
 
     companion object {
@@ -88,30 +72,10 @@ internal class MediaConvertViewModel(application: Application) :
     }
 
     private data class SelectedMediaFile(val uri: Uri, val fileName: String, val mediaInfo: String)
-    private data class SourceProbe(val hasVideo: Boolean, val durationSeconds: Double?)
     private data class OutputResult(val uri: Uri, val fileName: String)
 
-    val formatList = listOf(
-        MediaConvertFormatInfo("mp4", "MP4", "mp4", listOf("mpeg4", "libx264", "copy"), listOf("aac", "libmp3lame", "copy")),
-        MediaConvertFormatInfo("mkv", "MKV", "matroska", listOf("mpeg4", "libx264", "libvpx-vp9", "copy"), listOf("aac", "libmp3lame", "libopus", "libvorbis", "flac", "ac3", "copy")),
-        MediaConvertFormatInfo("avi", "AVI", "avi", listOf("mpeg4", "libx264", "copy"), listOf("libmp3lame", "aac", "ac3", "copy")),
-        MediaConvertFormatInfo("mov", "MOV", "mov", listOf("mpeg4", "libx264", "copy"), listOf("aac", "libmp3lame", "ac3", "copy")),
-        MediaConvertFormatInfo("webm", "WebM", "webm", listOf("libvpx", "libvpx-vp9", "copy"), listOf("libvorbis", "libopus", "copy")),
-        MediaConvertFormatInfo("flv", "FLV", "flv", listOf("libx264", "flv1", "mpeg4", "copy"), listOf("aac", "libmp3lame", "copy")),
-        MediaConvertFormatInfo("ts", "TS", "mpegts", listOf("libx264", "mpeg2video", "mpeg4", "copy"), listOf("aac", "libmp3lame", "ac3", "copy")),
-        MediaConvertFormatInfo("m4v", "M4V", "mp4", listOf("mpeg4", "libx264", "copy"), listOf("aac", "libmp3lame", "copy")),
-        MediaConvertFormatInfo("3gp", "3GP", "3gp", listOf("mpeg4", "libx264", "copy"), listOf("aac", "libmp3lame", "copy")),
-        MediaConvertFormatInfo("wmv", "WMV", "asf", listOf("wmv2", "msmpeg4v3", "copy"), listOf("wmav2", "copy")),
-        MediaConvertFormatInfo("mp3", "MP3", "mp3", emptyList(), listOf("libmp3lame"), true),
-        MediaConvertFormatInfo("aac", "AAC", "adts", emptyList(), listOf("aac"), true),
-        MediaConvertFormatInfo("m4a", "M4A", "ipod", emptyList(), listOf("aac"), true),
-        MediaConvertFormatInfo("wav", "WAV", "wav", emptyList(), listOf("pcm_s16le", "pcm_s24le", "pcm_f32le"), true),
-        MediaConvertFormatInfo("flac", "FLAC", "flac", emptyList(), listOf("flac"), true),
-        MediaConvertFormatInfo("ogg", "OGG", "ogg", emptyList(), listOf("vorbis", "opus"), true),
-        MediaConvertFormatInfo("opus", "OPUS", "opus", emptyList(), listOf("opus"), true),
-        MediaConvertFormatInfo("wma", "WMA", "asf", emptyList(), listOf("wmav2"), true),
-        MediaConvertFormatInfo("ac3", "AC3", "ac3", emptyList(), listOf("ac3"), true)
-    )
+    val formatList: List<MediaConvertFormatInfo>
+        get() = MediaConvertFormats.create(currentState.availableEncoders)
     val resolutions = listOf(
         application.getString(R.string.media_convert_resolution_original),
         application.getString(R.string.media_convert_resolution_4k),
@@ -155,6 +119,13 @@ internal class MediaConvertViewModel(application: Application) :
     init {
         setState { copy(saveToSourceDirectory = settingsManager.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)) }
         restoreOutputDirectory()
+        viewModelScope.launch {
+            val encoders = withContext(Dispatchers.IO) {
+                runCatching { MediaConvertFormats.parseEncoders(FFmpegKit.execute("-hide_banner -encoders").getAllLogsAsString()) }
+                    .getOrDefault(emptySet())
+            }
+            setState { copy(availableEncoders = availableEncoders + encoders) }
+        }
     }
 
     fun selectFiles(uris: List<Uri>) {
@@ -168,8 +139,6 @@ internal class MediaConvertViewModel(application: Application) :
             copy(
                 selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo) },
                 selectedFormat = null,
-                selectedVideoCodec = string(R.string.media_convert_codec_video_required),
-                selectedAudioCodec = string(R.string.media_convert_codec_format_required),
                 log = ""
             )
         }
@@ -185,15 +154,31 @@ internal class MediaConvertViewModel(application: Application) :
     }
 
     fun selectFormat(extension: String) {
-        val format = if (currentState.selectedFormat == extension) null else formatList.firstOrNull { it.extension == extension }
+        if (isRunning) return
+        val format = formatList.firstOrNull { it.extension == extension } ?: return
         setState {
-            copy(
-                selectedFormat = format?.extension,
-                selectedVideoCodec = format?.videoCodecs?.firstOrNull()
-                    ?: string(R.string.media_convert_codec_video_required),
-                selectedAudioCodec = format?.audioCodecs?.firstOrNull()
-                    ?: string(R.string.media_convert_codec_format_required)
+            val previous = if (format.isAudioOnly) audioOptions else videoOptions
+            val next = previous.copy(
+                selectedVideoCodec = previous.selectedVideoCodec.takeIf { it in format.videoCodecs } ?: "auto",
+                selectedAudioCodec = previous.selectedAudioCodec.takeIf { it in format.audioCodecs } ?: "auto"
             )
+            copy(
+                selectedFormat = format.extension,
+                isAudioOutput = format.isAudioOnly,
+                videoOptions = if (format.isAudioOnly) videoOptions else next,
+                audioOptions = if (format.isAudioOnly) next else audioOptions
+            )
+        }
+    }
+
+    fun toggleVideoFormats() = setState { copy(videoFormatsExpanded = !videoFormatsExpanded) }
+    fun toggleAudioFormats() = setState { copy(audioFormatsExpanded = !audioFormatsExpanded) }
+
+    private fun updateOptions(update: MediaConvertOptions.() -> MediaConvertOptions) {
+        if (isRunning) return
+        setState {
+            if (isAudioOutput) copy(audioOptions = audioOptions.update())
+            else copy(videoOptions = videoOptions.update())
         }
     }
 
@@ -201,16 +186,16 @@ internal class MediaConvertViewModel(application: Application) :
         settingsManager.setSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY, enabled)
         setState { copy(saveToSourceDirectory = enabled) }
     }
-    fun setVideoCodec(value: String) = setState { copy(selectedVideoCodec = value) }
-    fun setAudioCodec(value: String) = setState { copy(selectedAudioCodec = value) }
-    fun setResolution(value: Int) = setState { copy(resolutionIndex = value) }
-    fun setVideoBitrate(value: String) = setState { copy(videoBitrate = value) }
-    fun setQuality(value: String) = setState { copy(selectedQualityId = value) }
-    fun setCustomQuality(value: String) = setState { copy(customQuality = value) }
-    fun setAudioBitrate(value: String) = setState { copy(audioBitrate = value) }
-    fun setSampleRate(value: Int) = setState { copy(sampleRateIndex = value) }
-    fun setChannel(value: Int) = setState { copy(channelIndex = value) }
-    fun toggleAdvanced() = setState { copy(advancedExpanded = !advancedExpanded) }
+    fun setVideoCodec(value: String) = updateOptions { copy(selectedVideoCodec = value) }
+    fun setAudioCodec(value: String) = updateOptions { copy(selectedAudioCodec = value) }
+    fun setResolution(value: Int) = updateOptions { copy(resolutionIndex = value) }
+    fun setVideoBitrate(value: String) = updateOptions { copy(videoBitrate = value) }
+    fun setQuality(value: String) = updateOptions { copy(selectedQualityId = value) }
+    fun setCustomQuality(value: String) = updateOptions { copy(customQuality = value) }
+    fun setAudioBitrate(value: String) = updateOptions { copy(audioBitrate = value) }
+    fun setSampleRate(value: Int) = updateOptions { copy(sampleRateIndex = value) }
+    fun setChannel(value: Int) = updateOptions { copy(channelIndex = value) }
+    fun toggleAdvanced() = updateOptions { copy(advancedExpanded = !advancedExpanded) }
     fun dismissDialog() = setState { copy(dialog = MediaConvertDialog.NONE) }
 
     fun startConversion() {
@@ -366,7 +351,7 @@ internal class MediaConvertViewModel(application: Application) :
         return try {
             val prefix = "[${index + 1}/$total]"
             appendLog(string(R.string.media_convert_start_file, prefix, file.fileName))
-            val sourceProbe = if (format.isAudioOnly) null else withContext(Dispatchers.IO) { probeSourceUri(file.uri)?.let { if (isLikelyAudioFile(file)) SourceProbe(false, it.durationSeconds) else it } ?: SourceProbe(true, null) }
+            val sourceProbe = if (format.isAudioOnly) null else withContext(Dispatchers.IO) { probeSourceUri(file.uri)?.let { if (isLikelyAudioFile(file)) MediaConvertSource(false, it.durationSeconds) else it } ?: MediaConvertSource(true, null) }
             input = withContext(Dispatchers.IO) { ffmpegInput(file.uri) }
             if (sourceProbe?.hasVideo == false) {
                 appendLog(string(R.string.media_convert_no_video_stream, prefix))
@@ -391,12 +376,12 @@ internal class MediaConvertViewModel(application: Application) :
         finally { releaseFfmpegInput(input); withContext(NonCancellable + Dispatchers.IO) { cache.deleteRecursively() } }
     }
 
-    private suspend fun executeConversion(input: String, output: File, format: MediaConvertFormatInfo, probe: SourceProbe?, index: Int, total: Int): FFmpegSession {
-        val command = buildFfmpegCommand(input, output.absolutePath, format, probe)
-        appendLog(string(R.string.media_convert_execute_command, command))
+    private suspend fun executeConversion(input: String, output: File, format: MediaConvertFormatInfo, probe: MediaConvertSource?, index: Int, total: Int): FFmpegSession {
+        val arguments = MediaConvertCommand.build(input, output.absolutePath, format, currentState.options, probe).toTypedArray()
+        appendLog(string(R.string.media_convert_execute_command, arguments.joinToString(" ") { "\"$it\"" }))
         val lastProgressAt = AtomicLong(SystemClock.elapsedRealtime()); var local = 0
         val session = withContext(Dispatchers.IO) {
-            FFmpegKit.executeAsync(command, { }, { log -> appendLog(log.message) }, { statistics ->
+            FFmpegKit.executeWithArgumentsAsync(arguments, { }, { log -> appendLog(log.message) }, { statistics ->
                 if (statistics.time > 0) { lastProgressAt.set(SystemClock.elapsedRealtime()); local = (local + 1).coerceAtMost(95); setState { copy(progress = ((index * 100L + local) / total).toInt().coerceIn(0, 99)) } }
             })
         }
@@ -411,28 +396,26 @@ internal class MediaConvertViewModel(application: Application) :
         return session
     }
 
-    private fun buildFfmpegCommand(input: String, output: String, format: MediaConvertFormatInfo, probe: SourceProbe?): String {
-        val state = currentState; val synthetic = !format.isAudioOnly && probe?.hasVideo == false
-        val selectedVideo = if (!format.isAudioOnly) state.selectedVideoCodec.ifBlank { "mpeg4" } else ""
-        val video = if (synthetic && selectedVideo == "copy") fallbackVideoCodec(format) else selectedVideo
-        val audio = state.selectedAudioCodec.ifBlank { format.audioCodecs.firstOrNull() ?: "aac" }
-        val command = StringBuilder("-y -hide_banner")
-        if (synthetic) { val size = if (state.resolutionIndex > 0) resolutions[state.resolutionIndex].substringBefore(' ') else "1280x720"; command.append(" -f lavfi -i \"color=c=black:s=$size:r=30\" -i \"$input\"") } else command.append(" -i \"$input\"")
-        if (format.isAudioOnly) command.append(" -map 0:a:0 -vn -c:a $audio")
-        else if (synthetic) { command.append(" -map 0:v:0 -map 1:a:0 -shortest -c:v $video -c:a $audio"); probe?.durationSeconds?.takeIf { it > 0 }?.let { command.append(" -t ${String.format(Locale.US, "%.3f", it)}") } }
-        else command.append(" -map 0:v:0 -c:v $video -map 0:a:0? -c:a $audio")
-        if (!format.isAudioOnly) { command.append(" -sn -dn"); if (video != "copy") { selectedQuality()?.let { q -> when (video) { "libx264" -> command.append(" -crf $q"); "libvpx", "libvpx-vp9" -> command.append(" -crf $q -b:v 0"); else -> command.append(" -q:v $q") } }; if (!synthetic && state.resolutionIndex > 0) command.append(" -vf scale=${resolutions[state.resolutionIndex].substringBefore(' ')}"); state.videoBitrate.trim().toIntOrNull()?.takeIf { it > 0 }?.let { command.append(" -b:v ${it}k") } } }
-        if (audio != "copy") { if (audio == "opus" || audio == "vorbis") command.append(" -strict -2"); state.audioBitrate.trim().toIntOrNull()?.takeIf { it > 0 }?.let { command.append(" -b:a ${it}k") }; if (state.sampleRateIndex > 0) command.append(" -ar ${sampleRates[state.sampleRateIndex].substringBefore(' ')}"); if (state.channelIndex > 0) command.append(" -ac ${if (state.channelIndex == 1) 2 else 1}") }
-        command.append(" -f ${format.formatName} \"$output\""); return command.toString()
-    }
-    private fun selectedQuality(): Int? { val state = currentState; val number = if (state.selectedQualityId == "custom") state.customQuality.toIntOrNull() else state.selectedQualityId.toIntOrNull(); return number?.coerceIn(1, 31)?.takeIf { state.selectedQualityId != "-1" } }
-    private fun fallbackVideoCodec(format: MediaConvertFormatInfo) = format.videoCodecs.firstOrNull { it != "copy" } ?: "mpeg4"
     private fun ffmpegInput(uri: Uri): String = PickedUriAccess.file(uri)?.absolutePath
         ?: FFmpegKitConfig.getSafParameterForRead(app, uri)
     private fun releaseFfmpegInput(input: String?) {
         if (input?.startsWith("saf:") == true) FFmpegKitConfig.unregisterSafProtocolUrl(input)
     }
-    private fun probeSourceUri(uri: Uri): SourceProbe? { var input: String? = null; return try { input = ffmpegInput(uri); val info = FFprobeKit.getMediaInformation(input).getMediaInformation() ?: return null; SourceProbe(info.getStreams().any { it.getType() == "video" }, info.getDuration()?.toDoubleOrNull()?.takeIf { it > 0 }) } catch (_: Exception) { null } finally { releaseFfmpegInput(input) } }
+    private fun probeSourceUri(uri: Uri): MediaConvertSource? {
+        var input: String? = null
+        return try {
+            input = ffmpegInput(uri)
+            val info = FFprobeKit.getMediaInformation(input).getMediaInformation() ?: return null
+            val video = info.getStreams().firstOrNull { it.getType() == "video" }
+            val rate = video?.getAverageFrameRate()?.split('/')?.let { parts ->
+                val numerator = parts.firstOrNull()?.toDoubleOrNull()
+                val denominator = parts.getOrNull(1)?.toDoubleOrNull() ?: 1.0
+                if (numerator != null && denominator > 0) (numerator / denominator).takeIf { it > 0 } else null
+            }
+            MediaConvertSource(video != null, info.getDuration()?.toDoubleOrNull()?.takeIf { it > 0 }, rate)
+        } catch (_: Exception) { null }
+        finally { releaseFfmpegInput(input) }
+    }
     private fun isLikelyAudioFile(file: SelectedMediaFile) = app.contentResolver.getType(file.uri)?.startsWith("audio/") == true || file.fileName.substringAfterLast('.', "").lowercase(Locale.ROOT) in audioExtensions
     private fun desiredOutputName(name: String, format: MediaConvertFormatInfo) = "${name.substringBeforeLast('.', name).ifBlank { "media_file" }}.${format.extension}"
     private fun outputDirectoryFor(sourceUri: Uri, fallback: Uri): Uri =
@@ -478,7 +461,9 @@ internal class MediaConvertViewModel(application: Application) :
             OutputResult(target.uri, target.name ?: name)
         }
     }.getOrNull()
-    private fun getMimeType(name: String) = when (name.substringAfterLast('.', "").lowercase(Locale.ROOT)) { "mp4", "m4v" -> "video/mp4"; "mkv" -> "video/x-matroska"; "avi" -> "video/x-msvideo"; "mov" -> "video/quicktime"; "webm" -> "video/webm"; "flv" -> "video/x-flv"; "ts" -> "video/mp2t"; "3gp" -> "video/3gpp"; "wmv" -> "video/x-ms-wmv"; "mp3" -> "audio/mpeg"; "aac" -> "audio/aac"; "m4a" -> "audio/mp4"; "wav" -> "audio/wav"; "flac" -> "audio/flac"; "ogg" -> "audio/ogg"; "opus" -> "audio/opus"; "wma" -> "audio/x-ms-wma"; "ac3" -> "audio/ac3"; else -> "application/octet-stream" }
+    private fun getMimeType(name: String) = formatList.firstOrNull {
+        it.extension == name.substringAfterLast('.', "").lowercase(Locale.ROOT)
+    }?.mimeType ?: "application/octet-stream"
     private fun createTaskCache(purpose: String) = File(app.cacheDir, "media_convert_${purpose}_${System.currentTimeMillis()}_${System.nanoTime()}").apply { mkdirs() }
     private fun getFileName(uri: Uri): String = com.subtitleedit.util.UriDisplayName.of(app, uri, "media_file")
     private fun formatDuration(seconds: Double): String { val h = (seconds / 3600).toInt(); val m = ((seconds % 3600) / 60).toInt(); val s = (seconds % 60).toInt(); return if (h > 0) "%d:%02d:%02d".format(Locale.getDefault(), h, m, s) else "%d:%02d".format(Locale.getDefault(), m, s) }

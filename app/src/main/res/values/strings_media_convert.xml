@@ -16,11 +16,11 @@
     <string name="media_convert_channel_original">原始声道</string>
     <string name="media_convert_channel_stereo">立体声 (2ch)</string>
     <string name="media_convert_channel_mono">单声道 (1ch)</string>
-    <string name="media_convert_quality_original">原始质量</string>
-    <string name="media_convert_quality_high">高质量 (18)</string>
-    <string name="media_convert_quality_high_medium">较高质量 (23)</string>
-    <string name="media_convert_quality_medium">中等质量 (28)</string>
-    <string name="media_convert_quality_low">低质量 (33)</string>
+    <string name="media_convert_quality_original">自动（编码器默认）</string>
+    <string name="media_convert_quality_high">高质量</string>
+    <string name="media_convert_quality_high_medium">较高质量</string>
+    <string name="media_convert_quality_medium">中等质量</string>
+    <string name="media_convert_quality_low">低质量</string>
     <string name="media_convert_quality_custom">自定义</string>
     <string name="media_convert_output_directory">输出目录：%1$s</string>
     <string name="media_convert_probe_summary">媒体信息 %1$d/%2$d：%3$s&#10;</string>
@@ -51,4 +51,12 @@
     <string name="media_convert_output_access_failed">无法访问输出目录</string>
     <string name="media_convert_create_output_failed">无法创建输出文件：%1$s</string>
     <string name="media_convert_write_output_failed">无法写入输出文件：%1$s</string>
+    <string name="media_convert_codec_auto">自动（推荐）</string>
+    <string name="media_convert_codec_copy">复制原流（不重新编码）</string>
+    <string name="media_convert_audio_formats">音频格式</string>
+    <string name="media_convert_expanded">已展开</string>
+    <string name="media_convert_collapsed">已收起</string>
+    <string name="media_convert_quality_range">范围 %1$d–%2$d，%3$s</string>
+    <string name="media_convert_quality_larger">越大质量越高</string>
+    <string name="media_convert_quality_smaller">越小质量越高</string>
 </resources>
