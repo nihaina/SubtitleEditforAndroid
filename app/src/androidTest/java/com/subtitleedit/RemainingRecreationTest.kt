@@ -63,6 +63,9 @@ class RemainingRecreationTest {
                 before.setResolution(MediaConvertResolutionSettings(presetIndex = 3))
                 before.setVideoBitrate(MediaConvertVideoBitrateSettings(MediaConvertBitrateMode.CUSTOM, "3000"))
                 before.toggleAdvanced()
+                before.toggleMore()
+                before.setVideoSettings(MediaConvertVideoSettings(rotation = MediaConvertRotation.CLOCKWISE, flipHorizontal = true,
+                    pixelFormat = "yuv420p10le", sizeLimitPercent = 50, filter = MediaConvertVideoFilter.GOLD))
                 before.selectFormat("mp3")
                 before.setAudioBitrate("128")
                 before.setAudioVolume(50)
@@ -82,14 +85,21 @@ class RemainingRecreationTest {
                 assertEquals(3, after.state.value.options.resolution.presetIndex)
                 assertEquals(MediaConvertVideoBitrateSettings(MediaConvertBitrateMode.CUSTOM, "3000"), after.state.value.options.videoBitrate)
                 assertTrue(after.state.value.options.advancedExpanded)
+                assertTrue(after.state.value.options.moreExpanded)
+                assertEquals(MediaConvertRotation.CLOCKWISE, after.state.value.options.videoSettings.rotation)
+                assertTrue(after.state.value.options.videoSettings.flipHorizontal)
+                assertEquals(50, after.state.value.options.videoSettings.sizeLimitPercent)
+                assertEquals(MediaConvertVideoFilter.GOLD, after.state.value.options.videoSettings.filter)
                 after.selectFormat("mp3")
                 assertEquals("128", after.state.value.options.audioBitrate)
                 assertEquals(50, after.state.value.options.audioVolumePercent)
                 assertEquals(0, after.state.value.options.resolution.presetIndex)
                 assertEquals(MediaConvertVideoBitrateSettings(), after.state.value.options.videoBitrate)
+                assertEquals(MediaConvertVideoSettings(), after.state.value.options.videoSettings)
                 after.selectFormat("mp4")
                 assertEquals("192", after.state.value.options.audioBitrate)
                 assertEquals(200, after.state.value.options.audioVolumePercent)
+                assertEquals("yuv420p10le", after.state.value.options.videoSettings.pixelFormat)
             }
         }
     }

@@ -5,6 +5,7 @@ import android.content.Intent
 import com.subtitleedit.util.PickedUriAccess
 import android.net.Uri
 import android.os.SystemClock
+import android.provider.OpenableColumns
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.viewModelScope
 import com.arthenica.ffmpegkit.FFmpegKit
@@ -23,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -40,7 +42,9 @@ internal data class MediaConvertFileUi(
     val audioBitrateBps: Long? = null,
     val audioSampleRate: Int? = null,
     val audioChannels: Int? = null,
-    val audioChannelLayout: String? = null
+    val audioChannelLayout: String? = null,
+    val videoPixelFormat: String? = null,
+    val fileSizeBytes: Long? = null
 )
 
 internal data class MediaConvertUiState(
@@ -53,6 +57,7 @@ internal data class MediaConvertUiState(
     val audioFormatsExpanded: Boolean = false,
     val availableEncoders: Set<String> = MediaConvertFormats.baselineEncoders,
     val availableAudioEncoders: Set<String> = MediaConvertAudioCodecs.baselineEncoders,
+    val videoPixelFormats: Map<String, List<String>> = emptyMap(),
     val outputDirectory: String = "",
     val saveToSourceDirectory: Boolean = false,
     val progress: Int = 0,
@@ -79,8 +84,8 @@ internal class MediaConvertViewModel(application: Application) :
         private const val OUTPUT_DIRECTORY_KEY = "media_convert"
     }
 
-    private data class SelectedMediaFile(val uri: Uri, val fileName: String, val mediaInfo: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null)
-    private data class SourceDescription(val text: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null)
+    private data class SelectedMediaFile(val uri: Uri, val fileName: String, val mediaInfo: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null, val videoPixelFormat: String? = null, val fileSizeBytes: Long? = null)
+    private data class SourceDescription(val text: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null, val videoPixelFormat: String? = null, val fileSizeBytes: Long? = null)
     private data class OutputResult(val uri: Uri, val fileName: String)
 
     val formatList: List<MediaConvertFormatInfo>
@@ -127,6 +132,13 @@ internal class MediaConvertViewModel(application: Application) :
                 }.getOrDefault(emptySet<String>() to emptySet())
             }
             setState { copy(availableEncoders = availableEncoders + videoEncoders, availableAudioEncoders = availableAudioEncoders + audioEncoders) }
+            val offeredVideoEncoders = formatList.flatMap { it.videoCodecs }.distinct().filter { it in videoEncoders }
+            val pixels = withContext(Dispatchers.IO) {
+                offeredVideoEncoders.associateWith { codec ->
+                    runCatching { MediaConvertVideoSettingsSupport.parsePixelFormats(FFmpegKit.execute("-hide_banner -h encoder=$codec").getAllLogsAsString()) }.getOrDefault(emptyList())
+                }
+            }
+            setState { copy(videoPixelFormats = pixels) }
         }
     }
 
@@ -205,6 +217,10 @@ internal class MediaConvertViewModel(application: Application) :
         if (value in MediaConvertAudioVolume.MIN..MediaConvertAudioVolume.MAX) updateOptions { copy(audioVolumePercent = value) }
     }
     fun toggleAdvanced() = updateOptions { copy(advancedExpanded = !advancedExpanded) }
+    fun toggleMore() = updateOptions { copy(moreExpanded = !moreExpanded) }
+    fun setVideoSettings(value: MediaConvertVideoSettings) {
+        if (!currentState.isAudioOutput && value.isValid) updateOptions { copy(videoSettings = value) }
+    }
     fun dismissDialog() = setState { copy(dialog = MediaConvertDialog.NONE) }
 
     fun startConversion() {
@@ -263,10 +279,10 @@ internal class MediaConvertViewModel(application: Application) :
                 }
                 val current = selectedMediaFiles.indexOfFirst { it.uri == uri }
                 if (current < 0) return@forEachIndexed
-                selectedMediaFiles = selectedMediaFiles.toMutableList().also { list -> list[current] = list[current].copy(mediaInfo = info.text, videoSize = info.videoSize, videoBitrateBps = info.videoBitrateBps, audioBitrateBps = info.audioBitrateBps, audioSampleRate = info.audioSampleRate, audioChannels = info.audioChannels, audioChannelLayout = info.audioChannelLayout) }
+                selectedMediaFiles = selectedMediaFiles.toMutableList().also { list -> list[current] = list[current].copy(mediaInfo = info.text, videoSize = info.videoSize, videoBitrateBps = info.videoBitrateBps, audioBitrateBps = info.audioBitrateBps, audioSampleRate = info.audioSampleRate, audioChannels = info.audioChannels, audioChannelLayout = info.audioChannelLayout, videoPixelFormat = info.videoPixelFormat, fileSizeBytes = info.fileSizeBytes) }
                 setState {
                     copy(
-                        selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo, it.videoSize, it.videoBitrateBps, it.audioBitrateBps, it.audioSampleRate, it.audioChannels, it.audioChannelLayout) },
+                        selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo, it.videoSize, it.videoBitrateBps, it.audioBitrateBps, it.audioSampleRate, it.audioChannels, it.audioChannelLayout, it.videoPixelFormat, it.fileSizeBytes) },
                         log = (log + string(R.string.media_convert_probe_summary, index + 1, snapshot.size, selected.fileName))
                             .takeLast(16000)
                     )
@@ -277,11 +293,12 @@ internal class MediaConvertViewModel(application: Application) :
 
     private fun probeUri(uri: Uri): SourceDescription {
         var input: String? = null
+        val size = sourceSizeBytes(uri)
         return try {
             input = ffmpegInput(uri)
-            readMediaInfo(input) ?: SourceDescription(string(R.string.media_convert_probe_failed))
+            (readMediaInfo(input) ?: SourceDescription(string(R.string.media_convert_probe_failed))).copy(fileSizeBytes = size)
         } catch (e: Exception) {
-            SourceDescription(string(R.string.media_convert_probe_exception, e.message ?: string(R.string.media_convert_unknown)))
+            SourceDescription(string(R.string.media_convert_probe_exception, e.message ?: string(R.string.media_convert_unknown)), fileSizeBytes = size)
         }
         finally { releaseFfmpegInput(input) }
     }
@@ -318,7 +335,7 @@ internal class MediaConvertViewModel(application: Application) :
         val video = info.getStreams().firstOrNull { it.getType() == "video" }
         val audio = info.getStreams().firstOrNull { it.getType() == "audio" }
         return SourceDescription(text, video?.let(::videoSize), video?.let(::streamBitrateBps), audio?.let(::streamBitrateBps),
-            audio?.getSampleRate()?.toIntOrNull()?.takeIf { it > 0 }, audio?.getNumberProperty("channels")?.toInt(), audio?.getChannelLayout())
+            audio?.getSampleRate()?.toIntOrNull()?.takeIf { it > 0 }, audio?.getNumberProperty("channels")?.toInt(), audio?.getChannelLayout(), video?.getStringProperty("pix_fmt"))
     }
 
     private fun streamBitrateBps(stream: StreamInformation): Long? = MediaConvertVideoBitrate.sourceBitsPerSecond(
@@ -388,7 +405,7 @@ internal class MediaConvertViewModel(application: Application) :
             val sourceProbe = withContext(Dispatchers.IO) { probeSourceUri(file.uri)?.let { if (isLikelyAudioFile(file)) it.copy(hasVideo = false, videoBitrateBps = null) else it } ?: MediaConvertSource(true, null) }
             val options = currentState.options
             if (!format.isAudioOnly && options.videoBitrate.mode == MediaConvertBitrateMode.ORIGINAL &&
-                (options.selectedVideoCodec != "copy" || !sourceProbe.hasVideo) && sourceProbe.videoBitrateBps == null) {
+                options.videoSettings.sizeLimitPercent == null && (options.selectedVideoCodec != "copy" || !sourceProbe.hasVideo) && sourceProbe.videoBitrateBps == null) {
                 return Result.failure(IllegalStateException(string(R.string.media_convert_bitrate_source_unavailable)))
             }
             val audioCodec = format.audioEncoder(options.selectedAudioCodec)
@@ -402,7 +419,29 @@ internal class MediaConvertViewModel(application: Application) :
             }
             appendLog(string(R.string.media_convert_converting, prefix))
             val output = File(cache, "output.${format.extension}")
-            val session = executeConversion(input, output, format, sourceProbe, index, total)
+            val codec = if (format.isAudioOnly) "" else format.videoEncoder(options.selectedVideoCodec)
+            val commands = try {
+                MediaConvertCommand.plan(input, output.absolutePath, format, options, sourceProbe, File(cache, "video-pass").absolutePath,
+                    currentState.videoPixelFormats[codec])
+            } catch (e: MediaConvertVideoSizeException) {
+                val message = when (e.reason) {
+                    MediaConvertVideoSizeError.UNKNOWN_SOURCE_SIZE -> R.string.media_convert_size_source_required
+                    MediaConvertVideoSizeError.UNKNOWN_DURATION -> R.string.media_convert_size_duration_required
+                    MediaConvertVideoSizeError.UNKNOWN_AUDIO_BITRATE -> R.string.media_convert_size_audio_bitrate_required
+                    MediaConvertVideoSizeError.INSUFFICIENT_SIZE -> R.string.media_convert_size_out_of_range
+                }
+                return Result.failure(IllegalStateException(string(message)))
+            } catch (e: IllegalArgumentException) {
+                return Result.failure(IllegalStateException(string(R.string.media_convert_video_settings_invalid, e.message.orEmpty())))
+            }
+            var session: FFmpegSession? = null
+            for ((passIndex, command) in commands.withIndex()) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (commands.size > 1) appendLog(string(R.string.media_convert_video_pass, passIndex + 1, commands.size))
+                session = executeConversion(command.toTypedArray(), index, total, passIndex, commands.size)
+                if (!ReturnCode.isSuccess(session.getReturnCode())) break
+            }
+            checkNotNull(session)
             if (!ReturnCode.isSuccess(session.getReturnCode()) || !output.isFile || output.length() <= 0L) {
                 return Result.failure(
                     IllegalStateException(
@@ -420,16 +459,16 @@ internal class MediaConvertViewModel(application: Application) :
         finally { releaseFfmpegInput(input); withContext(NonCancellable + Dispatchers.IO) { cache.deleteRecursively() } }
     }
 
-    private suspend fun executeConversion(input: String, output: File, format: MediaConvertFormatInfo, probe: MediaConvertSource?, index: Int, total: Int): FFmpegSession {
-        val arguments = MediaConvertCommand.build(input, output.absolutePath, format, currentState.options, probe).toTypedArray()
+    private suspend fun executeConversion(arguments: Array<String>, index: Int, total: Int, passIndex: Int, passCount: Int): FFmpegSession {
         appendLog(string(R.string.media_convert_execute_command, arguments.joinToString(" ") { "\"$it\"" }))
         val lastProgressAt = AtomicLong(SystemClock.elapsedRealtime()); var local = 0
-        val session = withContext(Dispatchers.IO) {
+        val session = withContext(NonCancellable + Dispatchers.IO) {
             FFmpegKit.executeWithArgumentsAsync(arguments, { }, { log -> appendLog(log.message) }, { statistics ->
-                if (statistics.time > 0) { lastProgressAt.set(SystemClock.elapsedRealtime()); local = (local + 1).coerceAtMost(95); setState { copy(progress = ((index * 100L + local) / total).toInt().coerceIn(0, 99)) } }
+                if (statistics.time > 0) { lastProgressAt.set(SystemClock.elapsedRealtime()); local = (local + 1).coerceAtMost(95); setState { copy(progress = ((index * 100L + (passIndex * 100 + local) / passCount) / total).toInt().coerceIn(0, 99)) } }
             })
         }
         currentSession = session
+        if (taskController.isCancellationRequested) session.cancel()
         while (session.getState().name !in setOf("COMPLETED", "FAILED")) {
             delay(100)
             if (SystemClock.elapsedRealtime() - lastProgressAt.get() > 120_000L) {
@@ -458,9 +497,20 @@ internal class MediaConvertViewModel(application: Application) :
             }
             val audio = info.getStreams().firstOrNull { it.getType() == "audio" }
             MediaConvertSource(video != null, info.getDuration()?.toDoubleOrNull()?.takeIf { it > 0 }, rate, video?.let(::streamBitrateBps),
-                audio?.getSampleRate()?.toIntOrNull(), audio?.getNumberProperty("channels")?.toInt(), audio?.let(::streamBitrateBps), audio?.getChannelLayout())
+                audio?.getSampleRate()?.toIntOrNull(), audio?.getNumberProperty("channels")?.toInt(), audio?.let(::streamBitrateBps), audio?.getChannelLayout(),
+                video?.getStringProperty("pix_fmt"), audio != null, sourceSizeBytes(uri))
         } catch (_: Exception) { null }
         finally { releaseFfmpegInput(input) }
+    }
+    private fun sourceSizeBytes(uri: Uri): Long? {
+        PickedUriAccess.file(uri)?.let { return it.length().takeIf { size -> size > 0 } }
+        return runCatching {
+            app.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0).takeIf { it > 0 } else null
+            }
+        }.getOrNull() ?: runCatching {
+            app.contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize.takeIf { size -> size > 0 } }
+        }.getOrNull()
     }
     private fun isLikelyAudioFile(file: SelectedMediaFile) = app.contentResolver.getType(file.uri)?.startsWith("audio/") == true || file.fileName.substringAfterLast('.', "").lowercase(Locale.ROOT) in audioExtensions
     private fun desiredOutputName(name: String, format: MediaConvertFormatInfo) = "${name.substringBeforeLast('.', name).ifBlank { "media_file" }}.${format.extension}"

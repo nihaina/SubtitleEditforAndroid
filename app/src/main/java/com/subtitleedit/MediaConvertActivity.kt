@@ -167,6 +167,14 @@ class MediaConvertActivity : AppComposeActivity() {
                     sourceAudioChannelLabel = sourceChannelLabel,
                     audioVolumePercent = state.options.audioVolumePercent,
                     onAudioVolumeChange = viewModel::setAudioVolume,
+                    videoSettings = state.options.videoSettings,
+                    moreExpanded = state.options.moreExpanded,
+                    effectiveVideoCodec = effectiveVideoCodec,
+                    detectedPixelFormats = state.videoPixelFormats[effectiveVideoCodec],
+                    sourcePixelFormat = source?.videoPixelFormat,
+                    sourceFileSizeBytes = source?.fileSizeBytes,
+                    onToggleMore = viewModel::toggleMore,
+                    onVideoSettingsChange = viewModel::setVideoSettings,
                     qualityHint = getString(R.string.media_convert_quality_range, qualityRange.first, qualityRange.last, if (effectiveVideoCodec == "libtheora") getString(R.string.media_convert_quality_larger) else getString(R.string.media_convert_quality_smaller))
                 )
             }

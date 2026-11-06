@@ -50,6 +50,8 @@ import com.subtitleedit.MediaConvertBitrateMode
 import com.subtitleedit.MediaConvertVideoBitrate
 import com.subtitleedit.MediaConvertVideoBitrateSettings
 import com.subtitleedit.MediaConvertAudioBitrate
+import com.subtitleedit.MediaConvertVideoSettings
+import com.subtitleedit.MediaConvertVideoSettingsSupport
 import com.subtitleedit.ui.components.AppChoiceTile
 import com.subtitleedit.ui.components.AppConflictDialog
 import com.subtitleedit.ui.components.AppLogBox
@@ -139,7 +141,15 @@ internal fun MediaConvertScreen(
     sourceAudioSampleRate: Int? = null,
     sourceAudioChannelLabel: String = "",
     audioVolumePercent: Int = 100,
-    onAudioVolumeChange: (Int) -> Unit = {}
+    onAudioVolumeChange: (Int) -> Unit = {},
+    videoSettings: MediaConvertVideoSettings = MediaConvertVideoSettings(),
+    moreExpanded: Boolean = false,
+    effectiveVideoCodec: String = selectedVideoCodec,
+    detectedPixelFormats: List<String>? = null,
+    sourcePixelFormat: String? = null,
+    onToggleMore: () -> Unit = {},
+    onVideoSettingsChange: (MediaConvertVideoSettings) -> Unit = {},
+    sourceFileSizeBytes: Long? = null
 ) {
     var showResolutionDialog by rememberSaveable { mutableStateOf(false) }
     var showBitrateDialog by rememberSaveable { mutableStateOf(false) }
@@ -220,6 +230,11 @@ internal fun MediaConvertScreen(
             }
         }
 
+        if (selectedFormat != null && videoCodecs.isNotEmpty()) {
+            MediaConvertVideoMoreSettings(videoSettings, moreExpanded, effectiveVideoCodec, videoBitrate.mode,
+                detectedPixelFormats, sourcePixelFormat, multipleSources, isConverting, onToggleMore, onVideoSettingsChange, sourceFileSizeBytes)
+        }
+
         if (selectedFormat != null) AppSection {
             val rotation by animateFloatAsState(
                 targetValue = if (advancedExpanded) 90f else 0f,
@@ -284,7 +299,9 @@ internal fun MediaConvertScreen(
                                 Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
                             }
                         }
-                        val qualityEnabled = videoEnabled && videoBitrate.mode == MediaConvertBitrateMode.AUTO
+                        val qualityEnabled = videoEnabled && videoBitrate.mode == MediaConvertBitrateMode.AUTO &&
+                            videoSettings.sizeLimitPercent == null &&
+                            !(videoSettings.crf != null && effectiveVideoCodec in MediaConvertVideoSettingsSupport.crfCodecs)
                         if (videoBitrate.mode != MediaConvertBitrateMode.AUTO) Text(
                             stringResource(R.string.media_convert_bitrate_quality_hint),
                             style = MaterialTheme.typography.bodySmall,
