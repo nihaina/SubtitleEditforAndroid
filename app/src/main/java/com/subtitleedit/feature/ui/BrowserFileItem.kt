@@ -1,11 +1,11 @@
 package com.subtitleedit.feature.ui
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -24,8 +24,6 @@ import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -66,7 +64,11 @@ internal fun BrowserFileRow(
     val previewKey = remember(file.absolutePath, file.length(), file.lastModified()) {
         "${file.absolutePath}:${file.length()}:${file.lastModified()}"
     }
-    val thumbnailDp = if (viewMode == FileBrowserViewMode.GRID) 64 else 48
+    val thumbnailDp = when (viewMode) {
+        FileBrowserViewMode.DETAILED -> 40
+        FileBrowserViewMode.COMPACT -> 32
+        FileBrowserViewMode.GRID -> 160
+    }
     val targetSize = remember(context, thumbnailDp) { (thumbnailDp * context.resources.displayMetrics.density + 0.5f).toInt() }
     var preview by remember(previewKey) { mutableStateOf<MainFilePreview?>(null) }
     var directoryCount by remember(previewKey) { mutableStateOf<Int?>(null) }
@@ -74,7 +76,7 @@ internal fun BrowserFileRow(
         preview = withContext(Dispatchers.IO) {
             MainFilePreviewLoader.preview(context, file, targetSize)
         }
-        if (viewMode != FileBrowserViewMode.GRID && file.isDirectory && file.name != ".." && !restricted) {
+        if (file.isDirectory && file.name != ".." && !restricted) {
             directoryCount = withContext(Dispatchers.IO) {
                 MainFilePreviewLoader.directoryItemCount(file)
             }
@@ -93,53 +95,38 @@ internal fun BrowserFileRow(
         restricted -> 0.55f
         else -> 1f
     }
-    val isGrid = viewMode == FileBrowserViewMode.GRID
     val containerColor by animateColorAsState(
         targetValue = when {
             isSelected -> MaterialTheme.colorScheme.primaryContainer
-            isGrid -> Color.Transparent
-            else -> MaterialTheme.colorScheme.surfaceContainerLowest
+            viewMode == FileBrowserViewMode.GRID -> MaterialTheme.colorScheme.surfaceContainerLow
+            else -> Color.Transparent
         },
         animationSpec = AppMotion.state(),
         label = "file-row-container"
     )
-    val borderWidth by animateDpAsState(
-        targetValue = when {
-            isSelected -> 2.dp
-            else -> 0.dp
-        },
-        animationSpec = AppMotion.state(),
-        label = "file-row-border"
-    )
-    val borderColor by animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-        animationSpec = AppMotion.state(),
-        label = "file-row-border-color"
-    )
-    val rowShape = if (isGrid) MaterialTheme.shapes.large else MaterialTheme.shapes.medium
+    val itemShape = RoundedCornerShape(when (viewMode) {
+        FileBrowserViewMode.DETAILED -> 12.dp
+        FileBrowserViewMode.COMPACT -> 8.dp
+        FileBrowserViewMode.GRID -> 16.dp
+    })
     val itemModifier = modifier
         .fillMaxWidth()
-        .padding(
-            horizontal = if (isGrid) 0.dp else 4.dp,
-            vertical = when (viewMode) {
-                FileBrowserViewMode.DETAILED -> 4.dp
-                FileBrowserViewMode.COMPACT -> 2.dp
-                FileBrowserViewMode.GRID -> 0.dp
-            }
-        )
+        .padding(horizontal = if (viewMode == FileBrowserViewMode.GRID) 0.dp else 8.dp)
         .alpha(alpha)
-        .clip(rowShape)
+        .clip(itemShape)
+        .background(containerColor)
         .combinedClickable(
             enabled = enabled,
             onClick = onClick,
             onLongClick = { if (restricted) onClick() else onLongClick() }
         )
+    val count = directoryCount
     val summary = when {
         file.name == ".." -> ""
         !file.isDirectory -> FileUtils.formatFileSize(file.length())
-        restricted || directoryCount == null || directoryCount!! < 0 -> ""
-        directoryCount == 0 -> stringResource(R.string.directory_empty)
-        else -> stringResource(R.string.directory_item_count, directoryCount!!)
+        restricted || count == null || count < 0 -> ""
+        count == 0 -> stringResource(R.string.directory_empty)
+        else -> stringResource(R.string.directory_item_count, count)
     }
     val details = BrowserFileDetails(
         name = displayName,
@@ -148,18 +135,11 @@ internal fun BrowserFileRow(
         modifiedTime = if (file.name == "..") "" else modifiedTime,
         extension = if (file.isDirectory) "" else file.extension.uppercase(locale)
     )
-    val border = BorderStroke(borderWidth, borderColor)
-    Surface(
-        modifier = itemModifier,
-        shape = rowShape,
-        color = containerColor,
-        border = border,
-        tonalElevation = if (isSelected && !isGrid) 2.dp else 0.dp
-    ) {
+    Box(modifier = itemModifier) {
         when (viewMode) {
             FileBrowserViewMode.DETAILED -> DetailedFileRowContent(file, preview, details, restricted || !enabled)
             FileBrowserViewMode.COMPACT -> CompactFileRowContent(file, preview, details, restricted || !enabled)
-            FileBrowserViewMode.GRID -> GridFileItemContent(file, preview, displayName, restricted || !enabled)
+            FileBrowserViewMode.GRID -> GridFileItemContent(file, preview, details, restricted || !enabled)
         }
     }
 }
@@ -170,86 +150,112 @@ private data class BrowserFileDetails(
     val duration: String,
     val modifiedTime: String,
     val extension: String
-) {
-    fun metadata(includeDate: Boolean = false): String =
-        listOf(summary, duration, if (includeDate) modifiedTime else "").filter(String::isNotEmpty).joinToString(" • ")
-}
+)
 
 @Composable
 private fun DetailedFileRowContent(file: File, preview: MainFilePreview?, details: BrowserFileDetails, restricted: Boolean) {
-    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-        FileRowIcon(file, preview?.bitmap, restricted)
-        Column(Modifier.weight(1f).padding(horizontal = 12.dp), verticalArrangement = Arrangement.Center) {
-            FileItemTitle(details.name, restricted, MaterialTheme.typography.titleMedium)
+    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        BrowserIconContainer(file, preview?.bitmap, restricted, size = 42.dp)
+        Column(Modifier.weight(1f).padding(start = 12.dp, end = 8.dp)) {
+            FileItemTitle(details.name, restricted, MaterialTheme.typography.bodyLarge)
             if (file.name != "..") {
                 Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(details.summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    // Keep the duration slot while the media preview is loading.
+                    Text(details.summary, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, minLines = 1, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
                     val loadingDuration = MainFilePreviewLoader.isMediaFile(file) && preview == null
                     if (loadingDuration || details.duration.isNotEmpty()) {
-                        Text(if (loadingDuration) "00:00" else "• ${details.duration}",
-                            modifier = Modifier.padding(start = 8.dp).width(72.dp).alpha(if (loadingDuration) 0f else 1f),
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        Text(if (loadingDuration) "00:00" else details.duration,
+                            modifier = Modifier.padding(start = 12.dp).width(72.dp).alpha(if (loadingDuration) 0f else 1f),
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1)
                     }
                 }
             }
         }
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (details.extension.isNotEmpty()) StatusBadge(details.extension)
-            if (details.modifiedTime.isNotEmpty()) Text(details.modifiedTime, style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f), maxLines = 1)
+            else if (file.isDirectory && file.name != "..") Spacer(Modifier.height(24.dp))
+            if (details.modifiedTime.isNotEmpty()) {
+                Text(details.modifiedTime, style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            }
         }
     }
 }
 
 @Composable
 private fun CompactFileRowContent(file: File, preview: MainFilePreview?, details: BrowserFileDetails, restricted: Boolean) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        FileRowIcon(file, preview?.bitmap, restricted, size = 36.dp)
-        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-            FileItemTitle(details.name, restricted, MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
-            if (file.name != "..") {
-                Text(details.metadata(includeDate = true), modifier = Modifier.padding(top = 4.dp),
-                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        BrowserIconContainer(file, preview?.bitmap, restricted, size = 30.dp)
+        Box(Modifier.weight(1f).padding(start = 10.dp, end = 8.dp)) {
+            FileItemTitle(details.name, restricted, MaterialTheme.typography.bodyMedium)
+        }
+        if (details.summary.isNotEmpty()) {
+            Text(details.summary, style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f), maxLines = 1)
+            Spacer(Modifier.width(6.dp))
         }
         if (details.extension.isNotEmpty()) StatusBadge(details.extension)
     }
 }
 
 @Composable
-private fun GridFileItemContent(file: File, preview: MainFilePreview?, displayName: String, restricted: Boolean) {
-    Column(
-        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
+private fun GridFileItemContent(file: File, preview: MainFilePreview?, details: BrowserFileDetails, restricted: Boolean) {
+    Column(Modifier.fillMaxWidth().padding(6.dp)) {
         Box(
-            modifier = Modifier.fillMaxWidth().height(56.dp)
-                .alpha(if (file.name.startsWith(".") && file.name != "..") 0.5f else 1f),
+            modifier = Modifier.fillMaxWidth().aspectRatio(4f / 3).clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
             contentAlignment = Alignment.Center
         ) {
-            if (preview?.bitmap != null) {
-                val isApk = file.extension.equals("apk", true)
-                Image(
-                    preview.bitmap.asImageBitmap(), null,
-                    Modifier.size(56.dp).clip(MaterialTheme.shapes.small).padding(if (isApk) 4.dp else 0.dp),
-                    contentScale = if (isApk) ContentScale.Fit else ContentScale.Crop
-                )
+            if (preview?.bitmap != null && !file.extension.equals("apk", true)) {
+                Image(preview.bitmap.asImageBitmap(), null,
+                    Modifier.fillMaxSize().alpha(if (file.name.startsWith(".")) 0.5f else 1f), contentScale = ContentScale.Crop)
             } else {
-                Icon(
-                    painterResource(MainFilePreviewLoader.iconResource(file)),
-                    contentDescription = null,
-                    modifier = Modifier.size(56.dp),
-                    tint = if (restricted) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified
-                )
+                FileRowIcon(file, preview?.bitmap, restricted, size = 72.dp)
+            }
+            if (details.extension.isNotEmpty()) {
+                Box(Modifier.align(Alignment.TopEnd).padding(6.dp)) { StatusBadge(details.extension) }
+            }
+            if (details.duration.isNotEmpty()) {
+                Surface(
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp),
+                    shape = RoundedCornerShape(4.dp), color = Color.Black.copy(alpha = 0.65f)
+                ) {
+                    Text(details.duration, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall, color = Color.White)
+                }
             }
         }
-        Text(displayName, modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyMedium,
-            color = if (restricted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.Center, minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(6.dp))
+        FileItemTitle(details.name, restricted, MaterialTheme.typography.bodyMedium)
+        Text(listOf(details.summary, details.modifiedTime).filter(String::isNotEmpty).joinToString(" • "),
+            modifier = Modifier.padding(top = 2.dp), style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun BrowserIconContainer(file: File, bitmap: android.graphics.Bitmap?, restricted: Boolean, size: Dp) {
+    Box(
+        modifier = Modifier.size(size).alpha(if (file.name.startsWith(".") && file.name != "..") 0.5f else 1f),
+        contentAlignment = Alignment.Center
+    ) {
+        if (bitmap != null && !file.isDirectory) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = stringResource(R.string.file_name),
+                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(size * 0.15f)),
+                contentScale = if (file.extension.equals("apk", ignoreCase = true)) ContentScale.Fit else ContentScale.Crop
+            )
+        } else {
+            Icon(
+                painter = painterResource(MainFilePreviewLoader.iconResource(file)),
+                contentDescription = stringResource(R.string.file_name),
+                modifier = Modifier.fillMaxSize(),
+                tint = if (restricted) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified
+            )
+        }
     }
 }
 

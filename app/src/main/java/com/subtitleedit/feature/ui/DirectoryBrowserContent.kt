@@ -98,11 +98,11 @@ internal fun DirectoryBrowserContent(
         } else if (state.files.isNotEmpty()) {
             if (isGrid) {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(64.dp),
+                    columns = GridCells.Adaptive(136.dp),
                     state = gridState,
                     modifier = Modifier.fillMaxWidth().weight(1f).testTag("directory-files"),
-                    contentPadding = PaddingValues(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    contentPadding = PaddingValues(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(state.files, key = { it.absolutePath }) { file ->
@@ -116,7 +116,7 @@ internal fun DirectoryBrowserContent(
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth().weight(1f).testTag("directory-files"),
                     state = listState,
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp)
+                    contentPadding = PaddingValues(vertical = 4.dp)
                 ) {
                     items(state.files, key = { it.absolutePath }) { file ->
                         BrowserFileRow(

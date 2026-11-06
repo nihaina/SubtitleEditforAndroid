@@ -54,13 +54,17 @@ fun FavoritesScreen(
                 )
             }
         } else {
-            val contentPadding = PaddingValues(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 96.dp)
+            val contentPadding = if (viewMode == FileBrowserViewMode.GRID) {
+                PaddingValues(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 96.dp)
+            } else {
+                PaddingValues(top = 4.dp, bottom = 96.dp)
+            }
             if (viewMode == FileBrowserViewMode.GRID) {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(64.dp),
+                    columns = GridCells.Adaptive(136.dp),
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = contentPadding,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(directories, key = { it.absolutePath }) { directory ->
