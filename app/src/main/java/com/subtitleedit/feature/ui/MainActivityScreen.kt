@@ -1,10 +1,7 @@
 package com.subtitleedit.feature.ui
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,10 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Button
@@ -48,28 +43,21 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.SizeTransform
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -87,21 +75,13 @@ import com.subtitleedit.DirectoryScrollPosition
 import com.subtitleedit.MainTopLevelPages
 import com.subtitleedit.MainTopLevelPagesState
 import com.subtitleedit.R
-import com.subtitleedit.util.AndroidDirectoryPolicy
 import com.subtitleedit.util.BatchRename
 import com.subtitleedit.util.FileOperationUiPolicy
-import com.subtitleedit.util.FileUtils
-import com.subtitleedit.util.FilePathPolicy
 import com.subtitleedit.util.MainNavigationPolicy
 import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import com.subtitleedit.model.FileBrowserViewMode
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import com.subtitleedit.ui.components.StatusBadge
 import com.subtitleedit.ui.theme.AppMotion
 
 private val MainBottomNavigationItems = listOf(
@@ -138,6 +118,7 @@ internal data class MainActivityScreenState(
     val searchQuery: String = "",
     val sortField: FileSortField = FileSortField.NAME,
     val sortDirection: FileSortDirection = FileSortDirection.ASCENDING,
+    val viewMode: FileBrowserViewMode = FileBrowserViewMode.DETAILED,
     val canConvertSelected: Boolean = false,
     val canCompressSelected: Boolean = true,
     val canClearCacheSelected: Boolean = false
@@ -153,7 +134,7 @@ internal fun MainActivityScreen(
     state: MainActivityScreenState,
     topLevelPageRefreshVersion: Int,
     topLevelPageSelectionVersion: Int,
-    onDirectoryListState: (LazyListState) -> Unit,
+    onDirectoryScrollPosition: (() -> DirectoryScrollPosition) -> Unit,
     onTopLevelPageSelected: (Int) -> Unit,
     onOpenDirectoryFromFavorites: (File) -> Unit,
     onUpdateTopLevelToolbar: (String, Boolean, (() -> Unit)?) -> Unit,
@@ -162,6 +143,7 @@ internal fun MainActivityScreen(
     onCreateItem: (MainCreateItemKind, String, String) -> MainCreateItemError?,
     onSortFieldChanged: (FileSortField) -> Unit,
     onSortDirectionChanged: (FileSortDirection) -> Unit,
+    onViewModeChanged: (FileBrowserViewMode) -> Unit,
     onOpenFileManagementSettings: () -> Unit,
     onSelectAll: () -> Unit,
     onSelectRange: () -> Unit,
@@ -203,9 +185,9 @@ internal fun MainActivityScreen(
     onCacheItemSelected: (com.subtitleedit.ui.settings.SettingsCacheItem) -> Unit,
     onCacheClearConfirm: (com.subtitleedit.ui.settings.SettingsCacheItem) -> Unit
 ) {
-    val listState = rememberLazyListState()
+    val directoryListState = rememberLazyListState()
+    val directoryGridState = rememberLazyGridState()
     val topLevelPagesState = remember { MainTopLevelPagesState() }
-    SideEffect { onDirectoryListState(listState) }
     var createMenuExpanded by remember { mutableStateOf(false) }
     var directoryMenuExpanded by remember { mutableStateOf(false) }
     var createDialogKind by remember { mutableStateOf<MainCreateItemKind?>(null) }
@@ -316,6 +298,8 @@ internal fun MainActivityScreen(
                         }
                     }
                 } else if (isDirectoryPage) {
+                    DirectoryViewMenu(state.viewMode, state.sortField, state.sortDirection,
+                        onViewModeChanged, onSortFieldChanged, onSortDirectionChanged)
                     Box {
                         IconButton(onClick = {
                             createMenuExpanded = false
@@ -441,10 +425,12 @@ internal fun MainActivityScreen(
                 if (page == R.id.nav_directory) {
                     DirectoryBrowserContent(
                         state = state,
-                        listState = listState,
+                        onScrollPosition = onDirectoryScrollPosition,
                         onDirectoryBreadcrumbClick = onDirectoryBreadcrumbClick,
                         onFileClick = onFileClick,
-                        onFileLongClick = onFileLongClick
+                        onFileLongClick = onFileLongClick,
+                        listState = directoryListState,
+                        gridState = directoryGridState
                     )
                 } else {
                     MainTopLevelPages(
@@ -453,6 +439,7 @@ internal fun MainActivityScreen(
                         refreshVersion = topLevelPageRefreshVersion,
                         selectionVersion = topLevelPageSelectionVersion,
                         state = topLevelPagesState,
+                        viewMode = state.viewMode,
                         onOpenDirectory = onOpenDirectoryFromFavorites,
                         onToolbarChanged = onUpdateTopLevelToolbar
                     )
@@ -632,297 +619,6 @@ internal fun MainActivityScreen(
         onCacheItemSelected = onCacheItemSelected,
         onCacheClearConfirm = onCacheClearConfirm
     )
-}
-
-@Composable
-private fun DirectoryBrowserContent(
-    state: MainActivityScreenState,
-    listState: LazyListState,
-    onDirectoryBreadcrumbClick: (File) -> Boolean,
-    onFileClick: (File) -> Unit,
-    onFileLongClick: (File) -> Unit
-) {
-    val scrollRequest = state.scrollRequest
-    var appliedScrollGeneration by remember { mutableStateOf<Long?>(null) }
-    LaunchedEffect(scrollRequest, state.files, state.currentDirectory) {
-        val request = scrollRequest ?: return@LaunchedEffect
-        if (appliedScrollGeneration == request.generation || state.files.isEmpty()) return@LaunchedEffect
-        if (state.currentDirectory?.let(FilePathPolicy::canonicalOrAbsolute) != request.directoryPath) {
-            return@LaunchedEffect
-        }
-        val savedPosition = request.savedPosition
-        val position = savedPosition?.firstVisiblePath?.let { path ->
-            state.files.indexOfFirst { it.absolutePath == path }
-        }?.takeIf { it >= 0 } ?: savedPosition?.firstVisibleIndex ?: 0
-        listState.scrollToItem(position.coerceIn(0, state.files.lastIndex), savedPosition?.offset ?: 0)
-        appliedScrollGeneration = request.generation
-    }
-    Column(Modifier.fillMaxSize()) {
-        state.currentDirectory?.let { directory ->
-            DirectoryBreadcrumbBar(
-                directory = directory,
-                enabled = state.selectedPaths.isEmpty() || state.pendingOperation != null,
-                onNavigate = onDirectoryBreadcrumbClick
-            )
-        }
-        // The legacy directory screen only exposed progress while a recursive
-        // search was running. Loading a directory kept the existing list and
-        // did not replace the empty-state text with the search message.
-        val searchProgressAlpha by animateFloatAsState(
-            targetValue = if (state.isSearchInProgress) 1f else 0f,
-            animationSpec = AppMotion.fast(),
-            label = "directory-search-progress"
-        )
-        androidx.compose.material3.LinearProgressIndicator(
-            modifier = Modifier.fillMaxWidth().height(2.dp),
-            color = MaterialTheme.colorScheme.primary.copy(alpha = searchProgressAlpha),
-            trackColor = Color.Transparent,
-            progress = { 1f }
-        )
-
-        if (state.showDirectoryEmptyState) {
-            Box(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = stringResource(state.directoryEmptyStateMessage),
-                    color = MaterialTheme.colorScheme.onBackground,
-                    style = MaterialTheme.typography.bodyLarge
-                )
-            }
-        } else if (state.files.isNotEmpty()) {
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                state = listState,
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp)
-            ) {
-                items(state.files, key = { it.absolutePath }) { file ->
-                    BrowserFileRow(
-                        file = file,
-                        relativePathRoot = state.relativePathRoot,
-                        isSelected = file.absolutePath in state.selectedPaths,
-                        isSelectionMode = state.selectedPaths.isNotEmpty() && state.pendingOperation == null,
-                        onClick = { onFileClick(file) },
-                        onLongClick = { onFileLongClick(file) }
-                    )
-                }
-            }
-        } else {
-            Spacer(Modifier.weight(1f))
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-internal fun BrowserFileRow(
-    modifier: Modifier = Modifier,
-    file: File,
-    relativePathRoot: File?,
-    isSelected: Boolean,
-    isSelectionMode: Boolean,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit,
-    restrictedOverride: Boolean? = null,
-    enabled: Boolean = true
-) {
-    val context = LocalContext.current
-    val locale = LocalLocale.current.platformLocale
-    // FavoritesFragment historically used FileListAdapter without an
-    // isItemRestricted callback. Preserve that behavior for its rows while
-    // keeping the Android/data restriction for the main browser.
-    val restricted = remember(file.absolutePath, restrictedOverride) {
-        restrictedOverride ?: AndroidDirectoryPolicy.isRestricted(file)
-    }
-    val previewKey = remember(file.absolutePath, file.length(), file.lastModified()) {
-        "${file.absolutePath}:${file.length()}:${file.lastModified()}"
-    }
-    val targetSize = remember(context) { (48 * context.resources.displayMetrics.density + 0.5f).toInt() }
-    var preview by remember(previewKey) { mutableStateOf<MainFilePreview?>(null) }
-    var directoryCount by remember(previewKey) { mutableStateOf<Int?>(null) }
-    LaunchedEffect(previewKey) {
-        preview = withContext(Dispatchers.IO) {
-            MainFilePreviewLoader.preview(context, file, targetSize)
-        }
-        if (file.isDirectory && file.name != ".." && !restricted) {
-            directoryCount = withContext(Dispatchers.IO) {
-                MainFilePreviewLoader.directoryItemCount(file)
-            }
-        }
-    }
-    val displayName = remember(file.absolutePath, relativePathRoot?.absolutePath) {
-        relativePathRoot?.let { root -> runCatching { file.relativeTo(root).path }.getOrDefault(file.name) }
-            ?: file.name
-    }
-    val modifiedTime = remember(file.lastModified(), locale) {
-        SimpleDateFormat("yyyy-MM-dd", locale).format(Date(file.lastModified()))
-    }
-    val alpha = when {
-        !enabled -> 0.38f
-        isSelectionMode && !isSelected -> 0.72f
-        restricted -> 0.55f
-        else -> 1f
-    }
-    val selectionStrokeWidth = with(LocalDensity.current) { 2.toDp() }
-    val containerColor by animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceContainerLowest,
-        animationSpec = AppMotion.state(),
-        label = "file-row-container"
-    )
-    val animatedBorderWidth by animateDpAsState(
-        targetValue = if (isSelected) selectionStrokeWidth else 0.dp,
-        animationSpec = AppMotion.state(),
-        label = "file-row-border"
-    )
-    val border = BorderStroke(animatedBorderWidth, MaterialTheme.colorScheme.primary)
-    val rowShape = MaterialTheme.shapes.large
-
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(4.dp)
-            .alpha(alpha)
-            .clip(rowShape)
-            .combinedClickable(
-                enabled = enabled,
-                onClick = onClick,
-                onLongClick = { if (restricted) onClick() else onLongClick() }
-            ),
-        shape = rowShape,
-        color = containerColor,
-        border = border,
-        shadowElevation = 0.dp
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            FileRowIcon(file, preview?.bitmap, restricted || !enabled)
-            Column(
-                modifier = Modifier.weight(1f).padding(start = 8.dp),
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = displayName,
-                    color = if (restricted || !enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.MiddleEllipsis
-                )
-                if (file.isDirectory && file.name != "..") {
-                    if (!restricted) {
-                        val count = directoryCount
-                        if (count == null || count >= 0) {
-                            Text(
-                                text = when {
-                                    count == null -> ""
-                                    count == 0 -> stringResource(R.string.directory_empty)
-                                    else -> stringResource(R.string.directory_item_count, count)
-                                },
-                                modifier = Modifier.padding(top = 4.dp)
-                                    .alpha(if (count == null) 0f else 1f),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                        }
-                    }
-                } else if (!file.isDirectory) {
-                    Row(
-                        modifier = Modifier.padding(top = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = FileUtils.formatFileSize(file.length()),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1
-                        )
-                        val mediaFile = MainFilePreviewLoader.isMediaFile(file)
-                        if (mediaFile && preview == null) {
-                            Text(
-                                text = "00:00",
-                                modifier = Modifier
-                                    .padding(start = 12.dp)
-                                    .width(72.dp)
-                                    .alpha(0f),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        } else {
-                            preview?.mediaDuration?.takeIf(String::isNotEmpty)?.let { duration ->
-                                Text(
-                                    text = duration,
-                                    modifier = Modifier.padding(start = 12.dp).width(72.dp),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-            Column(
-                modifier = Modifier.padding(start = 8.dp),
-                horizontalAlignment = Alignment.End
-            ) {
-                if (file.isDirectory) {
-                    if (file.name != "..") {
-                        Spacer(Modifier.height(24.dp))
-                        Text(
-                            text = modifiedTime,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(top = 5.dp),
-                            maxLines = 1
-                        )
-                    }
-                } else {
-                    if (file.extension.isNotEmpty()) {
-                        StatusBadge(file.extension.uppercase(locale))
-                    }
-                    Text(
-                        text = modifiedTime,
-                        modifier = Modifier.padding(top = 5.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun FileRowIcon(file: File, bitmap: android.graphics.Bitmap?, restricted: Boolean) {
-    val iconDescription = stringResource(R.string.file_name)
-    Box(
-        modifier = Modifier.size(48.dp).alpha(
-            if (file.name.startsWith(".") && file.name != "..") 0.5f else 1f
-        ),
-        contentAlignment = Alignment.Center
-    ) {
-        if (bitmap != null) {
-            val isApk = file.extension.equals("apk", ignoreCase = true)
-            androidx.compose.foundation.Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = iconDescription,
-                modifier = if (isApk) Modifier.fillMaxSize().padding(8.dp) else Modifier.fillMaxSize(),
-                contentScale = if (isApk) ContentScale.Fit else ContentScale.Crop
-            )
-        } else {
-            Icon(
-                painter = painterResource(MainFilePreviewLoader.iconResource(file)),
-                contentDescription = iconDescription,
-                modifier = Modifier.size(32.dp),
-                tint = if (restricted) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified
-            )
-        }
-    }
 }
 
 @Composable

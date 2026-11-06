@@ -1,12 +1,16 @@
 package com.subtitleedit.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -22,6 +26,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
 import com.subtitleedit.feature.ui.BrowserFileRow
+import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.ui.components.AppAlertDialog
 import java.io.File
 
@@ -33,7 +38,8 @@ fun FavoritesScreen(
     onOpenDirectory: (File) -> Unit,
     onRequestRemoval: (File) -> Unit,
     onConfirmRemoval: () -> Unit,
-    onDismissRemoval: () -> Unit
+    onDismissRemoval: () -> Unit,
+    viewMode: FileBrowserViewMode = FileBrowserViewMode.DETAILED
 ) {
     Box(Modifier.fillMaxSize()) {
         if (directories.isEmpty()) {
@@ -48,20 +54,24 @@ fun FavoritesScreen(
                 )
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 96.dp)
-            ) {
-                items(directories, key = { it.absolutePath }) { directory ->
-                    BrowserFileRow(
-                        file = directory,
-                        relativePathRoot = null,
-                        isSelected = false,
-                        isSelectionMode = false,
-                        onClick = { onOpenDirectory(directory) },
-                        onLongClick = { onRequestRemoval(directory) },
-                        restrictedOverride = false
-                    )
+            val contentPadding = PaddingValues(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 96.dp)
+            if (viewMode == FileBrowserViewMode.GRID) {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(64.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = contentPadding,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(directories, key = { it.absolutePath }) { directory ->
+                        FavoriteDirectoryItem(directory, viewMode, onOpenDirectory, onRequestRemoval)
+                    }
+                }
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = contentPadding) {
+                    items(directories, key = { it.absolutePath }) { directory ->
+                        FavoriteDirectoryItem(directory, viewMode, onOpenDirectory, onRequestRemoval)
+                    }
                 }
             }
         }
@@ -89,4 +99,23 @@ fun FavoritesScreen(
             onDismiss = onDismissRemoval
         )
     }
+}
+
+@Composable
+private fun FavoriteDirectoryItem(
+    directory: File,
+    viewMode: FileBrowserViewMode,
+    onOpenDirectory: (File) -> Unit,
+    onRequestRemoval: (File) -> Unit
+) {
+    BrowserFileRow(
+        file = directory,
+        relativePathRoot = null,
+        isSelected = false,
+        isSelectionMode = false,
+        onClick = { onOpenDirectory(directory) },
+        onLongClick = { onRequestRemoval(directory) },
+        restrictedOverride = false,
+        viewMode = viewMode
+    )
 }

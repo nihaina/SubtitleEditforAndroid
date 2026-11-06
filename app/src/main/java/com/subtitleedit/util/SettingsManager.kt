@@ -70,6 +70,7 @@ class SettingsManager private constructor(context: Context) {
         private const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
         private const val KEY_FILE_SORT_FIELD = "file_sort_field"
         private const val KEY_FILE_SORT_DIRECTION = "file_sort_direction"
+        private const val KEY_FILE_VIEW_MODE = "file_view_mode"
         private const val KEY_BATCH_RENAME_HISTORY = "batch_rename_history"
         private const val KEY_CHECK_UPDATES_ON_STARTUP = "check_updates_on_startup"
         private const val KEY_PRESERVE_OUTPUT_DIRECTORIES = "preserve_output_directories"
@@ -1633,6 +1634,16 @@ class SettingsManager private constructor(context: Context) {
 
     fun setFileSortDirection(direction: com.subtitleedit.model.FileSortDirection) {
         prefs.edit().putString(KEY_FILE_SORT_DIRECTION, direction.name).apply()
+    }
+
+    fun getFileViewMode(): com.subtitleedit.model.FileBrowserViewMode = runCatching {
+        com.subtitleedit.model.FileBrowserViewMode.valueOf(
+            prefs.getString(KEY_FILE_VIEW_MODE, null) ?: com.subtitleedit.model.FileBrowserViewMode.DETAILED.name
+        )
+    }.getOrDefault(com.subtitleedit.model.FileBrowserViewMode.DETAILED)
+
+    fun setFileViewMode(mode: com.subtitleedit.model.FileBrowserViewMode) {
+        prefs.edit().putString(KEY_FILE_VIEW_MODE, mode.name).apply()
     }
 
     internal fun getBatchRenameHistory(): List<BatchRenameHistory.Entry> =

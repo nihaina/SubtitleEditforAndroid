@@ -1,0 +1,12 @@
+<resources>
+    <string name="directory_view_options">查看与排序</string>
+    <string name="directory_view_heading">查看</string>
+    <string name="directory_view_detailed">详细</string>
+    <string name="directory_view_compact">紧凑</string>
+    <string name="directory_view_grid">网格</string>
+    <string name="directory_sort_heading">排序</string>
+    <string name="directory_sort_name">名称</string>
+    <string name="directory_sort_size">大小</string>
+    <string name="directory_sort_date">日期</string>
+    <string name="directory_sort_type">类型</string>
+</resources>

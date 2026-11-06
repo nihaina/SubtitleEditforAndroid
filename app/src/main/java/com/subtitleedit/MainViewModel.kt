@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import com.subtitleedit.feature.ui.BatchRenameDialogUi
 import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
+import com.subtitleedit.model.FileBrowserViewMode
 import java.io.File
 
 internal enum class FileOperation { COPY, MOVE, EXTRACT }
@@ -14,7 +15,8 @@ internal enum class FileOperation { COPY, MOVE, EXTRACT }
 internal data class DirectoryScrollPosition(
     val firstVisiblePath: String?,
     val firstVisibleIndex: Int,
-    val offset: Int
+    val offset: Int,
+    val viewMode: FileBrowserViewMode? = null
 )
 
 internal class MainViewModel : ViewModel() {

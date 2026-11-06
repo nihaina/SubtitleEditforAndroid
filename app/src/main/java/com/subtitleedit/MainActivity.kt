@@ -14,7 +14,6 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -47,6 +46,7 @@ import com.subtitleedit.util.ArchivePreviewCache
 import com.subtitleedit.model.FileBrowserOrder
 import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
+import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.FileTransferManager
 import com.subtitleedit.util.FileDeletionManager
@@ -131,7 +131,7 @@ class MainActivity : AppComposeActivity() {
     private var topLevelPageRefreshVersion by mutableIntStateOf(0)
     private var topLevelPageSelectionVersion by mutableIntStateOf(0)
     private var searchExpanded = false
-    private var directoryListState: LazyListState? = null
+    private var directoryScrollPosition: (() -> DirectoryScrollPosition)? = null
     private var directoryScrollRequest: MainDirectoryScrollRequest? = null
     private var nextDirectoryScrollGeneration = 0L
     private var screenState by mutableStateOf(MainActivityScreenState())
@@ -240,6 +240,9 @@ class MainActivity : AppComposeActivity() {
         if (stateModel.documentState.sortDirection == null) {
             stateModel.documentState.sortDirection = settingsManager.getFileSortDirection()
         }
+        if (stateModel.documentState.viewMode == null) {
+            stateModel.documentState.viewMode = settingsManager.getFileViewMode()
+        }
         
         topLevelNavigationCoordinator = MainTopLevelNavigationCoordinator(
             activity = this,
@@ -286,7 +289,7 @@ class MainActivity : AppComposeActivity() {
                         state = screenState,
                         topLevelPageRefreshVersion = topLevelPageRefreshVersion,
                         topLevelPageSelectionVersion = topLevelPageSelectionVersion,
-                        onDirectoryListState = { directoryListState = it },
+                        onDirectoryScrollPosition = { directoryScrollPosition = it },
                         onTopLevelPageSelected = ::showTopLevelPage,
                         onOpenDirectoryFromFavorites = ::openDirectoryFromFavorites,
                         onUpdateTopLevelToolbar = ::updateTopLevelToolbar,
@@ -295,6 +298,7 @@ class MainActivity : AppComposeActivity() {
                         onCreateItem = ::createBrowserItem,
                         onSortFieldChanged = ::changeFileSortField,
                         onSortDirectionChanged = ::changeFileSortDirection,
+                        onViewModeChanged = ::changeFileViewMode,
                         onOpenFileManagementSettings = {
                             startActivity(Intent(this@MainActivity, FileManagementSettingsActivity::class.java))
                         },
@@ -445,6 +449,7 @@ class MainActivity : AppComposeActivity() {
             searchQuery = document.searchQuery,
             sortField = document.sortField ?: FileSortField.NAME,
             sortDirection = document.sortDirection ?: FileSortDirection.ASCENDING,
+            viewMode = document.viewMode ?: FileBrowserViewMode.DETAILED,
             canConvertSelected = canConvertSelected,
             canCompressSelected = !isFileSearchQueryActive(),
             canClearCacheSelected = canClearCacheSelected
@@ -535,6 +540,18 @@ class MainActivity : AppComposeActivity() {
         stateModel.documentState.sortDirection = direction
         SettingsManager.getInstance(this).setFileSortDirection(direction)
         displayDirectoryFiles()
+    }
+
+    private fun changeFileViewMode(mode: FileBrowserViewMode) {
+        if (stateModel.documentState.viewMode == mode) return
+        val directory = stateModel.documentState.currentDirectory
+        val position = directoryScrollPosition?.invoke()
+        if (directory != null && displayedFiles.isNotEmpty() && position != null) {
+            directoryScrollRequest = MainDirectoryScrollRequest(++nextDirectoryScrollGeneration, directoryPath(directory), position.copy(offset = 0))
+        }
+        stateModel.documentState.viewMode = mode
+        SettingsManager.getInstance(this).setFileViewMode(mode)
+        publishScreenState()
     }
     
     private fun checkPermissions() {
@@ -738,14 +755,8 @@ class MainActivity : AppComposeActivity() {
 
     private fun saveCurrentDirectoryScrollPosition() {
         val directory = stateModel.documentState.currentDirectory ?: return
-        val listState = directoryListState ?: return
-        val firstVisibleIndex = listState.firstVisibleItemIndex
-        val firstVisiblePath = displayedFiles.getOrNull(firstVisibleIndex)?.absolutePath
-        stateModel.documentState.directoryScrollPositions[directoryPath(directory)] = DirectoryScrollPosition(
-            firstVisiblePath = firstVisiblePath,
-            firstVisibleIndex = firstVisibleIndex,
-            offset = listState.firstVisibleItemScrollOffset
-        )
+        val position = directoryScrollPosition?.invoke() ?: return
+        stateModel.documentState.directoryScrollPositions[directoryPath(directory)] = position
     }
 
     private fun refreshWatchedDirectory() {

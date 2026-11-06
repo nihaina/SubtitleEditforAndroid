@@ -2,6 +2,7 @@ package com.subtitleedit
 
 import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
+import com.subtitleedit.model.FileBrowserViewMode
 import java.io.File
 
 /** Persistent file-browser state shared by MainActivity and its coordinators. */
@@ -17,4 +18,5 @@ internal class MainDocumentState {
     var selectedTopLevelItem = com.subtitleedit.R.id.nav_directory
     var sortField: FileSortField? = null
     var sortDirection: FileSortDirection? = null
+    var viewMode: FileBrowserViewMode? = null
 }

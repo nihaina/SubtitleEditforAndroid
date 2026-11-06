@@ -43,7 +43,8 @@ internal object MainFilePreviewLoader {
         val isImage = extension in imageExtensions
         val isApk = extension == "apk"
         if (!isMedia && !isImage && !isApk) return MainFilePreview()
-        val cachedBitmap = bitmapCache.get(key)
+        val bitmapKey = "$key:$targetSize"
+        val cachedBitmap = bitmapCache.get(bitmapKey)
         val cachedDuration = mediaDurationCache[key]
         // A cached duration does not mean the thumbnail is still cached: the bitmap
         // cache can evict media artwork while the duration cache retains its entry.
@@ -59,7 +60,7 @@ internal object MainFilePreviewLoader {
             }.first
             else -> null
         }
-        if (preview != null) bitmapCache.put(key, preview)
+        if (preview != null) bitmapCache.put(bitmapKey, preview)
         // Image rows retried decoding on each bind in FileListAdapter. Keep that
         // behavior so a transient read failure does not hide an image forever.
         if (preview == null && !isImage) emptyPreviewKeys += key

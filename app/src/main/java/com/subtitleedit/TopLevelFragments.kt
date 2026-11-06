@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import com.subtitleedit.ui.FavoritesScreen
+import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.ui.ToolDestination
 import com.subtitleedit.ui.ToolsScreen
 import com.subtitleedit.ui.settings.SettingsCacheItem
@@ -59,6 +60,7 @@ internal fun MainTopLevelPages(
     refreshVersion: Int,
     selectionVersion: Int,
     state: MainTopLevelPagesState,
+    viewMode: FileBrowserViewMode,
     onOpenDirectory: (File) -> Unit,
     onToolbarChanged: (String, Boolean, (() -> Unit)?) -> Unit
 ) {
@@ -262,6 +264,7 @@ internal fun MainTopLevelPages(
     when (selectedPage) {
         R.id.nav_favorites -> FavoritesScreen(
             directories = state.favoriteDirectories,
+            viewMode = viewMode,
             pendingRemoval = state.pendingFavoriteRemoval,
             onAddDirectory = { directoryPicker.launch(null) },
             onOpenDirectory = onOpenDirectory,
