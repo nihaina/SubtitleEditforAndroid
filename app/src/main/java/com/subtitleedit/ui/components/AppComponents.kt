@@ -290,6 +290,7 @@ fun AppToolScaffold(
     imePadding: Boolean = false,
     imePaddingContent: Boolean = imePadding,
     titleContent: (@Composable () -> Unit)? = null,
+    contentPadding: PaddingValues = PaddingValues(AppSpacing.Page),
     content: @Composable ColumnScope.() -> Unit
 ) {
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
@@ -322,7 +323,7 @@ fun AppToolScaffold(
                 .padding(innerPadding)
                 .then(if (scrollable) Modifier.verticalScroll(rememberScrollState()) else Modifier)
                 .then(if (imePaddingContent) Modifier.imePadding() else Modifier)
-                .padding(AppSpacing.Page),
+                .padding(contentPadding),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.CardGap),
             content = content
         )

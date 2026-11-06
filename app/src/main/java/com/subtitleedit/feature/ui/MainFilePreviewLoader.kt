@@ -71,8 +71,12 @@ internal object MainFilePreviewLoader {
         runCatching { file.list()?.size ?: -1 }.getOrDefault(-1)
     }
 
-    fun iconResource(file: File): Int {
-        if (file.isDirectory) return R.drawable.ic_folder
+    fun iconResource(file: File): Int = iconResource(file.name, file.isDirectory)
+
+    /** Classifies virtual entries without reading filesystem metadata. */
+    fun iconResource(name: String, isDirectory: Boolean): Int {
+        if (isDirectory) return R.drawable.ic_folder
+        val file = File(name)
         val extension = file.extension.lowercase(Locale.ROOT)
         return when {
             extension in audioExtensions -> R.drawable.ic_file_audio

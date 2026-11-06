@@ -33,7 +33,8 @@ class ArchivePreviewActivity : AppComposeActivity() {
                     isLoading = state.isLoading,
                     errorMessage = state.errorMessage,
                     onNavigateBack = { onBackPressedDispatcher.onBackPressed() },
-                    onOpenDirectory = viewModel::showDirectory
+                    onOpenDirectory = viewModel::showDirectory,
+                    viewMode = state.viewMode
                 )
             }
         }
@@ -43,6 +44,11 @@ class ArchivePreviewActivity : AppComposeActivity() {
                 if (viewModel.navigateUp()) finish()
             }
         })
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.refreshViewMode()
     }
 
     companion object {

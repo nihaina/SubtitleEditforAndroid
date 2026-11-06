@@ -2,14 +2,9 @@ package com.subtitleedit.feature.ui
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.LazyGridState
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -96,40 +91,23 @@ internal fun DirectoryBrowserContent(
                 )
             }
         } else if (state.files.isNotEmpty()) {
-            if (isGrid) {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(136.dp),
-                    state = gridState,
-                    modifier = Modifier.fillMaxWidth().weight(1f).testTag("directory-files"),
-                    contentPadding = PaddingValues(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(state.files, key = { it.absolutePath }) { file ->
-                        BrowserFileRow(file = file, relativePathRoot = state.relativePathRoot,
-                            isSelected = file.absolutePath in state.selectedPaths,
-                            isSelectionMode = state.selectedPaths.isNotEmpty() && state.pendingOperation == null,
-                            onClick = { onFileClick(file) }, onLongClick = { onFileLongClick(file) }, viewMode = state.viewMode)
-                    }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth().weight(1f).testTag("directory-files"),
-                    state = listState,
-                    contentPadding = PaddingValues(vertical = 4.dp)
-                ) {
-                    items(state.files, key = { it.absolutePath }) { file ->
-                        BrowserFileRow(
-                            file = file,
-                            relativePathRoot = state.relativePathRoot,
-                            isSelected = file.absolutePath in state.selectedPaths,
-                            isSelectionMode = state.selectedPaths.isNotEmpty() && state.pendingOperation == null,
-                            onClick = { onFileClick(file) },
-                            onLongClick = { onFileLongClick(file) },
-                            viewMode = state.viewMode
-                        )
-                    }
-                }
+            BrowserFileLayout(
+                items = state.files,
+                key = { it.absolutePath },
+                viewMode = state.viewMode,
+                modifier = Modifier.fillMaxWidth().weight(1f).testTag("directory-files"),
+                listState = listState,
+                gridState = gridState
+            ) { file ->
+                BrowserFileRow(
+                    file = file,
+                    relativePathRoot = state.relativePathRoot,
+                    isSelected = file.absolutePath in state.selectedPaths,
+                    isSelectionMode = state.selectedPaths.isNotEmpty() && state.pendingOperation == null,
+                    onClick = { onFileClick(file) },
+                    onLongClick = { onFileLongClick(file) },
+                    viewMode = state.viewMode
+                )
             }
         } else {
             Spacer(Modifier.weight(1f))

@@ -5,7 +5,9 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.subtitleedit.model.ArchivePreviewBrowser
 import com.subtitleedit.model.ArchivePreviewItem
+import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.util.ArchivePreviewCache
+import com.subtitleedit.util.SettingsManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -17,7 +19,8 @@ internal data class ArchivePreviewUiState(
     val items: List<ArchivePreviewItem> = emptyList(),
     val entryCount: Int? = null,
     val isLoading: Boolean = true,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val viewMode: FileBrowserViewMode = FileBrowserViewMode.DETAILED
 )
 
 internal class ArchivePreviewViewModel(
@@ -30,6 +33,16 @@ internal class ArchivePreviewViewModel(
 
     private var browser: ArchivePreviewBrowser? = null
     private var previewFile: File? = null
+    private val settings = SettingsManager.getInstance(application)
+
+    init {
+        refreshViewMode()
+    }
+
+    fun refreshViewMode() {
+        val mode = settings.getFileViewMode()
+        setState { copy(viewMode = mode) }
+    }
 
     /** Reads the intent extras once; later calls (after recreation) are ignored. */
     fun initialize(archiveName: String, previewPath: String) {

@@ -1,16 +1,9 @@
 package com.subtitleedit.ui
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -26,6 +19,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
 import com.subtitleedit.feature.ui.BrowserFileRow
+import com.subtitleedit.feature.ui.BrowserFileLayout
+import com.subtitleedit.feature.ui.browserFileContentPadding
 import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.ui.components.AppAlertDialog
 import java.io.File
@@ -54,29 +49,14 @@ fun FavoritesScreen(
                 )
             }
         } else {
-            val contentPadding = if (viewMode == FileBrowserViewMode.GRID) {
-                PaddingValues(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 96.dp)
-            } else {
-                PaddingValues(top = 4.dp, bottom = 96.dp)
-            }
-            if (viewMode == FileBrowserViewMode.GRID) {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(136.dp),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = contentPadding,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(directories, key = { it.absolutePath }) { directory ->
-                        FavoriteDirectoryItem(directory, viewMode, onOpenDirectory, onRequestRemoval)
-                    }
-                }
-            } else {
-                LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = contentPadding) {
-                    items(directories, key = { it.absolutePath }) { directory ->
-                        FavoriteDirectoryItem(directory, viewMode, onOpenDirectory, onRequestRemoval)
-                    }
-                }
+            BrowserFileLayout(
+                items = directories,
+                key = { it.absolutePath },
+                viewMode = viewMode,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = browserFileContentPadding(viewMode, bottom = 96.dp)
+            ) { directory ->
+                FavoriteDirectoryItem(directory, viewMode, onOpenDirectory, onRequestRemoval)
             }
         }
         FloatingActionButton(
