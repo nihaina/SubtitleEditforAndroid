@@ -24,7 +24,7 @@
     <string name="check_for_updates">检测更新</string>
     <string name="checking_for_updates">检测中…</string>
     <string name="file_browser">文件浏览</string>
-    <string name="batch_convert">批量转换</string>
+    <string name="batch_convert">字幕格式转换</string>
     <string name="select_file">选择文件</string>
     <string name="open_file">打开文件</string>
     <string name="save_file">保存文件</string>
@@ -297,7 +297,7 @@
     <string name="activity_media_convert_text_04">输出目录：软件目录/Convert</string>
     <string name="activity_media_convert_text_05">视频格式</string>
     <string name="activity_media_convert_text_06">音频格式（视频转音频 / 纯音频）</string>
-    <string name="activity_media_convert_text_07">▶ 高级选项</string>
+    <string name="activity_media_convert_text_07">高级选项</string>
     <string name="activity_media_convert_text_08">视频编码器</string>
     <string name="activity_media_convert_text_09">分辨率</string>
     <string name="activity_media_convert_text_10">视频码率</string>

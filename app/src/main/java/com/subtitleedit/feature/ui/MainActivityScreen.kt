@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -315,65 +316,99 @@ internal fun MainActivityScreen(
                         }
                     }
                 } else if (isDirectoryPage) {
-                    if (!state.isSearchExpanded) {
-                        IconButton(onClick = onSearchRequested) {
-                            Icon(painterResource(R.drawable.ic_search), contentDescription = stringResource(R.string.menu_search))
-                        }
-                    }
                     Box {
-                        IconButton(onClick = { createMenuExpanded = true }) {
-                            Icon(painterResource(R.drawable.ic_add), contentDescription = stringResource(R.string.menu_new))
-                        }
-                        DropdownMenu(
-                            expanded = createMenuExpanded,
-                            onDismissRequest = { createMenuExpanded = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("新建文件夹") },
-                                onClick = {
-                                    createMenuExpanded = false
-                                    createDialogKind = MainCreateItemKind.FOLDER
-                                    createName = ""
-                                    createExtension = "txt"
-                                    createNameError = null
-                                    createExtensionError = null
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("新建文件") },
-                                onClick = {
-                                    createMenuExpanded = false
-                                    createDialogKind = MainCreateItemKind.FILE
-                                    createName = ""
-                                    createExtension = "txt"
-                                    createNameError = null
-                                    createExtensionError = null
-                                }
-                            )
-                        }
-                    }
-                    Box {
-                        IconButton(onClick = { directoryMenuExpanded = true }) {
+                        IconButton(onClick = {
+                            createMenuExpanded = false
+                            directoryMenuExpanded = true
+                        }) {
                             Icon(painterResource(R.drawable.ic_more_vertical), contentDescription = stringResource(R.string.activity_main_text_01))
                         }
                         DropdownMenu(
                             expanded = directoryMenuExpanded,
-                            onDismissRequest = { directoryMenuExpanded = false }
+                            onDismissRequest = {
+                                directoryMenuExpanded = false
+                            },
+                            modifier = Modifier.widthIn(min = 200.dp)
                         ) {
-                            DropdownMenuItem(
-                                text = { Text("排序") },
-                                onClick = {
-                                    directoryMenuExpanded = false
-                                    showSortDialog = true
+                            AnimatedContent(
+                                targetState = createMenuExpanded,
+                                transitionSpec = {
+                                    val direction = if (targetState) 1 else -1
+                                    (fadeIn(AppMotion.state()) + slideInHorizontally(AppMotion.state()) { direction * it / 6 }) togetherWith
+                                        (fadeOut(AppMotion.fast()) + slideOutHorizontally(AppMotion.fast()) { -direction * it / 6 }) using
+                                        SizeTransform(clip = true) { _, _ -> AppMotion.state() }
+                                },
+                                contentAlignment = Alignment.TopStart,
+                                label = "directory-create-menu"
+                            ) { showCreateMenu ->
+                                Column {
+                                    if (showCreateMenu) {
+                                        Text(
+                                            stringResource(R.string.menu_new),
+                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.menu_file)) },
+                                            leadingIcon = { Icon(painterResource(R.drawable.ic_file), contentDescription = null) },
+                                            onClick = {
+                                                directoryMenuExpanded = false
+                                                createDialogKind = MainCreateItemKind.FILE
+                                                createName = ""
+                                                createExtension = "txt"
+                                                createNameError = null
+                                                createExtensionError = null
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("文件夹") },
+                                            leadingIcon = { Icon(painterResource(R.drawable.ic_folder), contentDescription = null) },
+                                            onClick = {
+                                                directoryMenuExpanded = false
+                                                createDialogKind = MainCreateItemKind.FOLDER
+                                                createName = ""
+                                                createExtension = "txt"
+                                                createNameError = null
+                                                createExtensionError = null
+                                            }
+                                        )
+                                    } else {
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.batch_rename_sort_options)) },
+                                            leadingIcon = { Icon(painterResource(R.drawable.ic_batch_rename_sort), contentDescription = null) },
+                                            onClick = {
+                                                directoryMenuExpanded = false
+                                                showSortDialog = true
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.menu_new)) },
+                                            leadingIcon = { Icon(painterResource(R.drawable.ic_add), contentDescription = null) },
+                                            trailingIcon = { Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null) },
+                                            onClick = { createMenuExpanded = true }
+                                        )
+                                        if (!state.isSearchExpanded) {
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.menu_search)) },
+                                                leadingIcon = { Icon(painterResource(R.drawable.ic_search), contentDescription = null) },
+                                                onClick = {
+                                                    directoryMenuExpanded = false
+                                                    onSearchRequested()
+                                                }
+                                            )
+                                        }
+                                        DropdownMenuItem(
+                                            text = { Text("设置") },
+                                            leadingIcon = { Icon(painterResource(R.drawable.ic_settings), contentDescription = null) },
+                                            onClick = {
+                                                directoryMenuExpanded = false
+                                                onOpenFileManagementSettings()
+                                            }
+                                        )
+                                    }
                                 }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("设置") },
-                                onClick = {
-                                    directoryMenuExpanded = false
-                                    onOpenFileManagementSettings()
-                                }
-                            )
+                            }
                         }
                     }
                 }
