@@ -578,7 +578,7 @@ internal class MediaConvertViewModel(application: Application) :
             val audio = info.getStreams().firstOrNull { it.getType() == "audio" }
             MediaConvertSource(video != null, info.getDuration()?.toDoubleOrNull()?.takeIf { it > 0 }, rate, video?.let(::streamBitrateBps),
                 audio?.getSampleRate()?.toIntOrNull(), audio?.getNumberProperty("channels")?.toInt(), audio?.let(::streamBitrateBps), audio?.getChannelLayout(),
-                video?.getStringProperty("pix_fmt"), audio != null, sourceSizeBytes(uri))
+                video?.getStringProperty("pix_fmt"), audio != null, sourceSizeBytes(uri), video?.getCodec(), audio?.getCodec())
         } catch (_: Exception) { null }
         finally { releaseFfmpegInput(input) }
     }

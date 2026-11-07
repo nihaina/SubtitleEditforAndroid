@@ -13,7 +13,9 @@ internal data class MediaConvertSource(
     val audioChannelLayout: String? = null,
     val videoPixelFormat: String? = null,
     val hasAudio: Boolean = true,
-    val fileSizeBytes: Long? = null
+    val fileSizeBytes: Long? = null,
+    val videoCodecName: String? = null,
+    val audioCodecName: String? = null
 )
 
 /** Builds argument arrays so SAF URLs and file names remain single arguments. */
@@ -52,7 +54,9 @@ internal object MediaConvertCommand {
               supportedPixelFormats: List<String>? = null, pass: MediaConvertPass? = null, subtitle: MediaConvertSubtitleInput? = null): List<String> {
         subtitle?.let { MediaConvertSubtitles.validate(format, options, it) }
         val synthetic = !format.isAudioOnly && source?.hasVideo == false
-        val selectedVideo = if (format.isAudioOnly) "" else format.videoEncoder(options.selectedVideoCodec)
+        val selectedVideo = if (format.isAudioOnly) ""
+            else if (MediaConvertStreamCopy.copiesVideo(format, options, source, subtitle)) "copy"
+            else format.videoEncoder(options.selectedVideoCodec)
         val video = if (synthetic && selectedVideo == "copy") format.videoEncoder("auto") else selectedVideo
         if (!format.isAudioOnly && video != "copy") {
             require(options.resolution.isValid) { "Invalid video resolution" }
@@ -63,7 +67,8 @@ internal object MediaConvertCommand {
         val analysisPass = pass?.number == 1
         val softSubtitle = subtitle?.takeIf { it.type == MediaConvertSubtitleType.SOFT && !analysisPass }
         val burnSubtitle = subtitle?.takeIf { it.type == MediaConvertSubtitleType.BURN_IN }
-        val audio = format.audioEncoder(options.selectedAudioCodec)
+        val audio = if (MediaConvertStreamCopy.copiesAudio(format, options, source)) "copy"
+            else format.audioEncoder(options.selectedAudioCodec)
         return buildList {
             addAll(listOf("-y", "-hide_banner"))
             if (synthetic) {
@@ -133,6 +138,10 @@ internal object MediaConvertCommand {
                             addAll(listOf("-x265-params", "pass=${pass.number}:stats=$stats"))
                         } else addAll(listOf("-pass", pass.number.toString(), "-passlogfile", pass.logPath))
                     }
+                } else if (MediaConvertStreamCopy.videoEncoderName(source?.videoCodecName) == "libx265" &&
+                    format.formatName in setOf("mp4", "mov")) {
+                    // The mov muxer otherwise tags copied HEVC as hev1, which several players reject.
+                    addAll(listOf("-tag:v", "hvc1"))
                 }
             }
             if (audio != "copy" && !analysisPass) {
