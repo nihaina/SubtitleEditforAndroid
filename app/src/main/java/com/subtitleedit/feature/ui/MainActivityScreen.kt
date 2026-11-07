@@ -193,6 +193,9 @@ internal fun MainActivityScreen(
     var createNameError by remember { mutableStateOf<String?>(null) }
     var createExtensionError by remember { mutableStateOf<String?>(null) }
     val isDirectoryPage = state.selectedTopLevelItem == R.id.nav_directory
+    val usesPageBackground = isDirectoryPage || state.selectedTopLevelItem in setOf(
+        R.id.nav_favorites, R.id.nav_settings, R.id.nav_tools
+    )
     // Selection actions belong to directoryContent in the legacy layout. The
     // selection state can survive a top-level tab switch, but its toolbar and
     // bottom action row stay hidden until the directory tab is visible again.
@@ -239,8 +242,8 @@ internal fun MainActivityScreen(
         TopAppBar(
             scrollBehavior = scrollBehavior,
             colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = if (isDirectoryPage || state.selectedTopLevelItem == R.id.nav_settings || state.selectedTopLevelItem == R.id.nav_tools) settingsPageBackground() else MaterialTheme.colorScheme.surface,
-                scrolledContainerColor = if (isDirectoryPage || state.selectedTopLevelItem == R.id.nav_settings || state.selectedTopLevelItem == R.id.nav_tools) settingsPageBackground() else MaterialTheme.colorScheme.surfaceContainer
+                containerColor = if (usesPageBackground) settingsPageBackground() else MaterialTheme.colorScheme.surface,
+                scrolledContainerColor = if (usesPageBackground) settingsPageBackground() else MaterialTheme.colorScheme.surfaceContainer
             ),
             title = {
                 DirectoryToolbarTitle(

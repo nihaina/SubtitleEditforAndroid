@@ -1,5 +1,6 @@
 package com.subtitleedit.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -23,6 +24,7 @@ import com.subtitleedit.feature.ui.BrowserFileLayout
 import com.subtitleedit.feature.ui.browserFileContentPadding
 import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.ui.components.AppAlertDialog
+import com.subtitleedit.ui.settings.settingsPageBackground
 import java.io.File
 
 @Composable
@@ -36,7 +38,7 @@ fun FavoritesScreen(
     onDismissRemoval: () -> Unit,
     viewMode: FileBrowserViewMode = FileBrowserViewMode.DETAILED
 ) {
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().background(settingsPageBackground())) {
         if (directories.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -54,7 +56,8 @@ fun FavoritesScreen(
                 key = { it.absolutePath },
                 viewMode = viewMode,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = browserFileContentPadding(viewMode, bottom = 96.dp)
+                contentPadding = browserFileContentPadding(viewMode, bottom = 96.dp),
+                adaptiveGrid = true
             ) { directory ->
                 FavoriteDirectoryItem(directory, viewMode, onOpenDirectory, onRequestRemoval)
             }
@@ -100,6 +103,7 @@ private fun FavoriteDirectoryItem(
         onClick = { onOpenDirectory(directory) },
         onLongClick = { onRequestRemoval(directory) },
         restrictedOverride = false,
-        viewMode = viewMode
+        viewMode = viewMode,
+        directoryPageStyle = true
     )
 }
