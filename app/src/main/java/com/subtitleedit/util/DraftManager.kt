@@ -2,6 +2,10 @@ package com.subtitleedit.util
 
 import android.content.Context
 import java.io.File
+import java.io.IOException
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -9,12 +13,14 @@ import java.util.*
  * 草稿箱管理器
  * 草稿存储结构：
  * drafts/
- *   ├── [filename].lrc/
- *   │     ├── 01_[filename].lrc
- *   │     ├── 02_[filename].lrc
+ *   ├── [audio filename]/
+ *   │     ├── subtitle.srt
+ *   │     ├── subtitle (1).srt
  *   │     └── ...
- *   └── [filename].srt/
- *         └── ...
+ *   └── ...
+ *
+ * Draft folders are named after the source audio file.  The old numbered layout is still
+ * readable so existing drafts survive the storage change.
  */
 object DraftManager {
     
@@ -33,59 +39,86 @@ object DraftManager {
     }
     
     /**
-     * 获取指定文件的草稿文件夹
+     * Saves a draft using the actual subtitle filename inside the source-audio folder.
+     *
+     * A collision follows the same naming rule as normal subtitle output: `name (1).ext`,
+     * `name (2).ext`, and so on.  The returned value is the filename that was written.
      */
-    fun getDraftFolder(context: Context, fileName: String): File {
-        val draftsDir = getDraftsDir(context)
-        val draftFolder = File(draftsDir, fileName)
-        if (!draftFolder.exists()) {
-            draftFolder.mkdirs()
-        }
-        return draftFolder
-    }
-    
-    /**
-     * 获取下一个草稿编号
-     */
-    fun getNextDraftNumber(context: Context, fileName: String): Int {
-        val draftFolder = getDraftFolder(context, fileName)
-        val existingFiles = draftFolder.listFiles { file ->
-            file.isFile && file.name.endsWith(fileName)
-        } ?: return 1
-        
-        if (existingFiles.isEmpty()) {
-            return 1
-        }
-        
-        // 从文件名中提取编号
-        val numbers = existingFiles.mapNotNull { file ->
-            val name = file.nameWithoutExtension
-            if (name.startsWith("0") || name.startsWith("1") || name.startsWith("2") || 
-                name.startsWith("3") || name.startsWith("4") || name.startsWith("5") ||
-                name.startsWith("6") || name.startsWith("7") || name.startsWith("8") ||
-                name.startsWith("9")) {
-                name.split("_").firstOrNull()?.toIntOrNull()
-            } else {
-                null
+    fun saveDraft(
+        context: Context,
+        folderName: String,
+        subtitleFileName: String,
+        content: String
+    ): String = saveDraft(getDraftsDir(context), folderName, subtitleFileName, content)
+
+    @Synchronized
+    internal fun saveDraft(
+        draftsDir: File,
+        folderName: String,
+        subtitleFileName: String,
+        content: String
+    ): String {
+        validateName(folderName)
+        validateName(subtitleFileName)
+        val draftFolder = File(draftsDir, folderName)
+        if (!draftFolder.mkdirs() && !draftFolder.isDirectory) throw IOException("无法创建草稿文件夹")
+        // Stage outside the visible folder, so opening drafts during a save cannot read a
+        // partially written subtitle. Only replace the empty filename reservation we own.
+        val temporary = File.createTempFile("draft_", ".tmp", draftsDir)
+        var target: File? = null
+        try {
+            temporary.writeText(content, Charsets.UTF_8)
+            var candidate: File
+            do {
+                candidate = File(draftFolder, uniqueDraftFileName(draftFolder, subtitleFileName))
+            } while (!candidate.createNewFile())
+            target = candidate
+            try {
+                Files.move(temporary.toPath(), candidate.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(temporary.toPath(), candidate.toPath(), StandardCopyOption.REPLACE_EXISTING)
             }
+            return candidate.name
+        } catch (error: Throwable) {
+            target?.delete()
+            throw error
+        } finally {
+            temporary.delete()
         }
-        
-        return (numbers.maxOrNull() ?: 0) + 1
     }
-    
+
+    /** Returns a saved draft path for source-editor preview or loading. */
+    fun getDraftFile(context: Context, folderName: String, fileName: String): File {
+        validateName(folderName)
+        validateName(fileName)
+        return File(File(getDraftsDir(context), folderName), fileName)
+    }
+
+    private fun validateName(name: String) {
+        require(name.isNotBlank() && name != "." && name != ".." &&
+            name.none { it == '/' || it == '\\' || it == '\u0000' }) { "草稿名称无效" }
+    }
+
     /**
-     * 保存草稿
-     * @return 保存的草稿文件名
+     * Resolves a non-conflicting file name in [directory], matching subtitle output naming.
+     * Kept internal so the pure JVM test can exercise collision behavior without Android APIs.
      */
-    fun saveDraft(context: Context, fileName: String, content: String): String {
-        val draftFolder = getDraftFolder(context, fileName)
-        val number = getNextDraftNumber(context, fileName)
-        val draftFileName = String.format(Locale.US, "%02d_%s", number, fileName)
-        val draftFile = File(draftFolder, draftFileName)
-        
-        draftFile.writeText(content)
-        
-        return draftFileName
+    internal fun uniqueDraftFileName(directory: File, requestedName: String): String {
+        val extension = requestedName.substringAfterLast('.', "")
+        val suffix = if (extension.isEmpty()) "" else ".${extension}"
+        val stem = if (extension.isEmpty()) {
+            requestedName
+        } else {
+            requestedName.removeSuffix(".$extension")
+        }
+        var candidate = requestedName
+        var counter = 1
+        while (File(directory, candidate).exists()) {
+            candidate = "$stem ($counter)$suffix"
+            counter++
+        }
+        return candidate
     }
     
     /**
@@ -93,6 +126,7 @@ object DraftManager {
      */
     fun getAllDraftFolders(context: Context): List<File> {
         val draftsDir = getDraftsDir(context)
+        removeEmptyDraftFolders(draftsDir)
         return draftsDir.listFiles { file ->
             file.isDirectory
         }?.toList() ?: emptyList()
@@ -103,16 +137,25 @@ object DraftManager {
      */
     fun getDraftsInFolder(context: Context, folderName: String): List<File> {
         val draftFolder = File(getDraftsDir(context), folderName)
-        return draftFolder.listFiles { file ->
+        val drafts = draftFolder.listFiles { file ->
             file.isFile
         }?.sortedByDescending { it.lastModified() } ?: emptyList()
+        if (drafts.isEmpty() && draftFolder.isDirectory) draftFolder.delete()
+        return drafts
+    }
+
+    /** Removes stale draft folders left behind after their last file was deleted. */
+    internal fun removeEmptyDraftFolders(draftsDir: File) {
+        draftsDir.listFiles { file -> file.isDirectory }
+            ?.filter { folder -> folder.listFiles().orEmpty().isEmpty() }
+            ?.forEach(File::delete)
     }
     
     /**
      * 读取草稿文件内容
      */
     fun readDraft(context: Context, folderName: String, fileName: String): String {
-        val draftFile = File(getDraftsDir(context), "$folderName/$fileName")
+        val draftFile = getDraftFile(context, folderName, fileName)
         return if (draftFile.exists()) {
             draftFile.readText()
         } else {
@@ -124,9 +167,13 @@ object DraftManager {
      * 删除草稿文件
      */
     fun deleteDraft(context: Context, folderName: String, fileName: String): Boolean {
-        val draftFile = File(getDraftsDir(context), "$folderName/$fileName")
+        val draftFile = getDraftFile(context, folderName, fileName)
         return if (draftFile.exists()) {
-            draftFile.delete()
+            val deleted = draftFile.delete()
+            if (deleted) draftFile.parentFile?.let { parent ->
+                if (parent.listFiles().orEmpty().isEmpty()) parent.delete()
+            }
+            deleted
         } else {
             false
         }

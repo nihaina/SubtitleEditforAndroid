@@ -414,6 +414,11 @@ internal class EditorViewModel(
 
     fun loadSubtitleContent(content: String, fileName: String? = null): SubtitleDocument {
         val document = loadSubtitleDocument(content, fileName)
+        return loadPreparedSubtitleContent(content, document)
+    }
+
+    /** Installs an already parsed document; parsing may run on a worker without mutating state. */
+    fun loadPreparedSubtitleContent(content: String, document: SubtitleDocument): SubtitleDocument {
         timingDragSession.discardAll()
         documentState.replaceDocument(document)
         documentState.originalFileContent = content

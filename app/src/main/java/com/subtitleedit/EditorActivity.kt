@@ -281,6 +281,33 @@ class EditorActivity : AppCompatActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == RESULT_OK) {
+            val previewFilePath = result.data?.getStringExtra(
+                DraftPreviewActivity.EXTRA_PREVIEW_FILE_PATH
+            )
+            if (!previewFilePath.isNullOrBlank()) {
+                val previewFile = File(previewFilePath)
+                val draftFileName = result.data?.getStringExtra(DraftsActivity.EXTRA_DRAFT_FILE_NAME)
+                    ?: previewFile.name
+                lifecycleScope.launch {
+                    try {
+                        val content = withContext(Dispatchers.IO) {
+                            try {
+                                previewFile.readText(Charsets.UTF_8)
+                            } finally {
+                                previewFile.delete()
+                            }
+                        }
+                        loadDraftContent(content, draftFileName)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        showShortToast("读取草稿失败：${error.message ?: "未知错误"}")
+                    }
+                }
+                return@registerForActivityResult
+            }
+
+            // Keep accepting results from the older draft picker while it remains in use.
             val content = result.data?.getStringExtra(DraftsActivity.EXTRA_DRAFT_CONTENT) ?: ""
             val draftFileName = result.data?.getStringExtra(DraftsActivity.EXTRA_DRAFT_FILE_NAME) ?: ""
             if (content.isNotEmpty()) {
@@ -1541,19 +1568,25 @@ class EditorActivity : AppCompatActivity() {
         }
     }
     
-    private fun parseContent(content: String, fileName: String? = null) {
+    private fun parseContent(
+        content: String,
+        fileName: String? = null,
+        preparedDocument: SubtitleDocument? = null,
+        preparedSource: SourceEditorView.PreparedDocument? = null
+    ) {
         // A new subtitle document invalidates previews from the previous document before its
         // rows are installed. Otherwise an already-running build could replace the new video's
         // track after this parse completes.
         if (::subtitlePreviewController.isInitialized) subtitlePreviewController.cancelPending()
-        stateModel.loadSubtitleContent(content, fileName)
+        if (preparedDocument == null) stateModel.loadSubtitleContent(content, fileName)
+        else stateModel.loadPreparedSubtitleContent(content, preparedDocument)
         
         if (stateModel.currentFormat.isSourceOnly) {
             // Source-only documents still need a block model for waveform playback and for
             // keeping source rows aligned with the list view.  The source editor displays
             // the untouched full text, while these parsed entries provide the corresponding
             // subtitle blocks.
-            enterSourceViewMode()
+            enterSourceViewMode(preparedSource = preparedSource)
         } else {
             exitSourceViewMode()
         }
@@ -1576,7 +1609,10 @@ class EditorActivity : AppCompatActivity() {
      * 大型字幕不使用淡入淡出：动画期间 RecyclerView、TextView 布局和 mpv 预览会短暂
      * 并存，正是日志中 native heap 峰值与 ANR 的高风险窗口。
      */
-    private fun enterSourceViewMode(onFinished: (() -> Unit)? = null) {
+    private fun enterSourceViewMode(
+        preparedSource: SourceEditorView.PreparedDocument? = null,
+        onFinished: (() -> Unit)? = null
+    ) {
         stateModel.isSourceViewMode = true
         sourceListParseJob?.cancel()
         sourceListParseJob = null
@@ -1601,7 +1637,7 @@ class EditorActivity : AppCompatActivity() {
         binding.rvSubtitles.visibility = View.GONE
         binding.sourceViewContainer.visibility = View.GONE
 
-        configureSourceViewEditor(stateModel.sourceViewContent)
+        configureSourceViewEditor(stateModel.sourceViewContent, preparedSource)
 
         binding.rvSubtitles.animate().cancel()
         binding.sourceViewContainer.animate().cancel()
@@ -1903,8 +1939,20 @@ class EditorActivity : AppCompatActivity() {
         }
     }
 
-    private fun configureSourceViewEditor(content: String) {
-        setSourceViewEditorText(content)
+    private fun configureSourceViewEditor(
+        content: String,
+        preparedSource: SourceEditorView.PreparedDocument? = null
+    ) {
+        if (preparedSource == null) setSourceViewEditorText(content)
+        else {
+            if (::sourceLineEditController.isInitialized) sourceLineEditController.invalidateLineIndex()
+            suppressSourceViewChanges = true
+            try {
+                binding.etSourceView.setPreparedDocumentText(preparedSource)
+            } finally {
+                suppressSourceViewChanges = false
+            }
+        }
         if (::sourceLineEditController.isInitialized) {
             sourceLineEditController.prepareDocument(content, stateModel.currentFormat)
         }
@@ -1964,12 +2012,50 @@ class EditorActivity : AppCompatActivity() {
             .setTitle("加载草稿")
             .setMessage("确定要用草稿内容覆盖当前编辑内容吗？（只覆盖内容，不更改文件名）")
             .setPositiveButton("确定") { _, _ ->
-                parseContent(content)
-                stateModel.hasUnsavedChanges = true
-                com.subtitleedit.util.OverwritingToast.makeText(this, "已加载草稿：$draftFileName", Toast.LENGTH_SHORT).show()
+                applyDraftContent(content, draftFileName)
             }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    private fun applyDraftContent(content: String, draftFileName: String) {
+        // The modal keeps user edits behind the worker parse. Also reject a result if an
+        // already pending source/list operation publishes a newer document while it runs.
+        val currentDocument = stateModel.document.value
+        val sourceGeneration = stateModel.documentState.sourceViewEditGeneration
+        val filePath = stateModel.filePath
+        val loading = AlertDialog.Builder(this)
+            .setMessage("正在加载草稿…")
+            .setView(android.widget.ProgressBar(this))
+            .setCancelable(false)
+            .show()
+        lifecycleScope.launch {
+            try {
+                val (document, preparedSource) = withContext(Dispatchers.Default) {
+                    val document = stateModel.subtitleRepository.load(content, draftFileName)
+                    val source = if (document.format.isSourceOnly) {
+                        SourceEditorView.prepareDocumentText(content)
+                    } else null
+                    document to source
+                }
+                if (stateModel.document.value !== currentDocument ||
+                    stateModel.documentState.sourceViewEditGeneration != sourceGeneration ||
+                    stateModel.filePath != filePath
+                ) {
+                    showShortToast("编辑内容已变化，请重新应用草稿")
+                    return@launch
+                }
+                parseContent(content, draftFileName, document, preparedSource)
+                stateModel.hasUnsavedChanges = true
+                showShortToast("已加载草稿：$draftFileName")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                showShortToast("加载草稿失败：${error.message ?: "未知错误"}")
+            } finally {
+                loading.dismiss()
+            }
+        }
     }
 
     /**
@@ -4121,10 +4207,29 @@ class EditorActivity : AppCompatActivity() {
      */
     private fun saveDraft() {
         val content = getCurrentEditableContent(requireNonEmptyList = true) ?: return
-        
-        val fileName = stateModel.currentFile?.name ?: "未命名"
-        val savedFileName = DraftManager.saveDraft(this, fileName, content)
-        com.subtitleedit.util.OverwritingToast.makeText(this, "草稿已保存：$savedFileName", Toast.LENGTH_LONG).show()
+        saveDraftContent(content) { savedFileName ->
+            com.subtitleedit.util.OverwritingToast.makeText(this, "草稿已保存：$savedFileName", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun saveDraftContent(content: String, onSaved: (String) -> Unit) {
+        val folderName = stateModel.currentFile?.name ?: "未命名"
+        val subtitleFile = if (stateModel.mediaType.hasPlayableMedia) {
+            stateModel.subtitleFile ?: stateModel.currentFile
+        } else stateModel.currentFile
+        val subtitleName = "${subtitleFile?.nameWithoutExtension ?: "未命名"}.${getFormatExtension(stateModel.currentFormat)}"
+        lifecycleScope.launch {
+            try {
+                val savedFileName = withContext(Dispatchers.IO) {
+                    DraftManager.saveDraft(this@EditorActivity, folderName, subtitleName, content)
+                }
+                onSaved(savedFileName)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                showShortToast("保存草稿失败：${error.message ?: "未知错误"}")
+            }
+        }
     }
     
     /**
@@ -4524,10 +4629,10 @@ class EditorActivity : AppCompatActivity() {
         previewItems.filter { it.apply }.forEach { item ->
             draftEntries.getOrNull(item.entryPosition)?.text = item.translatedText
         }
-        val fileName = stateModel.currentFile?.name ?: "未命名"
         val draftContent = serializeEntriesForFormat(stateModel.currentFormat, draftEntries)
-        val savedFileName = DraftManager.saveDraft(this, fileName, draftContent)
-        showShortToast("翻译草稿已保存：$savedFileName")
+        saveDraftContent(draftContent) { savedFileName ->
+            showShortToast("翻译草稿已保存：$savedFileName")
+        }
     }
     
     private fun renumberEntries(force: Boolean = false) {

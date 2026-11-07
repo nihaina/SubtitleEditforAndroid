@@ -4,4 +4,7 @@
     <string name="drafts_copied_to_clipboard">已复制到剪贴板</string>
     <string name="drafts_export_success">导出成功</string>
     <string name="drafts_export_failed">导出失败：%1$s</string>
+    <string name="draft_preview_apply">应用</string>
+    <string name="draft_preview_load_failed">无法预览草稿：%1$s</string>
+    <string name="draft_preview_apply_failed">无法应用草稿：%1$s</string>
 </resources>

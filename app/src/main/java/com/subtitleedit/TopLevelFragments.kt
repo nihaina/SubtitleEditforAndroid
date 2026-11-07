@@ -284,7 +284,6 @@ internal fun MainTopLevelPages(
         R.id.nav_drafts -> DraftsPage(
             currentFolder = state.currentDraftFolder,
             drafts = state.drafts,
-            fromEditor = false,
             dialogState = state.draftDialog,
             showTopBar = false,
             onBack = { goToDraftFolder("") },
@@ -293,9 +292,8 @@ internal fun MainTopLevelPages(
                 if (item.isFolder) {
                     goToDraftFolder(item.folderName)
                 } else {
-                    state.draftDialog = DraftsDialogState.Preview(
-                        item,
-                        DraftManager.readDraft(context, item.folderName, item.fileName)
+                    context.startActivity(
+                        DraftPreviewActivity.createIntent(context, item.folderName, item.fileName)
                     )
                 }
             },
@@ -316,12 +314,17 @@ internal fun MainTopLevelPages(
                 state.draftToExport = item
                 draftExporter.launch(item.fileName)
             },
-            onLoadDraft = {},
             onDeleteDraft = { item ->
                 state.draftDialog = null
                 // DraftsFragment always rebuilt its adapter after the delete attempt and did
                 // not show the standalone activity's success toast.
                 DraftManager.deleteDraft(context, item.folderName, item.fileName)
+                if (state.currentDraftFolder == item.folderName &&
+                    DraftManager.getDraftsInFolder(context, state.currentDraftFolder).isEmpty()
+                ) {
+                    state.currentDraftFolder = ""
+                    updateDraftToolbar()
+                }
                 loadDrafts()
             },
             onDeleteFolder = { item ->

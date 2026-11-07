@@ -66,6 +66,15 @@ class SourceEditorView @JvmOverloads constructor(
         val newEndOffset: Int
     )
 
+    /** A single-use source document whose line split and offset index can be built off-main. */
+    class PreparedDocument internal constructor(
+        internal val content: String,
+        internal val lines: List<SourceLineBlock>,
+        internal val offsets: LineOffsets
+    ) {
+        internal var consumed = false
+    }
+
     private data class ScrollAnchor(
         val stableId: Long,
         val position: Int,
@@ -238,11 +247,19 @@ class SourceEditorView @JvmOverloads constructor(
         maybeAutoScrollForSelection(localY)
     }
 
-    private companion object {
-        const val MENU_SELECT_ALL = 0x53450001
-        const val MENU_CUT = 0x53450002
-        const val MENU_COPY = 0x53450003
-        const val MENU_PASTE = 0x53450004
+    companion object {
+        private const val MENU_SELECT_ALL = 0x53450001
+        private const val MENU_CUT = 0x53450002
+        private const val MENU_COPY = 0x53450003
+        private const val MENU_PASTE = 0x53450004
+
+        /** Does not touch any View state; callers can prepare large files on a worker thread. */
+        fun prepareDocumentText(value: String): PreparedDocument {
+            val rows = SourceDocumentLineDiffs.split(value).mapIndexed { index, line ->
+                SourceLineBlock(index.toLong() + 1L, line.text, line.lineEnding)
+            }
+            return PreparedDocument(value, rows, LineOffsets().apply { reset(rows) })
+        }
     }
 
     private val imeEnsureRunnable = Runnable {
@@ -561,6 +578,22 @@ class SourceEditorView @JvmOverloads constructor(
         previousAnchor?.let(::scheduleScrollAnchorRestore)
     }
 
+    /** Installs a worker-prepared document on the UI thread without splitting or indexing it. */
+    fun setPreparedDocumentText(document: PreparedDocument) {
+        check(!document.consumed) { "Prepared source document has already been installed" }
+        document.consumed = true
+        clearDocumentSelection()
+        documentTextCache = document.content
+        lines.clear()
+        lines.addAll(document.lines)
+        nextLineId = lines.size.toLong() + 1L
+        offsets.replaceWith(document.offsets)
+        preferredLineEnding = lines.firstOrNull { it.lineEnding.isNotEmpty() }?.lineEnding ?: "\n"
+        lineAdapter.setLineCount(lines.size, notify = false)
+        lineAdapter.notifyDataSetChanged()
+        scrollHeights.invalidate()
+    }
+
     private fun captureScrollAnchor(): ScrollAnchor? {
         val position = lineLayoutManager.findFirstVisibleItemPosition()
         if (position == androidx.recyclerview.widget.RecyclerView.NO_POSITION) return null
@@ -653,6 +686,17 @@ class SourceEditorView @JvmOverloads constructor(
         }
     }.also { documentTextCache = it }
 
+    /** Capture immutable string references on main; file serialization can then run off-main. */
+    fun snapshotDocumentParts(): List<String> {
+        documentTextCache?.let { return listOf(it) }
+        return ArrayList<String>(lines.size * 2).apply {
+            lines.forEach { line ->
+                add(line.text)
+                add(line.lineEnding)
+            }
+        }
+    }
+
     fun replaceDocumentText(value: String) {
         val oldLineCount = lines.size
         val oldLength = offsets.documentLength
@@ -676,6 +720,7 @@ class SourceEditorView @JvmOverloads constructor(
     fun setDocumentEnabled(enabled: Boolean) {
         isEnabled = enabled
         lineAdapter.setEditorEnabled(enabled)
+        selectionActionMode?.invalidate()
     }
 
     fun setSearchHighlights(ranges: List<Highlight>) {
@@ -1775,6 +1820,7 @@ class SourceEditorView @JvmOverloads constructor(
     }
 
     private fun cutDocumentSelection(): Boolean {
+        if (!isEnabled) return false
         val range = selectedDocumentRange() ?: return false
         if (range.first >= range.second) return false
         if (!copyDocumentSelection()) return false
@@ -1784,6 +1830,7 @@ class SourceEditorView @JvmOverloads constructor(
     }
 
     private fun pasteDocumentSelection(): Boolean {
+        if (!isEnabled) return false
         val pasted = clipboardText() ?: return false
         val range = selectedDocumentRange() ?: return false
         if (range.first >= range.second) return false
@@ -2146,6 +2193,7 @@ class SourceEditorView @JvmOverloads constructor(
             setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
         }
         menu.add(Menu.NONE, MENU_CUT, 1, R.string.source_selection_cut).apply {
+            isVisible = this@SourceEditorView.isEnabled
             setIcon(R.drawable.ic_content_cut)
             setContentDescription(context.getString(R.string.source_selection_cut))
             setTooltipText(context.getString(R.string.source_selection_cut))
@@ -2158,6 +2206,7 @@ class SourceEditorView @JvmOverloads constructor(
             setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
         }
         menu.add(Menu.NONE, MENU_PASTE, 3, R.string.source_selection_paste).apply {
+            isVisible = this@SourceEditorView.isEnabled
             setIcon(R.drawable.ic_content_paste)
             setContentDescription(context.getString(R.string.source_selection_paste))
             setTooltipText(context.getString(R.string.source_selection_paste))
@@ -2718,7 +2767,7 @@ class SourceEditorView @JvmOverloads constructor(
 
         override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean {
             addSelectionMenu(menu)
-            menu.findItem(MENU_PASTE)?.isEnabled = hasClipboardText()
+            menu.findItem(MENU_PASTE)?.isEnabled = this@SourceEditorView.isEnabled && hasClipboardText()
             return true
         }
 
@@ -2802,7 +2851,7 @@ class SourceEditorView @JvmOverloads constructor(
     }
 
     /** Implicit treap of serialized line lengths; structural edits are O(log n). */
-    private class LineOffsets {
+    internal class LineOffsets {
         private class Node(
             var value: Int,
             val priority: Int,
@@ -2829,6 +2878,11 @@ class SourceEditorView @JvmOverloads constructor(
             lines.forEach { line ->
                 root = merge(root, Node(line.serializedLength, nextPriority()))
             }
+        }
+
+        fun replaceWith(prepared: LineOffsets) {
+            root = prepared.root
+            priorityState = prepared.priorityState
         }
 
         fun update(position: Int, delta: Int) {

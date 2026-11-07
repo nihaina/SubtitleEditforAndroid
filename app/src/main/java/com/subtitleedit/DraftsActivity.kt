@@ -1,8 +1,9 @@
 package com.subtitleedit
 
-import android.content.Intent
 import android.os.Bundle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import com.subtitleedit.filepicker.AppFilePickerContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -15,16 +16,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,9 +39,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.ui.components.AppToolScaffold
@@ -57,6 +52,15 @@ class DraftsActivity : AppComposeActivity() {
         AppFilePickerContracts.CreateDocument("*/*")
     ) { uri -> viewModel.onExportTargetSelected(uri) }
 
+    private val previewLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            setResult(RESULT_OK, result.data)
+            finish()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Whether the editor launched this page to load a saved draft.
@@ -64,17 +68,21 @@ class DraftsActivity : AppComposeActivity() {
         collectEvents(viewModel.events) { event ->
             when (event) {
                 is DraftsEvent.PickExportFile -> exportFileLauncher.launch(event.fileName)
-                is DraftsEvent.ReturnDraft -> returnDraftToEditor(event)
+                is DraftsEvent.PreviewDraft -> previewLauncher.launch(
+                    DraftPreviewActivity.createIntent(
+                        this, event.draft.folderName, event.draft.fileName, event.fromEditor
+                    )
+                )
             }
         }
 
         setContent {
             val state by viewModel.state.collectAsState()
+            BackHandler(enabled = state.currentFolder.isNotEmpty()) { viewModel.goToRoot() }
             SubtitleEditComposeTheme {
                 DraftsPage(
                     currentFolder = state.currentFolder,
                     drafts = state.drafts,
-                    fromEditor = state.fromEditor,
                     dialogState = state.dialogState,
                     onBack = ::handleBack,
                     onBackToRoot = viewModel::goToRoot,
@@ -85,7 +93,6 @@ class DraftsActivity : AppComposeActivity() {
                     onDismissDialog = viewModel::dismissDialog,
                     onCopyDraft = viewModel::copyDraft,
                     onExportDraft = viewModel::exportDraft,
-                    onLoadDraft = viewModel::loadDraftIntoEditor,
                     onDeleteDraft = viewModel::deleteDraft,
                     onDeleteFolder = viewModel::deleteFolder
                 )
@@ -95,15 +102,6 @@ class DraftsActivity : AppComposeActivity() {
 
     private fun handleBack() {
         if (viewModel.navigateUp()) onBackPressedDispatcher.onBackPressed()
-    }
-
-    private fun returnDraftToEditor(event: DraftsEvent.ReturnDraft) {
-        val resultIntent = Intent()
-        resultIntent.putExtra(EXTRA_DRAFT_CONTENT, event.content)
-        resultIntent.putExtra(EXTRA_DRAFT_FILE_NAME, event.fileName)
-        resultIntent.putExtra(EXTRA_DRAFT_FOLDER_NAME, event.folderName)
-        setResult(RESULT_OK, resultIntent)
-        finish()
     }
 
     companion object {
@@ -123,11 +121,6 @@ class DraftsActivity : AppComposeActivity() {
 }
 
 internal sealed interface DraftsDialogState {
-    data class Preview(
-        val draft: DraftsActivity.DraftItem,
-        val content: String
-    ) : DraftsDialogState
-
     data class Actions(val draft: DraftsActivity.DraftItem) : DraftsDialogState
     data class DeleteDraft(val draft: DraftsActivity.DraftItem) : DraftsDialogState
     data class DeleteFolder(val draft: DraftsActivity.DraftItem) : DraftsDialogState
@@ -138,7 +131,6 @@ internal sealed interface DraftsDialogState {
 internal fun DraftsPage(
     currentFolder: String,
     drafts: List<DraftsActivity.DraftItem>,
-    fromEditor: Boolean,
     dialogState: DraftsDialogState?,
     showTopBar: Boolean = true,
     onBack: () -> Unit,
@@ -150,7 +142,6 @@ internal fun DraftsPage(
     onDismissDialog: () -> Unit,
     onCopyDraft: (DraftsActivity.DraftItem) -> Unit,
     onExportDraft: (DraftsActivity.DraftItem) -> Unit,
-    onLoadDraft: (DraftsActivity.DraftItem) -> Unit,
     onDeleteDraft: (DraftsActivity.DraftItem) -> Unit,
     onDeleteFolder: (DraftsActivity.DraftItem) -> Unit
 ) {
@@ -206,12 +197,10 @@ internal fun DraftsPage(
 
     DraftsDialogHost(
         dialogState = dialogState,
-        fromEditor = fromEditor,
         onDismiss = onDismissDialog,
         onCopyDraft = onCopyDraft,
         onExportDraft = onExportDraft,
         onRequestDelete = onRequestDelete,
-        onLoadDraft = onLoadDraft,
         onDeleteDraft = onDeleteDraft,
         onDeleteFolder = onDeleteFolder
     )
@@ -240,6 +229,12 @@ private fun DraftRow(
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        Icon(
+            painter = painterResource(if (draft.isFolder) R.drawable.ic_folder else R.drawable.ic_file_text),
+            contentDescription = null,
+            tint = Color.Unspecified,
+            modifier = Modifier.padding(end = 12.dp).size(32.dp)
+        )
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.Center
@@ -279,71 +274,14 @@ private fun DraftRow(
 @Composable
 private fun DraftsDialogHost(
     dialogState: DraftsDialogState?,
-    fromEditor: Boolean,
     onDismiss: () -> Unit,
     onCopyDraft: (DraftsActivity.DraftItem) -> Unit,
     onExportDraft: (DraftsActivity.DraftItem) -> Unit,
     onRequestDelete: (DraftsActivity.DraftItem) -> Unit,
-    onLoadDraft: (DraftsActivity.DraftItem) -> Unit,
     onDeleteDraft: (DraftsActivity.DraftItem) -> Unit,
     onDeleteFolder: (DraftsActivity.DraftItem) -> Unit
 ) {
     when (dialogState) {
-        is DraftsDialogState.Preview -> {
-            val density = LocalDensity.current
-            val previewHorizontalPadding = with(density) { 50.toDp() }
-            val previewVerticalPadding = with(density) { 40.toDp() }
-            AppDialog(
-                onDismissRequest = onDismiss,
-                title = {
-                    Text(stringResource(R.string.draft_preview_title, dialogState.draft.displayName))
-                },
-                text = {
-                    Box(
-                        modifier = Modifier
-                            .verticalScroll(rememberScrollState())
-                            .padding(
-                                horizontal = previewHorizontalPadding,
-                                vertical = previewVerticalPadding
-                            )
-                    ) {
-                        Text(
-                            text = dialogState.content,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                },
-                confirmButton = {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        TextButton(onClick = {
-                            onCopyDraft(dialogState.draft)
-                            onDismiss()
-                        }) { Text(stringResource(R.string.draft_copy_full_text)) }
-                        Spacer(Modifier.weight(1f))
-                        if (fromEditor) {
-                            TextButton(onClick = onDismiss) {
-                                Text(stringResource(R.string.cancel))
-                            }
-                        }
-                        TextButton(onClick = {
-                            if (fromEditor) onLoadDraft(dialogState.draft)
-                            else onDismiss()
-                        }) {
-                            Text(
-                                if (fromEditor) stringResource(R.string.draft_load)
-                                else stringResource(R.string.confirm)
-                            )
-                        }
-                    }
-                },
-                dismissButton = {}
-            )
-        }
-
         is DraftsDialogState.Actions -> {
             AppDialog(
                 onDismissRequest = onDismiss,

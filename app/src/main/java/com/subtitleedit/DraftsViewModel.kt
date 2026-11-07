@@ -18,8 +18,8 @@ internal sealed interface DraftsEvent {
     /** Launch the "create document" picker for exporting a draft. */
     data class PickExportFile(val fileName: String) : DraftsEvent
 
-    /** Hand the chosen draft back to the editor and close the page. */
-    data class ReturnDraft(val content: String, val fileName: String, val folderName: String) : DraftsEvent
+    /** Open a source preview by filename, without reading the document on the UI thread. */
+    data class PreviewDraft(val draft: DraftsActivity.DraftItem, val fromEditor: Boolean) : DraftsEvent
 }
 
 internal class DraftsViewModel(
@@ -55,8 +55,7 @@ internal class DraftsViewModel(
             setState { copy(currentFolder = draft.folderName) }
             loadDrafts()
         } else {
-            val content = DraftManager.readDraft(app, draft.folderName, draft.fileName)
-            setState { copy(dialogState = DraftsDialogState.Preview(draft = draft, content = content)) }
+            sendEvent(DraftsEvent.PreviewDraft(draft, currentState.fromEditor))
         }
     }
 
@@ -103,15 +102,15 @@ internal class DraftsViewModel(
         }
     }
 
-    fun loadDraftIntoEditor(draft: DraftsActivity.DraftItem) {
-        val content = DraftManager.readDraft(app, draft.folderName, draft.fileName)
-        sendEvent(DraftsEvent.ReturnDraft(content, draft.fileName, draft.folderName))
-    }
-
     fun deleteDraft(draft: DraftsActivity.DraftItem) {
         dismissDialog()
         if (DraftManager.deleteDraft(app, draft.folderName, draft.fileName)) {
             toast(R.string.draft_deleted)
+            if (currentFolder == draft.folderName &&
+                DraftManager.getDraftsInFolder(app, currentFolder).isEmpty()
+            ) {
+                setState { copy(currentFolder = "") }
+            }
             loadDrafts()
         }
     }
