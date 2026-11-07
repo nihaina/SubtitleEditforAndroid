@@ -8,9 +8,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -32,10 +30,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -50,9 +47,9 @@ import com.subtitleedit.MediaConvertBitrateMode
 import com.subtitleedit.MediaConvertVideoBitrate
 import com.subtitleedit.MediaConvertVideoBitrateSettings
 import com.subtitleedit.MediaConvertAudioBitrate
+import com.subtitleedit.MediaConvertAudioVbr
 import com.subtitleedit.MediaConvertVideoSettings
 import com.subtitleedit.MediaConvertVideoSettingsSupport
-import com.subtitleedit.ui.components.AppChoiceTile
 import com.subtitleedit.ui.components.AppConflictDialog
 import com.subtitleedit.ui.components.AppLogBox
 import com.subtitleedit.ui.components.AppOption
@@ -123,10 +120,6 @@ internal fun MediaConvertScreen(
     onOverwrite: () -> Unit,
     onAutoRename: () -> Unit,
     onDismissDialog: () -> Unit,
-    videoFormatsExpanded: Boolean = false,
-    audioFormatsExpanded: Boolean = false,
-    onToggleVideoFormats: () -> Unit = {},
-    onToggleAudioFormats: () -> Unit = {},
     qualityHint: String = "",
     sourceVideoSize: MediaConvertVideoSize? = null,
     multipleSources: Boolean = false,
@@ -149,7 +142,9 @@ internal fun MediaConvertScreen(
     sourcePixelFormat: String? = null,
     onToggleMore: () -> Unit = {},
     onVideoSettingsChange: (MediaConvertVideoSettings) -> Unit = {},
-    sourceFileSizeBytes: Long? = null
+    sourceFileSizeBytes: Long? = null,
+    audioVbrQuality: Int = MediaConvertAudioVbr.OFF,
+    onAudioVbrQualityChange: (Int) -> Unit = {}
 ) {
     var showResolutionDialog by rememberSaveable { mutableStateOf(false) }
     var showBitrateDialog by rememberSaveable { mutableStateOf(false) }
@@ -157,6 +152,10 @@ internal fun MediaConvertScreen(
     var showSampleRateDialog by rememberSaveable { mutableStateOf(false) }
     var showChannelDialog by rememberSaveable { mutableStateOf(false) }
     var showVolumeDialog by rememberSaveable { mutableStateOf(false) }
+    var showAudioVbrDialog by rememberSaveable { mutableStateOf(false) }
+    val isAudioOutput = audioFormats.any { it.extension == selectedFormat }
+    val vbrSupported = isAudioOutput && MediaConvertAudioVbr.supports(effectiveAudioCodec)
+    val vbrActive = vbrSupported && audioVbrQuality in MediaConvertAudioVbr.qualities
     AppToolScaffold(
         title = stringResource(R.string.media_convert_title),
         onBack = onBack,
@@ -208,23 +207,19 @@ internal fun MediaConvertScreen(
 
         if (sourceSummary.isNotBlank()) {
             AppSection(title = stringResource(R.string.activity_tool_output_format)) {
-                FormatExpander(
+                MediaConvertFormatPicker(
                     title = stringResource(R.string.activity_media_convert_text_05),
                     formats = videoFormats,
                     selectedFormat = selectedFormat,
-                    expanded = videoFormatsExpanded,
                     enabled = !isConverting,
-                    onToggle = onToggleVideoFormats,
                     onSelected = onFormatSelected
                 )
                 HorizontalDivider()
-                FormatExpander(
+                MediaConvertFormatPicker(
                     title = stringResource(R.string.media_convert_audio_formats),
                     formats = audioFormats,
                     selectedFormat = selectedFormat,
-                    expanded = audioFormatsExpanded,
                     enabled = !isConverting,
-                    onToggle = onToggleAudioFormats,
                     onSelected = onFormatSelected
                 )
             }
@@ -336,8 +331,9 @@ internal fun MediaConvertScreen(
                         horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
                     ) {
                         Text(stringResource(R.string.activity_media_convert_text_13), modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
-                        OutlinedButton(onClick = { showAudioBitrateDialog = true }, enabled = audioEnabled && audioBitrateEditable, modifier = Modifier.weight(1f)) {
+                        OutlinedButton(onClick = { showAudioBitrateDialog = true }, enabled = audioEnabled && audioBitrateEditable && !vbrActive, modifier = Modifier.weight(1f)) {
                             val label = when {
+                                vbrActive -> stringResource(R.string.media_convert_audio_vbr_active)
                                 !audioBitrateEditable -> stringResource(R.string.media_convert_audio_bitrate_derived)
                                 audioBitrate == MediaConvertAudioBitrate.ORIGINAL -> stringResource(R.string.media_convert_bitrate_original) +
                                     (sourceAudioBitrateBps?.let { " (${MediaConvertAudioBitrate.label(it)})" } ?: "")
@@ -387,6 +383,29 @@ internal fun MediaConvertScreen(
                             Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
                         }
                     }
+                    if (isAudioOutput) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+                        ) {
+                            Text(stringResource(R.string.media_convert_audio_vbr), modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyMedium)
+                            OutlinedButton(
+                                onClick = { showAudioVbrDialog = true }, enabled = audioEnabled && vbrSupported,
+                                modifier = Modifier.weight(1f).testTag("audio-vbr-button")
+                            ) {
+                                val label = when {
+                                    !vbrSupported -> stringResource(R.string.media_convert_audio_vbr_unavailable)
+                                    vbrActive -> "${MediaConvertAudioVbr.bitrateBand(audioVbrQuality)} kbps"
+                                    else -> stringResource(R.string.media_convert_audio_vbr_off)
+                                }
+                                Text(label, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                        if (!vbrSupported) Text(stringResource(R.string.media_convert_audio_vbr_codec_hint),
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
         }
@@ -407,6 +426,14 @@ internal fun MediaConvertScreen(
         AppSection(title = stringResource(R.string.activity_settings_text_06)) {
             AppLogBox(log)
         }
+    }
+
+    if (showAudioVbrDialog && !isConverting && vbrSupported && selectedAudioCodec != "copy") {
+        MediaConvertAudioVbrDialog(
+            initialQuality = audioVbrQuality,
+            onDismiss = { showAudioVbrDialog = false },
+            onConfirm = { onAudioVbrQualityChange(it); showAudioVbrDialog = false }
+        )
     }
 
     if (showVolumeDialog && !isConverting && selectedAudioCodec != "copy") {
@@ -439,7 +466,7 @@ internal fun MediaConvertScreen(
         )
     }
 
-    if (showAudioBitrateDialog && !isConverting && selectedAudioCodec != "copy" && audioBitrateEditable) {
+    if (showAudioBitrateDialog && !isConverting && selectedAudioCodec != "copy" && audioBitrateEditable && !vbrActive) {
         MediaConvertAudioBitrateDialog(
             initial = audioBitrate,
             codec = effectiveAudioCodec,
@@ -480,67 +507,5 @@ internal fun MediaConvertScreen(
             onRename = onAutoRename,
             onCancel = onDismissDialog
         )
-    }
-}
-
-@Composable
-private fun FormatExpander(
-    title: String,
-    formats: List<MediaFormatOption>,
-    selectedFormat: String?,
-    expanded: Boolean,
-    enabled: Boolean,
-    onToggle: () -> Unit,
-    onSelected: (String) -> Unit
-) {
-    val selection = formats.firstOrNull { it.extension == selectedFormat }?.displayName
-    val description = stringResource(if (expanded) R.string.media_convert_expanded else R.string.media_convert_collapsed)
-    val rotation by animateFloatAsState(if (expanded) 90f else 0f, AppMotion.fast(), label = "format-chevron")
-    TextButton(
-        onClick = onToggle,
-        enabled = enabled,
-        modifier = Modifier.fillMaxWidth().semantics { stateDescription = description }
-    ) {
-        Text(title, modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
-        if (selection != null) Text(selection, modifier = Modifier.padding(end = AppSpacing.Inner))
-        Icon(
-            painter = painterResource(R.drawable.ic_arrow_right),
-            contentDescription = null,
-            modifier = Modifier.size(18.dp).graphicsLayer(rotationZ = rotation)
-        )
-    }
-    AnimatedVisibility(
-        visible = expanded,
-        enter = expandVertically(AppMotion.enter()) + fadeIn(AppMotion.enter()),
-        exit = shrinkVertically(AppMotion.exit()) + fadeOut(AppMotion.exit())
-    ) {
-        FormatGrid(formats, selectedFormat, enabled, onSelected)
-    }
-}
-
-@Composable
-private fun FormatGrid(
-    formats: List<MediaFormatOption>,
-    selectedFormat: String?,
-    enabled: Boolean,
-    onSelected: (String) -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)) {
-        formats.chunked(5).forEach { rowFormats ->
-            Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)) {
-                rowFormats.forEach { format ->
-                    AppChoiceTile(
-                        text = format.displayName,
-                        selected = selectedFormat == format.extension,
-                        enabled = enabled,
-                        onClick = { onSelected(format.extension) },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp)
-                    )
-                }
-                repeat(5 - rowFormats.size) { Spacer(Modifier.weight(1f)) }
-            }
-        }
     }
 }

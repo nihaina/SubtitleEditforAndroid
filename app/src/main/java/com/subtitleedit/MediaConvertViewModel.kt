@@ -53,8 +53,6 @@ internal data class MediaConvertUiState(
     val videoOptions: MediaConvertOptions = MediaConvertOptions(),
     val audioOptions: MediaConvertOptions = MediaConvertOptions(),
     val isAudioOutput: Boolean = false,
-    val videoFormatsExpanded: Boolean = false,
-    val audioFormatsExpanded: Boolean = false,
     val availableEncoders: Set<String> = MediaConvertFormats.baselineEncoders,
     val availableAudioEncoders: Set<String> = MediaConvertAudioCodecs.baselineEncoders,
     val videoPixelFormats: Map<String, List<String>> = emptyMap(),
@@ -185,9 +183,6 @@ internal class MediaConvertViewModel(application: Application) :
         }
     }
 
-    fun toggleVideoFormats() = setState { copy(videoFormatsExpanded = !videoFormatsExpanded) }
-    fun toggleAudioFormats() = setState { copy(audioFormatsExpanded = !audioFormatsExpanded) }
-
     private fun updateOptions(update: MediaConvertOptions.() -> MediaConvertOptions) {
         if (isRunning) return
         setState {
@@ -215,6 +210,11 @@ internal class MediaConvertViewModel(application: Application) :
     fun setChannel(value: Int) = updateOptions { copy(channelIndex = value) }
     fun setAudioVolume(value: Int) {
         if (value in MediaConvertAudioVolume.MIN..MediaConvertAudioVolume.MAX) updateOptions { copy(audioVolumePercent = value) }
+    }
+    fun setAudioVbrQuality(value: Int) {
+        val format = formatList.firstOrNull { it.extension == currentState.selectedFormat } ?: return
+        if (format.isAudioOnly && MediaConvertAudioVbr.supports(format.audioEncoder(currentState.options.selectedAudioCodec)) &&
+            MediaConvertAudioVbr.isValid(value)) updateOptions { copy(audioVbrQuality = value) }
     }
     fun toggleAdvanced() = updateOptions { copy(advancedExpanded = !advancedExpanded) }
     fun toggleMore() = updateOptions { copy(moreExpanded = !moreExpanded) }
@@ -410,6 +410,7 @@ internal class MediaConvertViewModel(application: Application) :
             }
             val audioCodec = format.audioEncoder(options.selectedAudioCodec)
             if (options.audioBitrate == MediaConvertAudioBitrate.ORIGINAL && audioCodec != "copy" &&
+                MediaConvertAudioVbr.activeQuality(format, options) == null &&
                 MediaConvertAudioCodecs.profile(audioCodec, format.formatName).adjustableBitrate && sourceProbe.audioBitrateBps == null) {
                 return Result.failure(IllegalStateException(string(R.string.media_convert_audio_bitrate_source_unavailable)))
             }

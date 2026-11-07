@@ -186,4 +186,10 @@
     <string name="media_convert_size_source_required">无法读取源文件大小，不能按比例计算目标大小，请关闭大小限制后重试。</string>
     <string name="media_convert_size_audio_bitrate_required">无法读取复制音轨的码率，请改用音频编码器，或关闭大小限制。</string>
     <string name="media_convert_size_out_of_range">目标大小对应的视频码率超出支持范围，请调整大小或音频码率后重试。</string>
+    <string name="media_convert_audio_vbr">VBR值</string>
+    <string name="media_convert_audio_vbr_off">否</string>
+    <string name="media_convert_audio_vbr_unavailable">当前编码器不支持此 VBR 设置</string>
+    <string name="media_convert_audio_vbr_hint">这些档位适用于 MP3 编码器。码率区间仅供参考，实际码率随音频内容、采样率和声道变化；越靠上音质越高、文件通常越大。选择“否”时沿用音频码率设置。</string>
+    <string name="media_convert_audio_vbr_codec_hint">此 VBR 设置仅适用于 MP3 编码器。</string>
+    <string name="media_convert_audio_vbr_active">由 VBR 控制</string>
 </resources>

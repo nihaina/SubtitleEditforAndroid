@@ -126,9 +126,12 @@ internal object MediaConvertCommand {
             }
             if (audio != "copy" && !analysisPass) {
                 val profile = MediaConvertAudioCodecs.profile(audio, format.formatName)
-                val parameters = MediaConvertAudioCodecs.parameters(audio, format.formatName, options, source)
+                val vbrQuality = MediaConvertAudioVbr.activeQuality(format, options)
+                val parameters = MediaConvertAudioCodecs.parameters(audio, format.formatName,
+                    if (vbrQuality != null) options.copy(audioBitrate = "") else options, source)
                 if (profile.experimental) addAll(listOf("-strict", "-2"))
-                parameters.bitrate?.let { addAll(listOf("-b:a", MediaConvertVideoBitrate.ffmpegValue(it))) }
+                if (vbrQuality != null) addAll(listOf("-q:a", vbrQuality.toString()))
+                else parameters.bitrate?.let { addAll(listOf("-b:a", MediaConvertVideoBitrate.ffmpegValue(it))) }
                 parameters.sampleRate?.let { addAll(listOf("-ar", it.toString())) }
                 parameters.channels?.let { addAll(listOf("-ac", it.toString())) }
                 parameters.channelLayout?.let { addAll(listOf("-channel_layout:a", it)) }

@@ -80,6 +80,7 @@ internal data class MediaConvertOptions(
     val sampleRateIndex: Int = 0,
     val channelIndex: Int = 0,
     val audioVolumePercent: Int = MediaConvertAudioVolume.DEFAULT,
+    val audioVbrQuality: Int = MediaConvertAudioVbr.OFF,
     val videoSettings: MediaConvertVideoSettings = MediaConvertVideoSettings(),
     val moreExpanded: Boolean = false,
     val advancedExpanded: Boolean = false
