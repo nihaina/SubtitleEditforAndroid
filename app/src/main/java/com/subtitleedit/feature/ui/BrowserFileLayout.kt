@@ -36,11 +36,12 @@ internal fun <T> BrowserFileLayout(
     listState: LazyListState = rememberLazyListState(),
     gridState: LazyGridState = rememberLazyGridState(),
     contentPadding: PaddingValues = browserFileContentPadding(viewMode),
+    adaptiveGrid: Boolean = false,
     itemContent: @Composable (T) -> Unit
 ) {
     if (viewMode == FileBrowserViewMode.GRID) {
         LazyVerticalGrid(
-            columns = GridCells.Fixed(3),
+            columns = if (adaptiveGrid) GridCells.Adaptive(112.dp) else GridCells.Fixed(3),
             state = gridState,
             modifier = modifier,
             contentPadding = contentPadding,

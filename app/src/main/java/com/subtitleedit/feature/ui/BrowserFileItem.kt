@@ -25,7 +25,8 @@ internal fun BrowserFileRow(
     onLongClick: () -> Unit,
     restrictedOverride: Boolean? = null,
     enabled: Boolean = true,
-    viewMode: FileBrowserViewMode = FileBrowserViewMode.DETAILED
+    viewMode: FileBrowserViewMode = FileBrowserViewMode.DETAILED,
+    directoryPageStyle: Boolean = false
 ) {
     val context = LocalContext.current
     // FavoritesFragment historically used FileListAdapter without an
@@ -86,7 +87,8 @@ internal fun BrowserFileRow(
         loadingDuration = MainFilePreviewLoader.isMediaFile(file) && preview == null,
         restricted = restricted || !enabled,
         isSelected = isSelected,
-        alpha = alpha
+        alpha = alpha,
+        directoryPageStyle = directoryPageStyle
     )
 }
 

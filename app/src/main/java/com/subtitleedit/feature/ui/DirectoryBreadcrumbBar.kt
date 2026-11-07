@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
@@ -79,8 +80,9 @@ internal fun DirectoryBreadcrumbBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .padding(horizontal = 4.dp),
+            .padding(horizontal = 8.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
@@ -130,11 +132,11 @@ internal fun DirectoryBreadcrumbBar(
                 ) {
                     Text(
                         text = ancestor.name.ifEmpty { ancestor.path },
-                        color = (if (isCurrentDirectory) MaterialTheme.colorScheme.onSurface
+                        color = (if (isCurrentDirectory) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant)
                             .copy(alpha = if (enabled) 1f else 0.38f),
                         style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = if (isCurrentDirectory) FontWeight.Medium else FontWeight.Normal,
+                        fontWeight = if (isCurrentDirectory) FontWeight.SemiBold else FontWeight.Normal,
                         maxLines = 1,
                         softWrap = false
                     )

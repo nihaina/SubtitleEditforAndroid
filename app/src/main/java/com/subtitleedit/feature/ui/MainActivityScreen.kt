@@ -1,6 +1,7 @@
 package com.subtitleedit.feature.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -22,7 +22,6 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -53,16 +52,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -196,7 +192,6 @@ internal fun MainActivityScreen(
     var createExtension by remember { mutableStateOf("txt") }
     var createNameError by remember { mutableStateOf<String?>(null) }
     var createExtensionError by remember { mutableStateOf<String?>(null) }
-    var showSortDialog by remember { mutableStateOf(false) }
     val isDirectoryPage = state.selectedTopLevelItem == R.id.nav_directory
     // Selection actions belong to directoryContent in the legacy layout. The
     // selection state can survive a top-level tab switch, but its toolbar and
@@ -244,8 +239,8 @@ internal fun MainActivityScreen(
         TopAppBar(
             scrollBehavior = scrollBehavior,
             colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = if (state.selectedTopLevelItem == R.id.nav_settings || state.selectedTopLevelItem == R.id.nav_tools) settingsPageBackground() else MaterialTheme.colorScheme.surface,
-                scrolledContainerColor = if (state.selectedTopLevelItem == R.id.nav_settings || state.selectedTopLevelItem == R.id.nav_tools) settingsPageBackground() else MaterialTheme.colorScheme.surfaceContainer
+                containerColor = if (isDirectoryPage || state.selectedTopLevelItem == R.id.nav_settings || state.selectedTopLevelItem == R.id.nav_tools) settingsPageBackground() else MaterialTheme.colorScheme.surface,
+                scrolledContainerColor = if (isDirectoryPage || state.selectedTopLevelItem == R.id.nav_settings || state.selectedTopLevelItem == R.id.nav_tools) settingsPageBackground() else MaterialTheme.colorScheme.surfaceContainer
             ),
             title = {
                 DirectoryToolbarTitle(
@@ -359,14 +354,6 @@ internal fun MainActivityScreen(
                                             }
                                         )
                                     } else {
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.batch_rename_sort_options)) },
-                                            leadingIcon = { Icon(painterResource(R.drawable.ic_batch_rename_sort), contentDescription = null) },
-                                            onClick = {
-                                                directoryMenuExpanded = false
-                                                showSortDialog = true
-                                            }
-                                        )
                                         DropdownMenuItem(
                                             text = { Text(stringResource(R.string.menu_new)) },
                                             leadingIcon = { Icon(painterResource(R.drawable.ic_add), contentDescription = null) },
@@ -530,71 +517,6 @@ internal fun MainActivityScreen(
         )
     }
 
-    if (showSortDialog) {
-        AppDialog(
-            onDismissRequest = { showSortDialog = false },
-            title = { Text(stringResource(R.string.directory_sort_heading)) },
-            text = {
-                Column(Modifier.padding(8.dp)) {
-                    listOf(
-                        stringResource(R.string.directory_sort_name) to FileSortField.NAME,
-                        stringResource(R.string.directory_sort_type) to FileSortField.TYPE,
-                        stringResource(R.string.directory_sort_size) to FileSortField.SIZE,
-                        stringResource(R.string.directory_sort_date) to FileSortField.DATE
-                    ).forEach { (label, field) ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                                .background(
-                                    if (state.sortField == field) MaterialTheme.colorScheme.primaryContainer
-                                    else Color.Transparent
-                                )
-                                .clickable { onSortFieldChanged(field) }
-                                .padding(start = 16.dp, end = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                            RadioButton(
-                                selected = state.sortField == field,
-                                onClick = null,
-                                modifier = Modifier.width(40.dp)
-                            )
-                        }
-                    }
-                    listOf(
-                        stringResource(R.string.file_picker_sort_ascending) to FileSortDirection.ASCENDING,
-                        stringResource(R.string.file_picker_sort_descending) to FileSortDirection.DESCENDING
-                    ).forEach { (label, direction) ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                                .background(
-                                    if (state.sortDirection == direction) MaterialTheme.colorScheme.primaryContainer
-                                    else Color.Transparent
-                                )
-                                .clickable { onSortDirectionChanged(direction) }
-                                .padding(start = 16.dp, end = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                            RadioButton(
-                                selected = state.sortDirection == direction,
-                                onClick = null,
-                                modifier = Modifier.width(40.dp)
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showSortDialog = false }) { Text(stringResource(R.string.cancel)) }
-            }
-        )
-    }
-
     MainFileOperationDialogs(
         subtitleConversion = subtitleConversion,
         subtitleConversionResult = subtitleConversionResult,
@@ -710,7 +632,7 @@ private fun SelectionAction(modifier: Modifier, icon: Int, label: String, onClic
             .height(64.dp)
             .clickable(
                 interactionSource = interactionSource,
-                indication = null,
+                indication = LocalIndication.current,
                 onClick = onClick
             ),
         horizontalAlignment = Alignment.CenterHorizontally,

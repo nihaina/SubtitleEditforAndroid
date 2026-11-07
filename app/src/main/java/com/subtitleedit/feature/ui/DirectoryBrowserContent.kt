@@ -1,6 +1,7 @@
 package com.subtitleedit.feature.ui
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -18,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import com.subtitleedit.DirectoryScrollPosition
 import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.ui.theme.AppMotion
+import com.subtitleedit.ui.settings.settingsPageBackground
 import com.subtitleedit.util.FilePathPolicy
 import java.io.File
 
@@ -51,12 +53,16 @@ internal fun DirectoryBrowserContent(
         val position = savedPosition?.firstVisiblePath?.let { path ->
             state.files.indexOfFirst { it.absolutePath == path }
         }?.takeIf { it >= 0 } ?: savedPosition?.firstVisibleIndex ?: 0
-        val offset = savedPosition?.takeIf { it.viewMode == null || it.viewMode == state.viewMode }?.offset ?: 0
+        // Grid cell heights can change with the adaptive column count; restore the
+        // saved item without a stale pixel offset that could scroll past it.
+        val offset = if (isGrid) 0 else savedPosition?.takeIf {
+            it.viewMode == null || it.viewMode == state.viewMode
+        }?.offset ?: 0
         if (isGrid) gridState.scrollToItem(position.coerceIn(0, state.files.lastIndex), offset)
         else listState.scrollToItem(position.coerceIn(0, state.files.lastIndex), offset)
         appliedScrollGeneration = request.generation
     }
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(settingsPageBackground())) {
         state.currentDirectory?.let { directory ->
             DirectoryBreadcrumbBar(
                 directory = directory,
@@ -97,7 +103,8 @@ internal fun DirectoryBrowserContent(
                 viewMode = state.viewMode,
                 modifier = Modifier.fillMaxWidth().weight(1f).testTag("directory-files"),
                 listState = listState,
-                gridState = gridState
+                gridState = gridState,
+                adaptiveGrid = true
             ) { file ->
                 BrowserFileRow(
                     file = file,
@@ -106,7 +113,8 @@ internal fun DirectoryBrowserContent(
                     isSelectionMode = state.selectedPaths.isNotEmpty() && state.pendingOperation == null,
                     onClick = { onFileClick(file) },
                     onLongClick = { onFileLongClick(file) },
-                    viewMode = state.viewMode
+                    viewMode = state.viewMode,
+                    directoryPageStyle = true
                 )
             }
         } else {

@@ -64,7 +64,8 @@ internal fun BrowserFileItem(
     loadingDuration: Boolean = false,
     restricted: Boolean = false,
     isSelected: Boolean = false,
-    alpha: Float = 1f
+    alpha: Float = 1f,
+    directoryPageStyle: Boolean = false
 ) {
     val locale = LocalLocale.current.platformLocale
     val modifiedTime = remember(entry.modifiedTimeMillis, locale) {
@@ -86,11 +87,11 @@ internal fun BrowserFileItem(
         modifiedTime = if (entry.isParentDirectory) "" else modifiedTime,
         extension = if (entry.isDirectory) "" else entry.name.substringAfterLast('.', "").uppercase(locale)
     )
-    Box(modifier.browserFileItemContainer(viewMode, isSelected, alpha).then(interactionModifier)) {
+    Box(modifier.browserFileItemContainer(viewMode, isSelected, alpha, directoryPageStyle).then(interactionModifier)) {
         when (viewMode) {
-            FileBrowserViewMode.DETAILED -> DetailedFileRowContent(entry, preview, details, restricted, loadingDuration)
-            FileBrowserViewMode.COMPACT -> CompactFileRowContent(entry, preview, details, restricted)
-            FileBrowserViewMode.GRID -> GridFileItemContent(entry, preview, details, restricted)
+            FileBrowserViewMode.DETAILED -> DetailedFileRowContent(entry, preview, details, restricted, loadingDuration, isSelected, directoryPageStyle)
+            FileBrowserViewMode.COMPACT -> CompactFileRowContent(entry, preview, details, restricted, isSelected, directoryPageStyle)
+            FileBrowserViewMode.GRID -> GridFileItemContent(entry, preview, details, restricted, isSelected, directoryPageStyle)
         }
     }
 }
@@ -99,7 +100,8 @@ internal fun BrowserFileItem(
 private fun Modifier.browserFileItemContainer(
     viewMode: FileBrowserViewMode = FileBrowserViewMode.DETAILED,
     isSelected: Boolean = false,
-    alpha: Float = 1f
+    alpha: Float = 1f,
+    directoryPageStyle: Boolean = false
 ): Modifier {
     val containerColor by animateColorAsState(
         targetValue = when {
@@ -111,15 +113,26 @@ private fun Modifier.browserFileItemContainer(
         label = "file-row-container"
     )
     val itemShape = RoundedCornerShape(when (viewMode) {
-        FileBrowserViewMode.DETAILED -> 12.dp
-        FileBrowserViewMode.COMPACT -> 8.dp
+        FileBrowserViewMode.DETAILED -> if (directoryPageStyle) 16.dp else 12.dp
+        FileBrowserViewMode.COMPACT -> if (directoryPageStyle) 16.dp else 8.dp
         FileBrowserViewMode.GRID -> 16.dp
     })
-    return fillMaxWidth()
-        .padding(horizontal = if (viewMode == FileBrowserViewMode.GRID) 0.dp else 8.dp)
-        .alpha(alpha)
-        .clip(itemShape)
-        .background(containerColor)
+    return if (!directoryPageStyle) {
+        fillMaxWidth()
+            .padding(horizontal = if (viewMode == FileBrowserViewMode.GRID) 0.dp else 8.dp)
+            .alpha(alpha)
+            .clip(itemShape)
+            .background(containerColor)
+    } else if (viewMode == FileBrowserViewMode.GRID) {
+        fillMaxWidth()
+            .alpha(alpha)
+            .clip(itemShape)
+            .background(containerColor)
+    } else {
+        fillMaxWidth()
+            .alpha(alpha)
+            .background(containerColor)
+    }
 }
 
 @Composable
@@ -128,9 +141,11 @@ private fun DetailedFileRowContent(
     preview: MainFilePreview?,
     details: BrowserFileDetails,
     restricted: Boolean,
-    loadingDuration: Boolean
+    loadingDuration: Boolean,
+    isSelected: Boolean,
+    directoryPageStyle: Boolean
 ) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = if (directoryPageStyle) 16.dp else 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         BrowserFileIcon(entry.name, entry.isDirectory, 42.dp, preview?.bitmap, restricted)
         Column(Modifier.weight(1f).padding(start = 12.dp, end = 8.dp)) {
             FileItemTitle(details.name, restricted, MaterialTheme.typography.bodyLarge)
@@ -148,14 +163,43 @@ private fun DetailedFileRowContent(
                 }
             }
         }
-        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (details.extension.isNotEmpty()) StatusBadge(details.extension)
+        Column(if (directoryPageStyle) Modifier.widthIn(max = 112.dp) else Modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(if (directoryPageStyle) 2.dp else 4.dp)) {
+            if (details.extension.isNotEmpty()) {
+                if (directoryPageStyle) FileExtensionBadge(details.extension) else StatusBadge(details.extension)
+            }
             else if (entry.isDirectory && !entry.isParentDirectory) Spacer(Modifier.height(24.dp))
             if (details.modifiedTime.isNotEmpty()) {
                 Text(details.modifiedTime, style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
         }
+        if (directoryPageStyle && isSelected) SelectionMark(Modifier.padding(start = 8.dp))
+    }
+}
+
+@Composable
+private fun FileExtensionBadge(extension: String) {
+    Text(
+        extension,
+        modifier = Modifier.widthIn(max = 80.dp).clip(MaterialTheme.shapes.extraSmall)
+            .background(MaterialTheme.colorScheme.secondaryContainer)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSecondaryContainer,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+    )
+}
+
+@Composable
+private fun SelectionMark(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier.size(18.dp).clip(RoundedCornerShape(9.dp))
+            .background(MaterialTheme.colorScheme.primary),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(painterResource(R.drawable.ic_check), contentDescription = null,
+            modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onPrimary)
     }
 }
 
@@ -197,8 +241,8 @@ private fun FileItemTitle(name: String, restricted: Boolean, style: TextStyle, l
 }
 
 @Composable
-private fun CompactFileRowContent(entry: BrowserFileEntry, preview: MainFilePreview?, details: BrowserFileDetails, restricted: Boolean) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun CompactFileRowContent(entry: BrowserFileEntry, preview: MainFilePreview?, details: BrowserFileDetails, restricted: Boolean, isSelected: Boolean, directoryPageStyle: Boolean) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = if (directoryPageStyle) 16.dp else 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         BrowserFileIcon(entry.name, entry.isDirectory, 30.dp, preview?.bitmap, restricted)
         Box(Modifier.weight(1f).padding(start = 10.dp, end = 8.dp)) {
             FileItemTitle(details.name, restricted, MaterialTheme.typography.bodyMedium)
@@ -208,12 +252,15 @@ private fun CompactFileRowContent(entry: BrowserFileEntry, preview: MainFilePrev
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f), maxLines = 1)
             Spacer(Modifier.width(6.dp))
         }
-        if (details.extension.isNotEmpty()) StatusBadge(details.extension)
+        if (details.extension.isNotEmpty()) {
+            if (directoryPageStyle) FileExtensionBadge(details.extension) else StatusBadge(details.extension)
+        }
+        if (directoryPageStyle && isSelected) SelectionMark(Modifier.padding(start = 8.dp))
     }
 }
 
 @Composable
-private fun GridFileItemContent(entry: BrowserFileEntry, preview: MainFilePreview?, details: BrowserFileDetails, restricted: Boolean) {
+private fun GridFileItemContent(entry: BrowserFileEntry, preview: MainFilePreview?, details: BrowserFileDetails, restricted: Boolean, isSelected: Boolean, directoryPageStyle: Boolean) {
     Column(Modifier.fillMaxWidth().padding(4.dp)) {
         Box(
             modifier = Modifier.fillMaxWidth().aspectRatio(4f / 3).clip(RoundedCornerShape(12.dp))
@@ -229,25 +276,34 @@ private fun GridFileItemContent(entry: BrowserFileEntry, preview: MainFilePrevie
             GridFileMetadata(
                 left = details.modifiedTime,
                 right = details.extension,
+                directoryPageStyle = directoryPageStyle,
                 modifier = Modifier.align(Alignment.TopStart)
             )
             GridFileMetadata(
                 left = if (entry.isDirectory) "" else details.summary,
                 right = if (entry.isDirectory) details.summary else details.duration,
+                directoryPageStyle = directoryPageStyle,
                 modifier = Modifier.align(Alignment.BottomStart)
             )
         }
         Spacer(Modifier.height(4.dp))
-        FileItemTitle(details.name, restricted, MaterialTheme.typography.bodySmall, lines = 2)
+        if (directoryPageStyle) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) {
+                FileItemTitle(details.name, restricted, MaterialTheme.typography.bodySmall, lines = 2)
+            }
+            if (isSelected) SelectionMark(Modifier.padding(start = 4.dp))
+        } else {
+            FileItemTitle(details.name, restricted, MaterialTheme.typography.bodySmall, lines = 2)
+        }
     }
 }
 
 @Composable
-private fun GridFileMetadata(left: String, right: String, modifier: Modifier = Modifier) {
+private fun GridFileMetadata(left: String, right: String, directoryPageStyle: Boolean, modifier: Modifier = Modifier) {
     if (left.isEmpty() && right.isEmpty()) return
     val textStyle = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 14.sp)
     Row(
-        modifier = modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.6f))
+        modifier = modifier.fillMaxWidth().background(Color.Black.copy(alpha = if (directoryPageStyle) 0.52f else 0.6f))
             .padding(horizontal = 4.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp)
