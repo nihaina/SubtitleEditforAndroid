@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +41,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.SettingsManager
@@ -188,7 +188,7 @@ internal fun TtsSettingsScreen(
     }
 
     if (showHelp) {
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { showHelp = false },
             title = { Text(stringResource(R.string.tts_help)) },
             text = { Text(stringResource(R.string.tts_help_message)) },

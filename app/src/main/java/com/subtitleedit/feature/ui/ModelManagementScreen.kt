@@ -14,7 +14,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -37,6 +36,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.ExperimentalFoundationApi
 import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppCard
+import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.ui.components.StatusBadge
 import kotlinx.coroutines.launch
@@ -156,7 +156,7 @@ fun ModelManagementScreen(
     )
 
     when (val activeDialog = dialog) {
-        is ModelManagementDialogUi.ConfirmDelete -> AlertDialog(
+        is ModelManagementDialogUi.ConfirmDelete -> AppDialog(
             onDismissRequest = onDismissDialog,
             title = { Text(stringResource(R.string.model_management_delete_title)) },
             text = {
@@ -178,7 +178,7 @@ fun ModelManagementScreen(
             properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = true)
         )
 
-        is ModelManagementDialogUi.ConfirmOverwrite -> AlertDialog(
+        is ModelManagementDialogUi.ConfirmOverwrite -> AppDialog(
             onDismissRequest = onDismissDialog,
             title = { Text(stringResource(R.string.model_management_overwrite_title)) },
             text = {

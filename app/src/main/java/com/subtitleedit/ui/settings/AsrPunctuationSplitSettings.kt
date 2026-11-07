@@ -15,7 +15,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -33,6 +32,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.util.AsrPunctuationOptions
 import com.subtitleedit.ui.components.SettingsSwitchRow
 
@@ -74,7 +74,7 @@ internal fun AsrPunctuationSplitSettings(
     }
 
     if (dialogVisible) {
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { dialogVisible = false },
             title = { Text(stringResource(R.string.speech_merge_set_punctuation)) },
             text = {

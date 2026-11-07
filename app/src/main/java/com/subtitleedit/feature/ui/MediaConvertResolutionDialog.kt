@@ -4,24 +4,19 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -45,13 +40,12 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.subtitleedit.MediaConvertFitMode
 import com.subtitleedit.MediaConvertResolution
 import com.subtitleedit.MediaConvertResolutionSettings
 import com.subtitleedit.MediaConvertVideoSize
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppDialog
 
 @Composable
 internal fun MediaConvertResolutionDialog(
@@ -80,110 +74,102 @@ internal fun MediaConvertResolutionDialog(
     val heightError = index == MediaConvertResolution.CUSTOM && !MediaConvertResolution.validDimension(height.toIntOrNull())
     val lockLabel = stringResource(R.string.media_convert_resolution_lock)
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(
-            modifier = Modifier.widthIn(max = 600.dp).fillMaxWidth(0.95f).fillMaxHeight(0.9f).imePadding(),
-            shape = MaterialTheme.shapes.extraLarge,
-            color = MaterialTheme.colorScheme.surface
-        ) {
-            Column {
-                MediaConvertDialogTitle(stringResource(R.string.media_convert_resolution_title))
-                LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
-                    item {
-                        Text(stringResource(R.string.media_convert_resolution_original), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 20.dp))
-                        ResolutionChoice(
-                            text = sourceSize?.label ?: stringResource(R.string.media_convert_resolution_original),
-                            detail = stringResource(R.string.media_convert_resolution_source),
-                            selected = index == 0,
-                            onClick = { index = 0 }
-                        )
-                        if (multipleSources) Text(
-                            stringResource(R.string.media_convert_resolution_batch),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
-                        HorizontalDivider()
-                    }
-                    item {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                            Text(stringResource(R.string.media_convert_resolution_custom), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                            Text(stringResource(R.string.media_convert_resolution_lock), style = MaterialTheme.typography.labelMedium)
-                            Switch(
-                                checked = locked,
-                                onCheckedChange = { checked ->
-                                    val w = width.toDoubleOrNull()
-                                    val h = height.toDoubleOrNull()
-                                    ratio = if (w != null && h != null && w > 0 && h > 0) w / h else sourceSize?.aspectRatio ?: 0.0
-                                    locked = checked && ratio > 0
-                                },
-                                enabled = (width.toIntOrNull()?.let { it > 0 } == true && height.toIntOrNull()?.let { it > 0 } == true) || sourceSize != null,
-                                modifier = Modifier.padding(start = 4.dp).semantics { contentDescription = lockLabel }.testTag("resolution-lock")
-                            )
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            RadioButton(selected = index == MediaConvertResolution.CUSTOM, onClick = { index = MediaConvertResolution.CUSTOM })
-                            OutlinedTextField(
-                                value = width,
-                                onValueChange = { value ->
-                                    if (value.length <= 4 && value.all(Char::isDigit)) {
-                                        width = value
-                                        index = MediaConvertResolution.CUSTOM
-                                        if (locked) height = MediaConvertResolution.linkedDimension(value, ratio.takeIf { it > 0 } ?: sourceSize?.aspectRatio ?: 0.0, true)
-                                    }
-                                },
-                                label = { Text(stringResource(R.string.media_convert_resolution_width)) },
-                                placeholder = { Text("2–4096") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                singleLine = true,
-                                isError = widthError,
-                                modifier = Modifier.weight(1f).testTag("resolution-width")
-                            )
-                            OutlinedTextField(
-                                value = height,
-                                onValueChange = { value ->
-                                    if (value.length <= 4 && value.all(Char::isDigit)) {
-                                        height = value
-                                        index = MediaConvertResolution.CUSTOM
-                                        if (locked) width = MediaConvertResolution.linkedDimension(value, ratio.takeIf { it > 0 } ?: sourceSize?.aspectRatio ?: 0.0, false)
-                                    }
-                                },
-                                label = { Text(stringResource(R.string.media_convert_resolution_height)) },
-                                placeholder = { Text("2–4096") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                singleLine = true,
-                                isError = heightError,
-                                modifier = Modifier.weight(1f).testTag("resolution-height")
-                            )
-                        }
-                        Text(
-                            stringResource(R.string.media_convert_resolution_limits),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (widthError || heightError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
-                        HorizontalDivider()
-                        Text(stringResource(R.string.media_convert_resolution_presets), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 20.dp, bottom = 4.dp))
-                    }
-                    items(MediaConvertResolution.presets.withIndex().drop(1).sortedBy { if (it.value!!.height > it.value!!.width) 0 else 1 }, key = { it.index }) { preset ->
-                        val size = preset.value!!
-                        ResolutionChoice(
-                            text = size.label,
-                            detail = stringResource(if (size.height > size.width) R.string.media_convert_resolution_portrait else R.string.media_convert_resolution_landscape),
-                            selected = index == preset.index,
-                            onClick = { index = preset.index }
-                        )
-                        HorizontalDivider()
-                    }
-                }
+    MediaConvertDialogSurface(onDismiss, withImePadding = true) {
+        MediaConvertDialogTitle(stringResource(R.string.media_convert_resolution_title))
+        LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
+            item {
+                Text(stringResource(R.string.media_convert_resolution_original), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 20.dp))
+                ResolutionChoice(
+                    text = sourceSize?.label ?: stringResource(R.string.media_convert_resolution_original),
+                    detail = stringResource(R.string.media_convert_resolution_source),
+                    selected = index == 0,
+                    onClick = { index = 0 }
+                )
+                if (multipleSources) Text(
+                    stringResource(R.string.media_convert_resolution_batch),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
                 HorizontalDivider()
-                TextButton(onClick = { showFitRules = true }, modifier = Modifier.fillMaxWidth().padding(8.dp).testTag("resolution-fit-rules")) {
-                    Text(stringResource(R.string.media_convert_resolution_fit_rule), modifier = Modifier.weight(1f))
-                    Text(stringResource(fitModeTitle(settings.fitMode)))
+            }
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                    Text(stringResource(R.string.media_convert_resolution_custom), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    Text(stringResource(R.string.media_convert_resolution_lock), style = MaterialTheme.typography.labelMedium)
+                    Switch(
+                        checked = locked,
+                        onCheckedChange = { checked ->
+                            val w = width.toDoubleOrNull()
+                            val h = height.toDoubleOrNull()
+                            ratio = if (w != null && h != null && w > 0 && h > 0) w / h else sourceSize?.aspectRatio ?: 0.0
+                            locked = checked && ratio > 0
+                        },
+                        enabled = (width.toIntOrNull()?.let { it > 0 } == true && height.toIntOrNull()?.let { it > 0 } == true) || sourceSize != null,
+                        modifier = Modifier.padding(start = 4.dp).semantics { contentDescription = lockLabel }.testTag("resolution-lock")
+                    )
                 }
-                MediaConvertDialogActions(onDismiss, { onConfirm(settings) }, settings.isValid, Modifier.testTag("resolution-confirm"))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    RadioButton(selected = index == MediaConvertResolution.CUSTOM, onClick = { index = MediaConvertResolution.CUSTOM })
+                    OutlinedTextField(
+                        value = width,
+                        onValueChange = { value ->
+                            if (value.length <= 4 && value.all(Char::isDigit)) {
+                                width = value
+                                index = MediaConvertResolution.CUSTOM
+                                if (locked) height = MediaConvertResolution.linkedDimension(value, ratio.takeIf { it > 0 } ?: sourceSize?.aspectRatio ?: 0.0, true)
+                            }
+                        },
+                        label = { Text(stringResource(R.string.media_convert_resolution_width)) },
+                        placeholder = { Text("2–4096") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        isError = widthError,
+                        modifier = Modifier.weight(1f).testTag("resolution-width")
+                    )
+                    OutlinedTextField(
+                        value = height,
+                        onValueChange = { value ->
+                            if (value.length <= 4 && value.all(Char::isDigit)) {
+                                height = value
+                                index = MediaConvertResolution.CUSTOM
+                                if (locked) width = MediaConvertResolution.linkedDimension(value, ratio.takeIf { it > 0 } ?: sourceSize?.aspectRatio ?: 0.0, false)
+                            }
+                        },
+                        label = { Text(stringResource(R.string.media_convert_resolution_height)) },
+                        placeholder = { Text("2–4096") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        isError = heightError,
+                        modifier = Modifier.weight(1f).testTag("resolution-height")
+                    )
+                }
+                Text(
+                    stringResource(R.string.media_convert_resolution_limits),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (widthError || heightError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
+                HorizontalDivider()
+                Text(stringResource(R.string.media_convert_resolution_presets), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 20.dp, bottom = 4.dp))
+            }
+            items(MediaConvertResolution.presets.withIndex().drop(1).sortedBy { if (it.value!!.height > it.value!!.width) 0 else 1 }, key = { it.index }) { preset ->
+                val size = preset.value!!
+                ResolutionChoice(
+                    text = size.label,
+                    detail = stringResource(if (size.height > size.width) R.string.media_convert_resolution_portrait else R.string.media_convert_resolution_landscape),
+                    selected = index == preset.index,
+                    onClick = { index = preset.index }
+                )
+                HorizontalDivider()
             }
         }
+        HorizontalDivider()
+        TextButton(onClick = { showFitRules = true }, modifier = Modifier.fillMaxWidth().padding(8.dp).testTag("resolution-fit-rules")) {
+            Text(stringResource(R.string.media_convert_resolution_fit_rule), modifier = Modifier.weight(1f))
+            Text(stringResource(fitModeTitle(settings.fitMode)))
+        }
+        MediaConvertDialogActions(onDismiss, { onConfirm(settings) }, settings.isValid, Modifier.testTag("resolution-confirm"))
     }
     if (showFitRules) FitRuleDialog(
         initial = settings.fitMode,
@@ -222,7 +208,7 @@ private fun fitModeDescription(mode: MediaConvertFitMode) = when (mode) {
 @Composable
 private fun FitRuleDialog(initial: MediaConvertFitMode, onDismiss: () -> Unit, onConfirm: (MediaConvertFitMode) -> Unit) {
     var selected by rememberSaveable { mutableStateOf(initial.name) }
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.media_convert_resolution_fit_rule)) },
         text = {

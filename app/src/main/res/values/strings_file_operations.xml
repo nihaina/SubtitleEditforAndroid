@@ -1,0 +1,21 @@
+<resources>
+    <string name="file_op_compress">压缩</string>
+    <string name="file_op_properties">详情</string>
+    <string name="file_op_rename">重命名</string>
+    <string name="file_op_close">关闭</string>
+    <string name="file_op_permission_denied_message">需要存储权限才能访问字幕文件。请在设置中授予权限。</string>
+    <string name="file_op_delete_message">确定要删除选中的 %1$d 项吗？此操作无法撤销。</string>
+    <string name="file_op_create_archive_title">创建压缩文件</string>
+    <string name="file_op_password_hide">隐藏密码</string>
+    <string name="file_op_password_show">显示密码</string>
+    <string name="file_op_archive_password_hint_zip">留空则不加密；ZipCrypto 兼容性更好，AES-256 更安全</string>
+    <string name="file_op_archive_password_hint_7z">使用 7Z AES-256 加密；留空则不加密</string>
+    <string name="file_op_archive_password_hint_tar">密码仅适用于 ZIP 和 7Z 格式</string>
+    <string name="file_op_password_book_title">密码本</string>
+    <string name="file_op_password_book_empty">密码本为空，可保存当前输入的密码。</string>
+    <string name="file_op_password_book_item">密码 %1$d（%2$s）</string>
+    <string name="file_op_password_book_save">保存当前密码</string>
+    <string name="file_op_password_book_clear">清空密码本</string>
+    <string name="batch_rename_invalid_number_width">请输入有效的编号位数</string>
+    <string name="batch_rename_invalid_start_number">请输入有效的开始序号</string>
+</resources>

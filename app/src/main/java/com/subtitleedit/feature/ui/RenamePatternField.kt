@@ -38,7 +38,11 @@ internal fun RenamePatternField(
     } else {
         Color(0xFF4F63ED)
     }
-    val transformation = remember(tokenColor) { RenamePatternTransformation(tokenColor) }
+    val fileNameLabel = stringResource(R.string.batch_rename_file_name)
+    val numberLabel = stringResource(R.string.batch_rename_number)
+    val transformation = remember(tokenColor, fileNameLabel, numberLabel) {
+        RenamePatternTransformation(tokenColor, fileNameLabel, numberLabel)
+    }
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
@@ -52,15 +56,19 @@ internal fun RenamePatternField(
 }
 
 /** Each placeholder occupies one editable character, so IME deletion always removes it whole. */
-internal class RenamePatternTransformation(private val tokenColor: Color) : VisualTransformation {
+internal class RenamePatternTransformation(
+    private val tokenColor: Color,
+    private val fileNameLabel: String = "文件名",
+    private val numberLabel: String = "序号"
+) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
         val originalOffsets = IntArray(text.length + 1)
         val transformedOffsets = mutableListOf(0)
         val rendered = buildAnnotatedString {
             text.text.forEachIndexed { index, character ->
                 val label = when (character.toString()) {
-                    BatchRename.FILE_NAME_TOKEN -> "文件名"
-                    BatchRename.NUMBER_TOKEN -> "序号"
+                    BatchRename.FILE_NAME_TOKEN -> fileNameLabel
+                    BatchRename.NUMBER_TOKEN -> numberLabel
                     else -> null
                 }
                 val displayed = label ?: character.toString()

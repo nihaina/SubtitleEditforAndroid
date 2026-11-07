@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -57,6 +56,7 @@ import com.subtitleedit.feature.ui.BrowserFileRow
 import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
 import com.subtitleedit.ui.components.AppConflictDialog
+import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.ui.components.AppTopBar
 import com.subtitleedit.util.FileOperationUiPolicy
 import java.io.File
@@ -273,7 +273,7 @@ internal fun FilePickerScreen(
 @Composable
 private fun PickerSortDialog(field: FileSortField, direction: FileSortDirection,
     onDismiss: () -> Unit, onSort: (FileSortField, FileSortDirection) -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(stringResource(R.string.file_picker_sort)) },
+    AppDialog(onDismissRequest = onDismiss, title = { Text(stringResource(R.string.file_picker_sort)) },
         text = {
             Column {
                 listOf(FileSortField.NAME to R.string.batch_rename_sort_name,
@@ -300,7 +300,7 @@ private fun PickerSortDialog(field: FileSortField, direction: FileSortDirection,
 @Composable
 private fun PickerLocationsDialog(locations: List<FilePickerLocation>, onDismiss: () -> Unit,
     onNavigate: (File) -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(stringResource(R.string.file_picker_locations)) },
+    AppDialog(onDismissRequest = onDismiss, title = { Text(stringResource(R.string.file_picker_locations)) },
         text = {
             LazyColumn {
                 items(locations, key = { it.directory.path }) { location ->
@@ -322,7 +322,7 @@ private fun PickerLocationsDialog(locations: List<FilePickerLocation>, onDismiss
 private fun CreateDirectoryDialog(onDismiss: () -> Unit, onCreate: (String, (String?) -> Unit) -> Unit) {
     var name by rememberSaveable { mutableStateOf("") }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
-    AlertDialog(onDismissRequest = onDismiss,
+    AppDialog(onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.file_picker_create_directory)) },
         text = {
             OutlinedTextField(value = name, onValueChange = { name = it; error = null }, singleLine = true,

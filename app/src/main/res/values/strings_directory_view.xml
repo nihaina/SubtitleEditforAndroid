@@ -9,4 +9,10 @@
     <string name="directory_sort_size">大小</string>
     <string name="directory_sort_date">日期</string>
     <string name="directory_sort_type">类型</string>
+    <string name="directory_select_range">局部全选</string>
+    <string name="directory_menu_folder">文件夹</string>
+    <string name="directory_create_folder_title">新建文件夹</string>
+    <string name="directory_create_file_title">新建文件</string>
+    <string name="directory_create_folder_name_hint">文件夹名称</string>
+    <string name="directory_clear_search">清除搜索</string>
 </resources>

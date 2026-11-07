@@ -14,7 +14,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Button
@@ -51,6 +50,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.util.defaultAiSubtitlesPerRequest
 import com.subtitleedit.util.AiProviderConfig
 import com.subtitleedit.ui.components.AppCard
@@ -212,7 +212,7 @@ fun AiSettingsScreen(
         AddAiProviderDialog(onDismiss = { showAddProvider = false }, onAdd = onAddProvider)
     }
     state.providers.firstOrNull { it.id == deletingProviderId && it.isUserAdded }?.let { provider ->
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { deletingProviderId = null },
             title = { Text(stringResource(R.string.ai_provider_delete_title)) },
             text = { Text(stringResource(R.string.ai_provider_delete_message, provider.displayName)) },
@@ -229,7 +229,7 @@ fun AiSettingsScreen(
     }
 
     state.modelChooser?.let { chooser ->
-        AlertDialog(
+        AppDialog(
             onDismissRequest = onDismissModelChooser,
             title = { Text(stringResource(R.string.ai_settings_choose_model_title, chooser.models.size)) },
             text = {

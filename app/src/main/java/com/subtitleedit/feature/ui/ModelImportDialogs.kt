@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
@@ -29,6 +28,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.ui.components.AppTaskProgress
 
 sealed interface ModelImportDialogUi {
@@ -85,7 +85,7 @@ private fun ModelImportDialog(dialog: ModelImportDialogUi) {
 
 @Composable
 private fun MessageDialog(dialog: ModelImportDialogUi.Message) {
-    AlertDialog(
+    AppDialog(
         onDismissRequest = dialog.onDismiss,
         title = { Text(dialog.title) },
         text = {
@@ -124,7 +124,7 @@ private fun MessageDialog(dialog: ModelImportDialogUi.Message) {
 
 @Composable
 private fun OptionsDialog(dialog: ModelImportDialogUi.Options) {
-    AlertDialog(
+    AppDialog(
         onDismissRequest = dialog.onDismiss,
         title = { Text(dialog.title) },
         text = {
@@ -168,7 +168,7 @@ private fun OptionsDialog(dialog: ModelImportDialogUi.Options) {
 
 @Composable
 private fun ProgressDialog(dialog: ModelImportDialogUi.Progress) {
-    AlertDialog(
+    AppDialog(
         onDismissRequest = dialog.onCancel,
         title = { Text(dialog.title) },
         text = {

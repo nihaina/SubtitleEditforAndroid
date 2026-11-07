@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -53,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.size
 import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppAlertDialog
+import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.ui.components.AppTaskProgress
 import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.util.AsrPunctuationOptions
@@ -582,7 +582,7 @@ private fun EditSubtitleDialog(
     val editedState = rememberSaveable(position, stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(text = text, selection = TextRange(text.length)))
     }
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.edit_subtitle_number, position + 1)) },
         text = {
@@ -618,7 +618,7 @@ private fun RangeSelectionDialog(
     val endValue = end.toIntOrNull()
     val isValid = startValue != null && endValue != null &&
         startValue in 1..itemCount && endValue in 1..itemCount && startValue <= endValue
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.range_selection_title, itemCount)) },
         text = {

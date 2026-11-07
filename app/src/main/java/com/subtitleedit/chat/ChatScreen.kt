@@ -23,7 +23,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -57,6 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.ui.components.AppToolScaffold
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -199,10 +199,8 @@ internal fun ChatScreen(
     }
 
     if (showHistoryDialog) {
-        AlertDialog(
+        AppDialog(
             onDismissRequest = onCloseHistory,
-            shape = MaterialTheme.shapes.extraLarge,
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = { Text(stringResource(R.string.chat_history)) },
             text = {
                 LazyColumn(modifier = Modifier.heightIn(max = 440.dp)) {

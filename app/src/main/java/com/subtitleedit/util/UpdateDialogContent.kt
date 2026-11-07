@@ -1,10 +1,10 @@
 package com.subtitleedit.util
 
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.window.DialogProperties
+import com.subtitleedit.ui.components.AppDialog
 
 @Composable
 internal fun UpdateAvailableDialog(
@@ -12,7 +12,7 @@ internal fun UpdateAvailableDialog(
     onDismiss: () -> Unit,
     onDownload: () -> Unit
 ) {
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(
             dismissOnBackPress = !update.forceUpdate,

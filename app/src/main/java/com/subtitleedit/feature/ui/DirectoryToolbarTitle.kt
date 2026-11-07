@@ -110,7 +110,7 @@ internal fun DirectoryToolbarTitle(
                         contentDescription = if (query.isEmpty()) {
                             stringResource(R.string.cancel)
                         } else {
-                            "清除搜索"
+                            stringResource(R.string.directory_clear_search)
                         },
                         modifier = Modifier.size(24.dp)
                     )

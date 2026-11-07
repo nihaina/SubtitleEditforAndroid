@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -42,6 +41,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.settings.SettingsCacheItem
 import com.subtitleedit.util.ArchiveManager
@@ -143,7 +143,7 @@ internal fun MainFileOperationDialogs(
     }
 
     subtitleConversionResult?.let { result ->
-        AlertDialog(
+        AppDialog(
             onDismissRequest = onDismissConversionResult,
             title = { Text(result.title) },
             text = {
@@ -195,7 +195,7 @@ private fun MainActivityDialog(
     onCacheClearConfirm: (SettingsCacheItem) -> Unit
 ) {
     when (dialog) {
-        is MainActivityDialogUi.Message -> AlertDialog(
+        is MainActivityDialogUi.Message -> AppDialog(
             onDismissRequest = onDismiss,
             title = { Text(dialog.title) },
             text = { Text(dialog.message) },
@@ -203,10 +203,10 @@ private fun MainActivityDialog(
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.confirm)) }
             }
         )
-        MainActivityDialogUi.PermissionDenied -> AlertDialog(
+        MainActivityDialogUi.PermissionDenied -> AppDialog(
             onDismissRequest = onDismiss,
             title = { Text(stringResource(R.string.error)) },
-            text = { Text("需要存储权限才能访问字幕文件。请在设置中授予权限。") },
+            text = { Text(stringResource(R.string.file_op_permission_denied_message)) },
             confirmButton = {
                 TextButton(onClick = onPermissionConfirm) { Text(stringResource(R.string.confirm)) }
             },
@@ -219,18 +219,18 @@ private fun MainActivityDialog(
             onDismiss = onDismiss,
             onConfirm = onRenameConfirm
         )
-        is MainActivityDialogUi.DeleteConfirmation -> AlertDialog(
+        is MainActivityDialogUi.DeleteConfirmation -> AppDialog(
             onDismissRequest = onDismiss,
-            title = { Text("删除") },
-            text = { Text("确定要删除选中的 ${dialog.selectedCount} 项吗？此操作无法撤销。") },
+            title = { Text(stringResource(R.string.delete)) },
+            text = { Text(stringResource(R.string.file_op_delete_message, dialog.selectedCount)) },
             confirmButton = {
-                Button(onClick = onDeleteConfirm) { Text("删除") }
+                Button(onClick = onDeleteConfirm) { Text(stringResource(R.string.delete)) }
             },
             dismissButton = {
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
             }
         )
-        is MainActivityDialogUi.CacheSelection -> AlertDialog(
+        is MainActivityDialogUi.CacheSelection -> AppDialog(
             onDismissRequest = onDismiss,
             title = { Text(stringResource(R.string.clear_cache)) },
             text = {
@@ -257,7 +257,7 @@ private fun MainActivityDialog(
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
             }
         )
-        is MainActivityDialogUi.CacheConfirmation -> AlertDialog(
+        is MainActivityDialogUi.CacheConfirmation -> AppDialog(
             onDismissRequest = onDismiss,
             title = { Text(stringResource(R.string.clear_cache_item, dialog.item.label)) },
             text = { Text(dialog.item.confirmationMessage) },
@@ -282,9 +282,9 @@ private fun RenameDialog(
     var name by remember(initialName) {
         mutableStateOf(TextFieldValue(initialName, selection = TextRange(initialName.length)))
     }
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        title = { Text("重命名") },
+        title = { Text(stringResource(R.string.file_op_rename)) },
         text = {
             OutlinedTextField(
                 value = name,
@@ -312,7 +312,7 @@ private fun SubtitleConversionDialog(
     var keepOriginal by remember(dialog) { mutableStateOf(false) }
     var converting by remember(dialog) { mutableStateOf(false) }
 
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.dialog_subtitle_convert_title)) },
         text = {
@@ -397,9 +397,9 @@ private fun ArchiveCreationDialog(
         selectedFormat.format == ArchiveManager.CreateFormat.SEVEN_Z
     val canSetPassword = selectedFormatOption.encryptionMethods.isNotEmpty()
 
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        title = { Text("创建压缩文件") },
+        title = { Text(stringResource(R.string.file_op_create_archive_title)) },
         text = {
             Column(
                 modifier = Modifier
@@ -471,7 +471,7 @@ private fun ArchiveCreationDialog(
                                         if (showPassword) R.drawable.ic_visibility_off
                                         else R.drawable.ic_visibility
                                     ),
-                                    contentDescription = if (showPassword) "隐藏密码" else "显示密码"
+                                    contentDescription = stringResource(if (showPassword) R.string.file_op_password_hide else R.string.file_op_password_show)
                                 )
                             }
                         },
@@ -493,9 +493,9 @@ private fun ArchiveCreationDialog(
                 Text(
                     modifier = Modifier.padding(top = 4.dp),
                     text = when (selectedFormat.format) {
-                        ArchiveManager.CreateFormat.ZIP -> "留空则不加密；ZipCrypto 兼容性更好，AES-256 更安全"
-                        ArchiveManager.CreateFormat.SEVEN_Z -> "使用 7Z AES-256 加密；留空则不加密"
-                        ArchiveManager.CreateFormat.TAR -> "密码仅适用于 ZIP 和 7Z 格式"
+                        ArchiveManager.CreateFormat.ZIP -> stringResource(R.string.file_op_archive_password_hint_zip)
+                        ArchiveManager.CreateFormat.SEVEN_Z -> stringResource(R.string.file_op_archive_password_hint_7z)
+                        ArchiveManager.CreateFormat.TAR -> stringResource(R.string.file_op_archive_password_hint_tar)
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
@@ -547,12 +547,12 @@ private fun ArchiveCreationDialog(
     )
 
     passwordBook?.let { passwords ->
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { passwordBook = null },
-            title = { Text("密码本") },
+            title = { Text(stringResource(R.string.file_op_password_book_title)) },
             text = {
                 if (passwords.isEmpty()) {
-                    Text("密码本为空，可保存当前输入的密码。")
+                    Text(stringResource(R.string.file_op_password_book_empty))
                 } else {
                     Column(
                         modifier = Modifier
@@ -567,7 +567,7 @@ private fun ArchiveCreationDialog(
                                 },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("密码 ${index + 1}（${"•".repeat(savedPassword.length.coerceIn(1, 8))}）")
+                                Text(stringResource(R.string.file_op_password_book_item, index + 1, "•".repeat(savedPassword.length.coerceIn(1, 8))))
                             }
                         }
                     }
@@ -577,7 +577,7 @@ private fun ArchiveCreationDialog(
                 TextButton(onClick = {
                     onSavePassword(password)
                     passwordBook = null
-                }) { Text("保存当前密码") }
+                }) { Text(stringResource(R.string.file_op_password_book_save)) }
             },
             dismissButton = {
                 Row {
@@ -585,9 +585,9 @@ private fun ArchiveCreationDialog(
                         TextButton(onClick = {
                             onClearPasswordBook()
                             passwordBook = null
-                        }) { Text("清空密码本") }
+                        }) { Text(stringResource(R.string.file_op_password_book_clear)) }
                     }
-                    TextButton(onClick = { passwordBook = null }) { Text("关闭") }
+                    TextButton(onClick = { passwordBook = null }) { Text(stringResource(R.string.file_op_close)) }
                 }
             }
         )

@@ -17,7 +17,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -51,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.util.BatchRename
 import com.subtitleedit.util.BatchRenameHistory
 import java.io.File
@@ -94,15 +94,17 @@ internal fun BatchRenameDialog(
         keyboardController?.hide()
         open()
     }
-    val optionsResult = remember(pattern.text, extension, extensionEdited, numberWidth, startNumber, find, replacement, regexEnabled) {
+    val invalidNumberWidth = stringResource(R.string.batch_rename_invalid_number_width)
+    val invalidStartNumber = stringResource(R.string.batch_rename_invalid_start_number)
+    val optionsResult = remember(pattern.text, extension, extensionEdited, numberWidth, startNumber, find, replacement, regexEnabled, invalidNumberWidth, invalidStartNumber) {
         runCatching {
             BatchRename.Options(
                 pattern = pattern.text,
                 extension = if (extensionEdited) extension else null,
                 numberWidth = numberWidth.toIntOrNull()
-                    ?: throw IllegalArgumentException("请输入有效的编号位数"),
+                    ?: throw IllegalArgumentException(invalidNumberWidth),
                 startNumber = startNumber.toLongOrNull()
-                    ?: throw IllegalArgumentException("请输入有效的开始序号"),
+                    ?: throw IllegalArgumentException(invalidStartNumber),
                 find = find,
                 replacement = replacement,
                 regexEnabled = regexEnabled
@@ -119,7 +121,7 @@ internal fun BatchRenameDialog(
     val controlsEnabled = !state.running
 
     MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = blue)) {
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { if (controlsEnabled) onDismiss() },
             properties = DialogProperties(dismissOnBackPress = controlsEnabled, dismissOnClickOutside = controlsEnabled),
             containerColor = if (isSystemInDarkTheme()) MaterialTheme.colorScheme.surfaceContainerHigh else Color(0xFFEDEDED),

@@ -1,11 +1,11 @@
 package com.subtitleedit
 
 import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
+import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.util.ArchiveManager
 import com.subtitleedit.util.ArchiveProgressPolicy
 import com.subtitleedit.util.FileUtils
@@ -185,7 +185,7 @@ internal class ArchiveProgressDialogController(
         val message = error.message ?: "未知错误"
         val activity = activityProvider() ?: return
         ComposeDialogHost.show(activity) { dialog ->
-            AlertDialog(
+            AppDialog(
                 onDismissRequest = dialog::dismiss,
                 title = { Text(title) },
                 text = { Text(message) },

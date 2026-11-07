@@ -1,12 +1,9 @@
 package com.subtitleedit.feature.ui
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
@@ -15,7 +12,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -29,8 +25,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.subtitleedit.MediaConvertCommand
 import com.subtitleedit.MediaConvertVideoFilter
 import com.subtitleedit.MediaConvertVideoSettings
@@ -138,31 +132,26 @@ private fun MediaConvertVideoValueDialog(
     val value = if (selected == "custom") custom else selected
     val valid = selected != "custom" || (custom.isNotBlank() &&
         (if (decimals) custom.toDoubleOrNull() else custom.toIntOrNull()?.toDouble())?.let { it.isFinite() && range?.contains(it) == true } == true)
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.widthIn(max = 600.dp).fillMaxWidth(0.95f).fillMaxHeight(0.85f),
-            shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surface) {
-            Column {
-                MediaConvertDialogTitle(title)
-                LazyColumn(Modifier.weight(1f).padding(horizontal = 20.dp)) {
-                    items(options, key = { it.id }) { option ->
-                        VideoValueChoice(option.label, selected == option.id, Modifier.testTag("video-setting-option-${option.id}"), details[option.id].orEmpty()) { selected = option.id }
-                        HorizontalDivider()
-                    }
-                    if (range != null) item {
-                        VideoValueChoice(stringResource(R.string.media_convert_quality_custom), selected == "custom", Modifier.testTag("video-setting-option-custom")) { selected = "custom" }
-                        if (selected == "custom") OutlinedTextField(custom, onValueChange = { text ->
-                            if (text.length <= 12 && text.all { it in '0'..'9' || decimals && it == '.' }) custom = text
-                        }, singleLine = true, isError = !valid, keyboardOptions = KeyboardOptions(keyboardType = if (decimals) KeyboardType.Decimal else KeyboardType.Number),
-                            label = { Text(stringResource(R.string.media_convert_setting_custom_value)) },
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp).testTag("video-setting-custom"))
-                    }
-                    if (hint.isNotBlank()) item {
-                        Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
-                    }
-                }
-                MediaConvertDialogActions(onDismiss, { onConfirm(value) }, valid, Modifier.testTag("video-setting-confirm"))
+    MediaConvertDialogSurface(onDismiss, heightFraction = 0.85f) {
+        MediaConvertDialogTitle(title)
+        LazyColumn(Modifier.weight(1f).padding(horizontal = 20.dp)) {
+            items(options, key = { it.id }) { option ->
+                VideoValueChoice(option.label, selected == option.id, Modifier.testTag("video-setting-option-${option.id}"), details[option.id].orEmpty()) { selected = option.id }
+                HorizontalDivider()
+            }
+            if (range != null) item {
+                VideoValueChoice(stringResource(R.string.media_convert_quality_custom), selected == "custom", Modifier.testTag("video-setting-option-custom")) { selected = "custom" }
+                if (selected == "custom") OutlinedTextField(custom, onValueChange = { text ->
+                    if (text.length <= 12 && text.all { it in '0'..'9' || decimals && it == '.' }) custom = text
+                }, singleLine = true, isError = !valid, keyboardOptions = KeyboardOptions(keyboardType = if (decimals) KeyboardType.Decimal else KeyboardType.Number),
+                    label = { Text(stringResource(R.string.media_convert_setting_custom_value)) },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp).testTag("video-setting-custom"))
+            }
+            if (hint.isNotBlank()) item {
+                Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
             }
         }
+        MediaConvertDialogActions(onDismiss, { onConfirm(value) }, valid, Modifier.testTag("video-setting-confirm"))
     }
 }
 

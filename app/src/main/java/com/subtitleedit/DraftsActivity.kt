@@ -25,7 +25,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.ui.components.AppToolScaffold
 
@@ -293,7 +293,7 @@ private fun DraftsDialogHost(
             val density = LocalDensity.current
             val previewHorizontalPadding = with(density) { 50.toDp() }
             val previewVerticalPadding = with(density) { 40.toDp() }
-            AlertDialog(
+            AppDialog(
                 onDismissRequest = onDismiss,
                 title = {
                     Text(stringResource(R.string.draft_preview_title, dialogState.draft.displayName))
@@ -345,7 +345,7 @@ private fun DraftsDialogHost(
         }
 
         is DraftsDialogState.Actions -> {
-            AlertDialog(
+            AppDialog(
                 onDismissRequest = onDismiss,
                 title = { Text(dialogState.draft.displayName) },
                 text = {
@@ -390,7 +390,7 @@ private fun DraftsDialogHost(
         }
 
         is DraftsDialogState.DeleteDraft -> {
-            AlertDialog(
+            AppDialog(
                 onDismissRequest = onDismiss,
                 title = { Text(stringResource(R.string.delete)) },
                 text = { Text(stringResource(R.string.delete_draft_confirm)) },
@@ -408,7 +408,7 @@ private fun DraftsDialogHost(
         }
 
         is DraftsDialogState.DeleteFolder -> {
-            AlertDialog(
+            AppDialog(
                 onDismissRequest = onDismiss,
                 title = { Text(stringResource(R.string.delete)) },
                 text = { Text(stringResource(R.string.draft_delete_folder_confirm)) },

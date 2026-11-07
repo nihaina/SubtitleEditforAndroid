@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -44,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.subtitleedit.model.ArchiveConflictDialogFormatter
 import com.subtitleedit.model.ArchiveConflictDialogModel
+import com.subtitleedit.ui.components.AppDialog
 
 @Composable
 internal fun ArchiveActionsDialog(
@@ -52,7 +52,7 @@ internal fun ArchiveActionsDialog(
     onDismiss: () -> Unit,
     onAction: (Int) -> Unit
 ) {
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
         title = { Text(archiveName) },
         text = {
@@ -83,7 +83,7 @@ internal fun ArchiveBlockingProgressDialog(
     title: String,
     message: String
 ) {
-    AlertDialog(
+    AppDialog(
         onDismissRequest = {},
         properties = DialogProperties(
             dismissOnBackPress = false,
@@ -211,7 +211,7 @@ internal fun ArchivePasswordDialog(
     onClosePasswordBook: () -> Unit
 ) {
     var passwordVisible by remember { mutableStateOf(false) }
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
         title = { Text("输入压缩包密码") },
         text = {
@@ -286,7 +286,7 @@ internal fun ArchivePasswordBookDialog(
     onClearPasswordBook: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
         title = { Text("密码本") },
         text = {
@@ -339,7 +339,7 @@ internal fun ArchiveProgressDialog(
             attributes.recycle()
         }
     }
-    AlertDialog(
+    AppDialog(
         onDismissRequest = {},
         properties = DialogProperties(
             dismissOnBackPress = false,

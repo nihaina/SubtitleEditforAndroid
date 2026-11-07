@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -38,6 +37,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.ui.components.SectionHeader
@@ -258,10 +258,8 @@ fun SettingsScreen(
     }
 
     if (showBackupWarning) {
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { showBackupWarning = false },
-            shape = MaterialTheme.shapes.extraLarge,
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = { Text(stringResource(R.string.settings_backup_warning_title)) },
             text = { Text(stringResource(R.string.settings_backup_warning_message)) },
             confirmButton = {
@@ -314,10 +312,8 @@ fun SettingsScreen(
     }
 
     if (showCacheDialog) {
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { showCacheDialog = false },
-            shape = MaterialTheme.shapes.extraLarge,
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = { Text(stringResource(R.string.clear_cache)) },
             text = {
                 Column {
@@ -349,10 +345,8 @@ fun SettingsScreen(
     }
 
     state.pendingSoftwareDirectory?.let { target ->
-        AlertDialog(
+        AppDialog(
             onDismissRequest = onCancelSoftwareDirectory,
-            shape = MaterialTheme.shapes.extraLarge,
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = { Text(stringResource(R.string.activity_settings_software_directory_migrate_title)) },
             text = {
                 Text(
@@ -383,10 +377,8 @@ fun SettingsScreen(
     }
 
     state.cacheItems.firstOrNull { it.key == pendingCacheKey }?.let { item ->
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { pendingCacheKey = null },
-            shape = MaterialTheme.shapes.extraLarge,
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = { Text(stringResource(R.string.clear_cache_item, item.label)) },
             text = { Text(item.confirmationMessage) },
             confirmButton = {
@@ -415,10 +407,8 @@ private fun <T> ChoiceDialog(
     onDismiss: () -> Unit,
     onSelect: (T) -> Unit
 ) {
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        shape = MaterialTheme.shapes.extraLarge,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         title = { Text(title) },
         text = {
             LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {

@@ -70,6 +70,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -78,6 +79,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import com.subtitleedit.R
 import com.subtitleedit.ui.theme.AppMotion
 import com.subtitleedit.ui.theme.AppSpacing
@@ -568,6 +570,31 @@ fun AppChoiceTile(
     }
 }
 
+/** Shared entry point for Material dialogs, so shape and container colour stay consistent. Takes the same parameters as AlertDialog. */
+@Composable
+fun AppDialog(
+    onDismissRequest: () -> Unit,
+    confirmButton: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    dismissButton: @Composable (() -> Unit)? = null,
+    title: @Composable (() -> Unit)? = null,
+    text: @Composable (() -> Unit)? = null,
+    containerColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    properties: DialogProperties = DialogProperties()
+) {
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        confirmButton = confirmButton,
+        modifier = modifier,
+        dismissButton = dismissButton,
+        title = title,
+        text = text,
+        shape = MaterialTheme.shapes.extraLarge,
+        containerColor = containerColor,
+        properties = properties
+    )
+}
+
 @Composable
 fun AppConflictDialog(
     title: String? = null,
@@ -576,10 +603,8 @@ fun AppConflictDialog(
     onRename: () -> Unit,
     onCancel: () -> Unit
 ) {
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onCancel,
-        shape = MaterialTheme.shapes.extraLarge,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         title = { Text(title ?: stringResource(R.string.dialog_file_conflict_title)) },
         text = { Text(message) },
         confirmButton = {
@@ -601,10 +626,8 @@ fun AppAlertDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        shape = MaterialTheme.shapes.extraLarge,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         title = { Text(title) },
         text = { Text(message) },
         confirmButton = {

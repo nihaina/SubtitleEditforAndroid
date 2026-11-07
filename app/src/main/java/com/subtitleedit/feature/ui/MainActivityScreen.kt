@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Button
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.RadioButton
@@ -75,6 +74,7 @@ import com.subtitleedit.DirectoryScrollPosition
 import com.subtitleedit.MainTopLevelPages
 import com.subtitleedit.MainTopLevelPagesState
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.util.BatchRename
 import com.subtitleedit.util.FileOperationUiPolicy
 import com.subtitleedit.util.MainNavigationPolicy
@@ -293,7 +293,7 @@ internal fun MainActivityScreen(
                         IconButton(onClick = onSelectRange) {
                             Icon(
                                 painterResource(R.drawable.ic_select_range),
-                                contentDescription = "局部全选"
+                                contentDescription = stringResource(R.string.directory_select_range)
                             )
                         }
                     }
@@ -346,7 +346,7 @@ internal fun MainActivityScreen(
                                             }
                                         )
                                         DropdownMenuItem(
-                                            text = { Text("文件夹") },
+                                            text = { Text(stringResource(R.string.directory_menu_folder)) },
                                             leadingIcon = { Icon(painterResource(R.drawable.ic_folder), contentDescription = null) },
                                             onClick = {
                                                 directoryMenuExpanded = false
@@ -383,7 +383,7 @@ internal fun MainActivityScreen(
                                             )
                                         }
                                         DropdownMenuItem(
-                                            text = { Text("设置") },
+                                            text = { Text(stringResource(R.string.menu_main_title_02)) },
                                             leadingIcon = { Icon(painterResource(R.drawable.ic_settings), contentDescription = null) },
                                             onClick = {
                                                 directoryMenuExpanded = false
@@ -484,16 +484,16 @@ internal fun MainActivityScreen(
     }
 
     createDialogKind?.let { kind ->
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { createDialogKind = null },
-            title = { Text(if (kind == MainCreateItemKind.FOLDER) "新建文件夹" else "新建文件") },
+            title = { Text(stringResource(if (kind == MainCreateItemKind.FOLDER) R.string.directory_create_folder_title else R.string.directory_create_file_title)) },
             text = {
                 Column {
                     OutlinedTextField(
                         value = createName,
                         onValueChange = { createName = it; createNameError = null },
                         modifier = Modifier.fillMaxWidth().focusRequester(createNameFocusRequester),
-                        placeholder = { Text(if (kind == MainCreateItemKind.FOLDER) "文件夹名称" else "文件名") },
+                        placeholder = { Text(stringResource(if (kind == MainCreateItemKind.FOLDER) R.string.directory_create_folder_name_hint else R.string.file_name)) },
                         singleLine = true,
                         isError = createNameError != null,
                         supportingText = { createNameError?.let { Text(it) } }
@@ -503,7 +503,7 @@ internal fun MainActivityScreen(
                             value = createExtension,
                             onValueChange = { createExtension = it; createExtensionError = null },
                             modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("扩展名") },
+                            placeholder = { Text(stringResource(R.string.batch_rename_extension)) },
                             singleLine = true,
                             isError = createExtensionError != null,
                             supportingText = { createExtensionError?.let { Text(it) } }
@@ -530,16 +530,16 @@ internal fun MainActivityScreen(
     }
 
     if (showSortDialog) {
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { showSortDialog = false },
-            title = { Text("排序") },
+            title = { Text(stringResource(R.string.directory_sort_heading)) },
             text = {
                 Column(Modifier.padding(8.dp)) {
                     listOf(
-                        "名称" to FileSortField.NAME,
-                        "类型" to FileSortField.TYPE,
-                        "大小" to FileSortField.SIZE,
-                        "日期" to FileSortField.DATE
+                        stringResource(R.string.directory_sort_name) to FileSortField.NAME,
+                        stringResource(R.string.directory_sort_type) to FileSortField.TYPE,
+                        stringResource(R.string.directory_sort_size) to FileSortField.SIZE,
+                        stringResource(R.string.directory_sort_date) to FileSortField.DATE
                     ).forEach { (label, field) ->
                         Row(
                             modifier = Modifier
@@ -562,8 +562,8 @@ internal fun MainActivityScreen(
                         }
                     }
                     listOf(
-                        "升序" to FileSortDirection.ASCENDING,
-                        "降序" to FileSortDirection.DESCENDING
+                        stringResource(R.string.file_picker_sort_ascending) to FileSortDirection.ASCENDING,
+                        stringResource(R.string.file_picker_sort_descending) to FileSortDirection.DESCENDING
                     ).forEach { (label, direction) ->
                         Row(
                             modifier = Modifier
@@ -665,7 +665,7 @@ private fun SelectionActions(
                     }
                     if (canCompress) {
                         DropdownMenuItem(
-                            text = { Text("压缩") },
+                            text = { Text(stringResource(R.string.file_op_compress)) },
                             onClick = { menuExpanded = false; onCompress() }
                         )
                     }
@@ -676,7 +676,7 @@ private fun SelectionActions(
                         )
                     }
                     DropdownMenuItem(
-                        text = { Text("详情") },
+                        text = { Text(stringResource(R.string.file_op_properties)) },
                         onClick = { menuExpanded = false; onProperties() }
                     )
                 }

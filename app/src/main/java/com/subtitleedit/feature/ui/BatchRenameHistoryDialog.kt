@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -25,6 +24,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.util.BatchRename
 import com.subtitleedit.util.BatchRenameHistory
 
@@ -38,9 +38,13 @@ internal fun BatchRenameHistoryDialog(
 ) {
     var deletingId by rememberSaveable { mutableStateOf<String?>(null) }
     val tokenColor = MaterialTheme.colorScheme.primary
-    val transformation = remember(tokenColor) { RenamePatternTransformation(tokenColor) }
+    val fileNameLabel = stringResource(R.string.batch_rename_file_name)
+    val numberLabel = stringResource(R.string.batch_rename_number)
+    val transformation = remember(tokenColor, fileNameLabel, numberLabel) {
+        RenamePatternTransformation(tokenColor, fileNameLabel, numberLabel)
+    }
     val deleteLabel = stringResource(R.string.batch_rename_history_delete_title)
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.batch_rename_history_title)) },
         text = {
@@ -98,7 +102,7 @@ internal fun BatchRenameHistoryDialog(
         }
     )
     entries.firstOrNull { it.id == deletingId }?.let { entry ->
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { deletingId = null },
             title = { Text(deleteLabel) },
             text = { Text(stringResource(R.string.batch_rename_history_delete_message)) },
