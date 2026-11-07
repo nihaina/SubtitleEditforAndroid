@@ -82,14 +82,14 @@ class FilePickerScreenTest {
         compose.onNodeWithContentDescription(context.getString(R.string.cancel)).performClick()
         compose.onNodeWithText(context.getString(R.string.file_picker_open_file)).assertExists()
         compose.onNodeWithText("已选择 1 项").assertDoesNotExist()
-        compose.onNodeWithContentDescription(context.getString(R.string.menu_search)).assertExists()
+        compose.onNodeWithContentDescription(context.getString(R.string.file_picker_more)).assertExists()
         compose.runOnIdle { assertTrue(state.value.selectedPaths.isEmpty()) }
     }
 
     @Test fun searchReplacesTheToolbarTitleAndClearsBeforeClosing() {
         val file = temporary.newFile("searchable.srt")
         show(listOf(file))
-        compose.onNodeWithContentDescription(context.getString(R.string.menu_search)).performClick()
+        openSearch()
         val search = compose.onNode(hasSetTextAction())
         search.assertIsFocused()
         compose.onNodeWithContentDescription(context.getString(R.string.menu_search)).assertDoesNotExist()
@@ -106,13 +106,13 @@ class FilePickerScreenTest {
         compose.onAllNodesWithContentDescription(context.getString(R.string.cancel))[1].performClick()
         compose.onNode(hasSetTextAction()).assertDoesNotExist()
         compose.onNodeWithText(context.getString(R.string.file_picker_open_file)).assertExists()
-        compose.onNodeWithContentDescription(context.getString(R.string.menu_search)).assertExists()
+        compose.onNodeWithContentDescription(context.getString(R.string.file_picker_more)).assertExists()
     }
 
     @Test fun selectionTemporarilyHidesSearchAndRestoresItsQueryWhenCleared() {
         val file = temporary.newFile("matching.srt")
         show(listOf(file))
-        compose.onNodeWithContentDescription(context.getString(R.string.menu_search)).performClick()
+        openSearch()
         compose.onNode(hasSetTextAction()).performTextReplacement("matching")
         compose.onNodeWithText(file.name).performClick()
 
@@ -152,6 +152,18 @@ class FilePickerScreenTest {
         compose.onNodeWithContentDescription(context.getString(R.string.file_picker_more)).performClick()
         compose.onNodeWithText(context.getString(R.string.file_picker_filter_unsupported)).performClick()
         compose.runOnIdle { assertFalse(state.value.filterUnsupported) }
+    }
+
+    private fun openSearch() {
+        compose.onNodeWithContentDescription(context.getString(R.string.menu_search)).assertDoesNotExist()
+        compose.onNodeWithContentDescription(context.getString(R.string.file_picker_more)).performClick()
+        compose.onNodeWithText(context.getString(R.string.menu_search)).performClick()
+    }
+
+    @Test fun longPressingBreadcrumbOpensPathEditor() {
+        show(listOf(temporary.newFile("subtitle.srt")))
+        compose.onNodeWithText(temporary.root.name).performTouchInput { longClick() }
+        compose.onNodeWithText(context.getString(R.string.directory_jump_title)).assertExists()
     }
 
     private fun show(files: List<File>, unsupportedPaths: Set<String> = emptySet()) {

@@ -58,6 +58,7 @@ import com.subtitleedit.model.FileSortField
 import com.subtitleedit.ui.components.AppConflictDialog
 import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.ui.components.AppTopBar
+import com.subtitleedit.ui.settings.settingsPageBackground
 import com.subtitleedit.util.FileOperationUiPolicy
 import java.io.File
 
@@ -120,10 +121,14 @@ internal fun FilePickerScreen(
     })
     val title = if (selectionActive) FileOperationUiPolicy.selectionTitle(null, state.selectedPaths.size)
         else defaultTitle
+    val pageBackground = settingsPageBackground()
     Scaffold(
+        containerColor = pageBackground,
         topBar = {
             AppTopBar(
                 title = title,
+                containerColor = pageBackground,
+                scrolledContainerColor = pageBackground,
                 titleContent = {
                     DirectoryToolbarTitle(
                         searchOpen = searchVisible,
@@ -151,11 +156,6 @@ internal fun FilePickerScreen(
                             Icon(painterResource(R.drawable.ic_select_range), "局部全选")
                         }
                     } else if (state.hasStoragePermission) {
-                        if (!searchVisible) {
-                            IconButton(onClick = { searchExpanded = true }) {
-                                Icon(painterResource(R.drawable.ic_search), stringResource(R.string.menu_search))
-                            }
-                        }
                         IconButton(onClick = { locationsExpanded = true }) {
                             Icon(painterResource(R.drawable.ic_nav_folder), stringResource(R.string.file_picker_locations))
                         }
@@ -164,6 +164,10 @@ internal fun FilePickerScreen(
                                 Icon(painterResource(R.drawable.ic_more_vertical), stringResource(R.string.file_picker_more))
                             }
                             DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                                if (!searchVisible) {
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.menu_search)) },
+                                        onClick = { menuExpanded = false; searchExpanded = true })
+                                }
                                 DropdownMenuItem(text = { Text(stringResource(R.string.file_picker_sort)) },
                                     onClick = { menuExpanded = false; sortExpanded = true })
                                 DropdownMenuItem(text = { Text(stringResource(R.string.file_picker_create_directory)) },
@@ -183,7 +187,7 @@ internal fun FilePickerScreen(
             )
         },
         bottomBar = {
-            Surface(tonalElevation = 3.dp) {
+            Surface(color = pageBackground) {
                 Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
                     if (state.mode == FilePickerMode.SAVE_FILE && state.hasStoragePermission) {
                         OutlinedTextField(
@@ -239,7 +243,7 @@ internal fun FilePickerScreen(
                     }
                 } else {
                     LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState,
-                        contentPadding = PaddingValues(8.dp)) {
+                        contentPadding = PaddingValues(vertical = 4.dp)) {
                         items(state.files, key = { it.absolutePath }) { file ->
                             val supported = file.absolutePath !in state.unsupportedPaths
                             BrowserFileRow(
@@ -249,7 +253,8 @@ internal fun FilePickerScreen(
                                 isSelectionMode = selectionActive,
                                 onClick = { onFileClick(file) },
                                 onLongClick = { onFileClick(file) },
-                                enabled = supported
+                                enabled = supported,
+                                directoryPageStyle = true
                             )
                         }
                     }

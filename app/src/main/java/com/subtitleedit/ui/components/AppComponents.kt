@@ -249,7 +249,9 @@ fun AppTopBar(
     navigationIcon: @Composable (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
     scrollBehavior: TopAppBarScrollBehavior? = null,
-    titleContent: (@Composable () -> Unit)? = null
+    titleContent: (@Composable () -> Unit)? = null,
+    containerColor: Color = MaterialTheme.colorScheme.surface,
+    scrolledContainerColor: Color = MaterialTheme.colorScheme.surfaceContainer
 ) {
     TopAppBar(
         modifier = modifier,
@@ -266,8 +268,8 @@ fun AppTopBar(
         actions = actions,
         scrollBehavior = scrollBehavior,
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
+            containerColor = containerColor,
+            scrolledContainerColor = scrolledContainerColor
         )
     )
 }
