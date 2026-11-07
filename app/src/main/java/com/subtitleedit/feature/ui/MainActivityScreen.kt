@@ -69,6 +69,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.safeDrawing
+import com.subtitleedit.ui.settings.settingsPageBackground
 import com.subtitleedit.FileOperation
 import com.subtitleedit.DirectoryScrollPosition
 import com.subtitleedit.MainTopLevelPages
@@ -243,8 +244,8 @@ internal fun MainActivityScreen(
         TopAppBar(
             scrollBehavior = scrollBehavior,
             colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.surface,
-                scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
+                containerColor = if (state.selectedTopLevelItem == R.id.nav_settings) settingsPageBackground() else MaterialTheme.colorScheme.surface,
+                scrolledContainerColor = if (state.selectedTopLevelItem == R.id.nav_settings) settingsPageBackground() else MaterialTheme.colorScheme.surfaceContainer
             ),
             title = {
                 DirectoryToolbarTitle(

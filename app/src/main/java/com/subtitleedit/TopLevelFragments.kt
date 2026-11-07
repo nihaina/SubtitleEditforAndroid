@@ -338,6 +338,7 @@ internal fun MainTopLevelPages(
             state = state.settingsPage,
             encodings = FileUtils.SUPPORTED_ENCODINGS,
             showTopBar = false,
+            useMaterial3Visuals = true,
             // The legacy SettingsFragment removed the selected cache group
             // immediately. The standalone SettingsActivity kept its
             // confirmation dialog, so this host must opt out explicitly.

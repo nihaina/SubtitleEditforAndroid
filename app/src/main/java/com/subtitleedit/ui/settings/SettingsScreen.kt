@@ -1,9 +1,33 @@
 package com.subtitleedit.ui.settings
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -44,7 +68,7 @@ import com.subtitleedit.ui.components.SectionHeader
 import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.components.SettingsGroup
-import com.subtitleedit.ui.components.SettingsRow
+import com.subtitleedit.ui.components.SettingsRow as SharedSettingsRow
 import com.subtitleedit.ui.components.SettingsSwitchRow as SharedSettingsSwitchRow
 import java.util.Locale
 
@@ -88,6 +112,7 @@ fun SettingsScreen(
     encodings: List<FileUtils.EncodingInfo>,
     showTopBar: Boolean = true,
     confirmCacheClear: Boolean = true,
+    useMaterial3Visuals: Boolean = false,
     onBack: () -> Unit,
     onEncodingSelected: (FileUtils.EncodingInfo) -> Unit,
     onThemeSelected: (String) -> Unit,
@@ -118,58 +143,69 @@ fun SettingsScreen(
         title = stringResource(R.string.menu_main_title_02),
         onBack = onBack,
         showTopBar = showTopBar,
-        imePadding = true
+        imePadding = true,
+        contentBackground = if (useMaterial3Visuals) settingsPageBackground() else Color.Transparent
     ) {
-            SettingsGroup {
-                SettingsRow(
+            SettingsPageGroup(useMaterial3Visuals) {
+                SettingsPageRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
                     title = stringResource(R.string.activity_settings_text_01),
+                    iconRes = if (useMaterial3Visuals) R.drawable.ic_encoding else null,
                     value = encodings.firstOrNull { it.id == state.encoding }?.displayName
                         ?: state.encoding,
                     showArrow = true,
                     onClick = { showEncodingDialog = true }
                 )
-                SettingsRow(
+                SettingsPageRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
                     title = stringResource(R.string.activity_settings_text_02),
                     value = state.themeLabel.ifBlank { stringResource(R.string.settings_theme_system) },
-                    iconRes = R.drawable.ic_theme_moon,
+                    iconRes = if (useMaterial3Visuals) R.drawable.ic_settings_moon else R.drawable.ic_theme_moon,
                     onClick = { showThemeDialog = true }
                 )
             }
-            Spacer(Modifier.height(20.dp))
-            SettingsGroup {
-                SettingsRow(
+            Spacer(Modifier.height(if (useMaterial3Visuals) 8.dp else 20.dp))
+            SettingsPageGroup(useMaterial3Visuals) {
+                SettingsPageRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
                     title = stringResource(R.string.activity_settings_text_04),
                     iconRes = R.drawable.ic_model,
                     onClick = onOpenModelManagement
                 )
-                SettingsRow(
+                SettingsPageRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
                     title = stringResource(R.string.activity_settings_ai_entry),
                     iconRes = R.drawable.ic_ai_translate,
                     onClick = onOpenAiSettings
                 )
-                SettingsRow(
+                SettingsPageRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
                     title = stringResource(R.string.tts_settings),
                     iconRes = R.drawable.ic_tts,
                     onClick = onOpenTtsSettings
                 )
-                SettingsRow(
+                SettingsPageRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
                     title = stringResource(R.string.activity_settings_text_05),
                     value = state.cacheSize,
                     iconRes = R.drawable.ic_delete_normal,
                     onClick = { showCacheDialog = true }
                 )
-                SettingsRow(
+                SettingsPageRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
                     title = stringResource(R.string.activity_settings_text_06),
                     iconRes = R.drawable.ic_document,
                     onClick = onOpenLogs
                 )
-                SettingsRow(
+                SettingsPageRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
                     title = stringResource(R.string.about),
                     iconRes = R.drawable.ic_info,
                     showArrow = true,
                     onClick = onOpenAbout
                 )
-                SettingsRow(
+                SettingsPageRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
                     title = stringResource(R.string.activity_settings_software_directory),
                     value = state.softwareDirectory.ifBlank {
                         stringResource(R.string.activity_settings_software_directory_default)
@@ -179,40 +215,47 @@ fun SettingsScreen(
                     showArrow = true,
                     onClick = onSelectSoftwareDirectory
                 )
-                SharedSettingsSwitchRow(
+                SettingsPageSwitchRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
                     title = stringResource(R.string.activity_settings_text_07),
                     description = stringResource(R.string.activity_settings_text_08),
                     checked = state.checkUpdatesOnStartup,
                     onCheckedChange = onCheckUpdatesChanged
                 )
             }
-            Spacer(Modifier.height(20.dp))
-            SettingsGroup {
-                SharedSettingsSwitchRow(
+            Spacer(Modifier.height(if (useMaterial3Visuals) 8.dp else 20.dp))
+            SettingsPageGroup(useMaterial3Visuals) {
+                SettingsPageSwitchRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
                     title = stringResource(R.string.activity_settings_text_17),
                     description = stringResource(R.string.activity_settings_text_18),
                     checked = state.preserveOutputDirectories,
                     onCheckedChange = onPreserveDirectoriesChanged
                 )
             }
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(if (useMaterial3Visuals) 8.dp else 20.dp))
             SectionHeader(stringResource(R.string.activity_settings_text_09))
-            SettingsGroup {
-                SharedSettingsSwitchRow(
+            SettingsPageGroup(useMaterial3Visuals) {
+                SettingsPageSwitchRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
                     title = stringResource(R.string.activity_settings_text_10),
                     description = stringResource(R.string.activity_settings_text_11),
                     checked = state.loopSelectedSubtitle,
                     onCheckedChange = onLoopSelectedChanged
                 )
-                SharedSettingsSwitchRow(
+                SettingsPageSwitchRow(
+                    useMaterial3Visuals = useMaterial3Visuals,
                     title = stringResource(R.string.activity_settings_text_19),
                     description = stringResource(R.string.activity_settings_text_20),
                     checked = state.selectPlayingSubtitle,
                     onCheckedChange = onSelectPlayingChanged
                 )
             }
-            Spacer(Modifier.height(20.dp))
-            Row(
+            Spacer(Modifier.height(if (useMaterial3Visuals) 8.dp else 20.dp))
+            if (useMaterial3Visuals) SettingsBackupActions(
+                onBackup = { showBackupWarning = true },
+                onRestore = onRestore
+            ) else Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
             ) {
@@ -395,6 +438,171 @@ fun SettingsScreen(
                 }
             }
         )
+    }
+}
+
+// The main settings page uses a slightly deeper background than its tiles in light mode.
+@Composable
+fun settingsPageBackground(): Color = if (MaterialTheme.colorScheme.surface.luminance() > 0.5f) {
+    Color(0xFFEEEDF5)
+} else {
+    MaterialTheme.colorScheme.surface
+}
+
+@Composable
+private fun settingsLightPalette(): Boolean = MaterialTheme.colorScheme.surface.luminance() > 0.5f
+
+private val SettingsTileRestingCorner = 4.dp
+private val SettingsTilePressedCorner = 20.dp
+
+/** Tile corners relax while pressed; the group clips the outer corners of the first and last tile. */
+@Composable
+private fun settingsTileShape(source: MutableInteractionSource): RoundedCornerShape {
+    val pressed by source.collectIsPressedAsState()
+    val corner by animateDpAsState(
+        targetValue = if (pressed) SettingsTilePressedCorner else SettingsTileRestingCorner,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "settingsTileCorner"
+    )
+    return RoundedCornerShape(corner.coerceAtLeast(0.dp))
+}
+
+@Composable
+private fun SettingsPageRow(
+    useMaterial3Visuals: Boolean,
+    title: String,
+    iconRes: Int? = null,
+    value: String? = null,
+    valueBelow: Boolean = false,
+    showArrow: Boolean = false,
+    onClick: () -> Unit
+) {
+    if (!useMaterial3Visuals) {
+        SharedSettingsRow(title = title, iconRes = iconRes, value = value, valueBelow = valueBelow, showArrow = showArrow, onClick = onClick)
+        return
+    }
+    val colors = MaterialTheme.colorScheme
+    val light = settingsLightPalette()
+    val tile = if (light) Color(0xFFFAF7FE) else colors.surfaceContainerHigh
+    val primaryText = if (light) Color(0xFF303139) else colors.onSurface
+    val secondaryText = if (light) Color(0xFF68758A) else colors.onSurfaceVariant
+    val source = remember { MutableInteractionSource() }
+    Row(
+        modifier = Modifier.fillMaxWidth().heightIn(min = if (valueBelow) 80.dp else 68.dp)
+            .clip(settingsTileShape(source)).background(tile)
+            .clickable(interactionSource = source, indication = LocalIndication.current, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (iconRes != null) {
+            Box(
+                modifier = Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(if (light) Color(0xFFE2EAFA) else colors.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(painter = painterResource(iconRes), contentDescription = null, modifier = Modifier.size(24.dp), tint = if (light) Color(0xFF303139) else colors.onPrimaryContainer)
+            }
+            Spacer(Modifier.width(16.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = primaryText)
+            if (valueBelow && !value.isNullOrEmpty()) Text(
+                value, modifier = Modifier.padding(top = 2.dp), style = MaterialTheme.typography.bodySmall,
+                color = secondaryText, maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+        }
+        if (!valueBelow && !value.isNullOrEmpty()) Text(
+            value,
+            modifier = Modifier.padding(start = 8.dp).widthIn(max = 160.dp).clip(CircleShape)
+                .background(if (light) Color(0xFFEDF0F7) else colors.surfaceContainerHighest).padding(horizontal = 12.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelLarge, color = secondaryText,
+            maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
+        Icon(
+            painter = painterResource(R.drawable.ic_arrow_right), contentDescription = null,
+            modifier = Modifier.padding(start = 4.dp).size(24.dp), tint = secondaryText
+        )
+    }
+}
+
+@Composable
+private fun SettingsPageSwitchRow(
+    useMaterial3Visuals: Boolean,
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    if (!useMaterial3Visuals) {
+        SharedSettingsSwitchRow(title = title, description = description, checked = checked, onCheckedChange = onCheckedChange)
+        return
+    }
+    val colors = MaterialTheme.colorScheme
+    val source = remember { MutableInteractionSource() }
+    val haptic = LocalHapticFeedback.current
+    val light = settingsLightPalette()
+    val tile = if (light) Color(0xFFFAF7FE) else colors.surfaceContainerHigh
+    val container by animateColorAsState(
+        targetValue = if (checked && !light) lerp(tile, colors.primaryContainer, 0.5f) else tile,
+        label = "settingsSwitchContainer"
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 76.dp)
+            .clip(settingsTileShape(source)).background(container)
+            .toggleable(
+                value = checked, interactionSource = source, indication = LocalIndication.current, role = Role.Switch,
+                onValueChange = {
+                    haptic.performHapticFeedback(if (it) HapticFeedbackType.ToggleOn else HapticFeedbackType.ToggleOff)
+                    onCheckedChange(it)
+                }
+            )
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f).padding(end = 16.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = if (light) Color(0xFF303139) else colors.onSurface)
+            if (description.isNotBlank()) Text(
+                description, modifier = Modifier.padding(top = 4.dp),
+                style = MaterialTheme.typography.bodySmall, color = if (light) Color(0xFF68758A) else colors.onSurfaceVariant
+            )
+        }
+        Switch(
+            checked = checked, onCheckedChange = null,
+            thumbContent = if (checked) {
+                { Icon(painterResource(R.drawable.ic_check), contentDescription = null, modifier = Modifier.size(SwitchDefaults.IconSize)) }
+            } else null
+        )
+    }
+}
+
+@Composable
+private fun SettingsPageGroup(
+    useMaterial3Visuals: Boolean,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    if (useMaterial3Visuals) {
+        Column(
+            modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.extraLarge),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            content = content
+        )
+    } else {
+        SettingsGroup(content = content)
+    }
+}
+
+@Composable
+private fun SettingsBackupActions(onBackup: () -> Unit, onRestore: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Button(onClick = onBackup, modifier = Modifier.weight(1f).height(56.dp), shape = CircleShape) {
+            Icon(painterResource(R.drawable.ic_download), contentDescription = null, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.settings_backup))
+        }
+        FilledTonalButton(onClick = onRestore, modifier = Modifier.weight(1f).height(56.dp), shape = CircleShape) {
+            Icon(painterResource(R.drawable.ic_restore), contentDescription = null, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.settings_restore))
+        }
     }
 }
 
