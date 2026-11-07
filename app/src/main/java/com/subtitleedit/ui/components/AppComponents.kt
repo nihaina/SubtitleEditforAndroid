@@ -296,6 +296,8 @@ fun AppToolScaffold(
     titleContent: (@Composable () -> Unit)? = null,
     contentPadding: PaddingValues = PaddingValues(AppSpacing.Page),
     contentBackground: Color = Color.Transparent,
+    topBarContainerColor: Color = MaterialTheme.colorScheme.surface,
+    topBarScrolledContainerColor: Color = MaterialTheme.colorScheme.surfaceContainer,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
@@ -310,7 +312,9 @@ fun AppToolScaffold(
                     navigationIcon = { AppBackButton(onBack) },
                     actions = actions,
                     scrollBehavior = scrollBehavior,
-                    titleContent = titleContent
+                    titleContent = titleContent,
+                    containerColor = topBarContainerColor,
+                    scrolledContainerColor = topBarScrolledContainerColor
                 )
             }
         },

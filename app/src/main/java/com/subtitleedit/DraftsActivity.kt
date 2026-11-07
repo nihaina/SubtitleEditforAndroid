@@ -6,43 +6,38 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import com.subtitleedit.filepicker.AppFilePickerContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.subtitleedit.feature.ui.BrowserFileLayout
+import com.subtitleedit.feature.ui.BrowserFileRow
+import com.subtitleedit.feature.ui.browserFileContentPadding
+import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.ui.components.AppDialog
-import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.ui.components.AppToolScaffold
+import com.subtitleedit.ui.settings.settingsPageBackground
+import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
+import com.subtitleedit.util.DraftManager
+import java.io.File
 
 /** Draft browser host. Page state and file access live in [DraftsViewModel]. */
 class DraftsActivity : AppComposeActivity() {
@@ -133,6 +128,7 @@ internal fun DraftsPage(
     drafts: List<DraftsActivity.DraftItem>,
     dialogState: DraftsDialogState?,
     showTopBar: Boolean = true,
+    viewMode: FileBrowserViewMode = FileBrowserViewMode.DETAILED,
     onBack: () -> Unit,
     onBackToRoot: () -> Unit,
     onItemClick: (DraftsActivity.DraftItem) -> Unit,
@@ -145,11 +141,16 @@ internal fun DraftsPage(
     onDeleteDraft: (DraftsActivity.DraftItem) -> Unit,
     onDeleteFolder: (DraftsActivity.DraftItem) -> Unit
 ) {
+    val pageBackground = settingsPageBackground()
     AppToolScaffold(
         title = if (currentFolder.isEmpty()) stringResource(R.string.drafts) else currentFolder,
         onBack = onBack,
         showTopBar = showTopBar,
         scrollable = false,
+        contentPadding = PaddingValues(0.dp),
+        contentBackground = pageBackground,
+        topBarContainerColor = pageBackground,
+        topBarScrolledContainerColor = pageBackground,
         actions = {
             if (currentFolder.isNotEmpty()) {
                 IconButton(onClick = onBackToRoot) {
@@ -175,22 +176,21 @@ internal fun DraftsPage(
                 )
             }
         } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 8.dp)
-            ) {
-                items(
-                    items = drafts,
-                    key = { "${it.folderName}/${it.fileName}" }
-                ) { draft ->
-                    DraftRow(
-                        draft = draft,
-                        onClick = { onItemClick(draft) },
-                        onLongClick = { onLongPress(draft) },
-                        onDeleteClick = { onDeleteClick(draft) }
-                    )
-                }
+            BrowserFileLayout(
+                items = drafts,
+                key = { "${it.folderName}/${it.fileName}" },
+                viewMode = viewMode,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = browserFileContentPadding(viewMode),
+                adaptiveGrid = true
+            ) { draft ->
+                DraftRow(
+                    draft = draft,
+                    viewMode = viewMode,
+                    onClick = { onItemClick(draft) },
+                    // Folders have no action menu, so long-press goes straight to delete.
+                    onLongClick = { if (draft.isFolder) onDeleteClick(draft) else onLongPress(draft) }
+                )
             }
         }
     }
@@ -206,69 +206,31 @@ internal fun DraftsPage(
     )
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+/** Same row as the directory and favorites pages, backed by the draft's on-disk file. */
 @Composable
 private fun DraftRow(
     draft: DraftsActivity.DraftItem,
+    viewMode: FileBrowserViewMode,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
-    onDeleteClick: () -> Unit
+    onLongClick: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), MaterialTheme.shapes.large)
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = {
-                    if (!draft.isFolder) onLongClick()
-                }
-            )
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            painter = painterResource(if (draft.isFolder) R.drawable.ic_folder else R.drawable.ic_file_text),
-            contentDescription = null,
-            tint = Color.Unspecified,
-            modifier = Modifier.padding(end = 12.dp).size(32.dp)
-        )
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.Center
-        ) {
-            Text(
-                text = draft.displayName,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = if (draft.isFolder) stringResource(R.string.draft_folder) else draft.formattedDate,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-            IconButton(
-                onClick = onDeleteClick,
-                modifier = Modifier.size(40.dp)
-            ) {
-                Icon(
-                    painter = painterResource(android.R.drawable.ic_menu_delete),
-                    contentDescription = stringResource(R.string.delete),
-                    tint = Color.Unspecified,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-        }
+    val context = LocalContext.current
+    val file = remember(draft.folderName, draft.fileName) {
+        val draftsDir = DraftManager.getDraftsDir(context)
+        if (draft.isFolder) File(draftsDir, draft.folderName)
+        else DraftManager.getDraftFile(context, draft.folderName, draft.fileName)
     }
+    BrowserFileRow(
+        file = file,
+        relativePathRoot = null,
+        isSelected = false,
+        isSelectionMode = false,
+        onClick = onClick,
+        onLongClick = onLongClick,
+        restrictedOverride = false,
+        viewMode = viewMode,
+        directoryPageStyle = true
+    )
 }
 
 @Composable

@@ -194,7 +194,7 @@ internal fun MainActivityScreen(
     var createExtensionError by remember { mutableStateOf<String?>(null) }
     val isDirectoryPage = state.selectedTopLevelItem == R.id.nav_directory
     val usesPageBackground = isDirectoryPage || state.selectedTopLevelItem in setOf(
-        R.id.nav_favorites, R.id.nav_settings, R.id.nav_tools
+        R.id.nav_favorites, R.id.nav_drafts, R.id.nav_settings, R.id.nav_tools
     )
     // Selection actions belong to directoryContent in the legacy layout. The
     // selection state can survive a top-level tab switch, but its toolbar and

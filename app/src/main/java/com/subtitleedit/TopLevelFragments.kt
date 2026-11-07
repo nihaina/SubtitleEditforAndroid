@@ -286,6 +286,7 @@ internal fun MainTopLevelPages(
             drafts = state.drafts,
             dialogState = state.draftDialog,
             showTopBar = false,
+            viewMode = viewMode,
             onBack = { goToDraftFolder("") },
             onBackToRoot = { goToDraftFolder("") },
             onItemClick = { item ->
