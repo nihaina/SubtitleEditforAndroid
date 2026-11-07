@@ -394,6 +394,7 @@ internal fun MainActivityScreen(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                .background(settingsPageBackground())
                 .nestedScroll(scrollBehavior.nestedScrollConnection)
         ) {
             val topLevelOffsetPx = with(LocalDensity.current) { 28.dp.roundToPx() }

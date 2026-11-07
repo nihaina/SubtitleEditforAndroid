@@ -473,6 +473,7 @@ internal class MediaConvertViewModel(application: Application) :
             val output = File(cache, "output.${format.extension}")
             val subtitle = prepareSubtitle(cache, format, options)
             val codec = if (format.isAudioOnly) "" else format.videoEncoder(options.selectedVideoCodec)
+            val durationMs = sourceProbe.durationSeconds?.let { (it * 1000.0).toLong() } ?: 0L
             val commands = try {
                 MediaConvertCommand.plan(input, output.absolutePath, format, options, sourceProbe, File(cache, "video-pass").absolutePath,
                     currentState.videoPixelFormats[codec], subtitle)
@@ -491,7 +492,7 @@ internal class MediaConvertViewModel(application: Application) :
             for ((passIndex, command) in commands.withIndex()) {
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (commands.size > 1) appendLog(string(R.string.media_convert_video_pass, passIndex + 1, commands.size))
-                session = executeConversion(command.toTypedArray(), index, total, passIndex, commands.size)
+                session = executeConversion(command.toTypedArray(), index, total, passIndex, commands.size, durationMs)
                 if (!ReturnCode.isSuccess(session.getReturnCode())) break
             }
             checkNotNull(session)
@@ -529,12 +530,21 @@ internal class MediaConvertViewModel(application: Application) :
         }
     }
 
-    private suspend fun executeConversion(arguments: Array<String>, index: Int, total: Int, passIndex: Int, passCount: Int): FFmpegSession {
+    private suspend fun executeConversion(arguments: Array<String>, index: Int, total: Int, passIndex: Int, passCount: Int, durationMs: Long): FFmpegSession {
         appendLog(string(R.string.media_convert_execute_command, arguments.joinToString(" ") { "\"$it\"" }))
-        val lastProgressAt = AtomicLong(SystemClock.elapsedRealtime()); var local = 0
+        val lastProgressAt = AtomicLong(SystemClock.elapsedRealtime())
         val session = withContext(NonCancellable + Dispatchers.IO) {
             FFmpegKit.executeWithArgumentsAsync(arguments, { }, { log -> appendLog(log.message) }, { statistics ->
-                if (statistics.time > 0) { lastProgressAt.set(SystemClock.elapsedRealtime()); local = (local + 1).coerceAtMost(95); setState { copy(progress = ((index * 100L + (passIndex * 100 + local) / passCount) / total).toInt().coerceIn(0, 99)) } }
+                // statistics.time is milliseconds of media processed and durationMs is the
+                // ffprobe total, so progress = processed / total rather than a counted fake step.
+                val processedMs = statistics.time.toDouble()
+                if (processedMs > 0 && durationMs > 0) {
+                    lastProgressAt.set(SystemClock.elapsedRealtime())
+                    val passProgress = (processedMs * 100.0 / durationMs).toLong().coerceIn(0L, 99L)
+                    setState { copy(progress = ((index * 100L + (passIndex * 100 + passProgress) / passCount) / total).toInt().coerceIn(0, 99)) }
+                } else if (processedMs > 0) {
+                    lastProgressAt.set(SystemClock.elapsedRealtime())
+                }
             })
         }
         currentSession = session
