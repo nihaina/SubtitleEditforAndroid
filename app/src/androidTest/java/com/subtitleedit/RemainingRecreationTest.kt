@@ -100,6 +100,36 @@ class RemainingRecreationTest {
     }
 
     @Test
+    fun conversionSubtitlesAreClearedForBatchSourcesAndAudioOutput() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val subtitle = File(context.cacheDir, "convert-subtitle-${System.nanoTime()}.srt").apply {
+            writeText("1\n00:00:00,000 --> 00:00:01,000\nCaption\n")
+        }
+        try {
+            ActivityScenario.launch(MediaConvertActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val model = ViewModelProvider(activity)[MediaConvertViewModel::class.java]
+                    val input = Uri.parse("file:///nonexistent/video.mp4")
+                    model.selectFiles(listOf(input))
+                    model.selectFormat("mp4")
+                    model.setSubtitleType(MediaConvertSubtitleType.SOFT)
+                    model.selectSubtitle(Uri.fromFile(subtitle))
+                    assertEquals(subtitle.name, model.state.value.subtitleFile?.fileName)
+                    model.selectFormat("mp3")
+                    assertEquals(null, model.state.value.subtitleFile)
+                    model.selectSubtitle(Uri.fromFile(subtitle))
+                    assertEquals(null, model.state.value.subtitleFile)
+                    model.selectFiles(listOf(input, Uri.parse("file:///nonexistent/second.mp4")))
+                    model.selectFormat("mp4")
+                    model.selectSubtitle(Uri.fromFile(subtitle))
+                    assertEquals(null, model.state.value.subtitleFile)
+                    assertTrue(model.allowedSubtitleExtensions.isEmpty())
+                }
+            }
+        } finally { subtitle.delete() }
+    }
+
+    @Test
     fun transcriptMatchSelectionsSurviveRecreation() {
         ActivityScenario.launch(TranscriptMatchActivity::class.java).use { scenario ->
             lateinit var before: TranscriptMatchViewModel

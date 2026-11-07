@@ -10,6 +10,7 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,21 +27,29 @@ import kotlinx.coroutines.launch
 internal fun MediaConvertSettingsPager(
     enabled: Boolean,
     moreContent: @Composable () -> Unit,
-    advancedContent: @Composable () -> Unit
+    advancedContent: @Composable () -> Unit,
+    showSubtitlePage: Boolean = false,
+    subtitleContent: @Composable () -> Unit = {}
 ) {
-    val pagerState = rememberPagerState { 2 }
+    val pageCount = if (showSubtitlePage) 3 else 2
+    val pagerState = rememberPagerState { pageCount }
+    val selectedTab = pagerState.currentPage.coerceIn(0, pageCount - 1)
     val scope = rememberCoroutineScope()
+    LaunchedEffect(pageCount) {
+        if (pagerState.currentPage >= pageCount) pagerState.scrollToPage(pageCount - 1)
+    }
     AppSection {
-        PrimaryTabRow(selectedTabIndex = pagerState.currentPage) {
-            listOf(R.string.media_convert_more_settings, R.string.media_convert_advanced_options).forEachIndexed { index, title ->
-                Tab(
-                    selected = pagerState.currentPage == index,
-                    enabled = enabled,
-                    onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
-                    modifier = Modifier.testTag("convert-settings-tab-$index"),
-                    text = { Text(stringResource(title)) }
-                )
-            }
+        PrimaryTabRow(selectedTabIndex = selectedTab) {
+            listOf(R.string.media_convert_more_settings, R.string.media_convert_advanced_options, R.string.media_convert_subtitles)
+                .take(pageCount).forEachIndexed { index, title ->
+                    Tab(
+                        selected = selectedTab == index,
+                        enabled = enabled,
+                        onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
+                        modifier = Modifier.testTag("convert-settings-tab-$index"),
+                        text = { Text(stringResource(title)) }
+                    )
+                }
         }
         HorizontalPager(
             state = pagerState,
@@ -49,7 +58,11 @@ internal fun MediaConvertSettingsPager(
             modifier = Modifier.fillMaxWidth().animateContentSize(AppMotion.state()).testTag("convert-settings-pager")
         ) { page ->
             Column(Modifier.fillMaxWidth()) {
-                if (page == 0) moreContent() else advancedContent()
+                when (page) {
+                    0 -> moreContent()
+                    1 -> advancedContent()
+                    else -> subtitleContent()
+                }
             }
         }
     }

@@ -61,4 +61,26 @@ class MediaConvertSettingsPagerTest {
         compose.onNodeWithTag("convert-settings-tab-0").assertIsNotEnabled()
         compose.onNodeWithTag("convert-settings-tab-1").assertIsNotEnabled()
     }
+
+    @Test
+    fun subtitlePageRestoresForVideoAndReturnsToAdvancedWhenOutputBecomesAudio() {
+        val videoOutput = mutableStateOf(true)
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            SubtitleEditComposeTheme {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    MediaConvertSettingsPager(true, { Text("更多设置内容") }, { Text("高级选项内容") },
+                        showSubtitlePage = videoOutput.value, subtitleContent = { Text("字幕配置内容") })
+                }
+            }
+        }
+        compose.onNodeWithTag("convert-settings-tab-2").performClick().assertIsSelected()
+        compose.onNodeWithText("字幕配置内容").assertIsDisplayed()
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithTag("convert-settings-tab-2").assertIsSelected()
+        compose.runOnIdle { videoOutput.value = false }
+        compose.onNodeWithTag("convert-settings-tab-2").assertDoesNotExist()
+        compose.onNodeWithTag("convert-settings-tab-1").assertIsSelected()
+        compose.onNodeWithText("高级选项内容").assertIsDisplayed()
+    }
 }

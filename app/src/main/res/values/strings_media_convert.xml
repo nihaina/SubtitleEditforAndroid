@@ -194,4 +194,21 @@
     <string name="media_convert_audio_vbr_hint">这些档位适用于 MP3 编码器。码率区间仅供参考，实际码率随音频内容、采样率和声道变化；越靠上音质越高、文件通常越大。选择“否”时沿用音频码率设置。</string>
     <string name="media_convert_audio_vbr_codec_hint">此 VBR 设置仅适用于 MP3 编码器。</string>
     <string name="media_convert_audio_vbr_active">由 VBR 控制</string>
+    <string name="media_convert_subtitles">字幕</string>
+    <string name="media_convert_subtitle_add">添加字幕</string>
+    <string name="media_convert_subtitle_choose">选择字幕文件</string>
+    <string name="media_convert_subtitle_remove">移除字幕</string>
+    <string name="media_convert_subtitle_type">字幕类型</string>
+    <string name="media_convert_subtitle_burn">嵌入式字幕</string>
+    <string name="media_convert_subtitle_soft">外挂式字幕</string>
+    <string name="media_convert_subtitle_single_only">字幕页仅支持单个源文件，请只选择一个音视频文件。</string>
+    <string name="media_convert_subtitle_copy_hint">烧录字幕需要重新编码视频，请将视频编码器从“复制原流”改为其他编码器。</string>
+    <string name="media_convert_subtitle_filter_missing">当前 FFmpeg 不支持字幕烧录，可尝试切换为外挂式字幕。</string>
+    <string name="media_convert_subtitle_container_unsupported">当前输出视频格式不支持封装可开关的文本字幕轨，请切换为嵌入式字幕或选择 MKV、MP4/MOV、WebM 等格式。</string>
+    <string name="media_convert_subtitle_burn_hint">字幕烧录到画面中，播放时无法关闭。使用现有字幕字体目录和系统字体。</string>
+    <string name="media_convert_subtitle_soft_hint">字幕作为独立轨道封装进视频，可在支持的播放器中切换或关闭。转换为 MP4/MOV 或 WebM 字幕时可能简化原字幕样式。</string>
+    <string name="media_convert_subtitle_formats">支持的字幕格式：%1$s</string>
+    <string name="media_convert_subtitle_incompatible">该字幕格式或字幕类型与当前输出格式、视频编码器不兼容。</string>
+    <string name="media_convert_subtitle_cleared">当前设置与已选字幕不兼容，已移除字幕，请重新选择。</string>
+    <string name="media_convert_subtitle_invalid">字幕文件无效，或没有可用的文本字幕轨。</string>
 </resources>

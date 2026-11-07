@@ -14,6 +14,10 @@ MediaCodec and SAF support used by the mpv runtime, and adds:
 | OpenCORE AMR | `arthenica/opencore-amr`, `v0.1.6` | `libopencore_amrnb` |
 | VisualOn AMR-WB | `arthenica/vo-amrwbenc`, `v0.1.3` | `libvo_amrwbenc` |
 | GSM 06.10 | `timothytylee/libgsm`, `98f1708fb5e06a0dfebd58a3b40d610823db9715` (1.0.16) | `libgsm`, `libgsm_ms` |
+| libass | `0.17.4` | `subtitles` and `ass` video filters |
+| FreeType / FriBidi / HarfBuzz | `2.14.3` / `1.0.16` / `14.2.1` | Font rasterization, bidi and shaping |
+| Fontconfig / Expat / libpng | `2.18.1` / `2.8.1` / `1.6.58` | System font discovery and FreeType dependencies |
+| libuuid | `arthenica/libuuid`, `libuuid-1.0.3` | Fontconfig dependency |
 
 FFmpegKit checkout revision: `3e223118e6e8fb6208693ecf3952e77cd096f587`.
 The upstream x265 recipe builds the 10-bit encoder. FFmpeg negotiates its
@@ -33,9 +37,9 @@ To package an already completed build:
 python3 native/ffmpeg/package-codecs.py "$FFMPEG_KIT_DIR"
 ```
 
-The script publishes `ffmpeg-kit-next:8.1.0-mpv4`, keeping previous artifacts
+The script publishes `ffmpeg-kit-next:8.1.0-mpv5`, keeping previous artifacts
 available for recovery. The packager compares exported symbols
-against the previous `8.1.0-mpv3` artifact. Before publishing, every ABI must contain all added
+against the previous `8.1.0-mpv4` artifact. Before publishing, every ABI must contain all added
 libraries, preserve every old exported symbol, and pass 16 KB ELF alignment
 checks for 64-bit libraries. The existing mpv runtime uses the same FFmpeg
 version and SONAMEs; it does not ship a second FFmpeg copy.
@@ -71,5 +75,28 @@ in `MediaConvertNativeTest`; compiling them does not execute them on a device.
 Previous `8.1.0-mpv3` AAR SHA-256:
 `a794376104fccd13279d64044b81c4423303e39159ae384949f09f43d3175fb2`.
 
-Current `8.1.0-mpv4` AAR SHA-256:
+Previous `8.1.0-mpv4` AAR SHA-256:
 `3a1c19af4ddbb000c66240f108e4cc46f4b018930a9cae93b9301eae2fb7f5c9`.
+
+Current `8.1.0-mpv5` AAR SHA-256:
+`9a2de413e4201ad6385aabd2d0e1de49e7c51ddbcfe716f7af5ade90a7bcab93`.
+
+Subtitle conversion uses libass for burn-in and the built-in `mov_text`, `ass`,
+`srt` and `webvtt` encoders for switchable tracks. `MediaConvertSubtitles`
+shares the container policy between the file picker and command builder.
+Only video output with one source file can configure subtitles. MP4/MOV-family,
+MKV and WebM containers accept text subtitle tracks; other video containers
+offer burn-in. F4V does not support the MP4 text-subtitle track.
+
+The `freetype.sh` recipe disables WOFF2/Brotli support, avoiding the upstream
+libjxl build dependency; TTF/OTF/TTC fonts and PNG glyph support remain enabled.
+The rebuild helper adjusts the matching dependency check in the pinned kit.
+Burn-in reuses `SubtitleFontManager` for Android system fonts and imported fonts.
+The AAR contains licenses for all added font libraries and their dependencies.
+
+`MediaConvertSubtitlesTest` checks validation, mapping and two-pass rules.
+With `MEDIA_CONVERT_SMOKE_FFMPEG` set, `MediaConvertSubtitlesFfmpegTest` checks
+all four input formats in each supported subtitle container, decodes the tracks
+back to text and checks rendered video pixels for burn-in, including escaped
+paths. `MediaConvertSubtitlesNativeTest` covers the bundled Android renderer,
+font setup and MP4 text tracks; it requires explicit device execution.

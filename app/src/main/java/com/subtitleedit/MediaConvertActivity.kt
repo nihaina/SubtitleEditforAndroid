@@ -6,6 +6,9 @@ import android.os.Bundle
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import com.subtitleedit.filepicker.AppFilePickerContracts
+import com.subtitleedit.filepicker.FilePickerRequest
+import com.subtitleedit.filepicker.FilePickerMode
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -28,6 +31,17 @@ class MediaConvertActivity : AppComposeActivity() {
     private val directoryPickerLauncher = registerForActivityResult(
         AppFilePickerContracts.OpenDocumentTree()
     ) { uri -> uri?.let(viewModel::selectOutputDirectory) }
+
+    private val subtitlePickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        AppFilePickerContracts.OpenDocument().parseResult(result.resultCode, result.data)?.let(viewModel::selectSubtitle)
+    }
+
+    private fun pickSubtitle() {
+        val extensions = viewModel.allowedSubtitleExtensions
+        if (viewModel.isRunning || extensions.isEmpty()) return
+        subtitlePickerLauncher.launch(FilePickerRequest(FilePickerMode.OPEN_FILE, mimeTypes = listOf("*/*"),
+            allowedExtensions = extensions.toList()).toIntent(this))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -163,6 +177,14 @@ class MediaConvertActivity : AppComposeActivity() {
                     onAudioVolumeChange = viewModel::setAudioVolume,
                     audioVbrQuality = state.options.audioVbrQuality,
                     onAudioVbrQualityChange = viewModel::setAudioVbrQuality,
+                    selectedSourceCount = state.selectedFiles.size,
+                    subtitleFileName = state.subtitleFile?.fileName,
+                    subtitleType = state.subtitleType,
+                    allowedSubtitleExtensions = viewModel.allowedSubtitleExtensions,
+                    subtitleBurnInAvailable = state.subtitleBurnInAvailable,
+                    onPickSubtitle = ::pickSubtitle,
+                    onRemoveSubtitle = viewModel::clearSubtitle,
+                    onSubtitleTypeChange = viewModel::setSubtitleType,
                     videoSettings = state.options.videoSettings,
                     effectiveVideoCodec = effectiveVideoCodec,
                     detectedPixelFormats = state.videoPixelFormats[effectiveVideoCodec],

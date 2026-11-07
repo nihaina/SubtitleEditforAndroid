@@ -86,6 +86,16 @@ use Apache License 2.0. Their complete notices are included in the AAR as
 `res/raw/license_speex.txt`, `res/raw/license_opencore_amr.txt` and
 `res/raw/license_vo_amrwbenc.txt`.
 
+FFmpeg subtitle burn-in additionally links libass 0.17.4 (ISC), FreeType 2.14.3
+(FreeType License), FriBidi 1.0.16 (LGPL), HarfBuzz 14.2.1 (MIT), Fontconfig
+2.18.1 (MIT-style), Expat 2.8.1 (MIT) and libpng 1.6.58 (libpng license).
+Their complete notices are bundled in the AAR as `res/raw/license_libass.txt`,
+`res/raw/license_freetype.txt`, `res/raw/license_fribidi.txt`,
+`res/raw/license_harfbuzz.txt`, `res/raw/license_fontconfig.txt`,
+`res/raw/license_expat.txt` and `res/raw/license_libpng.txt`.
+Fontconfig also uses libuuid 1.0.3 (BSD-style); its license is bundled as
+`res/raw/license_libuuid.txt`.
+
 ## libass and libplacebo
 
 libass 0.17.4 provides subtitle rendering and libplacebo 6.338.2 provides the

@@ -19,11 +19,11 @@ internal data class MediaConvertSource(
 /** Builds argument arrays so SAF URLs and file names remain single arguments. */
 internal object MediaConvertCommand {
     fun plan(input: String, output: String, format: MediaConvertFormatInfo, options: MediaConvertOptions, source: MediaConvertSource?,
-             logPath: String, supportedPixelFormats: List<String>? = null): List<List<String>> =
+             logPath: String, supportedPixelFormats: List<String>? = null, subtitle: MediaConvertSubtitleInput? = null): List<List<String>> =
         if (MediaConvertVideoSettingsSupport.usesTwoPass(format, options, source)) {
-            listOf(build(input, "/dev/null", format, options, source, supportedPixelFormats, MediaConvertPass(1, logPath)),
-                build(input, output, format, options, source, supportedPixelFormats, MediaConvertPass(2, logPath)))
-        } else listOf(build(input, output, format, options, source, supportedPixelFormats))
+            listOf(build(input, "/dev/null", format, options, source, supportedPixelFormats, MediaConvertPass(1, logPath), subtitle),
+                build(input, output, format, options, source, supportedPixelFormats, MediaConvertPass(2, logPath), subtitle))
+        } else listOf(build(input, output, format, options, source, supportedPixelFormats, subtitle = subtitle))
 
     // Keep existing indices stable; the video settings present these values in ascending order.
     val sampleRates = listOf(0, 48000, 44100, 22050, 16000, 8000, 32000, 96000, 88200, 192000, 176400, 24000, 11025, 12000,
@@ -49,7 +49,8 @@ internal object MediaConvertCommand {
     }
 
     fun build(input: String, output: String, format: MediaConvertFormatInfo, options: MediaConvertOptions, source: MediaConvertSource?,
-              supportedPixelFormats: List<String>? = null, pass: MediaConvertPass? = null): List<String> {
+              supportedPixelFormats: List<String>? = null, pass: MediaConvertPass? = null, subtitle: MediaConvertSubtitleInput? = null): List<String> {
+        subtitle?.let { MediaConvertSubtitles.validate(format, options, it) }
         val synthetic = !format.isAudioOnly && source?.hasVideo == false
         val selectedVideo = if (format.isAudioOnly) "" else format.videoEncoder(options.selectedVideoCodec)
         val video = if (synthetic && selectedVideo == "copy") format.videoEncoder("auto") else selectedVideo
@@ -60,6 +61,8 @@ internal object MediaConvertCommand {
         require(pass == null || MediaConvertVideoSettingsSupport.usesTwoPass(format, options, source)) { "Two-pass encoding requires a supported encoder and target bitrate" }
         require(pass == null || !synthetic || source?.durationSeconds != null) { "Two-pass generated video requires a known duration" }
         val analysisPass = pass?.number == 1
+        val softSubtitle = subtitle?.takeIf { it.type == MediaConvertSubtitleType.SOFT && !analysisPass }
+        val burnSubtitle = subtitle?.takeIf { it.type == MediaConvertSubtitleType.BURN_IN }
         val audio = format.audioEncoder(options.selectedAudioCodec)
         return buildList {
             addAll(listOf("-y", "-hide_banner"))
@@ -69,6 +72,7 @@ internal object MediaConvertCommand {
                 addAll(listOf("-f", "lavfi", "-i", "color=c=black:s=$size:r=30"))
             }
             addAll(listOf("-i", input))
+            softSubtitle?.let { addAll(listOf("-i", it.path)) }
             when {
                 format.isAudioOnly -> addAll(listOf("-map", "0:a:0", "-vn", "-c:a", audio))
                 synthetic -> {
@@ -83,7 +87,12 @@ internal object MediaConvertCommand {
             }
             if (analysisPass) add("-an")
             if (!format.isAudioOnly) {
-                addAll(listOf("-sn", "-dn"))
+                if (softSubtitle == null) add("-sn") else {
+                    val subtitleIndex = if (synthetic) 2 else 1
+                    addAll(listOf("-map", "$subtitleIndex:s:0", "-c:s", MediaConvertSubtitles.encoder(format, MediaConvertSubtitles.extension(softSubtitle.fileName)),
+                        "-disposition:s:0", "default"))
+                }
+                add("-dn")
                 if (video != "copy") {
                     val settings = options.videoSettings
                     val bitrate = MediaConvertVideoSettingsSupport.targetBitrate(format, options, source)
@@ -102,8 +111,10 @@ internal object MediaConvertCommand {
                         }
                     }
                     if (!synthetic || settings.rotation != MediaConvertRotation.NONE || settings.flipHorizontal || settings.flipVertical ||
-                        settings.deinterlace != MediaConvertDeinterlace.OFF || settings.filter != MediaConvertVideoFilter.NONE) {
-                        addAll(listOf("-vf", MediaConvertVideoSettingsSupport.filters(options.resolution, settings)))
+                        settings.deinterlace != MediaConvertDeinterlace.OFF || settings.filter != MediaConvertVideoFilter.NONE || burnSubtitle != null) {
+                        val filters = listOfNotNull(MediaConvertVideoSettingsSupport.filters(options.resolution, settings),
+                            burnSubtitle?.let(MediaConvertSubtitles::burnFilter)).joinToString(",")
+                        addAll(listOf("-vf", filters))
                     }
                     addAll(listOf("-pix_fmt", MediaConvertVideoSettingsSupport.pixelFormat(video, settings.pixelFormat, source?.videoPixelFormat, supportedPixelFormats)))
                     val rate = MediaConvertVideoSettingsSupport.frameRate(video, settings, source?.frameRate)

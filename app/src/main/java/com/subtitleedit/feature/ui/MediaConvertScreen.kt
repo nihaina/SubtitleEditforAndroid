@@ -40,6 +40,7 @@ import com.subtitleedit.MediaConvertVideoBitrate
 import com.subtitleedit.MediaConvertVideoBitrateSettings
 import com.subtitleedit.MediaConvertAudioBitrate
 import com.subtitleedit.MediaConvertAudioVbr
+import com.subtitleedit.MediaConvertSubtitleType
 import com.subtitleedit.MediaConvertVideoSettings
 import com.subtitleedit.MediaConvertVideoSettingsSupport
 import com.subtitleedit.ui.components.AppConflictDialog
@@ -131,7 +132,15 @@ internal fun MediaConvertScreen(
     onVideoSettingsChange: (MediaConvertVideoSettings) -> Unit = {},
     sourceFileSizeBytes: Long? = null,
     audioVbrQuality: Int = MediaConvertAudioVbr.OFF,
-    onAudioVbrQualityChange: (Int) -> Unit = {}
+    onAudioVbrQualityChange: (Int) -> Unit = {},
+    selectedSourceCount: Int = 0,
+    subtitleFileName: String? = null,
+    subtitleType: MediaConvertSubtitleType = MediaConvertSubtitleType.BURN_IN,
+    allowedSubtitleExtensions: Set<String> = emptySet(),
+    subtitleBurnInAvailable: Boolean = false,
+    onPickSubtitle: () -> Unit = {},
+    onRemoveSubtitle: () -> Unit = {},
+    onSubtitleTypeChange: (MediaConvertSubtitleType) -> Unit = {}
 ) {
     var showResolutionDialog by rememberSaveable { mutableStateOf(false) }
     var showBitrateDialog by rememberSaveable { mutableStateOf(false) }
@@ -215,6 +224,21 @@ internal fun MediaConvertScreen(
         if (sourceSummary.isNotBlank()) {
             MediaConvertSettingsPager(
                 enabled = !isConverting,
+                showSubtitlePage = videoFormats.any { it.extension == selectedFormat },
+                subtitleContent = {
+                    MediaConvertSubtitlePage(
+                        singleSource = selectedSourceCount == 1,
+                        enabled = !isConverting,
+                        fileName = subtitleFileName,
+                        type = subtitleType,
+                        allowedExtensions = allowedSubtitleExtensions,
+                        copyingVideo = effectiveVideoCodec == "copy",
+                        burnInAvailable = subtitleBurnInAvailable,
+                        onPick = onPickSubtitle,
+                        onRemove = onRemoveSubtitle,
+                        onTypeChanged = onSubtitleTypeChange
+                    )
+                },
                 moreContent = {
                     when {
                         selectedFormat == null -> Text(

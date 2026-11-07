@@ -10,11 +10,11 @@ import zipfile
 
 PROJECT = pathlib.Path(__file__).resolve().parents[2]
 KIT = pathlib.Path(sys.argv[1]).resolve()
-VERSION = "8.1.0-mpv4"
+VERSION = "8.1.0-mpv5"
 ROOT = PROJECT / "app/libs/ffmpeg-kit-next-maven/com/arthenica/ffmpeg-kit-next"
-BASE = ROOT / "8.1.0-mpv3/ffmpeg-kit-next-8.1.0-mpv3.aar"
+BASE = ROOT / "8.1.0-mpv4/ffmpeg-kit-next-8.1.0-mpv4.aar"
 ABIS = ("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-FLAGS = ("--enable-libx264", "--enable-libx265", "--enable-libxvid", "--enable-libaom", "--enable-libtheora", "--enable-libopus", "--enable-libvpx", "--enable-libvorbis", "--enable-libspeex", "--enable-libopencore-amrnb", "--enable-libvo-amrwbenc", "--enable-libgsm")
+FLAGS = ("--enable-libx264", "--enable-libx265", "--enable-libxvid", "--enable-libaom", "--enable-libtheora", "--enable-libopus", "--enable-libvpx", "--enable-libvorbis", "--enable-libspeex", "--enable-libopencore-amrnb", "--enable-libvo-amrwbenc", "--enable-libgsm", "--enable-libass", "--enable-libfontconfig", "--enable-libfreetype", "--enable-libfribidi", "--enable-libharfbuzz")
 LICENSES = {
     "license_x265": "src/x265/COPYING",
     "license_xvidcore": "src/xvidcore/xvidcore/LICENSE",
@@ -25,6 +25,14 @@ LICENSES = {
     "license_opencore_amr": "src/opencore-amr/LICENSE",
     "license_vo_amrwbenc": "src/vo-amrwbenc/COPYING",
     "license_gsm": "src/gsm/COPYRIGHT",
+    "license_libass": "src/libass/COPYING",
+    "license_freetype": "src/freetype/docs/FTL.TXT",
+    "license_fribidi": "src/fribidi/COPYING",
+    "license_harfbuzz": "src/harfbuzz/COPYING",
+    "license_fontconfig": "src/fontconfig/COPYING",
+    "license_expat": "src/expat/expat/COPYING",
+    "license_libpng": "src/libpng/LICENSE",
+    "license_libuuid": "src/libuuid/COPYING",
 }
 
 
@@ -44,6 +52,8 @@ with zipfile.ZipFile(BASE) as base, tempfile.TemporaryDirectory(prefix="subtitle
                           if b"--cross-prefix=" in v and b"--enable-gpl" in v]
         assert len(configurations) == 1, f"Missing FFmpeg configuration for {abi}"
         assert all(flag in configurations[0] for flag in FLAGS), f"Missing codec library for {abi}"
+        filters = (directory / "libavfilter.so").read_bytes()
+        assert b"subtitles\0" in filters and b"fontsdir\0" in filters, f"Missing subtitle renderer for {abi}"
         configs[abi] = configurations[0]
         for name in base.namelist():
             if not name.startswith(f"jni/{abi}/") or not name.endswith(".so"):
@@ -72,7 +82,18 @@ with zipfile.ZipFile(BASE) as base, tempfile.TemporaryDirectory(prefix="subtitle
             for library in sorted((KIT / "android/libs" / abi).glob("*.so")):
                 archive.write(library, f"jni/{abi}/{library.name}")
         for resource, source in LICENSES.items():
-            archive.write(KIT / source, f"res/raw/{resource}.txt")
+            notice = (KIT / source).read_bytes()
+            if resource == "license_libuuid":
+                # This release's COPYING points at a missing file. Preserve its
+                # complete BSD terms and copyright notices from the source headers.
+                headers = set()
+                for source_file in sorted((KIT / "src/libuuid").glob("*.[ch]")):
+                    header = source_file.read_bytes().split(b"*/", 1)[0]
+                    if b"Redistribution" in header:
+                        headers.add(header + b"*/\n")
+                assert headers, "Missing libuuid license headers"
+                notice += b"\n" + b"\n".join(sorted(headers))
+            archive.writestr(f"res/raw/{resource}.txt", notice)
         resource_lines = base.read("R.txt").decode().splitlines()
         existing_resources = {line.split()[2] for line in resource_lines if len(line.split()) >= 3}
         resource_lines += [f"int raw {name} 0x0" for name in LICENSES if name not in existing_resources]
@@ -81,7 +102,7 @@ with zipfile.ZipFile(BASE) as base, tempfile.TemporaryDirectory(prefix="subtitle
     with zipfile.ZipFile(staged) as archive:
         assert len(archive.namelist()) == len(set(archive.namelist())), "Duplicate AAR entries"
     output.write_bytes(staged.read_bytes())
-    pom = (ROOT / "8.1.0-mpv3/ffmpeg-kit-next-8.1.0-mpv3.pom").read_text()
-    (destination / f"ffmpeg-kit-next-{VERSION}.pom").write_text(pom.replace("8.1.0-mpv3", VERSION))
+    pom = (ROOT / "8.1.0-mpv4/ffmpeg-kit-next-8.1.0-mpv4.pom").read_text()
+    (destination / f"ffmpeg-kit-next-{VERSION}.pom").write_text(pom.replace("8.1.0-mpv4", VERSION))
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
     print(f"Verified all four ABIs, public symbols and 16 KB alignment.\n{output}\nSHA-256: {digest}")

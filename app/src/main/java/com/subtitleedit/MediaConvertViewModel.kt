@@ -19,6 +19,8 @@ import com.subtitleedit.task.LongTaskController
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SourceOutputDirectory
+import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.SubtitleFontManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -47,12 +49,17 @@ internal data class MediaConvertFileUi(
     val fileSizeBytes: Long? = null
 )
 
+internal data class MediaConvertSubtitleFile(val uri: Uri, val fileName: String)
+
 internal data class MediaConvertUiState(
     val selectedFiles: List<MediaConvertFileUi> = emptyList(),
     val selectedFormat: String? = null,
     val videoOptions: MediaConvertOptions = MediaConvertOptions(),
     val audioOptions: MediaConvertOptions = MediaConvertOptions(),
     val isAudioOutput: Boolean = false,
+    val subtitleFile: MediaConvertSubtitleFile? = null,
+    val subtitleType: MediaConvertSubtitleType = MediaConvertSubtitleType.BURN_IN,
+    val subtitleBurnInAvailable: Boolean = false,
     val availableEncoders: Set<String> = MediaConvertFormats.baselineEncoders,
     val availableAudioEncoders: Set<String> = MediaConvertAudioCodecs.baselineEncoders,
     val videoPixelFormats: Map<String, List<String>> = emptyMap(),
@@ -118,18 +125,27 @@ internal class MediaConvertViewModel(application: Application) :
 
     val currentOutputDirectoryUri: Uri? get() = outputDirectoryUri
     val isRunning: Boolean get() = currentState.isConverting
+    val allowedSubtitleExtensions: Set<String> get() {
+        if (currentState.selectedFiles.size != 1) return emptySet()
+        val format = formatList.firstOrNull { it.extension == currentState.selectedFormat }
+        return MediaConvertSubtitles.allowedExtensions(format, currentState.subtitleType,
+            format?.takeUnless { it.isAudioOnly }?.videoEncoder(currentState.options.selectedVideoCodec).orEmpty(),
+            currentState.subtitleBurnInAvailable)
+    }
 
     init {
         setState { copy(saveToSourceDirectory = settingsManager.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)) }
         restoreOutputDirectory()
         viewModelScope.launch {
-            val (videoEncoders, audioEncoders) = withContext(Dispatchers.IO) {
+            val (videoEncoders, audioEncoders, burnInAvailable) = withContext(Dispatchers.IO) {
                 runCatching {
                     val log = FFmpegKit.execute("-hide_banner -encoders").getAllLogsAsString()
-                    MediaConvertFormats.parseEncoders(log) to MediaConvertAudioCodecs.parseEncoders(log)
-                }.getOrDefault(emptySet<String>() to emptySet())
+                    Triple(MediaConvertFormats.parseEncoders(log), MediaConvertAudioCodecs.parseEncoders(log),
+                        MediaConvertSubtitles.hasBurnInFilter(FFmpegKit.execute("-hide_banner -filters").getAllLogsAsString()))
+                }.getOrDefault(Triple(emptySet<String>(), emptySet<String>(), false))
             }
-            setState { copy(availableEncoders = availableEncoders + videoEncoders, availableAudioEncoders = availableAudioEncoders + audioEncoders) }
+            setState { copy(availableEncoders = availableEncoders + videoEncoders, availableAudioEncoders = availableAudioEncoders + audioEncoders,
+                subtitleBurnInAvailable = burnInAvailable) }
             val offeredVideoEncoders = formatList.flatMap { it.videoCodecs }.distinct().filter { it in videoEncoders }
             val pixels = withContext(Dispatchers.IO) {
                 offeredVideoEncoders.associateWith { codec ->
@@ -151,6 +167,8 @@ internal class MediaConvertViewModel(application: Application) :
             copy(
                 selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo, it.videoSize, it.videoBitrateBps, it.audioBitrateBps, it.audioSampleRate, it.audioChannels, it.audioChannelLayout) },
                 selectedFormat = null,
+                subtitleFile = null,
+                subtitleType = MediaConvertSubtitleType.BURN_IN,
                 log = ""
             )
         }
@@ -168,6 +186,7 @@ internal class MediaConvertViewModel(application: Application) :
     fun selectFormat(extension: String) {
         if (isRunning) return
         val format = formatList.firstOrNull { it.extension == extension } ?: return
+        val hadSubtitle = currentState.subtitleFile != null
         setState {
             val previous = if (format.isAudioOnly) audioOptions else videoOptions
             val next = previous.copy(
@@ -177,10 +196,14 @@ internal class MediaConvertViewModel(application: Application) :
             copy(
                 selectedFormat = format.extension,
                 isAudioOutput = format.isAudioOnly,
+                subtitleFile = subtitleFile?.takeIf { MediaConvertSubtitles.extension(it.fileName) in
+                    MediaConvertSubtitles.allowedExtensions(format, subtitleType,
+                        if (format.isAudioOnly) "" else format.videoEncoder(next.selectedVideoCodec), subtitleBurnInAvailable) },
                 videoOptions = if (format.isAudioOnly) videoOptions else next,
                 audioOptions = if (format.isAudioOnly) next else audioOptions
             )
         }
+        if (hadSubtitle && currentState.subtitleFile == null) toast(R.string.media_convert_subtitle_cleared)
     }
 
     private fun updateOptions(update: MediaConvertOptions.() -> MediaConvertOptions) {
@@ -195,7 +218,37 @@ internal class MediaConvertViewModel(application: Application) :
         settingsManager.setSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY, enabled)
         setState { copy(saveToSourceDirectory = enabled) }
     }
-    fun setVideoCodec(value: String) = updateOptions { copy(selectedVideoCodec = value) }
+    fun setVideoCodec(value: String) {
+        if (isRunning) return
+        updateOptions { copy(selectedVideoCodec = value) }
+        discardIncompatibleSubtitle()
+    }
+
+    fun selectSubtitle(uri: Uri) {
+        if (isRunning || currentState.selectedFiles.size != 1 || currentState.isAudioOutput) return
+        val name = getFileName(uri)
+        if (MediaConvertSubtitles.extension(name) !in allowedSubtitleExtensions) return toast(R.string.media_convert_subtitle_incompatible)
+        runCatching { PickedUriAccess.retainPermission(app, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        setState { copy(subtitleFile = MediaConvertSubtitleFile(uri, name)) }
+    }
+
+    fun setSubtitleType(value: MediaConvertSubtitleType) {
+        if (isRunning || currentState.selectedFiles.size != 1 || currentState.isAudioOutput || currentState.selectedFormat == null) return
+        setState { copy(subtitleType = value) }
+        discardIncompatibleSubtitle()
+    }
+
+    fun clearSubtitle() {
+        if (!isRunning) setState { copy(subtitleFile = null) }
+    }
+
+    private fun discardIncompatibleSubtitle() {
+        val selected = currentState.subtitleFile ?: return
+        if (MediaConvertSubtitles.extension(selected.fileName) !in allowedSubtitleExtensions) {
+            setState { copy(subtitleFile = null) }
+            toast(R.string.media_convert_subtitle_cleared)
+        }
+    }
     fun setAudioCodec(value: String) = updateOptions { copy(selectedAudioCodec = value) }
     fun setResolution(value: MediaConvertResolutionSettings) {
         if (value.isValid) updateOptions { copy(resolution = value) }
@@ -418,10 +471,11 @@ internal class MediaConvertViewModel(application: Application) :
             }
             appendLog(string(R.string.media_convert_converting, prefix))
             val output = File(cache, "output.${format.extension}")
+            val subtitle = prepareSubtitle(cache, format, options)
             val codec = if (format.isAudioOnly) "" else format.videoEncoder(options.selectedVideoCodec)
             val commands = try {
                 MediaConvertCommand.plan(input, output.absolutePath, format, options, sourceProbe, File(cache, "video-pass").absolutePath,
-                    currentState.videoPixelFormats[codec])
+                    currentState.videoPixelFormats[codec], subtitle)
             } catch (e: MediaConvertVideoSizeException) {
                 val message = when (e.reason) {
                     MediaConvertVideoSizeError.UNKNOWN_SOURCE_SIZE -> R.string.media_convert_size_source_required
@@ -456,6 +510,23 @@ internal class MediaConvertViewModel(application: Application) :
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { Result.failure(e) }
         finally { releaseFfmpegInput(input); withContext(NonCancellable + Dispatchers.IO) { cache.deleteRecursively() } }
+    }
+
+    private suspend fun prepareSubtitle(cache: File, format: MediaConvertFormatInfo, options: MediaConvertOptions): MediaConvertSubtitleInput? {
+        val selected = currentState.subtitleFile ?: return null
+        check(currentState.selectedFiles.size == 1 && !format.isAudioOnly) { string(R.string.media_convert_subtitle_single_only) }
+        check(MediaConvertSubtitles.extension(selected.fileName) in allowedSubtitleExtensions) { string(R.string.media_convert_subtitle_incompatible) }
+        return withContext(Dispatchers.IO) {
+            val file = File(cache, "subtitle.${MediaConvertSubtitles.extension(selected.fileName)}")
+            file.writeText(FileUtils.readUri(app, selected.uri).removePrefix("\uFEFF"), Charsets.UTF_8)
+            val stream = FFprobeKit.getMediaInformation(file.absolutePath).getMediaInformation()?.getStreams()
+                ?.firstOrNull { it.getType() == "subtitle" }
+            check(stream?.getCodec() in setOf("ass", "ssa", "subrip", "srt", "webvtt")) { string(R.string.media_convert_subtitle_invalid) }
+            val fonts = if (currentState.subtitleType == MediaConvertSubtitleType.BURN_IN) SubtitleFontManager.writeFontConfig(app).absolutePath else null
+            MediaConvertSubtitleInput(file.absolutePath, selected.fileName, currentState.subtitleType, fonts).also {
+                MediaConvertSubtitles.validate(format, options, it)
+            }
+        }
     }
 
     private suspend fun executeConversion(arguments: Array<String>, index: Int, total: Int, passIndex: Int, passCount: Int): FFmpegSession {

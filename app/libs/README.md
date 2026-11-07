@@ -1,8 +1,9 @@
 ## FFmpegKitNext
 
-当前应用使用 `ffmpeg-kit-next:8.1.0-mpv4`，在下述构建配置上新增 x265 4.2、
+当前应用使用 `ffmpeg-kit-next:8.1.0-mpv5`，在下述构建配置上新增 x265 4.2、
 Xvid 1.3.7、libaom 3.12.1 和 Theora 1.1.1，分别提供 HEVC、Xvid、AV1 和
 Theora 软件编码，并增加 Speex 1.2.1、OpenCORE AMR 0.1.6、VisualOn AMR-WB 0.1.3 和 GSM 1.0.16。
+字幕烧录使用新增的 libass 0.17.4，以及 FreeType、FriBidi、HarfBuzz、Fontconfig 字体依赖。
 构建、打包及兼容性检查步骤见 `native/ffmpeg/README.md`。
 原有 `8.1.0` 和 `8.1.0-mpv1` 产物保留，以下校验值属于原始 `8.1.0` 产物。
 

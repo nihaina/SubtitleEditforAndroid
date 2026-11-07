@@ -31,8 +31,8 @@ options before regenerating this runtime.
 The generated mpv AAR intentionally excludes all `libav*.so` files. The original
 runtime used the shared libraries from `ffmpeg-kit-next:8.1.0-mpv1`.
 
-Media conversion now uses `ffmpeg-kit-next:8.1.0-mpv4`, built from the same
-FFmpeg version with additional software encoders. See `../ffmpeg/README.md`.
+Media conversion now uses `ffmpeg-kit-next:8.1.0-mpv5`, built from the same
+FFmpeg version with additional software encoders and subtitle rendering. See `../ffmpeg/README.md`.
 Its packager checks that all old exported symbols remain available before
 publishing, so the existing mpv runtime can keep using those shared libraries.
 The commands below describe rebuilding the original mpv/FFmpeg baseline;
