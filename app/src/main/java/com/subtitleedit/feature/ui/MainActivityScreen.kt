@@ -244,8 +244,8 @@ internal fun MainActivityScreen(
         TopAppBar(
             scrollBehavior = scrollBehavior,
             colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = if (state.selectedTopLevelItem == R.id.nav_settings) settingsPageBackground() else MaterialTheme.colorScheme.surface,
-                scrolledContainerColor = if (state.selectedTopLevelItem == R.id.nav_settings) settingsPageBackground() else MaterialTheme.colorScheme.surfaceContainer
+                containerColor = if (state.selectedTopLevelItem == R.id.nav_settings || state.selectedTopLevelItem == R.id.nav_tools) settingsPageBackground() else MaterialTheme.colorScheme.surface,
+                scrolledContainerColor = if (state.selectedTopLevelItem == R.id.nav_settings || state.selectedTopLevelItem == R.id.nav_tools) settingsPageBackground() else MaterialTheme.colorScheme.surfaceContainer
             ),
             title = {
                 DirectoryToolbarTitle(

@@ -332,7 +332,10 @@ internal fun MainTopLevelPages(
             }
         )
 
-        R.id.nav_tools -> ToolsScreen(onOpen = { destination -> openTool(context, destination) })
+        R.id.nav_tools -> ToolsScreen(
+            onOpen = { destination -> openTool(context, destination) },
+            useMaterial3Visuals = true
+        )
 
         R.id.nav_settings -> SettingsScreen(
             state = state.settingsPage,

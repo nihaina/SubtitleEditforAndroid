@@ -2,6 +2,9 @@ package com.subtitleedit.ui
 
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +24,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import com.subtitleedit.ui.settings.settingsPageBackground
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -101,22 +108,65 @@ private val toolItems = listOf(
 @Composable
 fun ToolsScreen(
     onOpen: (ToolDestination) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    useMaterial3Visuals: Boolean = false
 ) {
+    val background = if (useMaterial3Visuals) settingsPageBackground() else Color.Transparent
     Column(
         modifier = modifier
             .fillMaxSize()
+            .background(background)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(if (useMaterial3Visuals) 8.dp else 16.dp)
     ) {
         toolItems.forEachIndexed { index, item ->
-            ToolCard(
-                item = item,
-                onClick = { onOpen(item.destination) },
-                modifier = Modifier.staggeredAppear(index)
+            if (useMaterial3Visuals) {
+                MaterialToolCard(item, { onOpen(item.destination) }, Modifier.staggeredAppear(index))
+            } else {
+                ToolCard(item, { onOpen(item.destination) }, Modifier.staggeredAppear(index))
+            }
+        }
+    }
+}
+
+@Composable
+private fun MaterialToolCard(item: ToolItem, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
+    val light = colors.surface.luminance() > 0.5f
+    val primaryText = if (light) Color(0xFF303139) else colors.onSurface
+    val secondaryText = if (light) Color(0xFF626F84) else colors.onSurfaceVariant
+    Row(
+        modifier = modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(if (light) Color(0xFFFAF7FE) else colors.surfaceContainerHigh)
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier.size(44.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                painter = painterResource(item.icon),
+                contentDescription = stringResource(item.iconDescription),
+                modifier = Modifier.size(36.dp),
+                tint = if (light) Color(0xFF303139) else colors.onSurface
             )
         }
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(item.title), style = MaterialTheme.typography.bodyLarge, color = primaryText)
+            Spacer(Modifier.size(4.dp))
+            Text(stringResource(item.description), style = MaterialTheme.typography.bodyMedium, color = secondaryText)
+        }
+        Icon(
+            painter = painterResource(R.drawable.ic_arrow_right),
+            contentDescription = stringResource(R.string.activity_tools_contentdescription_01),
+            modifier = Modifier.padding(start = 4.dp).size(24.dp),
+            tint = secondaryText
+        )
     }
 }
 
