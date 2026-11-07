@@ -179,7 +179,8 @@
     <string name="media_convert_setting_default">默认</string>
     <string name="media_convert_setting_custom_value">自定义数值</string>
     <string name="media_convert_seconds">%1$s 秒</string>
-    <string name="media_convert_video_more_hint">复制视频流时这些选项不生效。CRF、二次编码和像素格式按所选编码器的能力提供；二次编码需先指定视频码率或大小。</string>
+    <string name="media_convert_video_more_hint">复制视频流时这些选项不生效。CRF 按所选编码器的能力提供。</string>
+    <string name="media_convert_video_advanced_hint">复制视频流时这些选项不生效。二次编码和像素格式按所选编码器的能力提供；二次编码需先指定视频码率或大小。</string>
     <string name="media_convert_video_rate_control_hint">目标大小优先于视频码率；指定大小或码率时，CRF 和质量选项不参与编码。</string>
     <string name="media_convert_video_pass">正在执行第 %1$d/%2$d 遍编码…\n</string>
     <string name="media_convert_video_settings_invalid">无法应用视频设置：%1$s</string>

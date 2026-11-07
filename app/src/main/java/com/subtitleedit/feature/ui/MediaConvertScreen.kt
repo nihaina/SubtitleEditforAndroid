@@ -221,7 +221,7 @@ internal fun MediaConvertScreen(
                             stringResource(R.string.media_convert_select_format_required),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        videoCodecs.isNotEmpty() -> MediaConvertVideoMoreSettings(
+                        videoCodecs.isNotEmpty() -> MediaConvertVideoSettingsContent(
                             settings = videoSettings,
                             codec = effectiveVideoCodec,
                             bitrateMode = videoBitrate.mode,
@@ -303,6 +303,17 @@ internal fun MediaConvertScreen(
                                         modifier = Modifier.fillMaxWidth().padding(start = AppSpacing.FormLabelWidth)
                                     )
                                 }
+                                MediaConvertVideoSettingsContent(
+                                    settings = videoSettings,
+                                    codec = effectiveVideoCodec,
+                                    bitrateMode = videoBitrate.mode,
+                                    detectedPixelFormats = detectedPixelFormats,
+                                    sourcePixelFormat = sourcePixelFormat,
+                                    multipleSources = multipleSources,
+                                    isConverting = isConverting,
+                                    onChange = onVideoSettingsChange,
+                                    group = MediaConvertVideoSettingsGroup.ADVANCED
+                                )
                                 HorizontalDivider()
                             }
                             AppOptionSelector(stringResource(R.string.activity_media_convert_text_12), audioCodecs.firstOrNull { it.id == selectedAudioCodec }, audioCodecs, !isConverting, onAudioCodecSelected)

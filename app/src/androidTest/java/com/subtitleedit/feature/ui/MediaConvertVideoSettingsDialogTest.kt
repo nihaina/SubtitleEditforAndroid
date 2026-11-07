@@ -39,7 +39,7 @@ class MediaConvertVideoSettingsDialogTest {
         val settings = mutableStateOf(MediaConvertVideoSettings())
         compose.setContent { SubtitleEditComposeTheme {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                MediaConvertVideoMoreSettings(settings.value, "libx264", MediaConvertBitrateMode.AUTO,
+                MediaConvertVideoSettingsContent(settings.value, "libx264", MediaConvertBitrateMode.AUTO,
                     null, null, false, false, { settings.value = it; values += it })
             }
         } }
@@ -90,15 +90,21 @@ class MediaConvertVideoSettingsDialogTest {
 
     @Test fun copyDisablesEncodingControlsWithoutChangingSettings() {
         val values = mutableListOf<MediaConvertVideoSettings>()
+        val group = mutableStateOf(MediaConvertVideoSettingsGroup.MORE)
         compose.setContent { SubtitleEditComposeTheme {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                MediaConvertVideoMoreSettings(MediaConvertVideoSettings(), "copy", MediaConvertBitrateMode.AUTO,
-                    null, null, false, false, { values += it })
+                MediaConvertVideoSettingsContent(MediaConvertVideoSettings(), "copy", MediaConvertBitrateMode.AUTO,
+                    null, null, false, false, { values += it }, group = group.value)
             }
         } }
         compose.onNodeWithTag("video-more-ROTATION").assertIsNotEnabled()
         compose.onNodeWithTag("video-more-CRF").assertIsNotEnabled()
-        compose.onNodeWithTag("video-more-TWO_PASS").assertIsNotEnabled()
+        val advancedSettings = listOf("TWO_PASS", "KEYFRAME", "FILTER", "PIXEL_FORMAT")
+        advancedSettings.forEach { compose.onNodeWithTag("video-more-$it").assertDoesNotExist() }
+        compose.runOnIdle { group.value = MediaConvertVideoSettingsGroup.ADVANCED }
+        compose.onNodeWithTag("video-more-ROTATION").assertDoesNotExist()
+        compose.onNodeWithTag("video-more-CRF").assertDoesNotExist()
+        advancedSettings.forEach { compose.onNodeWithTag("video-more-$it").assertIsNotEnabled() }
         assertTrue(values.isEmpty())
     }
 
@@ -133,13 +139,15 @@ class MediaConvertVideoSettingsDialogTest {
 
     @Test fun binarySettingsUseDropdownAndApplyImmediately() {
         val settings = mutableStateOf(MediaConvertVideoSettings())
+        val group = mutableStateOf(MediaConvertVideoSettingsGroup.MORE)
         compose.setContent { SubtitleEditComposeTheme {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                MediaConvertVideoMoreSettings(settings.value, "libx264", MediaConvertBitrateMode.CUSTOM,
-                    null, null, false, false, { settings.value = it })
+                MediaConvertVideoSettingsContent(settings.value, "libx264", MediaConvertBitrateMode.CUSTOM,
+                    null, null, false, false, { settings.value = it }, group = group.value)
             }
         } }
         for (setting in listOf("FLIP_HORIZONTAL", "FLIP_VERTICAL", "TWO_PASS")) {
+            if (setting == "TWO_PASS") compose.runOnIdle { group.value = MediaConvertVideoSettingsGroup.ADVANCED }
             compose.onNode(hasClickAction() and hasAnyAncestor(hasTestTag("video-more-$setting"))).performScrollTo().performClick()
             compose.onNode(hasText("开启") and hasAnyAncestor(isPopup())).performClick()
             compose.onNodeWithTag("video-setting-confirm").assertDoesNotExist()

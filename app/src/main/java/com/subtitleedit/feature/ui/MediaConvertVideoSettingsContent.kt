@@ -35,16 +35,25 @@ import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.components.AppOptionSelector
 import com.subtitleedit.ui.theme.AppSpacing
 
-internal enum class MediaConvertVideoSetting(val title: Int, val dropdown: Boolean = false) {
+internal enum class MediaConvertVideoSettingsGroup { MORE, ADVANCED }
+
+internal enum class MediaConvertVideoSetting(
+    val title: Int,
+    val dropdown: Boolean = false,
+    val group: MediaConvertVideoSettingsGroup = MediaConvertVideoSettingsGroup.MORE
+) {
     FRAME_RATE(R.string.media_convert_frame_rate), ROTATION(R.string.media_convert_rotation, true),
     FLIP_HORIZONTAL(R.string.media_convert_flip_horizontal, true), FLIP_VERTICAL(R.string.media_convert_flip_vertical, true),
-    CRF(R.string.media_convert_crf), SIZE(R.string.media_convert_size_limit), TWO_PASS(R.string.media_convert_two_pass, true),
-    KEYFRAME(R.string.media_convert_keyframe_interval), DEINTERLACE(R.string.media_convert_deinterlace, true),
-    FILTER(R.string.media_convert_video_filter), PIXEL_FORMAT(R.string.media_convert_pixel_format)
+    CRF(R.string.media_convert_crf), SIZE(R.string.media_convert_size_limit),
+    TWO_PASS(R.string.media_convert_two_pass, true, MediaConvertVideoSettingsGroup.ADVANCED),
+    KEYFRAME(R.string.media_convert_keyframe_interval, group = MediaConvertVideoSettingsGroup.ADVANCED),
+    DEINTERLACE(R.string.media_convert_deinterlace, true),
+    FILTER(R.string.media_convert_video_filter, group = MediaConvertVideoSettingsGroup.ADVANCED),
+    PIXEL_FORMAT(R.string.media_convert_pixel_format, group = MediaConvertVideoSettingsGroup.ADVANCED)
 }
 
 @Composable
-internal fun MediaConvertVideoMoreSettings(
+internal fun MediaConvertVideoSettingsContent(
     settings: MediaConvertVideoSettings,
     codec: String,
     bitrateMode: MediaConvertBitrateMode,
@@ -53,14 +62,15 @@ internal fun MediaConvertVideoMoreSettings(
     multipleSources: Boolean,
     isConverting: Boolean,
     onChange: (MediaConvertVideoSettings) -> Unit,
-    sourceFileSizeBytes: Long? = null
+    sourceFileSizeBytes: Long? = null,
+    group: MediaConvertVideoSettingsGroup = MediaConvertVideoSettingsGroup.MORE
 ) {
     var dialog by rememberSaveable { mutableStateOf<MediaConvertVideoSetting?>(null) }
     val enabled = !isConverting && codec != "copy"
     val hasTargetBitrate = bitrateMode != MediaConvertBitrateMode.AUTO || settings.sizeLimitPercent != null
     val pixels = MediaConvertVideoSettingsSupport.supportedPixels(codec, detectedPixelFormats)
     Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)) {
-        for (setting in MediaConvertVideoSetting.entries) {
+        for (setting in MediaConvertVideoSetting.entries.filter { it.group == group }) {
             val applicable = when (setting) {
                 MediaConvertVideoSetting.CRF -> codec in MediaConvertVideoSettingsSupport.crfCodecs && !hasTargetBitrate
                 MediaConvertVideoSetting.TWO_PASS -> codec in MediaConvertVideoSettingsSupport.twoPassCodecs && hasTargetBitrate
@@ -106,12 +116,13 @@ internal fun MediaConvertVideoMoreSettings(
                 VideoSettingRow(setting, label, editable) { dialog = setting }
             }
         }
-        Text(stringResource(R.string.media_convert_video_more_hint), style = MaterialTheme.typography.bodySmall,
+        Text(stringResource(if (group == MediaConvertVideoSettingsGroup.MORE) R.string.media_convert_video_more_hint
+            else R.string.media_convert_video_advanced_hint), style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (hasTargetBitrate) Text(stringResource(R.string.media_convert_video_rate_control_hint),
+        if (group == MediaConvertVideoSettingsGroup.MORE && hasTargetBitrate) Text(stringResource(R.string.media_convert_video_rate_control_hint),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
-    val selected = dialog
+    val selected = dialog?.takeIf { it.group == group }
     if (selected != null && enabled) {
         MediaConvertVideoSettingDialog(selected, settings, codec, pixels, sourcePixelFormat, multipleSources,
             onDismiss = { dialog = null }, onConfirm = { onChange(it); dialog = null }, sourceFileSizeBytes = sourceFileSizeBytes)
