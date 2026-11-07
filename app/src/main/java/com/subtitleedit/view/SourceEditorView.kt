@@ -118,7 +118,9 @@ class SourceEditorView @JvmOverloads constructor(
     private val documentChangeListeners = mutableListOf<(DocumentChange) -> Unit>()
     private var nextLineId = 1L
     private var preferredLineEnding = "\n"
-    private val basePaddingLeftPx = (resources.displayMetrics.density * 8f).toInt()
+    // Each row paints its own line-number gutter, so the list must not be inset on the left or
+    // the gutter would float away from the view edge.
+    private val basePaddingLeftPx = 0
     private val basePaddingTopPx = (resources.displayMetrics.density * 8f).toInt()
     private val basePaddingRightPx = (resources.displayMetrics.density * 8f).toInt()
     private val basePaddingBottomPx = (resources.displayMetrics.density * 8f).toInt()
