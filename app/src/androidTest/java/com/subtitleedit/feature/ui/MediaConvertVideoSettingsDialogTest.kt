@@ -39,8 +39,8 @@ class MediaConvertVideoSettingsDialogTest {
         val settings = mutableStateOf(MediaConvertVideoSettings())
         compose.setContent { SubtitleEditComposeTheme {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                MediaConvertVideoMoreSettings(settings.value, true, "libx264", MediaConvertBitrateMode.AUTO,
-                    null, null, false, false, {}, { settings.value = it; values += it })
+                MediaConvertVideoMoreSettings(settings.value, "libx264", MediaConvertBitrateMode.AUTO,
+                    null, null, false, false, { settings.value = it; values += it })
             }
         } }
         fun select(setting: String, label: String) {
@@ -88,17 +88,18 @@ class MediaConvertVideoSettingsDialogTest {
         assertEquals(0, values.single().crf)
     }
 
-    @Test fun moreSettingsExpandAndCopyDisablesEncodingControls() {
-        val expanded = mutableStateOf(false)
+    @Test fun copyDisablesEncodingControlsWithoutChangingSettings() {
+        val values = mutableListOf<MediaConvertVideoSettings>()
         compose.setContent { SubtitleEditComposeTheme {
-            MediaConvertVideoMoreSettings(MediaConvertVideoSettings(), expanded.value, "copy", MediaConvertBitrateMode.AUTO,
-                null, null, false, false, { expanded.value = !expanded.value }, {})
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                MediaConvertVideoMoreSettings(MediaConvertVideoSettings(), "copy", MediaConvertBitrateMode.AUTO,
+                    null, null, false, false, { values += it })
+            }
         } }
-        compose.onNodeWithTag("video-more-ROTATION").assertDoesNotExist()
-        compose.onNodeWithTag("video-more-toggle").performClick()
         compose.onNodeWithTag("video-more-ROTATION").assertIsNotEnabled()
         compose.onNodeWithTag("video-more-CRF").assertIsNotEnabled()
         compose.onNodeWithTag("video-more-TWO_PASS").assertIsNotEnabled()
+        assertTrue(values.isEmpty())
     }
 
     @Test fun percentageSizeDisplaysPreviewAndOnlyCommitsOnDone() {
@@ -134,8 +135,8 @@ class MediaConvertVideoSettingsDialogTest {
         val settings = mutableStateOf(MediaConvertVideoSettings())
         compose.setContent { SubtitleEditComposeTheme {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                MediaConvertVideoMoreSettings(settings.value, true, "libx264", MediaConvertBitrateMode.CUSTOM,
-                    null, null, false, false, {}, { settings.value = it })
+                MediaConvertVideoMoreSettings(settings.value, "libx264", MediaConvertBitrateMode.CUSTOM,
+                    null, null, false, false, { settings.value = it })
             }
         } }
         for (setting in listOf("FLIP_HORIZONTAL", "FLIP_VERTICAL", "TWO_PASS")) {

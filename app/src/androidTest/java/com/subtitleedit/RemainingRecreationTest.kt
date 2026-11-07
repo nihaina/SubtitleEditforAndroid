@@ -61,8 +61,6 @@ class RemainingRecreationTest {
                 before.setAudioVolume(200)
                 before.setResolution(MediaConvertResolutionSettings(presetIndex = 3))
                 before.setVideoBitrate(MediaConvertVideoBitrateSettings(MediaConvertBitrateMode.CUSTOM, "3000"))
-                before.toggleAdvanced()
-                before.toggleMore()
                 before.setVideoSettings(MediaConvertVideoSettings(rotation = MediaConvertRotation.CLOCKWISE, flipHorizontal = true,
                     pixelFormat = "yuv420p10le", sizeLimitPercent = 50, filter = MediaConvertVideoFilter.GOLD))
                 before.selectFormat("mp3")
@@ -83,8 +81,6 @@ class RemainingRecreationTest {
                 assertEquals("mp4", after.state.value.selectedFormat)
                 assertEquals(3, after.state.value.options.resolution.presetIndex)
                 assertEquals(MediaConvertVideoBitrateSettings(MediaConvertBitrateMode.CUSTOM, "3000"), after.state.value.options.videoBitrate)
-                assertTrue(after.state.value.options.advancedExpanded)
-                assertTrue(after.state.value.options.moreExpanded)
                 assertEquals(MediaConvertRotation.CLOCKWISE, after.state.value.options.videoSettings.rotation)
                 assertTrue(after.state.value.options.videoSettings.flipHorizontal)
                 assertEquals(50, after.state.value.options.videoSettings.sizeLimitPercent)

@@ -1,11 +1,5 @@
 package com.subtitleedit.feature.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,7 +10,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -24,14 +17,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.disabled
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.MediaConvertBitrateMode
@@ -41,10 +31,8 @@ import com.subtitleedit.MediaConvertVideoFilter
 import com.subtitleedit.MediaConvertVideoSettings
 import com.subtitleedit.MediaConvertVideoSettingsSupport
 import com.subtitleedit.R
-import com.subtitleedit.ui.components.AppSection
 import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.components.AppOptionSelector
-import com.subtitleedit.ui.theme.AppMotion
 import com.subtitleedit.ui.theme.AppSpacing
 
 internal enum class MediaConvertVideoSetting(val title: Int, val dropdown: Boolean = false) {
@@ -58,14 +46,12 @@ internal enum class MediaConvertVideoSetting(val title: Int, val dropdown: Boole
 @Composable
 internal fun MediaConvertVideoMoreSettings(
     settings: MediaConvertVideoSettings,
-    expanded: Boolean,
     codec: String,
     bitrateMode: MediaConvertBitrateMode,
     detectedPixelFormats: List<String>?,
     sourcePixelFormat: String?,
     multipleSources: Boolean,
     isConverting: Boolean,
-    onToggle: () -> Unit,
     onChange: (MediaConvertVideoSettings) -> Unit,
     sourceFileSizeBytes: Long? = null
 ) {
@@ -73,70 +59,57 @@ internal fun MediaConvertVideoMoreSettings(
     val enabled = !isConverting && codec != "copy"
     val hasTargetBitrate = bitrateMode != MediaConvertBitrateMode.AUTO || settings.sizeLimitPercent != null
     val pixels = MediaConvertVideoSettingsSupport.supportedPixels(codec, detectedPixelFormats)
-    AppSection {
-        val rotation by animateFloatAsState(if (expanded) 90f else 0f, AppMotion.fast(), label = "video-more-chevron")
-        val description = stringResource(if (expanded) R.string.media_convert_expanded else R.string.media_convert_collapsed)
-        TextButton(onClick = onToggle, enabled = !isConverting,
-            modifier = Modifier.fillMaxWidth().testTag("video-more-toggle").semantics { stateDescription = description }) {
-            Text(stringResource(R.string.media_convert_more_settings), modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
-            Icon(painterResource(R.drawable.ic_arrow_right), null, Modifier.size(18.dp).graphicsLayer(rotationZ = rotation))
-        }
-        AnimatedVisibility(expanded,
-            enter = expandVertically(AppMotion.enter()) + fadeIn(AppMotion.enter()),
-            exit = shrinkVertically(AppMotion.exit()) + fadeOut(AppMotion.exit())) {
-            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)) {
-                for (setting in MediaConvertVideoSetting.entries) {
-                    val applicable = when (setting) {
-                        MediaConvertVideoSetting.CRF -> codec in MediaConvertVideoSettingsSupport.crfCodecs && !hasTargetBitrate
-                        MediaConvertVideoSetting.TWO_PASS -> codec in MediaConvertVideoSettingsSupport.twoPassCodecs && hasTargetBitrate
-                        else -> true
-                    }
-                    val inactive = !applicable && (setting == MediaConvertVideoSetting.CRF && settings.crf != null ||
-                        setting == MediaConvertVideoSetting.TWO_PASS && settings.twoPass)
-                    val value = videoSettingLabel(setting, settings, pixels)
-                    val label = if (inactive) stringResource(R.string.media_convert_setting_inactive, value) else value
-                    val editable = enabled && applicable
-                    if (setting.dropdown) {
-                        val selected = when (setting) {
-                            MediaConvertVideoSetting.ROTATION -> settings.rotation.name
-                            MediaConvertVideoSetting.DEINTERLACE -> settings.deinterlace.name
-                            MediaConvertVideoSetting.FLIP_HORIZONTAL -> settings.flipHorizontal.toString()
-                            MediaConvertVideoSetting.FLIP_VERTICAL -> settings.flipVertical.toString()
-                            else -> settings.twoPass.toString()
-                        }
-                        val options = when (setting) {
-                            MediaConvertVideoSetting.ROTATION -> listOf(
-                                AppOption(MediaConvertRotation.NONE.name, stringResource(R.string.media_convert_setting_off)),
-                                AppOption(MediaConvertRotation.CLOCKWISE.name, stringResource(R.string.media_convert_rotate_clockwise)),
-                                AppOption(MediaConvertRotation.HALF.name, stringResource(R.string.media_convert_rotate_half)),
-                                AppOption(MediaConvertRotation.COUNTERCLOCKWISE.name, stringResource(R.string.media_convert_rotate_counterclockwise)))
-                            MediaConvertVideoSetting.DEINTERLACE -> listOf(
-                                AppOption(MediaConvertDeinterlace.OFF.name, stringResource(R.string.media_convert_setting_off)),
-                                AppOption(MediaConvertDeinterlace.AUTO.name, stringResource(R.string.media_convert_deinterlace_auto)),
-                                AppOption(MediaConvertDeinterlace.ON.name, stringResource(R.string.media_convert_deinterlace_all)))
-                            else -> listOf(AppOption("false", stringResource(R.string.media_convert_setting_off)),
-                                AppOption("true", stringResource(R.string.media_convert_setting_on)))
-                        }
-                        AppOptionSelector(stringResource(setting.title), AppOption(selected, label), options,
-                            editable, onSelected = { next ->
-                                onChange(when (setting) {
-                                    MediaConvertVideoSetting.ROTATION -> settings.copy(rotation = MediaConvertRotation.valueOf(next))
-                                    MediaConvertVideoSetting.DEINTERLACE -> settings.copy(deinterlace = MediaConvertDeinterlace.valueOf(next))
-                                    MediaConvertVideoSetting.FLIP_HORIZONTAL -> settings.copy(flipHorizontal = next.toBoolean())
-                                    MediaConvertVideoSetting.FLIP_VERTICAL -> settings.copy(flipVertical = next.toBoolean())
-                                    else -> settings.copy(twoPass = next.toBoolean())
-                                })
-                            }, modifier = Modifier.testTag("video-more-${setting.name}").semantics { if (!editable) disabled() })
-                    } else {
-                        VideoSettingRow(setting, label, editable) { dialog = setting }
-                    }
+    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)) {
+        for (setting in MediaConvertVideoSetting.entries) {
+            val applicable = when (setting) {
+                MediaConvertVideoSetting.CRF -> codec in MediaConvertVideoSettingsSupport.crfCodecs && !hasTargetBitrate
+                MediaConvertVideoSetting.TWO_PASS -> codec in MediaConvertVideoSettingsSupport.twoPassCodecs && hasTargetBitrate
+                else -> true
+            }
+            val inactive = !applicable && (setting == MediaConvertVideoSetting.CRF && settings.crf != null ||
+                setting == MediaConvertVideoSetting.TWO_PASS && settings.twoPass)
+            val value = videoSettingLabel(setting, settings, pixels)
+            val label = if (inactive) stringResource(R.string.media_convert_setting_inactive, value) else value
+            val editable = enabled && applicable
+            if (setting.dropdown) {
+                val selected = when (setting) {
+                    MediaConvertVideoSetting.ROTATION -> settings.rotation.name
+                    MediaConvertVideoSetting.DEINTERLACE -> settings.deinterlace.name
+                    MediaConvertVideoSetting.FLIP_HORIZONTAL -> settings.flipHorizontal.toString()
+                    MediaConvertVideoSetting.FLIP_VERTICAL -> settings.flipVertical.toString()
+                    else -> settings.twoPass.toString()
                 }
-                Text(stringResource(R.string.media_convert_video_more_hint), style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (hasTargetBitrate) Text(stringResource(R.string.media_convert_video_rate_control_hint),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val options = when (setting) {
+                    MediaConvertVideoSetting.ROTATION -> listOf(
+                        AppOption(MediaConvertRotation.NONE.name, stringResource(R.string.media_convert_setting_off)),
+                        AppOption(MediaConvertRotation.CLOCKWISE.name, stringResource(R.string.media_convert_rotate_clockwise)),
+                        AppOption(MediaConvertRotation.HALF.name, stringResource(R.string.media_convert_rotate_half)),
+                        AppOption(MediaConvertRotation.COUNTERCLOCKWISE.name, stringResource(R.string.media_convert_rotate_counterclockwise)))
+                    MediaConvertVideoSetting.DEINTERLACE -> listOf(
+                        AppOption(MediaConvertDeinterlace.OFF.name, stringResource(R.string.media_convert_setting_off)),
+                        AppOption(MediaConvertDeinterlace.AUTO.name, stringResource(R.string.media_convert_deinterlace_auto)),
+                        AppOption(MediaConvertDeinterlace.ON.name, stringResource(R.string.media_convert_deinterlace_all)))
+                    else -> listOf(AppOption("false", stringResource(R.string.media_convert_setting_off)),
+                        AppOption("true", stringResource(R.string.media_convert_setting_on)))
+                }
+                AppOptionSelector(stringResource(setting.title), AppOption(selected, label), options,
+                    editable, onSelected = { next ->
+                        onChange(when (setting) {
+                            MediaConvertVideoSetting.ROTATION -> settings.copy(rotation = MediaConvertRotation.valueOf(next))
+                            MediaConvertVideoSetting.DEINTERLACE -> settings.copy(deinterlace = MediaConvertDeinterlace.valueOf(next))
+                            MediaConvertVideoSetting.FLIP_HORIZONTAL -> settings.copy(flipHorizontal = next.toBoolean())
+                            MediaConvertVideoSetting.FLIP_VERTICAL -> settings.copy(flipVertical = next.toBoolean())
+                            else -> settings.copy(twoPass = next.toBoolean())
+                        })
+                    }, modifier = Modifier.testTag("video-more-${setting.name}").semantics { if (!editable) disabled() })
+            } else {
+                VideoSettingRow(setting, label, editable) { dialog = setting }
             }
         }
+        Text(stringResource(R.string.media_convert_video_more_hint), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (hasTargetBitrate) Text(stringResource(R.string.media_convert_video_rate_control_hint),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     val selected = dialog
     if (selected != null && enabled) {

@@ -216,8 +216,6 @@ internal class MediaConvertViewModel(application: Application) :
         if (format.isAudioOnly && MediaConvertAudioVbr.supports(format.audioEncoder(currentState.options.selectedAudioCodec)) &&
             MediaConvertAudioVbr.isValid(value)) updateOptions { copy(audioVbrQuality = value) }
     }
-    fun toggleAdvanced() = updateOptions { copy(advancedExpanded = !advancedExpanded) }
-    fun toggleMore() = updateOptions { copy(moreExpanded = !moreExpanded) }
     fun setVideoSettings(value: MediaConvertVideoSettings) {
         if (!currentState.isAudioOutput && value.isValid) updateOptions { copy(videoSettings = value) }
     }

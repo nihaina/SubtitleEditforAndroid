@@ -121,7 +121,6 @@ class MediaConvertActivity : AppComposeActivity() {
                     sampleRateIndex = state.options.sampleRateIndex,
                     channels = channelOptions,
                     channelIndex = state.options.channelIndex,
-                    advancedExpanded = state.options.advancedExpanded,
                     isConverting = state.isConverting,
                     canConvert = state.selectedFiles.isNotEmpty() && state.selectedFormat != null,
                     canShare = state.outputUris.isNotEmpty(),
@@ -142,7 +141,6 @@ class MediaConvertActivity : AppComposeActivity() {
                     onAudioBitrateChange = viewModel::setAudioBitrate,
                     onSampleRateSelected = viewModel::setSampleRate,
                     onChannelSelected = viewModel::setChannel,
-                    onToggleAdvanced = viewModel::toggleAdvanced,
                     onConvert = viewModel::startConversion,
                     onCancel = viewModel::cancelConversion,
                     onShare = viewModel::share,
@@ -166,12 +164,10 @@ class MediaConvertActivity : AppComposeActivity() {
                     audioVbrQuality = state.options.audioVbrQuality,
                     onAudioVbrQualityChange = viewModel::setAudioVbrQuality,
                     videoSettings = state.options.videoSettings,
-                    moreExpanded = state.options.moreExpanded,
                     effectiveVideoCodec = effectiveVideoCodec,
                     detectedPixelFormats = state.videoPixelFormats[effectiveVideoCodec],
                     sourcePixelFormat = source?.videoPixelFormat,
                     sourceFileSizeBytes = source?.fileSizeBytes,
-                    onToggleMore = viewModel::toggleMore,
                     onVideoSettingsChange = viewModel::setVideoSettings,
                     qualityHint = getString(R.string.media_convert_quality_range, qualityRange.first, qualityRange.last, if (effectiveVideoCodec == "libtheora") getString(R.string.media_convert_quality_larger) else getString(R.string.media_convert_quality_smaller))
                 )

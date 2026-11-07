@@ -130,6 +130,7 @@
     <string name="media_convert_volume_ratio">比例值</string>
     <string name="media_convert_volume_hint" formatted="false">100% 为原音量，0% 为静音。</string>
     <string name="media_convert_more_settings">更多设置</string>
+    <string name="media_convert_audio_more_hint">当前为音频输出，请切换到“高级选项”调整音频参数。</string>
     <string name="media_convert_frame_rate">帧率</string>
     <string name="media_convert_frame_rate_original">原始帧率</string>
     <string name="media_convert_frame_rate_hint">自定义范围：1–240 fps。MPEG-1/2 会匹配最接近的标准帧率；其他编码器按目标帧率补帧或丢帧。</string>
