@@ -1,24 +1,38 @@
 package com.subtitleedit.feature.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Tab
 import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -26,19 +40,23 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.ExperimentalFoundationApi
 import com.subtitleedit.R
-import com.subtitleedit.ui.components.AppCard
 import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.ui.components.AppToolScaffold
-import com.subtitleedit.ui.components.StatusBadge
+import com.subtitleedit.ui.components.SectionHeader
+import com.subtitleedit.ui.settings.SettingsIconBox
+import com.subtitleedit.ui.settings.settingsChipColor
+import com.subtitleedit.ui.settings.settingsPageBackground
+import com.subtitleedit.ui.settings.settingsPrimaryTextColor
+import com.subtitleedit.ui.settings.settingsSecondaryTextColor
+import com.subtitleedit.ui.settings.settingsTileColor
 import kotlinx.coroutines.launch
 
 data class ModelManagementItemUi(
@@ -97,15 +115,31 @@ fun ModelManagementScreen(
         onPageSelected(pagerState.currentPage)
     }
 
+    val pageBackground = settingsPageBackground()
     AppToolScaffold(
         title = stringResource(
             if (pagerState.currentPage == 0) R.string.model_management_import
             else R.string.model_management_title
         ),
         onBack = onNavigateBack,
-        scrollable = false
+        scrollable = false,
+        contentBackground = pageBackground,
+        topBarContainerColor = pageBackground,
+        topBarScrolledContainerColor = pageBackground
     ) {
-        PrimaryTabRow(selectedTabIndex = pagerState.currentPage) {
+        PrimaryTabRow(
+            selectedTabIndex = pagerState.currentPage,
+            containerColor = pageBackground,
+            contentColor = MaterialTheme.colorScheme.primary,
+            indicator = {
+                TabRowDefaults.PrimaryIndicator(
+                    modifier = Modifier.tabIndicatorOffset(pagerState.currentPage),
+                    width = 40.dp,
+                    height = 4.dp,
+                    shape = CircleShape
+                )
+            }
+        ) {
             listOf(
                 R.string.model_management_import,
                 R.string.model_management_title
@@ -113,7 +147,14 @@ fun ModelManagementScreen(
                 Tab(
                     selected = pagerState.currentPage == index,
                     onClick = { coroutineScope.launch { pagerState.animateScrollToPage(index) } },
-                    text = { Text(stringResource(titleRes)) }
+                    selectedContentColor = MaterialTheme.colorScheme.primary,
+                    unselectedContentColor = settingsSecondaryTextColor(),
+                    text = {
+                        Text(
+                            stringResource(titleRes),
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                    }
                 )
             }
         }
@@ -217,12 +258,13 @@ private fun ImportPage(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp)
+            .padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp)
     ) {
         Text(
             text = stringResource(R.string.model_management_import_description),
+            modifier = Modifier.padding(horizontal = 4.dp),
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = settingsSecondaryTextColor()
         )
         ModelManagementImportContent(
             asr = asrImport,
@@ -252,42 +294,41 @@ private fun ModelListPage(
         val groupedModels = models.groupBy { it.category }
         when {
             errorMessage != null -> Column(Modifier.fillMaxSize()) {
-                ModelsDirectoryText(modelsDirectoryLabel)
+                ModelsDirectoryText(modelsDirectoryLabel, Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp))
                 EmptyState(errorMessage, Modifier.weight(1f))
             }
             models.isEmpty() && !isLoading -> Column(Modifier.fillMaxSize()) {
-                ModelsDirectoryText(modelsDirectoryLabel)
+                ModelsDirectoryText(modelsDirectoryLabel, Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp))
                 EmptyState(emptyMessage, Modifier.weight(1f))
             }
             models.isEmpty() -> Column(Modifier.fillMaxSize()) {
-                ModelsDirectoryText(modelsDirectoryLabel)
+                ModelsDirectoryText(modelsDirectoryLabel, Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp))
                 Box(Modifier.weight(1f))
             }
             else -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                contentPadding = PaddingValues(
                     start = 16.dp,
                     top = 12.dp,
                     end = 16.dp,
                     bottom = 24.dp
                 ),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 item(key = "models-directory") {
                     ModelsDirectoryText(modelsDirectoryLabel)
                 }
                 groupedModels.forEach { (category, categoryModels) ->
                     item(key = "category:$category") {
-                        Text(
-                            text = category,
-                            modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurface
+                        SectionHeader(
+                            category,
+                            Modifier.padding(start = 12.dp, top = 14.dp, bottom = 6.dp)
                         )
                     }
-                    items(categoryModels, key = { it.key }) { item ->
+                    itemsIndexed(categoryModels, key = { _, model -> model.key }) { index, item ->
                         ModelRow(
                             item = item,
+                            shape = settingsGroupItemShape(index, categoryModels.size),
                             isExporting = isExporting,
                             isDeleting = deletingModelKey == item.key,
                             onExport = { onExport(item) },
@@ -305,17 +346,31 @@ private fun ModelListPage(
     }
 }
 
+/** First and last tile of a group get the large outer corners; tiles in between keep the small radius. */
+private fun settingsGroupItemShape(index: Int, count: Int): RoundedCornerShape {
+    val outer = 28.dp
+    val inner = 4.dp
+    val first = index == 0
+    val last = index == count - 1
+    return RoundedCornerShape(
+        topStart = if (first) outer else inner,
+        topEnd = if (first) outer else inner,
+        bottomStart = if (last) outer else inner,
+        bottomEnd = if (last) outer else inner
+    )
+}
+
 @Composable
-private fun ModelsDirectoryText(value: String) {
-    SelectionContainer(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 0.dp, vertical = 0.dp)
-    ) {
+private fun ModelsDirectoryText(value: String, modifier: Modifier = Modifier) {
+    SelectionContainer(modifier = modifier.fillMaxWidth()) {
         Text(
             text = value,
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(settingsChipColor())
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            color = settingsSecondaryTextColor(),
             style = MaterialTheme.typography.bodySmall
         )
     }
@@ -324,61 +379,80 @@ private fun ModelsDirectoryText(value: String) {
 @Composable
 private fun ModelRow(
     item: ModelManagementItemUi,
+    shape: RoundedCornerShape,
     isExporting: Boolean,
     isDeleting: Boolean,
     onExport: () -> Unit,
     onDelete: () -> Unit
 ) {
-    AppCard(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 12.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    val exportDescription = stringResource(R.string.export)
-                    Text(
-                        text = item.displayName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f)
-                    )
-                    StatusBadge(stringResource(R.string.model_status_installed))
-                    if (item.canExport) {
-                        TextButton(
-                            onClick = onExport,
-                            enabled = !isExporting && !isDeleting,
-                            modifier = Modifier.semantics {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(settingsTileColor())
+            .padding(start = 16.dp, top = 12.dp, end = 8.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        SettingsIconBox(R.drawable.ic_model)
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val exportDescription = stringResource(R.string.export)
+                Text(
+                    text = item.displayName,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = settingsPrimaryTextColor(),
+                    modifier = Modifier.weight(1f)
+                )
+                if (item.canExport) {
+                    FilledTonalButton(
+                        onClick = onExport,
+                        enabled = !isExporting && !isDeleting,
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .height(32.dp)
+                            .semantics {
                                 contentDescription = "${item.displayName} $exportDescription"
-                            }
-                        ) {
-                            Text(stringResource(R.string.export))
-                        }
+                            },
+                        shape = CircleShape,
+                        colors = ButtonDefaults.filledTonalButtonColors(),
+                        contentPadding = PaddingValues(horizontal = 14.dp)
+                    ) {
+                        Text(stringResource(R.string.export), maxLines = 1, softWrap = false)
                     }
                 }
-                Text(
-                    text = item.path,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = item.formattedSize,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
             }
-            if (item.canDelete) {
-                TextButton(onClick = onDelete, enabled = !isExporting && !isDeleting, modifier = Modifier.widthIn(min = 72.dp)) {
-                    Text(
-                        text = stringResource(
-                            if (isDeleting) R.string.model_management_deleting
-                            else R.string.model_management_delete_file
-                        ),
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
+            Text(
+                text = item.path,
+                modifier = Modifier.padding(top = 2.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = settingsSecondaryTextColor()
+            )
+            Text(
+                text = item.formattedSize,
+                modifier = Modifier
+                    .padding(top = 6.dp)
+                    .clip(CircleShape)
+                    .background(settingsChipColor())
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                    .padding(horizontal = 12.dp, vertical = 3.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        if (item.canDelete) {
+            TextButton(
+                onClick = onDelete,
+                enabled = !isExporting && !isDeleting,
+                modifier = Modifier.widthIn(min = 72.dp)
+            ) {
+                Text(
+                    text = stringResource(
+                        if (isDeleting) R.string.model_management_deleting
+                        else R.string.model_management_delete_file
+                    ),
+                    color = MaterialTheme.colorScheme.error
+                )
             }
         }
     }
@@ -390,7 +464,7 @@ private fun EmptyState(message: String, modifier: Modifier = Modifier) {
         Text(
             text = message,
             modifier = Modifier.padding(24.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = settingsSecondaryTextColor(),
             style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center
         )

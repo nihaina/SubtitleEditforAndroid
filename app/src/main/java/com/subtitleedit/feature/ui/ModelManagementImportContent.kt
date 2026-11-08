@@ -2,6 +2,7 @@ package com.subtitleedit.feature.ui
 
 import android.os.Process
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,14 +20,18 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -36,7 +41,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
-import com.subtitleedit.ui.components.AppCard
+import com.subtitleedit.ui.components.SectionHeader
+import com.subtitleedit.ui.settings.SettingsTileCard
+import com.subtitleedit.ui.settings.settingsChipColor
+import com.subtitleedit.ui.settings.settingsChoiceSelectedColor
+import com.subtitleedit.ui.settings.settingsChoiceSelectedTextColor
+import com.subtitleedit.ui.settings.settingsPrimaryTextColor
+import com.subtitleedit.ui.settings.settingsSecondaryTextColor
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.shape.RoundedCornerShape
 
 data class AsrModelImportUiState(
     val modelTitleRes: Int = R.string.model_import_whisper_model,
@@ -238,11 +251,11 @@ private fun AsrModelImportCard(
                         onClick = { onAction(AsrModelImportAction.ConfigureWhisper) },
                         modifier = Modifier.height(36.dp)
                     ) { Text(stringResource(R.string.activity_model_settings_text_08)) }
-                    OutlinedButton(
+                    TonalPillButton(
                         onClick = { onAction(AsrModelImportAction.SelectModelType) },
                         enabled = state.actionsEnabled,
                         modifier = Modifier.height(36.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp)
+                        contentPadding = PaddingValues(horizontal = 14.dp)
                     ) {
                         Text(
                             stringResource(R.string.activity_model_settings_text_09),
@@ -258,7 +271,8 @@ private fun AsrModelImportCard(
                             ),
                             enabled = state.actionsEnabled,
                             secondOptionAvailable = state.npuAvailable,
-                            onSelected = onAction
+                            onSelected = onAction,
+                            modifier = Modifier.padding(top = 12.dp)
                         )
                     }
                     if (state.showParakeetVariant) {
@@ -268,7 +282,8 @@ private fun AsrModelImportCard(
                                 ModelChoiceOption(AsrModelImportAction.SelectParakeetCtc, "CTC", state.parakeetCtcSelected)
                             ),
                             enabled = state.actionsEnabled,
-                            onSelected = onAction
+                            onSelected = onAction,
+                            modifier = Modifier.padding(top = 12.dp)
                         )
                     }
                 }
@@ -315,18 +330,18 @@ private fun AsrModelImportCard(
                     Text(
                         text = stringResource(R.string.activity_model_management_qwen_aligner_hint),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = settingsSecondaryTextColor(),
                         modifier = Modifier.padding(top = 2.dp)
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        OutlinedButton(
+                        TonalPillButton(
                             onClick = { onAction(AsrModelImportAction.SelectForcedAligner) },
                             enabled = state.actionsEnabled,
                             modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(horizontal = 8.dp)
+                            contentPadding = PaddingValues(horizontal = 14.dp)
                         ) {
                             Text(
                                 stringResource(R.string.activity_model_management_qwen_aligner_select),
@@ -349,7 +364,7 @@ private fun AsrModelImportCard(
                     }
                     Text(
                         text = forcedAlignerStatusText(state),
-                        color = if (state.forcedAlignerComplete) MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (state.forcedAlignerComplete) settingsSecondaryTextColor()
                         else MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 2.dp)
@@ -385,14 +400,14 @@ private fun AsrModelImportCard(
                     else -> state.vadModelFileName.orEmpty()
                 },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = settingsSecondaryTextColor(),
                 modifier = Modifier.padding(top = 8.dp)
             )
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedButton(onClick = { onAction(AsrModelImportAction.SelectVad) }) {
+                TonalPillButton(onClick = { onAction(AsrModelImportAction.SelectVad) }) {
                     Text(stringResource(R.string.model_import_select_vad))
                 }
                 Row(
@@ -416,12 +431,7 @@ private fun AsrModelImportCard(
 
 @Composable
 private fun ModelSectionLabel(labelRes: Int) {
-    Text(
-        text = stringResource(labelRes),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(horizontal = 16.dp)
-    )
+    SectionHeader(stringResource(labelRes), Modifier.padding(start = 12.dp))
 }
 
 @Composable
@@ -469,11 +479,11 @@ private fun LlmModelImportCard(
                         softWrap = false
                     )
                 }
-                OutlinedButton(
+                TonalPillButton(
                     onClick = { onAction(LlmModelImportAction.SelectModelType) },
                     enabled = state.actionsEnabled,
                     modifier = Modifier.height(36.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp)
+                    contentPadding = PaddingValues(horizontal = 14.dp)
                 ) {
                     Text(
                         stringResource(R.string.model_mgmt_llm_switch_type),
@@ -486,7 +496,7 @@ private fun LlmModelImportCard(
         Text(
             text = stringResource(R.string.model_mgmt_llm_hint),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = settingsSecondaryTextColor(),
             modifier = Modifier.padding(top = 8.dp)
         )
         HelpLink(onClick = { onAction(LlmModelImportAction.ShowGuide) })
@@ -543,7 +553,7 @@ private fun DemucsModelImportCard(
             Text(
                 text = stringResource(R.string.activity_vocal_separation_settings_text_04),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = settingsSecondaryTextColor(),
                 modifier = Modifier.padding(top = 8.dp)
             )
         } else {
@@ -577,7 +587,7 @@ private fun DemucsModelImportCard(
         Text(
             text = stringResource(R.string.activity_vocal_separation_settings_text_13),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = settingsSecondaryTextColor(),
             modifier = Modifier.padding(top = 8.dp)
         )
         HelpLink(onClick = { onAction(DemucsModelImportAction.ShowGuide) })
@@ -601,9 +611,41 @@ private fun forcedAlignerStatusText(state: AsrModelImportUiState): String = when
 
 @Composable
 private fun ModelImportCard(content: @Composable () -> Unit) {
-    AppCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) { content() }
+    SettingsTileCard {
+        CompositionLocalProvider(LocalContentColor provides settingsPrimaryTextColor()) { content() }
     }
+}
+
+/** Pill shaped tonal button matching the settings page backup / restore actions. */
+@Composable
+private fun TonalPillButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp),
+    content: @Composable RowScope.() -> Unit
+) {
+    FilledTonalButton(
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        shape = CircleShape,
+        colors = ButtonDefaults.filledTonalButtonColors(),
+        contentPadding = contentPadding,
+        content = content
+    )
+}
+
+/** Inset capsule that shows a path / file name on the tile, like the value capsule of a settings row. */
+@Composable
+private fun ValueField(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(settingsChipColor())
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) { content() }
 }
 
 @Composable
@@ -611,7 +653,8 @@ private fun ChoiceOptions(
     options: List<ModelChoiceOption>,
     enabled: Boolean,
     secondOptionAvailable: Boolean = true,
-    onSelected: (AsrModelImportAction) -> Unit
+    onSelected: (AsrModelImportAction) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val npuContentDescription = stringResource(
         if (secondOptionAvailable) {
@@ -620,28 +663,40 @@ private fun ChoiceOptions(
             R.string.model_import_sensevoice_npu_unavailable
         }
     )
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(settingsChipColor())
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+            .padding(2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         options.forEachIndexed { index, option ->
-            Text(
-                text = option.label,
+            Box(
                 modifier = Modifier
                     .widthIn(min = 44.dp)
-                    .height(36.dp)
-                    .clickable(
-                        enabled = enabled
-                    ) { onSelected(option.id) }
+                    .height(32.dp)
+                    .clip(CircleShape)
+                    .background(if (option.selected) settingsChoiceSelectedColor() else Color.Transparent)
+                    .clickable(enabled = enabled) { onSelected(option.id) }
                     .alpha(if (index == 1 && !secondOptionAvailable) 0.55f else 1f)
                     .then(
                         if (option.id == AsrModelImportAction.SelectSenseVoiceNpu) Modifier.semantics {
                             contentDescription = npuContentDescription
                         } else Modifier
-                    ),
-                textAlign = TextAlign.Center,
-                style = if (option.selected) MaterialTheme.typography.labelLarge
-                else MaterialTheme.typography.bodySmall,
-                color = if (option.selected) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant
-            )
+                    )
+                    .padding(horizontal = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = option.label,
+                    textAlign = TextAlign.Center,
+                    style = if (option.selected) MaterialTheme.typography.labelLarge
+                    else MaterialTheme.typography.bodySmall,
+                    color = if (option.selected) settingsChoiceSelectedTextColor()
+                    else settingsSecondaryTextColor()
+                )
+            }
         }
     }
 }
@@ -669,14 +724,15 @@ private fun ModelFileControl(
             softWrap = false,
             overflow = TextOverflow.Ellipsis
         )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.MiddleEllipsis,
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-        )
+        ValueField(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodySmall,
+                color = settingsSecondaryTextColor(),
+                maxLines = 1,
+                overflow = TextOverflow.MiddleEllipsis
+            )
+        }
         ModelSelectRow(
             selectLabel = selectLabel,
             onSelect = onSelect,
@@ -688,7 +744,7 @@ private fun ModelFileControl(
                 ?: stringResource(R.string.activity_model_settings_contentdescription_01),
             onDownload = onDownload,
             onReset = onReset,
-            modifier = Modifier.padding(top = 4.dp)
+            modifier = Modifier.padding(top = 8.dp)
         )
     }
 }
@@ -707,12 +763,12 @@ private fun ModelSelectRow(
     modifier: Modifier = Modifier
 ) {
     Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        OutlinedButton(
+        TonalPillButton(
             onClick = onSelect,
             enabled = enabled,
             modifier = (if (fillSelectButton) Modifier.weight(1f) else Modifier)
                 .height(36.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp)
+            contentPadding = PaddingValues(horizontal = 14.dp)
         ) {
             Text(selectLabel, maxLines = 1, softWrap = false)
         }
@@ -730,10 +786,10 @@ private fun ModelDownloadButton(onClick: () -> Unit, enabled: Boolean, descripti
     Box(
         modifier = Modifier
             .padding(start = 8.dp)
-            .size(28.dp)
+            .size(36.dp)
             .clip(CircleShape)
             .background(
-                if (enabled) MaterialTheme.colorScheme.primary
+                if (enabled) MaterialTheme.colorScheme.secondaryContainer
                 else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
             )
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
@@ -744,11 +800,11 @@ private fun ModelDownloadButton(onClick: () -> Unit, enabled: Boolean, descripti
             painter = painterResource(R.drawable.ic_download),
             contentDescription = null,
             tint = if (enabled) {
-                MaterialTheme.colorScheme.onPrimary
+                MaterialTheme.colorScheme.onSecondaryContainer
             } else {
                 MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
             },
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier.size(20.dp)
         )
     }
 }
@@ -780,21 +836,23 @@ private fun DemucsValueWithSwitch(
     modifier: Modifier = Modifier
 ) {
     Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        SelectionContainer(modifier = Modifier.weight(1f)) {
-            Text(
-                text = value.substringBefore('\n'),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.MiddleEllipsis
-            )
+        ValueField(Modifier.weight(1f)) {
+            SelectionContainer {
+                Text(
+                    text = value.substringBefore('\n'),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = settingsSecondaryTextColor(),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.MiddleEllipsis
+                )
+            }
         }
-        OutlinedButton(
+        TonalPillButton(
             onClick = onSwitch,
             enabled = enabled,
             modifier = Modifier.padding(start = 12.dp).height(36.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp)
+            contentPadding = PaddingValues(horizontal = 14.dp)
         ) {
             Text(
                 stringResource(R.string.activity_model_settings_text_09),
@@ -818,22 +876,24 @@ private fun DemucsSpecialistModelRow(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        SelectionContainer(modifier = Modifier.weight(1f)) {
-            Text(
-                text = value.substringBefore('\n'),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.MiddleEllipsis
-            )
+        ValueField(Modifier.weight(1f)) {
+            SelectionContainer {
+                Text(
+                    text = value.substringBefore('\n'),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = settingsSecondaryTextColor(),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.MiddleEllipsis
+                )
+            }
         }
         onSwitch?.let { switch ->
-            OutlinedButton(
+            TonalPillButton(
                 onClick = switch,
                 enabled = enabled,
                 modifier = Modifier.padding(start = 8.dp).height(36.dp),
-                contentPadding = PaddingValues(horizontal = 8.dp)
+                contentPadding = PaddingValues(horizontal = 14.dp)
             ) {
                 Text(
                     stringResource(R.string.activity_model_settings_text_09),
@@ -842,11 +902,11 @@ private fun DemucsSpecialistModelRow(
                 )
             }
         }
-        OutlinedButton(
+        TonalPillButton(
             onClick = onSelect,
             enabled = enabled,
             modifier = Modifier.padding(start = 12.dp).height(36.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp)
+            contentPadding = PaddingValues(horizontal = 14.dp)
         ) {
             Text(selectLabel, maxLines = 1, softWrap = false)
         }

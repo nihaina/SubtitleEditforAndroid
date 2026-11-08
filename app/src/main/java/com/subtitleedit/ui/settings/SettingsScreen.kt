@@ -1,13 +1,9 @@
 package com.subtitleedit.ui.settings
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
@@ -447,24 +443,6 @@ fun settingsPageBackground(): Color = if (MaterialTheme.colorScheme.surface.lumi
     Color(0xFFEEEDF5)
 } else {
     MaterialTheme.colorScheme.surface
-}
-
-@Composable
-private fun settingsLightPalette(): Boolean = MaterialTheme.colorScheme.surface.luminance() > 0.5f
-
-private val SettingsTileRestingCorner = 4.dp
-private val SettingsTilePressedCorner = 20.dp
-
-/** Tile corners relax while pressed; the group clips the outer corners of the first and last tile. */
-@Composable
-private fun settingsTileShape(source: MutableInteractionSource): RoundedCornerShape {
-    val pressed by source.collectIsPressedAsState()
-    val corner by animateDpAsState(
-        targetValue = if (pressed) SettingsTilePressedCorner else SettingsTileRestingCorner,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-        label = "settingsTileCorner"
-    )
-    return RoundedCornerShape(corner.coerceAtLeast(0.dp))
 }
 
 @Composable
