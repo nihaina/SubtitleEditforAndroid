@@ -17,7 +17,7 @@ class MediaConvertResolutionFfmpegTest {
             val output = File(root, "frame.rgb")
             val log = File(root, "ffmpeg.log")
             val source = "color=c=blue:s=200x100:r=1,drawbox=x=60:y=10:w=80:h=80:color=red:t=fill,setsar=$sar"
-            val filter = MediaConvertResolution.filter(MediaConvertResolutionSettings(-1, width, height, fitMode = mode))
+            val filter = MediaConvertResolution.filter(MediaConvertResolutionSettings(-1, width, height, fitMode = mode), null, null)!!
             val process = ProcessBuilder(executable!!, "-y", "-loglevel", "error", "-filter_threads", "1", "-f", "lavfi", "-i", source,
                 "-vf", filter, "-frames:v", "1", "-pix_fmt", "rgb24", "-f", "rawvideo", output.path)
                 .redirectErrorStream(true).redirectOutput(log).start()

@@ -80,7 +80,8 @@ class MediaConvertVideoSettingsTest {
     @Test fun pixelFormatsFollowActualEncoderCapabilitiesAndSourcePerFile() {
         assertEquals(listOf("yuv420p", "nv12", "yuv420p10le"),
             MediaConvertVideoSettingsSupport.parsePixelFormats("Encoder test\n Supported pixel formats: yuv420p nv12 rgb24 yuv420p10le\nOther options"))
-        assertEquals("yuv422p10le", args(MediaConvertVideoSettings(pixelFormat = "original")).value("-pix_fmt"))
+        // When original format matches source, -pix_fmt is omitted (optimization: let FFmpeg keep source format)
+        assertNull(args(MediaConvertVideoSettings(pixelFormat = "original")).value("-pix_fmt"))
         assertEquals("yuv420p", args(MediaConvertVideoSettings(pixelFormat = "nv20le")).value("-pix_fmt"))
         assertEquals("yuv420p10le", MediaConvertCommand.build("in", "out", mp4,
             MediaConvertOptions(selectedVideoCodec = "libx265"), source, listOf("yuv420p10le")).value("-pix_fmt"))

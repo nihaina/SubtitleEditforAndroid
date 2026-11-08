@@ -150,11 +150,12 @@ internal object MediaConvertCommand {
                     }
                     if (!synthetic || settings.rotation != MediaConvertRotation.NONE || settings.flipHorizontal || settings.flipVertical ||
                         settings.deinterlace != MediaConvertDeinterlace.OFF || settings.filter != MediaConvertVideoFilter.NONE || burnSubtitle != null) {
-                        val filters = listOfNotNull(MediaConvertVideoSettingsSupport.filters(options.resolution, settings),
+                        val filters = listOfNotNull(MediaConvertVideoSettingsSupport.filters(options.resolution, settings, source),
                             burnSubtitle?.let(MediaConvertSubtitles::burnFilter)).joinToString(",")
-                        addAll(listOf("-vf", filters))
+                        if (filters.isNotEmpty()) addAll(listOf("-vf", filters))
                     }
-                    addAll(listOf("-pix_fmt", MediaConvertVideoSettingsSupport.pixelFormat(video, settings.pixelFormat, source?.videoPixelFormat, supportedPixelFormats)))
+                    val targetPixFmt = MediaConvertVideoSettingsSupport.pixelFormat(video, settings.pixelFormat, source?.videoPixelFormat, supportedPixelFormats)
+                    if (targetPixFmt != source?.videoPixelFormat) addAll(listOf("-pix_fmt", targetPixFmt))
                     val rate = MediaConvertVideoSettingsSupport.frameRate(video, settings, source?.frameRate)
                     rate?.let { addAll(listOf("-r", it)) }
                     MediaConvertVideoSettingsSupport.keyframeFrames(settings, rate, source?.frameRate)?.let {

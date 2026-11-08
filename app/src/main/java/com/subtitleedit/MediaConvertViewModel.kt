@@ -475,14 +475,27 @@ internal class MediaConvertViewModel(application: Application) :
                 appendLog(string(R.string.media_convert_no_video_stream, prefix))
             }
             appendLog(string(R.string.media_convert_converting, prefix))
-            val output = File(cache, "output.${format.extension}")
+            // Prepare output path: SAF direct write when possible, else cache file
+            val desiredOutputName = if (overwrite) desiredName else uniqueOutputName(outputUri, desiredName, reserved)
+            val directSafOutput = if (outputUri.scheme != "file") {
+                runCatching {
+                    val dir = DocumentFile.fromTreeUri(app, outputUri) ?: return@runCatching null
+                    if (overwrite) dir.findFile(desiredOutputName)?.delete()
+                    val target = dir.createFile(getMimeType(desiredOutputName), desiredOutputName) ?: return@runCatching null
+                    com.arthenica.ffmpegkit.FFmpegKitConfig.getSafParameterForWrite(app, target.uri)?.let { safPath -> Triple(safPath, target.uri, target) }
+                }.getOrNull()
+            } else null
+            val outputPath = directSafOutput?.first ?: File(cache, "output.${format.extension}").absolutePath
+            val outputFile = if (directSafOutput == null) File(outputPath) else null
+            val resultUri = directSafOutput?.second
+            val resultDoc = directSafOutput?.third
             val subtitle = prepareSubtitle(cache, format, options)
             val codec = if (format.isAudioOnly) "" else format.videoEncoder(options.selectedVideoCodec)
             val durationMs = sourceProbe.durationSeconds?.let { (it * 1000.0).toLong() } ?: 0L
             val hardwareAttempted = MediaConvertCommand.usesHardwareEncoder(format, options, sourceProbe, subtitle)
             val passLogPath = File(cache, "video-pass").absolutePath
             val commands = try {
-                MediaConvertCommand.plan(input, output.absolutePath, format, options, sourceProbe, passLogPath,
+                MediaConvertCommand.plan(input, outputPath, format, options, sourceProbe, passLogPath,
                     currentState.videoPixelFormats[codec], subtitle, allowHardware = true, hardwareCodecNames = currentState.hardwareCodecNames)
             } catch (e: MediaConvertVideoSizeException) {
                 val message = when (e.reason) {
@@ -510,13 +523,14 @@ internal class MediaConvertViewModel(application: Application) :
             if (hardwareAttempted && session != null && !ReturnCode.isSuccess(session.getReturnCode()) &&
                 !ReturnCode.isCancel(session.getReturnCode()) && !taskController.isCancellationRequested) {
                 appendLog(string(R.string.media_convert_hardware_fallback))
-                output.delete()
-                val softwareCommands = MediaConvertCommand.plan(input, output.absolutePath, format, options, sourceProbe, passLogPath,
+                outputFile?.delete()
+                resultDoc?.delete()
+                val softwareCommands = MediaConvertCommand.plan(input, outputPath, format, options, sourceProbe, passLogPath,
                     currentState.videoPixelFormats[codec], subtitle, allowHardware = false, hardwareCodecNames = currentState.hardwareCodecNames)
                 session = runCommands(softwareCommands)
             }
             checkNotNull(session)
-            if (!ReturnCode.isSuccess(session.getReturnCode()) || !output.isFile || output.length() <= 0L) {
+            if (!ReturnCode.isSuccess(session.getReturnCode())) {
                 return Result.failure(
                     IllegalStateException(
                         session.getAllLogsAsString().takeLast(800)
@@ -524,7 +538,23 @@ internal class MediaConvertViewModel(application: Application) :
                     )
                 )
             }
-            val copied = withContext(Dispatchers.IO) { copyFileToOutputDirectory(output, desiredName, overwrite, reserved, outputUri) }
+            // SAF direct write: verify output and return result directly
+            if (directSafOutput != null) {
+                checkNotNull(resultDoc)
+                checkNotNull(resultUri)
+                if (resultDoc.length() == 0L) {
+                    resultDoc.delete()
+                    return Result.failure(IllegalStateException(string(R.string.media_convert_output_empty)))
+                }
+                appendLog(string(R.string.media_convert_file_completed, prefix, desiredOutputName))
+                return Result.success(OutputResult(resultUri, resultDoc.name ?: desiredOutputName))
+            }
+            // Cache file: verify and copy to final destination
+            checkNotNull(outputFile)
+            if (!outputFile.isFile || outputFile.length() <= 0L) {
+                return Result.failure(IllegalStateException(string(R.string.media_convert_ffmpeg_invalid_output)))
+            }
+            val copied = withContext(Dispatchers.IO) { copyFileToOutputDirectory(outputFile, desiredName, overwrite, reserved, outputUri) }
                 ?: return Result.failure(IllegalStateException(string(R.string.media_convert_output_write_failed)))
             appendLog(string(R.string.media_convert_file_completed, prefix, copied.fileName))
             Result.success(copied)

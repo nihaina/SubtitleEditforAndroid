@@ -46,7 +46,7 @@ class MediaConvertSubtitlesTest {
         val args = MediaConvertCommand.build("in", "out.mp4", format("mp4"), options, source, subtitle = sub)
         assertTrue("-sn" in args)
         assertNull(args.value("-c:s"))
-        assertEquals(MediaConvertVideoSettingsSupport.filters(options.resolution, options.videoSettings) + "," + MediaConvertSubtitles.burnFilter(sub), args.value("-vf"))
+        assertEquals(MediaConvertVideoSettingsSupport.filters(options.resolution, options.videoSettings, source)!! + "," + MediaConvertSubtitles.burnFilter(sub), args.value("-vf"))
         assertThrows(IllegalArgumentException::class.java) {
             MediaConvertCommand.build("in", "out", format("mp4"), options.copy(selectedVideoCodec = "copy"), source, subtitle = sub)
         }

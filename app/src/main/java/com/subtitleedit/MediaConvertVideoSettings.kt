@@ -141,7 +141,7 @@ internal object MediaConvertVideoSettingsSupport {
         return videoRate
     }
 
-    fun filters(resolution: MediaConvertResolutionSettings, settings: MediaConvertVideoSettings): String = buildList {
+    fun filters(resolution: MediaConvertResolutionSettings, settings: MediaConvertVideoSettings, source: MediaConvertSource?): String? = buildList {
         when (settings.deinterlace) {
             MediaConvertDeinterlace.AUTO -> add("yadif=mode=send_frame:parity=auto:deint=interlaced")
             MediaConvertDeinterlace.ON -> add("yadif=mode=send_frame:parity=auto:deint=all")
@@ -155,7 +155,7 @@ internal object MediaConvertVideoSettingsSupport {
         }
         if (settings.flipHorizontal) add("hflip")
         if (settings.flipVertical) add("vflip")
-        add(MediaConvertResolution.filter(resolution))
+        MediaConvertResolution.filter(resolution, source?.videoWidth, source?.videoHeight)?.let(::add)
         when (settings.filter) {
             MediaConvertVideoFilter.GRAYSCALE -> add("hue=s=0")
             MediaConvertVideoFilter.YELLOW -> add("colorchannelmixer=rr=1:gg=1:bb=0.5")
@@ -165,7 +165,7 @@ internal object MediaConvertVideoSettingsSupport {
             MediaConvertVideoFilter.GOLD -> add("colorchannelmixer=rr=0.393:rg=0.769:rb=0.189:gr=0.349:gg=0.686:gb=0.168:br=0.272:bg=0.534:bb=0.131")
             MediaConvertVideoFilter.NONE -> Unit
         }
-    }.joinToString(",")
+    }.takeIf { it.isNotEmpty() }?.joinToString(",")
 
     fun frameRate(codec: String, settings: MediaConvertVideoSettings, sourceRate: Double?): String? {
         if (codec !in setOf("mpeg1video", "mpeg2video")) return settings.frameRate.takeIf { it.isNotEmpty() }

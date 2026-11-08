@@ -52,7 +52,7 @@ class MediaConvertResolutionTest {
         val settings = MediaConvertResolutionSettings(-1, 720, 1280, true, MediaConvertFitMode.FILL)
         val options = MediaConvertOptions(resolution = settings)
         val real = MediaConvertCommand.build("input", "output", format, options, MediaConvertSource(true, 1.0))
-        assertEquals(MediaConvertResolution.filter(settings), real[real.indexOf("-vf") + 1])
+        assertEquals(MediaConvertResolution.filter(settings, null, null), real[real.indexOf("-vf") + 1])
         val synthetic = MediaConvertCommand.build("input", "output", format, options, MediaConvertSource(false, 1.0))
         assertTrue("color=c=black:s=720x1280:r=30" in synthetic)
         assertFalse("-vf" in synthetic)

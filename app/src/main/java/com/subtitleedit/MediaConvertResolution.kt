@@ -69,9 +69,11 @@ internal object MediaConvertResolution {
         return even.takeIf(::validDimension)?.toString().orEmpty()
     }
 
-    fun filter(settings: MediaConvertResolutionSettings): String {
+    fun filter(settings: MediaConvertResolutionSettings, sourceWidth: Int?, sourceHeight: Int?): String? {
         require(settings.isValid) { "Invalid video resolution" }
-        val size = settings.size ?: return "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+        val size = settings.size ?: return if (sourceWidth != null && sourceHeight != null && sourceWidth % 2 == 0 && sourceHeight % 2 == 0) {
+            null  // Source already even, no scale needed
+        } else "scale=trunc(iw/2)*2:trunc(ih/2)*2"
         val w = size.width
         val h = size.height
         return when (settings.fitMode) {
