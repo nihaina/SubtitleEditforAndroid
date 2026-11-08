@@ -63,6 +63,7 @@ internal data class MediaConvertUiState(
     val availableEncoders: Set<String> = MediaConvertFormats.baselineEncoders,
     val availableAudioEncoders: Set<String> = MediaConvertAudioCodecs.baselineEncoders,
     val videoPixelFormats: Map<String, List<String>> = emptyMap(),
+    val hardwareCodecNames: Map<String, String> = emptyMap(),
     val outputDirectory: String = "",
     val saveToSourceDirectory: Boolean = false,
     val progress: Int = 0,
@@ -144,9 +145,13 @@ internal class MediaConvertViewModel(application: Application) :
                         MediaConvertSubtitles.hasBurnInFilter(FFmpegKit.execute("-hide_banner -filters").getAllLogsAsString()))
                 }.getOrDefault(Triple(emptySet<String>(), emptySet<String>(), false))
             }
-            setState { copy(availableEncoders = availableEncoders + videoEncoders, availableAudioEncoders = availableAudioEncoders + audioEncoders,
-                subtitleBurnInAvailable = burnInAvailable) }
-            val offeredVideoEncoders = formatList.flatMap { it.videoCodecs }.distinct().filter { it in videoEncoders }
+            // h264_mediacodec/hevc_mediacodec are present in every ffmpeg-kit build; only keep them when a real
+            // hardware encoder exists on this device, so the UI doesn't offer a fallback-to-software disguise.
+            val hardwareNames = withContext(Dispatchers.IO) { MediaConvertHardwareCodecs.detect() }
+            val filteredEncoders = videoEncoders - (MediaConvertVideoSettingsSupport.hardwareCodecs - hardwareNames.keys)
+            setState { copy(availableEncoders = availableEncoders + filteredEncoders, availableAudioEncoders = availableAudioEncoders + audioEncoders,
+                subtitleBurnInAvailable = burnInAvailable, hardwareCodecNames = hardwareNames) }
+            val offeredVideoEncoders = formatList.flatMap { it.videoCodecs }.distinct().filter { it in filteredEncoders }
             val pixels = withContext(Dispatchers.IO) {
                 offeredVideoEncoders.associateWith { codec ->
                     runCatching { MediaConvertVideoSettingsSupport.parsePixelFormats(FFmpegKit.execute("-hide_banner -h encoder=$codec").getAllLogsAsString()) }.getOrDefault(emptyList())
@@ -474,9 +479,11 @@ internal class MediaConvertViewModel(application: Application) :
             val subtitle = prepareSubtitle(cache, format, options)
             val codec = if (format.isAudioOnly) "" else format.videoEncoder(options.selectedVideoCodec)
             val durationMs = sourceProbe.durationSeconds?.let { (it * 1000.0).toLong() } ?: 0L
+            val hardwareAttempted = MediaConvertCommand.usesHardwareEncoder(format, options, sourceProbe, subtitle)
+            val passLogPath = File(cache, "video-pass").absolutePath
             val commands = try {
-                MediaConvertCommand.plan(input, output.absolutePath, format, options, sourceProbe, File(cache, "video-pass").absolutePath,
-                    currentState.videoPixelFormats[codec], subtitle)
+                MediaConvertCommand.plan(input, output.absolutePath, format, options, sourceProbe, passLogPath,
+                    currentState.videoPixelFormats[codec], subtitle, allowHardware = true, hardwareCodecNames = currentState.hardwareCodecNames)
             } catch (e: MediaConvertVideoSizeException) {
                 val message = when (e.reason) {
                     MediaConvertVideoSizeError.UNKNOWN_SOURCE_SIZE -> R.string.media_convert_size_source_required
@@ -488,12 +495,25 @@ internal class MediaConvertViewModel(application: Application) :
             } catch (e: IllegalArgumentException) {
                 return Result.failure(IllegalStateException(string(R.string.media_convert_video_settings_invalid, e.message.orEmpty())))
             }
-            var session: FFmpegSession? = null
-            for ((passIndex, command) in commands.withIndex()) {
-                kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                if (commands.size > 1) appendLog(string(R.string.media_convert_video_pass, passIndex + 1, commands.size))
-                session = executeConversion(command.toTypedArray(), index, total, passIndex, commands.size, durationMs)
-                if (!ReturnCode.isSuccess(session.getReturnCode())) break
+            suspend fun runCommands(cmds: List<List<String>>): FFmpegSession? {
+                var last: FFmpegSession? = null
+                for ((passIndex, command) in cmds.withIndex()) {
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    if (cmds.size > 1) appendLog(string(R.string.media_convert_video_pass, passIndex + 1, cmds.size))
+                    last = executeConversion(command.toTypedArray(), index, total, passIndex, cmds.size, durationMs)
+                    if (!ReturnCode.isSuccess(last.getReturnCode())) break
+                }
+                return last
+            }
+            var session = runCommands(commands)
+            // MediaCodec codec/profile init failure exits non-zero but not by user cancel; retry in software.
+            if (hardwareAttempted && session != null && !ReturnCode.isSuccess(session.getReturnCode()) &&
+                !ReturnCode.isCancel(session.getReturnCode()) && !taskController.isCancellationRequested) {
+                appendLog(string(R.string.media_convert_hardware_fallback))
+                output.delete()
+                val softwareCommands = MediaConvertCommand.plan(input, output.absolutePath, format, options, sourceProbe, passLogPath,
+                    currentState.videoPixelFormats[codec], subtitle, allowHardware = false, hardwareCodecNames = currentState.hardwareCodecNames)
+                session = runCommands(softwareCommands)
             }
             checkNotNull(session)
             if (!ReturnCode.isSuccess(session.getReturnCode()) || !output.isFile || output.length() <= 0L) {
@@ -578,7 +598,8 @@ internal class MediaConvertViewModel(application: Application) :
             val audio = info.getStreams().firstOrNull { it.getType() == "audio" }
             MediaConvertSource(video != null, info.getDuration()?.toDoubleOrNull()?.takeIf { it > 0 }, rate, video?.let(::streamBitrateBps),
                 audio?.getSampleRate()?.toIntOrNull(), audio?.getNumberProperty("channels")?.toInt(), audio?.let(::streamBitrateBps), audio?.getChannelLayout(),
-                video?.getStringProperty("pix_fmt"), audio != null, sourceSizeBytes(uri), video?.getCodec(), audio?.getCodec())
+                video?.getStringProperty("pix_fmt"), audio != null, sourceSizeBytes(uri), video?.getCodec(), audio?.getCodec(),
+                video?.getWidth()?.toInt(), video?.getHeight()?.toInt())
         } catch (_: Exception) { null }
         finally { releaseFfmpegInput(input) }
     }

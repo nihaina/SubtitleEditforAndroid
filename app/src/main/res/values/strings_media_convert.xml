@@ -183,6 +183,7 @@
     <string name="media_convert_video_advanced_hint">复制视频流时这些选项不生效。二次编码和像素格式按所选编码器的能力提供；二次编码需先指定视频码率或大小。</string>
     <string name="media_convert_video_rate_control_hint">目标大小优先于视频码率；指定大小或码率时，CRF 和质量选项不参与编码。</string>
     <string name="media_convert_video_pass">正在执行第 %1$d/%2$d 遍编码…\n</string>
+    <string name="media_convert_hardware_fallback">硬件编码失败，回退到软件编码重试…\n</string>
     <string name="media_convert_video_settings_invalid">无法应用视频设置：%1$s</string>
     <string name="media_convert_size_duration_required">无法读取有效时长，请关闭大小限制后重试。</string>
     <string name="media_convert_size_source_required">无法读取源文件大小，不能按比例计算目标大小，请关闭大小限制后重试。</string>

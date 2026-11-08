@@ -15,17 +15,34 @@ internal data class MediaConvertSource(
     val hasAudio: Boolean = true,
     val fileSizeBytes: Long? = null,
     val videoCodecName: String? = null,
-    val audioCodecName: String? = null
+    val audioCodecName: String? = null,
+    val videoWidth: Int? = null,
+    val videoHeight: Int? = null
 )
 
 /** Builds argument arrays so SAF URLs and file names remain single arguments. */
 internal object MediaConvertCommand {
     fun plan(input: String, output: String, format: MediaConvertFormatInfo, options: MediaConvertOptions, source: MediaConvertSource?,
-             logPath: String, supportedPixelFormats: List<String>? = null, subtitle: MediaConvertSubtitleInput? = null): List<List<String>> =
+             logPath: String, supportedPixelFormats: List<String>? = null, subtitle: MediaConvertSubtitleInput? = null,
+             allowHardware: Boolean = true, hardwareCodecNames: Map<String, String> = emptyMap()): List<List<String>> =
         if (MediaConvertVideoSettingsSupport.usesTwoPass(format, options, source)) {
-            listOf(build(input, "/dev/null", format, options, source, supportedPixelFormats, MediaConvertPass(1, logPath), subtitle),
-                build(input, output, format, options, source, supportedPixelFormats, MediaConvertPass(2, logPath), subtitle))
-        } else listOf(build(input, output, format, options, source, supportedPixelFormats, subtitle = subtitle))
+            listOf(build(input, "/dev/null", format, options, source, supportedPixelFormats, MediaConvertPass(1, logPath), subtitle, allowHardware, hardwareCodecNames),
+                build(input, output, format, options, source, supportedPixelFormats, MediaConvertPass(2, logPath), subtitle, allowHardware, hardwareCodecNames))
+        } else listOf(build(input, output, format, options, source, supportedPixelFormats, subtitle = subtitle,
+            allowHardware = allowHardware, hardwareCodecNames = hardwareCodecNames))
+
+    /** True when the plan runs a MediaCodec encoder, i.e. when a software retry is meaningful. */
+    fun usesHardwareEncoder(format: MediaConvertFormatInfo, options: MediaConvertOptions, source: MediaConvertSource?,
+                            subtitle: MediaConvertSubtitleInput? = null): Boolean =
+        !format.isAudioOnly && !MediaConvertStreamCopy.copiesVideo(format, options, source, subtitle) &&
+            format.videoEncoder(options.selectedVideoCodec) in MediaConvertVideoSettingsSupport.hardwareCodecs
+
+    // MediaCodec decoders need 8-bit 4:2:0 input; 10-bit and 4:2:2/4:4:4 fail or silently truncate on many devices.
+    private val hardwareDecodable = setOf("h264", "hevc", "vp8", "vp9", "av1", "mpeg4", "mpeg2video")
+    private val hardwareDecodePixelFormats = setOf("yuv420p", "yuvj420p", "nv12")
+
+    private fun canHardwareDecode(source: MediaConvertSource?) =
+        source?.videoCodecName in hardwareDecodable && source?.videoPixelFormat in hardwareDecodePixelFormats
 
     // Keep existing indices stable; the video settings present these values in ascending order.
     val sampleRates = listOf(0, 48000, 44100, 22050, 16000, 8000, 32000, 96000, 88200, 192000, 176400, 24000, 11025, 12000,
@@ -35,10 +52,12 @@ internal object MediaConvertCommand {
         "libx264", "libx265" -> 0..51
         "libvpx", "libvpx-vp9", "libaom-av1" -> 0..63
         "libtheora" -> 0..10
+        "h264_mediacodec", "hevc_mediacodec" -> IntRange.EMPTY
         else -> 1..31
     }
 
     fun quality(codec: String, options: MediaConvertOptions): Int? {
+        if (codec in MediaConvertVideoSettingsSupport.hardwareCodecs) return null
         if (options.selectedQualityId == "-1") return null
         if (options.selectedQualityId == "custom") return options.customQuality.toIntOrNull()?.coerceIn(qualityRange(codec))
         val level = listOf("18", "23", "28", "33").indexOf(options.selectedQualityId)
@@ -51,13 +70,17 @@ internal object MediaConvertCommand {
     }
 
     fun build(input: String, output: String, format: MediaConvertFormatInfo, options: MediaConvertOptions, source: MediaConvertSource?,
-              supportedPixelFormats: List<String>? = null, pass: MediaConvertPass? = null, subtitle: MediaConvertSubtitleInput? = null): List<String> {
+              supportedPixelFormats: List<String>? = null, pass: MediaConvertPass? = null, subtitle: MediaConvertSubtitleInput? = null,
+              allowHardware: Boolean = true, hardwareCodecNames: Map<String, String> = emptyMap()): List<String> {
         subtitle?.let { MediaConvertSubtitles.validate(format, options, it) }
         val synthetic = !format.isAudioOnly && source?.hasVideo == false
         val selectedVideo = if (format.isAudioOnly) ""
             else if (MediaConvertStreamCopy.copiesVideo(format, options, source, subtitle)) "copy"
             else format.videoEncoder(options.selectedVideoCodec)
-        val video = if (synthetic && selectedVideo == "copy") format.videoEncoder("auto") else selectedVideo
+        val requestedVideo = if (synthetic && selectedVideo == "copy") format.videoEncoder("auto") else selectedVideo
+        // A failed MediaCodec attempt is retried with the matching software encoder.
+        val video = if (!allowHardware) MediaConvertVideoSettingsSupport.softwareFallback(requestedVideo) ?: requestedVideo else requestedVideo
+        val hardware = video in MediaConvertVideoSettingsSupport.hardwareCodecs
         if (!format.isAudioOnly && video != "copy") {
             require(options.resolution.isValid) { "Invalid video resolution" }
             require(options.videoSettings.isValid) { "Invalid video settings" }
@@ -76,6 +99,9 @@ internal object MediaConvertCommand {
                 val size = "${target.width}x${target.height}"
                 addAll(listOf("-f", "lavfi", "-i", "color=c=black:s=$size:r=30"))
             }
+            // Must precede the -i it applies to; frames come back as system-memory nv12/yuv420p, so filters still work.
+            // Only paired with a hardware encoder: with libx264 the encode dominates and the gain is marginal.
+            if (hardware && !synthetic && canHardwareDecode(source)) addAll(listOf("-hwaccel", "mediacodec"))
             addAll(listOf("-i", input))
             softSubtitle?.let { addAll(listOf("-i", it.path)) }
             when {
@@ -100,7 +126,14 @@ internal object MediaConvertCommand {
                 add("-dn")
                 if (video != "copy") {
                     val settings = options.videoSettings
-                    val bitrate = MediaConvertVideoSettingsSupport.targetBitrate(format, options, source)
+                    val targetBitrate = MediaConvertVideoSettingsSupport.targetBitrate(format, options, source)
+                    // MediaCodec has no CRF, and FFmpeg's 200 kb/s default would ruin the output, so always set a bitrate.
+                    val bitrate = targetBitrate ?: if (hardware) {
+                        val size = options.resolution.size
+                        MediaConvertVideoSettingsSupport.defaultHardwareBitrate(video, size?.width ?: source?.videoWidth,
+                            size?.height ?: source?.videoHeight, settings.frameRate.takeIf { it.isNotEmpty() }
+                                ?.let(MediaConvertVideoSettingsSupport::rate) ?: source?.frameRate)
+                    } else null
                     val q = if (bitrate == null) settings.crf?.takeIf { video in MediaConvertVideoSettingsSupport.crfCodecs }
                         ?.coerceIn(qualityRange(video)) ?: quality(video, options) else null
                     if (q != null) {
@@ -125,13 +158,17 @@ internal object MediaConvertCommand {
                     val rate = MediaConvertVideoSettingsSupport.frameRate(video, settings, source?.frameRate)
                     rate?.let { addAll(listOf("-r", it)) }
                     MediaConvertVideoSettingsSupport.keyframeFrames(settings, rate, source?.frameRate)?.let {
-                        addAll(listOf("-g", it.toString(), "-force_key_frames", "expr:gte(t,n_forced*${settings.keyframeSeconds.toDouble()})"))
+                        addAll(listOf("-g", it.toString()))
+                        // MediaCodec rounds -g to whole seconds and ignores forced keyframes.
+                        if (!hardware) addAll(listOf("-force_key_frames", "expr:gte(t,n_forced*${settings.keyframeSeconds.toDouble()})"))
                     }
                     if (video == "mpeg1video" || video == "mpeg2video") {
                         if (bitrate == null && q == null) addAll(listOf("-b:v", "2000k"))
                     }
                     if (bitrate != null) addAll(listOf("-b:v", MediaConvertVideoBitrate.ffmpegValue(bitrate)))
-                    if (video == "libx265" && format.formatName in setOf("mp4", "mov")) addAll(listOf("-tag:v", "hvc1"))
+                    // Without a pinned name FFmpeg takes whatever the platform lists first, often a software c2.android.* codec.
+                    if (hardware) hardwareCodecNames[video]?.let { addAll(listOf("-codec_name", it)) }
+                    if ((video == "libx265" || video == "hevc_mediacodec") && format.formatName in setOf("mp4", "mov")) addAll(listOf("-tag:v", "hvc1"))
                     if (pass != null) {
                         if (video == "libx265") {
                             val stats = pass.logPath.replace('\\', '/').replace(":", "\\:")

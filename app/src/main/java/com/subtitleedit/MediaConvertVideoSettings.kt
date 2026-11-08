@@ -38,6 +38,18 @@ internal class MediaConvertVideoSizeException(val reason: MediaConvertVideoSizeE
 internal object MediaConvertVideoSettingsSupport {
     val sizePercents = (90 downTo 10 step 10).toList()
     val crfCodecs = setOf("libx264", "libx265", "libvpx", "libvpx-vp9", "libaom-av1")
+
+    /** MediaCodec encoders: no CRF, presets or two-pass; rate control is -b:v only. */
+    val hardwareCodecs = setOf("h264_mediacodec", "hevc_mediacodec")
+    private val softwareEquivalent = mapOf("h264_mediacodec" to "libx264", "hevc_mediacodec" to "libx265")
+    fun softwareFallback(codec: String): String? = softwareEquivalent[codec]
+
+    /** Bits per pixel per frame; ~0.1 gives H.264 an acceptable result, HEVC needs about 30% less. */
+    fun defaultHardwareBitrate(codec: String, width: Int?, height: Int?, frameRate: Double?): Long {
+        val pixels = if (width != null && height != null && width > 0 && height > 0) width.toLong() * height else 1920L * 1080
+        val bits = pixels * (frameRate?.takeIf { it in 1.0..240.0 } ?: 30.0) * if (codec == "hevc_mediacodec") 0.07 else 0.1
+        return bits.toLong().coerceIn(500_000L, 80_000_000L)
+    }
     // libxvid's second pass opens an internal /tmp or current-directory file; neither is an app cache path on Android.
     val twoPassCodecs = setOf("libx264", "libx265", "mpeg1video", "mpeg2video", "mpeg4", "libvpx", "libvpx-vp9")
     val frameRates = listOf("12", "15", "24000/1001", "24", "25", "30000/1001", "30", "48", "50", "60000/1001", "60", "100", "120", "144", "240")
@@ -64,6 +76,9 @@ internal object MediaConvertVideoSettingsSupport {
         .find(log)?.groupValues?.get(1)?.trim()?.split(Regex("\\s+"))?.filter { it in pixelFormats }.orEmpty()
 
     fun supportedPixels(codec: String, detected: List<String>? = null): List<String> = detected?.takeIf { it.isNotEmpty() } ?: when (codec) {
+        // The CPU-buffer path of FFmpeg's MediaCodec encoders accepts only 8-bit nv12/yuv420p and many
+        // vendor codecs reject yuv420p at configure time, so offer only nv12.
+        "h264_mediacodec", "hevc_mediacodec" -> listOf("nv12")
         "libx264" -> listOf("yuv420p", "yuv422p", "yuv444p", "nv12", "nv16", "nv21", "yuv420p10le", "yuv422p10le", "yuv444p10le", "gray", "gray10le")
         // The bundled x265 build is Main10; an encoder probe takes precedence on other builds.
         "libx265" -> listOf("yuv420p10le", "yuv422p10le", "yuv444p10le", "gray10le")
@@ -73,6 +88,8 @@ internal object MediaConvertVideoSettingsSupport {
     }
 
     fun pixelFormat(codec: String, requested: String, source: String?, detected: List<String>?): String {
+        // Probed lists come from `-h encoder=` and can include yuv420p, which MediaCodec devices often refuse.
+        if (codec in hardwareCodecs) return "nv12"
         val available = supportedPixels(codec, detected)
         val selected = if (requested == "original") source else requested
         return selected?.takeIf { it in available } ?: "yuv420p".takeIf { it in available } ?: available.first()
