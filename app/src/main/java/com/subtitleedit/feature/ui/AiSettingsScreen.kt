@@ -26,7 +26,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,13 +52,26 @@ import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.util.defaultAiSubtitlesPerRequest
 import com.subtitleedit.util.AiProviderConfig
-import com.subtitleedit.ui.components.AppCard
 import com.subtitleedit.ui.components.AppOption
-import com.subtitleedit.ui.components.AppSection
 import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.ui.components.SectionHeader
-import com.subtitleedit.ui.components.SettingsSwitchRow
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.ui.settings.SettingsTileCard
+import com.subtitleedit.ui.settings.settingsPageBackground
+import com.subtitleedit.ui.settings.settingsPrimaryTextColor
+import com.subtitleedit.ui.settings.settingsSecondaryTextColor
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 
 enum class AiModelTarget {
     TRANSLATION,
@@ -157,10 +169,14 @@ fun AiSettingsScreen(
 ) {
     var showAddProvider by rememberSaveable { mutableStateOf(false) }
     var deletingProviderId by rememberSaveable { mutableStateOf<String?>(null) }
+    val pageBackground = settingsPageBackground()
     AppToolScaffold(
         title = stringResource(R.string.activity_settings_ai_entry),
         onBack = onNavigateBack,
         imePadding = true,
+        contentBackground = pageBackground,
+        topBarContainerColor = pageBackground,
+        topBarScrolledContainerColor = pageBackground,
         actions = {
             IconButton(onClick = onOpenChat) {
                 Icon(
@@ -279,7 +295,7 @@ private fun ProviderCard(
 ) {
     val provider = AiProviderConfig.getProvider(state.provider, state.providers)
     val uriHandler = LocalUriHandler.current
-    AppSection {
+    AiSection {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             SectionHeader(
                 stringResource(R.string.activity_ai_settings_provider_heading, provider.displayName),
@@ -314,7 +330,7 @@ private fun ProviderCard(
         var subtitlesPerRequestText by remember(state.subtitlesPerRequest) {
             mutableStateOf(state.subtitlesPerRequest.toString())
         }
-        OutlinedTextField(
+        AiTextField(
             value = subtitlesPerRequestText,
             onValueChange = { value ->
                 val digits = value.filter(Char::isDigit).take(4)
@@ -340,14 +356,14 @@ private fun ProviderCard(
                 defaultAiSubtitlesPerRequest(provider.templateId)
             ),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = settingsSecondaryTextColor(),
             modifier = Modifier.padding(top = 2.dp)
         )
         if (provider.isLocal) {
             Text(
                 text = stringResource(R.string.activity_ai_settings_local_model_label),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = settingsSecondaryTextColor(),
                 modifier = Modifier.padding(top = 8.dp)
             )
             Text(
@@ -355,6 +371,7 @@ private fun ProviderCard(
                     stringResource(R.string.activity_ai_settings_local_model_none)
                 },
                 style = MaterialTheme.typography.bodyLarge,
+                color = settingsPrimaryTextColor(),
                 modifier = Modifier.padding(top = 2.dp)
             )
             LocalModelRuntimeControls(
@@ -367,7 +384,7 @@ private fun ProviderCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedTextField(
+                AiTextField(
                     value = state.apiKey,
                     onValueChange = onApiKeyChange,
                     modifier = Modifier.weight(1f),
@@ -389,7 +406,7 @@ private fun ProviderCard(
                                 contentDescription = stringResource(
                                     if (state.apiKeyVisible) R.string.ai_api_key_hide else R.string.ai_api_key_show
                                 ),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                tint = settingsSecondaryTextColor()
                             )
                         }
                     }
@@ -401,7 +418,7 @@ private fun ProviderCard(
                     Icon(
                         painter = painterResource(R.drawable.ic_content_copy),
                         contentDescription = stringResource(R.string.ai_api_key_copy),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = settingsSecondaryTextColor()
                     )
                 }
             }
@@ -427,7 +444,7 @@ private fun ProviderCard(
                 )
             }
             if (provider.customEndpoint) {
-                OutlinedTextField(
+                AiTextField(
                     value = state.baseUrl,
                     onValueChange = onBaseUrlChange,
                     modifier = Modifier.fillMaxWidth(),
@@ -458,7 +475,7 @@ private fun LocalModelRuntimeControls(
         color = if (state.localModelLoaded) {
             MaterialTheme.colorScheme.primary
         } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
+            settingsSecondaryTextColor()
         },
         modifier = Modifier.padding(top = 8.dp)
     )
@@ -483,7 +500,7 @@ private fun LocalModelRuntimeControls(
                 stringResource(R.string.activity_ai_settings_local_model_load_progress, it)
             } ?: stringResource(R.string.activity_ai_settings_local_model_load_progress_unknown),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = settingsSecondaryTextColor(),
             modifier = Modifier.padding(top = 2.dp)
         )
     }
@@ -494,7 +511,7 @@ private fun LocalModelRuntimeControls(
                 formatMemoryBytes(state.localModelMemoryBytes)
             ),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = settingsSecondaryTextColor(),
             modifier = Modifier.padding(top = 2.dp)
         )
     }
@@ -502,7 +519,7 @@ private fun LocalModelRuntimeControls(
         Text(
             text = state.localModelStatus,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = settingsSecondaryTextColor(),
             modifier = Modifier.padding(top = 2.dp)
         )
     }
@@ -515,7 +532,10 @@ private fun LocalModelRuntimeControls(
         Button(
             onClick = onLoad,
             enabled = hasModel && !state.localModelLoaded && !state.localModelLoading,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier
+                .weight(1f)
+                .height(48.dp),
+            shape = CircleShape
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_download),
@@ -527,10 +547,13 @@ private fun LocalModelRuntimeControls(
                 modifier = Modifier.padding(start = 6.dp)
             )
         }
-        Button(
+        FilledTonalButton(
             onClick = onUnload,
             enabled = state.localModelLoaded || state.localModelLoading,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier
+                .weight(1f)
+                .height(48.dp),
+            shape = CircleShape
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_stop),
@@ -566,7 +589,7 @@ private fun TranslationSettingsCard(
     onFetchModels: () -> Unit
 ) {
     val provider = AiProviderConfig.getProvider(state.translationProvider, state.providers)
-    AppSection {
+    AiSection {
         SectionHeader(stringResource(R.string.activity_ai_settings_translation_title))
         ProviderSelector(
             label = stringResource(R.string.activity_ai_settings_text_02),
@@ -587,7 +610,7 @@ private fun TranslationSettingsCard(
                 onClick = onFetchModels
             )
         }
-        OutlinedTextField(
+        AiTextField(
             value = state.targetLanguage,
             onValueChange = onTargetLanguageChange,
             modifier = Modifier.fillMaxWidth(),
@@ -595,7 +618,7 @@ private fun TranslationSettingsCard(
             singleLine = true
         )
         if (provider.isLocal) {
-            SettingsSwitchRow(
+            AiSwitchRow(
                 title = stringResource(R.string.activity_ai_settings_local_thinking_title),
                 checked = state.translationLocalThinkingEnabled,
                 onCheckedChange = onLocalThinkingChange,
@@ -607,7 +630,7 @@ private fun TranslationSettingsCard(
                 onSelect = onReasoningChange
             )
         }
-        OutlinedTextField(
+        AiTextField(
             value = state.translationPrompt,
             onValueChange = onPromptChange,
             modifier = Modifier.fillMaxWidth(),
@@ -628,12 +651,12 @@ private fun PunctuationSettingsCard(
     onFetchModels: () -> Unit
 ) {
     val provider = AiProviderConfig.getProvider(state.punctuationProvider, state.providers)
-    AppSection {
+    AiSection {
         SectionHeader(stringResource(R.string.activity_ai_settings_punctuation_title))
         Text(
             text = stringResource(R.string.activity_ai_settings_punctuation_prompt_hint),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = settingsSecondaryTextColor()
         )
         ProviderSelector(
             label = stringResource(R.string.activity_ai_settings_text_02),
@@ -658,14 +681,14 @@ private fun PunctuationSettingsCard(
                 onSelect = onReasoningChange
             )
         } else {
-            SettingsSwitchRow(
+            AiSwitchRow(
                 title = stringResource(R.string.activity_ai_settings_local_thinking_title),
                 checked = state.punctuationLocalThinkingEnabled,
                 onCheckedChange = onLocalThinkingChange,
                 modifier = Modifier.padding(top = 8.dp)
             )
         }
-        OutlinedTextField(
+        AiTextField(
             value = state.punctuationPrompt,
             onValueChange = onPromptChange,
             modifier = Modifier.fillMaxWidth(),
@@ -694,7 +717,7 @@ private fun ModelField(
             onSelect = onModelChange
         )
     } else {
-        OutlinedTextField(
+        AiTextField(
             value = model,
             onValueChange = onModelChange,
             modifier = Modifier.fillMaxWidth(),
@@ -750,7 +773,7 @@ private fun <T> ChoiceField(
         expanded = expanded,
         onExpandedChange = { expanded = it }
     ) {
-        OutlinedTextField(
+        AiTextField(
             value = selected.label,
             onValueChange = {},
             modifier = Modifier
@@ -784,10 +807,10 @@ private fun FetchModelsButton(
     onClick: () -> Unit
 ) {
     if (!visible) return
-    TextButton(
+    FilledTonalButton(
         onClick = onClick,
         enabled = !loading,
-        modifier = Modifier.padding(start = 4.dp)
+        shape = CircleShape
     ) {
         if (loading) {
             CircularProgressIndicator(
@@ -804,6 +827,113 @@ private fun FetchModelsButton(
         Text(
             text = stringResource(R.string.activity_ai_settings_fetch_models),
             modifier = Modifier.padding(start = 8.dp)
+        )
+    }
+}
+
+/** Section tile in the settings page style; keeps AppSection's padding and inner spacing. */
+@Composable
+private fun AiSection(content: @Composable ColumnScope.() -> Unit) {
+    SettingsTileCard {
+        CompositionLocalProvider(LocalContentColor provides settingsPrimaryTextColor()) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
+        }
+    }
+}
+
+/**
+ * Standard Material 3 outlined field (label rests inside, floats onto the border when focused or
+ * filled). The container stays transparent so the label cut-out never shows a box; contrast comes
+ * from a visible outline instead.
+ */
+@Composable
+private fun AiTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    readOnly: Boolean = false,
+    label: @Composable (() -> Unit)? = null,
+    placeholder: @Composable (() -> Unit)? = null,
+    trailingIcon: @Composable (() -> Unit)? = null,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    singleLine: Boolean = false,
+    minLines: Int = 1
+) {
+    val text = settingsPrimaryTextColor()
+    val secondary = settingsSecondaryTextColor()
+    androidx.compose.material3.OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier,
+        readOnly = readOnly,
+        label = label,
+        placeholder = placeholder,
+        trailingIcon = trailingIcon,
+        visualTransformation = visualTransformation,
+        keyboardOptions = keyboardOptions,
+        singleLine = singleLine,
+        minLines = minLines,
+        shape = MaterialTheme.shapes.large,
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = text,
+            unfocusedTextColor = text,
+            focusedBorderColor = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+            focusedLabelColor = MaterialTheme.colorScheme.primary,
+            unfocusedLabelColor = secondary,
+            unfocusedTrailingIconColor = secondary,
+            focusedTrailingIconColor = secondary,
+            unfocusedPlaceholderColor = secondary,
+            focusedPlaceholderColor = secondary
+        )
+    )
+}
+
+/** Switch row matching the settings page switches (ticked thumb, haptic feedback). */
+@Composable
+private fun AiSwitchRow(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val haptic = LocalHapticFeedback.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .toggleable(
+                value = checked,
+                role = Role.Switch,
+                onValueChange = {
+                    haptic.performHapticFeedback(if (it) HapticFeedbackType.ToggleOn else HapticFeedbackType.ToggleOff)
+                    onCheckedChange(it)
+                }
+            )
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 16.dp),
+            style = MaterialTheme.typography.bodyLarge,
+            color = settingsPrimaryTextColor()
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = null,
+            thumbContent = if (checked) {
+                {
+                    Icon(
+                        painterResource(R.drawable.ic_check),
+                        contentDescription = null,
+                        modifier = Modifier.size(SwitchDefaults.IconSize)
+                    )
+                }
+            } else null
         )
     }
 }
