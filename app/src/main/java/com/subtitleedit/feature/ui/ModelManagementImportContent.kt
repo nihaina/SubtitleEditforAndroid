@@ -49,7 +49,6 @@ import com.subtitleedit.ui.settings.settingsChoiceSelectedTextColor
 import com.subtitleedit.ui.settings.settingsPrimaryTextColor
 import com.subtitleedit.ui.settings.settingsSecondaryTextColor
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.shape.RoundedCornerShape
 
 data class AsrModelImportUiState(
     val modelTitleRes: Int = R.string.model_import_whisper_model,
@@ -449,20 +448,23 @@ private fun LlmModelImportCard(
                     softWrap = false,
                     overflow = TextOverflow.Ellipsis
                 )
-                ModelFileControl(
-                    label = stringResource(R.string.model_mgmt_llm_file_label),
-                    value = state.modelValue.ifBlank { stringResource(R.string.model_import_not_selected) },
-                    selectLabel = stringResource(R.string.model_mgmt_llm_select_file),
-                    onSelect = { onAction(LlmModelImportAction.SelectModel) },
-                    enabled = state.actionsEnabled,
-                    fillSelectButton = true,
-                    showDownload = state.showModelDownload,
-                    showReset = state.showModelReset,
-                    downloadDescription = stringResource(R.string.model_mgmt_llm_download_title),
-                    onDownload = { onAction(LlmModelImportAction.DownloadModel) },
-                    onReset = { onAction(LlmModelImportAction.ResetModel) },
-                    modifier = Modifier.padding(top = 12.dp)
+                Text(
+                    text = stringResource(R.string.model_mgmt_llm_file_label),
+                    modifier = Modifier.padding(top = 12.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
                 )
+                ValueField(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                    Text(
+                        text = state.modelValue.ifBlank { stringResource(R.string.model_import_not_selected) },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = settingsSecondaryTextColor(),
+                        maxLines = 1,
+                        overflow = TextOverflow.MiddleEllipsis
+                    )
+                }
             }
             Column(
                 modifier = Modifier.padding(start = 12.dp),
@@ -493,6 +495,20 @@ private fun LlmModelImportCard(
                 }
             }
         }
+        // Full card width (not the column beside the config / switch buttons), so the
+        // "select GGUF model" label is not clipped.
+        ModelSelectRow(
+            selectLabel = stringResource(R.string.model_mgmt_llm_select_file),
+            onSelect = { onAction(LlmModelImportAction.SelectModel) },
+            enabled = state.actionsEnabled,
+            fillSelectButton = true,
+            showDownload = state.showModelDownload,
+            showReset = state.showModelReset,
+            downloadDescription = stringResource(R.string.model_mgmt_llm_download_title),
+            onDownload = { onAction(LlmModelImportAction.DownloadModel) },
+            onReset = { onAction(LlmModelImportAction.ResetModel) },
+            modifier = Modifier.padding(top = 8.dp)
+        )
         Text(
             text = stringResource(R.string.model_mgmt_llm_hint),
             style = MaterialTheme.typography.bodySmall,
@@ -636,16 +652,10 @@ private fun TonalPillButton(
     )
 }
 
-/** Inset capsule that shows a path / file name on the tile, like the value capsule of a settings row. */
+/** Plain path / file name text on the tile; no inset box so long names get the full width. */
 @Composable
 private fun ValueField(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(settingsChipColor())
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-    ) { content() }
+    Box(modifier = modifier.padding(vertical = 4.dp)) { content() }
 }
 
 @Composable
