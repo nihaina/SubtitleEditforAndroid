@@ -39,6 +39,11 @@ class MediaConvertCommandTest {
     }
 
     @Test
+    fun subtitleTypeDefaultsToSoftTrack() {
+        assertEquals(MediaConvertSubtitleType.SOFT, MediaConvertUiState().subtitleType)
+    }
+
+    @Test
     fun copyIgnoresAllEncodingAndFilterSettings() {
         val args = build("mkv", MediaConvertOptions(selectedVideoCodec = "copy", selectedAudioCodec = "copy", resolution = MediaConvertResolutionSettings(presetIndex = 3),
             videoBitrate = MediaConvertVideoBitrateSettings(MediaConvertBitrateMode.CUSTOM, "3000"), audioBitrate = "192", selectedQualityId = "23", sampleRateIndex = 2, channelIndex = 1))
@@ -59,6 +64,42 @@ class MediaConvertCommandTest {
         assertFalse("-filter_threads" in args)
         val filtered = MediaConvertCommand.build("input.mkv", "output.mp4", format("mp4"), options, source.copy(videoWidth = 1921))
         assertNotNull(filtered.value("-filter_threads"))
+    }
+
+    @Test
+    fun metadataOverridesAreAppliedToFinalOutputAndCoverNoneUnmapsAttachedPictures() {
+        val metadata = MediaConvertMetadata(cover = MediaConvertCoverMode.NONE, title = "Film", author = "Director", comment = "Note")
+        val args = MediaConvertCommand.build("in", "out.mp4", format("mp4"), MediaConvertOptions(),
+            MediaConvertSource(true, 2.0, attachedPictureStreamIndex = 3), metadata = metadata)
+        val tags = args.withIndex().filter { it.value == "-metadata" }.map { args[it.index + 1] }
+        assertEquals(listOf("title=Film", "author=Director", "comment=Note"), tags)
+        assertTrue(args.windowed(2).contains(listOf("-map", "-0:3")))
+        val defaults = MediaConvertCommand.build("in", "out.mp4", format("mp4"), MediaConvertOptions(), MediaConvertSource(true, 2.0))
+        assertFalse("-metadata" in defaults)
+        assertFalse(defaults.contains("-0:v:disp:attached_pic"))
+    }
+
+    @Test
+    fun coverDefaultPreservesAttachedPictureWhenVideoIsReencoded() {
+        val source = MediaConvertSource(true, 2.0, attachedPictureStreamIndex = 3)
+        val command = MediaConvertCommand.build("in", "out.mkv", format("mkv"),
+            MediaConvertOptions(selectedVideoCodec = "libx264"), source, metadata = MediaConvertMetadata())
+
+        assertTrue(command.windowed(2).contains(listOf("-map", "0:3")))
+        assertTrue(command.windowed(2).contains(listOf("-c:v:1", "copy")))
+        assertTrue(command.windowed(2).contains(listOf("-disposition:v:1", "attached_pic")))
+    }
+
+    @Test
+    fun twoPassMetadataOnlyAppearsOnTheFinalPass() {
+        val options = MediaConvertOptions(
+            videoBitrate = MediaConvertVideoBitrateSettings(MediaConvertBitrateMode.CUSTOM, "1200"),
+            videoSettings = MediaConvertVideoSettings(twoPass = true)
+        )
+        val plan = MediaConvertCommand.plan("in", "out.mp4", format("mp4"), options, MediaConvertSource(true, 2.0), "stats",
+            metadata = MediaConvertMetadata(title = "Film"))
+        assertFalse("-metadata" in plan.first())
+        assertTrue(plan.last().contains("title=Film"))
     }
 
     @Test

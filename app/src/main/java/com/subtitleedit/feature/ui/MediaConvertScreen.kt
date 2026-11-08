@@ -41,6 +41,7 @@ import com.subtitleedit.MediaConvertVideoBitrateSettings
 import com.subtitleedit.MediaConvertAudioBitrate
 import com.subtitleedit.MediaConvertAudioVbr
 import com.subtitleedit.MediaConvertSubtitleType
+import com.subtitleedit.MediaConvertMetadata
 import com.subtitleedit.MediaConvertVideoSettings
 import com.subtitleedit.MediaConvertVideoSettingsSupport
 import com.subtitleedit.ui.components.AppConflictDialog
@@ -135,12 +136,15 @@ internal fun MediaConvertScreen(
     onAudioVbrQualityChange: (Int) -> Unit = {},
     selectedSourceCount: Int = 0,
     subtitleFileName: String? = null,
-    subtitleType: MediaConvertSubtitleType = MediaConvertSubtitleType.BURN_IN,
+    subtitleType: MediaConvertSubtitleType = MediaConvertSubtitleType.SOFT,
     allowedSubtitleExtensions: Set<String> = emptySet(),
     subtitleBurnInAvailable: Boolean = false,
     onPickSubtitle: () -> Unit = {},
     onRemoveSubtitle: () -> Unit = {},
-    onSubtitleTypeChange: (MediaConvertSubtitleType) -> Unit = {}
+    onSubtitleTypeChange: (MediaConvertSubtitleType) -> Unit = {},
+    singleVideoSource: Boolean = false,
+    subtitleMetadata: MediaConvertMetadata = MediaConvertMetadata(),
+    onSubtitleMetadataChange: (MediaConvertMetadata) -> Unit = {}
 ) {
     var showResolutionDialog by rememberSaveable { mutableStateOf(false) }
     var showBitrateDialog by rememberSaveable { mutableStateOf(false) }
@@ -237,6 +241,13 @@ internal fun MediaConvertScreen(
                         onPick = onPickSubtitle,
                         onRemove = onRemoveSubtitle,
                         onTypeChanged = onSubtitleTypeChange
+                    )
+                },
+                infoContent = {
+                    MediaConvertInfoPage(
+                        enabled = singleVideoSource && !isConverting && !isAudioOutput,
+                        metadata = subtitleMetadata,
+                        onMetadataChanged = onSubtitleMetadataChange
                     )
                 },
                 moreContent = {

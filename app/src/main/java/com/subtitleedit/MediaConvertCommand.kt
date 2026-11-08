@@ -17,19 +17,21 @@ internal data class MediaConvertSource(
     val videoCodecName: String? = null,
     val audioCodecName: String? = null,
     val videoWidth: Int? = null,
-    val videoHeight: Int? = null
+    val videoHeight: Int? = null,
+    val videoStreamIndex: Long? = null,
+    val attachedPictureStreamIndex: Long? = null
 )
 
 /** Builds argument arrays so SAF URLs and file names remain single arguments. */
 internal object MediaConvertCommand {
     fun plan(input: String, output: String, format: MediaConvertFormatInfo, options: MediaConvertOptions, source: MediaConvertSource?,
              logPath: String, supportedPixelFormats: List<String>? = null, subtitle: MediaConvertSubtitleInput? = null,
-             allowHardware: Boolean = true, hardwareCodecNames: Map<String, String> = emptyMap()): List<List<String>> =
+             allowHardware: Boolean = true, hardwareCodecNames: Map<String, String> = emptyMap(), metadata: MediaConvertMetadata? = null): List<List<String>> =
         if (MediaConvertVideoSettingsSupport.usesTwoPass(format, options, source)) {
-            listOf(build(input, "/dev/null", format, options, source, supportedPixelFormats, MediaConvertPass(1, logPath), subtitle, allowHardware, hardwareCodecNames),
-                build(input, output, format, options, source, supportedPixelFormats, MediaConvertPass(2, logPath), subtitle, allowHardware, hardwareCodecNames))
+            listOf(build(input, "/dev/null", format, options, source, supportedPixelFormats, MediaConvertPass(1, logPath), subtitle, allowHardware, hardwareCodecNames, metadata),
+                build(input, output, format, options, source, supportedPixelFormats, MediaConvertPass(2, logPath), subtitle, allowHardware, hardwareCodecNames, metadata))
         } else listOf(build(input, output, format, options, source, supportedPixelFormats, subtitle = subtitle,
-            allowHardware = allowHardware, hardwareCodecNames = hardwareCodecNames))
+            allowHardware = allowHardware, hardwareCodecNames = hardwareCodecNames, metadata = metadata))
 
     /** True when the plan runs a MediaCodec encoder, i.e. when a software retry is meaningful. */
     fun usesHardwareEncoder(format: MediaConvertFormatInfo, options: MediaConvertOptions, source: MediaConvertSource?,
@@ -71,7 +73,7 @@ internal object MediaConvertCommand {
 
     fun build(input: String, output: String, format: MediaConvertFormatInfo, options: MediaConvertOptions, source: MediaConvertSource?,
               supportedPixelFormats: List<String>? = null, pass: MediaConvertPass? = null, subtitle: MediaConvertSubtitleInput? = null,
-              allowHardware: Boolean = true, hardwareCodecNames: Map<String, String> = emptyMap()): List<String> {
+              allowHardware: Boolean = true, hardwareCodecNames: Map<String, String> = emptyMap(), metadata: MediaConvertMetadata? = null): List<String> {
         subtitle?.let { MediaConvertSubtitles.validate(format, options, it) }
         val synthetic = !format.isAudioOnly && source?.hasVideo == false
         val selectedVideo = if (format.isAudioOnly) ""
@@ -113,7 +115,13 @@ internal object MediaConvertCommand {
                     source?.durationSeconds?.takeIf { it > 0 }?.let { addAll(listOf("-t", String.format(Locale.US, "%.3f", it))) }
                 }
                 else -> {
-                    addAll(listOf("-map", "0:v:0", "-c:v", video))
+                    addAll(listOf("-map", "0:${source?.videoStreamIndex ?: "v:0"}", "-c:v", video))
+                    if (!analysisPass) source?.attachedPictureStreamIndex?.let { coverIndex ->
+                        when {
+                            metadata?.cover == MediaConvertCoverMode.DEFAULT -> addAll(listOf("-map", "0:$coverIndex", "-c:v:1", "copy", "-disposition:v:1", "attached_pic"))
+                            metadata?.cover == MediaConvertCoverMode.NONE -> addAll(listOf("-map", "-0:$coverIndex"))
+                        }
+                    }
                     if (!analysisPass) addAll(listOf("-map", "0:a:0?", "-c:a", audio))
                 }
             }
@@ -213,6 +221,7 @@ internal object MediaConvertCommand {
                 addAll(listOf("-threads", threads.toString()))
                 if (hasVideoFilters) addAll(listOf("-filter_threads", threads.toString()))
             }
+            if (!analysisPass && !format.isAudioOnly) metadata?.let { addAll(it.arguments()) }
             addAll(listOf("-f", if (analysisPass) "null" else format.formatName, output))
         }
     }

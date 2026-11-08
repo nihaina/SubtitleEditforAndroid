@@ -29,9 +29,10 @@ internal fun MediaConvertSettingsPager(
     moreContent: @Composable () -> Unit,
     advancedContent: @Composable () -> Unit,
     showSubtitlePage: Boolean = false,
-    subtitleContent: @Composable () -> Unit = {}
+    subtitleContent: @Composable () -> Unit = {},
+    infoContent: @Composable () -> Unit = {}
 ) {
-    val pageCount = if (showSubtitlePage) 3 else 2
+    val pageCount = if (showSubtitlePage) 4 else 2
     val pagerState = rememberPagerState { pageCount }
     val selectedTab = pagerState.currentPage.coerceIn(0, pageCount - 1)
     val scope = rememberCoroutineScope()
@@ -40,7 +41,8 @@ internal fun MediaConvertSettingsPager(
     }
     AppSection {
         PrimaryTabRow(selectedTabIndex = selectedTab) {
-            listOf(R.string.media_convert_more_settings, R.string.media_convert_advanced_options, R.string.media_convert_subtitles)
+            listOf(R.string.media_convert_more_settings, R.string.media_convert_advanced_options,
+                R.string.media_convert_subtitles, R.string.media_convert_information)
                 .take(pageCount).forEachIndexed { index, title ->
                     Tab(
                         selected = selectedTab == index,
@@ -61,7 +63,8 @@ internal fun MediaConvertSettingsPager(
                 when (page) {
                     0 -> moreContent()
                     1 -> advancedContent()
-                    else -> subtitleContent()
+                    2 -> subtitleContent()
+                    else -> infoContent()
                 }
             }
         }
