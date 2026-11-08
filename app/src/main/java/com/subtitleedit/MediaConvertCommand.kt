@@ -92,6 +92,7 @@ internal object MediaConvertCommand {
         val burnSubtitle = subtitle?.takeIf { it.type == MediaConvertSubtitleType.BURN_IN }
         val audio = if (MediaConvertStreamCopy.copiesAudio(format, options, source)) "copy"
             else format.audioEncoder(options.selectedAudioCodec)
+        var hasVideoFilters = false
         return buildList {
             addAll(listOf("-y", "-hide_banner"))
             if (synthetic) {
@@ -152,7 +153,10 @@ internal object MediaConvertCommand {
                         settings.deinterlace != MediaConvertDeinterlace.OFF || settings.filter != MediaConvertVideoFilter.NONE || burnSubtitle != null) {
                         val filters = listOfNotNull(MediaConvertVideoSettingsSupport.filters(options.resolution, settings, source),
                             burnSubtitle?.let(MediaConvertSubtitles::burnFilter)).joinToString(",")
-                        if (filters.isNotEmpty()) addAll(listOf("-vf", filters))
+                        if (filters.isNotEmpty()) {
+                            addAll(listOf("-vf", filters))
+                            hasVideoFilters = true
+                        }
                     }
                     val targetPixFmt = MediaConvertVideoSettingsSupport.pixelFormat(video, settings.pixelFormat, source?.videoPixelFormat, supportedPixelFormats)
                     if (targetPixFmt != source?.videoPixelFormat) addAll(listOf("-pix_fmt", targetPixFmt))
@@ -201,6 +205,13 @@ internal object MediaConvertCommand {
                     // Very low rates can produce an automatic frame size below WavPack's minimum of 128.
                     addAll(listOf("-frame_size:a", "1024"))
                 }
+            }
+            if (video != "copy" && !hardware) {
+                // Use the available CPU for software encoders while keeping thread creation
+                // bounded on devices that report a large heterogeneous core count.
+                val threads = Runtime.getRuntime().availableProcessors().coerceIn(1, 16)
+                addAll(listOf("-threads", threads.toString()))
+                if (hasVideoFilters) addAll(listOf("-filter_threads", threads.toString()))
             }
             addAll(listOf("-f", if (analysisPass) "null" else format.formatName, output))
         }

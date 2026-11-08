@@ -6,6 +6,7 @@ import com.subtitleedit.util.PickedUriAccess
 import android.net.Uri
 import android.os.SystemClock
 import android.provider.OpenableColumns
+import android.system.Os
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.viewModelScope
 import com.arthenica.ffmpegkit.FFmpegKit
@@ -90,8 +91,9 @@ internal class MediaConvertViewModel(application: Application) :
         private const val OUTPUT_DIRECTORY_KEY = "media_convert"
     }
 
-    private data class SelectedMediaFile(val uri: Uri, val fileName: String, val mediaInfo: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null, val videoPixelFormat: String? = null, val fileSizeBytes: Long? = null)
-    private data class SourceDescription(val text: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null, val videoPixelFormat: String? = null, val fileSizeBytes: Long? = null)
+    private data class SelectedMediaFile(val uri: Uri, val fileName: String, val mediaInfo: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null, val videoPixelFormat: String? = null, val fileSizeBytes: Long? = null, val source: MediaConvertSource? = null)
+    private data class SourceDescription(val text: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null, val videoPixelFormat: String? = null, val fileSizeBytes: Long? = null, val source: MediaConvertSource? = null)
+    private data class DirectFileOutput(val staging: File, val target: File, val fileName: String)
     private data class OutputResult(val uri: Uri, val fileName: String)
 
     val formatList: List<MediaConvertFormatInfo>
@@ -335,7 +337,10 @@ internal class MediaConvertViewModel(application: Application) :
                 }
                 val current = selectedMediaFiles.indexOfFirst { it.uri == uri }
                 if (current < 0) return@forEachIndexed
-                selectedMediaFiles = selectedMediaFiles.toMutableList().also { list -> list[current] = list[current].copy(mediaInfo = info.text, videoSize = info.videoSize, videoBitrateBps = info.videoBitrateBps, audioBitrateBps = info.audioBitrateBps, audioSampleRate = info.audioSampleRate, audioChannels = info.audioChannels, audioChannelLayout = info.audioChannelLayout, videoPixelFormat = info.videoPixelFormat, fileSizeBytes = info.fileSizeBytes) }
+                val source = info.source?.let { probed ->
+                    if (isLikelyAudioFile(selected)) probed.copy(hasVideo = false, videoBitrateBps = null) else probed
+                }
+                selectedMediaFiles = selectedMediaFiles.toMutableList().also { list -> list[current] = list[current].copy(mediaInfo = info.text, videoSize = info.videoSize, videoBitrateBps = info.videoBitrateBps, audioBitrateBps = info.audioBitrateBps, audioSampleRate = info.audioSampleRate, audioChannels = info.audioChannels, audioChannelLayout = info.audioChannelLayout, videoPixelFormat = info.videoPixelFormat, fileSizeBytes = info.fileSizeBytes, source = source) }
                 setState {
                     copy(
                         selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo, it.videoSize, it.videoBitrateBps, it.audioBitrateBps, it.audioSampleRate, it.audioChannels, it.audioChannelLayout, it.videoPixelFormat, it.fileSizeBytes) },
@@ -352,7 +357,9 @@ internal class MediaConvertViewModel(application: Application) :
         val size = sourceSizeBytes(uri)
         return try {
             input = ffmpegInput(uri)
-            (readMediaInfo(input) ?: SourceDescription(string(R.string.media_convert_probe_failed))).copy(fileSizeBytes = size)
+            (readMediaInfo(input) ?: SourceDescription(string(R.string.media_convert_probe_failed))).let { description ->
+                description.copy(fileSizeBytes = size, source = description.source?.copy(fileSizeBytes = size))
+            }
         } catch (e: Exception) {
             SourceDescription(string(R.string.media_convert_probe_exception, e.message ?: string(R.string.media_convert_unknown)), fileSizeBytes = size)
         }
@@ -390,8 +397,19 @@ internal class MediaConvertViewModel(application: Application) :
         }.trimEnd()
         val video = info.getStreams().firstOrNull { it.getType() == "video" }
         val audio = info.getStreams().firstOrNull { it.getType() == "audio" }
+        val rate = video?.getAverageFrameRate()?.split('/')?.let { parts ->
+            val numerator = parts.firstOrNull()?.toDoubleOrNull()
+            val denominator = parts.getOrNull(1)?.toDoubleOrNull() ?: 1.0
+            if (numerator != null && denominator > 0) (numerator / denominator).takeIf { it > 0 } else null
+        }
+        val source = MediaConvertSource(video != null, info.getDuration()?.toDoubleOrNull()?.takeIf { it > 0 }, rate,
+            video?.let(::streamBitrateBps), audio?.getSampleRate()?.toIntOrNull(), audio?.getNumberProperty("channels")?.toInt(),
+            audio?.let(::streamBitrateBps), audio?.getChannelLayout(), video?.getStringProperty("pix_fmt"), audio != null,
+            videoCodecName = video?.getCodec(), audioCodecName = audio?.getCodec(),
+            videoWidth = video?.getWidth()?.toInt(), videoHeight = video?.getHeight()?.toInt())
         return SourceDescription(text, video?.let(::videoSize), video?.let(::streamBitrateBps), audio?.let(::streamBitrateBps),
-            audio?.getSampleRate()?.toIntOrNull()?.takeIf { it > 0 }, audio?.getNumberProperty("channels")?.toInt(), audio?.getChannelLayout(), video?.getStringProperty("pix_fmt"))
+            audio?.getSampleRate()?.toIntOrNull()?.takeIf { it > 0 }, audio?.getNumberProperty("channels")?.toInt(),
+            audio?.getChannelLayout(), video?.getStringProperty("pix_fmt"), source = source)
     }
 
     private fun streamBitrateBps(stream: StreamInformation): Long? = MediaConvertVideoBitrate.sourceBitsPerSecond(
@@ -455,17 +473,27 @@ internal class MediaConvertViewModel(application: Application) :
 
     private suspend fun convertFile(file: SelectedMediaFile, index: Int, total: Int, format: MediaConvertFormatInfo, desiredName: String, overwrite: Boolean, reserved: MutableSet<String>, outputUri: Uri): Result<OutputResult> {
         val cache = createTaskCache("convert"); var input: String? = null
+        var directSafOutput: Triple<String, Uri, DocumentFile>? = null
+        var directFileOutput: DirectFileOutput? = null
+        var outputFile: File? = null
+        var outputPath = ""
+        var outputCommitted = false
         return try {
             val prefix = "[${index + 1}/$total]"
             appendLog(string(R.string.media_convert_start_file, prefix, file.fileName))
-            val sourceProbe = withContext(Dispatchers.IO) { probeSourceUri(file.uri)?.let { if (isLikelyAudioFile(file)) it.copy(hasVideo = false, videoBitrateBps = null) else it } ?: MediaConvertSource(true, null) }
+            val sourceProbe = file.source ?: withContext(Dispatchers.IO) {
+                probeSourceUri(file.uri)?.let { if (isLikelyAudioFile(file)) it.copy(hasVideo = false, videoBitrateBps = null) else it }
+            } ?: MediaConvertSource(true, null)
             val options = currentState.options
-            if (!format.isAudioOnly && options.videoBitrate.mode == MediaConvertBitrateMode.ORIGINAL &&
-                options.videoSettings.sizeLimitPercent == null && (options.selectedVideoCodec != "copy" || !sourceProbe.hasVideo) && sourceProbe.videoBitrateBps == null) {
+            val videoWillCopy = MediaConvertStreamCopy.copiesVideo(format, options, sourceProbe) ||
+                (options.selectedVideoCodec == "copy" && sourceProbe.hasVideo)
+            if (!format.isAudioOnly && !videoWillCopy && options.videoBitrate.mode == MediaConvertBitrateMode.ORIGINAL &&
+                options.videoSettings.sizeLimitPercent == null && sourceProbe.videoBitrateBps == null) {
                 return Result.failure(IllegalStateException(string(R.string.media_convert_bitrate_source_unavailable)))
             }
             val audioCodec = format.audioEncoder(options.selectedAudioCodec)
-            if (options.audioBitrate == MediaConvertAudioBitrate.ORIGINAL && audioCodec != "copy" &&
+            val audioWillCopy = MediaConvertStreamCopy.copiesAudio(format, options, sourceProbe)
+            if (options.audioBitrate == MediaConvertAudioBitrate.ORIGINAL && !audioWillCopy && audioCodec != "copy" &&
                 MediaConvertAudioVbr.activeQuality(format, options) == null &&
                 MediaConvertAudioCodecs.profile(audioCodec, format.formatName).adjustableBitrate && sourceProbe.audioBitrateBps == null) {
                 return Result.failure(IllegalStateException(string(R.string.media_convert_audio_bitrate_source_unavailable)))
@@ -475,20 +503,34 @@ internal class MediaConvertViewModel(application: Application) :
                 appendLog(string(R.string.media_convert_no_video_stream, prefix))
             }
             appendLog(string(R.string.media_convert_converting, prefix))
-            // Prepare output path: SAF direct write when possible, else cache file
+            // Write to a temporary sibling for file outputs so a failed conversion never replaces a good file.
             val desiredOutputName = if (overwrite) desiredName else uniqueOutputName(outputUri, desiredName, reserved)
-            val directSafOutput = if (outputUri.scheme != "file") {
-                runCatching {
+            if (outputUri.scheme == "file") {
+                val dir = File(outputUri.path ?: error(string(R.string.media_convert_invalid_output_directory)))
+                if (!dir.exists() && !dir.mkdirs()) error(string(R.string.media_convert_create_output_directory_failed))
+                val target = File(dir, desiredOutputName)
+                val staging = File(dir, ".${desiredOutputName}.${System.nanoTime()}.part")
+                check(staging.createNewFile()) { string(R.string.media_convert_create_output_failed, staging.name) }
+                directFileOutput = DirectFileOutput(staging, target, desiredOutputName)
+                outputFile = staging
+                outputPath = staging.absolutePath
+            } else {
+                directSafOutput = runCatching {
                     val dir = DocumentFile.fromTreeUri(app, outputUri) ?: return@runCatching null
                     if (overwrite) dir.findFile(desiredOutputName)?.delete()
                     val target = dir.createFile(getMimeType(desiredOutputName), desiredOutputName) ?: return@runCatching null
-                    com.arthenica.ffmpegkit.FFmpegKitConfig.getSafParameterForWrite(app, target.uri)?.let { safPath -> Triple(safPath, target.uri, target) }
+                    val safPath = runCatching { FFmpegKitConfig.getSafParameterForWrite(app, target.uri) }
+                        .getOrElse { target.delete(); throw it }
+                    Triple(safPath, target.uri, target)
                 }.getOrNull()
-            } else null
-            val outputPath = directSafOutput?.first ?: File(cache, "output.${format.extension}").absolutePath
-            val outputFile = if (directSafOutput == null) File(outputPath) else null
-            val resultUri = directSafOutput?.second
-            val resultDoc = directSafOutput?.third
+                if (directSafOutput != null) {
+                    outputPath = directSafOutput?.first ?: error(string(R.string.media_convert_output_write_failed))
+                } else {
+                    val cachedOutput = File(cache, "output.${format.extension}")
+                    outputFile = cachedOutput
+                    outputPath = cachedOutput.absolutePath
+                }
+            }
             val subtitle = prepareSubtitle(cache, format, options)
             val codec = if (format.isAudioOnly) "" else format.videoEncoder(options.selectedVideoCodec)
             val durationMs = sourceProbe.durationSeconds?.let { (it * 1000.0).toLong() } ?: 0L
@@ -524,7 +566,14 @@ internal class MediaConvertViewModel(application: Application) :
                 !ReturnCode.isCancel(session.getReturnCode()) && !taskController.isCancellationRequested) {
                 appendLog(string(R.string.media_convert_hardware_fallback))
                 outputFile?.delete()
-                resultDoc?.delete()
+                directSafOutput?.let { (safPath, _, document) ->
+                    releaseFfmpegOutput(safPath)
+                    document.delete()
+                    directSafOutput = null
+                    val cachedOutput = File(cache, "output.${format.extension}")
+                    outputFile = cachedOutput
+                    outputPath = cachedOutput.absolutePath
+                }
                 val softwareCommands = MediaConvertCommand.plan(input, outputPath, format, options, sourceProbe, passLogPath,
                     currentState.videoPixelFormats[codec], subtitle, allowHardware = false, hardwareCodecNames = currentState.hardwareCodecNames)
                 session = runCommands(softwareCommands)
@@ -540,27 +589,38 @@ internal class MediaConvertViewModel(application: Application) :
             }
             // SAF direct write: verify output and return result directly
             if (directSafOutput != null) {
-                checkNotNull(resultDoc)
-                checkNotNull(resultUri)
+                val (_, resultUri, resultDoc) = directSafOutput ?: error(string(R.string.media_convert_output_write_failed))
                 if (resultDoc.length() == 0L) {
-                    resultDoc.delete()
                     return Result.failure(IllegalStateException(string(R.string.media_convert_output_empty)))
                 }
                 appendLog(string(R.string.media_convert_file_completed, prefix, desiredOutputName))
+                outputCommitted = true
                 return Result.success(OutputResult(resultUri, resultDoc.name ?: desiredOutputName))
             }
-            // Cache file: verify and copy to final destination
-            checkNotNull(outputFile)
-            if (!outputFile.isFile || outputFile.length() <= 0L) {
+            val encodedFile = checkNotNull(outputFile)
+            if (!encodedFile.isFile || encodedFile.length() <= 0L) {
                 return Result.failure(IllegalStateException(string(R.string.media_convert_ffmpeg_invalid_output)))
             }
-            val copied = withContext(Dispatchers.IO) { copyFileToOutputDirectory(outputFile, desiredName, overwrite, reserved, outputUri) }
-                ?: return Result.failure(IllegalStateException(string(R.string.media_convert_output_write_failed)))
-            appendLog(string(R.string.media_convert_file_completed, prefix, copied.fileName))
-            Result.success(copied)
+            val directFile = directFileOutput
+            val output = if (directFile != null) {
+                withContext(Dispatchers.IO) { publishDirectFileOutput(directFile, overwrite) }
+            } else {
+                withContext(Dispatchers.IO) { copyFileToOutputDirectory(encodedFile, desiredName, overwrite, reserved, outputUri) }
+            } ?: return Result.failure(IllegalStateException(string(R.string.media_convert_output_write_failed)))
+            outputCommitted = true
+            appendLog(string(R.string.media_convert_file_completed, prefix, output.fileName))
+            Result.success(output)
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { Result.failure(e) }
-        finally { releaseFfmpegInput(input); withContext(NonCancellable + Dispatchers.IO) { cache.deleteRecursively() } }
+        finally {
+            directSafOutput?.let { (safPath, _, document) ->
+                if (!outputCommitted) document.delete()
+                releaseFfmpegOutput(safPath)
+            }
+            if (!outputCommitted) directFileOutput?.staging?.delete()
+            releaseFfmpegInput(input)
+            withContext(NonCancellable + Dispatchers.IO) { cache.deleteRecursively() }
+        }
     }
 
     private suspend fun prepareSubtitle(cache: File, format: MediaConvertFormatInfo, options: MediaConvertOptions): MediaConvertSubtitleInput? {
@@ -613,6 +673,9 @@ internal class MediaConvertViewModel(application: Application) :
         ?: FFmpegKitConfig.getSafParameterForRead(app, uri)
     private fun releaseFfmpegInput(input: String?) {
         if (input?.startsWith("saf:") == true) FFmpegKitConfig.unregisterSafProtocolUrl(input)
+    }
+    private fun releaseFfmpegOutput(output: String?) {
+        if (output?.startsWith("saf:") == true) runCatching { FFmpegKitConfig.unregisterSafProtocolUrl(output) }
     }
     private fun probeSourceUri(uri: Uri): MediaConvertSource? {
         var input: String? = null
@@ -687,6 +750,12 @@ internal class MediaConvertViewModel(application: Application) :
             }
             OutputResult(target.uri, target.name ?: name)
         }
+    }.getOrNull()
+    private fun publishDirectFileOutput(output: DirectFileOutput, overwrite: Boolean): OutputResult? = runCatching {
+        if (!overwrite && output.target.exists()) error(string(R.string.media_convert_output_write_failed))
+        Os.rename(output.staging.absolutePath, output.target.absolutePath)
+        if (!output.target.isFile || output.target.length() <= 0L) error(string(R.string.media_convert_output_empty))
+        OutputResult(Uri.fromFile(output.target), output.fileName)
     }.getOrNull()
     private fun getMimeType(name: String) = formatList.firstOrNull {
         it.extension == name.substringAfterLast('.', "").lowercase(Locale.ROOT)

@@ -152,7 +152,7 @@
     <string name="media_convert_size_hint">百分比以源文件大小为基准，右侧为预计目标大小。保留完整时长，优先于视频码率和 CRF；实际大小可能有偏差，二次编码通常更接近目标。无法读取源大小、时长或目标大小不足以容纳音视频时会提示失败。</string>
     <string name="media_convert_size_batch">以上显示首个文件的预计大小；批量转换时，每个文件分别按所选比例计算。</string>
     <string name="media_convert_two_pass">二次编码</string>
-    <string name="media_convert_two_pass_hint">先分析画面，再进行第二遍编码；耗时更长，平均码率分配更准确。需设置视频目标码率或大小。支持 H.264、H.265、MPEG-1/2/4、VP8、VP9；切换到其他编码器（包括 Xvid）或自动码率时不生效。</string>
+    <string name="media_convert_two_pass_hint">先分析画面，再进行第二遍编码；通常耗时约翻倍，平均码率分配更准确。需设置视频目标码率或大小。支持 H.264、H.265、MPEG-1/2/4、VP8、VP9；切换到其他编码器（包括 Xvid）或自动码率时不生效。</string>
     <string name="media_convert_setting_inactive">%1$s（当前不生效）</string>
     <string name="media_convert_keyframe_interval">关键帧间隔</string>
     <string name="media_convert_keyframe_hint">自定义范围：0.1–600 秒。按时间强制插入关键帧；编码器可因场景变化提前插入关键帧。</string>

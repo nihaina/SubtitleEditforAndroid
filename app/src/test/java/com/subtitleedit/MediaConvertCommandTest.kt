@@ -44,8 +44,21 @@ class MediaConvertCommandTest {
             videoBitrate = MediaConvertVideoBitrateSettings(MediaConvertBitrateMode.CUSTOM, "3000"), audioBitrate = "192", selectedQualityId = "23", sampleRateIndex = 2, channelIndex = 1))
         assertEquals("copy", args.value("-c:v"))
         assertEquals("copy", args.value("-c:a"))
-        listOf("-vf", "-pix_fmt", "-crf", "-q:v", "-b:v", "-b:a", "-ar", "-ac").forEach { assertFalse(it, it in args) }
+        listOf("-vf", "-pix_fmt", "-crf", "-q:v", "-b:v", "-b:a", "-ar", "-ac", "-threads", "-filter_threads").forEach { assertFalse(it, it in args) }
         assertEquals(listOf("0:v:0", "0:a:0?"), args.withIndex().filter { it.value == "-map" }.map { args[it.index + 1] })
+    }
+
+    @Test
+    fun softwareVideoEncodingUsesBoundedCpuThreadCount() {
+        val source = MediaConvertSource(true, 2.0, videoCodecName = "h264", videoPixelFormat = "yuv420p", videoWidth = 1920, videoHeight = 1080)
+        val options = MediaConvertOptions(selectedVideoCodec = "libx264")
+        val args = MediaConvertCommand.build("input.mkv", "output.mp4", format("mp4"), options, source)
+        val threads = args.value("-threads")?.toIntOrNull()
+        assertNotNull(threads)
+        assertTrue(threads!! in 1..16)
+        assertFalse("-filter_threads" in args)
+        val filtered = MediaConvertCommand.build("input.mkv", "output.mp4", format("mp4"), options, source.copy(videoWidth = 1921))
+        assertNotNull(filtered.value("-filter_threads"))
     }
 
     @Test

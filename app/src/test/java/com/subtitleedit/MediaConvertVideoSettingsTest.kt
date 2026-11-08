@@ -103,6 +103,8 @@ class MediaConvertVideoSettingsTest {
         assertEquals(2, plan.size)
         assertEquals("1", plan[0].value("-pass"))
         assertEquals("2", plan[1].value("-pass"))
+        assertNotNull(plan[0].value("-threads"))
+        assertNotNull(plan[1].value("-threads"))
         assertEquals(plan[0].value("-passlogfile"), plan[1].value("-passlogfile"))
         assertEquals(plan[0].value("-vf"), plan[1].value("-vf"))
         assertEquals("null", plan[0].value("-f"))

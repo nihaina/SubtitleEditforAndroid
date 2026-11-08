@@ -25,6 +25,7 @@ class MediaConvertHardwareEncoderTest {
         assertFalse("-crf" in cmd)
         assertFalse("-q:v" in cmd)
         assertFalse("-preset" in cmd)
+        assertFalse("-threads" in cmd)
         assertFalse("-force_key_frames" in cmd)
     }
 
