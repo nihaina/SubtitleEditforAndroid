@@ -4,25 +4,15 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
-import android.widget.Spinner
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.clickable
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,7 +26,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -45,6 +34,21 @@ import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.ui.settings.SettingsTileCard
+import com.subtitleedit.ui.settings.settingsOutlinedTextFieldColors
+import com.subtitleedit.ui.settings.settingsPageBackground
+import com.subtitleedit.ui.settings.settingsPrimaryTextColor
+import com.subtitleedit.ui.settings.settingsSecondaryTextColor
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 
 /** System TTS engine selection page. */
 class TtsSettingsActivity : AppComposeActivity() {
@@ -106,41 +110,34 @@ internal fun TtsSettingsScreen(
         ?: SettingsManager.TTS_LANGUAGE_AUTO
     var showHelp by rememberSaveable { mutableStateOf(false) }
 
+    val pageBackground = settingsPageBackground()
     AppToolScaffold(
         title = stringResource(R.string.tts_settings),
         onBack = onBack,
-        imePadding = true
+        imePadding = true,
+        contentBackground = pageBackground,
+        topBarContainerColor = pageBackground,
+        topBarScrolledContainerColor = pageBackground
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = stringResource(R.string.tts_engine),
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f)
-                )
+        TtsSection(
+            title = stringResource(R.string.tts_engine),
+            description = stringResource(R.string.tts_engine_description),
+            action = {
                 IconButton(onClick = onSystemSettings, modifier = Modifier.size(40.dp)) {
                     Icon(
                         painter = painterResource(R.drawable.ic_settings),
                         contentDescription = stringResource(R.string.tts_system_settings),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = settingsSecondaryTextColor()
                     )
                 }
             }
-            Text(
-                text = stringResource(R.string.tts_engine_description),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-            Spacer(Modifier.height(12.dp))
+        ) {
             TtsDropdown(
+                label = stringResource(R.string.tts_engine),
                 options = engineOptions.map { it.label to it.packageName },
                 selectedValue = currentEngine,
                 onSelected = onEngineSelected
             )
-            Spacer(Modifier.height(8.dp))
             Text(
                 text = if (installedEngineCount == 0) {
                     stringResource(R.string.tts_no_engines)
@@ -148,40 +145,27 @@ internal fun TtsSettingsScreen(
                     stringResource(R.string.tts_engine_count, installedEngineCount)
                 },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = settingsSecondaryTextColor()
             )
+        }
 
-            Spacer(Modifier.height(28.dp))
-            Text(
-                text = stringResource(R.string.tts_language),
-                style = MaterialTheme.typography.titleMedium
-            )
-            Text(
-                text = stringResource(R.string.tts_language_description),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-            Spacer(Modifier.height(12.dp))
+        TtsSection(
+            title = stringResource(R.string.tts_language),
+            description = stringResource(R.string.tts_language_description)
+        ) {
             TtsDropdown(
+                label = stringResource(R.string.tts_language),
                 options = languageOptions.map { it.label to it.value },
                 selectedValue = currentLanguage,
                 onSelected = onLanguageSelected
             )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp)
-                    .height(48.dp)
-                    .clickable { showHelp = true }
-                    .padding(horizontal = 12.dp),
-                contentAlignment = Alignment.CenterEnd
-            ) {
+        }
+
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+            TextButton(onClick = { showHelp = true }) {
                 Text(
                     text = stringResource(R.string.tts_help),
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.labelLarge,
-                    textAlign = TextAlign.End
+                    style = MaterialTheme.typography.labelLarge
                 )
             }
         }
@@ -201,47 +185,81 @@ internal fun TtsSettingsScreen(
     }
 }
 
+/** Settings-page tile: title row (optional trailing action), description, then the controls. */
+@Composable
+private fun TtsSection(
+    title: String,
+    description: String,
+    action: (@Composable () -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    SettingsTileCard {
+        CompositionLocalProvider(LocalContentColor provides settingsPrimaryTextColor()) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = settingsPrimaryTextColor(),
+                    modifier = Modifier.weight(1f)
+                )
+                action?.invoke()
+            }
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodyMedium,
+                color = settingsSecondaryTextColor(),
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            Column(
+                modifier = Modifier.padding(top = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                content = content
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TtsDropdown(
+    label: String,
     options: List<Pair<String, String>>,
     selectedValue: String,
     onSelected: (String) -> Unit
 ) {
-    AndroidView(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp),
-        factory = { context ->
-            Spinner(context).apply {
-                adapter = ArrayAdapter(
-                    context,
-                    android.R.layout.simple_spinner_item,
-                    options.map { it.first }
-                ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-                val initial = options.indexOfFirst { it.second == selectedValue }.coerceAtLeast(0)
-                setSelection(initial, false)
-                var lastSelectedValue = options.getOrNull(initial)?.second.orEmpty()
-                onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                    override fun onItemSelected(
-                        parent: AdapterView<*>?,
-                        view: android.view.View?,
-                        position: Int,
-                        id: Long
-                    ) {
-                        val value = options.getOrNull(position)?.second ?: return
-                        if (value != lastSelectedValue) {
-                            lastSelectedValue = value
-                            onSelected(value)
-                        }
+    var expanded by remember { mutableStateOf(false) }
+    val selectedLabel = options.firstOrNull { it.second == selectedValue }?.first
+        ?: options.firstOrNull()?.first.orEmpty()
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it && options.isNotEmpty() }
+    ) {
+        OutlinedTextField(
+            value = selectedLabel,
+            onValueChange = {},
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+            readOnly = true,
+            singleLine = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            shape = MaterialTheme.shapes.large,
+            colors = settingsOutlinedTextFieldColors()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            options.forEach { (optionLabel, value) ->
+                DropdownMenuItem(
+                    text = { Text(optionLabel) },
+                    onClick = {
+                        expanded = false
+                        if (value != selectedValue) onSelected(value)
                     }
-
-                    override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-                }
+                )
             }
-        },
-        update = { spinner ->
-            val selected = options.indexOfFirst { it.second == selectedValue }.coerceAtLeast(0)
-            if (spinner.selectedItemPosition != selected) spinner.setSelection(selected)
         }
-    )
+    }
 }

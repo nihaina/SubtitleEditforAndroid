@@ -57,6 +57,7 @@ import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.ui.components.SectionHeader
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.ui.settings.SettingsTileCard
+import com.subtitleedit.ui.settings.settingsOutlinedTextFieldColors
 import com.subtitleedit.ui.settings.settingsPageBackground
 import com.subtitleedit.ui.settings.settingsPrimaryTextColor
 import com.subtitleedit.ui.settings.settingsSecondaryTextColor
@@ -65,7 +66,6 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.CompositionLocalProvider
@@ -860,8 +860,6 @@ private fun AiTextField(
     singleLine: Boolean = false,
     minLines: Int = 1
 ) {
-    val text = settingsPrimaryTextColor()
-    val secondary = settingsSecondaryTextColor()
     androidx.compose.material3.OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
@@ -875,18 +873,7 @@ private fun AiTextField(
         singleLine = singleLine,
         minLines = minLines,
         shape = MaterialTheme.shapes.large,
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedTextColor = text,
-            unfocusedTextColor = text,
-            focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-            focusedLabelColor = MaterialTheme.colorScheme.primary,
-            unfocusedLabelColor = secondary,
-            unfocusedTrailingIconColor = secondary,
-            focusedTrailingIconColor = secondary,
-            unfocusedPlaceholderColor = secondary,
-            focusedPlaceholderColor = secondary
-        )
+        colors = settingsOutlinedTextFieldColors()
     )
 }
 

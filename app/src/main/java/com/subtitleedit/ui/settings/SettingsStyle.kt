@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.TextFieldColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -65,6 +67,28 @@ internal fun settingsChoiceSelectedColor(): Color =
 @Composable
 internal fun settingsChoiceSelectedTextColor(): Color =
     if (settingsLightPalette()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onPrimaryContainer
+
+/**
+ * Colours for outlined fields placed on a settings tile. The container stays transparent so the
+ * floating label's cut-out in the border never shows a box; contrast comes from the outline.
+ */
+@Composable
+internal fun settingsOutlinedTextFieldColors(): TextFieldColors {
+    val text = settingsPrimaryTextColor()
+    val secondary = settingsSecondaryTextColor()
+    return OutlinedTextFieldDefaults.colors(
+        focusedTextColor = text,
+        unfocusedTextColor = text,
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+        focusedLabelColor = MaterialTheme.colorScheme.primary,
+        unfocusedLabelColor = secondary,
+        unfocusedTrailingIconColor = secondary,
+        focusedTrailingIconColor = secondary,
+        unfocusedPlaceholderColor = secondary,
+        focusedPlaceholderColor = secondary
+    )
+}
 
 private val SettingsTileRestingCorner = 4.dp
 private val SettingsTilePressedCorner = 20.dp
