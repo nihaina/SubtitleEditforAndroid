@@ -36,6 +36,10 @@ class MediaConvertActivity : AppComposeActivity() {
         AppFilePickerContracts.OpenDocument().parseResult(result.resultCode, result.data)?.let(viewModel::selectSubtitle)
     }
 
+    private val coverPickerLauncher = registerForActivityResult(
+        AppFilePickerContracts.OpenDocument(setOf("jpg", "jpeg", "png", "webp", "bmp", "gif", "heic", "heif"))
+    ) { uri -> uri?.let(viewModel::selectCover) }
+
     private fun pickSubtitle() {
         val extensions = viewModel.allowedSubtitleExtensions
         if (viewModel.isRunning || extensions.isEmpty()) return
@@ -136,7 +140,7 @@ class MediaConvertActivity : AppComposeActivity() {
                     channels = channelOptions,
                     channelIndex = state.options.channelIndex,
                     isConverting = state.isConverting,
-                    canConvert = state.selectedFiles.isNotEmpty() && state.selectedFormat != null,
+                    canConvert = state.selectedFiles.isNotEmpty() && state.selectedFormat != null && !state.isReadingCover,
                     canShare = state.outputUris.isNotEmpty(),
                     progress = state.progress,
                     log = state.log,
@@ -178,7 +182,10 @@ class MediaConvertActivity : AppComposeActivity() {
                     audioVbrQuality = state.options.audioVbrQuality,
                     onAudioVbrQualityChange = viewModel::setAudioVbrQuality,
                     selectedSourceCount = state.selectedFiles.size,
-                    singleVideoSource = state.selectedFiles.singleOrNull()?.hasVideo == true,
+                    metadataSelection = state.metadataSelection,
+                    coverFileName = state.coverFile?.fileName,
+                    coverSupported = format?.let(MediaConvertMetadataSupport::supportsCover) == true,
+                    onPickCover = { coverPickerLauncher.launch(arrayOf("image/*")) },
                     subtitleFileName = state.subtitleFile?.fileName,
                     subtitleType = state.subtitleType,
                     subtitleMetadata = state.subtitleMetadata,

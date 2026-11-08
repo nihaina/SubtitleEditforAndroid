@@ -94,6 +94,22 @@ internal object MediaConvertCommand {
         val burnSubtitle = subtitle?.takeIf { it.type == MediaConvertSubtitleType.BURN_IN }
         val audio = if (MediaConvertStreamCopy.copiesAudio(format, options, source)) "copy"
             else format.audioEncoder(options.selectedAudioCodec)
+        val sourceInputIndex = if (synthetic) 1 else 0
+        val coverSupported = MediaConvertMetadataSupport.supportsCover(format)
+        val customCover = metadata?.coverPath?.takeIf {
+            !analysisPass && coverSupported && metadata.cover == MediaConvertCoverMode.CUSTOM
+        }
+        if (!analysisPass && coverSupported && metadata?.cover == MediaConvertCoverMode.CUSTOM) {
+            require(!customCover.isNullOrBlank()) { "A selected cover image must be prepared before conversion" }
+        }
+        val copiedCoverIndex = source?.attachedPictureStreamIndex?.takeIf {
+            !analysisPass && coverSupported && (metadata == null || metadata.cover == MediaConvertCoverMode.DEFAULT)
+        }
+        val customCoverInputIndex = sourceInputIndex + 1 + if (softSubtitle != null) 1 else 0
+        // Matroska stores a custom cover as an attachment; other muxers use an attached-picture video stream.
+        val streamCover = copiedCoverIndex != null || (customCover != null && format.formatName != "matroska")
+        val mainVideoSpecifier = if (streamCover) ":v:0" else ":v"
+        fun mainVideoOption(name: String) = "-$name$mainVideoSpecifier"
         var hasVideoFilters = false
         return buildList {
             addAll(listOf("-y", "-hide_banner"))
@@ -107,22 +123,37 @@ internal object MediaConvertCommand {
             if (hardware && !synthetic && canHardwareDecode(source)) addAll(listOf("-hwaccel", "mediacodec"))
             addAll(listOf("-i", input))
             softSubtitle?.let { addAll(listOf("-i", it.path)) }
+            if (customCover != null && format.formatName != "matroska") addAll(listOf("-i", customCover))
             when {
-                format.isAudioOnly -> addAll(listOf("-map", "0:a:0", "-vn", "-c:a", audio))
+                format.isAudioOnly -> {
+                    addAll(listOf("-map", "0:a:0", "-c:a", audio))
+                    if (!streamCover) add("-vn")
+                }
                 synthetic -> {
-                    addAll(listOf("-map", "0:v:0", "-c:v", video))
+                    addAll(listOf("-map", "0:v:0", mainVideoOption("c"), video))
                     if (!analysisPass) addAll(listOf("-map", "1:a:0", "-shortest", "-c:a", audio))
                     source?.durationSeconds?.takeIf { it > 0 }?.let { addAll(listOf("-t", String.format(Locale.US, "%.3f", it))) }
                 }
                 else -> {
-                    addAll(listOf("-map", "0:${source?.videoStreamIndex ?: "v:0"}", "-c:v", video))
-                    if (!analysisPass) source?.attachedPictureStreamIndex?.let { coverIndex ->
-                        when {
-                            metadata?.cover == MediaConvertCoverMode.DEFAULT -> addAll(listOf("-map", "0:$coverIndex", "-c:v:1", "copy", "-disposition:v:1", "attached_pic"))
-                            metadata?.cover == MediaConvertCoverMode.NONE -> addAll(listOf("-map", "-0:$coverIndex"))
-                        }
-                    }
+                    addAll(listOf("-map", "0:${source?.videoStreamIndex ?: "v:0"}", mainVideoOption("c"), video))
                     if (!analysisPass) addAll(listOf("-map", "0:a:0?", "-c:a", audio))
+                }
+            }
+            if (!analysisPass) {
+                val coverVideoIndex = if (format.isAudioOnly) 0 else 1
+                val coverMap = when {
+                    customCover != null && format.formatName != "matroska" -> "$customCoverInputIndex:v:0"
+                    copiedCoverIndex != null -> "$sourceInputIndex:$copiedCoverIndex"
+                    else -> null
+                }
+                coverMap?.let {
+                    addAll(listOf("-map", it, "-c:v:$coverVideoIndex", "copy", "-disposition:v:$coverVideoIndex", "attached_pic"))
+                }
+                if (customCover != null && format.formatName == "matroska") {
+                    addAll(listOf("-attach", customCover, "-metadata:s:t:0", "mimetype=image/jpeg", "-metadata:s:t:0", "filename=cover.jpg"))
+                } else if (format.formatName == "matroska" && (metadata == null || metadata.cover == MediaConvertCoverMode.DEFAULT)) {
+                    // Matroska artwork is normally an attachment, rather than an attached-picture stream.
+                    addAll(listOf("-map", "$sourceInputIndex:t?", "-c:t", "copy"))
                 }
             }
             if (analysisPass) add("-an")
@@ -146,15 +177,17 @@ internal object MediaConvertCommand {
                     val q = if (bitrate == null) settings.crf?.takeIf { video in MediaConvertVideoSettingsSupport.crfCodecs }
                         ?.coerceIn(qualityRange(video)) ?: quality(video, options) else null
                     if (q != null) {
-                        addAll(listOf(if (video in setOf("libx264", "libx265", "libvpx", "libvpx-vp9", "libaom-av1")) "-crf" else "-q:v", q.toString()))
-                        if (bitrate == null && video in setOf("libvpx", "libvpx-vp9", "libaom-av1")) addAll(listOf("-b:v", "0"))
+                        addAll(listOf(if (video in setOf("libx264", "libx265", "libvpx", "libvpx-vp9", "libaom-av1")) {
+                            if (streamCover) "-crf:v:0" else "-crf"
+                        } else mainVideoOption("q"), q.toString()))
+                        if (bitrate == null && video in setOf("libvpx", "libvpx-vp9", "libaom-av1")) addAll(listOf(mainVideoOption("b"), "0"))
                     }
                     when (video) {
-                        "libx264" -> addAll(listOf("-preset", "veryfast"))
-                        "libx265" -> addAll(listOf("-preset", "fast"))
+                        "libx264" -> addAll(listOf(if (streamCover) "-preset:v:0" else "-preset", "veryfast"))
+                        "libx265" -> addAll(listOf(if (streamCover) "-preset:v:0" else "-preset", "fast"))
                         "libaom-av1" -> {
-                            addAll(listOf("-cpu-used", "6", "-row-mt", "1"))
-                            if (q == null && bitrate == null) addAll(listOf("-crf", "30", "-b:v", "0"))
+                            addAll(listOf(if (streamCover) "-cpu-used:v:0" else "-cpu-used", "6", if (streamCover) "-row-mt:v:0" else "-row-mt", "1"))
+                            if (q == null && bitrate == null) addAll(listOf(if (streamCover) "-crf:v:0" else "-crf", "30", mainVideoOption("b"), "0"))
                         }
                     }
                     if (!synthetic || settings.rotation != MediaConvertRotation.NONE || settings.flipHorizontal || settings.flipVertical ||
@@ -162,36 +195,36 @@ internal object MediaConvertCommand {
                         val filters = listOfNotNull(MediaConvertVideoSettingsSupport.filters(options.resolution, settings, source),
                             burnSubtitle?.let(MediaConvertSubtitles::burnFilter)).joinToString(",")
                         if (filters.isNotEmpty()) {
-                            addAll(listOf("-vf", filters))
+                            addAll(listOf(if (streamCover) "-filter:v:0" else "-vf", filters))
                             hasVideoFilters = true
                         }
                     }
                     val targetPixFmt = MediaConvertVideoSettingsSupport.pixelFormat(video, settings.pixelFormat, source?.videoPixelFormat, supportedPixelFormats)
-                    if (targetPixFmt != source?.videoPixelFormat) addAll(listOf("-pix_fmt", targetPixFmt))
+                    if (targetPixFmt != source?.videoPixelFormat) addAll(listOf(if (streamCover) "-pix_fmt:v:0" else "-pix_fmt", targetPixFmt))
                     val rate = MediaConvertVideoSettingsSupport.frameRate(video, settings, source?.frameRate)
-                    rate?.let { addAll(listOf("-r", it)) }
+                    rate?.let { addAll(listOf(if (streamCover) "-r:v:0" else "-r", it)) }
                     MediaConvertVideoSettingsSupport.keyframeFrames(settings, rate, source?.frameRate)?.let {
-                        addAll(listOf("-g", it.toString()))
+                        addAll(listOf(if (streamCover) "-g:v:0" else "-g", it.toString()))
                         // MediaCodec rounds -g to whole seconds and ignores forced keyframes.
-                        if (!hardware) addAll(listOf("-force_key_frames", "expr:gte(t,n_forced*${settings.keyframeSeconds.toDouble()})"))
+                        if (!hardware) addAll(listOf(if (streamCover) "-force_key_frames:v:0" else "-force_key_frames", "expr:gte(t,n_forced*${settings.keyframeSeconds.toDouble()})"))
                     }
                     if (video == "mpeg1video" || video == "mpeg2video") {
-                        if (bitrate == null && q == null) addAll(listOf("-b:v", "2000k"))
+                        if (bitrate == null && q == null) addAll(listOf(mainVideoOption("b"), "2000k"))
                     }
-                    if (bitrate != null) addAll(listOf("-b:v", MediaConvertVideoBitrate.ffmpegValue(bitrate)))
+                    if (bitrate != null) addAll(listOf(mainVideoOption("b"), MediaConvertVideoBitrate.ffmpegValue(bitrate)))
                     // Without a pinned name FFmpeg takes whatever the platform lists first, often a software c2.android.* codec.
-                    if (hardware) hardwareCodecNames[video]?.let { addAll(listOf("-codec_name", it)) }
-                    if ((video == "libx265" || video == "hevc_mediacodec") && format.formatName in setOf("mp4", "mov")) addAll(listOf("-tag:v", "hvc1"))
+                    if (hardware) hardwareCodecNames[video]?.let { addAll(listOf(if (streamCover) "-codec_name:v:0" else "-codec_name", it)) }
+                    if ((video == "libx265" || video == "hevc_mediacodec") && format.formatName in setOf("mp4", "mov")) addAll(listOf(mainVideoOption("tag"), "hvc1"))
                     if (pass != null) {
                         if (video == "libx265") {
                             val stats = pass.logPath.replace('\\', '/').replace(":", "\\:")
-                            addAll(listOf("-x265-params", "pass=${pass.number}:stats=$stats"))
-                        } else addAll(listOf("-pass", pass.number.toString(), "-passlogfile", pass.logPath))
+                            addAll(listOf(if (streamCover) "-x265-params:v:0" else "-x265-params", "pass=${pass.number}:stats=$stats"))
+                        } else addAll(listOf(if (streamCover) "-pass:v:0" else "-pass", pass.number.toString(), if (streamCover) "-passlogfile:v:0" else "-passlogfile", pass.logPath))
                     }
                 } else if (MediaConvertStreamCopy.videoEncoderName(source?.videoCodecName) == "libx265" &&
                     format.formatName in setOf("mp4", "mov")) {
                     // The mov muxer otherwise tags copied HEVC as hev1, which several players reject.
-                    addAll(listOf("-tag:v", "hvc1"))
+                    addAll(listOf(mainVideoOption("tag"), "hvc1"))
                 }
             }
             if (audio != "copy" && !analysisPass) {
@@ -218,10 +251,13 @@ internal object MediaConvertCommand {
                 // Use the available CPU for software encoders while keeping thread creation
                 // bounded on devices that report a large heterogeneous core count.
                 val threads = Runtime.getRuntime().availableProcessors().coerceIn(1, 16)
-                addAll(listOf("-threads", threads.toString()))
+                addAll(listOf(if (streamCover && !format.isAudioOnly) "-threads:v:0" else "-threads", threads.toString()))
                 if (hasVideoFilters) addAll(listOf("-filter_threads", threads.toString()))
             }
-            if (!analysisPass && !format.isAudioOnly) metadata?.let { addAll(it.arguments()) }
+            if (!analysisPass) metadata?.let {
+                addAll(listOf("-map_metadata", sourceInputIndex.toString()))
+                addAll(it.arguments(format.isAudioOnly))
+            }
             addAll(listOf("-f", if (analysisPass) "null" else format.formatName, output))
         }
     }

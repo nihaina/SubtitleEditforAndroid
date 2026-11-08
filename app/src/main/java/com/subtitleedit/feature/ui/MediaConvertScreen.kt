@@ -42,6 +42,7 @@ import com.subtitleedit.MediaConvertAudioBitrate
 import com.subtitleedit.MediaConvertAudioVbr
 import com.subtitleedit.MediaConvertSubtitleType
 import com.subtitleedit.MediaConvertMetadata
+import com.subtitleedit.MediaConvertMetadataSelection
 import com.subtitleedit.MediaConvertVideoSettings
 import com.subtitleedit.MediaConvertVideoSettingsSupport
 import com.subtitleedit.ui.components.AppConflictDialog
@@ -142,7 +143,10 @@ internal fun MediaConvertScreen(
     onPickSubtitle: () -> Unit = {},
     onRemoveSubtitle: () -> Unit = {},
     onSubtitleTypeChange: (MediaConvertSubtitleType) -> Unit = {},
-    singleVideoSource: Boolean = false,
+    metadataSelection: MediaConvertMetadataSelection = MediaConvertMetadataSelection.EMPTY,
+    coverFileName: String? = null,
+    coverSupported: Boolean = false,
+    onPickCover: () -> Unit = {},
     subtitleMetadata: MediaConvertMetadata = MediaConvertMetadata(),
     onSubtitleMetadataChange: (MediaConvertMetadata) -> Unit = {}
 ) {
@@ -228,6 +232,7 @@ internal fun MediaConvertScreen(
         if (sourceSummary.isNotBlank()) {
             MediaConvertSettingsPager(
                 enabled = !isConverting,
+                isAudioOutput = isAudioOutput,
                 showSubtitlePage = videoFormats.any { it.extension == selectedFormat },
                 subtitleContent = {
                     MediaConvertSubtitlePage(
@@ -245,9 +250,21 @@ internal fun MediaConvertScreen(
                 },
                 infoContent = {
                     MediaConvertInfoPage(
-                        enabled = singleVideoSource && !isConverting && !isAudioOutput,
+                        enabled = metadataSelection.editable && !isConverting,
                         metadata = subtitleMetadata,
-                        onMetadataChanged = onSubtitleMetadataChange
+                        onMetadataChanged = onSubtitleMetadataChange,
+                        isAudioOutput = isAudioOutput,
+                        batch = metadataSelection.batch,
+                        batchIsAudioSource = metadataSelection.audio,
+                        coverFileName = coverFileName,
+                        onPickCover = onPickCover,
+                        coverEnabled = metadataSelection.editable && !isConverting && coverSupported,
+                        coverUnsupportedHint = if (!coverSupported) stringResource(R.string.media_convert_info_cover_unsupported) else null,
+                        disabledHint = when (metadataSelection) {
+                            MediaConvertMetadataSelection.MIXED -> stringResource(R.string.media_convert_info_mixed_hint)
+                            MediaConvertMetadataSelection.READING -> stringResource(R.string.media_convert_reading_info)
+                            else -> stringResource(R.string.media_convert_info_unavailable_hint)
+                        }
                     )
                 },
                 moreContent = {

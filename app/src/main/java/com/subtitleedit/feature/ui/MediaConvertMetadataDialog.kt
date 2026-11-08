@@ -3,79 +3,58 @@ package com.subtitleedit.feature.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
-import com.subtitleedit.MediaConvertMetadata
-import com.subtitleedit.MediaConvertCoverMode
+import com.subtitleedit.MediaConvertMetadataField
 import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppDialog
-import com.subtitleedit.ui.components.AppOption
-import com.subtitleedit.ui.components.AppOptionSelector
+import com.subtitleedit.ui.theme.AppSpacing
 
 @Composable
 internal fun MediaConvertMetadataDialog(
-    metadata: MediaConvertMetadata,
+    field: MediaConvertMetadataField,
+    initialValue: String,
     onDismiss: () -> Unit,
-    onConfirm: (MediaConvertMetadata) -> Unit
+    onConfirm: (String) -> Unit,
+    batch: Boolean = false,
+    batchIsAudioSource: Boolean = false
 ) {
-    var title by rememberSaveable(metadata.title) { mutableStateOf(metadata.title) }
-    var author by rememberSaveable(metadata.author) { mutableStateOf(metadata.author) }
-    var comment by rememberSaveable(metadata.comment) { mutableStateOf(metadata.comment) }
-    var cover by rememberSaveable(metadata.cover) { mutableStateOf(metadata.cover) }
-    val coverOptions = listOf(
-        AppOption(MediaConvertCoverMode.DEFAULT, stringResource(R.string.media_convert_info_cover_default)),
-        AppOption(MediaConvertCoverMode.NONE, stringResource(R.string.media_convert_info_cover_none))
-    )
-
+    var value by rememberSaveable(field, initialValue) { mutableStateOf(initialValue) }
+    val multiline = field == MediaConvertMetadataField.COMMENT
     AppDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.media_convert_info_settings)) },
+        title = { Text(stringResource(field.labelResource)) },
         text = {
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                AppOptionSelector(
-                    label = stringResource(R.string.media_convert_info_cover),
-                    value = coverOptions.first { it.id == cover },
-                    options = coverOptions,
-                    onSelected = { cover = it },
-                    modifier = Modifier.testTag("convert-metadata-cover")
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)) {
+                if (batch) Text(
+                    text = stringResource(if (batchIsAudioSource) R.string.media_convert_info_batch_audio_warning else R.string.media_convert_info_batch_video_warning),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("convert-metadata-batch-warning")
                 )
                 OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text(stringResource(R.string.media_convert_info_title)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().testTag("convert-metadata-title")
-                )
-                OutlinedTextField(
-                    value = author,
-                    onValueChange = { author = it },
-                    label = { Text(stringResource(R.string.media_convert_info_author)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().testTag("convert-metadata-author")
-                )
-                OutlinedTextField(
-                    value = comment,
-                    onValueChange = { comment = it },
-                    label = { Text(stringResource(R.string.media_convert_info_comment)) },
-                    minLines = 2,
-                    maxLines = 4,
-                    modifier = Modifier.fillMaxWidth().testTag("convert-metadata-comment")
+                    value = value,
+                    onValueChange = { value = it },
+                    label = { Text(stringResource(field.labelResource)) },
+                    singleLine = !multiline,
+                    minLines = if (multiline) 2 else 1,
+                    maxLines = if (multiline) 4 else 1,
+                    modifier = Modifier.fillMaxWidth().testTag("convert-metadata-${field.tag}")
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(metadata.copy(cover = cover, title = title, author = author, comment = comment)) },
-                modifier = Modifier.testTag("convert-metadata-confirm")) {
+            TextButton(onClick = { onConfirm(value) }, modifier = Modifier.testTag("convert-metadata-confirm")) {
                 Text(stringResource(R.string.confirm))
             }
         },
@@ -86,3 +65,15 @@ internal fun MediaConvertMetadataDialog(
         }
     )
 }
+
+internal val MediaConvertMetadataField.labelResource: Int get() = when (this) {
+    MediaConvertMetadataField.TITLE -> R.string.media_convert_info_title
+    MediaConvertMetadataField.AUTHOR -> R.string.media_convert_info_author
+    MediaConvertMetadataField.COMMENT -> R.string.media_convert_info_comment
+    MediaConvertMetadataField.GENRE -> R.string.media_convert_info_genre
+    MediaConvertMetadataField.ARTIST -> R.string.media_convert_info_artist
+    MediaConvertMetadataField.ALBUM -> R.string.media_convert_info_album
+    MediaConvertMetadataField.YEAR -> R.string.media_convert_info_year
+}
+
+internal val MediaConvertMetadataField.tag: String get() = name.lowercase(java.util.Locale.ROOT)

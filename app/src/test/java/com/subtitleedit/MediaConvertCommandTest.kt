@@ -50,7 +50,7 @@ class MediaConvertCommandTest {
         assertEquals("copy", args.value("-c:v"))
         assertEquals("copy", args.value("-c:a"))
         listOf("-vf", "-pix_fmt", "-crf", "-q:v", "-b:v", "-b:a", "-ar", "-ac", "-threads", "-filter_threads").forEach { assertFalse(it, it in args) }
-        assertEquals(listOf("0:v:0", "0:a:0?"), args.withIndex().filter { it.value == "-map" }.map { args[it.index + 1] })
+        assertEquals(listOf("0:v:0", "0:a:0?", "0:t?"), args.withIndex().filter { it.value == "-map" }.map { args[it.index + 1] })
     }
 
     @Test
@@ -68,12 +68,15 @@ class MediaConvertCommandTest {
 
     @Test
     fun metadataOverridesAreAppliedToFinalOutputAndCoverNoneUnmapsAttachedPictures() {
-        val metadata = MediaConvertMetadata(cover = MediaConvertCoverMode.NONE, title = "Film", author = "Director", comment = "Note")
+        val metadata = MediaConvertMetadata(cover = MediaConvertCoverMode.NONE)
+            .withValue(MediaConvertMetadataField.TITLE, "Film")
+            .withValue(MediaConvertMetadataField.AUTHOR, "Director")
+            .withValue(MediaConvertMetadataField.COMMENT, "Note")
         val args = MediaConvertCommand.build("in", "out.mp4", format("mp4"), MediaConvertOptions(),
             MediaConvertSource(true, 2.0, attachedPictureStreamIndex = 3), metadata = metadata)
         val tags = args.withIndex().filter { it.value == "-metadata" }.map { args[it.index + 1] }
-        assertEquals(listOf("title=Film", "author=Director", "comment=Note"), tags)
-        assertTrue(args.windowed(2).contains(listOf("-map", "-0:3")))
+        assertEquals(listOf("title=Film", "author=Director", "artist=Director", "comment=Note", "description=Note"), tags)
+        assertFalse(args.windowed(2).contains(listOf("-map", "0:3")))
         val defaults = MediaConvertCommand.build("in", "out.mp4", format("mp4"), MediaConvertOptions(), MediaConvertSource(true, 2.0))
         assertFalse("-metadata" in defaults)
         assertFalse(defaults.contains("-0:v:disp:attached_pic"))
@@ -97,9 +100,64 @@ class MediaConvertCommandTest {
             videoSettings = MediaConvertVideoSettings(twoPass = true)
         )
         val plan = MediaConvertCommand.plan("in", "out.mp4", format("mp4"), options, MediaConvertSource(true, 2.0), "stats",
-            metadata = MediaConvertMetadata(title = "Film"))
+            metadata = MediaConvertMetadata().withValue(MediaConvertMetadataField.TITLE, "Film"))
         assertFalse("-metadata" in plan.first())
         assertTrue(plan.last().contains("title=Film"))
+    }
+
+    @Test
+    fun audioArtworkIsAnAttachedPictureAndDoesNotDisableOrChangeTheAudioEncoding() {
+        val metadata = MediaConvertMetadata(cover = MediaConvertCoverMode.CUSTOM, coverPath = "cover image.jpg")
+            .withValue(MediaConvertMetadataField.ARTIST, "Singer")
+        for (extension in listOf("mp3", "m4a", "flac")) {
+            val command = MediaConvertCommand.build("in", "out.$extension", format(extension), MediaConvertOptions(),
+                MediaConvertSource(false, 2.0), metadata = metadata)
+            assertTrue(extension, command.windowed(2).contains(listOf("-i", "cover image.jpg")))
+            assertTrue(extension, command.windowed(2).contains(listOf("-map", "1:v:0")))
+            assertTrue(extension, command.windowed(2).contains(listOf("-disposition:v:0", "attached_pic")))
+            assertTrue(extension, command.windowed(2).contains(listOf("-c:v:0", "copy")))
+            assertFalse(extension, "-vn" in command)
+            assertTrue(extension, "artist=Singer" in command)
+            assertNotNull(command.value("-c:a"))
+        }
+    }
+
+    @Test
+    fun videoFilterAndQualityOnlyAffectTheMainVideoAndCoverUsesItsOwnInput() {
+        val metadata = MediaConvertMetadata(cover = MediaConvertCoverMode.CUSTOM, coverPath = "cover.jpg")
+        val options = MediaConvertOptions(selectedVideoCodec = "libx264", selectedQualityId = "23",
+            videoSettings = MediaConvertVideoSettings(flipHorizontal = true))
+        val command = MediaConvertCommand.build("in", "out.mp4", format("mp4"), options, MediaConvertSource(true, 2.0), metadata = metadata)
+        assertEquals("libx264", command.value("-c:v:0"))
+        assertEquals("copy", command.value("-c:v:1"))
+        assertEquals("23", command.value("-crf:v:0"))
+        assertNotNull(command.value("-filter:v:0"))
+        assertNull(command.value("-vf"))
+        assertTrue(command.windowed(2).contains(listOf("-map", "1:v:0")))
+    }
+
+    @Test
+    fun unsupportedArtworkFormatsIgnoreTheImageButStillWriteTextTags() {
+        val metadata = MediaConvertMetadata(cover = MediaConvertCoverMode.CUSTOM, coverPath = "cover.jpg")
+            .withValue(MediaConvertMetadataField.TITLE, "Track")
+        val command = MediaConvertCommand.build("in", "out.wav", format("wav"), MediaConvertOptions(),
+            MediaConvertSource(false, 2.0), metadata = metadata)
+        assertFalse("cover.jpg" in command)
+        assertTrue("-vn" in command)
+        assertTrue("title=Track" in command)
+        assertFalse(MediaConvertMetadataSupport.supportsCover(format("wav")))
+    }
+
+    @Test
+    fun matroskaArtworkUsesAJpegAttachment() {
+        val command = MediaConvertCommand.build("in", "out.mkv", format("mkv"), MediaConvertOptions(),
+            MediaConvertSource(true, 2.0), metadata = MediaConvertMetadata(cover = MediaConvertCoverMode.CUSTOM, coverPath = "cover.jpg"))
+        assertEquals("cover.jpg", command.value("-attach"))
+        assertTrue("mimetype=image/jpeg" in command)
+        assertTrue("filename=cover.jpg" in command)
+        val preserved = MediaConvertCommand.build("in", "out.mkv", format("mkv"), MediaConvertOptions(),
+            MediaConvertSource(true, 2.0), metadata = MediaConvertMetadata())
+        assertTrue(preserved.windowed(2).contains(listOf("-map", "0:t?")))
     }
 
     @Test

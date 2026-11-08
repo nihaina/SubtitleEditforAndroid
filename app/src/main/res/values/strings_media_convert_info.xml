@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="media_convert_info_genre">类型</string>
+    <string name="media_convert_info_artist">演唱者</string>
+    <string name="media_convert_info_album">专辑名</string>
+    <string name="media_convert_info_year">年份</string>
+    <string name="media_convert_info_cover_selected">已选择图片</string>
+    <string name="media_convert_info_batch_audio_warning">批量修改将覆盖所有已选音频文件的对应信息，未修改的项目保留原值。</string>
+    <string name="media_convert_info_batch_video_warning">批量修改将覆盖所有已选视频文件的对应信息，未修改的项目保留原值。</string>
+    <string name="media_convert_info_unavailable_hint">音频与视频混合导入时无法修改信息；请统一选择音频文件或视频文件，并等待读取完成。</string>
+</resources>
