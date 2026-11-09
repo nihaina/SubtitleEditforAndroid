@@ -10,7 +10,11 @@
     <string name="media_tag_editor_cover_unsupported">所选文件的格式不支持内嵌图片封面。</string>
     <string name="media_tag_editor_unavailable">无法读取所选文件的音视频信息，不能编辑标签。</string>
     <string name="media_tag_editor_delete_cover">删除封面</string>
-    <string name="media_tag_editor_delete_cover_hint">（长按删除封面）</string>
+    <string name="media_tag_editor_export_cover">导出</string>
+    <string name="media_tag_editor_exporting_cover">正在导出封面…</string>
+    <string name="media_tag_editor_export_cover_none">没有可导出的封面。</string>
+    <string name="media_tag_editor_export_cover_failed">封面导出失败：%1$s</string>
+    <string name="media_tag_editor_export_cover_result">封面导出完成：成功 %1$d，失败 %2$d</string>
     <string name="media_tag_editor_delete_cover_message">是否删除封面？保存后生效。</string>
     <string name="media_tag_editor_delete_cover_batch_message">是否删除所有已选文件的封面？保存后生效。</string>
 </resources>

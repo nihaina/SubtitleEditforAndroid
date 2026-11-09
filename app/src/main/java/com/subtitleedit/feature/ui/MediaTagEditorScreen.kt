@@ -23,17 +23,19 @@ internal fun MediaTagEditorScreen(
     onMetadataChanged: (MediaConvertMetadata) -> Unit,
     onPickCover: () -> Unit,
     onSave: () -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    onExportCover: () -> Unit = {}
 ) {
+    val busy = state.isSaving || state.isExportingCover
     AppToolScaffold(
         title = stringResource(R.string.media_tag_editor_title),
         onBack = onBack,
         imePadding = true,
         bottomBar = {
             AppPrimaryButton(
-                text = stringResource(if (state.isSaving) R.string.cancel else R.string.save),
-                onClick = if (state.isSaving) onCancel else onSave,
-                enabled = state.isSaving || state.canSave,
+                text = stringResource(if (busy) R.string.cancel else R.string.save),
+                onClick = if (busy) onCancel else onSave,
+                enabled = busy || state.canSave,
                 modifier = Modifier.padding(horizontal = AppSpacing.Page, vertical = AppSpacing.Inner)
             )
         }
@@ -43,7 +45,7 @@ internal fun MediaTagEditorScreen(
         }
         AppSection {
             MediaConvertInfoPage(
-                enabled = state.selection.editable && !state.isSaving && !state.isReadingCover,
+                enabled = state.selection.editable && !busy && !state.isReadingCover,
                 metadata = state.metadata,
                 onMetadataChanged = onMetadataChanged,
                 isAudioOutput = state.selection.audio,
@@ -51,11 +53,14 @@ internal fun MediaTagEditorScreen(
                 batchIsAudioSource = state.selection.audio,
                 coverFileName = state.coverFileName,
                 onPickCover = onPickCover,
+                onExportCover = onExportCover,
+                coverExportEnabled = state.canExportCover,
                 coverEnabled = state.coverSupported,
                 coverUnsupportedHint = if (state.coverSupported || !state.selection.editable) null
                     else stringResource(R.string.media_tag_editor_cover_unsupported),
                 disabledHint = when {
                     state.isSaving -> stringResource(R.string.media_tag_editor_saving)
+                    state.isExportingCover -> stringResource(R.string.media_tag_editor_exporting_cover)
                     state.isReadingCover -> stringResource(R.string.media_convert_reading_info)
                     state.selection == MediaConvertMetadataSelection.READING -> stringResource(R.string.media_convert_reading_info)
                     state.selection == MediaConvertMetadataSelection.MIXED -> stringResource(R.string.media_convert_info_mixed_hint)
@@ -63,8 +68,8 @@ internal fun MediaTagEditorScreen(
                 }
             )
         }
-        if (state.isSaving) {
-            AppTaskProgress(visible = true, progress = state.progress, status = state.message)
+        if (busy) {
+            AppTaskProgress(visible = true, progress = if (state.isExportingCover) null else state.progress, status = state.message)
         } else if (state.message.isNotBlank()) {
             Text(state.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
         }

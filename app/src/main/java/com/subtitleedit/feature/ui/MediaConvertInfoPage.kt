@@ -23,9 +23,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.MediaConvertCoverMode
 import com.subtitleedit.MediaConvertMetadata
@@ -46,7 +48,9 @@ internal fun MediaConvertInfoPage(
     disabledHint: String? = null,
     batchIsAudioSource: Boolean = isAudioOutput,
     coverEnabled: Boolean = enabled,
-    coverUnsupportedHint: String? = null
+    coverUnsupportedHint: String? = null,
+    onExportCover: () -> Unit = {},
+    coverExportEnabled: Boolean = enabled
 ) {
     var editingFieldName by rememberSaveable { mutableStateOf<String?>(null) }
     var showCoverWarning by rememberSaveable { mutableStateOf(false) }
@@ -75,7 +79,21 @@ internal fun MediaConvertInfoPage(
             { if (batch) showCoverWarning = true else onPickCover() }, "convert-info-cover",
             onLongClick = { showCoverDeleteConfirmation = true },
             onLongClickLabel = stringResource(R.string.media_tag_editor_delete_cover),
-            supportingText = stringResource(R.string.media_tag_editor_delete_cover_hint))
+            actions = {
+                Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner),
+                    modifier = Modifier.padding(end = AppSpacing.Inner)) {
+                    Text(stringResource(R.string.media_tag_editor_export_cover),
+                        modifier = Modifier.testTag("convert-cover-export")
+                            .clickable(enabled = enabled && coverExportEnabled, role = Role.Button, onClick = onExportCover),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colorResource(R.color.primary).copy(alpha = if (enabled && coverExportEnabled) 1f else 0.38f))
+                    Text(stringResource(R.string.delete),
+                        modifier = Modifier.testTag("convert-cover-delete")
+                            .clickable(enabled = enabled && coverEnabled, role = Role.Button) { showCoverDeleteConfirmation = true },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error.copy(alpha = if (enabled && coverEnabled) 1f else 0.38f))
+                }
+            })
         if (coverUnsupportedHint != null) Text(
             text = coverUnsupportedHint,
             modifier = Modifier.testTag("convert-info-cover-unsupported-hint"),
@@ -150,7 +168,7 @@ internal fun MediaConvertInfoPage(
 @Composable
 private fun MediaConvertInfoRow(label: String, value: String, enabled: Boolean, onClick: () -> Unit, tag: String,
                                 onLongClick: (() -> Unit)? = null, onLongClickLabel: String? = null,
-                                supportingText: String? = null) {
+                                actions: @Composable () -> Unit = {}) {
     val interaction = if (onLongClick != null) Modifier.combinedClickable(
         enabled = enabled, onClick = onClick, onLongClick = onLongClick, onLongClickLabel = onLongClickLabel
     ) else Modifier.clickable(enabled = enabled, onClick = onClick)
@@ -159,15 +177,14 @@ private fun MediaConvertInfoRow(label: String, value: String, enabled: Boolean, 
         verticalAlignment = Alignment.CenterVertically
     ) {
         val contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f)
-        Text(label, modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyLarge, color = contentColor)
+        Row(Modifier.width(AppSpacing.FormLabelWidth), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, style = MaterialTheme.typography.bodyLarge, color = contentColor)
+            actions()
+        }
         Column(Modifier.weight(1f)) {
             Text(value, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = contentColor)
-            if (supportingText != null) Text(
-                text = supportingText,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.38f)
-            )
         }
         Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(20.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.38f))

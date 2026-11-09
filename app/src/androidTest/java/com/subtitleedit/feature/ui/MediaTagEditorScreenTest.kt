@@ -11,6 +11,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.subtitleedit.MediaConvertMetadata
+import com.subtitleedit.MediaConvertCoverMode
 import com.subtitleedit.MediaConvertMetadataSelection
 import com.subtitleedit.MediaTagEditorState
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
@@ -54,5 +55,35 @@ class MediaTagEditorScreenTest {
         compose.onNodeWithText("保存").assertIsNotEnabled()
         compose.onNodeWithTag("convert-info-title").assertIsNotEnabled()
         compose.onNodeWithTag("convert-info-cover").assertIsNotEnabled()
+        compose.onNodeWithTag("convert-cover-export").assertIsNotEnabled()
+        compose.onNodeWithTag("convert-cover-delete").assertIsNotEnabled()
+    }
+
+    @Test fun coverExportFollowsTheSelectedArtworkAndBusyState() {
+        val state = mutableStateOf(MediaTagEditorState(
+            fileNames = listOf("song.mp3"), selection = MediaConvertMetadataSelection.SINGLE_AUDIO,
+            coverSupported = true, hasSourceCover = true
+        ))
+        var exports = 0
+        var picks = 0
+        compose.setContent { SubtitleEditComposeTheme {
+            MediaTagEditorScreen(state.value, {}, { state.value = state.value.copy(metadata = it) },
+                { picks++ }, {}, {}, onExportCover = { exports++ })
+        } }
+        compose.onNodeWithTag("convert-cover-export").assertIsEnabled().performClick()
+        compose.runOnIdle {
+            assertEquals(1, exports)
+            assertEquals(0, picks)
+            state.value = state.value.copy(hasSourceCover = false)
+        }
+        compose.onNodeWithTag("convert-cover-export").assertIsNotEnabled()
+        compose.runOnIdle { state.value = state.value.copy(metadata = MediaConvertMetadata(cover = MediaConvertCoverMode.CUSTOM)) }
+        compose.onNodeWithTag("convert-cover-export").assertIsEnabled()
+        compose.runOnIdle { state.value = state.value.copy(isExportingCover = true) }
+        compose.onNodeWithTag("convert-cover-export").assertIsNotEnabled()
+        compose.onNodeWithTag("convert-cover-delete").assertIsNotEnabled()
+        compose.onNodeWithTag("convert-info-cover").assertIsNotEnabled()
+        compose.onNodeWithText("保存").assertDoesNotExist()
+        compose.onNodeWithText("取消").assertIsEnabled()
     }
 }

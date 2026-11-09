@@ -77,6 +77,56 @@ class MediaConvertInfoPageTest {
     }
 
     @Test
+    fun explicitCoverActionsReplaceTheHintAndDoNotOpenThePicker() {
+        val original = MediaConvertMetadata(title = "Film")
+        val metadata = mutableStateOf(original)
+        var picks = 0
+        var exports = 0
+        compose.setContent {
+            SubtitleEditComposeTheme {
+                MediaConvertInfoPage(true, metadata.value, { metadata.value = it },
+                    onPickCover = { picks++ }, onExportCover = { exports++ })
+            }
+        }
+        compose.onNodeWithText("（长按删除封面）").assertDoesNotExist()
+        compose.onNodeWithText("导出").assertExists()
+        compose.onNodeWithText("删除").assertExists()
+        compose.onNodeWithTag("convert-cover-export").assertIsEnabled().performClick()
+        compose.runOnIdle {
+            assertEquals(1, exports)
+            assertEquals(0, picks)
+            assertEquals(original, metadata.value)
+        }
+        compose.onNodeWithTag("convert-cover-delete").assertIsEnabled().performClick()
+        compose.onNodeWithText("是否删除封面？保存后生效。").assertExists()
+        compose.onNodeWithTag("convert-cover-delete-cancel").performClick()
+        compose.runOnIdle {
+            assertEquals(0, picks)
+            assertEquals(original, metadata.value)
+        }
+    }
+
+    @Test
+    fun anUnavailableExportDoesNotDisableCoverSelectionOrDeletion() {
+        var picks = 0
+        var exports = 0
+        compose.setContent {
+            SubtitleEditComposeTheme {
+                MediaConvertInfoPage(true, MediaConvertMetadata(), {}, onPickCover = { picks++ },
+                    onExportCover = { exports++ }, coverExportEnabled = false)
+            }
+        }
+        compose.onNodeWithTag("convert-cover-export").assertIsNotEnabled()
+        compose.onNodeWithTag("convert-cover-delete").assertIsEnabled().performClick()
+        compose.onNodeWithTag("convert-cover-delete-cancel").performClick()
+        compose.onNodeWithTag("convert-info-cover").performClick()
+        compose.runOnIdle {
+            assertEquals(1, picks)
+            assertEquals(0, exports)
+        }
+    }
+
+    @Test
     fun confirmingCoverDeletionClearsDefaultAndCustomArtworkWithoutChangingTextTags() {
         val metadata = mutableStateOf(MediaConvertMetadata(title = "Film", author = "Director"))
         var picks = 0
@@ -89,7 +139,7 @@ class MediaConvertInfoPageTest {
             val original = MediaConvertMetadata(cover = cover, title = "Film", author = "Director",
                 coverPath = if (cover == MediaConvertCoverMode.CUSTOM) "cover.jpg" else null)
             compose.runOnIdle { metadata.value = original }
-            compose.onNodeWithTag("convert-info-cover").performTouchInput { longClick() }
+            compose.onNodeWithTag("convert-cover-delete").performClick()
             compose.onNodeWithText("删除封面").assertExists()
             compose.onNodeWithText("是否删除封面？保存后生效。").assertExists()
             compose.runOnIdle { assertEquals(original, metadata.value) }
@@ -113,7 +163,7 @@ class MediaConvertInfoPageTest {
                     coverFileName = "cover.jpg", onPickCover = { picks++ })
             }
         }
-        compose.onNodeWithTag("convert-info-cover").performTouchInput { longClick() }
+        compose.onNodeWithTag("convert-cover-delete").performClick()
         compose.onNodeWithTag("convert-cover-delete-cancel").performClick()
         compose.onNodeWithTag("convert-cover-delete-confirm").assertDoesNotExist()
         compose.onNodeWithText("cover.jpg").assertExists()
@@ -136,9 +186,13 @@ class MediaConvertInfoPageTest {
             }
         }
         compose.onNodeWithTag("convert-info-cover").performTouchInput { longClick() }
+        compose.onNodeWithTag("convert-cover-export").assertIsNotEnabled()
+        compose.onNodeWithTag("convert-cover-delete").assertIsNotEnabled()
         compose.onNodeWithTag("convert-cover-delete-confirm").assertDoesNotExist()
         compose.runOnIdle { enabled.value = true; coverEnabled.value = false }
         compose.onNodeWithTag("convert-info-cover").performTouchInput { longClick() }
+        compose.onNodeWithTag("convert-cover-export").assertIsNotEnabled()
+        compose.onNodeWithTag("convert-cover-delete").assertIsNotEnabled()
         compose.onNodeWithTag("convert-cover-delete-confirm").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(0, changes)
@@ -192,6 +246,8 @@ class MediaConvertInfoPageTest {
         }
 
         compose.onNodeWithTag("convert-info-cover").assertIsNotEnabled()
+        compose.onNodeWithTag("convert-cover-export").assertIsNotEnabled()
+        compose.onNodeWithTag("convert-cover-delete").assertIsNotEnabled()
         compose.onNodeWithTag("convert-info-title").assertIsEnabled()
         compose.onNodeWithTag("convert-info-cover-unsupported-hint").assertExists()
         compose.onNodeWithTag("convert-info-title").performClick()

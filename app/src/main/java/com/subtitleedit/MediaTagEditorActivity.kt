@@ -22,6 +22,10 @@ class MediaTagEditorActivity : AppComposeActivity() {
         AppFilePickerContracts.OpenDocument(MediaTagFileSelectionPolicy.coverExtensions)
     ) { uri -> uri?.let(viewModel::selectCover) }
 
+    private val coverExportDirectory = registerForActivityResult(AppFilePickerContracts.OpenDocumentTree()) { uri ->
+        uri?.let(viewModel::exportCover)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         viewModel.initialize(intent.getStringArrayListExtra(EXTRA_FILE_PATHS).orEmpty(), intent.getStringExtra(EXTRA_COVER_PATH))
@@ -43,6 +47,7 @@ class MediaTagEditorActivity : AppComposeActivity() {
                     onBack = { onBackPressedDispatcher.onBackPressed() },
                     onMetadataChanged = viewModel::setMetadata,
                     onPickCover = { coverPicker.launch(arrayOf("image/*")) },
+                    onExportCover = { if (state.canExportCover) coverExportDirectory.launch(null) },
                     onSave = viewModel::save,
                     onCancel = viewModel::cancel
                 )

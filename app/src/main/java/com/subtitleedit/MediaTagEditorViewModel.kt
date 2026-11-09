@@ -31,13 +31,17 @@ internal data class MediaTagEditorState(
     val metadata: MediaConvertMetadata = MediaConvertMetadata(),
     val coverFileName: String? = null,
     val coverSupported: Boolean = false,
+    val hasSourceCover: Boolean = false,
     val isReadingCover: Boolean = false,
+    val isExportingCover: Boolean = false,
     val isSaving: Boolean = false,
     val progress: Float = 0f,
     val message: String = ""
 ) {
-    val canSave: Boolean get() = selection.editable && !isReadingCover && !isSaving &&
+    val canSave: Boolean get() = selection.editable && !isReadingCover && !isSaving && !isExportingCover &&
         (metadata.editedFields.isNotEmpty() || metadata.cover != MediaConvertCoverMode.DEFAULT)
+    val canExportCover: Boolean get() = selection.editable && !isSaving && !isReadingCover && !isExportingCover &&
+        (metadata.cover == MediaConvertCoverMode.CUSTOM || (metadata.cover == MediaConvertCoverMode.DEFAULT && hasSourceCover))
 }
 
 internal class MediaTagEditorViewModel(application: Application) :
@@ -48,6 +52,7 @@ internal class MediaTagEditorViewModel(application: Application) :
         val streams: List<MediaTagStream>,
         val media: MediaConvertSource,
         val metadata: MediaConvertMetadata,
+        val covers: List<MediaTagCover>,
         val size: Long,
         val modified: Long
     )
@@ -58,6 +63,7 @@ internal class MediaTagEditorViewModel(application: Application) :
     private var coverJob: Job? = null
     private var coverRequestId = 0L
     private var saveJob: Job? = null
+    private var exportJob: Job? = null
     @Volatile private var session: FFmpegSession? = null
 
     fun initialize(paths: List<String>, initialCoverPath: String? = null) {
@@ -72,21 +78,22 @@ internal class MediaTagEditorViewModel(application: Application) :
             setState {
                 copy(selection = selection,
                     metadata = probed.singleOrNull()?.metadata ?: MediaConvertMetadata(),
-                    coverSupported = sources.isNotEmpty() && sources.all { MediaTagEditorCommand.supportsCover(it.muxer) })
+                    coverSupported = sources.isNotEmpty() && sources.all { MediaTagEditorCommand.supportsCover(it.muxer) },
+                    hasSourceCover = sources.any { it.covers.isNotEmpty() })
             }
             initialCoverPath?.let { selectCover(Uri.fromFile(File(it))) }
         }
     }
 
     fun setMetadata(metadata: MediaConvertMetadata) {
-        if (currentState.selection.editable && !currentState.isSaving && !currentState.isReadingCover) {
+        if (currentState.selection.editable && !currentState.isSaving && !currentState.isReadingCover && !currentState.isExportingCover) {
             if (metadata.cover != MediaConvertCoverMode.CUSTOM) coverUri = null
             setState { copy(metadata = metadata, coverFileName = coverFileName.takeIf { metadata.cover == MediaConvertCoverMode.CUSTOM }) }
         }
     }
 
     fun selectCover(uri: Uri) {
-        if (!currentState.selection.editable || !currentState.coverSupported || currentState.isSaving) return
+        if (!currentState.selection.editable || !currentState.coverSupported || currentState.isSaving || currentState.isExportingCover) return
         val requestId = ++coverRequestId
         coverJob?.cancel()
         setState { copy(isReadingCover = true) }
@@ -104,6 +111,94 @@ internal class MediaTagEditorViewModel(application: Application) :
             } finally {
                 if (requestId == coverRequestId) setState { copy(isReadingCover = false) }
             }
+        }
+    }
+
+    fun exportCover(directory: Uri) {
+        if (!currentState.canExportCover || exportJob?.isActive == true) return
+        val snapshot = currentState
+        val selectedCover = coverUri
+        val selectedSources = sources.toList()
+        setState { copy(isExportingCover = true, message = string(R.string.media_tag_editor_exporting_cover)) }
+        exportJob = viewModelScope.launch {
+            val cache = File(app.cacheDir, "media_cover_export_${System.nanoTime()}")
+            var exported = 0
+            val failures = mutableListOf<String>()
+            try {
+                withContext(Dispatchers.IO) {
+                    val target = requireNotNull(PickedUriAccess.file(directory)) { string(R.string.media_convert_invalid_output_directory) }
+                    check(target.isDirectory) { string(R.string.media_convert_invalid_output_directory) }
+                    if (snapshot.metadata.cover == MediaConvertCoverMode.CUSTOM) {
+                        val prepared = MediaConvertCoverImages.prepare(app, requireNotNull(selectedCover), cache)
+                        currentCoroutineContext().ensureActive()
+                        val name = snapshot.coverFileName?.substringBeforeLast('.')?.takeIf { it.isNotBlank() } ?: "cover"
+                        MediaTagCoverExport.copyUnique(prepared, target, "$name.jpg")
+                        exported++
+                    } else {
+                        if (!cache.isDirectory && !cache.mkdirs()) error(string(R.string.media_convert_create_output_directory_failed))
+                        for ((sourceIndex, source) in selectedSources.withIndex()) {
+                            for ((coverIndex, cover) in source.covers.withIndex()) {
+                                currentCoroutineContext().ensureActive()
+                                val extracted = File(cache, "$sourceIndex-$coverIndex.${cover.extension}")
+                                try {
+                                    check(source.file.length() == source.size && source.file.lastModified() == source.modified) {
+                                        string(R.string.media_tag_editor_source_changed)
+                                    }
+                                    extractCover(source.file, extracted, cover)
+                                    currentCoroutineContext().ensureActive()
+                                    val suffix = if (coverIndex == 0) "" else "_${coverIndex + 1}"
+                                    MediaTagCoverExport.copyUnique(extracted, target, "${source.file.nameWithoutExtension}_cover$suffix.${cover.extension}")
+                                    exported++
+                                } catch (error: CancellationException) {
+                                    throw error
+                                } catch (error: Exception) {
+                                    failures += "${source.file.name}：${error.message.orEmpty()}"
+                                } finally { extracted.delete() }
+                            }
+                        }
+                    }
+                }
+                val result = string(R.string.media_tag_editor_export_cover_result, exported, failures.size)
+                if (exported == 0 && failures.isEmpty()) toast(R.string.media_tag_editor_export_cover_none)
+                else toast(result)
+                setState { copy(message = if (failures.isEmpty()) "" else (listOf(result) + failures).joinToString("\n")) }
+            } catch (cancelled: CancellationException) {
+                setState { copy(message = "") }
+                throw cancelled
+            } catch (error: Exception) {
+                setState { copy(message = string(R.string.media_tag_editor_export_cover_failed, error.message.orEmpty())) }
+            } finally {
+                withContext(NonCancellable + Dispatchers.IO) { cache.deleteRecursively() }
+                setState { copy(isExportingCover = false) }
+            }
+        }
+    }
+
+    private suspend fun extractCover(source: File, output: File, cover: MediaTagCover) {
+        var running: FFmpegSession? = null
+        try {
+            running = withContext(NonCancellable) {
+                FFmpegKit.executeWithArgumentsAsync(MediaTagCoverExport.arguments(source.absolutePath, output.absolutePath, cover)
+                    .toTypedArray(), {}, {}, {})
+            }
+            session = running
+            val deadline = SystemClock.elapsedRealtime() + 120_000L
+            while (running.getState().name !in setOf("COMPLETED", "FAILED")) {
+                delay(50)
+                check(SystemClock.elapsedRealtime() < deadline) { string(R.string.media_convert_timeout) }
+            }
+            currentCoroutineContext().ensureActive()
+            check(ReturnCode.isSuccess(running.getReturnCode()) && output.isFile && output.length() > 0) {
+                running.getAllLogsAsString().takeLast(2000).ifBlank { string(R.string.media_tag_editor_export_cover_none) }
+            }
+        } finally {
+            withContext(NonCancellable) {
+                running?.let { active ->
+                    if (active.getState().name !in setOf("COMPLETED", "FAILED")) active.cancel()
+                    while (active.getState().name !in setOf("COMPLETED", "FAILED")) delay(50)
+                }
+            }
+            session = null
         }
     }
 
@@ -156,6 +251,7 @@ internal class MediaTagEditorViewModel(application: Application) :
     fun cancel() {
         session?.cancel()
         saveJob?.cancel()
+        exportJob?.cancel()
     }
 
     /** A sibling staging file allows the successful remux to replace its source atomically. */
@@ -262,8 +358,12 @@ internal class MediaTagEditorViewModel(application: Application) :
             else -> formats.first()
         }
         check(file.length() == size && file.lastModified() == modified) { string(R.string.media_tag_editor_source_changed) }
+        val covers = info.getStreams().mapNotNull { stream ->
+            val description = streams.first { it.index == stream.getIndex() }
+            MediaTagCoverExport.cover(description, stream.getCodec(), stream.getTags()?.optString("filename"))
+        }
         return Source(file, muxer, streams, MediaConvertSource(video, info.getDuration()?.toDoubleOrNull(), hasAudio = audio),
-            metadata, size, modified)
+            metadata, covers, size, modified)
     }
 
     override fun onCleared() {
