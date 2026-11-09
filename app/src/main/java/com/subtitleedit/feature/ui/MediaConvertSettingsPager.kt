@@ -31,8 +31,7 @@ import kotlinx.coroutines.launch
 private enum class MediaConvertSettingsPage(val title: Int) {
     MORE(R.string.media_convert_more_settings),
     ADVANCED(R.string.media_convert_advanced_options),
-    SUBTITLES(R.string.media_convert_subtitles),
-    INFO(R.string.media_convert_information)
+    SUBTITLES(R.string.media_convert_subtitles)
 }
 
 /** Only the settings area pages horizontally; vertical scrolling stays with the tool page. */
@@ -44,11 +43,10 @@ internal fun MediaConvertSettingsPager(
     advancedContent: @Composable () -> Unit,
     showSubtitlePage: Boolean = false,
     subtitleContent: @Composable () -> Unit = {},
-    infoContent: @Composable () -> Unit = {},
     isAudioOutput: Boolean = false
 ) {
     val pages = when {
-        isAudioOutput -> listOf(MediaConvertSettingsPage.ADVANCED, MediaConvertSettingsPage.INFO)
+        isAudioOutput -> listOf(MediaConvertSettingsPage.ADVANCED)
         showSubtitlePage -> MediaConvertSettingsPage.entries.toList()
         else -> listOf(MediaConvertSettingsPage.MORE, MediaConvertSettingsPage.ADVANCED)
     }
@@ -91,7 +89,6 @@ internal fun MediaConvertSettingsPager(
                     MediaConvertSettingsPage.MORE -> moreContent()
                     MediaConvertSettingsPage.ADVANCED -> advancedContent()
                     MediaConvertSettingsPage.SUBTITLES -> subtitleContent()
-                    MediaConvertSettingsPage.INFO -> infoContent()
                 }
             }
         }

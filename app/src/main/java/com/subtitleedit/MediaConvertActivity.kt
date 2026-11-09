@@ -20,7 +20,7 @@ import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import java.io.File
 
-/** 音视频格式转换页面；状态和 FFmpeg 任务由 [MediaConvertViewModel] 持有。 */
+/** 音视频处理页面；状态和 FFmpeg 任务由 [MediaConvertViewModel] 持有。 */
 class MediaConvertActivity : AppComposeActivity() {
     private val viewModel: MediaConvertViewModel by viewModels()
 
@@ -35,10 +35,6 @@ class MediaConvertActivity : AppComposeActivity() {
     private val subtitlePickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         AppFilePickerContracts.OpenDocument().parseResult(result.resultCode, result.data)?.let(viewModel::selectSubtitle)
     }
-
-    private val coverPickerLauncher = registerForActivityResult(
-        AppFilePickerContracts.OpenDocument(setOf("jpg", "jpeg", "png", "webp", "bmp", "gif", "heic", "heif"))
-    ) { uri -> uri?.let(viewModel::selectCover) }
 
     private fun pickSubtitle() {
         val extensions = viewModel.allowedSubtitleExtensions
@@ -140,7 +136,7 @@ class MediaConvertActivity : AppComposeActivity() {
                     channels = channelOptions,
                     channelIndex = state.options.channelIndex,
                     isConverting = state.isConverting,
-                    canConvert = state.selectedFiles.isNotEmpty() && state.selectedFormat != null && !state.isReadingCover,
+                    canConvert = state.selectedFiles.isNotEmpty() && state.selectedFormat != null,
                     canShare = state.outputUris.isNotEmpty(),
                     progress = state.progress,
                     log = state.log,
@@ -182,19 +178,13 @@ class MediaConvertActivity : AppComposeActivity() {
                     audioVbrQuality = state.options.audioVbrQuality,
                     onAudioVbrQualityChange = viewModel::setAudioVbrQuality,
                     selectedSourceCount = state.selectedFiles.size,
-                    metadataSelection = state.metadataSelection,
-                    coverFileName = state.coverFile?.fileName,
-                    coverSupported = format?.let(MediaConvertMetadataSupport::supportsCover) == true,
-                    onPickCover = { coverPickerLauncher.launch(arrayOf("image/*")) },
                     subtitleFileName = state.subtitleFile?.fileName,
                     subtitleType = state.subtitleType,
-                    subtitleMetadata = state.subtitleMetadata,
                     allowedSubtitleExtensions = viewModel.allowedSubtitleExtensions,
                     subtitleBurnInAvailable = state.subtitleBurnInAvailable,
                     onPickSubtitle = ::pickSubtitle,
                     onRemoveSubtitle = viewModel::clearSubtitle,
                     onSubtitleTypeChange = viewModel::setSubtitleType,
-                    onSubtitleMetadataChange = viewModel::setSubtitleMetadata,
                     videoSettings = state.options.videoSettings,
                     effectiveVideoCodec = effectiveVideoCodec,
                     detectedPixelFormats = state.videoPixelFormats[effectiveVideoCodec],

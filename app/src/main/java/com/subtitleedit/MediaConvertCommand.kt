@@ -254,9 +254,9 @@ internal object MediaConvertCommand {
                 addAll(listOf(if (streamCover && !format.isAudioOnly) "-threads:v:0" else "-threads", threads.toString()))
                 if (hasVideoFilters) addAll(listOf("-filter_threads", threads.toString()))
             }
-            if (!analysisPass) metadata?.let {
+            if (!analysisPass) {
                 addAll(listOf("-map_metadata", sourceInputIndex.toString()))
-                addAll(it.arguments(format.isAudioOnly))
+                metadata?.let { addAll(it.arguments(format.isAudioOnly)) }
             }
             addAll(listOf("-f", if (analysisPass) "null" else format.formatName, output))
         }

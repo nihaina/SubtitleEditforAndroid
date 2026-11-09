@@ -70,17 +70,16 @@ class MediaConvertSettingsPagerTest {
             SubtitleEditComposeTheme {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     MediaConvertSettingsPager(true, { Text("更多设置内容") }, { Text("高级选项内容") },
-                        showSubtitlePage = videoOutput.value, subtitleContent = { Text("字幕配置内容") },
-                        infoContent = { Text("信息设置内容") })
+                        showSubtitlePage = videoOutput.value, subtitleContent = { Text("字幕配置内容") })
                 }
             }
         }
         compose.onNodeWithTag("convert-settings-tab-2").performClick().assertIsSelected()
         compose.onNodeWithText("字幕配置内容").assertIsDisplayed()
-        compose.onNodeWithTag("convert-settings-tab-3").performClick().assertIsSelected()
-        compose.onNodeWithText("信息设置内容").assertIsDisplayed()
+        compose.onNodeWithTag("convert-settings-tab-3").assertDoesNotExist()
+        compose.onNodeWithText("信息").assertDoesNotExist()
         restoration.emulateSavedInstanceStateRestore()
-        compose.onNodeWithTag("convert-settings-tab-3").assertIsSelected()
+        compose.onNodeWithTag("convert-settings-tab-2").assertIsSelected()
         compose.runOnIdle { videoOutput.value = false }
         compose.onNodeWithTag("convert-settings-tab-2").assertDoesNotExist()
         compose.onNodeWithTag("convert-settings-tab-1").assertIsSelected()
@@ -88,7 +87,7 @@ class MediaConvertSettingsPagerTest {
     }
 
     @Test
-    fun audioOutputOnlyShowsAdvancedAndInformationAndKeepsInformationSelected() {
+    fun audioOutputOnlyShowsAdvancedAndRestoresIt() {
         val audioOutput = mutableStateOf(false)
         val restoration = StateRestorationTester(compose)
         restoration.setContent {
@@ -100,24 +99,23 @@ class MediaConvertSettingsPagerTest {
                         advancedContent = { Text("高级选项内容") },
                         showSubtitlePage = !audioOutput.value,
                         subtitleContent = { Text("字幕配置内容") },
-                        infoContent = { Text("信息设置内容") },
                         isAudioOutput = audioOutput.value
                     )
                 }
             }
         }
 
-        compose.onNodeWithTag("convert-settings-tab-3").performClick().assertIsSelected()
+        compose.onNodeWithTag("convert-settings-tab-1").performClick().assertIsSelected()
         compose.runOnIdle { audioOutput.value = true }
         compose.onNodeWithText("更多设置").assertDoesNotExist()
         compose.onNodeWithText("字幕").assertDoesNotExist()
-        compose.onNodeWithTag("convert-settings-tab-1").assertIsSelected()
-        compose.onNodeWithText("信息设置内容").assertIsDisplayed()
+        compose.onNodeWithText("信息").assertDoesNotExist()
+        compose.onNodeWithTag("convert-settings-tab-1").assertDoesNotExist()
+        compose.onNodeWithTag("convert-settings-tab-0").assertIsSelected()
+        compose.onNodeWithText("高级选项内容").assertIsDisplayed()
 
         restoration.emulateSavedInstanceStateRestore()
-        compose.onNodeWithTag("convert-settings-tab-1").assertIsSelected()
-        compose.onNodeWithText("信息设置内容").assertIsDisplayed()
-        compose.onNodeWithTag("convert-settings-tab-0").performClick().assertIsSelected()
+        compose.onNodeWithTag("convert-settings-tab-0").assertIsSelected()
         compose.onNodeWithText("高级选项内容").assertIsDisplayed()
     }
 
@@ -130,7 +128,6 @@ class MediaConvertSettingsPagerTest {
                     true, { Text("更多设置内容") }, { Text("高级选项内容") },
                     showSubtitlePage = !audioOutput.value,
                     subtitleContent = { Text("字幕配置内容") },
-                    infoContent = { Text("信息设置内容") },
                     isAudioOutput = audioOutput.value
                 )
             }

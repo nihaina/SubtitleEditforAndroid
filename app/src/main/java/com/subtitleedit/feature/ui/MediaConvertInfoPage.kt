@@ -1,6 +1,7 @@
 package com.subtitleedit.feature.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -49,6 +50,7 @@ internal fun MediaConvertInfoPage(
 ) {
     var editingFieldName by rememberSaveable { mutableStateOf<String?>(null) }
     var showCoverWarning by rememberSaveable { mutableStateOf(false) }
+    var showCoverDeleteConfirmation by rememberSaveable { mutableStateOf(false) }
     val fields = if (isAudioOutput) listOf(
         MediaConvertMetadataField.GENRE, MediaConvertMetadataField.TITLE, MediaConvertMetadataField.ARTIST,
         MediaConvertMetadataField.ALBUM, MediaConvertMetadataField.YEAR
@@ -70,7 +72,10 @@ internal fun MediaConvertInfoPage(
             MediaConvertCoverMode.CUSTOM -> coverFileName ?: stringResource(R.string.media_convert_info_cover_selected)
         }
         MediaConvertInfoRow(stringResource(R.string.media_convert_info_cover), coverLabel, enabled && coverEnabled,
-            { if (batch) showCoverWarning = true else onPickCover() }, "convert-info-cover")
+            { if (batch) showCoverWarning = true else onPickCover() }, "convert-info-cover",
+            onLongClick = { showCoverDeleteConfirmation = true },
+            onLongClickLabel = stringResource(R.string.media_tag_editor_delete_cover),
+            supportingText = stringResource(R.string.media_tag_editor_delete_cover_hint))
         if (coverUnsupportedHint != null) Text(
             text = coverUnsupportedHint,
             modifier = Modifier.testTag("convert-info-cover-unsupported-hint"),
@@ -92,6 +97,27 @@ internal fun MediaConvertInfoPage(
             modifier = Modifier.testTag("convert-info-unavailable-hint"),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+    if (showCoverDeleteConfirmation && enabled && coverEnabled) {
+        AppDialog(
+            onDismissRequest = { showCoverDeleteConfirmation = false },
+            title = { Text(stringResource(R.string.media_tag_editor_delete_cover)) },
+            text = { Text(stringResource(if (batch) R.string.media_tag_editor_delete_cover_batch_message
+                else R.string.media_tag_editor_delete_cover_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onMetadataChanged(metadata.copy(cover = MediaConvertCoverMode.NONE, coverPath = null))
+                        showCoverDeleteConfirmation = false
+                    },
+                    modifier = Modifier.testTag("convert-cover-delete-confirm")
+                ) { Text(stringResource(R.string.delete)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCoverDeleteConfirmation = false },
+                    modifier = Modifier.testTag("convert-cover-delete-cancel")) { Text(stringResource(R.string.cancel)) }
+            }
         )
     }
     if (showCoverWarning && enabled && coverEnabled) {
@@ -122,15 +148,27 @@ internal fun MediaConvertInfoPage(
 }
 
 @Composable
-private fun MediaConvertInfoRow(label: String, value: String, enabled: Boolean, onClick: () -> Unit, tag: String) {
+private fun MediaConvertInfoRow(label: String, value: String, enabled: Boolean, onClick: () -> Unit, tag: String,
+                                onLongClick: (() -> Unit)? = null, onLongClickLabel: String? = null,
+                                supportingText: String? = null) {
+    val interaction = if (onLongClick != null) Modifier.combinedClickable(
+        enabled = enabled, onClick = onClick, onLongClick = onLongClick, onLongClickLabel = onLongClickLabel
+    ) else Modifier.clickable(enabled = enabled, onClick = onClick)
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).testTag(tag).padding(vertical = 14.dp),
+        modifier = Modifier.fillMaxWidth().then(interaction).testTag(tag).padding(vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         val contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f)
         Text(label, modifier = Modifier.width(AppSpacing.FormLabelWidth), style = MaterialTheme.typography.bodyLarge, color = contentColor)
-        Text(value, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = contentColor)
+        Column(Modifier.weight(1f)) {
+            Text(value, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = contentColor)
+            if (supportingText != null) Text(
+                text = supportingText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.38f)
+            )
+        }
         Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(20.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.38f))
     }

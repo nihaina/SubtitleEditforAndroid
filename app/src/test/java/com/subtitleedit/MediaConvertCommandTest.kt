@@ -67,6 +67,14 @@ class MediaConvertCommandTest {
     }
 
     @Test
+    fun conversionKeepsSourceTagsWithoutTheInformationEditor() {
+        assertEquals("0", build("mp4").value("-map_metadata"))
+        val generatedVideo = build("mp4", source = MediaConvertSource(false, 2.0))
+        assertEquals("1", generatedVideo.value("-map_metadata"))
+        assertFalse("-metadata" in generatedVideo)
+    }
+
+    @Test
     fun metadataOverridesAreAppliedToFinalOutputAndCoverNoneUnmapsAttachedPictures() {
         val metadata = MediaConvertMetadata(cover = MediaConvertCoverMode.NONE)
             .withValue(MediaConvertMetadataField.TITLE, "Film")

@@ -314,6 +314,7 @@ class MainActivity : AppComposeActivity() {
                         onDelete = ::confirmDeleteSelectedFiles,
                         onConvertSelection = ::showSubtitleFormatConvertDialog,
                         onCompressSelection = ::showCreateArchiveDialog,
+                        onEditTagsSelection = ::editSelectedMediaTags,
                         onClearCacheSelection = ::showSelectedMediaCacheDialog,
                         onShowSelectionProperties = ::showSelectedProperties,
                         onConfirmDestination = ::completeDestinationOperation,
@@ -424,6 +425,8 @@ class MainActivity : AppComposeActivity() {
         val canClearCacheSelected = selectedFiles.isNotEmpty() && selectedFiles.all {
             it.isFile && (FileUtils.isAudioFile(it) || FileTypePolicy.isVideo(it))
         }
+        val canEditTagsSelected = selectedFiles.size == document.selectedPaths.size &&
+            MediaTagFileSelectionPolicy.fromFiles(selectedFiles, ::isAudioOrVideoFile) != null
         screenState = MainActivityScreenState(
             selectedTopLevelItem = document.selectedTopLevelItem,
             // Selection actions and title belong to the directory content. The
@@ -452,6 +455,7 @@ class MainActivity : AppComposeActivity() {
             viewMode = document.viewMode ?: FileBrowserViewMode.DETAILED,
             canConvertSelected = canConvertSelected,
             canCompressSelected = !isFileSearchQueryActive(),
+            canEditTagsSelected = canEditTagsSelected,
             canClearCacheSelected = canClearCacheSelected
         )
     }
@@ -1301,6 +1305,16 @@ class MainActivity : AppComposeActivity() {
             val kindLabel = item.label.removeSuffix("缓存")
             showShortToast(getString(R.string.settings_cache_cleared, result.fileCount, kindLabel))
         }
+    }
+
+    private fun editSelectedMediaTags() {
+        val files = selectedFiles()
+        if (files.size != stateModel.documentState.selectedPaths.size) return
+        val selection = MediaTagFileSelectionPolicy.fromFiles(files, ::isAudioOrVideoFile) ?: return
+        startActivity(Intent(this, MediaTagEditorActivity::class.java).apply {
+            putStringArrayListExtra(MediaTagEditorActivity.EXTRA_FILE_PATHS, ArrayList(selection.mediaFiles.map { it.absolutePath }))
+            selection.coverFile?.let { putExtra(MediaTagEditorActivity.EXTRA_COVER_PATH, it.absolutePath) }
+        })
     }
 
     private fun isAudioOrVideoFile(file: File): Boolean = file.isFile &&

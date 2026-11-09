@@ -52,7 +52,6 @@ internal data class MediaConvertFileUi(
 )
 
 internal data class MediaConvertSubtitleFile(val uri: Uri, val fileName: String)
-internal data class MediaConvertCoverFile(val uri: Uri, val fileName: String)
 
 internal data class MediaConvertUiState(
     val selectedFiles: List<MediaConvertFileUi> = emptyList(),
@@ -62,10 +61,6 @@ internal data class MediaConvertUiState(
     val isAudioOutput: Boolean = false,
     val subtitleFile: MediaConvertSubtitleFile? = null,
     val subtitleType: MediaConvertSubtitleType = MediaConvertSubtitleType.SOFT,
-    val subtitleMetadata: MediaConvertMetadata = MediaConvertMetadata(),
-    val metadataSelection: MediaConvertMetadataSelection = MediaConvertMetadataSelection.EMPTY,
-    val coverFile: MediaConvertCoverFile? = null,
-    val isReadingCover: Boolean = false,
     val subtitleBurnInAvailable: Boolean = false,
     val availableEncoders: Set<String> = MediaConvertFormats.baselineEncoders,
     val availableAudioEncoders: Set<String> = MediaConvertAudioCodecs.baselineEncoders,
@@ -97,8 +92,8 @@ internal class MediaConvertViewModel(application: Application) :
         private const val OUTPUT_DIRECTORY_KEY = "media_convert"
     }
 
-    private data class SelectedMediaFile(val uri: Uri, val fileName: String, val mediaInfo: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null, val videoPixelFormat: String? = null, val fileSizeBytes: Long? = null, val source: MediaConvertSource? = null, val metadata: MediaConvertMetadata? = null)
-    private data class SourceDescription(val text: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null, val videoPixelFormat: String? = null, val fileSizeBytes: Long? = null, val source: MediaConvertSource? = null, val metadata: MediaConvertMetadata? = null)
+    private data class SelectedMediaFile(val uri: Uri, val fileName: String, val mediaInfo: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null, val videoPixelFormat: String? = null, val fileSizeBytes: Long? = null, val source: MediaConvertSource? = null)
+    private data class SourceDescription(val text: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null, val videoPixelFormat: String? = null, val fileSizeBytes: Long? = null, val source: MediaConvertSource? = null)
     private data class DirectFileOutput(val staging: File, val target: File, val fileName: String)
     private data class OutputResult(val uri: Uri, val fileName: String)
 
@@ -131,8 +126,6 @@ internal class MediaConvertViewModel(application: Application) :
     private var currentSession: FFmpegSession? = null
     private var conversionJob: Job? = null
     private var probeJob: Job? = null
-    private var coverJob: Job? = null
-    private var coverRequestId = 0L
 
     val currentOutputDirectoryUri: Uri? get() = outputDirectoryUri
     val isRunning: Boolean get() = currentState.isConverting
@@ -143,7 +136,6 @@ internal class MediaConvertViewModel(application: Application) :
             format?.takeUnless { it.isAudioOnly }?.videoEncoder(currentState.options.selectedVideoCodec).orEmpty(),
             currentState.subtitleBurnInAvailable)
     }
-    val canEditSubtitleMetadata: Boolean get() = currentState.metadataSelection.editable
 
     init {
         setState { copy(saveToSourceDirectory = settingsManager.isSaveToSourceDirectoryEnabled(OUTPUT_DIRECTORY_KEY)) }
@@ -175,8 +167,6 @@ internal class MediaConvertViewModel(application: Application) :
     fun selectFiles(uris: List<Uri>) {
         if (isRunning) return
         probeJob?.cancel()
-        coverRequestId++
-        coverJob?.cancel()
         selectedMediaFiles = uris.distinct().map { uri ->
             runCatching { PickedUriAccess.retainPermission(app, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             SelectedMediaFile(uri, getFileName(uri), app.getString(R.string.media_convert_reading_info))
@@ -187,10 +177,6 @@ internal class MediaConvertViewModel(application: Application) :
                 selectedFormat = null,
                 subtitleFile = null,
                 subtitleType = MediaConvertSubtitleType.SOFT,
-                subtitleMetadata = MediaConvertMetadata(),
-                metadataSelection = if (selectedMediaFiles.isEmpty()) MediaConvertMetadataSelection.EMPTY else MediaConvertMetadataSelection.READING,
-                coverFile = null,
-                isReadingCover = false,
                 log = ""
             )
         }
@@ -260,34 +246,6 @@ internal class MediaConvertViewModel(application: Application) :
         discardIncompatibleSubtitle()
     }
 
-    fun setSubtitleMetadata(value: MediaConvertMetadata) {
-        if (isRunning || !canEditSubtitleMetadata) return
-        setState { copy(subtitleMetadata = value, coverFile = coverFile.takeIf { value.cover == MediaConvertCoverMode.CUSTOM }) }
-    }
-
-    fun selectCover(uri: Uri) {
-        if (isRunning || !canEditSubtitleMetadata) return
-        coverJob?.cancel()
-        val requestId = ++coverRequestId
-        val sourceUris = selectedMediaFiles.map { it.uri }
-        setState { copy(isReadingCover = true) }
-        coverJob = viewModelScope.launch {
-            try {
-                withContext(Dispatchers.IO) { MediaConvertCoverImages.validate(app, uri) }
-                if (isRunning || sourceUris != selectedMediaFiles.map { it.uri } || !canEditSubtitleMetadata) return@launch
-                runCatching { PickedUriAccess.retainPermission(app, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-                setState { copy(coverFile = MediaConvertCoverFile(uri, getFileName(uri)),
-                    subtitleMetadata = subtitleMetadata.copy(cover = MediaConvertCoverMode.CUSTOM)) }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                toast(R.string.media_convert_cover_image_invalid)
-            } finally {
-                if (requestId == coverRequestId) setState { copy(isReadingCover = false) }
-            }
-        }
-    }
-
     fun clearSubtitle() {
         if (!isRunning) setState { copy(subtitleFile = null) }
     }
@@ -325,7 +283,6 @@ internal class MediaConvertViewModel(application: Application) :
     fun dismissDialog() = setState { copy(dialog = MediaConvertDialog.NONE) }
 
     fun startConversion() {
-        if (currentState.isReadingCover) return toast(R.string.media_convert_cover_image_reading)
         val format = currentState.selectedFormat?.let { id -> formatList.first { it.extension == id } }
         if (selectedMediaFiles.isEmpty()) return toast(R.string.activity_media_convert_text_02)
         if (format == null) return toast(R.string.media_convert_select_format_required)
@@ -373,25 +330,21 @@ internal class MediaConvertViewModel(application: Application) :
 
     private fun probeSelectedFiles() {
         val snapshot = selectedMediaFiles.map { it.uri }
-        val readMetadata = snapshot.size == 1
         probeJob = viewModelScope.launch {
             snapshot.forEachIndexed { index, uri ->
                 val selected = selectedMediaFiles.firstOrNull { it.uri == uri } ?: return@forEachIndexed
                 val info = withContext(Dispatchers.IO) {
-                    probeUri(uri, readMetadata).let { if (isLikelyAudioFile(selected)) it.copy(videoBitrateBps = null) else it }
+                    probeUri(uri).let { if (isLikelyAudioFile(selected)) it.copy(videoBitrateBps = null) else it }
                 }
                 val current = selectedMediaFiles.indexOfFirst { it.uri == uri }
                 if (current < 0) return@forEachIndexed
                 val source = info.source?.let { probed ->
                     if (isLikelyAudioFile(selected)) probed.copy(hasVideo = false, videoBitrateBps = null) else probed
                 }
-                val metadata = info.metadata?.takeIf { source?.hasVideo == true || source?.hasAudio == true }
-                selectedMediaFiles = selectedMediaFiles.toMutableList().also { list -> list[current] = list[current].copy(mediaInfo = info.text, videoSize = info.videoSize, videoBitrateBps = info.videoBitrateBps, audioBitrateBps = info.audioBitrateBps, audioSampleRate = info.audioSampleRate, audioChannels = info.audioChannels, audioChannelLayout = info.audioChannelLayout, videoPixelFormat = info.videoPixelFormat, fileSizeBytes = info.fileSizeBytes, source = source, metadata = metadata) }
+                selectedMediaFiles = selectedMediaFiles.toMutableList().also { list -> list[current] = list[current].copy(mediaInfo = info.text, videoSize = info.videoSize, videoBitrateBps = info.videoBitrateBps, audioBitrateBps = info.audioBitrateBps, audioSampleRate = info.audioSampleRate, audioChannels = info.audioChannels, audioChannelLayout = info.audioChannelLayout, videoPixelFormat = info.videoPixelFormat, fileSizeBytes = info.fileSizeBytes, source = source) }
                 setState {
                     copy(
                         selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo, it.videoSize, it.videoBitrateBps, it.audioBitrateBps, it.audioSampleRate, it.audioChannels, it.audioChannelLayout, it.videoPixelFormat, it.fileSizeBytes, it.source?.hasVideo == true) },
-                        subtitleMetadata = if (selectedMediaFiles.size == 1) metadata ?: MediaConvertMetadata() else MediaConvertMetadata(),
-                        metadataSelection = MediaConvertMetadataSelection.fromSources(selectedMediaFiles.map { it.source }, pending = index < snapshot.lastIndex),
                         log = (log + string(R.string.media_convert_probe_summary, index + 1, snapshot.size, selected.fileName))
                             .takeLast(16000)
                     )
@@ -400,12 +353,12 @@ internal class MediaConvertViewModel(application: Application) :
         }
     }
 
-    private fun probeUri(uri: Uri, readMetadata: Boolean): SourceDescription {
+    private fun probeUri(uri: Uri): SourceDescription {
         var input: String? = null
         val size = sourceSizeBytes(uri)
         return try {
             input = ffmpegInput(uri)
-            (readMediaInfo(input, readMetadata) ?: SourceDescription(string(R.string.media_convert_probe_failed))).let { description ->
+            (readMediaInfo(input) ?: SourceDescription(string(R.string.media_convert_probe_failed))).let { description ->
                 description.copy(fileSizeBytes = size, source = description.source?.copy(fileSizeBytes = size))
             }
         } catch (e: Exception) {
@@ -414,7 +367,7 @@ internal class MediaConvertViewModel(application: Application) :
         finally { releaseFfmpegInput(input) }
     }
 
-    private fun readMediaInfo(path: String, readMetadata: Boolean): SourceDescription? {
+    private fun readMediaInfo(path: String): SourceDescription? {
         val info = FFprobeKit.getMediaInformation(path).getMediaInformation() ?: return null
         val text = buildString {
             append(string(R.string.media_convert_duration, formatDuration(info.getDuration()?.toDoubleOrNull() ?: 0.0)))
@@ -458,18 +411,9 @@ internal class MediaConvertViewModel(application: Application) :
             videoCodecName = video?.getCodec(), audioCodecName = audio?.getCodec(),
             videoWidth = video?.getWidth()?.toInt(), videoHeight = video?.getHeight()?.toInt(),
             videoStreamIndex = video?.getIndex(), attachedPictureStreamIndex = attachedPicture?.getIndex())
-        val metadata = if (readMetadata) {
-            val tags = listOfNotNull(info.getTags(), video?.getTags(), audio?.getTags())
-            MediaConvertMetadata.fromTags { key ->
-                tags.firstNotNullOfOrNull { tag ->
-                    tag.keys().asSequence().firstOrNull { it.equals(key, ignoreCase = true) }
-                        ?.let { tag.optString(it).takeIf { value -> value.isNotBlank() && !value.equals("null", ignoreCase = true) } }
-                }
-            }
-        } else null
         return SourceDescription(text, video?.let(::videoSize), video?.let(::streamBitrateBps), audio?.let(::streamBitrateBps),
             audio?.getSampleRate()?.toIntOrNull()?.takeIf { it > 0 }, audio?.getNumberProperty("channels")?.toInt(),
-            audio?.getChannelLayout(), video?.getStringProperty("pix_fmt"), source = source, metadata = metadata)
+            audio?.getChannelLayout(), video?.getStringProperty("pix_fmt"), source = source)
     }
 
     private fun streamBitrateBps(stream: StreamInformation): Long? = MediaConvertVideoBitrate.sourceBitsPerSecond(
@@ -598,13 +542,11 @@ internal class MediaConvertViewModel(application: Application) :
             val subtitle = prepareSubtitle(cache, format, options)
             val codec = if (format.isAudioOnly) "" else format.videoEncoder(options.selectedVideoCodec)
             val durationMs = sourceProbe.durationSeconds?.let { (it * 1000.0).toLong() } ?: 0L
-            val outputMetadata = prepareMetadata(cache, format)
             val hardwareAttempted = MediaConvertCommand.usesHardwareEncoder(format, options, sourceProbe, subtitle)
             val passLogPath = File(cache, "video-pass").absolutePath
             val commands = try {
                 MediaConvertCommand.plan(input, outputPath, format, options, sourceProbe, passLogPath,
-                    currentState.videoPixelFormats[codec], subtitle, allowHardware = true, hardwareCodecNames = currentState.hardwareCodecNames,
-                    metadata = outputMetadata)
+                    currentState.videoPixelFormats[codec], subtitle, allowHardware = true, hardwareCodecNames = currentState.hardwareCodecNames)
             } catch (e: MediaConvertVideoSizeException) {
                 val message = when (e.reason) {
                     MediaConvertVideoSizeError.UNKNOWN_SOURCE_SIZE -> R.string.media_convert_size_source_required
@@ -641,8 +583,7 @@ internal class MediaConvertViewModel(application: Application) :
                     outputPath = cachedOutput.absolutePath
                 }
                 val softwareCommands = MediaConvertCommand.plan(input, outputPath, format, options, sourceProbe, passLogPath,
-                    currentState.videoPixelFormats[codec], subtitle, allowHardware = false, hardwareCodecNames = currentState.hardwareCodecNames,
-                    metadata = outputMetadata)
+                    currentState.videoPixelFormats[codec], subtitle, allowHardware = false, hardwareCodecNames = currentState.hardwareCodecNames)
                 session = runCommands(softwareCommands)
             }
             checkNotNull(session)
@@ -688,22 +629,6 @@ internal class MediaConvertViewModel(application: Application) :
             releaseFfmpegInput(input)
             withContext(NonCancellable + Dispatchers.IO) { cache.deleteRecursively() }
         }
-    }
-
-    private suspend fun prepareMetadata(cache: File, format: MediaConvertFormatInfo): MediaConvertMetadata? {
-        if (!canEditSubtitleMetadata) return null
-        val metadata = currentState.subtitleMetadata
-        if (metadata.cover != MediaConvertCoverMode.CUSTOM) return metadata
-        if (!MediaConvertMetadataSupport.supportsCover(format)) return metadata.copy(cover = MediaConvertCoverMode.DEFAULT)
-        val cover = currentState.coverFile ?: return metadata.copy(cover = MediaConvertCoverMode.DEFAULT)
-        val image = try {
-            withContext(Dispatchers.IO) { MediaConvertCoverImages.prepare(app, cover.uri, cache) }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            throw IllegalArgumentException(string(R.string.media_convert_cover_image_invalid), e)
-        }
-        return metadata.copy(coverPath = image.absolutePath)
     }
 
     private suspend fun prepareSubtitle(cache: File, format: MediaConvertFormatInfo, options: MediaConvertOptions): MediaConvertSubtitleInput? {
@@ -850,5 +775,5 @@ internal class MediaConvertViewModel(application: Application) :
     private fun formatDuration(seconds: Double): String { val h = (seconds / 3600).toInt(); val m = ((seconds % 3600) / 60).toInt(); val s = (seconds % 60).toInt(); return if (h > 0) "%d:%02d:%02d".format(Locale.getDefault(), h, m, s) else "%d:%02d".format(Locale.getDefault(), m, s) }
     private fun appendLog(message: String) { if (message.isNotBlank()) setState { copy(log = (log + message).takeLast(16000)) } }
 
-    override fun onCleared() { taskController.cancel(); currentSession?.cancel(); probeJob?.cancel(); coverJob?.cancel(); conversionJob?.cancel(); super.onCleared() }
+    override fun onCleared() { taskController.cancel(); currentSession?.cancel(); probeJob?.cancel(); conversionJob?.cancel(); super.onCleared() }
 }

@@ -4,10 +4,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.subtitleedit.MediaConvertCoverMode
 import com.subtitleedit.MediaConvertMetadata
@@ -72,6 +74,96 @@ class MediaConvertInfoPageTest {
         compose.onNodeWithTag("convert-metadata-title").assertDoesNotExist()
         compose.onNodeWithTag("convert-metadata-confirm").assertDoesNotExist()
         compose.runOnIdle { assertEquals(1, picks) }
+    }
+
+    @Test
+    fun confirmingCoverDeletionClearsDefaultAndCustomArtworkWithoutChangingTextTags() {
+        val metadata = mutableStateOf(MediaConvertMetadata(title = "Film", author = "Director"))
+        var picks = 0
+        compose.setContent {
+            SubtitleEditComposeTheme {
+                MediaConvertInfoPage(true, metadata.value, { metadata.value = it }, onPickCover = { picks++ })
+            }
+        }
+        for (cover in listOf(MediaConvertCoverMode.DEFAULT, MediaConvertCoverMode.CUSTOM)) {
+            val original = MediaConvertMetadata(cover = cover, title = "Film", author = "Director",
+                coverPath = if (cover == MediaConvertCoverMode.CUSTOM) "cover.jpg" else null)
+            compose.runOnIdle { metadata.value = original }
+            compose.onNodeWithTag("convert-info-cover").performTouchInput { longClick() }
+            compose.onNodeWithText("删除封面").assertExists()
+            compose.onNodeWithText("是否删除封面？保存后生效。").assertExists()
+            compose.runOnIdle { assertEquals(original, metadata.value) }
+            compose.onNodeWithTag("convert-cover-delete-confirm").performClick()
+            compose.onNodeWithTag("convert-cover-delete-confirm").assertDoesNotExist()
+            compose.runOnIdle {
+                assertEquals(original.copy(cover = MediaConvertCoverMode.NONE, coverPath = null), metadata.value)
+                assertEquals(0, picks)
+            }
+        }
+    }
+
+    @Test
+    fun cancellingCoverDeletionPreservesTheSelectedImageWithoutOpeningThePicker() {
+        val original = MediaConvertMetadata(cover = MediaConvertCoverMode.CUSTOM, coverPath = "cover.jpg")
+        val metadata = mutableStateOf(original)
+        var picks = 0
+        compose.setContent {
+            SubtitleEditComposeTheme {
+                MediaConvertInfoPage(true, metadata.value, { metadata.value = it },
+                    coverFileName = "cover.jpg", onPickCover = { picks++ })
+            }
+        }
+        compose.onNodeWithTag("convert-info-cover").performTouchInput { longClick() }
+        compose.onNodeWithTag("convert-cover-delete-cancel").performClick()
+        compose.onNodeWithTag("convert-cover-delete-confirm").assertDoesNotExist()
+        compose.onNodeWithText("cover.jpg").assertExists()
+        compose.runOnIdle {
+            assertEquals(original, metadata.value)
+            assertEquals(0, picks)
+        }
+    }
+
+    @Test
+    fun disabledOrUnsupportedCoverCannotOpenTheDeletionDialog() {
+        val enabled = mutableStateOf(false)
+        val coverEnabled = mutableStateOf(true)
+        var changes = 0
+        var picks = 0
+        compose.setContent {
+            SubtitleEditComposeTheme {
+                MediaConvertInfoPage(enabled.value, MediaConvertMetadata(), { changes++ },
+                    coverEnabled = coverEnabled.value, onPickCover = { picks++ })
+            }
+        }
+        compose.onNodeWithTag("convert-info-cover").performTouchInput { longClick() }
+        compose.onNodeWithTag("convert-cover-delete-confirm").assertDoesNotExist()
+        compose.runOnIdle { enabled.value = true; coverEnabled.value = false }
+        compose.onNodeWithTag("convert-info-cover").performTouchInput { longClick() }
+        compose.onNodeWithTag("convert-cover-delete-confirm").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(0, changes)
+            assertEquals(0, picks)
+        }
+    }
+
+    @Test
+    fun batchDeletionWarnsThatAllSelectedFilesWillLoseTheirArtwork() {
+        val metadata = mutableStateOf(MediaConvertMetadata())
+        var picks = 0
+        compose.setContent {
+            SubtitleEditComposeTheme {
+                MediaConvertInfoPage(true, metadata.value, { metadata.value = it },
+                    batch = true, onPickCover = { picks++ })
+            }
+        }
+        compose.onNodeWithTag("convert-info-cover").performTouchInput { longClick() }
+        compose.onNodeWithText("是否删除所有已选文件的封面？保存后生效。").assertExists()
+        compose.onNodeWithTag("convert-cover-batch-confirm").assertDoesNotExist()
+        compose.onNodeWithTag("convert-cover-delete-confirm").performClick()
+        compose.runOnIdle {
+            assertEquals(MediaConvertCoverMode.NONE, metadata.value.cover)
+            assertEquals(0, picks)
+        }
     }
 
     @Test

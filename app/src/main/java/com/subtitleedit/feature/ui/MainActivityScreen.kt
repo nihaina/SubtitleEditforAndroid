@@ -118,6 +118,7 @@ internal data class MainActivityScreenState(
     val viewMode: FileBrowserViewMode = FileBrowserViewMode.DETAILED,
     val canConvertSelected: Boolean = false,
     val canCompressSelected: Boolean = true,
+    val canEditTagsSelected: Boolean = false,
     val canClearCacheSelected: Boolean = false
 )
 
@@ -154,6 +155,7 @@ internal fun MainActivityScreen(
     onDelete: () -> Unit,
     onConvertSelection: () -> Unit,
     onCompressSelection: () -> Unit,
+    onEditTagsSelection: () -> Unit,
     onClearCacheSelection: () -> Unit,
     onShowSelectionProperties: () -> Unit,
     onConfirmDestination: () -> Unit,
@@ -463,9 +465,11 @@ internal fun MainActivityScreen(
                     onDelete = onDelete,
                     canConvert = state.canConvertSelected,
                     canCompress = state.canCompressSelected,
+                    canEditTags = state.canEditTagsSelected,
                     canClearCache = state.canClearCacheSelected,
                     onConvert = onConvertSelection,
                     onCompress = onCompressSelection,
+                    onEditTags = onEditTagsSelection,
                     onClearCache = onClearCacheSelection,
                     onProperties = onShowSelectionProperties,
                     onConfirmDestination = onConfirmDestination,
@@ -557,9 +561,11 @@ private fun SelectionActions(
     onDelete: () -> Unit,
     canConvert: Boolean,
     canCompress: Boolean,
+    canEditTags: Boolean,
     canClearCache: Boolean,
     onConvert: () -> Unit,
     onCompress: () -> Unit,
+    onEditTags: () -> Unit,
     onClearCache: () -> Unit,
     onProperties: () -> Unit,
     onConfirmDestination: () -> Unit,
@@ -594,6 +600,12 @@ private fun SelectionActions(
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.file_op_compress)) },
                             onClick = { menuExpanded = false; onCompress() }
+                        )
+                    }
+                    if (canEditTags) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.media_tag_editor_title)) },
+                            onClick = { menuExpanded = false; onEditTags() }
                         )
                     }
                     if (canClearCache) {

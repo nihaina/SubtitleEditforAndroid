@@ -226,6 +226,11 @@
             android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
 
         <activity
+            android:name=".MediaTagEditorActivity"
+            android:exported="false"
+            android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
+
+        <activity
             android:name=".SpeechToSubtitleActivity"
             android:exported="false"
             android:theme="@style/Theme.SubtitleEditforAndroid.Compose" />
