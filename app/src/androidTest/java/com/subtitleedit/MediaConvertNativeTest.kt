@@ -4,7 +4,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import android.content.Context
 import com.arthenica.ffmpegkit.FFmpegKit
-import com.arthenica.ffmpegkit.FFprobeKit
+import com.subtitleedit.util.FfprobeMediaInformation
 import com.arthenica.ffmpegkit.ReturnCode
 import java.io.File
 import org.junit.Assert.assertTrue
@@ -33,8 +33,7 @@ class MediaConvertNativeTest {
                     MediaConvertOptions(selectedAudioCodec = codec, audioBitrate = "192", channelIndex = 8),
                     MediaConvertSource(false, 1.2, audioSampleRate = 96000, audioChannels = 8, audioChannelLayout = "7.1")))
                 run(listOf("-i", output.path, "-map", "0:a:0", "-vn", "-f", "null", "-"))
-                val info = FFprobeKit.getMediaInformation(output.path).getMediaInformation()
-                    ?: throw AssertionError("Unrecognizable ${format.extension}/$codec")
+                val info = FfprobeMediaInformation.read(output.path, root)
                 assertTrue(info.getStreams().none { it.getType() == "video" })
                 assertTrue(info.getStreams().any { it.getType() == "audio" })
             }
@@ -87,8 +86,7 @@ class MediaConvertNativeTest {
                     run(MediaConvertCommand.build(input.path, output.path, format,
                         MediaConvertOptions(selectedVideoCodec = codec, selectedQualityId = "23"), MediaConvertSource(true, 0.24, 25.0)))
                     assertTrue("Empty ${format.extension}/$codec", output.length() > 0)
-                    val info = FFprobeKit.getMediaInformation(output.path).getMediaInformation()
-                        ?: throw AssertionError("Unrecognizable ${format.extension}/$codec")
+                    val info = FfprobeMediaInformation.read(output.path, root)
                     assertTrue(info.getStreams().any { it.getType() == "video" })
                     assertTrue(info.getStreams().any { it.getType() == "audio" })
                 }

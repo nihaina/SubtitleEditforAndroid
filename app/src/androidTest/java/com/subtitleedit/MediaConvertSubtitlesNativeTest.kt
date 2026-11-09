@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.arthenica.ffmpegkit.FFmpegKit
-import com.arthenica.ffmpegkit.FFprobeKit
+import com.subtitleedit.util.FfprobeMediaInformation
 import com.arthenica.ffmpegkit.ReturnCode
 import com.subtitleedit.util.SubtitleFontManager
 import java.io.File
@@ -36,7 +36,7 @@ class MediaConvertSubtitlesNativeTest {
                 run(MediaConvertCommand.build(input.path, output.path, format, MediaConvertOptions(), source,
                     subtitle = MediaConvertSubtitleInput(subtitle.path, subtitle.name, type,
                         if (type == MediaConvertSubtitleType.BURN_IN) SubtitleFontManager.writeFontConfig(context).path else null)))
-                val streams = FFprobeKit.getMediaInformation(output.path).getMediaInformation()!!.getStreams()
+                val streams = FfprobeMediaInformation.read(output.path, context.cacheDir).getStreams()
                 if (type == MediaConvertSubtitleType.SOFT) {
                     assertTrue(streams.any { it.getType() == "subtitle" && it.getCodec() == "mov_text" })
                     val decoded = File(root, "decoded.srt")

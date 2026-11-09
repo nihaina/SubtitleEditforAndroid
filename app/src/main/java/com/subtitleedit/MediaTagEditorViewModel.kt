@@ -8,10 +8,10 @@ import android.system.Os
 import androidx.lifecycle.viewModelScope
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegSession
-import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
 import com.subtitleedit.util.PickedUriAccess
 import com.subtitleedit.util.UriDisplayName
+import com.subtitleedit.util.FfprobeMediaInformation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -320,8 +320,7 @@ internal class MediaTagEditorViewModel(application: Application) :
         check(file.isFile)
         val size = file.length()
         val modified = file.lastModified()
-        val info = FFprobeKit.getMediaInformation(file.absolutePath).getMediaInformation()
-            ?: error(string(R.string.media_convert_probe_failed))
+        val info = FfprobeMediaInformation.read(file.absolutePath, app.cacheDir)
         val streams = info.getStreams().map { stream ->
             val tags = stream.getTags()
             val filename = tags?.optString("filename").orEmpty().lowercase(Locale.ROOT)

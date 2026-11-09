@@ -13,7 +13,7 @@ import kotlinx.coroutines.withContext
 
 internal class DefaultMediaRepository(
     private val cacheDir: File,
-    private val nativeMediaEngine: NativeMediaEngine = DefaultNativeMediaEngine()
+    private val nativeMediaEngine: NativeMediaEngine = DefaultNativeMediaEngine(cacheDir)
 ) : MediaRepository {
     private var temporaryPlaybackFile: File? = null
 

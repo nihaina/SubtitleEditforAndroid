@@ -13,7 +13,6 @@ import androidx.lifecycle.viewModelScope
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegKitConfig
 import com.arthenica.ffmpegkit.FFmpegSession
-import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
 import com.arthenica.ffmpegkit.StreamInformation
 import com.subtitleedit.feature.ui.MediaConvertDialog
@@ -24,6 +23,7 @@ import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SourceOutputDirectory
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SubtitleFontManager
+import com.subtitleedit.util.FfprobeMediaInformation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -461,7 +461,7 @@ internal class MediaConvertViewModel(application: Application) :
     }
 
     private fun readMediaInfo(path: String): SourceDescription? {
-        val info = FFprobeKit.getMediaInformation(path).getMediaInformation() ?: return null
+        val info = FfprobeMediaInformation.read(path, app.cacheDir)
         val text = buildString {
             append(string(R.string.media_convert_duration, formatDuration(info.getDuration()?.toDoubleOrNull() ?: 0.0)))
             append('\n')
@@ -789,8 +789,8 @@ internal class MediaConvertViewModel(application: Application) :
                 val preparedExtension = if (timedLrc) "srt" else MediaConvertSubtitles.extension(preparedName)
                 val file = File(cache, "subtitle_$index.$preparedExtension")
                 file.writeText(if (timedLrc) MediaConvertLyricText.lrcToSrt(content, durationSeconds) else content, Charsets.UTF_8)
-                val stream = FFprobeKit.getMediaInformation(file.absolutePath).getMediaInformation()?.getStreams()
-                    ?.firstOrNull { it.getType() == "subtitle" }
+                val stream = FfprobeMediaInformation.read(file.absolutePath, app.cacheDir).getStreams()
+                    .firstOrNull { it.getType() == "subtitle" }
                 check(stream?.getCodec() in setOf("ass", "ssa", "subrip", "srt", "webvtt")) { string(R.string.media_convert_subtitle_invalid) }
                 MediaConvertSubtitleInput(file.absolutePath, "${subtitle.fileName.substringBeforeLast('.') }.$preparedExtension",
                     currentState.subtitleType, fonts).also { MediaConvertSubtitles.validate(format, options, it) }
@@ -840,7 +840,7 @@ internal class MediaConvertViewModel(application: Application) :
         var input: String? = null
         return try {
             input = ffmpegInput(uri)
-            val info = FFprobeKit.getMediaInformation(input).getMediaInformation() ?: return null
+            val info = FfprobeMediaInformation.read(input, app.cacheDir)
             val videoStreams = info.getStreams().filter { it.getType() == "video" }
             val attachedPicture = videoStreams.firstOrNull(::isAttachedPicture)
             val video = videoStreams.firstOrNull { !isAttachedPicture(it) }

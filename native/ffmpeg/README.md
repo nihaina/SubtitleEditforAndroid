@@ -106,3 +106,12 @@ all four input formats in each supported subtitle container, decodes the tracks
 back to text and checks rendered video pixels for burn-in, including escaped
 paths. `MediaConvertSubtitlesNativeTest` covers the bundled Android renderer,
 font setup and MP4 text tracks; it requires explicit device execution.
+
+The bundled FFmpeg 8 FFprobe writes JSON through its stdout text writer, while
+FFmpegKit's `getMediaInformation()` still collects only `AV_LOG_STDERR` messages.
+Use `FfprobeMediaInformation.read(input, cacheDirectory)` instead: each probe
+passes `-o` with a unique private JSON file, checks the native return code and
+parses that file before deleting it. This also preserves paths with spaces and
+Unicode without changing global logging. `MediaConvertSubtitleWorkflowTest`
+exercises source probing and subtitle preparation through the actual ViewModel
+for SRT/LRC/VTT/ASS/SSA soft tracks and burn-in, plus invalid-subtitle rejection.

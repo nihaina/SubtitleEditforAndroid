@@ -35,7 +35,7 @@ import java.io.File
 internal class AppDependencies(application: Application) {
     private val appContext = application.applicationContext
 
-    val nativeMediaEngine: NativeMediaEngine by lazy { DefaultNativeMediaEngine() }
+    val nativeMediaEngine: NativeMediaEngine by lazy { DefaultNativeMediaEngine(appContext.cacheDir) }
 
     fun vocalSeparationRunner(
         modelPath: String,
