@@ -78,7 +78,7 @@ class MediaConvertSubtitlePageTest {
         compose.onNodeWithTag("convert-subtitle-pick").assertIsEnabled()
         compose.runOnIdle { allowed.value = emptySet() }
         compose.onNodeWithTag("convert-subtitle-pick").assertIsNotEnabled()
-        compose.onNodeWithText("当前音频格式无法写入受支持的歌词标签，请选择 MP3、FLAC、OGG、Opus、M4A、M4B、WMA、WavPack、WAV 或 MKA。").assertExists()
+        compose.onNodeWithText("当前音频格式无法写入受支持的歌词标签，请选择 MP3、AAC、FLAC、OGG、Opus、M4A、M4B、WMA、WavPack、WAV 或 MKA。").assertExists()
         compose.runOnIdle { allowed.value = setOf("lrc"); maxFiles.value = 1 }
         compose.onNodeWithText("当前格式支持一个歌词标签，保存完整 LRC 文本。其他字幕格式会先转换为 LRC；歌词同步显示取决于播放器。").assertExists()
     }

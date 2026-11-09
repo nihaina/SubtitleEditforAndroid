@@ -115,7 +115,7 @@ class RemainingRecreationTest {
                     model.setSubtitleType(MediaConvertSubtitleType.SOFT)
                     model.selectSubtitle(Uri.fromFile(subtitle))
                     assertEquals(subtitle.name, model.state.value.subtitleFile?.fileName)
-                    model.selectFormat("aac")
+                    model.selectFormat("ac3")
                     assertEquals(null, model.state.value.subtitleFile)
                     model.selectSubtitle(Uri.fromFile(subtitle))
                     assertEquals(null, model.state.value.subtitleFile)

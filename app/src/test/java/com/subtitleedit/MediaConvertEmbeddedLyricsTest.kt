@@ -8,7 +8,7 @@ class MediaConvertEmbeddedLyricsTest {
         for ((extension, key, field) in listOf(Triple("flac", "LYRICS", "LYRICS"),
             Triple("ogg", "lyrics", "LYRICS"), Triple("opus", "Lyrics", "LYRICS"),
             Triple("wv", "Lyrics", "LYRICS"), Triple("m4a", "lyrics", "©lyr"),
-            Triple("wma", "WM/Lyrics", "WM/Lyrics"))) {
+            Triple("wma", "WM/Lyrics", "WM/Lyrics"), Triple("aac", "lyrics", "USLT"))) {
             val tags = MediaConvertEmbeddedLyrics.fromMetadata(listOf("title" to "Song", key to "[00:01.25]海风 🌊"), extension)
             assertEquals(extension, 1, tags.size)
             assertEquals(field, tags.single().field)
@@ -19,12 +19,14 @@ class MediaConvertEmbeddedLyricsTest {
     }
 
     @Test fun id3KeysRetainHyphenatedDescriptionsAndEmptyDescriptions() {
-        val tags = MediaConvertEmbeddedLyrics.fromMetadata(listOf("lyrics-中文-原文-zho" to "[00:00.00]你好",
-            "lyrics-eng" to "Hello", "lyrics-und" to "Untitled", "UNSYNCEDLYRICS" to "Plain"), "mp3")
-        assertEquals(listOf("中文-原文", "", "", ""), tags.map { it.title })
-        assertEquals(listOf("zho", "eng", "und", ""), tags.map { it.language })
-        assertTrue(tags.all { it.field == "USLT" })
-        assertFalse(tags[1].synced)
+        for (extension in listOf("mp3", "aac")) {
+            val tags = MediaConvertEmbeddedLyrics.fromMetadata(listOf("lyrics-中文-原文-zho" to "[00:00.00]你好",
+                "lyrics-eng" to "Hello", "lyrics-und" to "Untitled", "UNSYNCEDLYRICS" to "Plain"), extension)
+            assertEquals(extension, listOf("中文-原文", "", "", ""), tags.map { it.title })
+            assertEquals(extension, listOf("zho", "eng", "und", ""), tags.map { it.language })
+            assertTrue(extension, tags.all { it.field == "USLT" })
+            assertFalse(extension, tags[1].synced)
+        }
     }
 
     @Test fun directFramesTakePrecedenceAndSynchronizedFrameRemainsSeparate() {

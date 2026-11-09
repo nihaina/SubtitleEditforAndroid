@@ -12,11 +12,11 @@ class MediaConvertAudioLyricsTest {
     private val lyric = MediaConvertLyric("Chinese", "[ti:Song]\n[00:01.00]海风 🌊\n[00:03.00]Next line\n")
 
     @Test fun onlyNativeContainersAreOfferedAndSingleValueTagsLimitTheSelection() {
-        for (extension in listOf("mp3", "wav", "mka")) assertEquals(extension, Int.MAX_VALUE, MediaConvertAudioLyrics.maxFiles(format(extension)))
+        for (extension in listOf("mp3", "aac", "wav", "mka")) assertEquals(extension, Int.MAX_VALUE, MediaConvertAudioLyrics.maxFiles(format(extension)))
         for (extension in listOf("m4a", "m4b", "flac", "ogg", "oga", "opus", "wma", "wv", "spx")) {
             assertEquals(extension, 1, MediaConvertAudioLyrics.maxFiles(format(extension)))
         }
-        for (extension in listOf("aac", "ac3", "w64", "mp4")) assertEquals(extension, 0, MediaConvertAudioLyrics.maxFiles(format(extension)))
+        for (extension in listOf("ac3", "w64", "mp4")) assertEquals(extension, 0, MediaConvertAudioLyrics.maxFiles(format(extension)))
         assertEquals(0, MediaConvertAudioLyrics.maxFiles(null))
     }
 
@@ -37,23 +37,26 @@ class MediaConvertAudioLyricsTest {
         }
     }
 
-    @Test fun mp3AndWaveHaveDedicatedFrameWritersAndMkaRetainsItsTimedTrackPath() {
+    @Test fun id3AudioFormatsHaveDedicatedFrameWritersAndMkaRetainsItsTimedTrackPath() {
         assertTrue(MediaConvertAudioLyrics.needsFileRewrite(format("mp3")))
+        assertTrue(MediaConvertAudioLyrics.needsFileRewrite(format("aac")))
         assertTrue(MediaConvertAudioLyrics.needsFileRewrite(format("wav")))
         assertFalse(MediaConvertAudioLyrics.needsFileRewrite(format("flac")))
         assertEquals(listOf("-id3v2_version", "3"), MediaConvertAudioLyrics.arguments(format("mp3"), listOf(lyric, lyric.copy(title = "English"))))
+        assertEquals(listOf("-write_id3v2", "1"), MediaConvertAudioLyrics.arguments(format("aac"), listOf(lyric, lyric.copy(title = "English"))))
+        assertFalse(MediaConvertAudioLyrics.usesSubtitleTracks(format("aac")))
         assertTrue(MediaConvertAudioLyrics.arguments(format("wav"), listOf(lyric)).isEmpty())
         assertTrue(MediaConvertAudioLyrics.usesSubtitleTracks(format("mka")))
         assertTrue(MediaConvertAudioLyrics.arguments(format("mka"), listOf(lyric, lyric)).isEmpty())
     }
 
     @Test fun unsupportedAndOverLimitSelectionsFailInsteadOfDroppingLyricVersions() {
-        for ((extension, selected) in listOf("aac" to listOf(lyric), "flac" to listOf(lyric, lyric))) {
+        for ((extension, selected) in listOf("ac3" to listOf(lyric), "flac" to listOf(lyric, lyric))) {
             try {
                 MediaConvertAudioLyrics.arguments(format(extension), selected)
                 throw AssertionError("Expected $extension lyric selection to be rejected")
             } catch (_: IllegalArgumentException) { }
         }
-        assertTrue(MediaConvertAudioLyrics.arguments(format("aac"), emptyList()).isEmpty())
+        assertTrue(MediaConvertAudioLyrics.arguments(format("ac3"), emptyList()).isEmpty())
     }
 }

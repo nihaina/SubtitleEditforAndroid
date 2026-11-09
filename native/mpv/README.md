@@ -7,7 +7,7 @@ libmpv handle so probing cannot replace the editor's playback session. It maps
 `track-list` entries using `ff-index`, not mpv's per-type track IDs. Automatic
 external-file loading is disabled, matching the editor's playback options.
 Lyric tags come from the `metadata` node map and are returned separately from
-stream indices. MP3/WAV USLT and SYLT frames are also read directly without
+stream indices. MP3/AAC/WAV USLT and SYLT frames are also read directly without
 modifying the source, since the demuxer does not expose SYLT as metadata.
 The client header is pinned to mpv v0.41.0 at
 `app/src/main/cpp/third_party/mpv/client.h` and retains its ISC notice.

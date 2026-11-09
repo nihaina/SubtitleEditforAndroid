@@ -24,7 +24,12 @@ internal object MediaConvertId3Lyrics {
     private data class Chunk(val offset: Long, val size: Long, val isId3: Boolean)
     private data class NamedLyric(val descriptor: String, val lrc: String)
 
-    fun writeMp3(file: File, lyrics: List<MediaConvertLyric>) {
+    fun writeMp3(file: File, lyrics: List<MediaConvertLyric>) = writeId3Audio(file, lyrics)
+
+    /** ADTS can carry a leading ID3v2 tag while keeping its AAC audio frames unchanged. */
+    fun writeAac(file: File, lyrics: List<MediaConvertLyric>) = writeId3Audio(file, lyrics)
+
+    private fun writeId3Audio(file: File, lyrics: List<MediaConvertLyric>) {
         val existing = RandomAccessFile(file, "r").use { input ->
             readTag(input, 0, input.length(), required = false)
         }

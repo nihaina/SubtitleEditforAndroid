@@ -72,6 +72,12 @@ settings, and checks codec identification and decoding. GSM formats appear only
 when runtime encoder discovery confirms availability. Android runtime tests are
 in `MediaConvertNativeTest`; compiling them does not execute them on a device.
 
+AAC lyric output keeps the `.aac` ADTS container and enables `-write_id3v2 1`.
+After FFmpeg finishes the private staging file, the shared ID3 writer adds one
+USLT/SYLT pair per selected LRC document without changing the AAC audio frames.
+The source probe also reads these frames directly for the existing-lyrics list.
+Playback display depends on the player's support for ID3 tags in ADTS files.
+
 Previous `8.1.0-mpv3` AAR SHA-256:
 `a794376104fccd13279d64044b81c4423303e39159ae384949f09f43d3175fb2`.
 

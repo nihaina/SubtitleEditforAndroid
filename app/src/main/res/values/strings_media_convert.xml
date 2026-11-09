@@ -212,7 +212,7 @@
     <string name="media_convert_lyrics_choose">选择歌词文件</string>
     <string name="media_convert_lyrics_embedded">内嵌歌词</string>
     <string name="media_convert_lyrics_hint">可选择多个歌词文件。其他字幕格式会先转换为 LRC，再按当前音频格式内嵌。歌词显示和时间轴支持取决于播放器。</string>
-    <string name="media_convert_lyrics_container_unsupported">当前音频格式无法写入受支持的歌词标签，请选择 MP3、FLAC、OGG、Opus、M4A、M4B、WMA、WavPack、WAV 或 MKA。</string>
+    <string name="media_convert_lyrics_container_unsupported">当前音频格式无法写入受支持的歌词标签，请选择 MP3、AAC、FLAC、OGG、Opus、M4A、M4B、WMA、WavPack、WAV 或 MKA。</string>
     <string name="media_convert_lyrics_single_tag_hint">当前格式支持一个歌词标签，保存完整 LRC 文本。其他字幕格式会先转换为 LRC；歌词同步显示取决于播放器。</string>
     <string name="media_convert_lyrics_plain_text_hint">当前格式支持一个歌词标签，仅保存歌词文本，不保存时间轴。其他字幕格式会先转换为 LRC，再提取歌词文本。</string>
     <string name="media_convert_source_subtitles">已有字幕轨</string>

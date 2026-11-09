@@ -85,12 +85,18 @@ class MediaConvertRepeatedProbeTest {
                 MediaConvertLyric("Chinese lyrics", "[00:00.10]海风\n[00:00.40]第二行\n"),
                 MediaConvertLyric("English lyrics", "[00:00.10]Sea breeze\n")
             ))
+            val aac = File(root, "two-lyrics.aac")
+            runFfmpeg(listOf("-y", "-i", plain.path, "-c:a", "aac", "-write_id3v2", "1", "-f", "adts", aac.path))
+            MediaConvertId3Lyrics.writeAac(aac, listOf(
+                MediaConvertLyric("Chinese lyrics", "[00:00.10]海风\n[00:00.40]第二行\n"),
+                MediaConvertLyric("English lyrics", "[00:00.10]Sea breeze\n")
+            ))
             val flac = File(root, "comment-lyrics.flac")
             val flacLrc = "[00:00.20]Comment lyric\n[00:00.50]Final line\n"
             runFfmpeg(listOf("-y", "-i", plain.path, "-c:a", "flac", "-metadata", "LYRICS=$flacLrc", flac.path))
 
             ActivityScenario.launch(MediaConvertActivity::class.java).use { scenario ->
-                for (source in listOf(mp3, plain, flac, mp3, mp3)) {
+                for (source in listOf(mp3, aac, plain, flac, aac, mp3, aac)) {
                     scenario.onActivity { activity ->
                         val model = ViewModelProvider(activity)[MediaConvertViewModel::class.java]
                         model.selectFiles(listOf(Uri.fromFile(source)))
@@ -102,7 +108,7 @@ class MediaConvertRepeatedProbeTest {
                     val state = awaitLyrics(scenario, source)
                     assertTrue("Lyric metadata must not become subtitle streams", state.sourceSubtitleTracks.isEmpty())
                     when (source) {
-                        mp3 -> {
+                        mp3, aac -> {
                             assertEquals("The USLT metadata copy must not be listed twice", 4, state.sourceEmbeddedLyrics.size)
                             assertEquals(mapOf("USLT" to 2, "SYLT" to 2), state.sourceEmbeddedLyrics.groupingBy { it.field }.eachCount())
                             assertEquals(setOf("Chinese lyrics", "English lyrics"), state.sourceEmbeddedLyrics.map { it.title }.toSet())

@@ -27,7 +27,7 @@ internal object MediaConvertEmbeddedLyrics {
             val title = if (language.isNotEmpty()) suffix.dropLast(4) else suffix
             val field = when {
                 compact == "sylt" -> "SYLT"
-                namedId3 || compact in setOf("uslt", "unsyncedlyrics") || extension.lowercase(Locale.ROOT) in setOf("mp3", "wav") -> "USLT"
+                namedId3 || compact in setOf("uslt", "unsyncedlyrics") || extension.lowercase(Locale.ROOT) in setOf("mp3", "aac", "wav") -> "USLT"
                 extension.lowercase(Locale.ROOT) in setOf("m4a", "m4b", "mp4", "mov") -> "©lyr"
                 compact.startsWith("wmlyrics") -> key
                 else -> "LYRICS"

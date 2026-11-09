@@ -26,11 +26,12 @@ class MpvSubtitleProbeTest {
             val source = File(root, "source.wav")
             runFfmpeg(listOf("-y", "-f", "lavfi", "-i", "sine=sample_rate=44100", "-t", "0.5", source.path))
             val lrc = "[00:00.10]海风 🌊\n[00:00.30]Second line"
-            val samples = listOf(Triple("flac", "flac", "LYRICS"), Triple("ogg", "libvorbis", "LYRICS"),
+            val samples = listOf(Triple("aac", "aac", "lyrics"), Triple("flac", "flac", "LYRICS"), Triple("ogg", "libvorbis", "LYRICS"),
                 Triple("opus", "libopus", "LYRICS"), Triple("m4a", "aac", "lyrics"),
                 Triple("wma", "wmav2", "WM/Lyrics"), Triple("wv", "wavpack", "Lyrics")).map { (ext, codec, key) ->
                 val output = File(root, "with-lyrics.$ext")
-                runFfmpeg(listOf("-y", "-i", source.path, "-c:a", codec, "-metadata", "$key=$lrc", output.path))
+                val id3 = if (ext == "aac") listOf("-write_id3v2", "1") else emptyList()
+                runFfmpeg(listOf("-y", "-i", source.path, "-c:a", codec, "-metadata", "$key=$lrc") + id3 + output.path)
                 output
             }
             runBlocking {

@@ -75,18 +75,33 @@ class MediaConvertSubtitlesTest {
             assertFalse(extension, "-sn" in args)
             assertTrue(extension, MediaConvertSubtitles.allowedExtensions(format(extension), MediaConvertSubtitleType.BURN_IN, "").isEmpty())
         }
-        for (extension in listOf("mp3", "flac", "wav", "ogg", "opus")) {
+        for (extension in listOf("mp3", "aac", "flac", "wav", "ogg", "opus")) {
             assertTrue(extension, MediaConvertSubtitles.allowedExtensions(format(extension), MediaConvertSubtitleType.SOFT, "").isNotEmpty())
             assertThrows(IllegalArgumentException::class.java) {
                 MediaConvertCommand.build("in", "out.$extension", format(extension), MediaConvertOptions(), source, subtitles = lyrics)
             }
         }
-        assertTrue(MediaConvertSubtitles.allowedExtensions(format("aac"), MediaConvertSubtitleType.SOFT, "").isEmpty())
+        assertTrue(MediaConvertSubtitles.allowedExtensions(format("ac3"), MediaConvertSubtitleType.SOFT, "").isEmpty())
         val lyric = MediaConvertLyric("Lyrics", "[00:00.00]Song line\n")
-        for (extension in listOf("mp3", "flac", "wav", "ogg", "opus", "m4a", "m4b", "wma", "wv")) {
+        for (extension in listOf("mp3", "aac", "flac", "wav", "ogg", "opus", "m4a", "m4b", "wma", "wv")) {
             val args = MediaConvertCommand.build("in", "out.$extension", format(extension), MediaConvertOptions(), source, lyrics = listOf(lyric))
             assertFalse(extension, args.windowed(2).any { it == listOf("-map", "1:s:0") })
         }
+    }
+
+    @Test fun aacStoresMultipleLyricVersionsInId3WithoutChangingItsAdtsContainer() {
+        val format = format("aac")
+        assertEquals("adts", format.formatName)
+        assertEquals(setOf("srt", "ass", "ssa", "vtt", "lrc", "txt"),
+            MediaConvertSubtitles.allowedExtensions(format, MediaConvertSubtitleType.SOFT, ""))
+        val lyrics = listOf(MediaConvertLyric("Chinese", "[00:00.00]海风\n"),
+            MediaConvertLyric("English", "[00:00.00]Sea breeze\n"))
+        val args = MediaConvertCommand.build("in", "out.aac", format, MediaConvertOptions(), source, lyrics = lyrics)
+        assertEquals("1", args.value("-write_id3v2"))
+        assertEquals("adts", args.value("-f"))
+        assertTrue("-sn" in args)
+        assertFalse(args.any { it.startsWith("-c:s") })
+        assertFalse(args.windowed(2).any { it == listOf("-map", "1:s:0") })
     }
 
     @Test fun videoBurnInRejectsMultipleAndMixedModeSubtitles() {

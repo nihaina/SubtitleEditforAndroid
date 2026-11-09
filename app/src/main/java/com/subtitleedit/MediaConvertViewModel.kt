@@ -439,7 +439,7 @@ internal class MediaConvertViewModel(application: Application) :
         }
         currentCoroutineContext().ensureActive()
         val extension = MediaConvertSubtitles.extension(getFileName(uri))
-        val id3Lyrics = if (extension in setOf("mp3", "wav")) try {
+        val id3Lyrics = if (extension in setOf("mp3", "aac", "wav")) try {
             val stream = PickedUriAccess.file(uri)?.inputStream() ?: app.contentResolver.openInputStream(uri)
                 ?: error("Cannot open media for lyric detection")
             stream.buffered().use { MediaConvertId3LyricsReader.read(it, wav = extension == "wav") }
@@ -718,6 +718,7 @@ internal class MediaConvertViewModel(application: Application) :
             if (rewriteLyricFile) withContext(Dispatchers.IO) {
                 when (format.formatName) {
                     "mp3" -> MediaConvertId3Lyrics.writeMp3(encodedFile, lyricTags)
+                    "adts" -> MediaConvertId3Lyrics.writeAac(encodedFile, lyricTags)
                     "wav" -> MediaConvertId3Lyrics.writeWav(encodedFile, lyricTags)
                 }
             }

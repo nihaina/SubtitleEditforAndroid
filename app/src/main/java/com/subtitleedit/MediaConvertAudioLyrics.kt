@@ -9,14 +9,13 @@ internal object MediaConvertAudioLyrics {
     /** A single-value tag cannot safely store several independently named lyric versions. */
     fun maxFiles(format: MediaConvertFormatInfo?): Int = when {
         format == null || !format.isAudioOnly -> 0
-        format.formatName in setOf("mp3", "wav", "matroska") -> Int.MAX_VALUE
+        format.formatName in setOf("mp3", "adts", "wav", "matroska") -> Int.MAX_VALUE
         format.formatName in textTagMuxers -> 1
-        // Raw ADTS AAC has no MP4 atoms; it cannot hold a copyright-lyr atom.
         else -> 0
     }
 
     fun needsFileRewrite(format: MediaConvertFormatInfo): Boolean =
-        format.isAudioOnly && format.formatName in setOf("mp3", "wav")
+        format.isAudioOnly && format.formatName in setOf("mp3", "adts", "wav")
 
     fun usesSubtitleTracks(format: MediaConvertFormatInfo): Boolean =
         format.isAudioOnly && format.formatName == "matroska"
@@ -29,6 +28,7 @@ internal object MediaConvertAudioLyrics {
         require(lyrics.all { it.lrc.isNotBlank() }) { "Cannot embed empty lyrics" }
         return when (format.formatName) {
             "mp3" -> listOf("-id3v2_version", "3") // USLT/SYLT frames are added to the completed staging file.
+            "adts" -> listOf("-write_id3v2", "1") // Preserve metadata before adding USLT/SYLT to the ADTS staging file.
             "wav", "matroska" -> emptyList()
             "ipod" -> listOf("-metadata", "lyrics=${plainText(lyrics.single().lrc)}")
             "asf" -> listOf("-metadata", "WM/Lyrics=${lyrics.single().lrc}")
