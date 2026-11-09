@@ -3,6 +3,7 @@ package com.subtitleedit
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import com.subtitleedit.filepicker.AppFilePickerContracts
@@ -14,11 +15,19 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.core.content.FileProvider
+import androidx.lifecycle.lifecycleScope
 import com.subtitleedit.feature.ui.MediaConvertScreen
 import com.subtitleedit.feature.ui.MediaFormatOption
 import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import java.io.File
+import java.util.concurrent.atomic.AtomicReference
+import com.subtitleedit.util.SubtitleParser
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** 音视频处理页面；状态和 FFmpeg 任务由 [MediaConvertViewModel] 持有。 */
 class MediaConvertActivity : AppComposeActivity() {
@@ -33,13 +42,16 @@ class MediaConvertActivity : AppComposeActivity() {
     ) { uri -> uri?.let(viewModel::selectOutputDirectory) }
 
     private val subtitlePickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        AppFilePickerContracts.OpenDocument().parseResult(result.resultCode, result.data)?.let(viewModel::selectSubtitle)
+        viewModel.selectSubtitles(AppFilePickerContracts.OpenMultipleDocuments().parseResult(result.resultCode, result.data))
     }
 
     private fun pickSubtitle() {
         val extensions = viewModel.allowedSubtitleExtensions
         if (viewModel.isRunning || extensions.isEmpty()) return
-        subtitlePickerLauncher.launch(FilePickerRequest(FilePickerMode.OPEN_FILE, mimeTypes = listOf("*/*"),
+        val mode = if (viewModel.maxSubtitleFiles == 1) {
+            FilePickerMode.OPEN_FILE
+        } else FilePickerMode.OPEN_FILES
+        subtitlePickerLauncher.launch(FilePickerRequest(mode, mimeTypes = listOf("*/*"),
             allowedExtensions = extensions.toList()).toIntent(this))
     }
 
@@ -178,12 +190,24 @@ class MediaConvertActivity : AppComposeActivity() {
                     audioVbrQuality = state.options.audioVbrQuality,
                     onAudioVbrQualityChange = viewModel::setAudioVbrQuality,
                     selectedSourceCount = state.selectedFiles.size,
-                    subtitleFileName = state.subtitleFile?.fileName,
+                    subtitleFileNames = state.subtitleFiles.map { it.fileName },
+                    maxSubtitleFiles = viewModel.maxSubtitleFiles,
+                    sourceSubtitleTracks = state.sourceSubtitleTracks,
+                    sourceEmbeddedLyrics = state.sourceEmbeddedLyrics,
+                    sourceIsAudio = viewModel.selectedSourceIsAudio,
+                    onViewEmbeddedLyric = ::viewEmbeddedLyric,
+                    sourceLyricsProbeFailed = state.sourceLyricsProbeFailed,
+                    sourceSubtitleProbeFailed = state.sourceSubtitleProbeFailed,
+                    sourceSubtitleProbeInProgress = state.isReadingSourceSubtitles,
+                    sourceSubtitleSupport = state.sourceSubtitleTracks.map {
+                        (state.isAudioOutput || state.subtitleType == MediaConvertSubtitleType.SOFT) &&
+                            MediaConvertSubtitles.sourceEncoder(format, it.codec) != null
+                    },
                     subtitleType = state.subtitleType,
                     allowedSubtitleExtensions = viewModel.allowedSubtitleExtensions,
                     subtitleBurnInAvailable = state.subtitleBurnInAvailable,
                     onPickSubtitle = ::pickSubtitle,
-                    onRemoveSubtitle = viewModel::clearSubtitle,
+                    onRemoveSubtitle = viewModel::removeSubtitle,
                     onSubtitleTypeChange = viewModel::setSubtitleType,
                     videoSettings = state.options.videoSettings,
                     effectiveVideoCodec = effectiveVideoCodec,
@@ -193,6 +217,36 @@ class MediaConvertActivity : AppComposeActivity() {
                     onVideoSettingsChange = viewModel::setVideoSettings,
                     qualityHint = getString(R.string.media_convert_quality_range, qualityRange.first, qualityRange.last, if (effectiveVideoCodec == "libtheora") getString(R.string.media_convert_quality_larger) else getString(R.string.media_convert_quality_smaller))
                 )
+            }
+        }
+    }
+
+    private fun viewEmbeddedLyric(index: Int) {
+        val lyric = viewModel.state.value.sourceEmbeddedLyrics.getOrNull(index) ?: return
+        val title = lyric.title.ifBlank { getString(R.string.media_convert_source_lyric_number, index + 1) }
+        lifecycleScope.launch {
+            val pending = AtomicReference<File?>()
+            var opened = false
+            try {
+                val file = withContext(Dispatchers.IO) {
+                    val directory = File(cacheDir, "subtitle_source_previews").apply { mkdirs() }
+                    val extension = if (SubtitleParser.parseLRC(lyric.text).isNotEmpty()) "lrc" else "txt"
+                    File.createTempFile("lyrics_", ".$extension", directory).also {
+                        pending.set(it)
+                        it.writeText(lyric.text, Charsets.UTF_8)
+                    }
+                }
+                startActivity(DraftPreviewActivity.createReadOnlyIntent(this@MediaConvertActivity, file,
+                    "$title.${file.extension}"))
+                opened = true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Toast.makeText(this@MediaConvertActivity,
+                    getString(R.string.media_convert_source_lyrics_preview_failed, error.message.orEmpty()),
+                    Toast.LENGTH_LONG).show()
+            } finally {
+                if (!opened) withContext(NonCancellable + Dispatchers.IO) { pending.get()?.delete() }
             }
         }
     }

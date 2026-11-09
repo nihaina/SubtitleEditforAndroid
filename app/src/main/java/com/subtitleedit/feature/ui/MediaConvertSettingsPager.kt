@@ -46,7 +46,8 @@ internal fun MediaConvertSettingsPager(
     isAudioOutput: Boolean = false
 ) {
     val pages = when {
-        isAudioOutput -> listOf(MediaConvertSettingsPage.ADVANCED)
+        isAudioOutput -> listOf(MediaConvertSettingsPage.ADVANCED) +
+            if (showSubtitlePage) listOf(MediaConvertSettingsPage.SUBTITLES) else emptyList()
         showSubtitlePage -> MediaConvertSettingsPage.entries.toList()
         else -> listOf(MediaConvertSettingsPage.MORE, MediaConvertSettingsPage.ADVANCED)
     }

@@ -107,7 +107,7 @@ android {
 
         externalNativeBuild {
             cmake {
-                targets("subtitleedit_7zip", "subtitleedit_llama")
+                targets("subtitleedit_7zip", "subtitleedit_llama", "subtitleedit_mpv_probe")
                 // Keep native inference optimized even when the Android
                 // debug variant is used for UI iteration. LMPlayground uses
                 // the same policy; an unoptimized ggml build can be an order

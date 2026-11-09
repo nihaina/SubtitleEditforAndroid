@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Source-line preview for a draft. Keeping each physical line in SourceEditorView avoids the
+ * Source-line preview for a draft or a read-only subtitle. Keeping physical lines in SourceEditorView avoids the
  * large TextView snapshot that previously made opening a large draft block the UI thread.
  */
 class DraftPreviewActivity : AppCompatActivity() {
@@ -35,14 +35,19 @@ class DraftPreviewActivity : AppCompatActivity() {
     private var loaded = false
     private var applying = false
     private var applyAction: MenuItem? = null
+    private var readOnlyPreview = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        fromEditor = intent.getBooleanExtra(DraftsActivity.EXTRA_FROM_EDITOR, false)
+        readOnlyPreview = intent.hasExtra(EXTRA_READ_ONLY_FILE_PATH)
+        fromEditor = !readOnlyPreview && intent.getBooleanExtra(DraftsActivity.EXTRA_FROM_EDITOR, false)
         val folderName = intent.getStringExtra(DraftsActivity.EXTRA_DRAFT_FOLDER_NAME).orEmpty()
-        val fileName = intent.getStringExtra(DraftsActivity.EXTRA_DRAFT_FILE_NAME).orEmpty()
-        draftFile = DraftManager.getDraftFile(this, folderName, fileName)
+        val fileName = if (readOnlyPreview) intent.getStringExtra(EXTRA_READ_ONLY_TITLE).orEmpty()
+            else intent.getStringExtra(DraftsActivity.EXTRA_DRAFT_FILE_NAME).orEmpty()
+        draftFile = if (readOnlyPreview) runCatching {
+            validatedReadOnlyFile(this, File(intent.getStringExtra(EXTRA_READ_ONLY_FILE_PATH).orEmpty()))
+        }.getOrNull() else DraftManager.getDraftFile(this, folderName, fileName)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (!applying) finish()
@@ -104,11 +109,18 @@ class DraftPreviewActivity : AppCompatActivity() {
                 throw cancelled
             } catch (error: Exception) {
                 Toast.makeText(this@DraftPreviewActivity,
-                    getString(R.string.draft_preview_load_failed, error.message.orEmpty()),
+                    getString(if (readOnlyPreview) R.string.media_convert_source_lyrics_preview_failed
+                        else R.string.draft_preview_load_failed, error.message.orEmpty()),
                     Toast.LENGTH_LONG).show()
                 finish()
             }
         }
+    }
+
+    override fun onDestroy() {
+        // Rotation/recreation reloads the same private preview; only a final close consumes it.
+        if (readOnlyPreview && isFinishing) draftFile?.delete()
+        super.onDestroy()
     }
 
     private fun applyDraft() {
@@ -166,6 +178,25 @@ class DraftPreviewActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_PREVIEW_FILE_PATH = "extra_preview_file_path"
+        private const val EXTRA_READ_ONLY_FILE_PATH = "extra_read_only_file_path"
+        private const val EXTRA_READ_ONLY_TITLE = "extra_read_only_title"
+
+        fun createReadOnlyIntent(context: Context, file: File, title: String): Intent {
+            val source = validatedReadOnlyFile(context, file)
+            return Intent(context, DraftPreviewActivity::class.java).apply {
+                putExtra(EXTRA_READ_ONLY_FILE_PATH, source.absolutePath)
+                putExtra(EXTRA_READ_ONLY_TITLE, title.ifBlank { source.name })
+            }
+        }
+
+        private fun validatedReadOnlyFile(context: Context, file: File): File {
+            val directory = File(context.cacheDir, "subtitle_source_previews").canonicalFile
+            val source = file.canonicalFile
+            require(source.isFile && source.path.startsWith(directory.path + File.separator)) {
+                "Invalid subtitle preview file"
+            }
+            return source
+        }
 
         fun createIntent(
             context: Context,

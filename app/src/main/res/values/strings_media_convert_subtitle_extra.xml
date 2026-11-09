@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="media_convert_source_lyrics">已有内嵌歌词</string>
+    <string name="media_convert_source_lyrics_reading">正在读取内嵌歌词…</string>
+    <string name="media_convert_source_lyrics_failed">无法读取内嵌歌词，请重新选择文件后重试。</string>
+    <string name="media_convert_source_lyrics_empty">未检测到内嵌歌词。</string>
+    <string name="media_convert_source_lyric_number">歌词 %1$d</string>
+    <string name="media_convert_source_lyrics_timed">带时间轴</string>
+    <string name="media_convert_source_lyrics_plain">纯文本</string>
+    <string name="media_convert_source_lyrics_view">查看</string>
+    <string name="media_convert_source_lyrics_preview_failed">无法预览歌词：%1$s</string>
+    <string name="media_convert_subtitle_selection_adjusted">已根据当前格式和字幕类型移除不兼容或超出数量限制的字幕。</string>
+    <string name="media_convert_subtitle_single_burn">嵌入式字幕只能选择一个文件。</string>
+    <string name="media_convert_source_subtitle_probe_failed">无法读取已有字幕轨，请重新选择文件后重试。</string>
+    <string name="media_convert_source_subtitle_probe_reading">正在读取已有字幕轨…</string>
+    <string name="media_convert_source_subtitle_empty">未检测到已有字幕轨。</string>
+    <string name="media_convert_source_subtitle_output_pending">请选择输出格式以判断字幕轨是否保留。</string>
+</resources>

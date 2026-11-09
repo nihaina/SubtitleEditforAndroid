@@ -21,6 +21,17 @@ endif()
 
 project(subtitleedit_archive LANGUAGES C CXX)
 
+# A separate headless handle reads subtitle tracks through the packaged libmpv
+# client API without changing the editor's global playback instance.
+add_library(subtitleedit_mpv_probe SHARED mpv_subtitle_probe.cpp)
+target_compile_features(subtitleedit_mpv_probe PRIVATE cxx_std_17)
+target_compile_options(subtitleedit_mpv_probe PRIVATE -fexceptions -fvisibility=hidden)
+target_link_libraries(subtitleedit_mpv_probe PRIVATE dl)
+target_link_options(subtitleedit_mpv_probe PRIVATE "-Wl,-z,max-page-size=16384")
+if (SEVENZIP_LLD AND EXISTS "${SEVENZIP_LLD}")
+    target_link_options(subtitleedit_mpv_probe PRIVATE "-fuse-ld=${SEVENZIP_LLD}")
+endif()
+
 # CMake's Android toolchain can accidentally prefer the extensionless helper
 # script shipped beside ld.lld.exe on Windows. Force the real executable for
 # every target, including llama.cpp's Threads probe.

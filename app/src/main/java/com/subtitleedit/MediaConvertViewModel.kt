@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.system.Os
+import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.viewModelScope
 import com.arthenica.ffmpegkit.FFmpegKit
@@ -16,6 +17,7 @@ import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
 import com.arthenica.ffmpegkit.StreamInformation
 import com.subtitleedit.feature.ui.MediaConvertDialog
+import com.subtitleedit.mpv.MpvSubtitleProbe
 import com.subtitleedit.task.LongTaskController
 import com.subtitleedit.util.DirectoryDisplayPath
 import com.subtitleedit.util.SettingsManager
@@ -28,6 +30,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -59,7 +62,12 @@ internal data class MediaConvertUiState(
     val videoOptions: MediaConvertOptions = MediaConvertOptions(),
     val audioOptions: MediaConvertOptions = MediaConvertOptions(),
     val isAudioOutput: Boolean = false,
-    val subtitleFile: MediaConvertSubtitleFile? = null,
+    val subtitleFiles: List<MediaConvertSubtitleFile> = emptyList(),
+    val sourceSubtitleTracks: List<MediaConvertSourceSubtitle> = emptyList(),
+    val sourceSubtitleProbeFailed: Boolean = false,
+    val sourceEmbeddedLyrics: List<MediaConvertEmbeddedLyric> = emptyList(),
+    val sourceLyricsProbeFailed: Boolean = false,
+    val isReadingSourceSubtitles: Boolean = false,
     val subtitleType: MediaConvertSubtitleType = MediaConvertSubtitleType.SOFT,
     val subtitleBurnInAvailable: Boolean = false,
     val availableEncoders: Set<String> = MediaConvertFormats.baselineEncoders,
@@ -75,6 +83,8 @@ internal data class MediaConvertUiState(
     val isConverting: Boolean = false
 ) {
     val options: MediaConvertOptions get() = if (isAudioOutput) audioOptions else videoOptions
+    /** Compatibility view for callers that still display a single selected subtitle. */
+    val subtitleFile: MediaConvertSubtitleFile? get() = subtitleFiles.singleOrNull()
 }
 
 internal sealed interface MediaConvertEvent {
@@ -92,10 +102,14 @@ internal class MediaConvertViewModel(application: Application) :
         private const val OUTPUT_DIRECTORY_KEY = "media_convert"
     }
 
-    private data class SelectedMediaFile(val uri: Uri, val fileName: String, val mediaInfo: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null, val videoPixelFormat: String? = null, val fileSizeBytes: Long? = null, val source: MediaConvertSource? = null)
-    private data class SourceDescription(val text: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null, val videoPixelFormat: String? = null, val fileSizeBytes: Long? = null, val source: MediaConvertSource? = null)
+    private data class SelectedMediaFile(val uri: Uri, val fileName: String, val mediaInfo: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null, val videoPixelFormat: String? = null, val fileSizeBytes: Long? = null, val source: MediaConvertSource? = null, val subtitleProbeFailed: Boolean = false, val subtitleTracks: List<MediaConvertSourceSubtitle> = emptyList(), val embeddedLyrics: List<MediaConvertEmbeddedLyric> = emptyList(), val lyricsProbeFailed: Boolean = false)
+    private data class SourceDescription(val text: String, val videoSize: MediaConvertVideoSize? = null, val videoBitrateBps: Long? = null, val audioBitrateBps: Long? = null, val audioSampleRate: Int? = null, val audioChannels: Int? = null, val audioChannelLayout: String? = null, val videoPixelFormat: String? = null, val fileSizeBytes: Long? = null, val source: MediaConvertSource? = null, val subtitleProbeFailed: Boolean = false, val subtitleTracks: List<MediaConvertSourceSubtitle> = emptyList(), val embeddedLyrics: List<MediaConvertEmbeddedLyric> = emptyList(), val lyricsProbeFailed: Boolean = false)
     private data class DirectFileOutput(val staging: File, val target: File, val fileName: String)
     private data class OutputResult(val uri: Uri, val fileName: String)
+    private data class PreparedSubtitles(
+        val streams: List<MediaConvertSubtitleInput> = emptyList(),
+        val lyrics: List<MediaConvertLyric> = emptyList()
+    )
 
     val formatList: List<MediaConvertFormatInfo>
         get() = MediaConvertFormats.create(currentState.availableEncoders, currentState.availableAudioEncoders)
@@ -126,9 +140,21 @@ internal class MediaConvertViewModel(application: Application) :
     private var currentSession: FFmpegSession? = null
     private var conversionJob: Job? = null
     private var probeJob: Job? = null
+    private var probeGeneration = 0L
 
     val currentOutputDirectoryUri: Uri? get() = outputDirectoryUri
     val isRunning: Boolean get() = currentState.isConverting
+    val selectedSourceIsAudio: Boolean get() = selectedMediaFiles.singleOrNull()?.let { file ->
+        file.source?.let { !it.hasVideo } ?: isLikelyAudioFile(file)
+    } ?: false
+    val maxSubtitleFiles: Int get() {
+        val format = formatList.firstOrNull { it.extension == currentState.selectedFormat } ?: return 0
+        return when {
+            format.isAudioOnly -> MediaConvertAudioLyrics.maxFiles(format)
+            currentState.subtitleType == MediaConvertSubtitleType.BURN_IN -> 1
+            else -> Int.MAX_VALUE
+        }
+    }
     val allowedSubtitleExtensions: Set<String> get() {
         if (currentState.selectedFiles.size != 1) return emptySet()
         val format = formatList.firstOrNull { it.extension == currentState.selectedFormat }
@@ -166,6 +192,7 @@ internal class MediaConvertViewModel(application: Application) :
 
     fun selectFiles(uris: List<Uri>) {
         if (isRunning) return
+        probeGeneration++
         probeJob?.cancel()
         selectedMediaFiles = uris.distinct().map { uri ->
             runCatching { PickedUriAccess.retainPermission(app, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
@@ -174,8 +201,12 @@ internal class MediaConvertViewModel(application: Application) :
         setState {
             copy(
                 selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo, it.videoSize, it.videoBitrateBps, it.audioBitrateBps, it.audioSampleRate, it.audioChannels, it.audioChannelLayout) },
-                selectedFormat = null,
-                subtitleFile = null,
+                subtitleFiles = emptyList(),
+                sourceSubtitleTracks = emptyList(),
+                sourceSubtitleProbeFailed = false,
+                sourceEmbeddedLyrics = emptyList(),
+                sourceLyricsProbeFailed = false,
+                isReadingSourceSubtitles = selectedMediaFiles.isNotEmpty(),
                 subtitleType = MediaConvertSubtitleType.SOFT,
                 log = ""
             )
@@ -194,24 +225,28 @@ internal class MediaConvertViewModel(application: Application) :
     fun selectFormat(extension: String) {
         if (isRunning) return
         val format = formatList.firstOrNull { it.extension == extension } ?: return
-        val hadSubtitle = currentState.subtitleFile != null
+        val oldSubtitleCount = currentState.subtitleFiles.size
         setState {
             val previous = if (format.isAudioOnly) audioOptions else videoOptions
             val next = previous.copy(
                 selectedVideoCodec = previous.selectedVideoCodec.takeIf { it in format.videoCodecs } ?: "auto",
                 selectedAudioCodec = previous.selectedAudioCodec.takeIf { it in format.audioCodecs } ?: "auto"
             )
+            val nextType = if (format.isAudioOnly) MediaConvertSubtitleType.SOFT else subtitleType
+            val allowed = MediaConvertSubtitles.allowedExtensions(format, nextType,
+                if (format.isAudioOnly) "" else format.videoEncoder(next.selectedVideoCodec), subtitleBurnInAvailable)
             copy(
                 selectedFormat = format.extension,
                 isAudioOutput = format.isAudioOnly,
-                subtitleFile = subtitleFile?.takeIf { MediaConvertSubtitles.extension(it.fileName) in
-                    MediaConvertSubtitles.allowedExtensions(format, subtitleType,
-                        if (format.isAudioOnly) "" else format.videoEncoder(next.selectedVideoCodec), subtitleBurnInAvailable) },
+                subtitleType = nextType,
+                subtitleFiles = subtitleFiles.filter { MediaConvertSubtitles.extension(it.fileName) in allowed }
+                    .take(if (format.isAudioOnly) MediaConvertAudioLyrics.maxFiles(format)
+                        else if (nextType == MediaConvertSubtitleType.BURN_IN) 1 else Int.MAX_VALUE),
                 videoOptions = if (format.isAudioOnly) videoOptions else next,
                 audioOptions = if (format.isAudioOnly) next else audioOptions
             )
         }
-        if (hadSubtitle && currentState.subtitleFile == null) toast(R.string.media_convert_subtitle_cleared)
+        if (currentState.subtitleFiles.size < oldSubtitleCount) toast(R.string.media_convert_subtitle_selection_adjusted)
     }
 
     private fun updateOptions(update: MediaConvertOptions.() -> MediaConvertOptions) {
@@ -232,13 +267,25 @@ internal class MediaConvertViewModel(application: Application) :
         discardIncompatibleSubtitle()
     }
 
-    fun selectSubtitle(uri: Uri) {
-        if (isRunning || currentState.selectedFiles.size != 1 || currentState.isAudioOutput) return
-        val name = getFileName(uri)
-        if (MediaConvertSubtitles.extension(name) !in allowedSubtitleExtensions) return toast(R.string.media_convert_subtitle_incompatible)
-        runCatching { PickedUriAccess.retainPermission(app, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-        setState { copy(subtitleFile = MediaConvertSubtitleFile(uri, name)) }
+    fun selectSubtitles(uris: List<Uri>) {
+        if (isRunning || currentState.selectedFiles.size != 1 || uris.isEmpty()) return
+        val allowed = allowedSubtitleExtensions
+        val files = uris.distinct().map { MediaConvertSubtitleFile(it, getFileName(it)) }
+        if (files.any { MediaConvertSubtitles.extension(it.fileName) !in allowed }) {
+            return toast(R.string.media_convert_subtitle_incompatible)
+        }
+        val maximum = maxSubtitleFiles
+        if (maximum == 0) return
+        val limited = files.take(maximum)
+        limited.forEach { runCatching { PickedUriAccess.retainPermission(app, it.uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
+        setState {
+            copy(subtitleFiles = if (maximum == 1) limited
+                else (subtitleFiles + limited).distinctBy { it.uri }.take(maximum))
+        }
+        if (limited.size < files.size) toast(R.string.media_convert_subtitle_selection_adjusted)
     }
+
+    fun selectSubtitle(uri: Uri) = selectSubtitles(listOf(uri))
 
     fun setSubtitleType(value: MediaConvertSubtitleType) {
         if (isRunning || currentState.selectedFiles.size != 1 || currentState.isAudioOutput || currentState.selectedFormat == null) return
@@ -246,16 +293,18 @@ internal class MediaConvertViewModel(application: Application) :
         discardIncompatibleSubtitle()
     }
 
-    fun clearSubtitle() {
-        if (!isRunning) setState { copy(subtitleFile = null) }
+    fun removeSubtitle(index: Int) {
+        if (!isRunning) setState { copy(subtitleFiles = subtitleFiles.filterIndexed { position, _ -> position != index }) }
     }
 
     private fun discardIncompatibleSubtitle() {
-        val selected = currentState.subtitleFile ?: return
-        if (MediaConvertSubtitles.extension(selected.fileName) !in allowedSubtitleExtensions) {
-            setState { copy(subtitleFile = null) }
-            toast(R.string.media_convert_subtitle_cleared)
-        }
+        val original = currentState.subtitleFiles
+        if (original.isEmpty()) return
+        val allowed = allowedSubtitleExtensions
+        val compatible = original.filter { MediaConvertSubtitles.extension(it.fileName) in allowed }.take(maxSubtitleFiles)
+        if (compatible.size == original.size) return
+        setState { copy(subtitleFiles = compatible) }
+        toast(R.string.media_convert_subtitle_selection_adjusted)
     }
     fun setAudioCodec(value: String) = updateOptions { copy(selectedAudioCodec = value) }
     fun setResolution(value: MediaConvertResolutionSettings) {
@@ -330,21 +379,31 @@ internal class MediaConvertViewModel(application: Application) :
 
     private fun probeSelectedFiles() {
         val snapshot = selectedMediaFiles.map { it.uri }
+        val generation = probeGeneration
         probeJob = viewModelScope.launch {
             snapshot.forEachIndexed { index, uri ->
+                currentCoroutineContext().ensureActive()
+                if (generation != probeGeneration) return@launch
                 val selected = selectedMediaFiles.firstOrNull { it.uri == uri } ?: return@forEachIndexed
                 val info = withContext(Dispatchers.IO) {
                     probeUri(uri).let { if (isLikelyAudioFile(selected)) it.copy(videoBitrateBps = null) else it }
                 }
+                currentCoroutineContext().ensureActive()
+                if (generation != probeGeneration) return@launch
                 val current = selectedMediaFiles.indexOfFirst { it.uri == uri }
                 if (current < 0) return@forEachIndexed
                 val source = info.source?.let { probed ->
                     if (isLikelyAudioFile(selected)) probed.copy(hasVideo = false, videoBitrateBps = null) else probed
                 }
-                selectedMediaFiles = selectedMediaFiles.toMutableList().also { list -> list[current] = list[current].copy(mediaInfo = info.text, videoSize = info.videoSize, videoBitrateBps = info.videoBitrateBps, audioBitrateBps = info.audioBitrateBps, audioSampleRate = info.audioSampleRate, audioChannels = info.audioChannels, audioChannelLayout = info.audioChannelLayout, videoPixelFormat = info.videoPixelFormat, fileSizeBytes = info.fileSizeBytes, source = source) }
+                selectedMediaFiles = selectedMediaFiles.toMutableList().also { list -> list[current] = list[current].copy(mediaInfo = info.text, videoSize = info.videoSize, videoBitrateBps = info.videoBitrateBps, audioBitrateBps = info.audioBitrateBps, audioSampleRate = info.audioSampleRate, audioChannels = info.audioChannels, audioChannelLayout = info.audioChannelLayout, videoPixelFormat = info.videoPixelFormat, fileSizeBytes = info.fileSizeBytes, source = source, subtitleProbeFailed = info.subtitleProbeFailed, subtitleTracks = info.subtitleTracks, embeddedLyrics = info.embeddedLyrics, lyricsProbeFailed = info.lyricsProbeFailed) }
                 setState {
                     copy(
                         selectedFiles = selectedMediaFiles.map { MediaConvertFileUi(it.uri, it.fileName, it.mediaInfo, it.videoSize, it.videoBitrateBps, it.audioBitrateBps, it.audioSampleRate, it.audioChannels, it.audioChannelLayout, it.videoPixelFormat, it.fileSizeBytes, it.source?.hasVideo == true) },
+                        sourceSubtitleTracks = selectedMediaFiles.singleOrNull()?.subtitleTracks.orEmpty(),
+                        sourceSubtitleProbeFailed = selectedMediaFiles.singleOrNull()?.subtitleProbeFailed == true,
+                        sourceEmbeddedLyrics = selectedMediaFiles.singleOrNull()?.embeddedLyrics.orEmpty(),
+                        sourceLyricsProbeFailed = selectedMediaFiles.singleOrNull()?.lyricsProbeFailed == true,
+                        isReadingSourceSubtitles = index < snapshot.lastIndex,
                         log = (log + string(R.string.media_convert_probe_summary, index + 1, snapshot.size, selected.fileName))
                             .takeLast(16000)
                     )
@@ -353,18 +412,52 @@ internal class MediaConvertViewModel(application: Application) :
         }
     }
 
-    private fun probeUri(uri: Uri): SourceDescription {
+    private suspend fun probeUri(uri: Uri): SourceDescription {
         var input: String? = null
         val size = sourceSizeBytes(uri)
-        return try {
+        val description = try {
             input = ffmpegInput(uri)
-            (readMediaInfo(input) ?: SourceDescription(string(R.string.media_convert_probe_failed))).let { description ->
-                description.copy(fileSizeBytes = size, source = description.source?.copy(fileSizeBytes = size))
-            }
+            readMediaInfo(input) ?: SourceDescription(string(R.string.media_convert_probe_failed))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             SourceDescription(string(R.string.media_convert_probe_exception, e.message ?: string(R.string.media_convert_unknown)), fileSizeBytes = size)
         }
         finally { releaseFfmpegInput(input) }
+        currentCoroutineContext().ensureActive()
+        // Subtitle discovery must also run when the separate media-info probe fails.
+        val probed = try {
+            MpvSubtitleProbe.readDetails(app, uri)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w("MediaConvert", "mpv subtitle detection failed", error)
+            null
+        } catch (error: LinkageError) {
+            Log.w("MediaConvert", "mpv subtitle runtime unavailable", error)
+            null
+        }
+        currentCoroutineContext().ensureActive()
+        val extension = MediaConvertSubtitles.extension(getFileName(uri))
+        val id3Lyrics = if (extension in setOf("mp3", "wav")) try {
+            val stream = PickedUriAccess.file(uri)?.inputStream() ?: app.contentResolver.openInputStream(uri)
+                ?: error("Cannot open media for lyric detection")
+            stream.buffered().use { MediaConvertId3LyricsReader.read(it, wav = extension == "wav") }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w("MediaConvert", "ID3 lyric detection failed", error)
+            null
+        } else null
+        val subtitleTracks = probed?.subtitleTracks?.map { track ->
+            MediaConvertSourceSubtitle(track.ffIndex, track.codec, track.language, track.title, track.isDefault)
+        }
+        val lyrics = MediaConvertEmbeddedLyrics.merge(
+            MediaConvertEmbeddedLyrics.fromMetadata(probed?.lyricMetadata.orEmpty(), extension), id3Lyrics.orEmpty())
+        return description.copy(fileSizeBytes = size,
+            source = description.source?.copy(fileSizeBytes = size, subtitleStreams = subtitleTracks.orEmpty()),
+            subtitleProbeFailed = subtitleTracks == null, subtitleTracks = subtitleTracks.orEmpty(),
+            embeddedLyrics = lyrics, lyricsProbeFailed = probed == null && id3Lyrics == null)
     }
 
     private fun readMediaInfo(path: String): SourceDescription? {
@@ -489,9 +582,17 @@ internal class MediaConvertViewModel(application: Application) :
         return try {
             val prefix = "[${index + 1}/$total]"
             appendLog(string(R.string.media_convert_start_file, prefix, file.fileName))
-            val sourceProbe = file.source ?: withContext(Dispatchers.IO) {
+            var sourceProbe = file.source ?: withContext(Dispatchers.IO) {
                 probeSourceUri(file.uri)?.let { if (isLikelyAudioFile(file)) it.copy(hasVideo = false, videoBitrateBps = null) else it }
             } ?: MediaConvertSource(true, null)
+            val retainSourceSubtitles = format.isAudioOnly || currentState.subtitleType == MediaConvertSubtitleType.SOFT
+            if (!retainSourceSubtitles) {
+                sourceProbe = sourceProbe.copy(subtitleStreams = emptyList())
+            } else if (file.subtitleProbeFailed && MediaConvertSubtitles.sourceEncoder(format, "subrip") != null) {
+                // A failed probe is not proof that the source has no subtitles.
+                // Retry before an output that promises to retain compatible tracks.
+                sourceProbe = sourceProbe.copy(subtitleStreams = readSourceSubtitleTracks(file.uri))
+            }
             val options = currentState.options
             val videoWillCopy = MediaConvertStreamCopy.copiesVideo(format, options, sourceProbe) ||
                 (options.selectedVideoCodec == "copy" && sourceProbe.hasVideo)
@@ -506,6 +607,10 @@ internal class MediaConvertViewModel(application: Application) :
                 MediaConvertAudioCodecs.profile(audioCodec, format.formatName).adjustableBitrate && sourceProbe.audioBitrateBps == null) {
                 return Result.failure(IllegalStateException(string(R.string.media_convert_audio_bitrate_source_unavailable)))
             }
+            val prepared = prepareSubtitles(cache, format, options, sourceProbe.durationSeconds)
+            val subtitles = prepared.streams
+            val lyricTags = prepared.lyrics
+            val rewriteLyricFile = lyricTags.isNotEmpty() && MediaConvertAudioLyrics.needsFileRewrite(format)
             input = withContext(Dispatchers.IO) { ffmpegInput(file.uri) }
             if (!format.isAudioOnly && !sourceProbe.hasVideo) {
                 appendLog(string(R.string.media_convert_no_video_stream, prefix))
@@ -523,7 +628,7 @@ internal class MediaConvertViewModel(application: Application) :
                 outputFile = staging
                 outputPath = staging.absolutePath
             } else {
-                directSafOutput = runCatching {
+                directSafOutput = if (rewriteLyricFile) null else runCatching {
                     val dir = DocumentFile.fromTreeUri(app, outputUri) ?: return@runCatching null
                     if (overwrite) dir.findFile(desiredOutputName)?.delete()
                     val target = dir.createFile(getMimeType(desiredOutputName), desiredOutputName) ?: return@runCatching null
@@ -539,14 +644,14 @@ internal class MediaConvertViewModel(application: Application) :
                     outputPath = cachedOutput.absolutePath
                 }
             }
-            val subtitle = prepareSubtitle(cache, format, options)
             val codec = if (format.isAudioOnly) "" else format.videoEncoder(options.selectedVideoCodec)
             val durationMs = sourceProbe.durationSeconds?.let { (it * 1000.0).toLong() } ?: 0L
-            val hardwareAttempted = MediaConvertCommand.usesHardwareEncoder(format, options, sourceProbe, subtitle)
+            val hardwareAttempted = MediaConvertCommand.usesHardwareEncoder(format, options, sourceProbe, subtitles = subtitles)
             val passLogPath = File(cache, "video-pass").absolutePath
             val commands = try {
                 MediaConvertCommand.plan(input, outputPath, format, options, sourceProbe, passLogPath,
-                    currentState.videoPixelFormats[codec], subtitle, allowHardware = true, hardwareCodecNames = currentState.hardwareCodecNames)
+                    currentState.videoPixelFormats[codec], allowHardware = true,
+                    hardwareCodecNames = currentState.hardwareCodecNames, subtitles = subtitles, lyrics = lyricTags)
             } catch (e: MediaConvertVideoSizeException) {
                 val message = when (e.reason) {
                     MediaConvertVideoSizeError.UNKNOWN_SOURCE_SIZE -> R.string.media_convert_size_source_required
@@ -583,7 +688,8 @@ internal class MediaConvertViewModel(application: Application) :
                     outputPath = cachedOutput.absolutePath
                 }
                 val softwareCommands = MediaConvertCommand.plan(input, outputPath, format, options, sourceProbe, passLogPath,
-                    currentState.videoPixelFormats[codec], subtitle, allowHardware = false, hardwareCodecNames = currentState.hardwareCodecNames)
+                    currentState.videoPixelFormats[codec], allowHardware = false,
+                    hardwareCodecNames = currentState.hardwareCodecNames, subtitles = subtitles, lyrics = lyricTags)
                 session = runCommands(softwareCommands)
             }
             checkNotNull(session)
@@ -609,6 +715,13 @@ internal class MediaConvertViewModel(application: Application) :
             if (!encodedFile.isFile || encodedFile.length() <= 0L) {
                 return Result.failure(IllegalStateException(string(R.string.media_convert_ffmpeg_invalid_output)))
             }
+            if (rewriteLyricFile) withContext(Dispatchers.IO) {
+                when (format.formatName) {
+                    "mp3" -> MediaConvertId3Lyrics.writeMp3(encodedFile, lyricTags)
+                    "wav" -> MediaConvertId3Lyrics.writeWav(encodedFile, lyricTags)
+                }
+            }
+            currentCoroutineContext().ensureActive()
             val directFile = directFileOutput
             val output = if (directFile != null) {
                 withContext(Dispatchers.IO) { publishDirectFileOutput(directFile, overwrite) }
@@ -631,20 +744,57 @@ internal class MediaConvertViewModel(application: Application) :
         }
     }
 
-    private suspend fun prepareSubtitle(cache: File, format: MediaConvertFormatInfo, options: MediaConvertOptions): MediaConvertSubtitleInput? {
-        val selected = currentState.subtitleFile ?: return null
-        check(currentState.selectedFiles.size == 1 && !format.isAudioOnly) { string(R.string.media_convert_subtitle_single_only) }
-        check(MediaConvertSubtitles.extension(selected.fileName) in allowedSubtitleExtensions) { string(R.string.media_convert_subtitle_incompatible) }
+    private suspend fun prepareSubtitles(cache: File, format: MediaConvertFormatInfo, options: MediaConvertOptions,
+                                         durationSeconds: Double?): PreparedSubtitles {
+        val selected = currentState.subtitleFiles
+        if (selected.isEmpty()) return PreparedSubtitles()
+        check(currentState.selectedFiles.size == 1) { string(R.string.media_convert_subtitle_single_only) }
+        check(currentState.subtitleType != MediaConvertSubtitleType.BURN_IN || selected.size == 1) {
+            string(R.string.media_convert_subtitle_single_burn)
+        }
+        check(selected.all { MediaConvertSubtitles.extension(it.fileName) in allowedSubtitleExtensions }) {
+            string(R.string.media_convert_subtitle_incompatible)
+        }
         return withContext(Dispatchers.IO) {
-            val file = File(cache, "subtitle.${MediaConvertSubtitles.extension(selected.fileName)}")
-            file.writeText(FileUtils.readUri(app, selected.uri).removePrefix("\uFEFF"), Charsets.UTF_8)
-            val stream = FFprobeKit.getMediaInformation(file.absolutePath).getMediaInformation()?.getStreams()
-                ?.firstOrNull { it.getType() == "subtitle" }
-            check(stream?.getCodec() in setOf("ass", "ssa", "subrip", "srt", "webvtt")) { string(R.string.media_convert_subtitle_invalid) }
-            val fonts = if (currentState.subtitleType == MediaConvertSubtitleType.BURN_IN) SubtitleFontManager.writeFontConfig(app).absolutePath else null
-            MediaConvertSubtitleInput(file.absolutePath, selected.fileName, currentState.subtitleType, fonts).also {
-                MediaConvertSubtitles.validate(format, options, it)
+            val fonts = if (!format.isAudioOnly && currentState.subtitleType == MediaConvertSubtitleType.BURN_IN) {
+                SubtitleFontManager.writeFontConfig(app).absolutePath
+            } else null
+            val lyrics = mutableListOf<MediaConvertLyric>()
+            val streams = selected.mapIndexedNotNull { index, subtitle ->
+                val extension = MediaConvertSubtitles.extension(subtitle.fileName)
+                var content = FileUtils.readUri(app, subtitle.uri).removePrefix("\uFEFF")
+                var preparedName = subtitle.fileName
+                if (format.isAudioOnly && extension in setOf("ass", "ssa")) {
+                    val original = File(cache, "original_subtitle_$index.$extension").apply { writeText(content, Charsets.UTF_8) }
+                    val normalized = File(cache, "normalized_subtitle_$index.srt")
+                    val session = FFmpegKit.executeWithArguments(arrayOf("-y", "-i", original.absolutePath,
+                        "-map", "0:s:0", "-c:s", "srt", normalized.absolutePath))
+                    check(ReturnCode.isSuccess(session.getReturnCode())) { string(R.string.media_convert_subtitle_invalid) }
+                    content = normalized.readText(Charsets.UTF_8)
+                    preparedName = normalized.name
+                }
+                if (format.isAudioOnly) {
+                    // Tags keep the complete lyric document; only timed tracks are clipped below.
+                    val lrc = MediaConvertLyricText.toLrc(content, preparedName, null)
+                    val lyric = MediaConvertLyric(subtitle.fileName.substringBeforeLast('.', subtitle.fileName), lrc)
+                    if (!MediaConvertAudioLyrics.usesSubtitleTracks(format)) {
+                        lyrics += lyric
+                        return@mapIndexedNotNull null
+                    }
+                    content = lrc
+                    preparedName = "${lyric.title}.lrc"
+                }
+                val timedLrc = MediaConvertSubtitles.extension(preparedName) == "lrc"
+                val preparedExtension = if (timedLrc) "srt" else MediaConvertSubtitles.extension(preparedName)
+                val file = File(cache, "subtitle_$index.$preparedExtension")
+                file.writeText(if (timedLrc) MediaConvertLyricText.lrcToSrt(content, durationSeconds) else content, Charsets.UTF_8)
+                val stream = FFprobeKit.getMediaInformation(file.absolutePath).getMediaInformation()?.getStreams()
+                    ?.firstOrNull { it.getType() == "subtitle" }
+                check(stream?.getCodec() in setOf("ass", "ssa", "subrip", "srt", "webvtt")) { string(R.string.media_convert_subtitle_invalid) }
+                MediaConvertSubtitleInput(file.absolutePath, "${subtitle.fileName.substringBeforeLast('.') }.$preparedExtension",
+                    currentState.subtitleType, fonts).also { MediaConvertSubtitles.validate(format, options, it) }
             }
+            PreparedSubtitles(streams, lyrics)
         }
     }
 
@@ -685,7 +835,7 @@ internal class MediaConvertViewModel(application: Application) :
     private fun releaseFfmpegOutput(output: String?) {
         if (output?.startsWith("saf:") == true) runCatching { FFmpegKitConfig.unregisterSafProtocolUrl(output) }
     }
-    private fun probeSourceUri(uri: Uri): MediaConvertSource? {
+    private suspend fun probeSourceUri(uri: Uri): MediaConvertSource? {
         var input: String? = null
         return try {
             input = ffmpegInput(uri)
@@ -702,10 +852,17 @@ internal class MediaConvertViewModel(application: Application) :
             MediaConvertSource(video != null, info.getDuration()?.toDoubleOrNull()?.takeIf { it > 0 }, rate, video?.let(::streamBitrateBps),
                 audio?.getSampleRate()?.toIntOrNull(), audio?.getNumberProperty("channels")?.toInt(), audio?.let(::streamBitrateBps), audio?.getChannelLayout(),
                 video?.getStringProperty("pix_fmt"), audio != null, sourceSizeBytes(uri), video?.getCodec(), audio?.getCodec(),
-                video?.getWidth()?.toInt(), video?.getHeight()?.toInt(), video?.getIndex(), attachedPicture?.getIndex())
+                video?.getWidth()?.toInt(), video?.getHeight()?.toInt(), video?.getIndex(), attachedPicture?.getIndex(),
+                readSourceSubtitleTracks(uri))
+        } catch (error: CancellationException) {
+            throw error
         } catch (_: Exception) { null }
         finally { releaseFfmpegInput(input) }
     }
+    private suspend fun readSourceSubtitleTracks(uri: Uri): List<MediaConvertSourceSubtitle> =
+        MpvSubtitleProbe.read(app, uri).map { track ->
+            MediaConvertSourceSubtitle(track.ffIndex, track.codec, track.language, track.title, track.isDefault)
+        }
     private fun sourceSizeBytes(uri: Uri): Long? {
         PickedUriAccess.file(uri)?.let { return it.length().takeIf { size -> size > 0 } }
         return runCatching {

@@ -17,12 +17,85 @@ class MediaConvertSubtitlesTest {
             val burn = MediaConvertSubtitles.allowedExtensions(format, MediaConvertSubtitleType.BURN_IN, "auto")
             assertEquals(format.extension, !format.isAudioOnly, burn.isNotEmpty())
             val mux = MediaConvertSubtitles.allowedExtensions(format, MediaConvertSubtitleType.SOFT, "copy")
-            assertEquals(format.extension, format.extension in soft, mux.isNotEmpty())
-            if (mux.isNotEmpty()) assertEquals(setOf("srt", "ass", "ssa", "vtt"), mux)
+            val audioLyrics = format.isAudioOnly && MediaConvertAudioLyrics.maxFiles(format) > 0
+            assertEquals(format.extension, format.extension in soft || audioLyrics, mux.isNotEmpty())
+            if (mux.isNotEmpty()) assertEquals(setOf("srt", "ass", "ssa", "vtt", "lrc") + if (audioLyrics) setOf("txt") else emptySet(), mux)
         }
         assertTrue(MediaConvertSubtitles.allowedExtensions(format("mp4"), MediaConvertSubtitleType.BURN_IN, "copy").isEmpty())
         assertTrue(MediaConvertSubtitles.allowedExtensions(format("mp4"), MediaConvertSubtitleType.BURN_IN, "auto", false).isEmpty())
         assertEquals("ass", MediaConvertSubtitles.extension("字幕.ASS"))
+    }
+
+    @Test fun multipleSoftTracksHaveIndependentEncodersAndDoNotMoveTheCoverInput() {
+        val subtitles = listOf(subtitle(MediaConvertSubtitleType.SOFT), subtitle(MediaConvertSubtitleType.SOFT, "第二轨.ass"))
+        val args = MediaConvertCommand.build("in", "out.mkv", format("mkv"), MediaConvertOptions(selectedVideoCodec = "copy"), source,
+            metadata = MediaConvertMetadata(cover = MediaConvertCoverMode.CUSTOM, coverPath = "cover.jpg"), subtitles = subtitles)
+        assertTrue(args.windowed(2).contains(listOf("-map", "1:s:0")))
+        assertTrue(args.windowed(2).contains(listOf("-map", "2:s:0")))
+        assertEquals("srt", args.value("-c:s:0"))
+        assertEquals("ass", args.value("-c:s:1"))
+        assertEquals("default", args.value("-disposition:s:0"))
+        assertEquals("0", args.value("-disposition:s:1"))
+        val withStreamCover = MediaConvertCommand.build("in", "out.mp4", format("mp4"), MediaConvertOptions(), source,
+            metadata = MediaConvertMetadata(cover = MediaConvertCoverMode.CUSTOM, coverPath = "cover.jpg"), subtitles = subtitles)
+        assertTrue(withStreamCover.windowed(2).contains(listOf("-map", "3:v:0")))
+        val synthetic = MediaConvertCommand.build("in", "out.mp4", format("mp4"), MediaConvertOptions(), MediaConvertSource(false, 2.0),
+            metadata = MediaConvertMetadata(cover = MediaConvertCoverMode.CUSTOM, coverPath = "cover.jpg"), subtitles = subtitles)
+        assertTrue(synthetic.windowed(2).contains(listOf("-map", "2:s:0")))
+        assertTrue(synthetic.windowed(2).contains(listOf("-map", "3:s:0")))
+        assertTrue(synthetic.windowed(2).contains(listOf("-map", "4:v:0")))
+    }
+
+    @Test fun existingSourceTracksArePreservedAndAdaptedAlongsideNewSubtitles() {
+        val tracks = listOf(MediaConvertSourceSubtitle(4, "ass", "eng", "Original", true),
+            MediaConvertSourceSubtitle(5, "hdmv_pgs_subtitle", "jpn", "Bitmap"))
+        val withTracks = source.copy(subtitleStreams = tracks)
+        val args = MediaConvertCommand.build("in", "out.mkv", format("mkv"), MediaConvertOptions(), withTracks,
+            subtitles = listOf(subtitle(MediaConvertSubtitleType.SOFT)))
+        assertTrue(args.windowed(2).contains(listOf("-map", "0:4")))
+        assertTrue(args.windowed(2).contains(listOf("-map", "0:5")))
+        assertEquals("copy", args.value("-c:s:0"))
+        assertEquals("copy", args.value("-c:s:1"))
+        assertEquals("srt", args.value("-c:s:2"))
+        assertTrue(args.windowed(2).contains(listOf("-metadata:s:s:0", "language=eng")))
+        assertTrue(args.windowed(2).contains(listOf("-metadata:s:s:0", "title=Original")))
+        val mp4 = MediaConvertCommand.build("in", "out.mp4", format("mp4"), MediaConvertOptions(), withTracks)
+        assertTrue(mp4.windowed(2).contains(listOf("-map", "0:4")))
+        assertFalse(mp4.windowed(2).contains(listOf("-map", "0:5")))
+        assertEquals("mov_text", mp4.value("-c:s:0"))
+        assertNull(MediaConvertSubtitles.sourceEncoder(format("mp3"), "subrip"))
+    }
+
+    @Test fun audioContainersUseNativeLyricTagsAndMkaUsesTimedTracks() {
+        val lyrics = listOf(subtitle(MediaConvertSubtitleType.SOFT, "first.lrc"), subtitle(MediaConvertSubtitleType.SOFT, "second.srt"))
+        for (extension in listOf("mka")) {
+            val args = MediaConvertCommand.build("in", "out.$extension", format(extension), MediaConvertOptions(), source, subtitles = lyrics)
+            assertTrue(extension, args.windowed(2).contains(listOf("-map", "1:s:0")))
+            assertTrue(extension, args.windowed(2).contains(listOf("-map", "2:s:0")))
+            assertFalse(extension, "-sn" in args)
+            assertTrue(extension, MediaConvertSubtitles.allowedExtensions(format(extension), MediaConvertSubtitleType.BURN_IN, "").isEmpty())
+        }
+        for (extension in listOf("mp3", "flac", "wav", "ogg", "opus")) {
+            assertTrue(extension, MediaConvertSubtitles.allowedExtensions(format(extension), MediaConvertSubtitleType.SOFT, "").isNotEmpty())
+            assertThrows(IllegalArgumentException::class.java) {
+                MediaConvertCommand.build("in", "out.$extension", format(extension), MediaConvertOptions(), source, subtitles = lyrics)
+            }
+        }
+        assertTrue(MediaConvertSubtitles.allowedExtensions(format("aac"), MediaConvertSubtitleType.SOFT, "").isEmpty())
+        val lyric = MediaConvertLyric("Lyrics", "[00:00.00]Song line\n")
+        for (extension in listOf("mp3", "flac", "wav", "ogg", "opus", "m4a", "m4b", "wma", "wv")) {
+            val args = MediaConvertCommand.build("in", "out.$extension", format(extension), MediaConvertOptions(), source, lyrics = listOf(lyric))
+            assertFalse(extension, args.windowed(2).any { it == listOf("-map", "1:s:0") })
+        }
+    }
+
+    @Test fun videoBurnInRejectsMultipleAndMixedModeSubtitles() {
+        val burn = subtitle(MediaConvertSubtitleType.BURN_IN)
+        for (subtitles in listOf(listOf(burn, burn.copy(fileName = "other.srt")), listOf(burn, subtitle(MediaConvertSubtitleType.SOFT)))) {
+            assertThrows(IllegalArgumentException::class.java) {
+                MediaConvertCommand.build("in", "out.mp4", format("mp4"), MediaConvertOptions(), source, subtitles = subtitles)
+            }
+        }
     }
 
     @Test fun softSubtitlesMapOnlyTheAddedTrackAndKeepCopyVideoAvailable() {

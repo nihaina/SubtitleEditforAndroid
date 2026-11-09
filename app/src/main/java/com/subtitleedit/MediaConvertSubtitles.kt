@@ -12,17 +12,50 @@ internal data class MediaConvertSubtitleInput(
     val fontsDirectory: String? = null
 )
 
+/** Soft subtitle streams already stored in the selected source container. */
+internal data class MediaConvertSourceSubtitle(
+    val streamIndex: Long,
+    val codec: String,
+    val language: String = "",
+    val title: String = "",
+    val isDefault: Boolean = false
+)
+
 internal object MediaConvertSubtitles {
-    private val textExtensions = setOf("srt", "ass", "ssa", "vtt")
+    private val textExtensions = setOf("srt", "ass", "ssa", "vtt", "lrc")
+    private val lyricExtensions = textExtensions + "txt"
     private val movMuxers = setOf("mp4", "mov", "ipod", "3gp", "3g2")
+    private val textCodecs = setOf("subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text", "lrc")
+    private val matroskaCopyCodecs = setOf("subrip", "srt", "ass", "ssa", "webvtt", "dvd_subtitle", "dvb_subtitle", "hdmv_pgs_subtitle")
 
     fun allowedExtensions(format: MediaConvertFormatInfo?, type: MediaConvertSubtitleType, videoCodec: String,
                           burnInAvailable: Boolean = true): Set<String> {
-        if (format == null || format.isAudioOnly) return emptySet()
+        if (format == null) return emptySet()
+        if (format.isAudioOnly) return if (type == MediaConvertSubtitleType.SOFT &&
+            MediaConvertAudioLyrics.maxFiles(format) > 0) lyricExtensions else emptySet()
         return when (type) {
             MediaConvertSubtitleType.BURN_IN -> if (videoCodec == "copy" || !burnInAvailable) emptySet() else textExtensions
             MediaConvertSubtitleType.SOFT -> if (format.formatName in movMuxers || format.formatName in setOf("matroska", "webm")) textExtensions else emptySet()
         }
+    }
+
+    /** Null means this source track cannot be retained by the chosen output container. */
+    fun sourceEncoder(format: MediaConvertFormatInfo?, codec: String): String? {
+        if (format == null || (format.isAudioOnly && format.formatName !in setOf("ipod", "matroska"))) return null
+        return when {
+            format.formatName == "matroska" && codec in matroskaCopyCodecs -> "copy"
+            codec !in textCodecs -> null
+            format.formatName in movMuxers -> "mov_text"
+            format.formatName == "webm" -> "webvtt"
+            format.formatName == "matroska" -> "srt"
+            else -> null
+        }
+    }
+
+    fun validate(format: MediaConvertFormatInfo, options: MediaConvertOptions, subtitles: List<MediaConvertSubtitleInput>) {
+        require(subtitles.map { it.type }.distinct().size <= 1) { "Subtitle modes cannot be mixed" }
+        require(subtitles.count { it.type == MediaConvertSubtitleType.BURN_IN } <= 1) { "Only one subtitle can be burned into the video" }
+        subtitles.forEach { validate(format, options, it) }
     }
 
     fun extension(name: String) = name.substringAfterLast('.', "").lowercase(Locale.ROOT)

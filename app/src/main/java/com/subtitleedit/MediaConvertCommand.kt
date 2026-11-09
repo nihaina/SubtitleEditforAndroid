@@ -19,24 +19,28 @@ internal data class MediaConvertSource(
     val videoWidth: Int? = null,
     val videoHeight: Int? = null,
     val videoStreamIndex: Long? = null,
-    val attachedPictureStreamIndex: Long? = null
+    val attachedPictureStreamIndex: Long? = null,
+    val subtitleStreams: List<MediaConvertSourceSubtitle> = emptyList()
 )
 
 /** Builds argument arrays so SAF URLs and file names remain single arguments. */
 internal object MediaConvertCommand {
     fun plan(input: String, output: String, format: MediaConvertFormatInfo, options: MediaConvertOptions, source: MediaConvertSource?,
              logPath: String, supportedPixelFormats: List<String>? = null, subtitle: MediaConvertSubtitleInput? = null,
-             allowHardware: Boolean = true, hardwareCodecNames: Map<String, String> = emptyMap(), metadata: MediaConvertMetadata? = null): List<List<String>> =
+             allowHardware: Boolean = true, hardwareCodecNames: Map<String, String> = emptyMap(), metadata: MediaConvertMetadata? = null,
+             subtitles: List<MediaConvertSubtitleInput> = listOfNotNull(subtitle),
+             lyrics: List<MediaConvertLyric> = emptyList()): List<List<String>> =
         if (MediaConvertVideoSettingsSupport.usesTwoPass(format, options, source)) {
-            listOf(build(input, "/dev/null", format, options, source, supportedPixelFormats, MediaConvertPass(1, logPath), subtitle, allowHardware, hardwareCodecNames, metadata),
-                build(input, output, format, options, source, supportedPixelFormats, MediaConvertPass(2, logPath), subtitle, allowHardware, hardwareCodecNames, metadata))
+            listOf(build(input, "/dev/null", format, options, source, supportedPixelFormats, MediaConvertPass(1, logPath), subtitle, allowHardware, hardwareCodecNames, metadata, subtitles, lyrics),
+                build(input, output, format, options, source, supportedPixelFormats, MediaConvertPass(2, logPath), subtitle, allowHardware, hardwareCodecNames, metadata, subtitles, lyrics))
         } else listOf(build(input, output, format, options, source, supportedPixelFormats, subtitle = subtitle,
-            allowHardware = allowHardware, hardwareCodecNames = hardwareCodecNames, metadata = metadata))
+            allowHardware = allowHardware, hardwareCodecNames = hardwareCodecNames, metadata = metadata, subtitles = subtitles, lyrics = lyrics))
 
     /** True when the plan runs a MediaCodec encoder, i.e. when a software retry is meaningful. */
     fun usesHardwareEncoder(format: MediaConvertFormatInfo, options: MediaConvertOptions, source: MediaConvertSource?,
-                            subtitle: MediaConvertSubtitleInput? = null): Boolean =
-        !format.isAudioOnly && !MediaConvertStreamCopy.copiesVideo(format, options, source, subtitle) &&
+                            subtitle: MediaConvertSubtitleInput? = null,
+                            subtitles: List<MediaConvertSubtitleInput> = listOfNotNull(subtitle)): Boolean =
+        !format.isAudioOnly && !MediaConvertStreamCopy.copiesVideo(format, options, source, subtitles.firstOrNull { it.type == MediaConvertSubtitleType.BURN_IN }) &&
             format.videoEncoder(options.selectedVideoCodec) in MediaConvertVideoSettingsSupport.hardwareCodecs
 
     // MediaCodec decoders need 8-bit 4:2:0 input; 10-bit and 4:2:2/4:4:4 fail or silently truncate on many devices.
@@ -73,11 +77,20 @@ internal object MediaConvertCommand {
 
     fun build(input: String, output: String, format: MediaConvertFormatInfo, options: MediaConvertOptions, source: MediaConvertSource?,
               supportedPixelFormats: List<String>? = null, pass: MediaConvertPass? = null, subtitle: MediaConvertSubtitleInput? = null,
-              allowHardware: Boolean = true, hardwareCodecNames: Map<String, String> = emptyMap(), metadata: MediaConvertMetadata? = null): List<String> {
-        subtitle?.let { MediaConvertSubtitles.validate(format, options, it) }
+              allowHardware: Boolean = true, hardwareCodecNames: Map<String, String> = emptyMap(), metadata: MediaConvertMetadata? = null,
+              subtitles: List<MediaConvertSubtitleInput> = listOfNotNull(subtitle),
+              lyrics: List<MediaConvertLyric> = emptyList()): List<String> {
+        MediaConvertSubtitles.validate(format, options, subtitles)
+        require(!format.isAudioOnly || subtitles.isEmpty() || MediaConvertAudioLyrics.usesSubtitleTracks(format)) {
+            "This audio container stores LRC lyric tags instead of subtitle streams"
+        }
+        require(lyrics.isEmpty() || (format.isAudioOnly && lyrics.size <= MediaConvertAudioLyrics.maxFiles(format))) {
+            "The output format cannot store the selected lyric tags"
+        }
+        val burnSubtitle = subtitles.singleOrNull { it.type == MediaConvertSubtitleType.BURN_IN }
         val synthetic = !format.isAudioOnly && source?.hasVideo == false
         val selectedVideo = if (format.isAudioOnly) ""
-            else if (MediaConvertStreamCopy.copiesVideo(format, options, source, subtitle)) "copy"
+            else if (MediaConvertStreamCopy.copiesVideo(format, options, source, burnSubtitle)) "copy"
             else format.videoEncoder(options.selectedVideoCodec)
         val requestedVideo = if (synthetic && selectedVideo == "copy") format.videoEncoder("auto") else selectedVideo
         // A failed MediaCodec attempt is retried with the matching software encoder.
@@ -90,8 +103,9 @@ internal object MediaConvertCommand {
         require(pass == null || MediaConvertVideoSettingsSupport.usesTwoPass(format, options, source)) { "Two-pass encoding requires a supported encoder and target bitrate" }
         require(pass == null || !synthetic || source?.durationSeconds != null) { "Two-pass generated video requires a known duration" }
         val analysisPass = pass?.number == 1
-        val softSubtitle = subtitle?.takeIf { it.type == MediaConvertSubtitleType.SOFT && !analysisPass }
-        val burnSubtitle = subtitle?.takeIf { it.type == MediaConvertSubtitleType.BURN_IN }
+        val softSubtitles = subtitles.filter { it.type == MediaConvertSubtitleType.SOFT && !analysisPass }
+        val sourceSubtitles = if (analysisPass || burnSubtitle != null) emptyList() else source?.subtitleStreams.orEmpty()
+            .mapNotNull { track -> MediaConvertSubtitles.sourceEncoder(format, track.codec)?.let { track to it } }
         val audio = if (MediaConvertStreamCopy.copiesAudio(format, options, source)) "copy"
             else format.audioEncoder(options.selectedAudioCodec)
         val sourceInputIndex = if (synthetic) 1 else 0
@@ -105,7 +119,7 @@ internal object MediaConvertCommand {
         val copiedCoverIndex = source?.attachedPictureStreamIndex?.takeIf {
             !analysisPass && coverSupported && (metadata == null || metadata.cover == MediaConvertCoverMode.DEFAULT)
         }
-        val customCoverInputIndex = sourceInputIndex + 1 + if (softSubtitle != null) 1 else 0
+        val customCoverInputIndex = sourceInputIndex + 1 + softSubtitles.size
         // Matroska stores a custom cover as an attachment; other muxers use an attached-picture video stream.
         val streamCover = copiedCoverIndex != null || (customCover != null && format.formatName != "matroska")
         val mainVideoSpecifier = if (streamCover) ":v:0" else ":v"
@@ -122,7 +136,7 @@ internal object MediaConvertCommand {
             // Only paired with a hardware encoder: with libx264 the encode dominates and the gain is marginal.
             if (hardware && !synthetic && canHardwareDecode(source)) addAll(listOf("-hwaccel", "mediacodec"))
             addAll(listOf("-i", input))
-            softSubtitle?.let { addAll(listOf("-i", it.path)) }
+            softSubtitles.forEach { addAll(listOf("-i", it.path)) }
             if (customCover != null && format.formatName != "matroska") addAll(listOf("-i", customCover))
             when {
                 format.isAudioOnly -> {
@@ -157,12 +171,25 @@ internal object MediaConvertCommand {
                 }
             }
             if (analysisPass) add("-an")
-            if (!format.isAudioOnly) {
-                if (softSubtitle == null) add("-sn") else {
-                    val subtitleIndex = if (synthetic) 2 else 1
-                    addAll(listOf("-map", "$subtitleIndex:s:0", "-c:s", MediaConvertSubtitles.encoder(format, MediaConvertSubtitles.extension(softSubtitle.fileName)),
-                        "-disposition:s:0", "default"))
+            if (sourceSubtitles.isEmpty() && softSubtitles.isEmpty()) add("-sn") else {
+                sourceSubtitles.forEachIndexed { index, (track, encoder) ->
+                    addAll(listOf("-map", "$sourceInputIndex:${track.streamIndex}", "-c:s:$index", encoder,
+                        "-disposition:s:$index", if (track.isDefault) "default" else "0"))
+                    if (track.language.isNotBlank()) addAll(listOf("-metadata:s:s:$index", "language=${track.language}"))
+                    if (track.title.isNotBlank()) addAll(listOf("-metadata:s:s:$index", "title=${track.title}"))
                 }
+                softSubtitles.forEachIndexed { index, selected ->
+                    val outputIndex = sourceSubtitles.size + index
+                    // Retain the original singular option for old callers while assigning each
+                    // new or existing track its own encoder when more than one is present.
+                    val codecFlag = if (sourceSubtitles.isEmpty() && softSubtitles.size == 1) "-c:s" else "-c:s:$outputIndex"
+                    addAll(listOf("-map", "${sourceInputIndex + 1 + index}:s:0", codecFlag,
+                        MediaConvertSubtitles.encoder(format, MediaConvertSubtitles.extension(selected.fileName)),
+                        "-disposition:s:$outputIndex", if (sourceSubtitles.isEmpty() && index == 0) "default" else "0",
+                        "-metadata:s:s:$outputIndex", "title=${selected.fileName.substringBeforeLast('.', selected.fileName)}"))
+                }
+            }
+            if (!format.isAudioOnly) {
                 add("-dn")
                 if (video != "copy") {
                     val settings = options.videoSettings
@@ -257,6 +284,7 @@ internal object MediaConvertCommand {
             if (!analysisPass) {
                 addAll(listOf("-map_metadata", sourceInputIndex.toString()))
                 metadata?.let { addAll(it.arguments(format.isAudioOnly)) }
+                if (lyrics.isNotEmpty()) addAll(MediaConvertAudioLyrics.arguments(format, lyrics))
             }
             addAll(listOf("-f", if (analysisPass) "null" else format.formatName, output))
         }

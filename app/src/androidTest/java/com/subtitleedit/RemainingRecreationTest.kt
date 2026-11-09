@@ -100,7 +100,7 @@ class RemainingRecreationTest {
     }
 
     @Test
-    fun conversionSubtitlesAreClearedForBatchSourcesAndAudioOutput() {
+    fun conversionSubtitlesAreClearedForBatchSourcesAndUnsupportedAudioOutput() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val subtitle = File(context.cacheDir, "convert-subtitle-${System.nanoTime()}.srt").apply {
             writeText("1\n00:00:00,000 --> 00:00:01,000\nCaption\n")
@@ -115,7 +115,7 @@ class RemainingRecreationTest {
                     model.setSubtitleType(MediaConvertSubtitleType.SOFT)
                     model.selectSubtitle(Uri.fromFile(subtitle))
                     assertEquals(subtitle.name, model.state.value.subtitleFile?.fileName)
-                    model.selectFormat("mp3")
+                    model.selectFormat("aac")
                     assertEquals(null, model.state.value.subtitleFile)
                     model.selectSubtitle(Uri.fromFile(subtitle))
                     assertEquals(null, model.state.value.subtitleFile)

@@ -41,6 +41,8 @@ import com.subtitleedit.MediaConvertVideoBitrateSettings
 import com.subtitleedit.MediaConvertAudioBitrate
 import com.subtitleedit.MediaConvertAudioVbr
 import com.subtitleedit.MediaConvertSubtitleType
+import com.subtitleedit.MediaConvertSourceSubtitle
+import com.subtitleedit.MediaConvertEmbeddedLyric
 import com.subtitleedit.MediaConvertVideoSettings
 import com.subtitleedit.MediaConvertVideoSettingsSupport
 import com.subtitleedit.ui.components.AppConflictDialog
@@ -134,13 +136,22 @@ internal fun MediaConvertScreen(
     audioVbrQuality: Int = MediaConvertAudioVbr.OFF,
     onAudioVbrQualityChange: (Int) -> Unit = {},
     selectedSourceCount: Int = 0,
-    subtitleFileName: String? = null,
+    subtitleFileNames: List<String> = emptyList(),
+    maxSubtitleFiles: Int = Int.MAX_VALUE,
     subtitleType: MediaConvertSubtitleType = MediaConvertSubtitleType.SOFT,
     allowedSubtitleExtensions: Set<String> = emptySet(),
     subtitleBurnInAvailable: Boolean = false,
     onPickSubtitle: () -> Unit = {},
-    onRemoveSubtitle: () -> Unit = {},
-    onSubtitleTypeChange: (MediaConvertSubtitleType) -> Unit = {}
+    onRemoveSubtitle: (Int) -> Unit = {},
+    onSubtitleTypeChange: (MediaConvertSubtitleType) -> Unit = {},
+    sourceSubtitleTracks: List<MediaConvertSourceSubtitle> = emptyList(),
+    sourceSubtitleSupport: List<Boolean> = emptyList(),
+    sourceSubtitleProbeFailed: Boolean = false,
+    sourceSubtitleProbeInProgress: Boolean = false,
+    sourceEmbeddedLyrics: List<MediaConvertEmbeddedLyric> = emptyList(),
+    sourceLyricsProbeFailed: Boolean = false,
+    sourceIsAudio: Boolean = false,
+    onViewEmbeddedLyric: (Int) -> Unit = {}
 ) {
     var showResolutionDialog by rememberSaveable { mutableStateOf(false) }
     var showBitrateDialog by rememberSaveable { mutableStateOf(false) }
@@ -225,19 +236,31 @@ internal fun MediaConvertScreen(
             MediaConvertSettingsPager(
                 enabled = !isConverting,
                 isAudioOutput = isAudioOutput,
-                showSubtitlePage = videoFormats.any { it.extension == selectedFormat },
+                showSubtitlePage = selectedSourceCount > 0,
                 subtitleContent = {
                     MediaConvertSubtitlePage(
                         singleSource = selectedSourceCount == 1,
                         enabled = !isConverting,
-                        fileName = subtitleFileName,
+                        fileNames = subtitleFileNames,
                         type = subtitleType,
                         allowedExtensions = allowedSubtitleExtensions,
                         copyingVideo = effectiveVideoCodec == "copy",
                         burnInAvailable = subtitleBurnInAvailable,
                         onPick = onPickSubtitle,
                         onRemove = onRemoveSubtitle,
-                        onTypeChanged = onSubtitleTypeChange
+                        onTypeChanged = onSubtitleTypeChange,
+                        isAudioOutput = isAudioOutput,
+                        maxSubtitleFiles = maxSubtitleFiles,
+                        audioLyricsPlainText = isAudioOutput && audioMuxer == "ipod",
+                        sourceSubtitleTracks = sourceSubtitleTracks,
+                        sourceSubtitleSupport = sourceSubtitleSupport,
+                        sourceSubtitleProbeFailed = sourceSubtitleProbeFailed,
+                        sourceSubtitleProbeInProgress = sourceSubtitleProbeInProgress,
+                        sourceEmbeddedLyrics = sourceEmbeddedLyrics,
+                        sourceLyricsProbeFailed = sourceLyricsProbeFailed,
+                        sourceIsAudio = sourceIsAudio,
+                        onViewEmbeddedLyric = onViewEmbeddedLyric,
+                        outputFormatSelected = selectedFormat != null
                     )
                 },
                 moreContent = {
