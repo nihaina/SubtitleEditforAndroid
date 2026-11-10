@@ -44,6 +44,31 @@ class MediaConvertId3LyricsReaderTest {
         assertArrayEquals(bytes, file.readBytes())
     }
 
+    @Test fun wavTagsAcceptedByTheWriterAreNotRejectedByASmallerReaderLimit() {
+        // A preserved non-lyric frame can put even a small new lyric beyond the old 16 MiB cap.
+        val existing = tag(3, listOf(frame(3, "PRIV", ByteArray(16 * 1024 * 1024) { 7 })))
+        val file = temporary.newFile("large-tag.wav").apply {
+            outputStream().use { output ->
+                val audio = chunk("data", byteArrayOf(1, 2, 3, 4))
+                output.write("RIFF".toByteArray())
+                output.write(integer(4L + audio.size + 8 + existing.size + (existing.size and 1), 4).reversedArray())
+                output.write("WAVE".toByteArray())
+                output.write(audio)
+                output.write("id3 ".toByteArray())
+                output.write(integer(existing.size.toLong(), 4).reversedArray())
+                output.write(existing)
+                if (existing.size and 1 != 0) output.write(0)
+            }
+        }
+        val lyric = MediaConvertLyric("中文", "[00:00.125]海风 🌊\n")
+        MediaConvertId3Lyrics.writeWav(file, listOf(lyric))
+        val detected = file.inputStream().buffered().use(MediaConvertEmbeddedLyricReader::read)
+        assertEquals(1, detected.size)
+        assertEquals(lyric.title, detected.single().title)
+        assertEquals(lyric.lrc, detected.single().text)
+        assertTrue(detected.single().synced)
+    }
+
     @Test fun allFourTextEncodingsAndMultipleLanguagesAreRecognized() {
         val frames = (0..3).map { encoding ->
             val title = if (encoding == 0) "François" else "中文 🎵"
@@ -143,6 +168,62 @@ class MediaConvertId3LyricsReaderTest {
         assertEquals("Wave", detected.single().title)
         assertTrue("Audio must be skipped instead of buffered", input.readCount < 200)
         assertFalse(input.closed)
+    }
+
+    @Test fun rf64AndBw64UseTheDs64DataLengthToFindLyricsAfterAudio() {
+        val id3 = tag(3, listOf(frame(3, "USLT", uslt(3, "zho", "RF64 lyrics", "[00:01.00]海风 🌊"))))
+        for (signature in listOf("RF64", "BW64")) {
+            val samples = ByteArray(1_000_001)
+            val data = "data".toByteArray() + byteArrayOf(-1, -1, -1, -1) + samples + byteArrayOf(0)
+            val suffix = chunk("Id3 ", id3)
+            val ds64Size = 8 + 28
+            val riffSize = 4L + ds64Size + data.size + suffix.size
+            val sizes = integer(riffSize, 8).reversedArray() + integer(samples.size.toLong(), 8).reversedArray() +
+                ByteArray(8) + ByteArray(4)
+            val bytes = signature.toByteArray() + byteArrayOf(-1, -1, -1, -1) + "WAVE".toByteArray() +
+                chunk("ds64", sizes) + data + suffix
+            val input = CountingStream(bytes)
+
+            val detected = MediaConvertId3LyricsReader.read(input, wav = true)
+
+            assertEquals(signature, "RF64 lyrics", detected.single().title)
+            assertEquals("[00:01.00]海风 🌊", detected.single().text)
+            assertTrue("Audio must be skipped in $signature", input.readCount < 300)
+            assertFalse(input.closed)
+        }
+    }
+
+    @Test fun rf64UsesTheDs64TableForOtherSentinelChunks() {
+        val id3 = tag(3, listOf(frame(3, "USLT", uslt(0, "eng", "Table", "Lyrics"))))
+        val data = chunk("data", ByteArray(4))
+        val id3Chunk = "id3 ".toByteArray() + byteArrayOf(-1, -1, -1, -1) + id3 + ByteArray(id3.size and 1)
+        val riffSize = 4L + 8 + 40 + data.size + id3Chunk.size
+        val sizes = integer(riffSize, 8).reversedArray() + integer(4, 8).reversedArray() + ByteArray(8) +
+            integer(1, 4).reversedArray() + "id3 ".toByteArray() + integer(id3.size.toLong(), 8).reversedArray()
+        val bytes = "RF64".toByteArray() + byteArrayOf(-1, -1, -1, -1) + "WAVE".toByteArray() +
+            chunk("ds64", sizes) + data + id3Chunk
+
+        assertEquals("Table", MediaConvertId3LyricsReader.read(ByteArrayInputStream(bytes), wav = true).single().title)
+    }
+
+    @Test fun truncatedLaterWavChunksDoNotErasePreviouslyReadLyrics() {
+        val id3 = tag(3, listOf(frame(3, "USLT", uslt(0, "eng", "Complete", "Lyrics"))))
+        val complete = wav(chunk("id3 ", id3), chunk("data", ByteArray(32)))
+        val truncated = complete.copyOf(complete.size - 12)
+
+        val detected = MediaConvertId3LyricsReader.read(ByteArrayInputStream(truncated), wav = true)
+
+        assertEquals("Complete", detected.single().title)
+    }
+
+    @Test fun unknownLargeWavChunkSizesAndInvalidDs64TablesStopSafely() {
+        val unresolved = "RIFF".toByteArray() + byteArrayOf(-1, -1, -1, -1) + "WAVE".toByteArray() +
+            "data".toByteArray() + byteArrayOf(-1, -1, -1, -1) + ByteArray(12)
+        assertTrue(MediaConvertId3LyricsReader.read(ByteArrayInputStream(unresolved), wav = true).isEmpty())
+        val invalidSizes = integer(100, 8).reversedArray() + integer(4, 8).reversedArray() + ByteArray(8) +
+            integer(100_000, 4).reversedArray()
+        val invalidTable = "RF64".toByteArray() + byteArrayOf(-1, -1, -1, -1) + "WAVE".toByteArray() + chunk("ds64", invalidSizes)
+        assertTrue(MediaConvertId3LyricsReader.read(ByteArrayInputStream(invalidTable), wav = true).isEmpty())
     }
 
     @Test fun malformedWavContainersAndMissingTagsHaveNoLyrics() {

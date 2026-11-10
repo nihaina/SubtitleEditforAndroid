@@ -10,7 +10,7 @@ import java.nio.charset.Charset
 
 /** Reads lyric frames without loading audio data or taking ownership of the input stream. */
 internal object MediaConvertId3LyricsReader {
-    private const val MAX_TAG_BYTES = 16 * 1024 * 1024
+    private const val MAX_TAG_BYTES = MediaConvertId3Limits.MAX_TAG_BYTES
     private const val MAX_LYRIC_FRAMES = 128
 
     fun read(input: InputStream, wav: Boolean): List<MediaConvertEmbeddedLyric> = try {
@@ -21,24 +21,53 @@ internal object MediaConvertId3LyricsReader {
 
     private fun readWav(input: InputStream): List<MediaConvertEmbeddedLyric> {
         val header = readExactly(input, 12)
-        if (ascii(header, 0, 4) != "RIFF" || ascii(header, 8, 4) != "WAVE") return emptyList()
-        var remaining = littleEndian(header, 4) - 4
+        val container = ascii(header, 0, 4)
+        if (container !in setOf("RIFF", "RF64", "BW64") || ascii(header, 8, 4) != "WAVE") return emptyList()
+        val declaredSize = littleEndian(header, 4)
+        var end = if (declaredSize == 0xffff_ffffL) Long.MAX_VALUE else declaredSize + 8
+        var offset = 12L
+        var largeDataSize: Long? = null
+        val largeChunks = mutableMapOf<String, ArrayDeque<Long>>()
         val lyrics = mutableListOf<MediaConvertEmbeddedLyric>()
-        while (remaining >= 8 && lyrics.size < MAX_LYRIC_FRAMES) {
-            val chunkHeader = readExactly(input, 8)
-            remaining -= 8
-            val size = littleEndian(chunkHeader, 4)
-            val paddedSize = size + (size and 1)
-            if (paddedSize > remaining) break
-            val id = ascii(chunkHeader, 0, 4)
-            if ((id == "id3 " || id == "ID3 ") && size <= MAX_TAG_BYTES + 20L) {
-                val bytes = readExactly(input, size.toInt())
-                lyrics += readTag(ByteArrayInputStream(bytes), size).take(MAX_LYRIC_FRAMES - lyrics.size)
-            } else {
-                skipExactly(input, size)
+        try {
+            while (end - offset >= 8 && lyrics.size < MAX_LYRIC_FRAMES) {
+                val chunkHeader = readExactly(input, 8)
+                offset += 8
+                val id = ascii(chunkHeader, 0, 4)
+                val size32 = littleEndian(chunkHeader, 4)
+                val size = if (size32 != 0xffff_ffffL) size32 else if (id == "data" && largeDataSize != null) {
+                    requireNotNull(largeDataSize).also { largeDataSize = null }
+                } else largeChunks[id]?.removeFirstOrNull() ?: break
+                if (size < 0 || size > end - offset || size == Long.MAX_VALUE) break
+                val paddedSize = size + (size and 1)
+                if (paddedSize > end - offset) break
+                if (id == "ds64" && container != "RIFF") {
+                    // RF64/BW64 replace sentinel chunk lengths with this 64-bit size table.
+                    if (size < 28) break
+                    val fixed = readExactly(input, 28)
+                    val riffSize = littleEndian64(fixed, 0) ?: break
+                    largeDataSize = littleEndian64(fixed, 8) ?: break
+                    if (riffSize > Long.MAX_VALUE - 8 || riffSize + 8 < offset + paddedSize) break
+                    end = riffSize + 8
+                    val count = littleEndian(fixed, 24)
+                    if (count > (size - 28) / 12 || count > 10_000) break
+                    repeat(count.toInt()) {
+                        val entry = readExactly(input, 12)
+                        val length = littleEndian64(entry, 4)
+                        if (length != null) largeChunks.getOrPut(ascii(entry, 0, 4)) { ArrayDeque() }.addLast(length)
+                    }
+                    skipExactly(input, size - 28 - count * 12)
+                } else if (id.equals("id3 ", ignoreCase = true) && size <= MAX_TAG_BYTES + 20L) {
+                    val bytes = readExactly(input, size.toInt())
+                    lyrics += readTag(ByteArrayInputStream(bytes), size).take(MAX_LYRIC_FRAMES - lyrics.size)
+                } else {
+                    skipExactly(input, size)
+                }
+                if (size and 1L != 0L) skipExactly(input, 1)
+                offset += paddedSize
             }
-            if (size and 1L != 0L) skipExactly(input, 1)
-            remaining -= paddedSize
+        } catch (_: EOFException) {
+            // A truncated later chunk must not erase complete lyric frames already read.
         }
         return lyrics
     }
@@ -229,6 +258,9 @@ internal object MediaConvertId3LyricsReader {
         (0 until size).fold(0L) { value, index -> (value shl 8) or (bytes[start + index].toLong() and 255) }
     private fun littleEndian(bytes: ByteArray, start: Int): Long =
         (3 downTo 0).fold(0L) { value, index -> (value shl 8) or (bytes[start + index].toLong() and 255) }
+    private fun littleEndian64(bytes: ByteArray, start: Int): Long? =
+        if (bytes[start + 7] < 0) null else
+            (7 downTo 0).fold(0L) { value, index -> (value shl 8) or (bytes[start + index].toLong() and 255) }
     private fun syncsafe(bytes: ByteArray, start: Int): Int? {
         var result = 0
         repeat(4) { index ->

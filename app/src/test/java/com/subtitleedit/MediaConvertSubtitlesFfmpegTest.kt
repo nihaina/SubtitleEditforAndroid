@@ -1,5 +1,6 @@
 package com.subtitleedit
 
+import com.subtitleedit.util.SubtitleParser
 import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
@@ -8,6 +9,56 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 class MediaConvertSubtitlesFfmpegTest {
+    @Test fun longSoftSubtitleTracksKeepEveryCueThroughTheEndOfTheVideo() {
+        val executable = System.getenv("MEDIA_CONVERT_SMOKE_FFMPEG")
+        assumeTrue("Set MEDIA_CONVERT_SMOKE_FFMPEG for subtitle integration checks", !executable.isNullOrBlank())
+        val root = Files.createTempDirectory("long subtitle checks ").toFile()
+        fun ffmpeg(arguments: List<String>) {
+            val log = File(root, "ffmpeg.log")
+            val process = ProcessBuilder(listOf(executable!!, "-v", "error", "-threads", "1", "-filter_threads", "1") + arguments)
+                .redirectErrorStream(true).redirectOutput(log).start()
+            if (!process.waitFor(60, TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+                throw AssertionError("Timed out: $arguments")
+            }
+            assertEquals("$arguments\n${log.readText()}", 0, process.exitValue())
+        }
+        try {
+            // Sparse video frames make a twelve-hour fixture small while retaining real timestamps.
+            val source = File(root, "long source.mkv")
+            ffmpeg(listOf("-y", "-f", "lavfi", "-i", "color=c=black:s=32x32:r=1/60",
+                "-frames:v", "720", "-c:v", "libx264", "-preset", "ultrafast", source.path))
+            val subtitle = File(root, "complete captions.srt").apply {
+                writeText(buildString {
+                    repeat(16_429) { index ->
+                        val start = index * 2_600L
+                        append(index + 1).append('\n')
+                        append(com.subtitleedit.util.TimeUtils.formatSRT(start)).append(" --> ")
+                            .append(com.subtitleedit.util.TimeUtils.formatSRT(start + 1_800L)).append('\n')
+                        append("Caption ").append(index + 1).append(" 海风 🌊\n\n")
+                    }
+                })
+            }
+            val expected = SubtitleParser.parseSRT(subtitle.readText())
+            val formats = MediaConvertFormats.create(MediaConvertFormats.baselineEncoders)
+            for (extension in listOf("mkv", "mp4")) {
+                val output = File(root, "complete.$extension")
+                val format = formats.first { it.extension == extension }
+                ffmpeg(MediaConvertCommand.build(source.path, output.path, format,
+                    MediaConvertOptions(selectedVideoCodec = "copy"),
+                    MediaConvertSource(true, 43_200.0, 1.0 / 60.0, hasAudio = false, videoCodecName = "h264",
+                        videoPixelFormat = "yuv420p"),
+                    subtitle = MediaConvertSubtitleInput(subtitle.path, subtitle.name, MediaConvertSubtitleType.SOFT)))
+                val extracted = File(root, "extracted-$extension.srt")
+                ffmpeg(listOf("-y", "-i", output.path, "-map", "0:s:0", "-c:s", "srt", extracted.path))
+                val actual = SubtitleParser.parseSRT(extracted.readText())
+                assertEquals(extension, expected.size, actual.size)
+                assertEquals(extension, expected.map { it.text }, actual.map { it.text })
+                assertEquals(extension, expected.map { it.startTime to it.endTime }, actual.map { it.startTime to it.endTime })
+            }
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun multipleVideoSubtitlesAndAudioLyricsSurviveAndExistingTracksAreRetained() {
         val executable = System.getenv("MEDIA_CONVERT_SMOKE_FFMPEG")
         assumeTrue("Set MEDIA_CONVERT_SMOKE_FFMPEG for subtitle integration checks", !executable.isNullOrBlank())

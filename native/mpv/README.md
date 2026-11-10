@@ -9,6 +9,9 @@ external-file loading is disabled, matching the editor's playback options.
 Lyric tags come from the `metadata` node map and are returned separately from
 stream indices. MP3/AAC/WAV USLT and SYLT frames are also read directly without
 modifying the source, since the demuxer does not expose SYLT as metadata.
+The media-information probe also supplies container and audio-stream lyric tags
+when player metadata is missing. Direct ID3 detection uses the file header rather
+than its suffix, and the WAVE reader handles RIFF/RF64/BW64 size tables.
 The client header is pinned to mpv v0.41.0 at
 `app/src/main/cpp/third_party/mpv/client.h` and retains its ISC notice.
 

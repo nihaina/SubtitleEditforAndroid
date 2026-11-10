@@ -20,7 +20,10 @@ internal data class MediaConvertSource(
     val videoHeight: Int? = null,
     val videoStreamIndex: Long? = null,
     val attachedPictureStreamIndex: Long? = null,
-    val subtitleStreams: List<MediaConvertSourceSubtitle> = emptyList()
+    val subtitleStreams: List<MediaConvertSourceSubtitle> = emptyList(),
+    val attachedPictureCodecName: String? = null,
+    val attachedPicturePath: String? = null,
+    val attachmentStreamCount: Int = 0
 )
 
 /** Builds argument arrays so SAF URLs and file names remain single arguments. */
@@ -116,12 +119,17 @@ internal object MediaConvertCommand {
         if (!analysisPass && coverSupported && metadata?.cover == MediaConvertCoverMode.CUSTOM) {
             require(!customCover.isNullOrBlank()) { "A selected cover image must be prepared before conversion" }
         }
-        val copiedCoverIndex = source?.attachedPictureStreamIndex?.takeIf {
+        val sourceCoverFile = source?.attachedPicturePath?.takeIf {
             !analysisPass && coverSupported && (metadata == null || metadata.cover == MediaConvertCoverMode.DEFAULT)
+        }
+        val coverFile = customCover ?: sourceCoverFile
+        val copiedCoverIndex = source?.attachedPictureStreamIndex?.takeIf {
+            !analysisPass && coverSupported && sourceCoverFile == null &&
+                (metadata == null || metadata.cover == MediaConvertCoverMode.DEFAULT)
         }
         val customCoverInputIndex = sourceInputIndex + 1 + softSubtitles.size
         // Matroska stores a custom cover as an attachment; other muxers use an attached-picture video stream.
-        val streamCover = copiedCoverIndex != null || (customCover != null && format.formatName != "matroska")
+        val streamCover = copiedCoverIndex != null || (coverFile != null && format.formatName != "matroska")
         val mainVideoSpecifier = if (streamCover) ":v:0" else ":v"
         fun mainVideoOption(name: String) = "-$name$mainVideoSpecifier"
         var hasVideoFilters = false
@@ -137,7 +145,7 @@ internal object MediaConvertCommand {
             if (hardware && !synthetic && canHardwareDecode(source)) addAll(listOf("-hwaccel", "mediacodec"))
             addAll(listOf("-i", input))
             softSubtitles.forEach { addAll(listOf("-i", it.path)) }
-            if (customCover != null && format.formatName != "matroska") addAll(listOf("-i", customCover))
+            if (coverFile != null && format.formatName != "matroska") addAll(listOf("-i", coverFile))
             when {
                 format.isAudioOnly -> {
                     addAll(listOf("-map", "0:a:0", "-c:a", audio))
@@ -156,18 +164,25 @@ internal object MediaConvertCommand {
             if (!analysisPass) {
                 val coverVideoIndex = if (format.isAudioOnly) 0 else 1
                 val coverMap = when {
-                    customCover != null && format.formatName != "matroska" -> "$customCoverInputIndex:v:0"
+                    coverFile != null && format.formatName != "matroska" -> "$customCoverInputIndex:v:0"
                     copiedCoverIndex != null -> "$sourceInputIndex:$copiedCoverIndex"
                     else -> null
                 }
                 coverMap?.let {
                     addAll(listOf("-map", it, "-c:v:$coverVideoIndex", "copy", "-disposition:v:$coverVideoIndex", "attached_pic"))
                 }
-                if (customCover != null && format.formatName == "matroska") {
-                    addAll(listOf("-attach", customCover, "-metadata:s:t:0", "mimetype=image/jpeg", "-metadata:s:t:0", "filename=cover.jpg"))
-                } else if (format.formatName == "matroska" && (metadata == null || metadata.cover == MediaConvertCoverMode.DEFAULT)) {
+                val retainAttachments = format.formatName == "matroska" &&
+                    (metadata == null || metadata.cover == MediaConvertCoverMode.DEFAULT)
+                if (retainAttachments) {
                     // Matroska artwork is normally an attachment, rather than an attached-picture stream.
                     addAll(listOf("-map", "$sourceInputIndex:t?", "-c:t", "copy"))
+                }
+                if (coverFile != null && format.formatName == "matroska") {
+                    val index = if (retainAttachments) source?.attachmentStreamCount?.coerceAtLeast(0) ?: 0 else 0
+                    val extension = if (customCover != null) "jpg" else coverFile.substringAfterLast('.', "img").lowercase(Locale.ROOT)
+                    val mime = if (customCover != null) "image/jpeg" else MediaConvertSourceCover.mimeType(coverFile)
+                    addAll(listOf("-attach", coverFile, "-metadata:s:t:$index", "mimetype=$mime",
+                        "-metadata:s:t:$index", "filename=cover.$extension"))
                 }
             }
             if (analysisPass) add("-an")

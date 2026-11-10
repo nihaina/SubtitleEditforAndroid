@@ -35,6 +35,7 @@ class MediaConvertSubtitlesTest {
         assertEquals("srt", args.value("-c:s:0"))
         assertEquals("ass", args.value("-c:s:1"))
         assertEquals("default", args.value("-disposition:s:0"))
+        assertFalse("-max_interleave_delta" in args)
         assertEquals("0", args.value("-disposition:s:1"))
         val withStreamCover = MediaConvertCommand.build("in", "out.mp4", format("mp4"), MediaConvertOptions(), source,
             metadata = MediaConvertMetadata(cover = MediaConvertCoverMode.CUSTOM, coverPath = "cover.jpg"), subtitles = subtitles)
@@ -44,6 +45,33 @@ class MediaConvertSubtitlesTest {
         assertTrue(synthetic.windowed(2).contains(listOf("-map", "2:s:0")))
         assertTrue(synthetic.windowed(2).contains(listOf("-map", "3:s:0")))
         assertTrue(synthetic.windowed(2).contains(listOf("-map", "4:v:0")))
+    }
+
+    @Test fun preparedSourceCoverBecomesAMatroskaAttachmentAndKeepsFonts() {
+        val prepared = source.copy(attachedPictureStreamIndex = 2, attachedPictureCodecName = "png",
+            attachedPicturePath = "/cache/source cover.png", attachmentStreamCount = 1)
+        val args = MediaConvertCommand.build("in", "out.mkv", format("mkv"),
+            MediaConvertOptions(selectedVideoCodec = "copy"), prepared,
+            subtitle = subtitle(MediaConvertSubtitleType.SOFT))
+        assertTrue(args.windowed(2).contains(listOf("-attach", "/cache/source cover.png")))
+        assertTrue(args.windowed(2).contains(listOf("-metadata:s:t:1", "mimetype=image/png")))
+        assertTrue(args.windowed(2).contains(listOf("-metadata:s:t:1", "filename=cover.png")))
+        assertTrue(args.windowed(2).contains(listOf("-map", "0:t?")))
+        assertFalse(args.windowed(2).contains(listOf("-map", "0:2")))
+        assertFalse("-max_interleave_delta" in args)
+        assertEquals("copy", args.value("-c:v"))
+    }
+
+    @Test fun preparedSourceCoverUsesAnIndependentImageInputOutsideMatroska() {
+        val prepared = source.copy(attachedPictureStreamIndex = 2, attachedPictureCodecName = "png",
+            attachedPicturePath = "/cache/cover.png")
+        val args = MediaConvertCommand.build("in", "out.mp4", format("mp4"), MediaConvertOptions(), prepared,
+            subtitles = listOf(subtitle(MediaConvertSubtitleType.SOFT), subtitle(MediaConvertSubtitleType.SOFT, "other.srt")))
+        assertTrue(args.windowed(2).contains(listOf("-i", "/cache/cover.png")))
+        assertTrue(args.windowed(2).contains(listOf("-map", "3:v:0")))
+        assertFalse(args.windowed(2).contains(listOf("-map", "0:2")))
+        assertTrue(args.windowed(2).contains(listOf("-disposition:v:1", "attached_pic")))
+        assertFalse("-max_interleave_delta" in args)
     }
 
     @Test fun existingSourceTracksArePreservedAndAdaptedAlongsideNewSubtitles() {

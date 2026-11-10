@@ -5,6 +5,7 @@
     <string name="media_tag_editor_result">标签保存完成：成功 %1$d，失败 %2$d</string>
     <string name="media_tag_editor_cancelled">已取消保存，已完成 %1$d 个文件。</string>
     <string name="media_tag_editor_failed">标签保存失败</string>
+    <string name="media_tag_editor_verify_failed">保存后的标签与修改内容不一致，未替换原文件。</string>
     <string name="media_tag_editor_not_writable">无法写入所选文件</string>
     <string name="media_tag_editor_source_changed">源文件已被修改，请重新打开后再试</string>
     <string name="media_tag_editor_cover_unsupported">所选文件的格式不支持内嵌图片封面。</string>

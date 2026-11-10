@@ -136,7 +136,7 @@ class MediaConvertAudioLyricsFfmpegTest {
                 val frames = frameIds(bytes, id3Offset)
                 assertEquals(extension, 2, frames.count { it == "USLT" })
                 assertEquals(extension, if (extension != "wav") 2 else 0, frames.count { it == "SYLT" })
-                val detected = output.inputStream().use { MediaConvertId3LyricsReader.read(it, wav = extension == "wav") }
+                val detected = output.inputStream().buffered().use(MediaConvertEmbeddedLyricReader::read)
                 assertEquals(lyrics.map { it.lrc }, detected.filter { it.field == "USLT" }.map { it.text })
                 assertEquals(extension, if (extension != "wav") 2 else 0, detected.count { it.field == "SYLT" })
                 assertTrue(detected.all { it.synced })

@@ -10,6 +10,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.ReturnCode
 import java.io.File
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -94,9 +95,19 @@ class MediaConvertRepeatedProbeTest {
             val flac = File(root, "comment-lyrics.flac")
             val flacLrc = "[00:00.20]Comment lyric\n[00:00.50]Final line\n"
             runFfmpeg(listOf("-y", "-i", plain.path, "-c:a", "flac", "-metadata", "LYRICS=$flacLrc", flac.path))
+            val wavLyrics = listOf(
+                MediaConvertLyric("WAV 中文", "[00:00.10]海风 🌊\n[00:00.40]第二行\n"),
+                MediaConvertLyric("WAV English", "[00:00.10]Sea breeze\n")
+            )
+            val wav = File(root, "two-lyrics.wav").also { plain.copyTo(it) }
+            MediaConvertId3Lyrics.writeWav(wav, wavLyrics)
+            // Detection must inspect the container rather than require a WAV filename suffix.
+            val renamedWav = File(root, "hidden-audio.bin").also { wav.copyTo(it) }
+            val sources = listOf(mp3, aac, wav, plain, wav, flac, renamedWav, plain, renamedWav, aac, mp3, wav)
+            val originalBytes = sources.distinct().associateWith { it.readBytes() }
 
             ActivityScenario.launch(MediaConvertActivity::class.java).use { scenario ->
-                for (source in listOf(mp3, aac, plain, flac, aac, mp3, aac)) {
+                for (source in sources) {
                     scenario.onActivity { activity ->
                         val model = ViewModelProvider(activity)[MediaConvertViewModel::class.java]
                         model.selectFiles(listOf(Uri.fromFile(source)))
@@ -107,6 +118,10 @@ class MediaConvertRepeatedProbeTest {
                     }
                     val state = awaitLyrics(scenario, source)
                     assertTrue("Lyric metadata must not become subtitle streams", state.sourceSubtitleTracks.isEmpty())
+                    scenario.onActivity { activity ->
+                        val model = ViewModelProvider(activity)[MediaConvertViewModel::class.java]
+                        assertTrue("Audio content must use the existing-lyrics section for ${source.name}", model.selectedSourceIsAudio)
+                    }
                     when (source) {
                         mp3, aac -> {
                             assertEquals("The USLT metadata copy must not be listed twice", 4, state.sourceEmbeddedLyrics.size)
@@ -115,6 +130,12 @@ class MediaConvertRepeatedProbeTest {
                             assertTrue(state.sourceEmbeddedLyrics.all { it.synced })
                             assertTrue(state.sourceEmbeddedLyrics.any { "海风" in it.text })
                             assertTrue(state.sourceEmbeddedLyrics.any { "Sea breeze" in it.text })
+                        }
+                        wav, renamedWav -> {
+                            assertEquals("WAV USLT frames must not be repeated by metadata fallbacks", 2, state.sourceEmbeddedLyrics.size)
+                            assertTrue(state.sourceEmbeddedLyrics.all { it.field == "USLT" && it.synced })
+                            assertEquals(wavLyrics.map { it.title }, state.sourceEmbeddedLyrics.map { it.title })
+                            assertEquals(wavLyrics.map { it.lrc }, state.sourceEmbeddedLyrics.map { it.text })
                         }
                         flac -> {
                             assertEquals(1, state.sourceEmbeddedLyrics.size)
@@ -125,6 +146,7 @@ class MediaConvertRepeatedProbeTest {
                         }
                         else -> assertTrue(state.sourceEmbeddedLyrics.isEmpty())
                     }
+                    assertArrayEquals("Detection changed ${source.name}", originalBytes.getValue(source), source.readBytes())
                 }
             }
         } finally {

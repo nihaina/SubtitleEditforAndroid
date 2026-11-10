@@ -171,7 +171,7 @@ internal class MediaConvertViewModel(application: Application) :
                 runCatching {
                     val log = FFmpegKit.execute("-hide_banner -encoders").getAllLogsAsString()
                     Triple(MediaConvertFormats.parseEncoders(log), MediaConvertAudioCodecs.parseEncoders(log),
-                        MediaConvertSubtitles.hasBurnInFilter(FFmpegKit.execute("-hide_banner -filters").getAllLogsAsString()))
+                        MediaConvertSubtitleRenderer.isAvailable(app.cacheDir))
                 }.getOrDefault(Triple(emptySet<String>(), emptySet<String>(), false))
             }
             // h264_mediacodec/hevc_mediacodec are present in every ffmpeg-kit build; only keep them when a real
@@ -415,9 +415,10 @@ internal class MediaConvertViewModel(application: Application) :
     private suspend fun probeUri(uri: Uri): SourceDescription {
         var input: String? = null
         val size = sourceSizeBytes(uri)
+        val extension = MediaConvertSubtitles.extension(getFileName(uri))
         val description = try {
             input = ffmpegInput(uri)
-            readMediaInfo(input) ?: SourceDescription(string(R.string.media_convert_probe_failed))
+            readMediaInfo(input, extension) ?: SourceDescription(string(R.string.media_convert_probe_failed))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -438,29 +439,29 @@ internal class MediaConvertViewModel(application: Application) :
             null
         }
         currentCoroutineContext().ensureActive()
-        val extension = MediaConvertSubtitles.extension(getFileName(uri))
-        val id3Lyrics = if (extension in setOf("mp3", "aac", "wav")) try {
+        val id3Lyrics = try {
             val stream = PickedUriAccess.file(uri)?.inputStream() ?: app.contentResolver.openInputStream(uri)
                 ?: error("Cannot open media for lyric detection")
-            stream.buffered().use { MediaConvertId3LyricsReader.read(it, wav = extension == "wav") }
+            stream.buffered().use(MediaConvertEmbeddedLyricReader::read)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
             Log.w("MediaConvert", "ID3 lyric detection failed", error)
             null
-        } else null
+        }
         val subtitleTracks = probed?.subtitleTracks?.map { track ->
             MediaConvertSourceSubtitle(track.ffIndex, track.codec, track.language, track.title, track.isDefault)
         }
         val lyrics = MediaConvertEmbeddedLyrics.merge(
-            MediaConvertEmbeddedLyrics.fromMetadata(probed?.lyricMetadata.orEmpty(), extension), id3Lyrics.orEmpty())
+            description.embeddedLyrics + MediaConvertEmbeddedLyrics.fromMetadata(probed?.lyricMetadata.orEmpty(), extension),
+            id3Lyrics.orEmpty())
         return description.copy(fileSizeBytes = size,
             source = description.source?.copy(fileSizeBytes = size, subtitleStreams = subtitleTracks.orEmpty()),
             subtitleProbeFailed = subtitleTracks == null, subtitleTracks = subtitleTracks.orEmpty(),
-            embeddedLyrics = lyrics, lyricsProbeFailed = probed == null && id3Lyrics == null)
+            embeddedLyrics = lyrics, lyricsProbeFailed = description.source == null && probed == null && id3Lyrics.isNullOrEmpty())
     }
 
-    private fun readMediaInfo(path: String): SourceDescription? {
+    private fun readMediaInfo(path: String, extension: String): SourceDescription? {
         val info = FfprobeMediaInformation.read(path, app.cacheDir)
         val text = buildString {
             append(string(R.string.media_convert_duration, formatDuration(info.getDuration()?.toDoubleOrNull() ?: 0.0)))
@@ -503,10 +504,13 @@ internal class MediaConvertViewModel(application: Application) :
             audio?.let(::streamBitrateBps), audio?.getChannelLayout(), video?.getStringProperty("pix_fmt"), audio != null,
             videoCodecName = video?.getCodec(), audioCodecName = audio?.getCodec(),
             videoWidth = video?.getWidth()?.toInt(), videoHeight = video?.getHeight()?.toInt(),
-            videoStreamIndex = video?.getIndex(), attachedPictureStreamIndex = attachedPicture?.getIndex())
+            videoStreamIndex = video?.getIndex(), attachedPictureStreamIndex = attachedPicture?.getIndex(),
+            attachedPictureCodecName = attachedPicture?.getCodec(),
+            attachmentStreamCount = info.getStreams().count { it.getType() == "attachment" })
         return SourceDescription(text, video?.let(::videoSize), video?.let(::streamBitrateBps), audio?.let(::streamBitrateBps),
             audio?.getSampleRate()?.toIntOrNull()?.takeIf { it > 0 }, audio?.getNumberProperty("channels")?.toInt(),
-            audio?.getChannelLayout(), video?.getStringProperty("pix_fmt"), source = source)
+            audio?.getChannelLayout(), video?.getStringProperty("pix_fmt"), source = source,
+            embeddedLyrics = MediaConvertEmbeddedLyrics.fromMediaInformation(info, extension))
     }
 
     private fun streamBitrateBps(stream: StreamInformation): Long? = MediaConvertVideoBitrate.sourceBitsPerSecond(
@@ -612,6 +616,11 @@ internal class MediaConvertViewModel(application: Application) :
             val lyricTags = prepared.lyrics
             val rewriteLyricFile = lyricTags.isNotEmpty() && MediaConvertAudioLyrics.needsFileRewrite(format)
             input = withContext(Dispatchers.IO) { ffmpegInput(file.uri) }
+            if (MediaConvertMetadataSupport.supportsCover(format) && sourceProbe.attachedPictureStreamIndex != null) {
+                sourceProbe = withContext(Dispatchers.IO) {
+                    MediaConvertSourceCover.prepare(checkNotNull(input), cache, sourceProbe)
+                }
+            }
             if (!format.isAudioOnly && !sourceProbe.hasVideo) {
                 appendLog(string(R.string.media_convert_no_video_stream, prefix))
             }
@@ -854,7 +863,8 @@ internal class MediaConvertViewModel(application: Application) :
                 audio?.getSampleRate()?.toIntOrNull(), audio?.getNumberProperty("channels")?.toInt(), audio?.let(::streamBitrateBps), audio?.getChannelLayout(),
                 video?.getStringProperty("pix_fmt"), audio != null, sourceSizeBytes(uri), video?.getCodec(), audio?.getCodec(),
                 video?.getWidth()?.toInt(), video?.getHeight()?.toInt(), video?.getIndex(), attachedPicture?.getIndex(),
-                readSourceSubtitleTracks(uri))
+                readSourceSubtitleTracks(uri), attachedPictureCodecName = attachedPicture?.getCodec(),
+                attachmentStreamCount = info.getStreams().count { it.getType() == "attachment" })
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) { null }

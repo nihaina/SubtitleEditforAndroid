@@ -15,9 +15,8 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class MediaConvertSubtitlesNativeTest {
     @Test fun bundledSubtitleRendererAndMuxerProduceCaptions() {
-        assertTrue("Missing libass subtitle filter", MediaConvertSubtitles.hasBurnInFilter(
-            FFmpegKit.execute("-hide_banner -filters").getAllLogsAsString()))
         val context = ApplicationProvider.getApplicationContext<Context>()
+        assertTrue("Missing operational libass subtitle filter", MediaConvertSubtitleRenderer.isAvailable(context.cacheDir))
         val root = File(context.cacheDir, "subtitle-native-${System.nanoTime()}").apply { mkdirs() }
         fun run(arguments: List<String>) {
             val session = FFmpegKit.executeWithArguments(arguments.toTypedArray())

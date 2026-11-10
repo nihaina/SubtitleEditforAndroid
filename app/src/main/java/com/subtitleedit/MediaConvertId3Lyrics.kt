@@ -13,15 +13,21 @@ import java.nio.file.StandardCopyOption
 
 internal data class MediaConvertLyric(val title: String, val lrc: String)
 
+internal object MediaConvertId3Limits {
+    const val MAX_TAG_BYTES = 64 * 1024 * 1024
+}
+
 /** Writes lyrics after FFmpeg has finished a private staging file. Audio is copied as a stream. */
 internal object MediaConvertId3Lyrics {
-    private const val MAX_TAG_SIZE = 64 * 1024 * 1024
+    private const val MAX_TAG_SIZE = MediaConvertId3Limits.MAX_TAG_BYTES
     private const val MAX_UINT32 = 0xffff_ffffL
     private val lyricFrameIds = setOf("USLT", "SYLT")
 
     private data class Frame(val id: String, val flags: ByteArray, val body: ByteArray)
     private data class Tag(val version: Int, val frames: List<Frame>, val size: Long)
     private data class Chunk(val offset: Long, val size: Long, val isId3: Boolean)
+    private data class WavTag(val version: Int?, val frames: List<Frame>, val chunks: List<Chunk>,
+                              val container: String, val ds64Offset: Long? = null)
     private data class NamedLyric(val descriptor: String, val lrc: String)
 
     fun writeMp3(file: File, lyrics: List<MediaConvertLyric>) = writeId3Audio(file, lyrics)
@@ -45,27 +51,93 @@ internal object MediaConvertId3Lyrics {
 
     /** RIFF/WAVE uses an ID3 chunk with USLT; synchronized MP3 frames are not needed here. */
     fun writeWav(file: File, lyrics: List<MediaConvertLyric>) {
+        val existing = readWav(file)
+        val tag = buildTag(existing.version ?: 3, existing.frames, lyrics, synced = false)
+        writeWavTag(file, existing, tag)
+    }
+
+    /** FFmpeg writes WAV INFO tags but drops ID3, including lyrics and private frames. */
+    fun restoreWavMetadata(source: File, target: File, metadata: MediaConvertMetadata,
+                           sourceMetadata: MediaConvertMetadata) {
+        val original = readWav(source, allowLarge = true)
+        val output = readWav(target, allowLarge = true)
+        val version = original.version ?: 3
+        val frames = original.frames.toMutableList()
+        for (field in MediaConvertMetadata.audioFields) {
+            val ids = when (field) {
+                MediaConvertMetadataField.TITLE -> setOf("TIT2")
+                MediaConvertMetadataField.ARTIST -> setOf("TPE1")
+                MediaConvertMetadataField.ALBUM -> setOf("TALB")
+                MediaConvertMetadataField.GENRE -> setOf("TCON")
+                MediaConvertMetadataField.YEAR -> setOf("TYER", "TDRC", "TDAT", "TIME")
+                else -> continue
+            }
+            val edited = field in metadata.editedFields
+            if (!edited && frames.any { it.id in ids }) continue
+            val value = if (edited) metadata.value(field) else sourceMetadata.value(field)
+            if (edited) frames.removeAll { it.id in ids }
+            if (value.isBlank()) continue
+            require('\u0000' !in value && value.length <= MAX_TAG_SIZE / 2 - 2) { "Invalid ID3 text value" }
+            val id = if (field == MediaConvertMetadataField.YEAR) {
+                if (version == 4) "TDRC" else "TYER"
+            } else ids.first()
+            frames += Frame(id, byteArrayOf(0, 0), byteArrayOf(1) + utf16(value))
+        }
+        writeWavTag(target, output, serializeTag(version, frames))
+    }
+
+    private fun readWav(file: File, allowLarge: Boolean = false): WavTag {
         val chunks = mutableListOf<Chunk>()
         val frames = mutableListOf<Frame>()
         var version: Int? = null
+        var container = "RIFF"
+        var ds64Offset: Long? = null
         RandomAccessFile(file, "r").use { input ->
             require(input.length() >= 12) { "Truncated WAV header" }
             val header = ByteArray(12).also(input::readFully)
-            require(ascii(header, 0, 4) == "RIFF" && ascii(header, 8, 4) == "WAVE") {
+            container = ascii(header, 0, 4)
+            val large = allowLarge && container in setOf("RF64", "BW64")
+            require((container == "RIFF" || large) && ascii(header, 8, 4) == "WAVE") {
                 "Only RIFF/WAVE is supported for ID3 lyrics (RF64 is unsupported)"
             }
-            val riffEnd = readLe32(header, 4) + 8L
+            var riffEnd = readLe32(header, 4) + 8L
+            var largeDataSize: Long? = null
+            val largeChunks = mutableMapOf<String, ArrayDeque<Long>>()
+            if (large) {
+                require(readLe32(header, 4) == MAX_UINT32 && input.length() >= 48L) { "Invalid RF64 header" }
+                val dsHeader = ByteArray(8).also(input::readFully)
+                val dsSize = readLe32(dsHeader, 4)
+                require(ascii(dsHeader, 0, 4) == "ds64" && dsSize >= 28 && dsSize <= input.length() - 20) {
+                    "Missing or truncated RF64 size table"
+                }
+                val fixed = ByteArray(28).also(input::readFully)
+                val size64 = readLe64(fixed, 0)
+                require(size64 <= Long.MAX_VALUE - 8) { "RF64 size is out of range" }
+                riffEnd = size64 + 8
+                largeDataSize = readLe64(fixed, 8)
+                val count = readLe32(fixed, 24)
+                require(count <= 10_000 && count <= (dsSize - 28) / 12) { "Invalid RF64 size table" }
+                repeat(count.toInt()) {
+                    val entry = ByteArray(12).also(input::readFully)
+                    largeChunks.getOrPut(ascii(entry, 0, 4)) { ArrayDeque() }.addLast(readLe64(entry, 4))
+                }
+                ds64Offset = 12L
+            }
             require(riffEnd == input.length()) { "Invalid WAV RIFF size" }
             var offset = 12L
             while (offset < riffEnd) {
                 require(riffEnd - offset >= 8) { "Truncated WAV chunk header" }
                 input.seek(offset)
                 val chunkHeader = ByteArray(8).also(input::readFully)
-                val dataSize = readLe32(chunkHeader, 4)
+                val id = ascii(chunkHeader, 0, 4)
+                val size32 = readLe32(chunkHeader, 4)
+                val dataSize = if (size32 != MAX_UINT32) size32 else if (id == "data" && largeDataSize != null) {
+                    requireNotNull(largeDataSize).also { largeDataSize = null }
+                } else requireNotNull(largeChunks[id]?.removeFirstOrNull()) { "Missing RF64 chunk size" }
+                require(dataSize <= riffEnd - offset - 8) { "Truncated WAV chunk" }
                 val chunkSize = 8L + dataSize + (dataSize and 1L)
                 require(chunkSize <= riffEnd - offset) { "Truncated WAV chunk" }
-                val id = ascii(chunkHeader, 0, 4)
-                val isId3 = id == "id3 " || id == "ID3 "
+                val isId3 = id.equals("id3 ", ignoreCase = true)
                 if (isId3) {
                     val tag = requireNotNull(readTag(input, offset + 8L, dataSize, required = true))
                     require(version == null || version == tag.version) { "Mixed ID3 versions in WAV" }
@@ -88,17 +160,25 @@ internal object MediaConvertId3Lyrics {
                 offset += chunkSize
             }
         }
-        val tag = buildTag(version ?: 3, frames, lyrics, synced = false)
+        return WavTag(version, frames, chunks, container, ds64Offset)
+    }
+
+    private fun writeWavTag(file: File, wav: WavTag, tag: ByteArray) {
+        val chunks = wav.chunks
         val riffSize = 4L + chunks.filterNot { it.isId3 }.sumOf { it.size } +
             8L + tag.size + (tag.size and 1)
-        require(riffSize <= MAX_UINT32) { "WAV exceeds RIFF size limit" }
+        require(riffSize >= 4 && (wav.ds64Offset != null || riffSize <= MAX_UINT32)) { "WAV exceeds RIFF size limit" }
         rewrite(file) { output ->
-            output.write("RIFF".toByteArray(Charsets.US_ASCII))
-            writeLe32(output, riffSize)
+            output.write(wav.container.toByteArray(Charsets.US_ASCII))
+            writeLe32(output, if (wav.ds64Offset == null) riffSize else MAX_UINT32)
             output.write("WAVE".toByteArray(Charsets.US_ASCII))
             RandomAccessFile(file, "r").use { input ->
                 chunks.filterNot { it.isId3 }.forEach { chunk ->
-                    copyRange(input, output, chunk.offset, chunk.size)
+                    if (chunk.offset == wav.ds64Offset) {
+                        copyRange(input, output, chunk.offset, 8)
+                        writeLe64(output, riffSize)
+                        copyRange(input, output, chunk.offset + 16, chunk.size - 16)
+                    } else copyRange(input, output, chunk.offset, chunk.size)
                 }
             }
             output.write("id3 ".toByteArray(Charsets.US_ASCII))
@@ -138,6 +218,10 @@ internal object MediaConvertId3Lyrics {
                 frames += Frame("SYLT", byteArrayOf(0, 0), sylt.toByteArray())
             }
         }
+        return serializeTag(version, frames)
+    }
+
+    private fun serializeTag(version: Int, frames: List<Frame>): ByteArray {
         val payloadSize = frames.sumOf { 10L + it.body.size }
         require(payloadSize <= MAX_TAG_SIZE) { "ID3 tag is too large" }
         return ByteArrayOutputStream(payloadSize.toInt() + 10).apply {
@@ -266,6 +350,15 @@ internal object MediaConvertId3Lyrics {
 
     private fun readLe32(bytes: ByteArray, offset: Int): Long =
         (3 downTo 0).fold(0L) { value, index -> (value shl 8) or (bytes[offset + index].toLong() and 0xff) }
+
+    private fun readLe64(bytes: ByteArray, offset: Int): Long {
+        require(bytes[offset + 7] >= 0) { "RF64 size is out of range" }
+        return (7 downTo 0).fold(0L) { value, index -> (value shl 8) or (bytes[offset + index].toLong() and 0xff) }
+    }
+
+    private fun writeLe64(output: OutputStream, value: Long) {
+        for (shift in 0..56 step 8) output.write(((value ushr shift) and 0xff).toInt())
+    }
 
     private fun writeBe32(output: OutputStream, value: Long) {
         for (shift in 24 downTo 0 step 8) output.write(((value ushr shift) and 0xff).toInt())

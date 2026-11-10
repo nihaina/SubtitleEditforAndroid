@@ -18,13 +18,97 @@ import org.junit.runner.RunWith
 /** Exercise subtitle preparation through the ViewModel, rather than bypassing it in command tests. */
 @RunWith(AndroidJUnit4::class)
 class MediaConvertSubtitleWorkflowTest {
+    @Test fun appExportedWavLyricsAreDetectedAfterReselectionAndReopeningThePage() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val root = File(context.cacheDir, "wav-lyrics-workflow-${System.nanoTime()}").apply { mkdirs() }
+        try {
+            val source = File(root, "source audio.wav")
+            ffmpeg(listOf("-y", "-f", "lavfi", "-i", "sine=sample_rate=44100", "-t", "1", source.path))
+            val original = File(root, "中文歌词.lrc").apply {
+                writeText("[ti:海风]\n[00:00.125]海风 🌊\n[00:00.500]第二行\n")
+            }
+            val translated = File(root, "English lyrics.srt").apply {
+                writeText("1\n00:00:00,125 --> 00:00:00,450\nSea breeze\n\n2\n00:00:00,500 --> 00:00:00,900\nSecond line\n")
+            }
+            val directory = File(root, "exported").apply { mkdirs() }
+            lateinit var output: File
+            ActivityScenario.launch(MediaConvertActivity::class.java).use { scenario ->
+                lateinit var originalDirectory: Uri
+                var originalSaveToSource = false
+                scenario.onActivity { activity ->
+                    val model = ViewModelProvider(activity)[MediaConvertViewModel::class.java]
+                    originalDirectory = requireNotNull(model.currentOutputDirectoryUri)
+                    originalSaveToSource = model.state.value.saveToSourceDirectory
+                    model.setSaveToSourceDirectory(false)
+                    model.selectOutputDirectory(Uri.fromFile(directory))
+                    model.selectFiles(listOf(Uri.fromFile(source)))
+                    model.selectFormat("wav")
+                    model.selectSubtitles(listOf(Uri.fromFile(original), Uri.fromFile(translated)))
+                    assertEquals(listOf(original.name, translated.name), model.state.value.subtitleFiles.map { it.fileName })
+                    model.startConversion()
+                }
+                try {
+                    val completed = awaitState(scenario) { !it.isConverting }
+                    assertEquals(completed.log, 1, completed.outputUris.size)
+                    output = File(requireNotNull(completed.outputUris.single().path))
+                    assertEquals(directory.canonicalFile, requireNotNull(output.parentFile).canonicalFile)
+                    val tags = output.inputStream().buffered().use(MediaConvertEmbeddedLyricReader::read)
+                    assertEquals(listOf("USLT", "USLT"), tags.map { it.field })
+                    assertEquals(listOf("中文歌词", "English lyrics"), tags.map { it.title })
+                    assertEquals(original.readText(), tags.first().text)
+                    assertTrue(tags.last().text.contains("Sea breeze"))
+                    val bytes = output.readBytes()
+                    repeat(2) {
+                        assertWavLyricsAfterSelection(scenario, output)
+                        assertArrayEquals("Selecting the exported WAV modified it", bytes, output.readBytes())
+                    }
+                } finally {
+                    scenario.onActivity { activity ->
+                        val model = ViewModelProvider(activity)[MediaConvertViewModel::class.java]
+                        model.cancelConversion()
+                        model.selectOutputDirectory(originalDirectory)
+                        model.setSaveToSourceDirectory(originalSaveToSource)
+                    }
+                }
+            }
+            ActivityScenario.launch(MediaConvertActivity::class.java).use { scenario ->
+                assertWavLyricsAfterSelection(scenario, output)
+            }
+        } finally { root.deleteRecursively() }
+    }
+
+    private fun assertWavLyricsAfterSelection(scenario: ActivityScenario<MediaConvertActivity>, file: File) {
+        scenario.onActivity { activity ->
+            val model = ViewModelProvider(activity)[MediaConvertViewModel::class.java]
+            model.selectFiles(listOf(Uri.fromFile(file)))
+            assertTrue(model.state.value.isReadingSourceSubtitles)
+            assertTrue(model.state.value.sourceEmbeddedLyrics.isEmpty())
+        }
+        val detected = awaitState(scenario) { !it.isReadingSourceSubtitles }
+        assertFalse(detected.log, detected.sourceLyricsProbeFailed)
+        assertEquals(listOf("USLT", "USLT"), detected.sourceEmbeddedLyrics.map { it.field })
+        assertEquals(listOf("中文歌词", "English lyrics"), detected.sourceEmbeddedLyrics.map { it.title })
+        assertTrue(detected.sourceEmbeddedLyrics.all { it.synced })
+        assertTrue(detected.sourceEmbeddedLyrics.first().text.contains("海风 🌊"))
+        assertTrue(detected.sourceEmbeddedLyrics.last().text.contains("Sea breeze"))
+        scenario.onActivity { activity ->
+            val model = ViewModelProvider(activity)[MediaConvertViewModel::class.java]
+            assertTrue("The WAV must display the existing-lyrics section", model.selectedSourceIsAudio)
+        }
+    }
+
     @Test fun selectedSubtitlesReachTheMuxerAndRendererThroughTheRealConversionWorkflow() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val root = File(context.cacheDir, "subtitle-workflow-${System.nanoTime()}").apply { mkdirs() }
         try {
             val source = File(root, "source with spaces ☕.mp4")
+            val base = File(root, "base.mp4")
+            val cover = File(root, "source cover.png")
             ffmpeg(listOf("-y", "-f", "lavfi", "-i", "color=c=black:s=320x240:r=25",
-                "-f", "lavfi", "-i", "sine=sample_rate=44100", "-t", "0.8", "-c:v", "libx264", "-c:a", "aac", source.path))
+                "-f", "lavfi", "-i", "sine=sample_rate=44100", "-t", "0.8", "-c:v", "libx264", "-c:a", "aac", base.path))
+            ffmpeg(listOf("-y", "-f", "lavfi", "-i", "color=c=blue:s=64x64", "-frames:v", "1", cover.path))
+            ffmpeg(listOf("-y", "-i", base.path, "-i", cover.path, "-map", "0", "-map", "1:v:0", "-c", "copy",
+                "-disposition:v:1", "attached_pic", source.path))
             val srt = File(root, "字幕 with spaces.srt").apply {
                 writeText("1\n00:00:00,000 --> 00:00:00,700\nCaption\n", Charsets.UTF_8)
             }

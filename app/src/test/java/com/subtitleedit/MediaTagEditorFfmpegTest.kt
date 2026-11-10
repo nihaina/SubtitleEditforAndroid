@@ -11,6 +11,62 @@ import org.junit.Test
 
 /** Real stream-copy checks; opt in with the same host FFmpeg used by the conversion tests. */
 class MediaTagEditorFfmpegTest {
+    @Test fun wavEditsReachInfoAndId3ReadersWithoutLosingLyricsOrAudio() = withFfmpeg { host ->
+        val source = host.file("source with lyrics.wav")
+        val original = MediaConvertMetadata(title = "Original title", artist = "Original singer", album = "Original album",
+            genre = "Rock", year = "2001")
+        host.run(listOf("-y", "-f", "lavfi", "-i", "sine=sample_rate=44100", "-t", "0.2",
+            "-metadata", "title=${original.title}", "-metadata", "artist=${original.artist}",
+            "-metadata", "album=${original.album}", "-metadata", "genre=${original.genre}", "-metadata", "date=${original.year}", source.path))
+        val lyrics = listOf(MediaConvertLyric("Original", "[00:00.125]First lyric 🌊\n"),
+            MediaConvertLyric("Translation", "[00:00.125]第二份歌词\n"))
+        MediaConvertId3Lyrics.writeWav(source, lyrics)
+        val rawLyrics = WavTagFixture.readTag(source).frames.filter { it.id == "USLT" }
+        val edited = host.file("edited.wav")
+        val changes = MediaConvertMetadata()
+            .withValue(MediaConvertMetadataField.TITLE, "Edited title")
+            .withValue(MediaConvertMetadataField.ARTIST, "Edited singer")
+            .withValue(MediaConvertMetadataField.ALBUM, "Edited album")
+            .withValue(MediaConvertMetadataField.GENRE, "Jazz")
+            .withValue(MediaConvertMetadataField.YEAR, "2026")
+        host.run(MediaTagEditorCommand.build(source.path, edited.path, "wav", host.streams(source), changes, true))
+        MediaConvertId3Lyrics.restoreWavMetadata(source, edited, changes, original)
+        val tags = host.tags(edited)
+        assertTrue(tags, "title=edited title" in tags)
+        assertTrue(tags, "artist=edited singer" in tags)
+        assertTrue(tags, "album=edited album" in tags)
+        assertTrue(tags, "genre=jazz" in tags)
+        assertTrue(tags, "date=2026" in tags)
+        val frames = WavTagFixture.readTag(edited).frames
+        assertEquals("Edited title", WavTagFixture.text(frames.single { it.id == "TIT2" }))
+        assertEquals("Edited singer", WavTagFixture.text(frames.single { it.id == "TPE1" }))
+        assertEquals("Edited album", WavTagFixture.text(frames.single { it.id == "TALB" }))
+        assertEquals("Jazz", WavTagFixture.text(frames.single { it.id == "TCON" }))
+        assertEquals("2026", WavTagFixture.text(frames.single { it.id == "TYER" }))
+        assertWavInfo(edited, mapOf("INAM" to "Edited title", "IART" to "Edited singer", "IPRD" to "Edited album",
+            "IGNR" to "Jazz", "ICRD" to "2026"))
+        val actualLyrics = frames.filter { it.id == "USLT" }
+        assertEquals(2, actualLyrics.size)
+        rawLyrics.zip(actualLyrics).forEach { (expected, actual) ->
+            org.junit.Assert.assertArrayEquals(expected.flags, actual.flags)
+            org.junit.Assert.assertArrayEquals(expected.body, actual.body)
+        }
+        assertEquals(host.audioHash(source), host.audioHash(edited))
+
+        val cleared = host.file("cleared.wav")
+        val clear = MediaConvertMetadata.audioFields.fold(MediaConvertMetadata()) { value, field -> value.withValue(field, "") }
+        host.run(MediaTagEditorCommand.build(edited.path, cleared.path, "wav", host.streams(edited), clear, true))
+        MediaConvertId3Lyrics.restoreWavMetadata(edited, cleared, clear, changes)
+        val clearedTags = host.tags(cleared)
+        for (key in listOf("title", "artist", "album", "genre", "date", "year")) assertFalse(clearedTags, "$key=" in clearedTags)
+        val clearedFrames = WavTagFixture.readTag(cleared).frames
+        assertFalse(clearedFrames.any { it.id in setOf("TIT2", "TPE1", "TALB", "TCON", "TYER", "TDRC") })
+        val remainingLyrics = clearedFrames.filter { it.id == "USLT" }
+        assertEquals(2, remainingLyrics.size)
+        rawLyrics.zip(remainingLyrics).forEach { (expected, actual) -> org.junit.Assert.assertArrayEquals(expected.body, actual.body) }
+        assertEquals(host.audioHash(source), host.audioHash(cleared))
+    }
+
     @Test fun oggAndOpusCommentsCanBeChangedAndClearedWithoutLosingUneditedTags() = withFfmpeg { host ->
         for ((extension, codec) in listOf("ogg" to "libvorbis", "opus" to "libopus")) {
             val source = host.file("source.$extension")
@@ -131,6 +187,20 @@ class MediaTagEditorFfmpegTest {
             assertTrue(extension, "subtitle:" in replacedInfo)
             if (extension == "mkv") assertTrue("Font attachment was lost on replacement", "font.ttf" in replacedInfo)
         }
+    }
+
+    private fun assertWavInfo(file: File, expected: Map<String, String>) {
+        val bytes = WavTagFixture.chunks(file.readBytes()).single { it.first == "LIST" }.second
+        assertEquals("INFO", String(bytes, 8, 4, Charsets.US_ASCII))
+        val info = mutableMapOf<String, String>()
+        var offset = 12
+        while (offset + 8 <= bytes.size) {
+            val name = String(bytes, offset, 4, Charsets.US_ASCII)
+            val size = java.nio.ByteBuffer.wrap(bytes, offset + 4, 4).order(java.nio.ByteOrder.LITTLE_ENDIAN).int
+            info[name] = String(bytes, offset + 8, size, Charsets.UTF_8).trimEnd('\u0000')
+            offset += 8 + size + (size and 1)
+        }
+        expected.forEach { (name, value) -> assertEquals(name, value, info[name]) }
     }
 
     private fun withFfmpeg(block: (Host) -> Unit) {
