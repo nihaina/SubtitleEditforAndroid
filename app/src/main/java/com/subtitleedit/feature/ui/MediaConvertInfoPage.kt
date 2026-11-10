@@ -55,10 +55,7 @@ internal fun MediaConvertInfoPage(
     var editingFieldName by rememberSaveable { mutableStateOf<String?>(null) }
     var showCoverWarning by rememberSaveable { mutableStateOf(false) }
     var showCoverDeleteConfirmation by rememberSaveable { mutableStateOf(false) }
-    val fields = if (isAudioOutput) listOf(
-        MediaConvertMetadataField.GENRE, MediaConvertMetadataField.TITLE, MediaConvertMetadataField.ARTIST,
-        MediaConvertMetadataField.ALBUM, MediaConvertMetadataField.YEAR
-    ) else listOf(MediaConvertMetadataField.TITLE, MediaConvertMetadataField.AUTHOR, MediaConvertMetadataField.COMMENT)
+    val fields = if (isAudioOutput) MediaConvertMetadata.audioFields else MediaConvertMetadata.videoFields
     val warning = if (batch) stringResource(
         if (batchIsAudioSource) R.string.media_convert_info_batch_audio_warning else R.string.media_convert_info_batch_video_warning
     ) else null

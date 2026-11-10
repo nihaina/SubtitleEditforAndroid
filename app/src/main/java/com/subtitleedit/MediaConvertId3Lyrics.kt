@@ -35,6 +35,27 @@ internal object MediaConvertId3Lyrics {
     /** ADTS can carry a leading ID3v2 tag while keeping its AAC audio frames unchanged. */
     fun writeAac(file: File, lyrics: List<MediaConvertLyric>) = writeId3Audio(file, lyrics)
 
+    /**
+     * ADTS has no TagLib file writer. Edit only its leading ID3 block on the private copy,
+     * keeping every AAC byte and every unedited ID3 frame (including USLT/SYLT/PRIV).
+     */
+    fun editAacMetadata(file: File, metadata: MediaConvertMetadata) {
+        val existing = RandomAccessFile(file, "r").use { input ->
+            readTag(input, 0, input.length(), required = false)
+        }
+        val version = existing?.version ?: 3
+        val frames = metadataFrames(existing?.frames.orEmpty(), version, metadata, MediaConvertMetadata())
+        updateCoverFrames(frames, metadata)
+        val tag = serializeTag(version, frames)
+        val audioOffset = existing?.size ?: 0L
+        rewrite(file) { output ->
+            output.write(tag)
+            RandomAccessFile(file, "r").use { input ->
+                copyRange(input, output, audioOffset, input.length() - audioOffset)
+            }
+        }
+    }
+
     private fun writeId3Audio(file: File, lyrics: List<MediaConvertLyric>) {
         val existing = RandomAccessFile(file, "r").use { input ->
             readTag(input, 0, input.length(), required = false)
@@ -62,7 +83,13 @@ internal object MediaConvertId3Lyrics {
         val original = readWav(source, allowLarge = true)
         val output = readWav(target, allowLarge = true)
         val version = original.version ?: 3
-        val frames = original.frames.toMutableList()
+        val frames = metadataFrames(original.frames, version, metadata, sourceMetadata)
+        writeWavTag(target, output, serializeTag(version, frames))
+    }
+
+    private fun metadataFrames(original: List<Frame>, version: Int, metadata: MediaConvertMetadata,
+                               sourceMetadata: MediaConvertMetadata): MutableList<Frame> {
+        val frames = original.toMutableList()
         for (field in MediaConvertMetadata.audioFields) {
             val ids = when (field) {
                 MediaConvertMetadataField.TITLE -> setOf("TIT2")
@@ -70,20 +97,80 @@ internal object MediaConvertId3Lyrics {
                 MediaConvertMetadataField.ALBUM -> setOf("TALB")
                 MediaConvertMetadataField.GENRE -> setOf("TCON")
                 MediaConvertMetadataField.YEAR -> setOf("TYER", "TDRC", "TDAT", "TIME")
+                MediaConvertMetadataField.ALBUM_ARTIST -> setOf("TPE2")
+                MediaConvertMetadataField.COMPOSER -> setOf("TCOM")
+                MediaConvertMetadataField.TRACK_NUMBER -> setOf("TRCK")
+                MediaConvertMetadataField.DISC_NUMBER -> setOf("TPOS")
+                MediaConvertMetadataField.COMMENT -> setOf("COMM")
+                MediaConvertMetadataField.LYRICIST -> setOf("TEXT")
+                MediaConvertMetadataField.COPYRIGHT -> setOf("TCOP")
+                MediaConvertMetadataField.LANGUAGE -> setOf("TLAN")
                 else -> continue
             }
+            fun matches(frame: Frame) = frame.id in ids &&
+                (field != MediaConvertMetadataField.COMMENT || isGenericComment(frame, version))
             val edited = field in metadata.editedFields
             if (!edited && frames.any { it.id in ids }) continue
             val value = if (edited) metadata.value(field) else sourceMetadata.value(field)
-            if (edited) frames.removeAll { it.id in ids }
+            if (edited) frames.removeAll(::matches)
             if (value.isBlank()) continue
             require('\u0000' !in value && value.length <= MAX_TAG_SIZE / 2 - 2) { "Invalid ID3 text value" }
             val id = if (field == MediaConvertMetadataField.YEAR) {
                 if (version == 4) "TDRC" else "TYER"
             } else ids.first()
-            frames += Frame(id, byteArrayOf(0, 0), byteArrayOf(1) + utf16(value))
+            val body = if (field == MediaConvertMetadataField.COMMENT) {
+                ByteArrayOutputStream().apply {
+                    writeTextHeader(this, "")
+                    write(utf16(value))
+                }.toByteArray()
+            } else byteArrayOf(1) + utf16(value)
+            frames += Frame(id, byteArrayOf(0, 0), body)
         }
-        writeWavTag(target, output, serializeTag(version, frames))
+        return frames
+    }
+
+    /** Named comments such as iTunNORM are independent tags and must survive comment edits. */
+    private fun isGenericComment(frame: Frame, version: Int): Boolean {
+        val flags = frame.flags[1].toInt() and 0xff
+        require(flags and (if (version == 3) 0xe0 else 0x4f) == 0) {
+            "Encoded ID3 comments cannot be edited safely"
+        }
+        require(frame.body.size >= 5) { "Truncated ID3 comment" }
+        val encoding = frame.body[0].toInt() and 0xff
+        val start = 4
+        val empty = when (encoding) {
+            0, 3 -> frame.body[start] == 0.toByte()
+            1 -> frame.body.size >= start + 2 &&
+                ((frame.body[start] == 0.toByte() && frame.body[start + 1] == 0.toByte()) ||
+                (frame.body.size >= start + 4 && frame.body.copyOfRange(start, start + 2).let { bom ->
+                    bom.contentEquals(byteArrayOf(0xff.toByte(), 0xfe.toByte())) ||
+                        bom.contentEquals(byteArrayOf(0xfe.toByte(), 0xff.toByte()))
+                } && frame.body[start + 2] == 0.toByte() && frame.body[start + 3] == 0.toByte()))
+            2 -> frame.body.size >= start + 2 && frame.body[start] == 0.toByte() && frame.body[start + 1] == 0.toByte()
+            else -> throw IllegalArgumentException("Invalid ID3 comment encoding")
+        }
+        return empty
+    }
+
+    private fun updateCoverFrames(frames: MutableList<Frame>, metadata: MediaConvertMetadata) {
+        when (metadata.cover) {
+            MediaConvertCoverMode.DEFAULT -> Unit
+            MediaConvertCoverMode.NONE -> frames.removeAll { it.id == "APIC" }
+            MediaConvertCoverMode.CUSTOM -> {
+                val cover = File(requireNotNull(metadata.coverPath) { "The cover image is not ready" })
+                require(cover.isFile && cover.length() in 1..MAX_TAG_SIZE.toLong()) { "Invalid cover image size" }
+                frames.removeAll { frame ->
+                    if (frame.id != "APIC") false else {
+                        require(frame.flags[1] == 0.toByte()) { "Encoded ID3 pictures cannot be replaced safely" }
+                        val mimeEnd = (1 until frame.body.size).firstOrNull { frame.body[it] == 0.toByte() } ?: -1
+                        require(mimeEnd >= 1 && mimeEnd + 1 < frame.body.size) { "Truncated ID3 picture" }
+                        frame.body[mimeEnd + 1] == 3.toByte()
+                    }
+                }
+                val header = byteArrayOf(0) + "image/jpeg".toByteArray(Charsets.US_ASCII) + byteArrayOf(0, 3, 0)
+                frames += Frame("APIC", byteArrayOf(0, 0), header + cover.readBytes())
+            }
+        }
     }
 
     private fun readWav(file: File, allowLarge: Boolean = false): WavTag {

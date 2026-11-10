@@ -10,6 +10,23 @@ Automatic subtitle charset detection uses [chardet4j](https://github.com/sigpwne
 copyright 2022 Andy Boothe, under the Apache License 2.0. The dependency is
 resolved from Maven Central (`com.sigpwned:chardet4j:78.1.0`).
 
+## TagLib and utfcpp
+
+Audio tag editing uses [TagLib](https://github.com/taglib/taglib), pinned to
+commit `a27dca557e85db1e23de33d2118cde87c8f32770`. TagLib is copyright its
+contributors and is dual-licensed under LGPL-2.1 and MPL-1.1. Its complete
+source and both license texts are retained in
+`app/src/main/cpp/third_party/taglib/`. The APK includes the notices as
+`assets/licenses/TagLib-COPYING.LGPL.txt` and
+`assets/licenses/TagLib-COPYING.MPL.txt`.
+
+TagLib's UTF conversion uses [utfcpp](https://github.com/nemtrif/utfcpp),
+copyright 2006 Nemanja Trifunovic, under the Boost Software License 1.0,
+pinned to commit `63d64de49fd6b829f7c8694df5ab2ee625cb7134`. Its source and
+license are retained in TagLib's `3rdparty/utfcpp/` directory. The APK includes
+the license as `assets/licenses/utfcpp-LICENSE.txt`. Source provenance and
+the Android integration are documented in the vendored `UPSTREAM.md`.
+
 ## llama.cpp and ggml
 
 The local LLM runtime includes source from [llama.cpp](https://github.com/ggml-org/llama.cpp),

@@ -255,7 +255,7 @@ class MediaConvertInfoPageTest {
     }
 
     @Test
-    fun audioInformationHasReferenceFieldsAndWarnsBeforeBatchChanges() {
+    fun audioInformationHasExtendedFieldsAndWarnsBeforeBatchChanges() {
         val metadata = mutableStateOf(MediaConvertMetadata(genre = "Genre", artist = "Artist", album = "Album", year = "2026"))
         compose.setContent {
             SubtitleEditComposeTheme {
@@ -266,11 +266,11 @@ class MediaConvertInfoPageTest {
             }
         }
 
-        listOf("genre", "title", "artist", "album", "year").forEach { field ->
+        listOf("genre", "title", "artist", "album", "year", "album_artist", "composer",
+            "track_number", "disc_number", "comment", "lyricist", "copyright", "language").forEach { field ->
             compose.onNodeWithTag("convert-info-$field").assertExists()
         }
         compose.onNodeWithTag("convert-info-author").assertDoesNotExist()
-        compose.onNodeWithTag("convert-info-comment").assertDoesNotExist()
         compose.onNodeWithTag("convert-info-batch-warning").assertExists()
         compose.onNodeWithTag("convert-info-artist").performClick()
         compose.onNodeWithTag("convert-metadata-batch-warning").assertExists()

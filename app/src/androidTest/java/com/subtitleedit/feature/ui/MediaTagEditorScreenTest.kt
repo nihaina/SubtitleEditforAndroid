@@ -59,6 +59,29 @@ class MediaTagEditorScreenTest {
         compose.onNodeWithTag("convert-cover-delete").assertIsNotEnabled()
     }
 
+    @Test fun additionalAudioFieldsEditIndependentlyAndKeepTrackTotals() {
+        val state = mutableStateOf(MediaTagEditorState(
+            fileNames = listOf("song.wav"), selection = MediaConvertMetadataSelection.SINGLE_AUDIO,
+            metadata = MediaConvertMetadata(title = "Song", albumArtist = "Original album artist", trackNumber = "1/12"),
+            coverSupported = true
+        ))
+        compose.setContent { SubtitleEditComposeTheme {
+            MediaTagEditorScreen(state.value, {}, { state.value = state.value.copy(metadata = it) }, {}, {}, {})
+        } }
+        compose.onNodeWithTag("convert-info-album_artist").performScrollTo().performClick()
+        compose.onNodeWithTag("convert-metadata-album_artist").performTextReplacement("新专辑艺术家 🌊")
+        compose.onNodeWithTag("convert-metadata-confirm").performClick()
+        compose.onNodeWithTag("convert-info-track_number").performScrollTo().performClick()
+        compose.onNodeWithTag("convert-metadata-track_number").performTextReplacement("3/12")
+        compose.onNodeWithTag("convert-metadata-confirm").performClick()
+        compose.runOnIdle {
+            assertEquals("新专辑艺术家 🌊", state.value.metadata.albumArtist)
+            assertEquals("3/12", state.value.metadata.trackNumber)
+            assertEquals("Song", state.value.metadata.title)
+            assertEquals(MediaConvertCoverMode.DEFAULT, state.value.metadata.cover)
+        }
+    }
+
     @Test fun coverExportFollowsTheSelectedArtworkAndBusyState() {
         val state = mutableStateOf(MediaTagEditorState(
             fileNames = listOf("song.mp3"), selection = MediaConvertMetadataSelection.SINGLE_AUDIO,

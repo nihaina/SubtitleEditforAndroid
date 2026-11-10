@@ -10,7 +10,7 @@ internal data class MediaTagStream(
 /** Rewrites tags in the original container without dropping or encoding any media streams. */
 internal object MediaTagEditorCommand {
     fun supportsCover(muxer: String): Boolean = muxer in
-        setOf("mp3", "mp4", "ipod", "mov", "flac", "matroska")
+        setOf("mp3", "mp4", "ipod", "mov", "flac", "matroska", "adts")
 
     fun build(
         input: String,
@@ -37,6 +37,7 @@ internal object MediaTagEditorCommand {
             removed.forEach { addAll(listOf("-map", "-0:${it.index}")) }
             if (customCover != null && muxer != "matroska") addAll(listOf("-map", "1:v:0"))
             addAll(listOf("-c", "copy", "-map_metadata", "0", "-map_chapters", "0"))
+            if (muxer == "adts") addAll(listOf("-write_id3v2", "1"))
             if (customCover != null) {
                 if (muxer == "matroska") {
                     val attachmentIndex = retained.count { it.type == "attachment" }

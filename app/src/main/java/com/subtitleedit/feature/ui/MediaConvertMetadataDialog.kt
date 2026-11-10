@@ -74,6 +74,13 @@ internal val MediaConvertMetadataField.labelResource: Int get() = when (this) {
     MediaConvertMetadataField.ARTIST -> R.string.media_convert_info_artist
     MediaConvertMetadataField.ALBUM -> R.string.media_convert_info_album
     MediaConvertMetadataField.YEAR -> R.string.media_convert_info_year
+    MediaConvertMetadataField.ALBUM_ARTIST -> R.string.media_convert_info_album_artist
+    MediaConvertMetadataField.COMPOSER -> R.string.media_convert_info_composer
+    MediaConvertMetadataField.TRACK_NUMBER -> R.string.media_convert_info_track_number
+    MediaConvertMetadataField.DISC_NUMBER -> R.string.media_convert_info_disc_number
+    MediaConvertMetadataField.LYRICIST -> R.string.media_convert_info_lyricist
+    MediaConvertMetadataField.COPYRIGHT -> R.string.media_convert_info_copyright
+    MediaConvertMetadataField.LANGUAGE -> R.string.media_convert_info_language
 }
 
 internal val MediaConvertMetadataField.tag: String get() = name.lowercase(java.util.Locale.ROOT)

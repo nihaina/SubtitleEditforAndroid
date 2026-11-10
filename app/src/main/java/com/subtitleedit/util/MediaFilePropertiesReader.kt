@@ -116,7 +116,10 @@ internal object MediaFilePropertiesReader {
         } finally {
             runCatching { extractor.release() }
         }
-        return technicalDetails + embeddedDetails
+        // TagLib handles formats such as WAV whose Android extractor exposes no text tags.
+        // A supported file's tag map is authoritative, including fields explicitly cleared.
+        val fileTags = runCatching { MediaTagPropertyDetails.read(file) }.getOrNull()
+        return technicalDetails + (fileTags ?: embeddedDetails)
     }
 
     private fun readVideoProperties(file: File): List<PropertyDetail> {

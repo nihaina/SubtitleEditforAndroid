@@ -6,6 +6,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MediaTagEditorCommandTest {
+    @Test fun rawAacFallbackExplicitlyEnablesId3Tags() {
+        val arguments = MediaTagEditorCommand.build("source.aac", "output.aac", "adts",
+            listOf(MediaTagStream(0, "audio")),
+            MediaConvertMetadata().withValue(MediaConvertMetadataField.TITLE, "Title"), true)
+        assertTrue(arguments.windowed(2).contains(listOf("-write_id3v2", "1")))
+    }
+
     private val videoStreams = listOf(
         MediaTagStream(0, "video"), MediaTagStream(1, "audio"), MediaTagStream(2, "audio"),
         MediaTagStream(3, "subtitle"), MediaTagStream(4, "attachment"),

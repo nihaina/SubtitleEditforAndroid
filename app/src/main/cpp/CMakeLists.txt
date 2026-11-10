@@ -203,3 +203,42 @@ if (SEVENZIP_LLD AND EXISTS "${SEVENZIP_LLD}")
 endif()
 target_link_options(subtitleedit_7zip PRIVATE "-Wl,-z,max-page-size=16384")
 target_link_libraries(subtitleedit_7zip PRIVATE log)
+
+# TagLib uses format-specific tag writers, so audio metadata changes do not
+# remux or re-encode the audio payload. Keep its static-library options local:
+# llama.cpp and ggml above still build their runtime-selected shared backends.
+function(subtitleedit_add_taglib)
+    set(BUILD_SHARED_LIBS OFF)
+    set(BUILD_TESTING OFF)
+    set(BUILD_EXAMPLES OFF)
+    set(BUILD_BINDINGS OFF)
+    set(VISIBILITY_HIDDEN ON)
+    set(WITH_MOD OFF)
+    set(WITH_SHORTEN OFF)
+    set(WITH_ZLIB ON)
+    # Always use the pinned vendored UTF conversion headers, including on hosts
+    # that happen to have an unrelated utf8cpp package installed.
+    set(CMAKE_DISABLE_FIND_PACKAGE_utf8cpp TRUE)
+    set(utf8cpp_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/taglib/3rdparty/utfcpp/source")
+    set(TAGLIB_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/taglib")
+    set(TAGLIB_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/taglib")
+    add_subdirectory("${TAGLIB_SOURCE_DIR}" "${TAGLIB_BINARY_DIR}" EXCLUDE_FROM_ALL)
+    set_target_properties(tag PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_compile_options(tag PRIVATE -fexceptions -frtti)
+    target_compile_definitions(tag PRIVATE _FILE_OFFSET_BITS=64)
+
+    add_library(subtitleedit_tags SHARED media_tags_jni.cpp)
+    target_compile_features(subtitleedit_tags PRIVATE cxx_std_17)
+    target_compile_options(subtitleedit_tags PRIVATE -fexceptions -frtti -fvisibility=hidden)
+    target_compile_definitions(subtitleedit_tags PRIVATE _FILE_OFFSET_BITS=64)
+    target_include_directories(subtitleedit_tags PRIVATE
+        "${TAGLIB_SOURCE_DIR}/taglib"
+        "${TAGLIB_BINARY_DIR}"
+        "$<TARGET_PROPERTY:tag,INCLUDE_DIRECTORIES>")
+    target_link_libraries(subtitleedit_tags PRIVATE tag log)
+    target_link_options(subtitleedit_tags PRIVATE "-Wl,-z,max-page-size=16384")
+    if (SEVENZIP_LLD AND EXISTS "${SEVENZIP_LLD}")
+        target_link_options(subtitleedit_tags PRIVATE "-fuse-ld=${SEVENZIP_LLD}")
+    endif()
+endfunction()
+subtitleedit_add_taglib()

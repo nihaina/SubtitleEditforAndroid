@@ -56,6 +56,86 @@ class MediaConvertId3LyricsTest {
         assertEquals("[00:00.00]新歌词\n", decodeUslt(tag.frames[2]).text)
     }
 
+    @Test fun aacTextEditsPreserveAllNamedLyricsPrivateDataCoversAndAudio() {
+        val audio = byteArrayOf(0xff.toByte(), 0xf1.toByte(), 0x50, 0x80.toByte(), 1, 2, 3, 4)
+        val privateFrame = RawFrame("PRIV", byteArrayOf(0x10, 0), "owner\u0000data".toByteArray())
+        val art = picture(3, byteArrayOf(9, 8, 7))
+        val file = newFile("tagged.aac", tagBytes(4, listOf(privateFrame, art)) + audio)
+        MediaConvertId3Lyrics.writeAac(file, listOf(
+            MediaConvertLyric("原文", "[00:00.01]第一句 🌊\n[00:01.00]第二句\n"),
+            MediaConvertLyric("Translation", "[00:00.01]First\n[00:01.00]Second\n")
+        ))
+        val preserved = decodeTag(file.readBytes()).frames
+        val values = mapOf(
+            MediaConvertMetadataField.TITLE to ("TIT2" to "新曲名 🌊"),
+            MediaConvertMetadataField.ARTIST to ("TPE1" to "歌手"),
+            MediaConvertMetadataField.ALBUM to ("TALB" to "专辑"),
+            MediaConvertMetadataField.GENRE to ("TCON" to "Custom genre"),
+            MediaConvertMetadataField.YEAR to ("TDRC" to "2026"),
+            MediaConvertMetadataField.ALBUM_ARTIST to ("TPE2" to "专辑艺术家"),
+            MediaConvertMetadataField.COMPOSER to ("TCOM" to "作曲"),
+            MediaConvertMetadataField.TRACK_NUMBER to ("TRCK" to "03/12"),
+            MediaConvertMetadataField.DISC_NUMBER to ("TPOS" to "01/02"),
+            MediaConvertMetadataField.COMMENT to ("COMM" to "第一行\n第二行"),
+            MediaConvertMetadataField.LYRICIST to ("TEXT" to "作词"),
+            MediaConvertMetadataField.COPYRIGHT to ("TCOP" to "版权所有"),
+            MediaConvertMetadataField.LANGUAGE to ("TLAN" to "zho")
+        )
+        val metadata = values.entries.fold(MediaConvertMetadata()) { value, (field, tag) -> value.withValue(field, tag.second) }
+        MediaConvertId3Lyrics.editAacMetadata(file, metadata)
+        val bytes = file.readBytes()
+        val tag = decodeTag(bytes)
+        assertEquals(4, tag.version)
+        assertArrayEquals(audio, bytes.copyOfRange(tag.end, bytes.size))
+        preserved.forEach { expected -> assertFrameEquals(expected, tag.frames.first { it.id == expected.id && it.body.contentEquals(expected.body) }) }
+        for ((_, idAndText) in values) {
+            val (id, text) = idAndText
+            val frame = tag.frames.single { it.id == id }
+            val textOffset = if (id == "COMM") 8 else 1
+            assertEquals(id, text, String(frame.body, textOffset, frame.body.size - textOffset, Charsets.UTF_16))
+        }
+
+        val clear = values.keys.fold(MediaConvertMetadata()) { value, field -> value.withValue(field, "") }
+        MediaConvertId3Lyrics.editAacMetadata(file, clear)
+        val cleared = decodeTag(file.readBytes())
+        assertEquals(preserved.size, cleared.frames.size)
+        preserved.zip(cleared.frames).forEach { (expected, actual) -> assertFrameEquals(expected, actual) }
+        assertArrayEquals(audio, file.readBytes().copyOfRange(cleared.end, file.length().toInt()))
+    }
+
+    @Test fun aacArtworkUpdatesRetainBackCoverAndCanRemoveAllArtwork() {
+        val audio = byteArrayOf(0xff.toByte(), 0xf1.toByte(), 1, 2, 3)
+        val front = picture(3, byteArrayOf(1, 2, 3))
+        val back = picture(4, byteArrayOf(4, 5, 6))
+        val file = newFile("art.aac", tagBytes(3, listOf(front, back)) + audio)
+        val cover = newFile("new-cover.jpg", byteArrayOf(0xff.toByte(), 0xd8.toByte(), 8, 7, 6, 5))
+        MediaConvertId3Lyrics.editAacMetadata(file,
+            MediaConvertMetadata(cover = MediaConvertCoverMode.CUSTOM, coverPath = cover.path))
+        var result = decodeTag(file.readBytes())
+        assertEquals(2, result.frames.size)
+        assertFrameEquals(back, result.frames[0])
+        assertFrameEquals(picture(3, cover.readBytes()), result.frames[1])
+        assertArrayEquals(audio, file.readBytes().copyOfRange(result.end, file.length().toInt()))
+        MediaConvertId3Lyrics.editAacMetadata(file, MediaConvertMetadata(cover = MediaConvertCoverMode.NONE))
+        result = decodeTag(file.readBytes())
+        assertTrue(result.frames.isEmpty())
+        assertArrayEquals(audio, file.readBytes().copyOfRange(result.end, file.length().toInt()))
+    }
+
+    @Test fun aacGenericCommentEditKeepsNamedCommentsAndUnsupportedInputIsSafe() {
+        val named = RawFrame("COMM", byteArrayOf(0, 0), byteArrayOf(0) + "undiTunNORM\u0000private value".toByteArray())
+        val old = RawFrame("COMM", byteArrayOf(0, 0), byteArrayOf(0) + "und\u0000Old comment".toByteArray())
+        val file = newFile("comments.aac", tagBytes(3, listOf(named, old)) + byteArrayOf(1, 2))
+        MediaConvertId3Lyrics.editAacMetadata(file, MediaConvertMetadata().withValue(MediaConvertMetadataField.COMMENT, ""))
+        assertFrameEquals(named, decodeTag(file.readBytes()).frames.single())
+
+        val unsupported = tagBytes(3, emptyList()).also { it[5] = 0x80.toByte() } + byteArrayOf(1, 2)
+        val invalid = newFile("unsupported.aac", unsupported)
+        expectRejected { MediaConvertId3Lyrics.editAacMetadata(invalid,
+            MediaConvertMetadata().withValue(MediaConvertMetadataField.TITLE, "new")) }
+        assertArrayEquals(unsupported, invalid.readBytes())
+    }
+
     @Test fun v24SyncsafeFramesAndFooterAreReadWithoutChangingFrameEncoding() {
         val title = RawFrame("TIT2", byteArrayOf(0x10, 0x02), byteArrayOf(3) + "Title ".repeat(40).toByteArray())
         val audio = byteArrayOf(11, 12, 13, 14)
@@ -284,6 +364,9 @@ class MediaConvertId3LyricsTest {
     }
 
     private fun oldLyric(id: String): RawFrame = RawFrame(id, byteArrayOf(0, 0), "old lyric bytes".toByteArray())
+
+    private fun picture(type: Int, data: ByteArray) = RawFrame("APIC", byteArrayOf(0, 0),
+        byteArrayOf(0) + "image/jpeg".toByteArray() + byteArrayOf(0, type.toByte(), 0) + data)
 
     private fun tagBytes(
         version: Int,

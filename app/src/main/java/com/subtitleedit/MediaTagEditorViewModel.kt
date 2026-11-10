@@ -63,6 +63,9 @@ internal class MediaTagEditorViewModel(application: Application) :
         val covers: List<MediaTagCover>,
         val size: Long,
         val modified: Long,
+        val nativeAudio: Boolean = false,
+        val nativeCoverCount: Int = 0,
+        val nativeCoverSupported: Boolean = false,
         val requiresReload: Boolean = false
     )
 
@@ -87,8 +90,10 @@ internal class MediaTagEditorViewModel(application: Application) :
             setState {
                 copy(selection = selection,
                     metadata = probed.singleOrNull()?.metadata ?: MediaConvertMetadata(),
-                    coverSupported = sources.isNotEmpty() && sources.all { MediaTagEditorCommand.supportsCover(it.muxer) },
-                    hasSourceCover = sources.any { it.covers.isNotEmpty() })
+                    coverSupported = sources.isNotEmpty() && sources.all {
+                        if (it.nativeAudio) it.nativeCoverSupported else MediaTagEditorCommand.supportsCover(it.muxer)
+                    },
+                    hasSourceCover = sources.any { it.nativeCoverCount > 0 || it.covers.isNotEmpty() })
             }
             initialCoverPath?.let { selectCover(Uri.fromFile(File(it))) }
         }
@@ -146,6 +151,28 @@ internal class MediaTagEditorViewModel(application: Application) :
                     } else {
                         if (!cache.isDirectory && !cache.mkdirs()) error(string(R.string.media_convert_create_output_directory_failed))
                         for ((sourceIndex, source) in selectedSources.withIndex()) {
+                            if (source.nativeAudio) {
+                                try {
+                                    verifySourceUnchanged(source, "cover export")
+                                    MediaTagAudioRepository.pictures(source.file).forEachIndexed { coverIndex, picture ->
+                                        currentCoroutineContext().ensureActive()
+                                        val extension = MediaTagAudioRepository.extension(picture)
+                                        val extracted = File(cache, "$sourceIndex-$coverIndex.$extension")
+                                        try {
+                                            extracted.writeBytes(picture.data)
+                                            val suffix = if (coverIndex == 0) "" else "_${coverIndex + 1}"
+                                            MediaTagCoverExport.copyUnique(extracted, target,
+                                                "${source.file.nameWithoutExtension}_cover$suffix.$extension")
+                                            exported++
+                                        } finally { extracted.delete() }
+                                    }
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (error: Exception) {
+                                    failures += "${source.file.name}：${error.message.orEmpty()}"
+                                }
+                                continue
+                            }
                             for ((coverIndex, cover) in source.covers.withIndex()) {
                                 currentCoroutineContext().ensureActive()
                                 val extracted = File(cache, "$sourceIndex-$coverIndex.${cover.extension}")
@@ -239,6 +266,10 @@ internal class MediaTagEditorViewModel(application: Application) :
                 }
                 val result = string(R.string.media_tag_editor_result, saved, failures.size)
                 if (failures.isEmpty()) {
+                    val readback = sources.singleOrNull()?.metadata ?: MediaConvertMetadata()
+                    coverUri = null
+                    setState { copy(metadata = readback, coverFileName = null,
+                        hasSourceCover = sources.any { it.nativeCoverCount > 0 || it.covers.isNotEmpty() }, message = "") }
                     toast(result)
                     sendEvent(Unit)
                 } else {
@@ -274,11 +305,64 @@ internal class MediaTagEditorViewModel(application: Application) :
             staging.delete()
             throw error
         }
-        var sourceDescriptor: ParcelFileDescriptor? = null
+        try {
+            if (source.nativeAudio) {
+                copyForPublication(source.file, prepared)
+                currentCoroutineContext().ensureActive()
+                MediaTagAudioRepository.write(prepared, metadata)
+            } else {
+                remuxToPrepared(source, prepared, metadata, isAudio, index, total)
+            }
+            val rewritten = probe(prepared)
+            val fields = if (isAudio) MediaConvertMetadata.audioFields else MediaConvertMetadata.videoFields
+            check(fields.filter { it in metadata.editedFields }.all {
+                MediaTagAudioMetadata.matches(it, metadata.value(it), rewritten.metadata.value(it))
+            }) { string(R.string.media_tag_editor_verify_failed) }
+            fun mediaStreams(value: Source) = value.streams.filter {
+                it.type in setOf("audio", "video", "subtitle") && !it.attachedPicture
+            }.groupingBy { it.type }.eachCount()
+            check(mediaStreams(rewritten) == mediaStreams(source)) {
+                string(R.string.media_convert_ffmpeg_invalid_output)
+            }
+            // Finish native writes and atomic ID3 rewrites in private storage. Publishing only
+            // finalized bytes avoids stale public-storage inodes after multiple replacements.
+            copyForPublication(prepared, staging)
+            verifySourceUnchanged(source, "before commit")
+            currentCoroutineContext().ensureActive()
+            Os.rename(staging.absolutePath, source.file.absolutePath)
+            onCommitted()
+            // Shared-storage providers may normalize timestamps when the staging path is renamed.
+            // The next edit must compare the published file with its own attributes, not the old path.
+            val committed = try {
+                probe(source.file, publishedSize = rewritten.size)
+            } catch (error: Exception) {
+                // The validated file has already been published. Refresh failure must not turn
+                // a successful save into a reported failure or encourage an unnecessary retry.
+                Log.w("MediaTagEditor", "Unable to refresh the published file", error)
+                rewritten.copy(file = source.file, requiresReload = true)
+            }
+            sources = sources.map { if (it.file == source.file) committed else it }
+            scanSavedFile(source.file)
+        } finally {
+            staging.delete()
+            prepared.delete()
+        }
+    }
+
+    /** Retain the existing stream-copy path for video and audio containers TagLib cannot open. */
+    private suspend fun remuxToPrepared(source: Source, prepared: File, metadata: MediaConvertMetadata,
+                                       isAudio: Boolean, index: Int, total: Int) {
+        if (isAudio && source.muxer == "adts") {
+            // ADTS stores tags in a leading ID3 block. Remuxing loses named USLT/SYLT and
+            // private frames; change that block on the private copy and retain AAC bytes.
+            copyForPublication(source.file, prepared)
+            MediaConvertId3Lyrics.editAacMetadata(prepared, metadata)
+            return
+        }
+        val descriptor = ParcelFileDescriptor.open(source.file, ParcelFileDescriptor.MODE_READ_ONLY)
         var running: FFmpegSession? = null
         try {
-            sourceDescriptor = ParcelFileDescriptor.open(source.file, ParcelFileDescriptor.MODE_READ_ONLY)
-            val arguments = MediaTagEditorCommand.build("/proc/self/fd/${sourceDescriptor.fd}", prepared.absolutePath,
+            val arguments = MediaTagEditorCommand.build("/proc/self/fd/${descriptor.fd}", prepared.absolutePath,
                 source.muxer, source.streams, metadata, isAudio)
             val lastProgress = AtomicLong(SystemClock.elapsedRealtime())
             running = withContext(NonCancellable) {
@@ -303,60 +387,33 @@ internal class MediaTagEditorViewModel(application: Application) :
             check(ReturnCode.isSuccess(running.getReturnCode()) && prepared.length() > 0L) {
                 running.getAllLogsAsString().takeLast(2000).ifBlank { string(R.string.media_tag_editor_failed) }
             }
-            sourceDescriptor.close()
-            sourceDescriptor = null
             if (source.muxer == "wav") {
                 MediaConvertId3Lyrics.restoreWavMetadata(source.file, prepared, metadata, source.metadata)
             }
-            val rewritten = probe(prepared)
-            val fields = if (isAudio) MediaConvertMetadata.audioFields else MediaConvertMetadata.videoFields
-            // Readers normalize numeric genres and dates; compare only literal text fields.
-            check(fields.filter { it in metadata.editedFields && it !in setOf(
-                MediaConvertMetadataField.GENRE, MediaConvertMetadataField.YEAR) }.all {
-                rewritten.metadata.value(it) == metadata.value(it).trim()
-            }) { string(R.string.media_tag_editor_verify_failed) }
-            fun mediaStreams(value: Source) = value.streams.filter {
-                it.type in setOf("audio", "video", "subtitle") && !it.attachedPicture
-            }.groupingBy { it.type }.eachCount()
-            check(mediaStreams(rewritten) == mediaStreams(source)) {
-                string(R.string.media_convert_ffmpeg_invalid_output)
-            }
-            // Finish native writes and atomic ID3 rewrites in private storage. Publishing only
-            // finalized bytes avoids stale public-storage inodes after multiple replacements.
-            prepared.inputStream().use { input ->
-                FileOutputStream(staging).use { output ->
-                    input.copyTo(output)
-                    output.fd.sync()
-                }
-            }
-            verifySourceUnchanged(source, "before commit")
-            currentCoroutineContext().ensureActive()
-            Os.rename(staging.absolutePath, source.file.absolutePath)
-            onCommitted()
-            // Shared-storage providers may normalize timestamps when the staging path is renamed.
-            // The next edit must compare the published file with its own attributes, not the old path.
-            val committed = try {
-                probe(source.file, publishedSize = rewritten.size)
-            } catch (error: Exception) {
-                // The validated file has already been published. Refresh failure must not turn
-                // a successful save into a reported failure or encourage an unnecessary retry.
-                Log.w("MediaTagEditor", "Unable to refresh the published file", error)
-                rewritten.copy(file = source.file, requiresReload = true)
-            }
-            sources = sources.map { if (it.file == source.file) committed else it }
-            scanSavedFile(source.file)
         } finally {
-            // Wait for cancellation to release the file before removing an unfinished output.
             withContext(NonCancellable) {
                 running?.let { active ->
                     if (active.getState().name !in setOf("COMPLETED", "FAILED")) active.cancel()
                     while (active.getState().name !in setOf("COMPLETED", "FAILED")) delay(100)
                 }
-                staging.delete()
-                prepared.delete()
-                sourceDescriptor?.close()
+                descriptor.close()
             }
             session = null
+        }
+    }
+
+    private suspend fun copyForPublication(source: File, destination: File) {
+        source.inputStream().use { input ->
+            FileOutputStream(destination).use { output ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    output.write(buffer, 0, count)
+                }
+                output.fd.sync()
+            }
         }
     }
 
@@ -425,13 +482,19 @@ internal class MediaTagEditorViewModel(application: Application) :
         }
         val primaryAudio = info.getStreams().firstOrNull { it.getType() == "audio" }
         val tags = listOfNotNull(info.getTags(), primaryVideo?.getTags(), primaryAudio?.getTags())
-        val metadata = MediaConvertMetadata.fromTags { key ->
+        val fallbackMetadata = MediaConvertMetadata.fromTags { key ->
             tags.firstNotNullOfOrNull { tag ->
                 tag.keys().asSequence().firstOrNull { it.equals(key, ignoreCase = true) }
                     ?.let { tag.optString(it).takeIf { value -> value.isNotBlank() && !value.equals("null", true) } }
             }
         }
+        // Read and write supported audio tags through the same library. Android/FFprobe may
+        // expose only a subset of WAV/ID3 fields or report conflicting aliases differently.
         val formats = info.getFormat().orEmpty().split(',')
+        // ADTS payload bytes can resemble MPEG headers to TagLib's quick detector.
+        // Route it by the probed container and preserve its ID3 frames with our AAC writer.
+        val native = if (audio && !video && "aac" !in formats) MediaTagAudioRepository.read(file) else null
+        val metadata = native?.metadata ?: fallbackMetadata
         val extension = file.extension.lowercase(Locale.ROOT)
         val muxer = when {
             "mp4" in formats || "mov" in formats -> when (extension) {
@@ -442,6 +505,7 @@ internal class MediaTagEditorViewModel(application: Application) :
                 else -> "mp4"
             }
             "matroska" in formats -> if (extension == "webm") "webm" else "matroska"
+            "aac" in formats -> "adts"
             else -> formats.first()
         }
         val (finalSize, finalModified) = fileAttributes(file)
@@ -458,7 +522,9 @@ internal class MediaTagEditorViewModel(application: Application) :
         }
         return Source(file, muxer, streams, MediaConvertSource(video, info.getDuration()?.toDoubleOrNull(), hasAudio = audio),
             metadata, covers, if (publishedSize == null) size else finalSize,
-            if (publishedSize == null) modified else finalModified)
+            if (publishedSize == null) modified else finalModified,
+            nativeAudio = native != null, nativeCoverCount = native?.pictureCount ?: 0,
+            nativeCoverSupported = native?.supportsCover == true)
     }
 
     override fun onCleared() {

@@ -41,7 +41,8 @@ object FileUtils {
     val SUBTITLE_EXTENSIONS = setOf("srt", "lrc", "ass", "ssa", "sub", "txt", "vtt")
     
     // 音频文件扩展名
-    val AUDIO_EXTENSIONS = setOf("mp3", "wav", "flac", "aac", "ogg", "m4a", "wma", "ape")
+    val AUDIO_EXTENSIONS = setOf("mp3", "wav", "flac", "aac", "ogg", "oga", "opus",
+        "m4a", "m4b", "wma", "ape", "wv", "aif", "aiff")
     
     // 常见的编码方式 - 使用带显示名称的数据类
     data class EncodingInfo(

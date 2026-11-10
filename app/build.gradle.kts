@@ -82,6 +82,18 @@ val generateArchiveLicenseAssets by tasks.registering(Sync::class) {
     from(rootProject.file("native/mpv/mpv-android-LICENSE.txt")) {
         into("licenses")
     }
+    from("src/main/cpp/third_party/taglib/COPYING.LGPL") {
+        into("licenses")
+        rename { "TagLib-COPYING.LGPL.txt" }
+    }
+    from("src/main/cpp/third_party/taglib/COPYING.MPL") {
+        into("licenses")
+        rename { "TagLib-COPYING.MPL.txt" }
+    }
+    from("src/main/cpp/third_party/taglib/3rdparty/utfcpp/LICENSE") {
+        into("licenses")
+        rename { "utfcpp-LICENSE.txt" }
+    }
     into(archiveLicenseAssetsDir)
 }
 
@@ -107,7 +119,7 @@ android {
 
         externalNativeBuild {
             cmake {
-                targets("subtitleedit_7zip", "subtitleedit_llama", "subtitleedit_mpv_probe")
+                targets("subtitleedit_7zip", "subtitleedit_llama", "subtitleedit_mpv_probe", "subtitleedit_tags")
                 // Keep native inference optimized even when the Android
                 // debug variant is used for UI iteration. LMPlayground uses
                 // the same policy; an unoptimized ggml build can be an order

@@ -72,4 +72,61 @@ class MediaConvertMetadataTest {
         assertTrue("date=2026" in metadata.arguments(true))
         assertFalse("author=Writer" in metadata.arguments(true))
     }
+
+    @Test
+    fun readsTagLibAndContainerAliasesWithoutLosingTrackTotalsOrDates() {
+        val values = mapOf(
+            "ALBUMARTIST" to "专辑艺术家", "COMPOSER" to "作曲者", "TRACKNUMBER" to "3/12",
+            "DISCNUMBER" to "2/3", "COMMENT" to "第一行\n第二行", "LYRICIST" to "作词者",
+            "COPYRIGHT" to "© 2026", "LANGUAGE" to "jpn", "DATE" to "2026-08-14"
+        )
+        val metadata = MediaConvertMetadata.fromTags(values::get)
+        assertEquals("专辑艺术家", metadata.albumArtist)
+        assertEquals("作曲者", metadata.composer)
+        assertEquals("3/12", metadata.trackNumber)
+        assertEquals("2/3", metadata.discNumber)
+        assertEquals("第一行\n第二行", metadata.comment)
+        assertEquals("作词者", metadata.lyricist)
+        assertEquals("© 2026", metadata.copyright)
+        assertEquals("jpn", metadata.language)
+        assertEquals("2026-08-14", metadata.year)
+        assertTrue(metadata.editedFields.isEmpty())
+        assertTrue(metadata.arguments(true).isEmpty())
+    }
+
+    @Test
+    fun newAudioEditsLeaveUntouchedTagsAndVideoArgumentsAlone() {
+        val metadata = MediaConvertMetadata(title = "Original title", composer = "Untouched composer")
+            .withValue(MediaConvertMetadataField.ALBUM_ARTIST, "New album artist")
+            .withValue(MediaConvertMetadataField.TRACK_NUMBER, "4/12")
+            .withValue(MediaConvertMetadataField.LANGUAGE, "")
+        assertEquals("Original title", metadata.title)
+        assertEquals("Untouched composer", metadata.composer)
+        assertEquals(setOf(MediaConvertMetadataField.ALBUM_ARTIST, MediaConvertMetadataField.TRACK_NUMBER,
+            MediaConvertMetadataField.LANGUAGE), metadata.editedFields)
+        assertEquals(listOf("-metadata", "album_artist=New album artist", "-metadata", "track=4/12",
+            "-metadata", "language="), metadata.arguments(true))
+        assertTrue(metadata.arguments().isEmpty())
+    }
+
+    @Test
+    fun commonAudioFieldsCanBeIndependentlyEditedOrCleared() {
+        val values = linkedMapOf(
+            MediaConvertMetadataField.ALBUM_ARTIST to "Album artist",
+            MediaConvertMetadataField.COMPOSER to "Composer",
+            MediaConvertMetadataField.TRACK_NUMBER to "3/12",
+            MediaConvertMetadataField.DISC_NUMBER to "2/3",
+            MediaConvertMetadataField.COMMENT to "A comment",
+            MediaConvertMetadataField.LYRICIST to "Lyricist",
+            MediaConvertMetadataField.COPYRIGHT to "Copyright",
+            MediaConvertMetadataField.LANGUAGE to "eng"
+        )
+        val metadata = values.entries.fold(MediaConvertMetadata()) { current, (field, value) -> current.withValue(field, value) }
+        for ((field, value) in values) assertEquals(field.name, value, metadata.value(field))
+        val cleared = metadata.withValue(MediaConvertMetadataField.COMPOSER, "")
+        assertEquals("", cleared.composer)
+        assertEquals("Album artist", cleared.albumArtist)
+        assertEquals("3/12", cleared.trackNumber)
+        assertTrue("composer=" in cleared.arguments(true))
+    }
 }
