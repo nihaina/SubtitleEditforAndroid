@@ -1,39 +1,50 @@
 package com.subtitleedit.feature.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppAlertDialog
-import com.subtitleedit.ui.components.AppChoiceTile
 import com.subtitleedit.ui.components.AppConflictDialog
-import com.subtitleedit.ui.components.AppOptionSelector
 import com.subtitleedit.ui.components.AppOption
-import com.subtitleedit.ui.components.AppPrimaryButton
-import com.subtitleedit.ui.components.AppSection
 import com.subtitleedit.ui.components.AppToolScaffold
+import com.subtitleedit.ui.settings.SettingsIconBox
+import com.subtitleedit.ui.settings.SettingsTileGroup
+import com.subtitleedit.ui.settings.SettingsTileRow
+import com.subtitleedit.ui.settings.SettingsTileSection
+import com.subtitleedit.ui.settings.SettingsTileSwitchRow
+import com.subtitleedit.ui.settings.settingsChipColor
+import com.subtitleedit.ui.settings.settingsPageBackground
+import com.subtitleedit.ui.settings.settingsPrimaryTextColor
+import com.subtitleedit.ui.settings.settingsSecondaryTextColor
 import com.subtitleedit.ui.theme.AppSpacing
 import com.subtitleedit.util.SubtitleParser
 
@@ -67,60 +78,64 @@ fun BatchConvertScreen(
     onOverwriteConflicts: () -> Unit,
     onRenameConflicts: () -> Unit
 ) {
+    val pageBackground = settingsPageBackground()
     AppToolScaffold(
         title = stringResource(R.string.batch_convert),
         onBack = onNavigateBack,
+        contentBackground = pageBackground,
+        topBarContainerColor = pageBackground,
+        topBarScrolledContainerColor = pageBackground,
         bottomBar = {
-            AppPrimaryButton(
-                text = stringResource(R.string.start_convert),
-                onClick = onStartConversion,
-                modifier = Modifier.padding(horizontal = AppSpacing.Page, vertical = AppSpacing.Inner)
-            )
+            Box(Modifier.background(pageBackground)) {
+                Button(
+                    onClick = onStartConversion,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = AppSpacing.Page, vertical = AppSpacing.Inner)
+                        .height(56.dp),
+                    shape = CircleShape
+                ) {
+                    Text(stringResource(R.string.start_convert), style = MaterialTheme.typography.labelLarge)
+                }
+            }
         }
     ) {
-        AppSection(title = stringResource(R.string.batch_convert_select_subtitle_files)) {
-            OutlinedButton(onClick = onSelectFiles) {
-                Text(stringResource(R.string.activity_tool_select_files))
-            }
-            Text(
-                text = if (files.isEmpty()) {
+        SettingsTileGroup {
+            SettingsTileRow(
+                title = stringResource(R.string.batch_convert_select_subtitle_files),
+                iconRes = R.drawable.ic_file_text,
+                value = if (files.isEmpty()) {
                     stringResource(R.string.activity_media_convert_text_03)
                 } else {
                     stringResource(R.string.batch_convert_selected_file_count, files.size)
                 },
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium
+                onClick = onSelectFiles
             )
-        }
-
-        AppSection(title = stringResource(R.string.activity_batch_convert_text_01)) {
-            AppOptionSelector(
+            BatchConvertFormatRow(
                 label = stringResource(R.string.target_format),
-                value = formats.firstOrNull { it.id == selectedFormat },
-                options = formats,
+                value = formats.firstOrNull { it.id == selectedFormat }?.label.orEmpty(),
+                formats = formats,
                 onSelected = onSelectFormat
             )
         }
 
-        AppSection(title = stringResource(R.string.activity_batch_convert_text_04)) {
+        SettingsTileSection(title = stringResource(R.string.activity_batch_convert_text_04)) {
             if (files.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 64.dp)
-                        .padding(vertical = AppSpacing.Inner),
+                        .heightIn(min = 64.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         stringResource(R.string.activity_media_convert_text_03),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = settingsSecondaryTextColor()
                     )
                 }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
-                    contentPadding = PaddingValues(vertical = 2.dp),
                     verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
                 ) {
                     items(files, key = { it.key }) { file ->
@@ -130,13 +145,22 @@ fun BatchConvertScreen(
             }
         }
 
-        ToolOutputDirectorySection(
-            outputDirectory = outputDirectoryLabel,
-            saveToSourceDirectory = saveToSourceDirectory,
-            enabled = dialog != BatchConvertDialogUi.Conflict,
-            onSelectOutputDirectory = onSelectOutputDirectory,
-            onSaveToSourceDirectoryChange = onSaveToSourceDirectoryChange
-        )
+        SettingsTileGroup {
+            SettingsTileRow(
+                title = stringResource(R.string.activity_tool_output_directory),
+                iconRes = R.drawable.ic_folder,
+                value = outputDirectoryLabel,
+                valueBelow = true,
+                enabled = dialog != BatchConvertDialogUi.Conflict && !saveToSourceDirectory,
+                onClick = onSelectOutputDirectory
+            )
+            SettingsTileSwitchRow(
+                title = stringResource(R.string.save_to_source_folder),
+                checked = saveToSourceDirectory,
+                enabled = dialog != BatchConvertDialogUi.Conflict,
+                onCheckedChange = onSaveToSourceDirectoryChange
+            )
+        }
     }
 
     when (dialog) {
@@ -157,38 +181,57 @@ fun BatchConvertScreen(
 }
 
 @Composable
+private fun BatchConvertFormatRow(
+    label: String,
+    value: String,
+    formats: List<AppOption<SubtitleParser.SubtitleFormat>>,
+    onSelected: (SubtitleParser.SubtitleFormat) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        SettingsTileRow(
+            title = label,
+            iconRes = R.drawable.ic_subtitle_format,
+            value = value,
+            onClick = { expanded = true }
+        )
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            formats.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option.label) },
+                    onClick = {
+                        expanded = false
+                        onSelected(option.id)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun BatchConvertFileRow(file: BatchConvertFileUi, onRemove: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp),
+            .clip(MaterialTheme.shapes.large)
+            .background(settingsChipColor())
+            .padding(start = 12.dp, top = 4.dp, end = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .padding(4.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_file),
-                contentDescription = stringResource(R.string.file_name),
-                modifier = Modifier.size(24.dp),
-                tint = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-        }
-        Column(modifier = Modifier.weight(1f).padding(start = AppSpacing.Inner)) {
+        SettingsIconBox(R.drawable.ic_file_text)
+        Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
             Text(
                 text = file.fileName,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = settingsPrimaryTextColor(),
                 maxLines = 1,
                 overflow = TextOverflow.MiddleEllipsis
             )
             Text(
                 text = file.fileSizeLabel,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = settingsSecondaryTextColor(),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

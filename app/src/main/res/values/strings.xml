@@ -249,7 +249,7 @@
     <string name="activity_batch_convert_text_02">选择输出目录</string>
     <string name="activity_batch_convert_text_04">待转换文件</string>
     <string name="activity_batch_convert_text_05">添加文件</string>
-    <string name="batch_convert_select_subtitle_files">选择字幕文件（可多选）</string>
+    <string name="batch_convert_select_subtitle_files">选择字幕文件</string>
     <string name="batch_convert_selected_file_count">已选择 %1$d 个字幕文件</string>
     <string name="activity_editor_hint_01">替换为</string>
     <string name="activity_editor_text_01">替换</string>
