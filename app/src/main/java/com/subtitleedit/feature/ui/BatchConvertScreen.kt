@@ -36,15 +36,12 @@ import com.subtitleedit.ui.components.AppAlertDialog
 import com.subtitleedit.ui.components.AppConflictDialog
 import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.components.AppToolScaffold
+import com.subtitleedit.ui.settings.MaterialSettingsTileTheme
 import com.subtitleedit.ui.settings.SettingsIconBox
 import com.subtitleedit.ui.settings.SettingsTileGroup
 import com.subtitleedit.ui.settings.SettingsTileRow
 import com.subtitleedit.ui.settings.SettingsTileSection
 import com.subtitleedit.ui.settings.SettingsTileSwitchRow
-import com.subtitleedit.ui.settings.settingsChipColor
-import com.subtitleedit.ui.settings.settingsPageBackground
-import com.subtitleedit.ui.settings.settingsPrimaryTextColor
-import com.subtitleedit.ui.settings.settingsSecondaryTextColor
 import com.subtitleedit.ui.theme.AppSpacing
 import com.subtitleedit.util.SubtitleParser
 
@@ -78,88 +75,90 @@ fun BatchConvertScreen(
     onOverwriteConflicts: () -> Unit,
     onRenameConflicts: () -> Unit
 ) {
-    val pageBackground = settingsPageBackground()
-    AppToolScaffold(
-        title = stringResource(R.string.batch_convert),
-        onBack = onNavigateBack,
-        contentBackground = pageBackground,
-        topBarContainerColor = pageBackground,
-        topBarScrolledContainerColor = pageBackground,
-        bottomBar = {
-            Box(Modifier.background(pageBackground)) {
-                Button(
-                    onClick = onStartConversion,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = AppSpacing.Page, vertical = AppSpacing.Inner)
-                        .height(56.dp),
-                    shape = CircleShape
-                ) {
-                    Text(stringResource(R.string.start_convert), style = MaterialTheme.typography.labelLarge)
-                }
-            }
-        }
-    ) {
-        SettingsTileGroup {
-            SettingsTileRow(
-                title = stringResource(R.string.batch_convert_select_subtitle_files),
-                iconRes = R.drawable.ic_file_text,
-                value = if (files.isEmpty()) {
-                    stringResource(R.string.activity_media_convert_text_03)
-                } else {
-                    stringResource(R.string.batch_convert_selected_file_count, files.size)
-                },
-                onClick = onSelectFiles
-            )
-            BatchConvertFormatRow(
-                label = stringResource(R.string.target_format),
-                value = formats.firstOrNull { it.id == selectedFormat }?.label.orEmpty(),
-                formats = formats,
-                onSelected = onSelectFormat
-            )
-        }
-
-        SettingsTileSection(title = stringResource(R.string.activity_batch_convert_text_04)) {
-            if (files.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 64.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        stringResource(R.string.activity_media_convert_text_03),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = settingsSecondaryTextColor()
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
-                    verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
-                ) {
-                    items(files, key = { it.key }) { file ->
-                        BatchConvertFileRow(file = file, onRemove = { onRemoveFile(file.key) })
+    val pageBackground = MaterialTheme.colorScheme.background
+    MaterialSettingsTileTheme {
+        AppToolScaffold(
+            title = stringResource(R.string.batch_convert),
+            onBack = onNavigateBack,
+            contentBackground = pageBackground,
+            topBarContainerColor = pageBackground,
+            topBarScrolledContainerColor = pageBackground,
+            bottomBar = {
+                Box(Modifier.background(pageBackground)) {
+                    Button(
+                        onClick = onStartConversion,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = AppSpacing.Page, vertical = AppSpacing.Inner)
+                            .height(56.dp),
+                        shape = CircleShape
+                    ) {
+                        Text(stringResource(R.string.start_convert), style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
-        }
+        ) {
+            SettingsTileGroup {
+                SettingsTileRow(
+                    title = stringResource(R.string.batch_convert_select_subtitle_files),
+                    iconRes = R.drawable.ic_file_text,
+                    value = if (files.isEmpty()) {
+                        stringResource(R.string.activity_media_convert_text_03)
+                    } else {
+                        stringResource(R.string.batch_convert_selected_file_count, files.size)
+                    },
+                    onClick = onSelectFiles
+                )
+                BatchConvertFormatRow(
+                    label = stringResource(R.string.target_format),
+                    value = formats.firstOrNull { it.id == selectedFormat }?.label.orEmpty(),
+                    formats = formats,
+                    onSelected = onSelectFormat
+                )
+            }
 
-        SettingsTileGroup {
-            SettingsTileRow(
-                title = stringResource(R.string.activity_tool_output_directory),
-                iconRes = R.drawable.ic_folder,
-                value = outputDirectoryLabel,
-                valueBelow = true,
-                enabled = dialog != BatchConvertDialogUi.Conflict && !saveToSourceDirectory,
-                onClick = onSelectOutputDirectory
-            )
-            SettingsTileSwitchRow(
-                title = stringResource(R.string.save_to_source_folder),
-                checked = saveToSourceDirectory,
-                enabled = dialog != BatchConvertDialogUi.Conflict,
-                onCheckedChange = onSaveToSourceDirectoryChange
-            )
+            SettingsTileSection(title = stringResource(R.string.activity_batch_convert_text_04)) {
+                if (files.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 64.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            stringResource(R.string.activity_media_convert_text_03),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
+                        verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+                    ) {
+                        items(files, key = { it.key }) { file ->
+                            BatchConvertFileRow(file = file, onRemove = { onRemoveFile(file.key) })
+                        }
+                    }
+                }
+            }
+
+            SettingsTileGroup {
+                SettingsTileRow(
+                    title = stringResource(R.string.activity_tool_output_directory),
+                    iconRes = R.drawable.ic_folder,
+                    value = outputDirectoryLabel,
+                    valueBelow = true,
+                    enabled = dialog != BatchConvertDialogUi.Conflict && !saveToSourceDirectory,
+                    onClick = onSelectOutputDirectory
+                )
+                SettingsTileSwitchRow(
+                    title = stringResource(R.string.save_to_source_folder),
+                    checked = saveToSourceDirectory,
+                    enabled = dialog != BatchConvertDialogUi.Conflict,
+                    onCheckedChange = onSaveToSourceDirectoryChange
+                )
+            }
         }
     }
 
@@ -215,7 +214,7 @@ private fun BatchConvertFileRow(file: BatchConvertFileUi, onRemove: () -> Unit) 
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.large)
-            .background(settingsChipColor())
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .padding(start = 12.dp, top = 4.dp, end = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -224,14 +223,14 @@ private fun BatchConvertFileRow(file: BatchConvertFileUi, onRemove: () -> Unit) 
             Text(
                 text = file.fileName,
                 style = MaterialTheme.typography.bodyMedium,
-                color = settingsPrimaryTextColor(),
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.MiddleEllipsis
             )
             Text(
                 text = file.fileSizeLabel,
                 style = MaterialTheme.typography.bodySmall,
-                color = settingsSecondaryTextColor(),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

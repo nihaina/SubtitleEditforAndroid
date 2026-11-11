@@ -32,8 +32,10 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldColors
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -48,6 +50,15 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
+import com.subtitleedit.ui.theme.cardContainer
+
+private val LocalUseMaterialTileColors = staticCompositionLocalOf { false }
+
+/** Use the app's Material colours while keeping settings tile layouts and interactions. */
+@Composable
+internal fun MaterialSettingsTileTheme(content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalUseMaterialTileColors provides true, content = content)
+}
 
 /**
  * Visual tokens of the settings page, shared with the model import / management pages so that all
@@ -58,28 +69,52 @@ internal fun settingsLightPalette(): Boolean = MaterialTheme.colorScheme.surface
 
 @Composable
 internal fun settingsTileColor(): Color =
-    if (settingsLightPalette()) Color(0xFFFAF7FE) else MaterialTheme.colorScheme.surfaceContainerHigh
+    when {
+        LocalUseMaterialTileColors.current -> MaterialTheme.colorScheme.cardContainer
+        settingsLightPalette() -> Color(0xFFFAF7FE)
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
 
 @Composable
 internal fun settingsPrimaryTextColor(): Color =
-    if (settingsLightPalette()) Color(0xFF303139) else MaterialTheme.colorScheme.onSurface
+    if (LocalUseMaterialTileColors.current || !settingsLightPalette()) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        Color(0xFF303139)
+    }
 
 @Composable
 internal fun settingsSecondaryTextColor(): Color =
-    if (settingsLightPalette()) Color(0xFF68758A) else MaterialTheme.colorScheme.onSurfaceVariant
+    if (LocalUseMaterialTileColors.current || !settingsLightPalette()) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        Color(0xFF68758A)
+    }
 
 @Composable
 internal fun settingsIconBoxColor(): Color =
-    if (settingsLightPalette()) Color(0xFFE2EAFA) else MaterialTheme.colorScheme.primaryContainer
+    if (LocalUseMaterialTileColors.current || !settingsLightPalette()) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        Color(0xFFE2EAFA)
+    }
 
 @Composable
 internal fun settingsIconTint(): Color =
-    if (settingsLightPalette()) Color(0xFF303139) else MaterialTheme.colorScheme.onPrimaryContainer
+    if (LocalUseMaterialTileColors.current || !settingsLightPalette()) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        Color(0xFF303139)
+    }
 
 /** Background of value capsules and inset value fields placed on a tile. */
 @Composable
 internal fun settingsChipColor(): Color =
-    if (settingsLightPalette()) Color(0xFFEDF0F7) else MaterialTheme.colorScheme.surfaceContainerHighest
+    if (LocalUseMaterialTileColors.current || !settingsLightPalette()) {
+        MaterialTheme.colorScheme.surfaceContainerHighest
+    } else {
+        Color(0xFFEDF0F7)
+    }
 
 /** Background of the selected segment in a small two-option switch (CPU / NPU, TDT / CTC). */
 @Composable

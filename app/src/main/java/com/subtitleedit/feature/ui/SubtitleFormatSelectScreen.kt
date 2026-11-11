@@ -4,14 +4,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppCard
 import com.subtitleedit.ui.components.AppPrimaryButton
 import com.subtitleedit.ui.components.AppSection
 import com.subtitleedit.ui.components.AppToolScaffold
@@ -40,18 +43,24 @@ fun SubtitleFormatSelectScreen(
             title = stringResource(R.string.activity_subtitle_format_select_text_01),
             subtitle = stringResource(R.string.activity_subtitle_format_select_text_02)
         ) {
-            OutlinedButton(onClick = onSelectFile, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.activity_subtitle_format_select_text_03))
-            }
-            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Icon(painterResource(R.drawable.ic_file), contentDescription = null, tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(
-                    selectedFileName ?: stringResource(R.string.activity_subtitle_format_select_text_04),
-                    modifier = Modifier.weight(1f),
-                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.MiddleEllipsis
-                )
+            AppCard(onClick = onSelectFile, modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_file),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        selectedFileName ?: stringResource(R.string.activity_subtitle_format_select_text_04),
+                        modifier = Modifier.weight(1f).padding(start = 16.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.MiddleEllipsis
+                    )
+                }
             }
         }
     }
