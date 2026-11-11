@@ -151,7 +151,8 @@ internal fun MediaConvertScreen(
     sourceEmbeddedLyrics: List<MediaConvertEmbeddedLyric> = emptyList(),
     sourceLyricsProbeFailed: Boolean = false,
     sourceIsAudio: Boolean = false,
-    onViewEmbeddedLyric: (Int) -> Unit = {}
+    onViewEmbeddedLyric: (Int) -> Unit = {},
+    showTopBar: Boolean = true
 ) {
     var showResolutionDialog by rememberSaveable { mutableStateOf(false) }
     var showBitrateDialog by rememberSaveable { mutableStateOf(false) }
@@ -166,6 +167,7 @@ internal fun MediaConvertScreen(
     AppToolScaffold(
         title = stringResource(R.string.media_convert_title),
         onBack = onBack,
+        showTopBar = showTopBar,
         imePadding = true,
         bottomBar = {
             Column(

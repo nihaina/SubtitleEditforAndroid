@@ -34,6 +34,7 @@ import com.subtitleedit.feature.ui.MainActivityScreen
 import com.subtitleedit.feature.ui.MainActivityScreenState
 import com.subtitleedit.feature.ui.MainDirectoryScrollRequest
 import com.subtitleedit.feature.ui.MainFileOperationDialogs
+import com.subtitleedit.feature.ui.MediaProcessingChooserDialog
 import com.subtitleedit.feature.ui.SubtitleConversionDialogUi
 import com.subtitleedit.feature.ui.SubtitleConversionResultUi
 import com.subtitleedit.repository.ArchiveRepository
@@ -139,6 +140,7 @@ class MainActivity : AppComposeActivity() {
     private var subtitleConversionResult by mutableStateOf<SubtitleConversionResultUi?>(null)
     private var archiveCreationDialog by mutableStateOf<ArchiveCreationDialogUi?>(null)
     private var mainDialog by mutableStateOf<MainActivityDialogUi?>(null)
+    private var mediaProcessingSelection by mutableStateOf<MediaProcessingSelection?>(null)
     private var pendingSubtitleConversionSources: List<SubtitleConversionSource>? = null
     private var pendingArchiveDraft: PendingArchiveDraft? = null
     private var pendingRenameFile: File? = null
@@ -344,6 +346,14 @@ class MainActivity : AppComposeActivity() {
                         onCacheItemSelected = ::confirmSelectedMediaCacheClear,
                         onCacheClearConfirm = ::clearSelectedMediaCache
                 )
+                mediaProcessingSelection?.let { selection ->
+                    MediaProcessingChooserDialog(
+                        canConvert = selection.supports(MediaProcessingPage.CONVERT),
+                        canMux = selection.supports(MediaProcessingPage.MUX),
+                        onDismiss = { mediaProcessingSelection = null },
+                        onSelect = ::openSelectedMediaProcessingPage
+                    )
+                }
             }
         }
         setupBackNavigation()
@@ -429,7 +439,7 @@ class MainActivity : AppComposeActivity() {
         val canEditTagsSelected = selectedFiles.size == document.selectedPaths.size &&
             MediaTagFileSelectionPolicy.fromFiles(selectedFiles, ::isAudioOrVideoFile) != null
         val canProcessMediaSelected = selectedFiles.size == document.selectedPaths.size &&
-            MediaConvertFileSelectionPolicy.fromFiles(selectedFiles, ::isAudioOrVideoFile) != null
+            MediaProcessingSelectionPolicy.fromFiles(selectedFiles, ::isAudioOrVideoFile) != null
         screenState = MainActivityScreenState(
             selectedTopLevelItem = document.selectedTopLevelItem,
             // Selection actions and title belong to the directory content. The
@@ -1327,12 +1337,25 @@ class MainActivity : AppComposeActivity() {
     private fun processSelectedMedia() {
         val files = selectedFiles()
         if (files.size != stateModel.documentState.selectedPaths.size) return
-        val selection = MediaConvertFileSelectionPolicy.fromFiles(files, ::isAudioOrVideoFile) ?: return
+        mediaProcessingSelection = MediaProcessingSelectionPolicy.fromFiles(files, ::isAudioOrVideoFile)
+    }
+
+    private fun openSelectedMediaProcessingPage(page: MediaProcessingPage) {
+        val pending = mediaProcessingSelection ?: return
+        // Recheck the snapshot in case a selected file disappeared while the chooser was open.
+        val selection = MediaProcessingSelectionPolicy.fromFiles(pending.files, ::isAudioOrVideoFile)
+        mediaProcessingSelection = null
+        if (selection == null || !selection.supports(page)) return
+        val media = if (page == MediaProcessingPage.CONVERT) {
+            requireNotNull(selection.conversion).mediaFiles
+        } else requireNotNull(selection.muxFiles)
+        val subtitles = if (page == MediaProcessingPage.CONVERT) selection.conversion?.subtitleFiles.orEmpty() else emptyList()
         startActivity(Intent(this, MediaConvertActivity::class.java).apply {
+            putExtra(MediaConvertActivity.EXTRA_PAGE, page.name)
             putStringArrayListExtra(MediaConvertActivity.EXTRA_FILE_PATHS,
-                ArrayList(selection.mediaFiles.map { it.absolutePath }))
+                ArrayList(media.map { it.absolutePath }))
             putStringArrayListExtra(MediaConvertActivity.EXTRA_SUBTITLE_PATHS,
-                ArrayList(selection.subtitleFiles.map { it.absolutePath }))
+                ArrayList(subtitles.map { it.absolutePath }))
         })
     }
 

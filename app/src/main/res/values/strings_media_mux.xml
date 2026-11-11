@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="media_mux_merge">音视频合并</string>
+    <string name="media_mux_split">音视频分离</string>
+    <string name="media_mux_mode">处理方式</string>
+    <string name="media_mux_merge_hint">音视频混流：按行合并左侧视频与中间音频。缺少视频或音频的行暂不处理。</string>
+    <string name="media_mux_split_hint">解复用：仅处理只有视频的行，音频填入中列，无音轨的视频输出到右列。已有音频的行暂不处理。</string>
+    <string name="media_mux_import">导入音视频</string>
+    <string name="media_mux_blank_row">添加空行</string>
+    <string name="media_mux_output_directory">输出目录</string>
+    <string name="media_mux_output_choose">选择输出目录</string>
+    <string name="media_mux_video">视频</string>
+    <string name="media_mux_audio">音频</string>
+    <string name="media_mux_output">输出</string>
+    <string name="media_mux_empty">空</string>
+    <string name="media_mux_waiting">待输出</string>
+    <string name="media_mux_list_empty">导入音视频后，按行调整配对。</string>
+    <string name="media_mux_order">调整次序</string>
+    <string name="media_mux_order_title">%1$s次序</string>
+    <string name="media_mux_order_hint">拖动手柄或使用上下按钮调整，空位也参与排序。调整立即生效。</string>
+    <string name="media_mux_sort_name">按文件名排序</string>
+    <string name="media_mux_sort_reverse">倒序</string>
+    <string name="media_mux_order_done">完成</string>
+    <string name="media_mux_row">第 %1$d 行</string>
+    <string name="media_mux_row_skipped">本次不处理</string>
+    <string name="media_mux_row_blank">空行</string>
+    <string name="media_mux_remove">移除%1$s</string>
+    <string name="media_mux_remove_row">移除此行</string>
+    <string name="media_mux_move_up">上移</string>
+    <string name="media_mux_move_down">下移</string>
+    <string name="media_mux_drag">拖动调整%1$s</string>
+    <string name="media_mux_start">开始处理</string>
+    <string name="media_mux_importing">正在读取文件…</string>
+    <string name="media_mux_running">正在处理…</string>
+    <string name="media_mux_output_hint">按视频文件名分类保存至“合并”或“分离”子文件夹。</string>
+    <string name="media_mux_conflict_title">视频已有音轨</string>
+    <string name="media_mux_conflict_message">%1$s 已有音轨，请选择如何加入中列音频。</string>
+    <string name="media_mux_conflict_replace">替换原音轨</string>
+    <string name="media_mux_conflict_add">新增音轨</string>
+    <string name="media_mux_conflict_all">应用到本次输出的所有文件</string>
+</resources>

@@ -17,6 +17,8 @@ import androidx.compose.runtime.remember
 import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import com.subtitleedit.feature.ui.MediaConvertScreen
+import com.subtitleedit.feature.ui.MediaMuxScreen
+import com.subtitleedit.feature.ui.MediaProcessingScreen
 import com.subtitleedit.feature.ui.MediaFormatOption
 import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
@@ -34,9 +36,18 @@ class MediaConvertActivity : AppComposeActivity() {
     companion object {
         const val EXTRA_FILE_PATHS = "media_convert_file_paths"
         const val EXTRA_SUBTITLE_PATHS = "media_convert_subtitle_paths"
+        const val EXTRA_PAGE = "media_processing_page"
     }
 
     private val viewModel: MediaConvertViewModel by viewModels()
+    private val muxViewModel: MediaMuxViewModel by viewModels()
+
+    private val muxFilePicker = registerForActivityResult(AppFilePickerContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) muxViewModel.addFiles(uris)
+    }
+    private val muxDirectoryPicker = registerForActivityResult(AppFilePickerContracts.OpenDocumentTree()) { uri ->
+        uri?.let(muxViewModel::selectOutputDirectory)
+    }
 
     private val pickFileLauncher = registerForActivityResult(
         AppFilePickerContracts.OpenMultipleDocuments()
@@ -62,13 +73,19 @@ class MediaConvertActivity : AppComposeActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        viewModel.initializeSelection(
-            intent.getStringArrayListExtra(EXTRA_FILE_PATHS).orEmpty().map { Uri.fromFile(File(it)) },
-            intent.getStringArrayListExtra(EXTRA_SUBTITLE_PATHS).orEmpty().map { Uri.fromFile(File(it)) }
-        )
+        val initialPage = runCatching { MediaProcessingPage.valueOf(intent.getStringExtra(EXTRA_PAGE).orEmpty()) }
+            .getOrDefault(MediaProcessingPage.CONVERT)
+        val initialFiles = intent.getStringArrayListExtra(EXTRA_FILE_PATHS).orEmpty().map { Uri.fromFile(File(it)) }
+        if (initialPage == MediaProcessingPage.MUX) {
+            muxViewModel.initializeSelection(initialFiles)
+        } else {
+            viewModel.initializeSelection(initialFiles,
+                intent.getStringArrayListExtra(EXTRA_SUBTITLE_PATHS).orEmpty().map { Uri.fromFile(File(it)) })
+        }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (viewModel.isRunning) viewModel.cancelConversion()
+                muxViewModel.cancel()
                 isEnabled = false
                 finish()
             }
@@ -80,6 +97,7 @@ class MediaConvertActivity : AppComposeActivity() {
         }
         setContent {
             val state by viewModel.state.collectAsState()
+            val muxState by muxViewModel.state.collectAsState()
             val formats = remember(state.availableEncoders, state.availableAudioEncoders) { viewModel.formatList }
             val videoFormats = formats.filterNot { it.isAudioOnly }.map {
                 MediaFormatOption(it.extension, it.displayName, it.isAudioOnly)
@@ -134,8 +152,26 @@ class MediaConvertActivity : AppComposeActivity() {
                 if (restrictedAudio && !MediaConvertAudioChannels.recordsLayout(effectiveAudioCodec, format?.formatName.orEmpty())) add(getString(R.string.media_convert_channel_count_only_hint))
             }.joinToString("\n")
             SubtitleEditComposeTheme {
+                MediaProcessingScreen(initialPage = initialPage,
+                    enabled = !state.isConverting && !muxState.isRunning && !muxState.isImporting,
+                    onBack = { onBackPressedDispatcher.onBackPressed() },
+                    muxContent = {
+                        MediaMuxScreen(state = muxState,
+                            onPickFiles = { muxFilePicker.launch(arrayOf("video/*", "audio/*")) },
+                            onPickOutputDirectory = { muxDirectoryPicker.launch(muxViewModel.currentOutputDirectoryUri) },
+                            onModeChanged = muxViewModel::setMode,
+                            onAddEmptyRow = muxViewModel::addEmptyRow,
+                            onRemove = muxViewModel::remove,
+                            onRemoveRow = muxViewModel::removeRow,
+                            onRemoveOutput = muxViewModel::removeOutput,
+                            onMove = muxViewModel::move,
+                            onStart = muxViewModel::startProcessing,
+                            onCancel = muxViewModel::cancel,
+                            onResolveConflict = muxViewModel::resolveAudioConflict)
+                    }, convertContent = {
                 MediaConvertScreen(
                     sourceSummary = if (state.selectedFiles.isEmpty()) "" else getString(R.string.files_selected_header, state.selectedFiles.size),
+                    showTopBar = false,
                     sourceInfo = state.selectedFiles.mapIndexed { index, file -> "${index + 1}. ${file.fileName}\n${file.mediaInfo}" }.joinToString("\n\n"),
                     outputDirectory = state.outputDirectory,
                     saveToSourceDirectory = state.saveToSourceDirectory,
@@ -226,6 +262,7 @@ class MediaConvertActivity : AppComposeActivity() {
                     onVideoSettingsChange = viewModel::setVideoSettings,
                     qualityHint = getString(R.string.media_convert_quality_range, qualityRange.first, qualityRange.last, if (effectiveVideoCodec == "libtheora") getString(R.string.media_convert_quality_larger) else getString(R.string.media_convert_quality_smaller))
                 )
+                })
             }
         }
     }
