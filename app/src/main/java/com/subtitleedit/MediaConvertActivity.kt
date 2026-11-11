@@ -31,6 +31,11 @@ import kotlinx.coroutines.withContext
 
 /** 音视频处理页面；状态和 FFmpeg 任务由 [MediaConvertViewModel] 持有。 */
 class MediaConvertActivity : AppComposeActivity() {
+    companion object {
+        const val EXTRA_FILE_PATHS = "media_convert_file_paths"
+        const val EXTRA_SUBTITLE_PATHS = "media_convert_subtitle_paths"
+    }
+
     private val viewModel: MediaConvertViewModel by viewModels()
 
     private val pickFileLauncher = registerForActivityResult(
@@ -57,6 +62,10 @@ class MediaConvertActivity : AppComposeActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        viewModel.initializeSelection(
+            intent.getStringArrayListExtra(EXTRA_FILE_PATHS).orEmpty().map { Uri.fromFile(File(it)) },
+            intent.getStringArrayListExtra(EXTRA_SUBTITLE_PATHS).orEmpty().map { Uri.fromFile(File(it)) }
+        )
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (viewModel.isRunning) viewModel.cancelConversion()

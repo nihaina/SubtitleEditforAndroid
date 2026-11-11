@@ -119,7 +119,8 @@ internal data class MainActivityScreenState(
     val canConvertSelected: Boolean = false,
     val canCompressSelected: Boolean = true,
     val canEditTagsSelected: Boolean = false,
-    val canClearCacheSelected: Boolean = false
+    val canClearCacheSelected: Boolean = false,
+    val canProcessMediaSelected: Boolean = false
 )
 
 internal enum class MainCreateItemKind { FOLDER, FILE }
@@ -182,7 +183,8 @@ internal fun MainActivityScreen(
     onDeleteBatchRenameHistory: (String) -> Unit,
     onDeleteConfirm: () -> Unit,
     onCacheItemSelected: (com.subtitleedit.ui.settings.SettingsCacheItem) -> Unit,
-    onCacheClearConfirm: (com.subtitleedit.ui.settings.SettingsCacheItem) -> Unit
+    onCacheClearConfirm: (com.subtitleedit.ui.settings.SettingsCacheItem) -> Unit,
+    onProcessMediaSelection: () -> Unit = {}
 ) {
     val directoryListState = rememberLazyListState()
     val directoryGridState = rememberLazyGridState()
@@ -473,7 +475,9 @@ internal fun MainActivityScreen(
                     onClearCache = onClearCacheSelection,
                     onProperties = onShowSelectionProperties,
                     onConfirmDestination = onConfirmDestination,
-                    onCancelDestination = onCancelDestination
+                    onCancelDestination = onCancelDestination,
+                    canProcessMedia = state.canProcessMediaSelected,
+                    onProcessMedia = onProcessMediaSelection
                 )
             }
         }
@@ -553,7 +557,7 @@ internal fun MainActivityScreen(
 }
 
 @Composable
-private fun SelectionActions(
+internal fun SelectionActions(
     operation: FileOperation?,
     onCopy: () -> Unit,
     onMove: () -> Unit,
@@ -569,7 +573,9 @@ private fun SelectionActions(
     onClearCache: () -> Unit,
     onProperties: () -> Unit,
     onConfirmDestination: () -> Unit,
-    onCancelDestination: () -> Unit
+    onCancelDestination: () -> Unit,
+    canProcessMedia: Boolean = false,
+    onProcessMedia: () -> Unit = {}
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     Spacer(Modifier.fillMaxWidth().height(4.dp).background(MaterialTheme.colorScheme.surfaceContainer))
@@ -606,6 +612,12 @@ private fun SelectionActions(
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.media_tag_editor_title)) },
                             onClick = { menuExpanded = false; onEditTags() }
+                        )
+                    }
+                    if (canProcessMedia) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.media_convert_title)) },
+                            onClick = { menuExpanded = false; onProcessMedia() }
                         )
                     }
                     if (canClearCache) {

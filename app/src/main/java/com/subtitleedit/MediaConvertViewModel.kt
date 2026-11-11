@@ -141,6 +141,7 @@ internal class MediaConvertViewModel(application: Application) :
     private var conversionJob: Job? = null
     private var probeJob: Job? = null
     private var probeGeneration = 0L
+    private var selectionInitialized = false
 
     val currentOutputDirectoryUri: Uri? get() = outputDirectoryUri
     val isRunning: Boolean get() = currentState.isConverting
@@ -188,6 +189,20 @@ internal class MediaConvertViewModel(application: Application) :
             }
             setState { copy(videoPixelFormats = pixels) }
         }
+    }
+
+    /** Consume the directory shortcut once; recreation must retain the user's subsequent changes. */
+    fun initializeSelection(mediaUris: List<Uri>, subtitleUris: List<Uri>) {
+        if (selectionInitialized) return
+        selectionInitialized = true
+        if (mediaUris.isEmpty()) return
+        selectFiles(mediaUris)
+        if (mediaUris.distinct().size != 1) return
+        // An output format has not been selected yet. Keep the imported documents visible;
+        // selectFormat applies the existing container compatibility and count limits later.
+        val subtitles = subtitleUris.distinct().map { MediaConvertSubtitleFile(it, getFileName(it)) }
+            .filter { MediaConvertSubtitles.extension(it.fileName) in MediaConvertSubtitles.importExtensions }
+        setState { copy(subtitleFiles = subtitles) }
     }
 
     fun selectFiles(uris: List<Uri>) {

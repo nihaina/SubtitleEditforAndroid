@@ -315,6 +315,7 @@ class MainActivity : AppComposeActivity() {
                         onConvertSelection = ::showSubtitleFormatConvertDialog,
                         onCompressSelection = ::showCreateArchiveDialog,
                         onEditTagsSelection = ::editSelectedMediaTags,
+                        onProcessMediaSelection = ::processSelectedMedia,
                         onClearCacheSelection = ::showSelectedMediaCacheDialog,
                         onShowSelectionProperties = ::showSelectedProperties,
                         onConfirmDestination = ::completeDestinationOperation,
@@ -427,6 +428,8 @@ class MainActivity : AppComposeActivity() {
         }
         val canEditTagsSelected = selectedFiles.size == document.selectedPaths.size &&
             MediaTagFileSelectionPolicy.fromFiles(selectedFiles, ::isAudioOrVideoFile) != null
+        val canProcessMediaSelected = selectedFiles.size == document.selectedPaths.size &&
+            MediaConvertFileSelectionPolicy.fromFiles(selectedFiles, ::isAudioOrVideoFile) != null
         screenState = MainActivityScreenState(
             selectedTopLevelItem = document.selectedTopLevelItem,
             // Selection actions and title belong to the directory content. The
@@ -456,6 +459,7 @@ class MainActivity : AppComposeActivity() {
             canConvertSelected = canConvertSelected,
             canCompressSelected = !isFileSearchQueryActive(),
             canEditTagsSelected = canEditTagsSelected,
+            canProcessMediaSelected = canProcessMediaSelected,
             canClearCacheSelected = canClearCacheSelected
         )
     }
@@ -1319,6 +1323,18 @@ class MainActivity : AppComposeActivity() {
 
     private fun isAudioOrVideoFile(file: File): Boolean = file.isFile &&
         (FileUtils.isAudioFile(file) || FileTypePolicy.isVideo(file))
+
+    private fun processSelectedMedia() {
+        val files = selectedFiles()
+        if (files.size != stateModel.documentState.selectedPaths.size) return
+        val selection = MediaConvertFileSelectionPolicy.fromFiles(files, ::isAudioOrVideoFile) ?: return
+        startActivity(Intent(this, MediaConvertActivity::class.java).apply {
+            putStringArrayListExtra(MediaConvertActivity.EXTRA_FILE_PATHS,
+                ArrayList(selection.mediaFiles.map { it.absolutePath }))
+            putStringArrayListExtra(MediaConvertActivity.EXTRA_SUBTITLE_PATHS,
+                ArrayList(selection.subtitleFiles.map { it.absolutePath }))
+        })
+    }
 
     private fun formatCacheSize(bytes: Long): String = when {
         bytes < 1024L -> "$bytes B"

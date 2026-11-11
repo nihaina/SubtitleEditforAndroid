@@ -24,6 +24,7 @@ internal data class MediaConvertSourceSubtitle(
 internal object MediaConvertSubtitles {
     private val textExtensions = setOf("srt", "ass", "ssa", "vtt", "lrc")
     private val lyricExtensions = textExtensions + "txt"
+    val importExtensions: Set<String> get() = lyricExtensions
     private val movMuxers = setOf("mp4", "mov", "ipod", "3gp", "3g2")
     private val textCodecs = setOf("subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text", "lrc")
     private val matroskaCopyCodecs = setOf("subrip", "srt", "ass", "ssa", "webvtt", "dvd_subtitle", "dvb_subtitle", "hdmv_pgs_subtitle")
