@@ -1,6 +1,7 @@
 package com.subtitleedit.feature.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
@@ -41,7 +43,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextRange
@@ -55,6 +57,12 @@ import com.subtitleedit.ui.components.AppAlertDialog
 import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.ui.components.AppTaskProgress
 import com.subtitleedit.ui.components.AppToolScaffold
+import com.subtitleedit.ui.settings.MaterialSettingsTileTheme
+import com.subtitleedit.ui.settings.settingsChipColor
+import com.subtitleedit.ui.settings.settingsOutlinedTextFieldColors
+import com.subtitleedit.ui.settings.settingsPrimaryTextColor
+import com.subtitleedit.ui.settings.settingsSecondaryTextColor
+import com.subtitleedit.ui.settings.settingsTileColor
 import com.subtitleedit.util.AsrPunctuationOptions
 import com.subtitleedit.util.PunctuationReplacementScope
 
@@ -124,90 +132,96 @@ fun SubtitleFormatEditorScreen(
         addEndPunctuation = addEndPunctuationOptions[addEndPunctuationIndex]
     )
 
-    AppToolScaffold(
-        title = stringResource(R.string.subtitle_format_editor_title),
-        onBack = onBack,
-        scrollable = false,
-        titleContent = {
-            Column {
-                Text(
-                    text = stringResource(R.string.subtitle_format_editor_title),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = fileName,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.MiddleEllipsis
-                )
-            }
-        },
-        actions = {
-            IconButton(onClick = onSelectAll, enabled = items.isNotEmpty() && !isLoading) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_select_all),
-                    contentDescription = stringResource(R.string.menu_subtitle_format_editor_title_01),
-                    tint = MaterialTheme.colorScheme.onSurface
-                )
-            }
-            IconButton(
-                onClick = { selectingRange = true },
-                enabled = items.isNotEmpty() && !isLoading
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_select_range),
-                    contentDescription = stringResource(R.string.menu_subtitle_format_editor_title_02),
-                    tint = MaterialTheme.colorScheme.onSurface
-                )
-            }
-        }
-    ) {
-        Box(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            if (isLoading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    AppTaskProgress(visible = true, progress = null)
+    val pageBackground = MaterialTheme.colorScheme.background
+    MaterialSettingsTileTheme {
+        AppToolScaffold(
+            title = stringResource(R.string.subtitle_format_editor_title),
+            onBack = onBack,
+            scrollable = false,
+            contentBackground = pageBackground,
+            topBarContainerColor = pageBackground,
+            topBarScrolledContainerColor = pageBackground,
+            titleContent = {
+                Column {
+                    Text(
+                        text = stringResource(R.string.subtitle_format_editor_title),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = fileName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.MiddleEllipsis
+                    )
                 }
-            } else {
-                Row(Modifier.fillMaxSize()) {
-                    Column(Modifier.weight(3f).fillMaxHeight().padding(8.dp)) {
-                        FileInfo(fileInfo)
-                        PreviewList(
-                            items = items,
-                            onSelectionChanged = onSelectionChanged,
-                            onEdit = { editingPosition = it },
-                            modifier = Modifier.weight(1f)
+            },
+            actions = {
+                IconButton(onClick = onSelectAll, enabled = items.isNotEmpty() && !isLoading) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_select_all),
+                        contentDescription = stringResource(R.string.menu_subtitle_format_editor_title_01),
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                IconButton(
+                    onClick = { selectingRange = true },
+                    enabled = items.isNotEmpty() && !isLoading
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_select_range),
+                        contentDescription = stringResource(R.string.menu_subtitle_format_editor_title_02),
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                if (isLoading) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        AppTaskProgress(visible = true, progress = null)
+                    }
+                } else {
+                    Row(Modifier.fillMaxSize()) {
+                        Column(Modifier.weight(3f).fillMaxHeight().padding(8.dp)) {
+                            FileInfo(fileInfo)
+                            PreviewList(
+                                items = items,
+                                onSelectionChanged = onSelectionChanged,
+                                onEdit = { editingPosition = it },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Surface(
+                            Modifier.fillMaxHeight().width(1.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant
+                        ) {}
+                        FormattingControls(
+                            modifier = Modifier.weight(2f).fillMaxHeight(),
+                            removeSpaces = removeSpaces,
+                            onRemoveSpacesChanged = { removeSpaces = it },
+                            innerPunctuation = innerPunctuation,
+                            onInnerPunctuationChanged = { innerPunctuation = it },
+                            startPunctuation = startPunctuation,
+                            onStartPunctuationChanged = { startPunctuation = it },
+                            endPunctuation = endPunctuation,
+                            onEndPunctuationChanged = { endPunctuation = it },
+                            replaceFrom = replaceFrom,
+                            onReplaceFromChanged = { replaceFrom = it },
+                            replaceTo = replaceTo,
+                            onReplaceToChanged = { replaceTo = it },
+                            replacementScope = replacementScope,
+                            onReplacementScopeChanged = { replacementScope = it },
+                            addEndPunctuationIndex = addEndPunctuationIndex,
+                            onAddEndPunctuationChanged = { addEndPunctuationIndex = it },
+                            isApplying = isApplying,
+                            onApply = { onApply(options) },
+                            onSave = onSaveRequest
                         )
                     }
-                    Surface(
-                        Modifier.fillMaxHeight().width(1.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    ) {}
-                    FormattingControls(
-                        modifier = Modifier.weight(2f).fillMaxHeight(),
-                        removeSpaces = removeSpaces,
-                        onRemoveSpacesChanged = { removeSpaces = it },
-                        innerPunctuation = innerPunctuation,
-                        onInnerPunctuationChanged = { innerPunctuation = it },
-                        startPunctuation = startPunctuation,
-                        onStartPunctuationChanged = { startPunctuation = it },
-                        endPunctuation = endPunctuation,
-                        onEndPunctuationChanged = { endPunctuation = it },
-                        replaceFrom = replaceFrom,
-                        onReplaceFromChanged = { replaceFrom = it },
-                        replaceTo = replaceTo,
-                        onReplaceToChanged = { replaceTo = it },
-                        replacementScope = replacementScope,
-                        onReplacementScopeChanged = { replacementScope = it },
-                        addEndPunctuationIndex = addEndPunctuationIndex,
-                        onAddEndPunctuationChanged = { addEndPunctuationIndex = it },
-                        isApplying = isApplying,
-                        onApply = { onApply(options) },
-                        onSave = onSaveRequest
-                    )
                 }
             }
         }
@@ -277,7 +291,7 @@ private fun FileInfo(fileInfo: String) {
             .fillMaxWidth()
             .padding(6.dp),
         style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = settingsSecondaryTextColor(),
         maxLines = 1,
         overflow = TextOverflow.MiddleEllipsis
     )
@@ -310,7 +324,7 @@ private fun PreviewList(
                     text = "${index + 1}.",
                     modifier = Modifier.padding(end = 4.dp),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = settingsSecondaryTextColor()
                 )
                 Text(
                     text = item.text,
@@ -320,7 +334,7 @@ private fun PreviewList(
                         .clickable { onEdit(index) }
                         .padding(6.dp),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = settingsPrimaryTextColor()
                 )
             }
         }
@@ -353,18 +367,21 @@ private fun FormattingControls(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .background(settingsTileColor())
             .verticalScroll(rememberScrollState())
             .padding(12.dp)
     ) {
         Text(
             stringResource(R.string.activity_subtitle_format_editor_text_01),
-            style = MaterialTheme.typography.titleMedium
+            style = MaterialTheme.typography.titleMedium,
+            color = settingsPrimaryTextColor()
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = removeSpaces, onCheckedChange = onRemoveSpacesChanged)
             Text(
                 stringResource(R.string.activity_subtitle_format_editor_text_02),
-                modifier = Modifier.clickable { onRemoveSpacesChanged(!removeSpaces) }
+                modifier = Modifier.clickable { onRemoveSpacesChanged(!removeSpaces) },
+                color = settingsPrimaryTextColor()
             )
         }
         PunctuationGrid(
@@ -375,7 +392,8 @@ private fun FormattingControls(
         Text(
             stringResource(R.string.subtitle_format_clear_start_punctuation),
             modifier = Modifier.padding(top = 16.dp),
-            style = MaterialTheme.typography.titleMedium
+            style = MaterialTheme.typography.titleMedium,
+            color = settingsPrimaryTextColor()
         )
         PunctuationGrid(
             selected = startPunctuation,
@@ -385,7 +403,8 @@ private fun FormattingControls(
         Text(
             stringResource(R.string.activity_subtitle_format_editor_text_03),
             modifier = Modifier.padding(top = 16.dp),
-            style = MaterialTheme.typography.titleMedium
+            style = MaterialTheme.typography.titleMedium,
+            color = settingsPrimaryTextColor()
         )
         PunctuationGrid(
             selected = endPunctuation,
@@ -395,7 +414,8 @@ private fun FormattingControls(
         Text(
             stringResource(R.string.activity_subtitle_format_editor_text_04),
             modifier = Modifier.padding(top = 16.dp),
-            style = MaterialTheme.typography.titleMedium
+            style = MaterialTheme.typography.titleMedium,
+            color = settingsPrimaryTextColor()
         )
         ReplacementScopeSelector(
             selected = replacementScope,
@@ -407,6 +427,7 @@ private fun FormattingControls(
             onValueChange = onReplaceFromChanged,
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             label = { Text(stringResource(R.string.activity_subtitle_format_editor_hint_01)) },
+            colors = settingsOutlinedTextFieldColors(),
             singleLine = true
         )
         OutlinedTextField(
@@ -414,13 +435,15 @@ private fun FormattingControls(
             onValueChange = onReplaceToChanged,
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
             label = { Text(stringResource(R.string.activity_editor_hint_01)) },
+            colors = settingsOutlinedTextFieldColors(),
             singleLine = true
         )
 
         Text(
             stringResource(R.string.activity_subtitle_format_editor_text_05),
             modifier = Modifier.padding(top = 16.dp),
-            style = MaterialTheme.typography.titleMedium
+            style = MaterialTheme.typography.titleMedium,
+            color = settingsPrimaryTextColor()
         )
         EndPunctuationSelector(
             selectedIndex = addEndPunctuationIndex,
@@ -432,19 +455,23 @@ private fun FormattingControls(
             onClick = onApply,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 18.dp),
-            enabled = !isApplying
+                .padding(top = 18.dp)
+                .height(48.dp),
+            enabled = !isApplying,
+            shape = CircleShape
         ) {
             Text(
                 if (isApplying) stringResource(R.string.applying)
-                else stringResource(R.string.activity_subtitle_format_editor_text_06)
+                else stringResource(R.string.activity_subtitle_format_editor_text_06),
+                style = MaterialTheme.typography.labelLarge
             )
         }
         OutlinedButton(
             onClick = onSave,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(48.dp),
+            shape = CircleShape
         ) {
-            Text(stringResource(R.string.menu_save))
+            Text(stringResource(R.string.menu_save), style = MaterialTheme.typography.labelLarge)
         }
     }
 }
@@ -454,6 +481,7 @@ private fun PunctuationGrid(
     selected: String,
     onSelectionChanged: (String) -> Unit
 ) {
+    val chipColor = settingsChipColor()
     Column(
         modifier = Modifier.padding(2.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -476,12 +504,12 @@ private fun PunctuationGrid(
                         color = if (isSelected) {
                             MaterialTheme.colorScheme.primaryContainer
                         } else {
-                            MaterialTheme.colorScheme.surfaceContainerHighest
+                            chipColor
                         },
                         contentColor = if (isSelected) {
                             MaterialTheme.colorScheme.onPrimaryContainer
                         } else {
-                            MaterialTheme.colorScheme.onSurface
+                            settingsPrimaryTextColor()
                         },
                         border = BorderStroke(
                             1.dp,
