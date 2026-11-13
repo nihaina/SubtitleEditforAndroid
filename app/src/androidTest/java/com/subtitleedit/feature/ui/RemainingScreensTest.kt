@@ -153,7 +153,7 @@ class RemainingScreensTest {
                 )
             }
         }
-        compose.onNodeWithText("添加文件").performClick()
+        compose.onNodeWithText("选择字幕文件").performClick()
         compose.onNodeWithText("开始处理").performClick()
         assertEquals(listOf("files", "start"), calls)
     }
