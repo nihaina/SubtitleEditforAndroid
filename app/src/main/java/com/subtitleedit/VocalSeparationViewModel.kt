@@ -5,18 +5,21 @@ import android.content.Intent
 import com.subtitleedit.util.PickedUriAccess
 import android.net.Uri
 import android.os.Environment
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.viewModelScope
 import com.subtitleedit.demix.DemixOutputWriter
 import com.subtitleedit.demix.VocalSeparationEngine
 import com.subtitleedit.feature.ui.VocalSeparationDialog
+import com.subtitleedit.feature.ui.VocalSeparationFileUi
 import com.subtitleedit.feature.ui.VocalSeparationUiState
 import com.subtitleedit.nativebridge.NativeMediaOperation
 import com.subtitleedit.nativebridge.PcmFormat
 import com.subtitleedit.task.LongTaskController
 import com.subtitleedit.util.ByteSizeFormat
 import com.subtitleedit.util.DirectoryDisplayPath
+import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.RuntimeLogManager
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SourceOutputDirectory
@@ -38,7 +41,7 @@ internal class VocalSeparationViewModel(
         const val LOG_TAG = "VocalSeparation"
     }
 
-    private data class SelectedMediaFile(val uri: Uri, val fileName: String)
+    private data class SelectedMediaFile(val uri: Uri, val fileName: String, val fileSize: Long)
 
     private val settings = SettingsManager.getInstance(application)
     private val taskController = LongTaskController(dependencies.taskStateStore, "vocal-separation")
@@ -78,14 +81,35 @@ internal class VocalSeparationViewModel(
 
     fun selectFiles(uris: List<Uri>) {
         if (isRunning) return
-        selectedFiles = uris.map { SelectedMediaFile(it, fileName(it)) }
-        val text = buildString {
-            append(string(R.string.files_selected_header, selectedFiles.size))
-            selectedFiles.forEachIndexed { index, item ->
-                append('\n').append(string(R.string.files_selected_item, index + 1, item.fileName))
-            }
+        selectedFiles = uris.distinct().map { SelectedMediaFile(it, fileName(it), fileSize(it)) }
+        publishFiles()
+    }
+
+    fun removeFile(key: String) {
+        if (isRunning || currentState.dialog == VocalSeparationDialog.OUTPUT_CONFLICT) return
+        selectedFiles = selectedFiles.filterNot { it.uri.toString() == key }
+        publishFiles()
+    }
+
+    private fun publishFiles() {
+        val files = selectedFiles.map {
+            VocalSeparationFileUi(
+                key = it.uri.toString(),
+                fileName = it.fileName,
+                fileSizeLabel = FileUtils.formatFileSize(it.fileSize)
+            )
         }
-        setState { copy(selectedFilesText = text, hasSelectedFiles = selectedFiles.isNotEmpty()) }
+        setState { copy(files = files) }
+    }
+
+    private fun fileSize(uri: Uri): Long {
+        PickedUriAccess.file(uri)?.let { return it.length() }
+        return runCatching {
+            app.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                val column = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (cursor.moveToFirst() && column >= 0 && !cursor.isNull(column)) cursor.getLong(column) else 0L
+            }
+        }.getOrNull()?.coerceAtLeast(0L) ?: 0L
     }
 
     fun selectOutputDirectory(uri: Uri) {

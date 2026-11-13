@@ -53,7 +53,6 @@ import com.subtitleedit.ui.components.AppAlertDialog
 import com.subtitleedit.ui.components.AppConflictDialog
 import com.subtitleedit.ui.components.AppTaskProgress
 import com.subtitleedit.ui.components.AppToolScaffold
-import com.subtitleedit.ui.settings.MaterialSettingsTileTheme
 import com.subtitleedit.ui.settings.SettingsIconBox
 import com.subtitleedit.ui.settings.SettingsTileGroup
 import com.subtitleedit.ui.settings.SettingsTileRow
@@ -61,6 +60,7 @@ import com.subtitleedit.ui.settings.SettingsTileSection
 import com.subtitleedit.ui.settings.SettingsTileSwitchRow
 import com.subtitleedit.ui.settings.settingsChipColor
 import com.subtitleedit.ui.settings.settingsLightPalette
+import com.subtitleedit.ui.settings.settingsPageBackground
 import com.subtitleedit.ui.settings.settingsPrimaryTextColor
 import com.subtitleedit.ui.theme.AppMotion
 import com.subtitleedit.ui.theme.AppSpacing
@@ -115,9 +115,8 @@ fun AutoTranslateScreen(
     onConfirmExit: () -> Unit,
     onDismissExit: () -> Unit
 ) {
-    val pageBackground = MaterialTheme.colorScheme.background
-    MaterialSettingsTileTheme {
-        AppToolScaffold(
+    val pageBackground = settingsPageBackground()
+    AppToolScaffold(
             title = stringResource(R.string.auto_translate),
             onBack = onNavigateBack,
             contentBackground = pageBackground,
@@ -253,7 +252,6 @@ fun AutoTranslateScreen(
                 )
             }
         }
-    }
 
     if (state.showOutputConflict) {
         AppConflictDialog(

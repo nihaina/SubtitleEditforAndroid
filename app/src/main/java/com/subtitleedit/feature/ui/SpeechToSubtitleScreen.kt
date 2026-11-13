@@ -1,5 +1,6 @@
 package com.subtitleedit.feature.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +39,7 @@ import com.subtitleedit.ui.components.AppSection
 import com.subtitleedit.ui.components.AppTaskProgress
 import com.subtitleedit.ui.components.AppToolScaffold
 import com.subtitleedit.ui.components.SettingsSwitchRow
+import com.subtitleedit.ui.settings.settingsPageBackground
 import com.subtitleedit.ui.theme.AppMotion
 import com.subtitleedit.ui.theme.AppSpacing
 
@@ -90,22 +92,28 @@ fun SpeechToSubtitleScreen(
     onConfirmCancel: () -> Unit,
     onConfirmBack: () -> Unit
 ) {
+    val pageBackground = settingsPageBackground()
     AppToolScaffold(
         title = stringResource(R.string.speech_to_subtitle_title),
         onBack = onNavigateBack,
+        contentBackground = pageBackground,
+        topBarContainerColor = pageBackground,
+        topBarScrolledContainerColor = pageBackground,
         actions = {
             IconButton(onClick = onSettings, enabled = !state.isConverting) {
                 Icon(painterResource(R.drawable.ic_settings), contentDescription = stringResource(R.string.activity_settings_text_03))
             }
         },
         bottomBar = {
-            AppPrimaryButton(
-                text = stringResource(R.string.start_convert),
-                onClick = onStart,
-                enabled = state.startEnabled,
-                modifier = Modifier.padding(horizontal = AppSpacing.Page, vertical = AppSpacing.Inner)
-            )
-        }
+            Box(Modifier.background(pageBackground)) {
+                AppPrimaryButton(
+                    text = stringResource(R.string.start_convert),
+                    onClick = onStart,
+                    enabled = state.startEnabled,
+                    modifier = Modifier.padding(horizontal = AppSpacing.Page, vertical = AppSpacing.Inner)
+                )
+            }
+        },
     ) {
         AppSection(
             title = stringResource(R.string.activity_speech_to_subtitle_text_01),

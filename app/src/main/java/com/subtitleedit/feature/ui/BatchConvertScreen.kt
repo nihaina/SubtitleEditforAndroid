@@ -3,8 +3,6 @@ package com.subtitleedit.feature.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -15,8 +13,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,22 +22,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppAlertDialog
 import com.subtitleedit.ui.components.AppConflictDialog
 import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.ui.components.AppToolScaffold
-import com.subtitleedit.ui.settings.MaterialSettingsTileTheme
-import com.subtitleedit.ui.settings.SettingsIconBox
 import com.subtitleedit.ui.settings.SettingsTileGroup
 import com.subtitleedit.ui.settings.SettingsTileRow
 import com.subtitleedit.ui.settings.SettingsTileSection
 import com.subtitleedit.ui.settings.SettingsTileSwitchRow
+import com.subtitleedit.ui.settings.settingsPageBackground
 import com.subtitleedit.ui.theme.AppSpacing
 import com.subtitleedit.util.SubtitleParser
 
@@ -75,15 +67,14 @@ fun BatchConvertScreen(
     onOverwriteConflicts: () -> Unit,
     onRenameConflicts: () -> Unit
 ) {
-    val pageBackground = MaterialTheme.colorScheme.background
-    MaterialSettingsTileTheme {
-        AppToolScaffold(
-            title = stringResource(R.string.batch_convert),
-            onBack = onNavigateBack,
-            contentBackground = pageBackground,
-            topBarContainerColor = pageBackground,
-            topBarScrolledContainerColor = pageBackground,
-            bottomBar = {
+    val pageBackground = settingsPageBackground()
+    AppToolScaffold(
+        title = stringResource(R.string.batch_convert),
+        onBack = onNavigateBack,
+        contentBackground = pageBackground,
+        topBarContainerColor = pageBackground,
+        topBarScrolledContainerColor = pageBackground,
+        bottomBar = {
                 Box(Modifier.background(pageBackground)) {
                     Button(
                         onClick = onStartConversion,
@@ -137,7 +128,11 @@ fun BatchConvertScreen(
                         verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
                     ) {
                         items(files, key = { it.key }) { file ->
-                            BatchConvertFileRow(file = file, onRemove = { onRemoveFile(file.key) })
+                            ToolPendingFileRow(
+                                fileName = file.fileName,
+                                fileSizeLabel = file.fileSizeLabel,
+                                onRemove = { onRemoveFile(file.key) }
+                            )
                         }
                     }
                 }
@@ -160,7 +155,6 @@ fun BatchConvertScreen(
                 )
             }
         }
-    }
 
     when (dialog) {
         BatchConvertDialogUi.Conflict -> AppConflictDialog(
@@ -204,43 +198,6 @@ private fun BatchConvertFormatRow(
                     }
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun BatchConvertFileRow(file: BatchConvertFileUi, onRemove: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .padding(start = 12.dp, top = 4.dp, end = 4.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        SettingsIconBox(R.drawable.ic_file_text)
-        Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-            Text(
-                text = file.fileName,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.MiddleEllipsis
-            )
-            Text(
-                text = file.fileSizeLabel,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        IconButton(onClick = onRemove) {
-            Icon(
-                painter = painterResource(R.drawable.ic_delete),
-                contentDescription = stringResource(R.string.delete),
-                tint = MaterialTheme.colorScheme.error
-            )
         }
     }
 }

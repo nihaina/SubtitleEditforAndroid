@@ -466,7 +466,7 @@
     <string name="activity_speech_to_subtitle_settings_text_62">短于此时长的语音会被忽略</string>
     <string name="activity_speech_to_subtitle_settings_text_63">最大语音时长</string>
     <string name="activity_speech_to_subtitle_settings_text_64">超过此时长会强制分段</string>
-    <string name="activity_speech_to_subtitle_text_01">选择音频/视频文件（可多选）</string>
+    <string name="activity_speech_to_subtitle_text_01">选择音频/视频文件</string>
     <string name="activity_speech_to_subtitle_text_02">支持 MP3, WAV, FLAC, MP4, MKV 等格式</string>
     <string name="activity_speech_to_subtitle_text_03">源语言</string>
     <string name="activity_speech_to_subtitle_text_04">TXT格式不使用VAD分段</string>
@@ -490,6 +490,7 @@
     <string name="activity_subtitle_format_select_text_03">选择字幕文件</string>
     <string name="activity_subtitle_format_select_text_04">尚未选择文件</string>
     <string name="activity_subtitle_format_select_text_05">确定并编辑</string>
+    <string name="subtitle_format_file_selected">已选择</string>
     <string name="activity_tools_text_01">字幕格式转换</string>
     <string name="activity_tools_text_02">批量转换字幕格式（SRT/LRC/VTT）</string>
     <string name="activity_tools_contentdescription_01">进入</string>
@@ -584,6 +585,7 @@
     <string name="activity_vocal_separation_title">人声分离</string>
     <string name="activity_vocal_separation_settings_title">人声分离设置</string>
     <string name="vocal_separation_no_files">未选择文件</string>
+    <string name="vocal_separation_selected_file_count">已选择 %1$d 个文件</string>
     <string name="vocal_separation_cancel_title">确认取消</string>
     <string name="vocal_separation_cancel_message">人声分离正在进行，确定要取消吗？</string>
     <string name="vocal_separation_cancel_confirm">取消分离</string>

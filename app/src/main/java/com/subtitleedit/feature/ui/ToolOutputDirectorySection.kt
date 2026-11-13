@@ -24,10 +24,14 @@ internal fun ToolOutputDirectorySection(
     outputDirectory: String,
     saveToSourceDirectory: Boolean,
     enabled: Boolean = true,
+    modifier: Modifier = Modifier,
     onSelectOutputDirectory: () -> Unit,
     onSaveToSourceDirectoryChange: (Boolean) -> Unit
 ) {
-    AppSection(title = stringResource(R.string.activity_tool_output_directory)) {
+    AppSection(
+        title = stringResource(R.string.activity_tool_output_directory),
+        modifier = modifier
+    ) {
         Text(
             outputDirectory,
             style = MaterialTheme.typography.bodyMedium,

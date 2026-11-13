@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import com.subtitleedit.feature.ui.SubtitleFormatSelectScreen
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import com.subtitleedit.util.SubtitleFormatConverter
+import com.subtitleedit.util.FileUtils
 
 class SubtitleFormatSelectActivity : AppComposeActivity() {
     private val viewModel: SubtitleFormatSelectViewModel by viewModels()
@@ -28,6 +29,8 @@ class SubtitleFormatSelectActivity : AppComposeActivity() {
             SubtitleEditComposeTheme {
                 SubtitleFormatSelectScreen(
                     selectedFileName = state.selectedName.takeIf { state.selectedUri != null },
+                    selectedFileSizeLabel = state.selectedSize?.let(FileUtils::formatFileSize)
+                        ?: getString(R.string.file_size_unknown),
                     onSelectFile = { filePicker.launch(arrayOf("text/*", "application/*")) },
                     onConfirm = ::openEditor,
                     onNavigateBack = { onBackPressedDispatcher.onBackPressed() }

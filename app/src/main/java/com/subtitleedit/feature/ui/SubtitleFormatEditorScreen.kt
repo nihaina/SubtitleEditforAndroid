@@ -52,9 +52,9 @@ import com.subtitleedit.ui.components.AppAlertDialog
 import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.ui.components.AppTaskProgress
 import com.subtitleedit.ui.components.AppToolScaffold
-import com.subtitleedit.ui.settings.MaterialSettingsTileTheme
 import com.subtitleedit.ui.settings.settingsChipColor
 import com.subtitleedit.ui.settings.settingsOutlinedTextFieldColors
+import com.subtitleedit.ui.settings.settingsPageBackground
 import com.subtitleedit.ui.settings.settingsPrimaryTextColor
 import com.subtitleedit.ui.settings.settingsSecondaryTextColor
 import com.subtitleedit.ui.settings.settingsTileColor
@@ -127,9 +127,8 @@ fun SubtitleFormatEditorScreen(
         addEndPunctuation = addEndPunctuationOptions[addEndPunctuationIndex]
     )
 
-    val pageBackground = MaterialTheme.colorScheme.background
-    MaterialSettingsTileTheme {
-        AppToolScaffold(
+    val pageBackground = settingsPageBackground()
+    AppToolScaffold(
             title = stringResource(R.string.subtitle_format_editor_title),
             onBack = onBack,
             scrollable = false,
@@ -220,7 +219,6 @@ fun SubtitleFormatEditorScreen(
                 }
             }
         }
-    }
 
     editingPosition?.let { position ->
         val row = items.getOrNull(position)

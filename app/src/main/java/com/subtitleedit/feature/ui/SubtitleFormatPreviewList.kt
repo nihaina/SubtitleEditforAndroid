@@ -20,6 +20,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -52,7 +53,8 @@ internal fun SubtitleFormatPreviewList(
     }
     val bottomPadding = with(LocalDensity.current) { 8.dp.roundToPx() }
     AndroidView(
-        modifier = modifier.fillMaxWidth(),
+        // Native touch scrolling must stay below the Compose file-info header.
+        modifier = modifier.fillMaxWidth().clipToBounds(),
         factory = { context ->
             DraggableRecyclerView(context).apply {
                 id = android.R.id.list

@@ -31,7 +31,7 @@ class VocalSeparationRecreationTest {
                 val after = ViewModelProvider(activity)[VocalSeparationViewModel::class.java]
                 assertSame(before, after)
                 assertTrue(after.state.value.hasSelectedFiles)
-                assertTrue(after.state.value.selectedFilesText.orEmpty().contains("song.mp3"))
+                assertTrue(after.state.value.files.any { it.fileName == "song.mp3" })
             }
         }
     }

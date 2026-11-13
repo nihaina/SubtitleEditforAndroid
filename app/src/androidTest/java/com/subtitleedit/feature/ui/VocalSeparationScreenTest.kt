@@ -5,7 +5,10 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.subtitleedit.R
@@ -35,6 +38,7 @@ class VocalSeparationScreenTest {
                     onConfirmBack = { calls += "confirmBack" },
                     onSettings = { calls += "settings" },
                     onSelectFiles = { calls += "selectFiles" },
+                    onRemoveFile = { calls += "remove:$it" },
                     onSelectOutputDirectory = { calls += "selectOutput" },
                     onSaveToSourceDirectoryChange = { calls += "saveToSource:$it" },
                     onStemChange = { stem, checked -> calls += "stem:$stem:$checked" },
@@ -53,12 +57,12 @@ class VocalSeparationScreenTest {
         show(VocalSeparationUiState())
 
         compose.onNodeWithText(text(R.string.activity_vocal_separation_text_08)).assertIsNotEnabled()
-        compose.onNodeWithText(text(R.string.vocal_separation_no_files)).assertIsDisplayed()
+        compose.onAllNodesWithText(text(R.string.vocal_separation_no_files)).onFirst().assertIsDisplayed()
     }
 
     @Test
     fun startIsEnabledWithFilesAndStems() {
-        show(VocalSeparationUiState(selectedFilesText = "a.mp3", hasSelectedFiles = true))
+        show(VocalSeparationUiState(files = listOf(VocalSeparationFileUi("a", "a.mp3", "1 KB"))))
 
         compose.onNodeWithText(text(R.string.activity_vocal_separation_text_08))
             .assertIsEnabled()
@@ -99,8 +103,8 @@ class VocalSeparationScreenTest {
             )
         )
 
-        compose.onNodeWithText("[1/2] working").assertIsDisplayed()
-        compose.onNodeWithText(text(R.string.cancel)).performClick()
+        compose.onNodeWithText("[1/2] working").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.cancel)).performScrollTo().performClick()
 
         assertEquals(listOf("cancel"), calls)
     }

@@ -37,6 +37,7 @@ class VocalSeparationActivity : AppComposeActivity() {
                     },
                     onSettings = { startActivity(Intent(this, VocalSeparationSettingsActivity::class.java)) },
                     onSelectFiles = { filePickerLauncher.launch(arrayOf("audio/*", "video/*")) },
+                    onRemoveFile = viewModel::removeFile,
                     onSelectOutputDirectory = { outputDirLauncher.launch(viewModel.outputDirUri) },
                     onSaveToSourceDirectoryChange = viewModel::setSaveToSourceDirectory,
                     onStemChange = viewModel::setStemSelected,

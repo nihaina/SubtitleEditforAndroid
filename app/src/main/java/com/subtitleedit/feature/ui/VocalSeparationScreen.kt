@@ -1,16 +1,25 @@
 package com.subtitleedit.feature.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -21,15 +30,23 @@ import com.subtitleedit.ui.components.AppAlertDialog
 import com.subtitleedit.ui.components.AppChoiceTile
 import com.subtitleedit.ui.components.AppConflictDialog
 import com.subtitleedit.ui.components.AppLogBox
-import com.subtitleedit.ui.components.AppPrimaryButton
-import com.subtitleedit.ui.components.AppSection
 import com.subtitleedit.ui.components.AppTaskProgress
 import com.subtitleedit.ui.components.AppToolScaffold
+import com.subtitleedit.ui.settings.SettingsTileGroup
+import com.subtitleedit.ui.settings.SettingsTileRow
+import com.subtitleedit.ui.settings.SettingsTileSection
+import com.subtitleedit.ui.settings.SettingsTileSwitchRow
+import com.subtitleedit.ui.settings.settingsPageBackground
 import com.subtitleedit.ui.theme.AppSpacing
 
+internal data class VocalSeparationFileUi(
+    val key: String,
+    val fileName: String,
+    val fileSizeLabel: String
+)
+
 internal data class VocalSeparationUiState(
-    val selectedFilesText: String? = null,
-    val hasSelectedFiles: Boolean = false,
+    val files: List<VocalSeparationFileUi> = emptyList(),
     val outputDirectory: String = "",
     val saveToSourceDirectory: Boolean = false,
     val selectedStems: Set<VocalSeparationEngine.Stem> = setOf(VocalSeparationEngine.Stem.VOCALS),
@@ -42,6 +59,9 @@ internal data class VocalSeparationUiState(
     val dialog: VocalSeparationDialog = VocalSeparationDialog.NONE,
     val errorMessage: String = ""
 ) {
+    val hasSelectedFiles: Boolean
+        get() = files.isNotEmpty()
+
     val canStart: Boolean
         get() = !isRunning && hasSelectedFiles && selectedStems.isNotEmpty()
 }
@@ -55,6 +75,7 @@ internal fun VocalSeparationScreen(
     onConfirmBack: () -> Unit,
     onSettings: () -> Unit,
     onSelectFiles: () -> Unit,
+    onRemoveFile: (String) -> Unit,
     onSelectOutputDirectory: () -> Unit,
     onSaveToSourceDirectoryChange: (Boolean) -> Unit,
     onStemChange: (VocalSeparationEngine.Stem, Boolean) -> Unit,
@@ -64,35 +85,90 @@ internal fun VocalSeparationScreen(
     onAutoRename: () -> Unit,
     onDismissDialog: () -> Unit
 ) {
+    val pageBackground = settingsPageBackground()
     AppToolScaffold(
         title = stringResource(R.string.activity_vocal_separation_title),
         onBack = onBack,
+        contentBackground = pageBackground,
+        topBarContainerColor = pageBackground,
+        topBarScrolledContainerColor = pageBackground,
         actions = {
             IconButton(onClick = onSettings, enabled = !state.isRunning) {
-                Icon(painterResource(R.drawable.ic_settings), contentDescription = stringResource(R.string.activity_vocal_separation_settings_title))
+                Icon(
+                    painterResource(R.drawable.ic_settings),
+                    contentDescription = stringResource(R.string.activity_vocal_separation_settings_title),
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
             }
         },
         bottomBar = {
-            AppPrimaryButton(
-                text = stringResource(R.string.activity_vocal_separation_text_08),
-                onClick = onStart,
-                enabled = state.canStart,
-                modifier = Modifier.padding(horizontal = AppSpacing.Page, vertical = AppSpacing.Inner)
-            )
+            Box(Modifier.background(pageBackground)) {
+                Button(
+                    onClick = onStart,
+                    enabled = state.canStart,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = AppSpacing.Page, vertical = AppSpacing.Inner)
+                        .height(56.dp),
+                    shape = CircleShape
+                ) {
+                    Text(
+                        stringResource(R.string.activity_vocal_separation_text_08),
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
+            }
         }
     ) {
-        AppSection(title = stringResource(R.string.activity_speech_to_subtitle_text_01)) {
-            OutlinedButton(onClick = onSelectFiles, enabled = !state.isRunning) {
-                Text(stringResource(R.string.select_file))
-            }
-            Text(
-                state.selectedFilesText ?: stringResource(R.string.vocal_separation_no_files),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+        SettingsTileGroup {
+            SettingsTileRow(
+                title = stringResource(R.string.activity_speech_to_subtitle_text_01),
+                iconRes = R.drawable.ic_file_text,
+                value = if (state.files.isEmpty()) {
+                    stringResource(R.string.vocal_separation_no_files)
+                } else {
+                    stringResource(R.string.vocal_separation_selected_file_count, state.files.size)
+                },
+                enabled = !state.isRunning,
+                onClick = onSelectFiles
             )
         }
 
-        AppSection(title = stringResource(R.string.activity_vocal_separation_text_02)) {
+        SettingsTileSection(title = stringResource(R.string.activity_batch_convert_text_04)) {
+            if (state.files.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        stringResource(R.string.vocal_separation_no_files),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+                ) {
+                    items(state.files, key = { it.key }) { file ->
+                        ToolPendingFileRow(
+                            fileName = file.fileName,
+                            fileSizeLabel = file.fileSizeLabel,
+                            onRemove = { onRemoveFile(file.key) },
+                            removeEnabled = !state.isRunning && state.dialog != VocalSeparationDialog.OUTPUT_CONFLICT
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        SettingsTileSection(
+            title = stringResource(R.string.activity_vocal_separation_text_02),
+            subtitle = stringResource(R.string.activity_vocal_separation_text_10)
+        ) {
             VocalSeparationEngine.Stem.entries.chunked(2).forEach { stems ->
                 Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)) {
                     stems.forEach { stem ->
@@ -110,23 +186,31 @@ internal fun VocalSeparationScreen(
                     }
                 }
             }
-            Text(
-                stringResource(R.string.activity_vocal_separation_text_10),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        SettingsTileGroup {
+            SettingsTileRow(
+                title = stringResource(R.string.activity_tool_output_directory),
+                iconRes = R.drawable.ic_folder,
+                value = state.outputDirectory.ifBlank { stringResource(R.string.activity_settings_software_directory_default) },
+                valueBelow = true,
+                enabled = !state.isRunning && state.dialog != VocalSeparationDialog.OUTPUT_CONFLICT &&
+                    !state.saveToSourceDirectory,
+                onClick = onSelectOutputDirectory
+            )
+            SettingsTileSwitchRow(
+                title = stringResource(R.string.save_to_source_folder),
+                checked = state.saveToSourceDirectory,
+                enabled = !state.isRunning && state.dialog != VocalSeparationDialog.OUTPUT_CONFLICT,
+                onCheckedChange = onSaveToSourceDirectoryChange
             )
         }
 
-        ToolOutputDirectorySection(
-            outputDirectory = state.outputDirectory,
-            saveToSourceDirectory = state.saveToSourceDirectory,
-            enabled = !state.isRunning && state.dialog != VocalSeparationDialog.OUTPUT_CONFLICT,
-            onSelectOutputDirectory = onSelectOutputDirectory,
-            onSaveToSourceDirectoryChange = onSaveToSourceDirectoryChange
-        )
-
         if (state.progressVisible) {
-            AppSection(title = stringResource(R.string.activity_speech_to_subtitle_text_06)) {
+            Spacer(Modifier.height(12.dp))
+            SettingsTileSection(title = stringResource(R.string.activity_speech_to_subtitle_text_06)) {
                 AppTaskProgress(
                     visible = true,
                     progress = state.progress.coerceIn(0, 100) / 100f,
@@ -136,8 +220,11 @@ internal fun VocalSeparationScreen(
             }
         }
 
-        AppSection(title = stringResource(R.string.activity_settings_text_06)) {
-            AppLogBox(state.log)
+        if (state.log.isNotBlank()) {
+            Spacer(Modifier.height(12.dp))
+            SettingsTileSection(title = stringResource(R.string.activity_settings_text_06)) {
+                AppLogBox(state.log)
+            }
         }
     }
 
