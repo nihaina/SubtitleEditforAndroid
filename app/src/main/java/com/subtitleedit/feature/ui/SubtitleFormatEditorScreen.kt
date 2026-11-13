@@ -6,18 +6,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -51,7 +47,6 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.layout.size
 import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppAlertDialog
 import com.subtitleedit.ui.components.AppDialog
@@ -84,7 +79,7 @@ data class SubtitleFormatEditorOptions(
 )
 
 private val punctuationOptions = AsrPunctuationOptions.choices.map { it.single() }
-private val endPunctuationDefaults = "。．.，,、？?！!：:；;…".toSet()
+private const val boundaryPunctuationDefaults = "。．.，,、？?！!：:；;…"
 private val addEndPunctuationOptions = listOf("", "。", ".", "！", "!", "？", "?", "，", ",", "…")
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -112,8 +107,8 @@ fun SubtitleFormatEditorScreen(
 ) {
     var removeSpaces by rememberSaveable { mutableStateOf(false) }
     var innerPunctuation by rememberSaveable { mutableStateOf("") }
-    var startPunctuation by rememberSaveable { mutableStateOf("") }
-    var endPunctuation by rememberSaveable { mutableStateOf(endPunctuationDefaults.joinToString("")) }
+    var startPunctuation by rememberSaveable { mutableStateOf(boundaryPunctuationDefaults) }
+    var endPunctuation by rememberSaveable { mutableStateOf(boundaryPunctuationDefaults) }
     var replaceFrom by rememberSaveable { mutableStateOf("") }
     var replaceTo by rememberSaveable { mutableStateOf("") }
     var replacementScope by rememberSaveable { mutableStateOf(PunctuationReplacementScope.INNER) }
@@ -188,7 +183,7 @@ fun SubtitleFormatEditorScreen(
                     Row(Modifier.fillMaxSize()) {
                         Column(Modifier.weight(3f).fillMaxHeight().padding(8.dp)) {
                             FileInfo(fileInfo)
-                            PreviewList(
+                            SubtitleFormatPreviewList(
                                 items = items,
                                 onSelectionChanged = onSelectionChanged,
                                 onEdit = { editingPosition = it },
@@ -200,7 +195,7 @@ fun SubtitleFormatEditorScreen(
                             color = MaterialTheme.colorScheme.outlineVariant
                         ) {}
                         FormattingControls(
-                            modifier = Modifier.weight(2f).fillMaxHeight(),
+                            modifier = Modifier.weight(2.5f).fillMaxHeight(),
                             removeSpaces = removeSpaces,
                             onRemoveSpacesChanged = { removeSpaces = it },
                             innerPunctuation = innerPunctuation,
@@ -298,50 +293,6 @@ private fun FileInfo(fileInfo: String) {
 }
 
 @Composable
-private fun PreviewList(
-    items: List<SubtitleFormatEditorRow>,
-    onSelectionChanged: (Int, Boolean) -> Unit,
-    onEdit: (Int) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    LazyColumn(
-        modifier = modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(bottom = 8.dp)
-    ) {
-        itemsIndexed(items, key = { _, item -> item.entryPosition }) { index, item ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 4.dp, top = 6.dp, end = 8.dp, bottom = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Checkbox(
-                    checked = item.selected,
-                    onCheckedChange = { onSelectionChanged(index, it) },
-                    modifier = Modifier.size(40.dp)
-                )
-                Text(
-                    text = "${index + 1}.",
-                    modifier = Modifier.padding(end = 4.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = settingsSecondaryTextColor()
-                )
-                Text(
-                    text = item.text,
-                    modifier = Modifier
-                        .weight(1f)
-                        .defaultMinSize(minHeight = 40.dp)
-                        .clickable { onEdit(index) }
-                        .padding(6.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = settingsPrimaryTextColor()
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun FormattingControls(
     modifier: Modifier = Modifier,
     removeSpaces: Boolean,
@@ -369,7 +320,8 @@ private fun FormattingControls(
             .fillMaxWidth()
             .background(settingsTileColor())
             .verticalScroll(rememberScrollState())
-            .padding(12.dp)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(
             stringResource(R.string.activity_subtitle_format_editor_text_01),
@@ -391,7 +343,6 @@ private fun FormattingControls(
 
         Text(
             stringResource(R.string.subtitle_format_clear_start_punctuation),
-            modifier = Modifier.padding(top = 16.dp),
             style = MaterialTheme.typography.titleMedium,
             color = settingsPrimaryTextColor()
         )
@@ -402,7 +353,6 @@ private fun FormattingControls(
 
         Text(
             stringResource(R.string.activity_subtitle_format_editor_text_03),
-            modifier = Modifier.padding(top = 16.dp),
             style = MaterialTheme.typography.titleMedium,
             color = settingsPrimaryTextColor()
         )
@@ -413,19 +363,17 @@ private fun FormattingControls(
 
         Text(
             stringResource(R.string.activity_subtitle_format_editor_text_04),
-            modifier = Modifier.padding(top = 16.dp),
             style = MaterialTheme.typography.titleMedium,
             color = settingsPrimaryTextColor()
         )
         ReplacementScopeSelector(
             selected = replacementScope,
-            onSelected = onReplacementScopeChanged,
-            modifier = Modifier.padding(top = 6.dp)
+            onSelected = onReplacementScopeChanged
         )
         OutlinedTextField(
             value = replaceFrom,
             onValueChange = onReplaceFromChanged,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            modifier = Modifier.fillMaxWidth(),
             label = { Text(stringResource(R.string.activity_subtitle_format_editor_hint_01)) },
             colors = settingsOutlinedTextFieldColors(),
             singleLine = true
@@ -433,7 +381,7 @@ private fun FormattingControls(
         OutlinedTextField(
             value = replaceTo,
             onValueChange = onReplaceToChanged,
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            modifier = Modifier.fillMaxWidth(),
             label = { Text(stringResource(R.string.activity_editor_hint_01)) },
             colors = settingsOutlinedTextFieldColors(),
             singleLine = true
@@ -441,21 +389,18 @@ private fun FormattingControls(
 
         Text(
             stringResource(R.string.activity_subtitle_format_editor_text_05),
-            modifier = Modifier.padding(top = 16.dp),
             style = MaterialTheme.typography.titleMedium,
             color = settingsPrimaryTextColor()
         )
         EndPunctuationSelector(
             selectedIndex = addEndPunctuationIndex,
-            onSelected = onAddEndPunctuationChanged,
-            modifier = Modifier.padding(top = 6.dp)
+            onSelected = onAddEndPunctuationChanged
         )
 
         Button(
             onClick = onApply,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 18.dp)
                 .height(48.dp),
             enabled = !isApplying,
             shape = CircleShape
@@ -468,7 +413,7 @@ private fun FormattingControls(
         }
         OutlinedButton(
             onClick = onSave,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(48.dp),
+            modifier = Modifier.fillMaxWidth().height(48.dp),
             shape = CircleShape
         ) {
             Text(stringResource(R.string.menu_save), style = MaterialTheme.typography.labelLarge)
@@ -487,7 +432,7 @@ private fun PunctuationGrid(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         punctuationOptions.chunked(3).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
                 row.forEach { punctuation ->
                     val isSelected = punctuation in selected
                     Surface(
@@ -499,7 +444,7 @@ private fun PunctuationGrid(
                         },
                         modifier = Modifier
                             .weight(1f)
-                            .height(40.dp),
+                            .height(38.dp),
                         shape = MaterialTheme.shapes.medium,
                         color = if (isSelected) {
                             MaterialTheme.colorScheme.primaryContainer
@@ -518,7 +463,7 @@ private fun PunctuationGrid(
                         )
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(punctuation.toString(), style = MaterialTheme.typography.bodyLarge)
+                            Text(punctuation.toString(), style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
@@ -538,7 +483,7 @@ private fun ReplacementScopeSelector(
     Box(modifier.fillMaxWidth()) {
         OutlinedButton(
             onClick = { expanded = true },
-            modifier = Modifier.fillMaxWidth().height(48.dp)
+            modifier = Modifier.fillMaxWidth().height(44.dp)
         ) {
             Text(
                 if (selected == PunctuationReplacementScope.END) {
@@ -579,7 +524,7 @@ private fun EndPunctuationSelector(
     Box(modifier.fillMaxWidth()) {
         OutlinedButton(
             onClick = { expanded = true },
-            modifier = Modifier.fillMaxWidth().height(48.dp)
+            modifier = Modifier.fillMaxWidth().height(44.dp)
         ) {
             Text(selectedText)
         }
