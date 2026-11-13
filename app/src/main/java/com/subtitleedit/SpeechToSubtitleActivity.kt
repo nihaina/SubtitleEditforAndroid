@@ -40,6 +40,7 @@ class SpeechToSubtitleActivity : AppComposeActivity() {
                     onNavigateBack = { onBackPressedDispatcher.onBackPressed() },
                     onSettings = viewModel::openSettings,
                     onSelectFiles = { filePickerLauncher.launch(arrayOf("audio/*", "video/*")) },
+                    onRemoveFile = viewModel::removeFile,
                     onLanguageSelected = viewModel::selectLanguage,
                     onFormatSelected = viewModel::selectFormat,
                     onAddToAutoTranslateChange = viewModel::setAddToAutoTranslate,

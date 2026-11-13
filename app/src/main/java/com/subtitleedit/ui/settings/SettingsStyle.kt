@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -166,6 +167,7 @@ internal fun settingsTileShape(source: MutableInteractionSource): RoundedCornerS
 @Composable
 fun SettingsTileCard(
     modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(16.dp),
     content: @Composable ColumnScope.() -> Unit
 ) {
     Column(
@@ -173,7 +175,7 @@ fun SettingsTileCard(
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.extraLarge)
             .background(settingsTileColor())
-            .padding(16.dp),
+            .padding(contentPadding),
         content = content
     )
 }
@@ -184,9 +186,10 @@ fun SettingsTileSection(
     title: String? = null,
     subtitle: String? = null,
     modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(16.dp),
     content: @Composable ColumnScope.() -> Unit
 ) {
-    SettingsTileCard(modifier = modifier) {
+    SettingsTileCard(modifier = modifier, contentPadding = contentPadding) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (title != null || subtitle != null) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {

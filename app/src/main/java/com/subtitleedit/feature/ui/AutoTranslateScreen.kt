@@ -15,6 +15,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -53,7 +54,6 @@ import com.subtitleedit.ui.components.AppAlertDialog
 import com.subtitleedit.ui.components.AppConflictDialog
 import com.subtitleedit.ui.components.AppTaskProgress
 import com.subtitleedit.ui.components.AppToolScaffold
-import com.subtitleedit.ui.settings.SettingsIconBox
 import com.subtitleedit.ui.settings.SettingsTileGroup
 import com.subtitleedit.ui.settings.SettingsTileRow
 import com.subtitleedit.ui.settings.SettingsTileSection
@@ -183,7 +183,10 @@ fun AutoTranslateScreen(
                 }
             }
 
-            SettingsTileSection(title = stringResource(R.string.activity_auto_translate_text_04)) {
+            SettingsTileSection(
+                title = stringResource(R.string.activity_auto_translate_text_04),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 16.dp)
+            ) {
                 AnimatedVisibility(
                     visible = state.queueRunning,
                     enter = expandVertically(animationSpec = AppMotion.enter()) + fadeIn(animationSpec = AppMotion.enter()),
@@ -380,7 +383,6 @@ private fun AutoTranslateFileRow(
     val rowModifier = Modifier
         .fillMaxWidth()
         .clip(MaterialTheme.shapes.large)
-        .background(colors.surfaceContainerHighest)
         .then(
             if (isActive) {
                 Modifier.border(
@@ -393,39 +395,22 @@ private fun AutoTranslateFileRow(
             }
         )
         .then(if (interactive) Modifier.clickable(onClick = onClick) else Modifier)
-        .padding(start = 12.dp, top = 8.dp, end = 4.dp, bottom = 8.dp)
 
-    Row(
-        modifier = rowModifier,
-        verticalAlignment = Alignment.CenterVertically
+    ToolPendingFileRow(
+        fileName = file.fileName,
+        fileSizeLabel = stringResource(
+            R.string.subtitle_file_progress_summary,
+            file.fileSizeLabel,
+            file.totalLines,
+            file.processedLines
+        ),
+        onRemove = onRemove,
+        modifier = rowModifier
     ) {
-        SettingsIconBox(R.drawable.ic_file_text)
         Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(start = 12.dp),
+            modifier = Modifier.padding(top = 2.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            Text(
-                text = file.fileName,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                color = colors.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.MiddleEllipsis
-            )
-            Text(
-                text = stringResource(
-                    R.string.subtitle_file_progress_summary,
-                    file.fileSizeLabel,
-                    file.totalLines,
-                    file.processedLines
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
             AnimatedVisibility(visible = file.showStageProgress && file.totalLines > 0) {
                 val targetProgress = (file.processedLines.toFloat() / file.totalLines.coerceAtLeast(1).toFloat())
                     .coerceIn(0f, 1f)
@@ -450,13 +435,6 @@ private fun AutoTranslateFileRow(
                 color = statusColor,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
-            )
-        }
-        IconButton(onClick = onRemove) {
-            Icon(
-                painter = painterResource(R.drawable.ic_delete),
-                contentDescription = stringResource(R.string.delete),
-                tint = colors.error
             )
         }
     }

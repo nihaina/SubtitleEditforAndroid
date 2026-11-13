@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -123,7 +124,7 @@ internal fun VocalSeparationScreen(
         SettingsTileGroup {
             SettingsTileRow(
                 title = stringResource(R.string.activity_speech_to_subtitle_text_01),
-                iconRes = R.drawable.ic_file_text,
+                iconRes = R.drawable.ic_file_audio,
                 value = if (state.files.isEmpty()) {
                     stringResource(R.string.vocal_separation_no_files)
                 } else {
@@ -134,7 +135,10 @@ internal fun VocalSeparationScreen(
             )
         }
 
-        SettingsTileSection(title = stringResource(R.string.activity_batch_convert_text_04)) {
+        SettingsTileSection(
+            title = stringResource(R.string.activity_batch_convert_text_04),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 16.dp)
+        ) {
             if (state.files.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),

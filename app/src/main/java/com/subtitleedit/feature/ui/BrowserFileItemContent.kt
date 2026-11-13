@@ -65,14 +65,17 @@ internal fun BrowserFileItem(
     restricted: Boolean = false,
     isSelected: Boolean = false,
     alpha: Float = 1f,
-    directoryPageStyle: Boolean = false
+    directoryPageStyle: Boolean = false,
+    summaryOverride: String? = null,
+    supportingContent: (@Composable () -> Unit)? = null,
+    horizontalContentPadding: Dp? = null
 ) {
     val locale = LocalLocale.current.platformLocale
     val modifiedTime = remember(entry.modifiedTimeMillis, locale) {
         entry.modifiedTimeMillis?.let { SimpleDateFormat("yyyy-MM-dd", locale).format(Date(it)) }.orEmpty()
     }
     val count = entry.itemCount
-    val summary = when {
+    val summary = summaryOverride ?: when {
         entry.isParentDirectory -> ""
         !entry.isDirectory && entry.size >= 0L -> FileUtils.formatFileSize(entry.size)
         !entry.isDirectory -> stringResource(R.string.file_size_unknown)
@@ -89,8 +92,8 @@ internal fun BrowserFileItem(
     )
     Box(modifier.browserFileItemContainer(viewMode, isSelected, alpha, directoryPageStyle).then(interactionModifier)) {
         when (viewMode) {
-            FileBrowserViewMode.DETAILED -> DetailedFileRowContent(entry, preview, details, restricted, loadingDuration, isSelected, directoryPageStyle)
-            FileBrowserViewMode.COMPACT -> CompactFileRowContent(entry, preview, details, restricted, isSelected, directoryPageStyle)
+            FileBrowserViewMode.DETAILED -> DetailedFileRowContent(entry, preview, details, restricted, loadingDuration, isSelected, directoryPageStyle, supportingContent, horizontalContentPadding)
+            FileBrowserViewMode.COMPACT -> CompactFileRowContent(entry, preview, details, restricted, isSelected, directoryPageStyle, horizontalContentPadding)
             FileBrowserViewMode.GRID -> GridFileItemContent(entry, preview, details, restricted, isSelected, directoryPageStyle)
         }
     }
@@ -143,9 +146,11 @@ private fun DetailedFileRowContent(
     restricted: Boolean,
     loadingDuration: Boolean,
     isSelected: Boolean,
-    directoryPageStyle: Boolean
+    directoryPageStyle: Boolean,
+    supportingContent: (@Composable () -> Unit)?,
+    horizontalContentPadding: Dp?
 ) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = if (directoryPageStyle) 16.dp else 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = horizontalContentPadding ?: if (directoryPageStyle) 16.dp else 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         BrowserFileIcon(entry.name, entry.isDirectory, 42.dp, preview?.bitmap, restricted)
         Column(Modifier.weight(1f).padding(start = 12.dp, end = 8.dp)) {
             FileItemTitle(details.name, restricted, MaterialTheme.typography.bodyLarge)
@@ -162,6 +167,7 @@ private fun DetailedFileRowContent(
                     }
                 }
             }
+            supportingContent?.invoke()
         }
         Column(if (directoryPageStyle) Modifier.widthIn(max = 112.dp) else Modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(if (directoryPageStyle) 2.dp else 4.dp)) {
             if (details.extension.isNotEmpty()) {
@@ -241,8 +247,8 @@ private fun FileItemTitle(name: String, restricted: Boolean, style: TextStyle, l
 }
 
 @Composable
-private fun CompactFileRowContent(entry: BrowserFileEntry, preview: MainFilePreview?, details: BrowserFileDetails, restricted: Boolean, isSelected: Boolean, directoryPageStyle: Boolean) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = if (directoryPageStyle) 16.dp else 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun CompactFileRowContent(entry: BrowserFileEntry, preview: MainFilePreview?, details: BrowserFileDetails, restricted: Boolean, isSelected: Boolean, directoryPageStyle: Boolean, horizontalContentPadding: Dp?) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = horizontalContentPadding ?: if (directoryPageStyle) 16.dp else 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         BrowserFileIcon(entry.name, entry.isDirectory, 30.dp, preview?.bitmap, restricted)
         Box(Modifier.weight(1f).padding(start = 10.dp, end = 8.dp)) {
             FileItemTitle(details.name, restricted, MaterialTheme.typography.bodyMedium)

@@ -3,6 +3,7 @@ package com.subtitleedit.feature.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -108,7 +109,10 @@ fun BatchConvertScreen(
                 )
             }
 
-            SettingsTileSection(title = stringResource(R.string.activity_batch_convert_text_04)) {
+            SettingsTileSection(
+                title = stringResource(R.string.activity_batch_convert_text_04),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 16.dp)
+            ) {
                 if (files.isEmpty()) {
                     Box(
                         modifier = Modifier

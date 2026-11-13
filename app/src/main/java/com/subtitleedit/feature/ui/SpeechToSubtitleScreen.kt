@@ -4,12 +4,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -43,7 +46,6 @@ import com.subtitleedit.ui.settings.SettingsTileSection
 import com.subtitleedit.ui.settings.SettingsTileSwitchRow
 import com.subtitleedit.ui.settings.settingsPageBackground
 import com.subtitleedit.ui.settings.settingsPrimaryTextColor
-import com.subtitleedit.ui.settings.settingsSecondaryTextColor
 import com.subtitleedit.ui.theme.AppSpacing
 
 sealed interface SpeechToSubtitleDialogUi {
@@ -53,10 +55,16 @@ sealed interface SpeechToSubtitleDialogUi {
     data class Error(val message: String) : SpeechToSubtitleDialogUi
 }
 
+data class SpeechToSubtitleFileUi(
+    val key: String,
+    val fileName: String,
+    val fileSizeLabel: String
+)
+
 data class SpeechToSubtitleUiState(
     val languageOptions: List<AppOption<String>> = emptyList(),
     val formatOptions: List<AppOption<String>> = emptyList(),
-    val selectedFiles: List<String> = emptyList(),
+    val selectedFiles: List<SpeechToSubtitleFileUi> = emptyList(),
     val outputDirectory: String? = null,
     val saveToSourceDirectory: Boolean = false,
     val selectedLanguage: String = "",
@@ -81,6 +89,7 @@ fun SpeechToSubtitleScreen(
     onNavigateBack: () -> Unit,
     onSettings: () -> Unit,
     onSelectFiles: () -> Unit,
+    onRemoveFile: (String) -> Unit,
     onLanguageSelected: (String) -> Unit,
     onFormatSelected: (String) -> Unit,
     onAddToAutoTranslateChange: (Boolean) -> Unit,
@@ -96,6 +105,7 @@ fun SpeechToSubtitleScreen(
     onConfirmBack: () -> Unit
 ) {
     val pageBackground = settingsPageBackground()
+    val canModifyFiles = !state.isConverting && state.dialog != SpeechToSubtitleDialogUi.OutputConflict
     AppToolScaffold(
         title = stringResource(R.string.speech_to_subtitle_title),
         onBack = onNavigateBack,
@@ -140,6 +150,7 @@ fun SpeechToSubtitleScreen(
                 } else {
                     stringResource(R.string.selected_file_count_with_colon, state.selectedFiles.size)
                 },
+                enabled = canModifyFiles,
                 onClick = onSelectFiles
             )
             SpeechToSubtitleOptionRow(
@@ -151,22 +162,36 @@ fun SpeechToSubtitleScreen(
             )
         }
 
-        // ── Selected files detail ──
-        if (state.selectedFiles.isNotEmpty()) {
-            SettingsTileSection(
-                title = stringResource(R.string.activity_speech_to_subtitle_text_01),
-                subtitle = stringResource(R.string.activity_speech_to_subtitle_text_02)
-            ) {
-                Text(
-                    text = buildString {
-                        state.selectedFiles.forEachIndexed { index, fileName ->
-                            if (index > 0) append("\n")
-                            append("${index + 1}. $fileName")
-                        }
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = settingsSecondaryTextColor()
-                )
+        SettingsTileSection(
+            title = stringResource(R.string.speech_to_subtitle_pending_files),
+            subtitle = stringResource(R.string.activity_speech_to_subtitle_text_02),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 16.dp)
+        ) {
+            if (state.selectedFiles.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        stringResource(R.string.activity_media_convert_text_03),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+                ) {
+                    items(state.selectedFiles, key = { it.key }) { file ->
+                        ToolPendingFileRow(
+                            fileName = file.fileName,
+                            fileSizeLabel = file.fileSizeLabel,
+                            onRemove = { onRemoveFile(file.key) },
+                            removeEnabled = canModifyFiles
+                        )
+                    }
+                }
             }
         }
 

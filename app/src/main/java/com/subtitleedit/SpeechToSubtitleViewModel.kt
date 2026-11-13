@@ -5,11 +5,13 @@ import android.content.Intent
 import com.subtitleedit.util.PickedUriAccess
 import android.net.Uri
 import android.os.Environment
+import android.provider.OpenableColumns
 import android.util.Log
 import android.widget.Toast
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.viewModelScope
 import com.subtitleedit.feature.ui.SpeechToSubtitleDialogUi
+import com.subtitleedit.feature.ui.SpeechToSubtitleFileUi
 import com.subtitleedit.feature.ui.SpeechToSubtitleUiState
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.nativebridge.NativeMediaOperation
@@ -18,6 +20,7 @@ import com.subtitleedit.task.LongTaskController
 import com.subtitleedit.ui.components.AppOption
 import com.subtitleedit.util.ByteSizeFormat
 import com.subtitleedit.util.DirectoryDisplayPath
+import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.SourceOutputDirectory
 import com.subtitleedit.util.SubtitleOutputWriter
@@ -70,7 +73,8 @@ internal class SpeechToSubtitleViewModel(
 
     private data class SelectedMediaFile(
         val uri: Uri,
-        val fileName: String
+        val fileName: String,
+        val fileSize: Long?
     )
 
     private val settingsManager = SettingsManager.getInstance(application)
@@ -202,12 +206,42 @@ internal class SpeechToSubtitleViewModel(
      * 处理选择的音频/视频文件
      */
     fun selectFiles(uris: List<Uri>) {
-        selectedMediaFiles = uris.map { uri ->
-            SelectedMediaFile(uri, UriDisplayName.of(app, uri, string(R.string.unknown_file)))
+        if (isConverting || currentState.dialog == SpeechToSubtitleDialogUi.OutputConflict) return
+        selectedMediaFiles = uris.distinct().map { uri ->
+            SelectedMediaFile(uri, UriDisplayName.of(app, uri, string(R.string.unknown_file)), fileSize(uri))
         }
-        setState { copy(selectedFiles = selectedMediaFiles.map(SelectedMediaFile::fileName)) }
+        publishSelectedFiles()
+    }
+
+    fun removeFile(key: String) {
+        if (isConverting || currentState.dialog == SpeechToSubtitleDialogUi.OutputConflict) return
+        selectedMediaFiles = selectedMediaFiles.filterNot { it.uri.toString() == key }
+        publishSelectedFiles()
+    }
+
+    private fun publishSelectedFiles() {
+        val files = selectedMediaFiles.map { file ->
+            SpeechToSubtitleFileUi(
+                key = file.uri.toString(),
+                fileName = file.fileName,
+                fileSizeLabel = file.fileSize?.let(FileUtils::formatFileSize) ?: string(R.string.file_size_unknown)
+            )
+        }
+        setState { copy(selectedFiles = files) }
         updateStartButtonState()
     }
+
+    private fun fileSize(uri: Uri): Long? = runCatching {
+        PickedUriAccess.file(uri)?.let { file ->
+            return@runCatching file.takeIf { it.isFile }?.length()
+        }
+        app.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            val column = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (cursor.moveToFirst() && column >= 0 && !cursor.isNull(column)) {
+                cursor.getLong(column).takeIf { it >= 0L }
+            } else null
+        }
+    }.getOrNull()
 
     /**
      * 处理选择的输出目录

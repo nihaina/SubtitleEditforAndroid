@@ -2,6 +2,7 @@ package com.subtitleedit.feature.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -68,7 +69,7 @@ fun SubtitleFormatSelectScreen(
                 onClick = onSelectFile
             )
         }
-        SettingsTileSection {
+        SettingsTileSection(contentPadding = PaddingValues(horizontal = 8.dp, vertical = 16.dp)) {
             if (selectedFileName == null) {
                 Box(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
