@@ -1,19 +1,22 @@
 package com.subtitleedit.feature.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -25,7 +28,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
@@ -33,14 +35,15 @@ import com.subtitleedit.ui.components.AppAlertDialog
 import com.subtitleedit.ui.components.AppConflictDialog
 import com.subtitleedit.ui.components.AppLogBox
 import com.subtitleedit.ui.components.AppOption
-import com.subtitleedit.ui.components.AppOptionSelector
-import com.subtitleedit.ui.components.AppPrimaryButton
-import com.subtitleedit.ui.components.AppSection
 import com.subtitleedit.ui.components.AppTaskProgress
 import com.subtitleedit.ui.components.AppToolScaffold
-import com.subtitleedit.ui.components.SettingsSwitchRow
+import com.subtitleedit.ui.settings.SettingsTileGroup
+import com.subtitleedit.ui.settings.SettingsTileRow
+import com.subtitleedit.ui.settings.SettingsTileSection
+import com.subtitleedit.ui.settings.SettingsTileSwitchRow
 import com.subtitleedit.ui.settings.settingsPageBackground
-import com.subtitleedit.ui.theme.AppMotion
+import com.subtitleedit.ui.settings.settingsPrimaryTextColor
+import com.subtitleedit.ui.settings.settingsSecondaryTextColor
 import com.subtitleedit.ui.theme.AppSpacing
 
 sealed interface SpeechToSubtitleDialogUi {
@@ -101,102 +104,150 @@ fun SpeechToSubtitleScreen(
         topBarScrolledContainerColor = pageBackground,
         actions = {
             IconButton(onClick = onSettings, enabled = !state.isConverting) {
-                Icon(painterResource(R.drawable.ic_settings), contentDescription = stringResource(R.string.activity_settings_text_03))
+                Icon(
+                    painterResource(R.drawable.ic_settings),
+                    contentDescription = stringResource(R.string.activity_settings_text_03),
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
             }
         },
         bottomBar = {
             Box(Modifier.background(pageBackground)) {
-                AppPrimaryButton(
-                    text = stringResource(R.string.start_convert),
+                Button(
                     onClick = onStart,
                     enabled = state.startEnabled,
-                    modifier = Modifier.padding(horizontal = AppSpacing.Page, vertical = AppSpacing.Inner)
-                )
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = AppSpacing.Page, vertical = AppSpacing.Inner)
+                        .height(56.dp),
+                    shape = CircleShape
+                ) {
+                    Text(
+                        stringResource(R.string.start_convert),
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
             }
         },
     ) {
-        AppSection(
-            title = stringResource(R.string.activity_speech_to_subtitle_text_01),
-            subtitle = stringResource(R.string.activity_speech_to_subtitle_text_02)
-        ) {
-            OutlinedButton(onClick = onSelectFiles) {
-                Text(stringResource(R.string.activity_tool_select_files))
-            }
-            Text(
-                text = if (state.selectedFiles.isEmpty()) {
+        // ── File selection & source language ──
+        SettingsTileGroup {
+            SettingsTileRow(
+                title = stringResource(R.string.activity_speech_to_subtitle_text_01),
+                iconRes = R.drawable.ic_file_audio,
+                value = if (state.selectedFiles.isEmpty()) {
                     stringResource(R.string.activity_media_convert_text_03)
                 } else {
-                    buildString {
-                        append(stringResource(R.string.selected_file_count_with_colon, state.selectedFiles.size))
-                        state.selectedFiles.forEachIndexed { index, fileName -> append("\n${index + 1}. $fileName") }
-                    }
+                    stringResource(R.string.selected_file_count_with_colon, state.selectedFiles.size)
                 },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                onClick = onSelectFiles
             )
-        }
-
-        AppSection(title = stringResource(R.string.activity_speech_to_subtitle_text_03)) {
-            AppOptionSelector(
+            SpeechToSubtitleOptionRow(
                 label = stringResource(R.string.activity_speech_to_subtitle_text_03),
-                value = state.languageOptions.firstOrNull { it.id == state.selectedLanguage },
+                iconRes = R.drawable.ic_mic,
+                value = state.languageOptions.firstOrNull { it.id == state.selectedLanguage }?.label.orEmpty(),
                 options = state.languageOptions,
                 onSelected = onLanguageSelected
             )
         }
 
-        AppSection(title = stringResource(R.string.activity_tool_output_format)) {
-            AppOptionSelector(
+        // ── Selected files detail ──
+        if (state.selectedFiles.isNotEmpty()) {
+            SettingsTileSection(
+                title = stringResource(R.string.activity_speech_to_subtitle_text_01),
+                subtitle = stringResource(R.string.activity_speech_to_subtitle_text_02)
+            ) {
+                Text(
+                    text = buildString {
+                        state.selectedFiles.forEachIndexed { index, fileName ->
+                            if (index > 0) append("\n")
+                            append("${index + 1}. $fileName")
+                        }
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = settingsSecondaryTextColor()
+                )
+            }
+        }
+
+        // ── Output format & options ──
+        SettingsTileGroup {
+            SpeechToSubtitleOptionRow(
                 label = stringResource(R.string.target_format),
-                value = state.formatOptions.firstOrNull { it.id == state.selectedFormat },
+                iconRes = R.drawable.ic_subtitle_format,
+                value = state.formatOptions.firstOrNull { it.id == state.selectedFormat }?.label.orEmpty(),
                 options = state.formatOptions,
                 onSelected = onFormatSelected
             )
-            SettingsSwitchRow(
+            SettingsTileSwitchRow(
                 title = stringResource(R.string.activity_speech_to_subtitle_text_10),
                 checked = state.addToAutoTranslate,
                 onCheckedChange = onAddToAutoTranslateChange
             )
-            SettingsSwitchRow(
+            SettingsTileSwitchRow(
                 title = stringResource(R.string.activity_speech_to_subtitle_text_04),
                 description = stringResource(R.string.activity_speech_to_subtitle_text_05),
                 checked = state.disableVadForTxt,
                 onCheckedChange = onDisableVadForTxtChange,
                 enabled = state.isTxtSelected
             )
-            Text(
-                stringResource(R.string.activity_speech_to_subtitle_text_05),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (state.isTxtSelected) 1f else 0.6f)
+        }
+
+        // ── Output directory ──
+        SettingsTileGroup {
+            SettingsTileRow(
+                title = stringResource(R.string.activity_tool_output_directory),
+                iconRes = R.drawable.ic_folder,
+                value = state.outputDirectory ?: stringResource(R.string.activity_tool_default_output_directory),
+                valueBelow = true,
+                enabled = !state.isConverting && state.dialog != SpeechToSubtitleDialogUi.OutputConflict && !state.saveToSourceDirectory,
+                onClick = onSelectOutputDirectory
+            )
+            SettingsTileSwitchRow(
+                title = stringResource(R.string.save_to_source_folder),
+                checked = state.saveToSourceDirectory,
+                enabled = !state.isConverting && state.dialog != SpeechToSubtitleDialogUi.OutputConflict,
+                onCheckedChange = onSaveToSourceDirectoryChange
             )
         }
 
-        ToolOutputDirectorySection(
-            outputDirectory = state.outputDirectory ?: stringResource(R.string.activity_tool_default_output_directory),
-            saveToSourceDirectory = state.saveToSourceDirectory,
-            enabled = !state.isConverting && state.dialog != SpeechToSubtitleDialogUi.OutputConflict,
-            onSelectOutputDirectory = onSelectOutputDirectory,
-            onSaveToSourceDirectoryChange = onSaveToSourceDirectoryChange
-        )
-
+        // ── ASR model warning ──
         if (!state.asrModelReady) {
-            Text(
-                stringResource(R.string.speech_to_subtitle_asr_model_required),
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodyMedium
-            )
+            SettingsTileSection {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.Inner)
+                ) {
+                    Icon(
+                        painterResource(R.drawable.ic_info),
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                    Text(
+                        stringResource(R.string.speech_to_subtitle_asr_model_required),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
         }
 
+        // ── Processing panel ──
         if (state.showProcessingPanel) {
-            AppSection(title = stringResource(R.string.activity_speech_to_subtitle_text_06)) {
+            SettingsTileSection(title = stringResource(R.string.activity_speech_to_subtitle_text_06)) {
                 AppTaskProgress(
                     visible = state.progressVisible,
                     progress = state.progress.coerceIn(0, 100) / 100f,
                     status = state.progressStatus,
                     onCancel = if (state.progressVisible) onCancel else null
                 )
-                Text(stringResource(R.string.activity_speech_to_subtitle_text_08), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(R.string.activity_speech_to_subtitle_text_08),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = settingsPrimaryTextColor()
+                )
                 AppLogBox(state.logText)
             }
         }
@@ -232,5 +283,36 @@ fun SpeechToSubtitleScreen(
             onDismiss = onDismissDialog
         )
         null -> Unit
+    }
+}
+
+/** A settings-tile-styled dropdown row for selecting a language or format option. */
+@Composable
+private fun <T> SpeechToSubtitleOptionRow(
+    label: String,
+    iconRes: Int,
+    value: String,
+    options: List<AppOption<T>>,
+    onSelected: (T) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        SettingsTileRow(
+            title = label,
+            iconRes = iconRes,
+            value = value,
+            onClick = { expanded = true }
+        )
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option.label) },
+                    onClick = {
+                        expanded = false
+                        onSelected(option.id)
+                    }
+                )
+            }
+        }
     }
 }

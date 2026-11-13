@@ -135,22 +135,6 @@ fun SubtitleFormatEditorScreen(
             contentBackground = pageBackground,
             topBarContainerColor = pageBackground,
             topBarScrolledContainerColor = pageBackground,
-            titleContent = {
-                Column {
-                    Text(
-                        text = stringResource(R.string.subtitle_format_editor_title),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = fileName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.MiddleEllipsis
-                    )
-                }
-            },
             actions = {
                 IconButton(onClick = onSelectAll, enabled = items.isNotEmpty() && !isLoading) {
                     Icon(
@@ -171,8 +155,9 @@ fun SubtitleFormatEditorScreen(
                 }
             }
         ) {
+            FileInfo(fileInfo.ifBlank { fileName })
             Box(
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxWidth().weight(1f)
             ) {
                 if (isLoading) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -181,7 +166,6 @@ fun SubtitleFormatEditorScreen(
                 } else {
                     Row(Modifier.fillMaxSize()) {
                         Column(Modifier.weight(3f).fillMaxHeight().padding(8.dp)) {
-                            FileInfo(fileInfo)
                             SubtitleFormatPreviewList(
                                 items = items,
                                 onSelectionChanged = onSelectionChanged,
@@ -281,8 +265,7 @@ private fun FileInfo(fileInfo: String) {
     Text(
         text = fileInfo,
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(6.dp),
+            .fillMaxWidth(),
         style = MaterialTheme.typography.bodySmall,
         color = settingsSecondaryTextColor(),
         maxLines = 1,
