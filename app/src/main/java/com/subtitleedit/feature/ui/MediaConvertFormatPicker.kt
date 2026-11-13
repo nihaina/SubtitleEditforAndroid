@@ -2,15 +2,9 @@ package com.subtitleedit.feature.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -18,15 +12,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
 import com.subtitleedit.ui.components.AppChoiceTile
+import com.subtitleedit.ui.settings.SettingsTileRow
 import com.subtitleedit.ui.theme.AppSpacing
 
 @Composable
@@ -36,19 +29,25 @@ internal fun MediaConvertFormatPicker(
     selectedFormat: String?,
     enabled: Boolean,
     onSelected: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    iconRes: Int? = if (formats.isNotEmpty() && formats.all { it.isAudioOnly }) {
+        R.drawable.ic_file_audio
+    } else {
+        R.drawable.ic_file_video
+    }
 ) {
     var showDialog by rememberSaveable { mutableStateOf(false) }
     val selection = formats.firstOrNull { it.extension == selectedFormat }?.displayName
-    TextButton(
-        onClick = { showDialog = true },
+    SettingsTileRow(
+        title = title,
+        modifier = modifier,
+        iconRes = iconRes,
+        value = selection,
+        valueBelow = false,
+        showArrow = true,
         enabled = enabled && formats.isNotEmpty(),
-        modifier = modifier.fillMaxWidth()
-    ) {
-        Text(title, modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
-        if (selection != null) Text(selection, modifier = Modifier.padding(end = AppSpacing.Inner))
-        Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null, modifier = Modifier.size(18.dp))
-    }
+        onClick = { showDialog = true }
+    )
     if (showDialog && enabled && formats.isNotEmpty()) {
         MediaConvertFormatDialog(
             title = title,

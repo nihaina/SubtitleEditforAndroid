@@ -79,7 +79,7 @@ class RemainingScreensTest {
         }
         compose.onNodeWithText("未选择文件").assertIsDisplayed()
         compose.onNodeWithText("开始转换").assertIsNotEnabled()
-        compose.onNodeWithText("选择音视频文件（可多选）").performClick()
+        compose.onNodeWithText("选择音视频文件").performClick()
         assertEquals(listOf("pick"), calls)
     }
 

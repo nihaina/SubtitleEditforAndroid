@@ -1,6 +1,7 @@
 package com.subtitleedit.feature.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -115,31 +117,41 @@ internal fun MediaMuxOrderDialog(
                     }
                 }
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 380.dp).testTag("mux-order-list"),
-                    state = listState, userScrollEnabled = dragState.draggedKey == null) {
+                    state = listState, verticalArrangement = Arrangement.spacedBy(6.dp),
+                    userScrollEnabled = dragState.draggedKey == null) {
                     itemsIndexed(slots, key = { _, slot -> slot.key }) { index, slot ->
                         val dragging = dragState.draggedKey == slot.key
                         val moveUp = stringResource(R.string.media_mux_move_up)
                         val moveDown = stringResource(R.string.media_mux_move_down)
+                        val blank = slot.name == null
                         val name = slot.name ?: stringResource(R.string.media_mux_row_blank)
                         val handleLabel = stringResource(R.string.media_mux_drag, name)
                         Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).zIndex(if (dragging) 1f else 0f)
                             .graphicsLayer { translationY = dragState.translation(slot.key) }
-                            .background(if (dragging) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surfaceContainerHigh)
-                            .testTag("mux-order-slot-${slot.key}"), verticalAlignment = Alignment.CenterVertically) {
+                            .clip(MaterialTheme.shapes.medium)
+                            .background(if (dragging) MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.surfaceContainerHighest)
+                            .border(1.dp, if (dragging) MaterialTheme.colorScheme.primary.copy(alpha = .55f)
+                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = .35f),
+                                MaterialTheme.shapes.medium)
+                            .testTag("mux-order-slot-${slot.key}")
+                            .padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f).padding(end = 4.dp)) {
                                 Text(stringResource(R.string.media_mux_row, index + 1), style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                                Text(name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium,
+                                    color = if (blank) MaterialTheme.colorScheme.onSurfaceVariant
+                                    else MaterialTheme.colorScheme.onSurface)
                             }
                             IconButton(onClick = { dragState.stop(); move(index, index - 1) }, enabled = index > 0,
                                 modifier = Modifier.size(36.dp).testTag("mux-order-up-${slot.key}")) {
-                                Text("↑", style = MaterialTheme.typography.titleMedium,
-                                    modifier = Modifier.semantics { contentDescription = moveUp })
+                                Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = moveUp,
+                                    modifier = Modifier.size(20.dp).graphicsLayer(rotationZ = -90f))
                             }
                             IconButton(onClick = { dragState.stop(); move(index, index + 1) }, enabled = index < slots.lastIndex,
                                 modifier = Modifier.size(36.dp).testTag("mux-order-down-${slot.key}")) {
-                                Text("↓", style = MaterialTheme.typography.titleMedium,
-                                    modifier = Modifier.semantics { contentDescription = moveDown })
+                                Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = moveDown,
+                                    modifier = Modifier.size(20.dp).graphicsLayer(rotationZ = 90f))
                             }
                             Box(Modifier.size(44.dp).testTag("mux-order-drag-${slot.key}")
                                 .semantics {

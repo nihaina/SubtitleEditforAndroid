@@ -1,6 +1,7 @@
 package com.subtitleedit.feature.ui
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.pager.HorizontalPager
@@ -19,10 +20,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
-import com.subtitleedit.ui.components.AppSection
+import com.subtitleedit.ui.settings.SettingsTileCard
 import com.subtitleedit.ui.theme.AppMotion
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -43,7 +46,8 @@ internal fun MediaConvertSettingsPager(
     advancedContent: @Composable () -> Unit,
     showSubtitlePage: Boolean = false,
     subtitleContent: @Composable () -> Unit = {},
-    isAudioOutput: Boolean = false
+    isAudioOutput: Boolean = false,
+    modifier: Modifier = Modifier
 ) {
     val pages = when {
         isAudioOutput -> listOf(MediaConvertSettingsPage.ADVANCED) +
@@ -66,30 +70,38 @@ internal fun MediaConvertSettingsPager(
             pages.getOrNull(index)?.let { selectedPageName = it.name }
         }
     }
-    AppSection {
-        PrimaryTabRow(selectedTabIndex = selectedTab) {
-            pages.forEachIndexed { index, page ->
-                Tab(
-                    selected = selectedTab == index,
-                    enabled = enabled,
-                    onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
-                    modifier = Modifier.testTag("convert-settings-tab-$index"),
-                    text = { Text(stringResource(page.title)) }
-                )
+    SettingsTileCard(modifier = modifier) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            PrimaryTabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = Color.Transparent
+            ) {
+                pages.forEachIndexed { index, page ->
+                    Tab(
+                        selected = selectedTab == index,
+                        enabled = enabled,
+                        onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
+                        modifier = Modifier.testTag("convert-settings-tab-$index"),
+                        text = { Text(stringResource(page.title)) }
+                    )
+                }
             }
-        }
-        HorizontalPager(
-            state = pagerState,
-            key = { pages[it].name },
-            userScrollEnabled = enabled,
-            verticalAlignment = Alignment.Top,
-            modifier = Modifier.fillMaxWidth().animateContentSize(AppMotion.state()).testTag("convert-settings-pager")
-        ) { index ->
-            Column(Modifier.fillMaxWidth()) {
-                when (pages[index]) {
-                    MediaConvertSettingsPage.MORE -> moreContent()
-                    MediaConvertSettingsPage.ADVANCED -> advancedContent()
-                    MediaConvertSettingsPage.SUBTITLES -> subtitleContent()
+            HorizontalPager(
+                state = pagerState,
+                key = { pages[it].name },
+                userScrollEnabled = enabled,
+                verticalAlignment = Alignment.Top,
+                modifier = Modifier.fillMaxWidth().animateContentSize(AppMotion.state()).testTag("convert-settings-pager")
+            ) { index ->
+                Column(Modifier.fillMaxWidth()) {
+                    when (pages[index]) {
+                        MediaConvertSettingsPage.MORE -> moreContent()
+                        MediaConvertSettingsPage.ADVANCED -> advancedContent()
+                        MediaConvertSettingsPage.SUBTITLES -> subtitleContent()
+                    }
                 }
             }
         }

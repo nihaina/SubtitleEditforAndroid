@@ -6,6 +6,12 @@
     <string name="media_mux_merge_hint">音视频混流：按行合并左侧视频与中间音频。缺少视频或音频的行暂不处理。</string>
     <string name="media_mux_split_hint">解复用：仅处理只有视频的行，音频填入中列，无音轨的视频输出到右列。已有音频的行暂不处理。</string>
     <string name="media_mux_import">导入音视频</string>
+    <string name="media_mux_import_none">未导入文件</string>
+    <string name="media_mux_import_count">已导入 %1$d 个文件</string>
+    <string name="media_mux_queue">处理队列</string>
+    <string name="media_mux_queue_count">共 %1$d 行</string>
+    <string name="media_mux_output_count">已生成 %1$d 个</string>
+    <string name="media_mux_output_none">尚未生成</string>
     <string name="media_mux_blank_row">添加空行</string>
     <string name="media_mux_output_directory">输出目录</string>
     <string name="media_mux_output_choose">选择输出目录</string>
