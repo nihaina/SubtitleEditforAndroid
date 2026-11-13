@@ -4,8 +4,11 @@ import android.app.Application
 import android.content.Intent
 import com.subtitleedit.util.PickedUriAccess
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.viewModelScope
 import com.subtitleedit.feature.ui.TranscriptMatchDialog
+import com.subtitleedit.feature.ui.TranscriptMatchFileType
+import com.subtitleedit.feature.ui.TranscriptMatchFileUi
 import com.subtitleedit.model.SubtitleEntry
 import com.subtitleedit.nativebridge.NativeMediaOperation
 import com.subtitleedit.nativebridge.PcmFormat
@@ -33,7 +36,7 @@ internal data class TranscriptMatchUiState(
     val audioFileName: String,
     val outputDirectory: String,
     val saveToSourceDirectory: Boolean = false,
-    val pendingFiles: String,
+    val pendingFiles: List<TranscriptMatchFileUi> = emptyList(),
     val selectedFormat: String = "SRT",
     val selectedLanguage: String,
     val modelHint: String = "",
@@ -54,7 +57,6 @@ internal class TranscriptMatchViewModel(application: Application) :
             textFileName = application.getString(R.string.transcript_match_unselected),
             audioFileName = application.getString(R.string.transcript_match_unselected),
             outputDirectory = "",
-            pendingFiles = application.getString(R.string.transcript_match_pending_empty),
             selectedLanguage = SettingsManager.TRANSCRIPTION_LANGUAGE_OPTIONS.drop(1).first()
         )
     ) {
@@ -68,6 +70,8 @@ internal class TranscriptMatchViewModel(application: Application) :
     private var audioUri: Uri? = null
     private var textName = ""
     private var audioName = ""
+    private var textFileSize: Long? = null
+    private var audioFileSize: Long? = null
     private var outputUri: Uri? = null
     @Volatile private var mediaOperation: NativeMediaOperation? = null
 
@@ -86,6 +90,7 @@ internal class TranscriptMatchViewModel(application: Application) :
     }
 
     fun selectText(uri: Uri) {
+        if (isRunning) return
         val name = displayName(uri)
         if (!SubtitleFormatConverter.isSupportedSourceFileName(name)) {
             toast(R.string.transcript_match_unsupported_text)
@@ -93,14 +98,36 @@ internal class TranscriptMatchViewModel(application: Application) :
         }
         textUri = uri
         textName = name
+        textFileSize = fileSize(uri)
         setState { copy(textFileName = textName) }
         updatePending()
     }
 
     fun selectAudio(uri: Uri) {
+        if (isRunning) return
         audioUri = uri
         audioName = displayName(uri)
+        audioFileSize = fileSize(uri)
         setState { copy(audioFileName = audioName) }
+        updatePending()
+    }
+
+    fun removeFile(type: TranscriptMatchFileType) {
+        if (isRunning) return
+        when (type) {
+            TranscriptMatchFileType.TEXT -> {
+                textUri = null
+                textName = ""
+                textFileSize = null
+                setState { copy(textFileName = string(R.string.transcript_match_unselected)) }
+            }
+            TranscriptMatchFileType.AUDIO -> {
+                audioUri = null
+                audioName = ""
+                audioFileSize = null
+                setState { copy(audioFileName = string(R.string.transcript_match_unselected)) }
+            }
+        }
         updatePending()
     }
 
@@ -279,14 +306,37 @@ internal class TranscriptMatchViewModel(application: Application) :
     }
 
     private fun updatePending() {
-        val pending = if (textUri == null && audioUri == null) {
-            string(R.string.transcript_match_pending_empty)
-        } else {
-            string(R.string.transcript_match_pending_files, textName.ifBlank { string(R.string.transcript_match_unselected) }, audioName.ifBlank { string(R.string.transcript_match_unselected) })
+        val pending = buildList {
+            if (textUri != null) {
+                add(TranscriptMatchFileUi(
+                    type = TranscriptMatchFileType.TEXT,
+                    fileName = textName,
+                    fileSizeLabel = textFileSize?.let(FileUtils::formatFileSize) ?: string(R.string.file_size_unknown)
+                ))
+            }
+            if (audioUri != null) {
+                add(TranscriptMatchFileUi(
+                    type = TranscriptMatchFileType.AUDIO,
+                    fileName = audioName,
+                    fileSizeLabel = audioFileSize?.let(FileUtils::formatFileSize) ?: string(R.string.file_size_unknown)
+                ))
+            }
         }
         setState { copy(pendingFiles = pending) }
         refreshModelState()
     }
+
+    private fun fileSize(uri: Uri): Long? = runCatching {
+        PickedUriAccess.file(uri)?.let { file ->
+            return@runCatching file.takeIf { it.isFile }?.length()
+        }
+        app.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            val column = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (cursor.moveToFirst() && column >= 0 && !cursor.isNull(column)) {
+                cursor.getLong(column).takeIf { it >= 0L }
+            } else null
+        }
+    }.getOrNull()
 
     fun refreshModelState(): Boolean {
         val issues = mutableListOf<String>()

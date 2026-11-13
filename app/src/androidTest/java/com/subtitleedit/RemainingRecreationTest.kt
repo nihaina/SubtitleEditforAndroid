@@ -146,7 +146,7 @@ class RemainingRecreationTest {
                 assertSame(before, after)
                 assertTrue(after.state.value.textFileName.contains("script.srt"))
                 assertTrue(after.state.value.audioFileName.contains("audio.wav"))
-                assertTrue(after.state.value.pendingFiles.contains("script.srt"))
+                assertTrue(after.state.value.pendingFiles.any { it.fileName == "script.srt" })
             }
         }
     }

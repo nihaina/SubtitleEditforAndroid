@@ -54,6 +54,7 @@ class TranscriptMatchActivity : AppComposeActivity() {
                     onBack = { onBackPressedDispatcher.onBackPressed() },
                     onSelectText = { textPicker.launch(arrayOf("text/*", "application/octet-stream")) },
                     onSelectAudio = { audioPicker.launch(arrayOf("audio/*")) },
+                    onRemoveFile = viewModel::removeFile,
                     onSelectOutputDirectory = { directoryPicker.launch(viewModel.outputDirectoryUri) },
                     onSaveToSourceDirectoryChange = viewModel::setSaveToSourceDirectory,
                     onFormatSelected = viewModel::setFormat,
