@@ -35,11 +35,12 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost) :
     private var completed = false
     private var pendingSeekMs: Long? = null
     private var pendingSubtitle: PlayerSubtitleOption? = null
+    private var fallbackSubtitle: PlayerSubtitleOption? = null
     private var durationMs = 0L
     private var speed = 1f
     private var volume = 100
     private var audioFilter = ""
-    private var subtitleFontSize = 18
+    private var subtitleFontSize = PlayerPreferences.DEFAULT_SUBTITLE_FONT_SIZE
     private var loudnessEnabled = false
     private var loudnessSampleId = 0L
     private val loudnessPoll = object : Runnable {
@@ -58,7 +59,14 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost) :
         }
     }
 
-    fun start(configDir: File, cacheDir: File, file: File, autoplay: Boolean = true, loadId: Long = 0L) {
+    fun start(
+        configDir: File,
+        cacheDir: File,
+        file: File,
+        autoplay: Boolean = true,
+        loadId: Long = 0L,
+        fallbackSubtitle: PlayerSubtitleOption? = null
+    ) {
         if (released.get()) return
         val request = generation.incrementAndGet()
         publish(request) { PlayerEngineState(loadId = loadId) }
@@ -71,6 +79,7 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost) :
             durationMs = 0L
             pendingSeekMs = null
             pendingSubtitle = null
+            this.fallbackSubtitle = fallbackSubtitle
             playRequested = autoplay
             check(file.isFile && file.canRead()) { "无法读取文件：${file.name}" }
             check(configDir.isDirectory || configDir.mkdirs()) { "无法创建播放器配置目录" }
@@ -113,6 +122,7 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost) :
         completed = false
         pendingSeekMs = null
         pendingSubtitle = null
+        fallbackSubtitle = null
         accessHandler.removeCallbacks(loudnessPoll)
         if (initialized) MPVLib.command(arrayOf("stop"))
         publish { copy(ready = false, playing = false, ended = false, loudness = 0f) }
@@ -170,7 +180,7 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost) :
     }
 
     fun setSubtitleFontSize(size: Int) = post {
-        subtitleFontSize = size.coerceIn(10, 32)
+        subtitleFontSize = size.coerceIn(PlayerPreferences.MIN_SUBTITLE_FONT_SIZE, PlayerPreferences.MAX_SUBTITLE_FONT_SIZE)
         if (initialized) MPVLib.setPropertyDouble("sub-font-size", subtitleFontSize.toDouble())
     }
 
@@ -293,8 +303,8 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost) :
                 val resumePosition = clampPosition(pendingSeekMs ?: 0L)
                 pendingSeekMs = null
                 if (resumePosition > 0L) seek(resumePosition)
-                MPVLib.setPropertyString("sid", "no")
-                pendingSubtitle?.let(::applySubtitle)
+                val internalTracks = refreshSubtitleTracks()
+                applySubtitle(PlayerSubtitleSelection.initial(pendingSubtitle, internalTracks, fallbackSubtitle))
                 pendingSubtitle = null
                 MPVLib.setPropertyBoolean("pause", !playRequested)
                 val playing = playRequested
@@ -358,7 +368,7 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost) :
         publish { copy(selectedSubtitleId = selectedId, subtitleText = "") }
     }
 
-    private fun refreshSubtitleTracks() {
+    private fun refreshSubtitleTracks(): List<PlayerSubtitleOption> {
         val count = MPVLib.getPropertyInt("track-list/count") ?: 0
         val tracks = mutableListOf<PlayerSubtitleOption>()
         var selectedId = "none"
@@ -378,6 +388,7 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost) :
         val options = tracks.toList()
         val selected = selectedId
         publish { copy(subtitleTracks = options, selectedSubtitleId = selected) }
+        return options
     }
 
     private fun secondsToMs(value: Double?): Long =

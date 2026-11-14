@@ -38,10 +38,13 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalConfiguration
+import android.content.res.Configuration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
 
@@ -54,10 +57,14 @@ internal fun PlayerAudioVisual(
     showLoudnessWaveform: Boolean,
     modifier: Modifier = Modifier
 ) {
+    val configuration = LocalConfiguration.current
+    val landscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val discSize = if (landscape) (configuration.screenHeightDp.dp * 0.42f).coerceIn(96.dp, 180.dp) else 300.dp
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        if (playing) AnimatedVinyl() else StaticVinyl()
+        if (playing) AnimatedVinyl(discSize) else StaticVinyl(discSize)
         if (showLoudnessWaveform) {
-            PlayerLoudnessWaveform(playing, loudness, loudnessSampleId, Modifier.padding(top = 312.dp))
+            PlayerLoudnessWaveform(playing, loudness, loudnessSampleId,
+                Modifier.padding(top = discSize + 12.dp))
         }
     }
 }
@@ -65,7 +72,7 @@ internal fun PlayerAudioVisual(
 private const val LOUDNESS_BARS = 21
 
 @Composable
-private fun AnimatedVinyl() {
+private fun AnimatedVinyl(discSize: Dp) {
     val spin = rememberInfiniteTransition(label = "vinyl-spin")
     val angle by spin.animateFloat(
         initialValue = 0f,
@@ -80,19 +87,19 @@ private fun AnimatedVinyl() {
         animationSpec = infiniteRepeatable(tween(1_600, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "vinyl-pulse-scale"
     )
-    VinylDisc(angle = angle, scale = pulseScale)
+    VinylDisc(angle = angle, scale = pulseScale, size = discSize)
 }
 
 @Composable
-private fun StaticVinyl() {
-    VinylDisc(angle = 0f, scale = 1f)
+private fun StaticVinyl(discSize: Dp) {
+    VinylDisc(angle = 0f, scale = 1f, size = discSize)
 }
 
 @Composable
-private fun VinylDisc(angle: Float, scale: Float) {
+private fun VinylDisc(angle: Float, scale: Float, size: Dp) {
     Box(
         modifier = Modifier
-            .size(300.dp)
+            .size(size)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -108,14 +115,14 @@ private fun VinylDisc(angle: Float, scale: Float) {
         listOf(0.86f, 0.72f, 0.58f).forEach { fraction ->
             Box(
                 modifier = Modifier
-                    .size(300.dp * fraction)
+                    .size(size * fraction)
                     .clip(CircleShape)
                     .background(PlayerColors.OnDark.copy(alpha = 0.04f))
             )
         }
         Box(
             modifier = Modifier
-                .size(120.dp)
+                .size(size * 0.4f)
                 .rotate(angle)
                 .clip(CircleShape)
                 .background(PlayerColors.accentBrush),
@@ -123,7 +130,7 @@ private fun VinylDisc(angle: Float, scale: Float) {
         ) {
             Box(
                 modifier = Modifier
-                    .size(26.dp)
+                    .size(size * (26f / 300f))
                     .clip(CircleShape)
                     .background(PlayerColors.Background)
             )
@@ -135,11 +142,8 @@ private fun VinylDisc(angle: Float, scale: Float) {
 private fun PlayerLoudnessWaveform(playing: Boolean, loudness: Float, sampleId: Long, modifier: Modifier = Modifier) {
     var history by remember { mutableStateOf(List(LOUDNESS_BARS) { 0f }) }
     LaunchedEffect(playing, sampleId) {
-        if (!playing) {
-            history = List(LOUDNESS_BARS) { 0f }
-            return@LaunchedEffect
-        }
-        if (sampleId > 0L) {
+        // A paused stream has no new PCM. Keep the last measured shape until playback resumes.
+        if (playing && sampleId > 0L) {
             val sample = loudness.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0f
             history = history.drop(1) + sample
         }
@@ -149,7 +153,7 @@ private fun PlayerLoudnessWaveform(playing: Boolean, loudness: Float, sampleId: 
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.Bottom
     ) {
-        history.forEach { sample -> LoudnessBar(if (playing) sample else 0f) }
+        history.forEach { sample -> LoudnessBar(sample) }
     }
 }
 
@@ -159,8 +163,7 @@ private fun LoudnessBar(height: Float) {
         modifier = Modifier
             .width(4.dp)
             .height(44.dp)
-            .clip(RoundedCornerShape(3.dp))
-            .background(PlayerColors.OnDarkVariant.copy(alpha = 0.12f)),
+            .clip(RoundedCornerShape(3.dp)),
         contentAlignment = Alignment.BottomCenter
     ) {
         Box(

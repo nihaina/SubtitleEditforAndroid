@@ -3,10 +3,9 @@ package com.subtitleedit.player
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -36,6 +35,8 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -48,6 +49,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalConfiguration
+import android.content.res.Configuration
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -66,6 +69,7 @@ import kotlin.math.roundToInt
 internal fun PlayerScreen(viewModel: PlayerViewModel, onEditTags: () -> Unit = {}) {
     val state by viewModel.state.collectAsState()
     val pageGradient = PlayerColors.pageGradient
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     MaterialTheme {
         Box(
             modifier = Modifier
@@ -127,7 +131,7 @@ internal fun PlayerScreen(viewModel: PlayerViewModel, onEditTags: () -> Unit = {
                 Box(Modifier.fillMaxSize().background(pageGradient), contentAlignment = Alignment.Center) {
                     key(state.currentTrack?.path) {
                         PlayerAudioVisual(state.playing, state.loudness, state.loudnessSampleId, state.showLoudnessWaveform,
-                            Modifier.padding(bottom = 120.dp))
+                            Modifier.padding(bottom = if (landscape) 24.dp else 120.dp))
                     }
                 }
             }
@@ -135,7 +139,7 @@ internal fun PlayerScreen(viewModel: PlayerViewModel, onEditTags: () -> Unit = {
             PlayerSubtitleOverlay(
                 text = if (state.isVideo) "" else state.subtitleText,
                 fontSize = state.subtitleFontSize,
-                modifier = Modifier.align(Alignment.Center).padding(bottom = 260.dp)
+                modifier = Modifier.align(Alignment.Center).padding(bottom = if (landscape) 64.dp else 260.dp)
             )
 
             PlayerHintOverlay(
@@ -157,24 +161,24 @@ internal fun PlayerScreen(viewModel: PlayerViewModel, onEditTags: () -> Unit = {
 
             AnimatedVisibility(
                 visible = state.controlsVisible,
-                modifier = Modifier.align(Alignment.TopCenter).then(if (state.isVideo) Modifier.background(
-                    Brush.verticalGradient(listOf(PlayerColors.Background.copy(alpha = 0.96f), Color.Transparent))
-                ) else Modifier),
-                enter = fadeIn() + slideInVertically { -it / 3 },
-                exit = fadeOut() + slideOutVertically { -it / 3 }
+                modifier = Modifier.align(Alignment.TopCenter),
+                enter = fadeIn(tween(220)),
+                exit = fadeOut(tween(220))
             ) {
-                PlayerTopBar(state, viewModel)
+                PlayerControlOverlay(state.isVideo, top = true) {
+                    PlayerTopBar(state, viewModel, landscape)
+                }
             }
 
             AnimatedVisibility(
                 visible = state.controlsVisible,
-                modifier = Modifier.align(Alignment.BottomCenter).then(if (state.isVideo) Modifier.background(
-                    Brush.verticalGradient(listOf(Color.Transparent, PlayerColors.Background.copy(alpha = 0.96f)))
-                ) else Modifier),
-                enter = fadeIn() + slideInVertically { it / 3 },
-                exit = fadeOut() + slideOutVertically { it / 3 }
+                modifier = Modifier.align(Alignment.BottomCenter),
+                enter = fadeIn(tween(220)),
+                exit = fadeOut(tween(220))
             ) {
-                PlayerControls(state, viewModel)
+                PlayerControlOverlay(state.isVideo, top = false) {
+                    PlayerControls(state, viewModel, landscape)
+                }
             }
 
             PlayerPanelSheet(state, viewModel, onEditTags)
@@ -182,31 +186,58 @@ internal fun PlayerScreen(viewModel: PlayerViewModel, onEditTags: () -> Unit = {
     }
 }
 
+private val LocalVideoControls = staticCompositionLocalOf { false }
+
+/** The scrim lives inside AnimatedVisibility so it fades with the controls. */
+@Composable
+private fun PlayerControlOverlay(video: Boolean, top: Boolean, content: @Composable () -> Unit) {
+    val scrim = Color.Black.copy(alpha = 0.26f)
+    val modifier = Modifier.fillMaxWidth()
+        .testTag(if (top) "player-top-overlay" else "player-bottom-overlay")
+        .then(if (video) Modifier.background(Brush.verticalGradient(
+            if (top) listOf(scrim, Color.Transparent) else listOf(Color.Transparent, scrim)
+        )) else Modifier)
+    CompositionLocalProvider(LocalVideoControls provides video) {
+        Box(modifier) { content() }
+    }
+}
+
+private object PlayerControlColors {
+    val Foreground: Color @Composable get() = if (LocalVideoControls.current) Color.White else PlayerColors.OnDark
+    val Secondary: Color @Composable get() = if (LocalVideoControls.current) Color.White.copy(alpha = 0.85f) else PlayerColors.OnDarkVariant
+    val Accent: Color @Composable get() = if (LocalVideoControls.current) Color.White else PlayerColors.Accent
+    val Surface: Color @Composable get() = if (LocalVideoControls.current) Color.Black.copy(alpha = 0.18f) else PlayerColors.SurfaceHigh
+    val PlayBackground: Brush @Composable get() = if (LocalVideoControls.current)
+        Brush.linearGradient(listOf(Color.White.copy(alpha = 0.9f), Color.White.copy(alpha = 0.9f)))
+        else PlayerColors.accentBrush
+    val PlayForeground: Color @Composable get() = if (LocalVideoControls.current) Color.Black else PlayerColors.Background
+}
+
 private const val AXIS_SEEK = 0
 private const val AXIS_VOLUME = 1
 
 @Composable
-private fun PlayerTopBar(state: PlayerUiState, viewModel: PlayerViewModel) {
+private fun PlayerTopBar(state: PlayerUiState, viewModel: PlayerViewModel, landscape: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("player-top-bar")
             .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 8.dp, vertical = if (landscape) 2.dp else 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(onClick = { viewModel.requestFinish() }, modifier = Modifier.testTag("player-back")) {
+        IconButton(onClick = { viewModel.requestFinish() }, modifier = Modifier.size(if (landscape) 42.dp else 48.dp).testTag("player-back")) {
             Icon(
                 painterResource(R.drawable.ic_back),
                 contentDescription = stringResource(R.string.tools_navigate_back),
-                tint = PlayerColors.OnDark
+                tint = PlayerControlColors.Foreground
             )
         }
         Column(Modifier.weight(1f).padding(horizontal = 4.dp)) {
             Text(
                 text = state.currentTrack?.name.orEmpty(),
-                color = PlayerColors.OnDark,
-                fontSize = 16.sp,
+                color = PlayerControlColors.Foreground,
+                fontSize = if (landscape) 14.sp else 16.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -219,48 +250,53 @@ private fun PlayerTopBar(state: PlayerUiState, viewModel: PlayerViewModel) {
             }
             Text(
                 text = subtitle,
-                color = PlayerColors.OnDarkVariant,
+                color = PlayerControlColors.Secondary,
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
-        IconButton(onClick = { viewModel.openPanel(PlayerPanel.TIMER) }, modifier = Modifier.testTag("player-timer")) {
+        if (landscape) {
+            PlayerToolsRow(state, viewModel, compact = true)
+        }
+        IconButton(onClick = { viewModel.openPanel(PlayerPanel.TIMER) },
+            modifier = Modifier.size(if (landscape) 42.dp else 48.dp).testTag("player-timer")) {
             Icon(
                 painterResource(R.drawable.ic_player_alarm),
                 contentDescription = stringResource(R.string.player_panel_timer),
                 tint = if (state.sleepTimer.active || state.scheduledStartRemainingMs != null)
-                    PlayerColors.Accent else PlayerColors.OnDarkVariant
+                    PlayerControlColors.Accent else PlayerControlColors.Secondary
             )
         }
-        IconButton(onClick = { viewModel.openPanel(PlayerPanel.SETTINGS) }) {
+        IconButton(onClick = { viewModel.openPanel(PlayerPanel.SETTINGS) },
+            modifier = Modifier.size(if (landscape) 42.dp else 48.dp)) {
             Icon(
                 painterResource(R.drawable.ic_settings),
                 contentDescription = stringResource(R.string.player_panel_settings),
-                tint = PlayerColors.OnDarkVariant
+                tint = PlayerControlColors.Secondary
             )
         }
     }
 }
 
 @Composable
-private fun PlayerControls(state: PlayerUiState, viewModel: PlayerViewModel) {
+private fun PlayerControls(state: PlayerUiState, viewModel: PlayerViewModel, landscape: Boolean) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("player-controls")
             .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
             .padding(horizontal = 20.dp)
-            .padding(bottom = 16.dp)
+            .padding(bottom = if (landscape) 6.dp else 16.dp)
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 formatPlaybackTime(state.seekPreviewMs ?: state.positionMs),
-                color = PlayerColors.OnDarkVariant,
+                color = PlayerControlColors.Secondary,
                 fontSize = 12.sp
             )
             Spacer(Modifier.weight(1f))
-            Text(formatPlaybackTime(state.durationMs), color = PlayerColors.OnDarkVariant, fontSize = 12.sp)
+            Text(formatPlaybackTime(state.durationMs), color = PlayerControlColors.Secondary, fontSize = 12.sp)
         }
         Slider(
             value = (state.seekPreviewMs ?: state.positionMs).toFloat(),
@@ -272,11 +308,11 @@ private fun PlayerControls(state: PlayerUiState, viewModel: PlayerViewModel) {
             valueRange = 0f..state.durationMs.coerceAtLeast(1L).toFloat(),
             enabled = state.ready && state.durationMs > 0,
             colors = SliderDefaults.colors(
-                thumbColor = PlayerColors.Accent,
-                activeTrackColor = PlayerColors.Accent,
-                inactiveTrackColor = PlayerColors.SurfaceHigh
+                thumbColor = PlayerControlColors.Accent,
+                activeTrackColor = PlayerControlColors.Accent,
+                inactiveTrackColor = PlayerControlColors.Surface
             ),
-            modifier = Modifier.fillMaxWidth().height(28.dp).testTag("player-seek")
+            modifier = Modifier.fillMaxWidth().height(if (landscape) 24.dp else 28.dp).testTag("player-seek")
         )
         Row(
             Modifier.fillMaxWidth(),
@@ -291,44 +327,53 @@ private fun PlayerControls(state: PlayerUiState, viewModel: PlayerViewModel) {
             PlayerTransportIcon(R.drawable.ic_skip_next, R.string.player_next, state.hasNext,
                 tag = "player-next", onClick = viewModel::next)
         }
-        Spacer(Modifier.height(6.dp))
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            val modeDescription = stringResource(modeLabel(state.mode))
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(CircleShape)
-                    .background(PlayerColors.SurfaceHigh)
-                    .testTag("player-mode-chip")
-                    .semantics { contentDescription = modeDescription }
-                    .clickable(role = Role.Button) { viewModel.cycleMode() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(painterResource(modeIcon(state.mode)), contentDescription = null,
-                    modifier = Modifier.size(24.dp), tint = PlayerColors.Accent)
-            }
-            Box(
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(PlayerColors.SurfaceHigh)
-                    .clickable(role = Role.Button) { viewModel.openPanel(PlayerPanel.SPEED) }
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-            ) {
-                Text("${state.speed}x", color = PlayerColors.OnDark, fontSize = 11.sp)
-            }
-            PlayerControlIcon(R.drawable.ic_player_equalizer, R.string.player_panel_equalizer,
-                state.equalizer.enabled, { viewModel.openPanel(PlayerPanel.EQUALIZER) })
-            PlayerControlIcon(R.drawable.ic_subtitle_format, R.string.player_panel_subtitle,
-                state.selectedSubtitleId.isNotBlank() && state.selectedSubtitleId != "none", { viewModel.openPanel(PlayerPanel.SUBTITLE) })
-            PlayerControlIcon(R.drawable.ic_player_bookmarks, R.string.player_panel_bookmark,
-                state.bookmarks.isNotEmpty(), { viewModel.openPanel(PlayerPanel.BOOKMARK) })
-            PlayerControlIcon(R.drawable.ic_player_playlist, R.string.player_panel_playlist,
-                false, { viewModel.openPanel(PlayerPanel.PLAYLIST) })
+        if (!landscape) {
+            Spacer(Modifier.height(6.dp))
+            PlayerToolsRow(state, viewModel, compact = false)
         }
+    }
+}
+
+@Composable
+private fun PlayerToolsRow(state: PlayerUiState, viewModel: PlayerViewModel, compact: Boolean) {
+    Row(
+        modifier = (if (compact) Modifier else Modifier.fillMaxWidth()).testTag("player-tools-row"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = if (compact) Arrangement.spacedBy(2.dp) else Arrangement.SpaceBetween
+    ) {
+        val modeDescription = stringResource(modeLabel(state.mode))
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(CircleShape)
+                .background(PlayerControlColors.Surface)
+                .testTag("player-mode-chip")
+                .semantics { contentDescription = modeDescription }
+                .clickable(role = Role.Button) { viewModel.cycleMode() },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(painterResource(modeIcon(state.mode)), contentDescription = null,
+                modifier = Modifier.size(24.dp), tint = PlayerControlColors.Accent)
+        }
+        Box(
+            modifier = Modifier
+                .size(width = 46.dp, height = 42.dp)
+                .clip(CircleShape)
+                .background(PlayerControlColors.Surface)
+                .clickable(role = Role.Button) { viewModel.openPanel(PlayerPanel.SPEED) }
+                .padding(horizontal = 4.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("${state.speed}x", color = PlayerControlColors.Foreground, fontSize = 11.sp)
+        }
+        PlayerControlIcon(R.drawable.ic_player_equalizer, R.string.player_panel_equalizer,
+            state.equalizer.enabled, { viewModel.openPanel(PlayerPanel.EQUALIZER) })
+        PlayerControlIcon(R.drawable.ic_subtitle_format, R.string.player_panel_subtitle,
+            state.selectedSubtitleId.isNotBlank() && state.selectedSubtitleId != "none", { viewModel.openPanel(PlayerPanel.SUBTITLE) })
+        PlayerControlIcon(R.drawable.ic_player_bookmarks, R.string.player_panel_bookmark,
+            state.bookmarks.isNotEmpty(), { viewModel.openPanel(PlayerPanel.BOOKMARK) })
+        PlayerControlIcon(R.drawable.ic_player_playlist, R.string.player_panel_playlist,
+            false, { viewModel.openPanel(PlayerPanel.PLAYLIST) })
     }
 }
 
@@ -341,7 +386,7 @@ private fun PlayerTransportIcon(icon: Int, description: Int, enabled: Boolean, r
             painterResource(icon),
             contentDescription = stringResource(description),
             modifier = Modifier.size(24.dp).scale(scaleX = if (rotate == 180f) -1f else 1f, scaleY = 1f),
-            tint = if (enabled) PlayerColors.OnDark else PlayerColors.OnDarkVariant.copy(alpha = 0.4f)
+            tint = if (enabled) PlayerControlColors.Foreground else PlayerControlColors.Secondary.copy(alpha = 0.4f)
         )
     }
 }
@@ -358,11 +403,11 @@ private fun PlayerPlayButton(playing: Boolean, tag: String? = null, onClick: () 
     val description = stringResource(if (playing) R.string.player_pause else R.string.player_play)
     Box(
         modifier = Modifier
-            .size(76.dp)
+            .size(36.dp)
             .then(if (tag != null) Modifier.testTag(tag) else Modifier)
             .scale(scale)
             .clip(CircleShape)
-            .background(PlayerColors.accentBrush, CircleShape)
+            .background(PlayerControlColors.PlayBackground, CircleShape)
             .semantics { contentDescription = description }
             .clickable(
                 interactionSource = interactionSource,
@@ -375,8 +420,8 @@ private fun PlayerPlayButton(playing: Boolean, tag: String? = null, onClick: () 
         Icon(
             painterResource(if (playing) R.drawable.ic_video_pause else R.drawable.ic_video_play),
             contentDescription = null,
-            modifier = Modifier.size(34.dp),
-            tint = PlayerColors.Background
+            modifier = Modifier.size(24.dp),
+            tint = PlayerControlColors.PlayForeground
         )
     }
 }
@@ -388,7 +433,7 @@ private fun PlayerControlIcon(icon: Int, description: Int, active: Boolean, onCl
             painterResource(icon),
             contentDescription = stringResource(description),
             modifier = Modifier.size(20.dp),
-            tint = if (active) PlayerColors.Accent else PlayerColors.OnDarkVariant
+            tint = if (active) PlayerControlColors.Accent else PlayerControlColors.Secondary
         )
     }
 }

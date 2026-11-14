@@ -36,8 +36,10 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) {
             .apply()
 
     var subtitleFontSize: Int
-        get() = prefs.getInt(KEY_SUB_SIZE, 16).coerceIn(10, 32)
-        set(value) = prefs.edit().putInt(KEY_SUB_SIZE, value.coerceIn(10, 32)).apply()
+        get() = prefs.getInt(KEY_SUB_SIZE, DEFAULT_SUBTITLE_FONT_SIZE)
+            .coerceIn(MIN_SUBTITLE_FONT_SIZE, MAX_SUBTITLE_FONT_SIZE)
+        set(value) = prefs.edit().putInt(KEY_SUB_SIZE,
+            value.coerceIn(MIN_SUBTITLE_FONT_SIZE, MAX_SUBTITLE_FONT_SIZE)).apply()
 
     var resumePlayback: Boolean
         get() = prefs.getBoolean(KEY_RESUME, true)
@@ -54,6 +56,9 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) {
     }
 
     companion object {
+        const val DEFAULT_SUBTITLE_FONT_SIZE = 30
+        const val MIN_SUBTITLE_FONT_SIZE = 10
+        const val MAX_SUBTITLE_FONT_SIZE = 60
         const val MIN_SPEED = 0.25f
         const val MAX_SPEED = 4f
         val SPEED_STEPS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f, 4f)

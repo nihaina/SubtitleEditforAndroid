@@ -280,6 +280,23 @@ private fun PlayerSubtitlePanel(state: PlayerUiState, viewModel: PlayerViewModel
             }
         }
     }
+    Spacer(Modifier.height(14.dp))
+    Text(
+        stringResource(R.string.player_settings_subtitle_size, state.subtitleFontSize),
+        color = PlayerColors.OnDarkVariant,
+        fontSize = 13.sp
+    )
+    Slider(
+        value = state.subtitleFontSize.toFloat(),
+        onValueChange = { viewModel.setSubtitleFontSize(it.toInt()) },
+        valueRange = PlayerPreferences.MIN_SUBTITLE_FONT_SIZE.toFloat()..PlayerPreferences.MAX_SUBTITLE_FONT_SIZE.toFloat(),
+        steps = PlayerPreferences.MAX_SUBTITLE_FONT_SIZE - PlayerPreferences.MIN_SUBTITLE_FONT_SIZE - 1,
+        colors = SliderDefaults.colors(
+            thumbColor = PlayerColors.Accent,
+            activeTrackColor = PlayerColors.Accent,
+            inactiveTrackColor = PlayerColors.SurfaceHigh
+        )
+    )
 }
 
 @Composable
@@ -507,23 +524,7 @@ private fun PlayerSettingsPanel(state: PlayerUiState, viewModel: PlayerViewModel
             }
         }
     }
-    Spacer(Modifier.height(14.dp))
-    Text(
-        stringResource(R.string.player_settings_subtitle_size, state.subtitleFontSize),
-        color = PlayerColors.OnDarkVariant,
-        fontSize = 13.sp
-    )
-    Slider(
-        value = state.subtitleFontSize.toFloat(),
-        onValueChange = { viewModel.setSubtitleFontSize(it.toInt()) },
-        valueRange = 10f..32f,
-        steps = 21,
-        colors = SliderDefaults.colors(
-            thumbColor = PlayerColors.Accent,
-            activeTrackColor = PlayerColors.Accent,
-            inactiveTrackColor = PlayerColors.SurfaceHigh
-        )
-    )
+
 }
 
 @Composable

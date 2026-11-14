@@ -131,6 +131,7 @@ internal object PlayerMpvOptions {
         MPVLib.setOptionString("load-unsafe-playlists", "no")
         MPVLib.setOptionString("sub-auto", "no")
         MPVLib.setOptionString("sid", "no")
+        MPVLib.setOptionString("sub-font-size", PlayerPreferences.DEFAULT_SUBTITLE_FONT_SIZE.toString())
         MPVLib.setOptionString("terminal", "no")
         MPVLib.setOptionString("msg-level", "all=warn")
         MPVLib.setOptionString("demuxer-max-bytes", (64 * 1024 * 1024).toString())

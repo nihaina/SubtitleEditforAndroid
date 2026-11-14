@@ -36,7 +36,7 @@ internal data class PlayerUiState(
     val loudness: Float = 0f,
     val loudnessSampleId: Long = 0L,
     val resumePlayback: Boolean = true,
-    val subtitleFontSize: Int = 16,
+    val subtitleFontSize: Int = PlayerPreferences.DEFAULT_SUBTITLE_FONT_SIZE,
     val sleepTimer: PlayerSleepTimer = PlayerSleepTimer(),
     val sleepRemainingMs: Long = 0L,
     val scheduledStartRemainingMs: Long? = null,
@@ -278,7 +278,8 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
         )
         val shouldPlay = autoplay && audioFocus.request()
         playOnAttach = shouldPlay
-        session.start(File(app.filesDir, "player/config"), app.cacheDir, track.file, shouldPlay, loadId)
+        session.start(File(app.filesDir, "player/config"), app.cacheDir, track.file, shouldPlay, loadId,
+            fallbackSubtitle = externalSubtitles.firstOrNull())
         session.setSpeed(current.speed)
         session.setAudioFilter(PlayerEqualizer.afFilter(current.equalizer))
         session.setLoudnessEnabled(current.showLoudnessWaveform && !track.isVideo)
@@ -410,7 +411,7 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
     }
 
     fun setSubtitleFontSize(size: Int) {
-        val value = size.coerceIn(10, 32)
+        val value = size.coerceIn(PlayerPreferences.MIN_SUBTITLE_FONT_SIZE, PlayerPreferences.MAX_SUBTITLE_FONT_SIZE)
         preferences.subtitleFontSize = value
         engine?.setSubtitleFontSize(value)
         _state.value = _state.value.copy(subtitleFontSize = value)
