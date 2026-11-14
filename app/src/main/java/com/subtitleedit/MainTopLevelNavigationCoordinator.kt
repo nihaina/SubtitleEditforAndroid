@@ -2,6 +2,7 @@ package com.subtitleedit
 
 import androidx.appcompat.app.AppCompatActivity
 import com.subtitleedit.util.MainNavigationPolicy
+import com.subtitleedit.player.PlayerPreferences
 import java.io.File
 
 /** Owns top-level page switching while leaving directory/file operations in MainActivity. */
@@ -18,7 +19,10 @@ internal class MainTopLevelNavigationCoordinator(
 ) {
     fun bind() = showPage(state.selectedTopLevelItem)
 
-    fun showPage(itemId: Int) {
+    fun showPage(requestedItemId: Int) {
+        val itemId = MainNavigationPolicy.pageForMode(
+            requestedItemId, PlayerPreferences.getInstance(activity).playerModeEnabled
+        )
         val wasDirectorySelected = state.selectedTopLevelItem == R.id.nav_directory
         if (wasDirectorySelected && itemId != R.id.nav_directory) saveDirectoryScroll()
         state.selectedTopLevelItem = itemId

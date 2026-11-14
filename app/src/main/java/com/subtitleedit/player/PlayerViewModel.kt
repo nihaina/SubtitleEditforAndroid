@@ -5,6 +5,10 @@ import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.subtitleedit.R
+import com.subtitleedit.library.MediaLibraryRepository
+import com.subtitleedit.library.MediaPlaylist
+import com.subtitleedit.library.PlayerTrackDetails
+import com.subtitleedit.library.PlayerTrackMetadataReader
 import com.subtitleedit.util.FileUtils
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -49,7 +53,14 @@ internal data class PlayerUiState(
     val panel: PlayerPanel = PlayerPanel.NONE,
     val isVideo: Boolean = false,
     val seekPreviewMs: Long? = null,
-    val gestureHint: PlayerGestureHint? = null
+    val gestureHint: PlayerGestureHint? = null,
+    val isFavorite: Boolean = false,
+    val showTrackInfoDialog: Boolean = false,
+    val trackInfoLoading: Boolean = false,
+    val trackInfo: PlayerTrackDetails? = null,
+    val showPlaylistPickerDialog: Boolean = false,
+    val userPlaylists: List<MediaPlaylist> = emptyList(),
+    val trackContainedPlaylistIds: Set<Long> = emptySet()
 ) {
     val currentTrack: PlayerTrack? get() = playlist.getOrNull(currentIndex)
     val hasPrevious: Boolean get() = currentTrack != null && (positionMs > 5_000L ||
@@ -59,7 +70,10 @@ internal data class PlayerUiState(
 }
 
 /** Owns one surface session and folds engine events into a single main-thread UI state. */
-internal class PlayerViewModel(application: Application) : AndroidViewModel(application) {
+internal class PlayerViewModel @JvmOverloads constructor(
+    application: Application,
+    private val libraryRepository: MediaLibraryRepository = MediaLibraryRepository.getInstance(application)
+) : AndroidViewModel(application) {
     private val preferences = PlayerPreferences.getInstance(application)
     private val bookmarkStore = PlayerBookmarkStore.create(application.filesDir)
     private val _state = MutableStateFlow(PlayerUiState(
@@ -90,10 +104,21 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
     private var playOnAttach = true
     private data class TagEditResume(val path: String, val positionMs: Long, val subtitle: PlayerSubtitleOption?)
     private var tagEditResume: TagEditResume? = null
+    private val listening = PlayerListeningTracker()
+    private data class HistoryProgress(val playbackId: String, val positionMs: Long, val durationMs: Long)
+    private var lastHistoryProgress: HistoryProgress? = null
     private val audioFocus = PlayerAudioFocus(application) { interrupted ->
         if (interrupted) pause()
     }
     private val timerAlarm = PlayerTimerAlarm(application) { tickTimers() }
+    private val libraryController = PlayerLibraryController(
+        application = application,
+        repository = libraryRepository,
+        scope = viewModelScope,
+        state = _state,
+        currentGeneration = { loadId },
+        showHint = ::hint
+    )
 
     fun configure(playlist: List<PlayerTrack>, startIndex: Int) {
         if (configured) return
@@ -101,14 +126,22 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
         val selectedPath = playlist.getOrNull(startIndex)?.path
         val tracks = playlist.filter { it.file.isFile }.distinctBy { it.path }
         val index = if (tracks.isEmpty()) -1 else tracks.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
+        val currentTrack = tracks.getOrNull(index)
         _state.value = _state.value.copy(
             playlist = tracks,
             currentIndex = index,
             shuffleOrder = PlayerPlaylistOrder.newShuffleOrder(tracks.size, index),
-            isVideo = tracks.getOrNull(index)?.isVideo == true,
-            bookmarks = tracks.getOrNull(index)?.let { bookmarkStore.load(it.path) }.orEmpty(),
+            isVideo = currentTrack?.isVideo == true,
+            bookmarks = currentTrack?.let { bookmarkStore.load(it.path) }.orEmpty(),
+            isFavorite = false,
             error = if (tracks.isEmpty()) applicationText(R.string.player_playlist_empty) else null
         )
+        refreshFavorite()
+        if (tracks.isNotEmpty()) {
+            PlayerLibraryWriter.submit {
+                libraryRepository.saveCurrentQueue(tracks.map { it.path }, index)
+            }
+        }
     }
 
     fun attach(view: PlayerMpvView) {
@@ -121,6 +154,10 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
             session.state.collect { sample ->
                 if (loadId == 0L || sample.loadId != loadId || engine !== session || _state.value.currentTrack == null) return@collect
                 val snapshot = _state.value
+                if (sample.error != null) rememberPosition()
+                val previouslyPlayed = listening.hasPlayed
+                updateListening(sample.ready && sample.playing && sample.error == null && !sample.ended &&
+                    playOnAttach && tagEditResume == null)
                 _state.value = snapshot.copy(
                     positionMs = sample.positionMs,
                     durationMs = sample.durationMs,
@@ -135,6 +172,7 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
                         sample.subtitleTracks.none { it.id == external.id }
                     }
                 )
+                if (!previouslyPlayed && listening.hasPlayed) rememberPosition()
                 if (sample.error != null) audioFocus.abandon()
                 if (sample.ended && sample.ready && sample.error == null && handledEndId != loadId) {
                     handledEndId = loadId
@@ -149,7 +187,7 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
         tickTimers()
         if (tagEditResume == null) {
             loadCurrent(resume = _state.value.resumePlayback, autoplay = playOnAttach && !scheduledStart.active,
-                resumeAt = resumeAt, subtitle = subtitle)
+                resumeAt = resumeAt, subtitle = subtitle, preservePlayback = true)
         }
         tickerJob = viewModelScope.launch {
             var lastSave = SystemClock.elapsedRealtime()
@@ -159,6 +197,7 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastSave >= 5_000L) {
                     rememberPosition()
+                    flushListeningStats()
                     lastSave = now
                 }
             }
@@ -169,6 +208,7 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
         if (host !== view) return
         detachedPosition = _state.value.positionMs
         detachedSubtitle = _state.value.subtitleOptions.firstOrNull { it.id == _state.value.selectedSubtitleId }
+        stopListening()
         rememberPosition()
         engineJob?.cancel()
         tickerJob?.cancel()
@@ -194,7 +234,10 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
             loadCurrent(resume = false, autoplay = true)
             return
         }
-        if (trackEnded) {
+        val current = _state.value
+        if (trackEnded || (current.ready && current.durationMs > 0L && current.positionMs >= current.durationMs)) {
+            stopListening()
+            _state.value.currentTrack?.let { selectListening(it.path, preservePlayback = false) }
             trackEnded = false
             handledEndId = -1L
             engine?.seekTo(0L)
@@ -204,6 +247,7 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
 
     fun pause() {
         playOnAttach = false
+        stopListening()
         engine?.pause()
         _state.value = _state.value.copy(playing = false, loudness = 0f)
         audioFocus.abandon()
@@ -218,6 +262,10 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
         if (fromGesture) {
             _state.value = current.copy(seekPreviewMs = target)
             return
+        }
+        if (trackEnded) {
+            stopListening()
+            current.currentTrack?.let { selectListening(it.path, preservePlayback = false) }
         }
         trackEnded = false
         handledEndId = -1L
@@ -259,13 +307,23 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
         loadCurrent(resume = _state.value.resumePlayback, autoplay = true)
     }
 
-    private fun loadCurrent(resume: Boolean, autoplay: Boolean, resumeAt: Long? = null, subtitle: PlayerSubtitleOption? = null) {
+    private fun loadCurrent(
+        resume: Boolean,
+        autoplay: Boolean,
+        resumeAt: Long? = null,
+        subtitle: PlayerSubtitleOption? = null,
+        preservePlayback: Boolean = false
+    ) {
+        stopListening()
         val current = _state.value
         val track = current.currentTrack ?: return
         val session = engine ?: return
         val app = getApplication<Application>()
         loadId++
         trackEnded = false
+        selectListening(track.path, preservePlayback)
+        closeTrackInfoDialog()
+        closePlaylistPickerDialog()
         externalSubtitles = FileUtils.getPossibleSubtitleFiles(track.file).filter { it.isFile }.map { file ->
             PlayerSubtitleOption("external:${file.absolutePath}", file.name, PlayerSubtitleKind.EXTERNAL, path = file.absolutePath)
         }
@@ -274,8 +332,16 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
             isVideo = track.isVideo, subtitleText = "", selectedSubtitleId = "none",
             subtitleOptions = listOf(SUBTITLE_OFF) + externalSubtitles,
             bookmarks = bookmarkStore.load(track.path), seekPreviewMs = null,
-            loudness = 0f, loudnessSampleId = 0L
+            loudness = 0f, loudnessSampleId = 0L,
+            isFavorite = false,
+            trackInfo = null,
+            showTrackInfoDialog = false,
+            trackInfoLoading = false,
+            showPlaylistPickerDialog = false,
+            userPlaylists = emptyList(),
+            trackContainedPlaylistIds = emptySet()
         )
+        refreshFavorite()
         val shouldPlay = autoplay && audioFocus.request()
         playOnAttach = shouldPlay
         session.start(File(app.filesDir, "player/config"), app.cacheDir, track.file, shouldPlay, loadId,
@@ -288,12 +354,19 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
         val saved = resumeAt ?: if (resume) preferences.lastPosition(track.path) else 0L
         if (saved > 0L) session.seekTo(saved)
         subtitle?.let(session::selectSubtitle)
+        val queuePaths = current.playlist.map { it.path }
+        val queueIdx = current.currentIndex
+        PlayerLibraryWriter.submit {
+            libraryRepository.saveCurrentQueue(queuePaths, queueIdx)
+        }
     }
 
     private fun onTrackEnded() {
         val current = _state.value
+        stopListening()
         current.currentTrack?.let { preferences.saveLastPosition(it.path, 0L) }
         trackEnded = true
+        rememberPosition()
         val target = PlayerPlaylistOrder.afterEnd(current.currentIndex, current.playlist.size, current.mode, current.shuffleOrder)
         if (target == null) {
             playOnAttach = false
@@ -308,18 +381,56 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
     private fun rememberPosition() {
         val current = _state.value
         val track = current.currentTrack ?: return
-        if (!current.resumePlayback || !current.ready || current.error != null) return
+        if (!current.ready || current.error != null || !listening.hasPlayed || track.path != listening.path) return
         val completed = trackEnded || (current.durationMs > 0L && current.positionMs >= current.durationMs - 1_000L)
-        preferences.saveLastPosition(track.path, if (completed) 0L else current.positionMs)
+        val position = if (completed) 0L else current.positionMs
+        if (current.resumePlayback) preferences.saveLastPosition(track.path, position)
+        val progress = HistoryProgress(listening.playbackId, position, current.durationMs)
+        if (lastHistoryProgress == progress) return
+        val newPlayback = lastHistoryProgress?.playbackId != progress.playbackId
+        lastHistoryProgress = progress
+        val playedAt = System.currentTimeMillis()
+        PlayerLibraryWriter.submit {
+            libraryRepository.recordPlaybackProgress(track.path, progress.playbackId,
+                progress.durationMs, progress.positionMs, playedAt)
+            if (newPlayback) libraryRepository.indexTrack(track.path, progress.durationMs)
+        }
     }
 
-    fun saveProgress() = rememberPosition()
+    private fun selectListening(path: String, preservePlayback: Boolean) {
+        persistListening(listening.select(path, preservePlayback, SystemClock.elapsedRealtime(), System.currentTimeMillis()))
+    }
+
+    private fun updateListening(active: Boolean) {
+        persistListening(listening.update(active, SystemClock.elapsedRealtime(), System.currentTimeMillis()))
+    }
+
+    private fun stopListening() = updateListening(false)
+
+    private fun flushListeningStats() {
+        persistListening(listening.flush(SystemClock.elapsedRealtime(), System.currentTimeMillis()))
+    }
+
+    private fun persistListening(intervals: List<PlayerListeningInterval>) {
+        intervals.forEach { interval ->
+            PlayerLibraryWriter.submit {
+                libraryRepository.recordListeningInterval(interval.path, interval.playbackId,
+                    interval.startedAtMs, interval.durationMs)
+            }
+        }
+    }
+
+    fun saveProgress() {
+        flushListeningStats()
+        rememberPosition()
+    }
 
     /** Release the media file before the existing tag editor updates it. */
     fun prepareTagEditing(): String? {
         val current = _state.value
         val track = current.currentTrack ?: return null
         if (tagEditResume != null) return null
+        stopListening()
         rememberPosition()
         tagEditResume = TagEditResume(track.path, current.positionMs,
             current.subtitleOptions.firstOrNull { it.id == current.selectedSubtitleId })
@@ -333,8 +444,13 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
         val saved = tagEditResume ?: return
         tagEditResume = null
         if (_state.value.currentTrack?.path == saved.path) {
+            val duration = _state.value.durationMs
+            PlayerLibraryWriter.submit {
+                PlayerTrackMetadataReader.invalidate(saved.path)
+                libraryRepository.indexTrack(saved.path, duration)
+            }
             loadCurrent(resume = false, autoplay = playOnAttach && !scheduledStart.active,
-                resumeAt = saved.positionMs, subtitle = saved.subtitle)
+                resumeAt = saved.positionMs, subtitle = saved.subtitle, preservePlayback = true)
         }
     }
 
@@ -497,6 +613,15 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
         updateTimerAlarm()
     }
 
+    private fun refreshFavorite() = libraryController.refreshFavorite()
+    fun toggleFavorite() = libraryController.toggleFavorite()
+    fun openTrackInfoDialog() = libraryController.openTrackInfoDialog()
+    fun closeTrackInfoDialog() = libraryController.closeTrackInfoDialog()
+    fun openPlaylistPickerDialog() = libraryController.openPlaylistPickerDialog()
+    fun closePlaylistPickerDialog() = libraryController.closePlaylistPickerDialog()
+    fun createUserPlaylist(name: String, onCreated: (Long?) -> Unit) = libraryController.createUserPlaylist(name, onCreated)
+    fun addCurrentTrackToPlaylists(playlistIds: Set<Long>) = libraryController.addCurrentTrackToPlaylists(playlistIds)
+
     fun requestFinish() { _finishRequests.value++ }
     fun setControlsVisible(visible: Boolean) { _state.value = _state.value.copy(controlsVisible = visible) }
     fun openPanel(panel: PlayerPanel) { _state.value = _state.value.copy(panel = panel, controlsVisible = true) }
@@ -507,6 +632,7 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
     private fun applicationText(res: Int) = getApplication<Application>().getString(res)
 
     override fun onCleared() {
+        stopListening()
         rememberPosition()
         engineJob?.cancel()
         tickerJob?.cancel()

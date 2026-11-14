@@ -60,4 +60,39 @@
     <string name="player_settings_loudness_waveform">显示响度波形</string>
     <string name="player_settings_default_mode">默认播放模式</string>
     <string name="player_settings_subtitle_size">字幕字号 %1$d</string>
+
+    <string name="player_action_favorite">收藏</string>
+    <string name="player_library_operation_failed">操作失败，请重试</string>
+    <string name="player_action_unfavorite">取消收藏</string>
+    <string name="player_action_favorited_hint">已添加到收藏</string>
+    <string name="player_action_unfavorited_hint">已取消收藏</string>
+    <string name="player_action_info">歌曲信息</string>
+    <string name="player_action_add_to_playlist">添加到播放列表</string>
+
+    <string name="player_info_title">歌曲信息</string>
+    <string name="player_info_file_name">文件名</string>
+    <string name="player_info_location">位置</string>
+    <string name="player_info_track_title">标题</string>
+    <string name="player_info_album">专辑</string>
+    <string name="player_info_artist">歌手</string>
+    <string name="player_info_album_artist">专辑艺术家</string>
+    <string name="player_info_composer">作曲人</string>
+    <string name="player_info_genre">流派</string>
+    <string name="player_info_lyricist">作词人</string>
+    <string name="player_info_track_number">曲目数</string>
+    <string name="player_info_disc_number">碟片编号</string>
+    <string name="player_info_unknown">[未知]</string>
+    <string name="player_info_edit_tags">编辑标签</string>
+    <string name="player_info_done">完成</string>
+    <string name="player_info_path_copied">路径已复制</string>
+
+    <string name="player_playlist_picker_new">新播放列表</string>
+    <string name="player_playlist_picker_new_title">新建播放列表</string>
+    <string name="player_playlist_picker_new_hint">输入播放列表名称</string>
+    <string name="player_playlist_picker_create">创建</string>
+    <string name="player_playlist_picker_add">添加</string>
+    <string name="player_playlist_picker_empty">暂无自定义歌单，点击下方创建</string>
+    <string name="player_playlist_picker_added">已添加到 %1$d 个播放列表</string>
+    <string name="player_playlist_picker_already_in">已在所选播放列表中</string>
+    <string name="player_playlist_picker_count">%1$d 首</string>
 </resources>

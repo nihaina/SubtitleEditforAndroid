@@ -11,16 +11,22 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import com.subtitleedit.filepicker.AppFilePickerContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import com.subtitleedit.ui.FavoritesScreen
+import com.subtitleedit.ui.ListeningStatsScreen
+import com.subtitleedit.ui.MediaLibraryScreen
+import com.subtitleedit.ui.MediaLibraryScanCoordinator
+import com.subtitleedit.ui.showLibraryError
 import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.ui.ToolDestination
 import com.subtitleedit.ui.ToolsScreen
@@ -65,6 +71,8 @@ internal fun MainTopLevelPages(
     onToolbarChanged: (String, Boolean, (() -> Unit)?) -> Unit
 ) {
     val isActive = selectedPage == activePage
+    val activeNow by rememberUpdatedState(isActive)
+    val toolbarCallback by rememberUpdatedState(onToolbarChanged)
     val context = LocalContext.current
     val resources = LocalResources.current
     val preferences = context.getSharedPreferences(FAVORITES_PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -110,6 +118,22 @@ internal fun MainTopLevelPages(
 
     val directoryPicker = rememberLauncherForActivityResult(AppFilePickerContracts.OpenDocumentTree()) { uri ->
         if (uri != null) addFavoriteDirectory(context, preferences, state, uri)
+    }
+    var libraryScanPickerPending by remember { mutableStateOf(false) }
+    val libraryScanRunning by MediaLibraryScanCoordinator.scanning.collectAsState()
+    val libraryScanPicker = rememberLauncherForActivityResult(AppFilePickerContracts.OpenDocumentTree()) { uri ->
+        libraryScanPickerPending = false
+        if (uri != null) {
+            try {
+                com.subtitleedit.util.PickedUriAccess.retainPermission(
+                    context, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+                val dir = File(DirectoryDisplayPath.fromUri(context, uri))
+                MediaLibraryScanCoordinator.scan(context, listOf(dir))
+            } catch (error: Exception) {
+                showLibraryError(context, error)
+            }
+        }
     }
     val softwareDirectoryPicker = rememberLauncherForActivityResult(AppFilePickerContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
@@ -231,6 +255,7 @@ internal fun MainTopLevelPages(
         previousSelectedPage = selectedPage
         previousSelectionVersion = selectionVersion
         when (selectedPage) {
+            R.id.nav_library -> loadFavoriteDirectories()
             R.id.nav_favorites -> loadFavoriteDirectories()
             R.id.nav_drafts -> {
                 loadDrafts()
@@ -259,9 +284,35 @@ internal fun MainTopLevelPages(
         goToDraftFolder("")
     }
 
-    val pageKey = if (selectedPage == R.id.nav_tools) 0 else selectionVersion
+    val pageKey = if (selectedPage == R.id.nav_tools || selectedPage == R.id.nav_library || selectedPage == R.id.nav_stats) 0 else selectionVersion
     key(selectedPage, pageKey) {
     when (selectedPage) {
+        R.id.nav_library -> MediaLibraryScreen(
+            refreshVersion = refreshVersion,
+            selectionVersion = selectionVersion,
+            onToolbarChanged = { title, hasBack, back ->
+                if (activeNow) toolbarCallback(title, hasBack, back)
+            },
+            onRequestScanDirectory = {
+                if (!libraryScanPickerPending && !libraryScanRunning) {
+                    libraryScanPickerPending = true
+                    try {
+                        libraryScanPicker.launch(null)
+                    } catch (error: Exception) {
+                        libraryScanPickerPending = false
+                        showLibraryError(context, error)
+                    }
+                }
+            },
+            favoriteDirectories = state.favoriteDirectories,
+            isActive = isActive,
+            scanPickerPending = libraryScanPickerPending
+        )
+
+        R.id.nav_stats -> ListeningStatsScreen(
+            refreshVersion = refreshVersion
+        )
+
         R.id.nav_favorites -> FavoritesScreen(
             directories = state.favoriteDirectories,
             viewMode = viewMode,

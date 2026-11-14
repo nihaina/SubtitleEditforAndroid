@@ -83,7 +83,7 @@ import com.subtitleedit.model.FileBrowserViewMode
 import java.io.File
 import com.subtitleedit.ui.theme.AppMotion
 
-private val MainBottomNavigationItems = listOf(
+private val EditorBottomNavigationItems = listOf(
     Triple(R.id.nav_directory, R.drawable.ic_nav_folder, R.string.nav_directory),
     Triple(R.id.nav_favorites, R.drawable.ic_favorite, R.string.nav_favorites),
     Triple(R.id.nav_drafts, R.drawable.ic_nav_draft, R.string.drafts),
@@ -91,7 +91,16 @@ private val MainBottomNavigationItems = listOf(
     Triple(R.id.nav_settings, R.drawable.ic_settings, R.string.menu_main_title_02)
 )
 
-private val TopLevelOrder = MainBottomNavigationItems.map { it.first }
+private val PlayerBottomNavigationItems = listOf(
+    Triple(R.id.nav_directory, R.drawable.ic_nav_folder, R.string.nav_directory),
+    Triple(R.id.nav_library, R.drawable.ic_nav_library, R.string.nav_library),
+    Triple(R.id.nav_stats, R.drawable.ic_nav_stats, R.string.nav_stats),
+    Triple(R.id.nav_tools, R.drawable.ic_tools, R.string.menu_main_title_01),
+    Triple(R.id.nav_settings, R.drawable.ic_settings, R.string.menu_main_title_02)
+)
+
+private fun bottomNavigationItems(playerModeEnabled: Boolean) =
+    if (playerModeEnabled) PlayerBottomNavigationItems else EditorBottomNavigationItems
 
 internal data class MainDirectoryScrollRequest(
     val generation: Long,
@@ -194,6 +203,7 @@ internal fun MainActivityScreen(
     val directoryListState = rememberLazyListState()
     val directoryGridState = rememberLazyGridState()
     val topLevelPagesState = remember { MainTopLevelPagesState() }
+    val topLevelOrder = bottomNavigationItems(state.playerModeEnabled).map { it.first }
     var createMenuExpanded by remember { mutableStateOf(false) }
     var directoryMenuExpanded by remember { mutableStateOf(false) }
     var createDialogKind by remember { mutableStateOf<MainCreateItemKind?>(null) }
@@ -203,7 +213,7 @@ internal fun MainActivityScreen(
     var createExtensionError by remember { mutableStateOf<String?>(null) }
     val isDirectoryPage = state.selectedTopLevelItem == R.id.nav_directory
     val usesPageBackground = isDirectoryPage || state.selectedTopLevelItem in setOf(
-        R.id.nav_favorites, R.id.nav_drafts, R.id.nav_settings, R.id.nav_tools
+        R.id.nav_library, R.id.nav_stats, R.id.nav_favorites, R.id.nav_drafts, R.id.nav_settings, R.id.nav_tools
     )
     // Selection actions belong to directoryContent in the legacy layout. The
     // selection state can survive a top-level tab switch, but its toolbar and
@@ -283,6 +293,13 @@ internal fun MainActivityScreen(
                             contentDescription = stringResource(
                                 R.string.cancel
                             )
+                        )
+                    }
+                } else if (MainNavigationPolicy.isAuxiliaryPage(state.selectedTopLevelItem, state.playerModeEnabled)) {
+                    IconButton(onClick = { onTopLevelPageSelected(R.id.nav_directory) }) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_back),
+                            contentDescription = stringResource(R.string.tools_navigate_back)
                         )
                     }
                 }
@@ -410,6 +427,24 @@ internal fun MainActivityScreen(
                                                 onOpenFileManagementSettings()
                                             }
                                         )
+                                        if (state.playerModeEnabled) {
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.nav_favorites)) },
+                                                leadingIcon = { Icon(painterResource(R.drawable.ic_favorite), contentDescription = null) },
+                                                onClick = {
+                                                    directoryMenuExpanded = false
+                                                    onTopLevelPageSelected(R.id.nav_favorites)
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.drafts)) },
+                                                leadingIcon = { Icon(painterResource(R.drawable.ic_nav_draft), contentDescription = null) },
+                                                onClick = {
+                                                    directoryMenuExpanded = false
+                                                    onTopLevelPageSelected(R.id.nav_drafts)
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -431,7 +466,7 @@ internal fun MainActivityScreen(
                 targetState = state.selectedTopLevelItem,
                 transitionSpec = {
                     val direction = if (
-                        TopLevelOrder.indexOf(targetState) > TopLevelOrder.indexOf(initialState)
+                        topLevelOrder.indexOf(targetState) > topLevelOrder.indexOf(initialState)
                     ) 1 else -1
                     (
                         slideInHorizontally(AppMotion.enter()) { direction * topLevelOffsetPx } +
@@ -481,6 +516,7 @@ internal fun MainActivityScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 MainBottomNavigation(
                     selectedItemId = state.selectedTopLevelItem,
+                    playerModeEnabled = state.playerModeEnabled,
                     onSelected = onTopLevelPageSelected
                 )
             } else if (isSelectionActive) {
@@ -708,12 +744,12 @@ private fun SelectionAction(modifier: Modifier, icon: Int, label: String, onClic
 }
 
 @Composable
-private fun MainBottomNavigation(selectedItemId: Int, onSelected: (Int) -> Unit) {
+internal fun MainBottomNavigation(selectedItemId: Int, playerModeEnabled: Boolean, onSelected: (Int) -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().height(60.dp).background(MaterialTheme.colorScheme.surfaceContainer),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        MainBottomNavigationItems.forEach { (id, icon, title) ->
+        bottomNavigationItems(playerModeEnabled).forEach { (id, icon, title) ->
             val label = stringResource(title)
             val selected = selectedItemId == id
             val indicatorAlpha by animateFloatAsState(

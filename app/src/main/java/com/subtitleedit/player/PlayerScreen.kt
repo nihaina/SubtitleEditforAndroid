@@ -216,6 +216,19 @@ internal fun PlayerScreen(viewModel: PlayerViewModel, onEditTags: () -> Unit = {
             }
 
             PlayerPanelSheet(state, viewModel, onEditTags)
+
+            PlayerTrackInfoDialog(
+                state = state,
+                onDismiss = viewModel::closeTrackInfoDialog,
+                onEditTags = onEditTags
+            )
+
+            PlayerPlaylistPickerDialog(
+                state = state,
+                onDismiss = viewModel::closePlaylistPickerDialog,
+                onCreatePlaylist = viewModel::createUserPlaylist,
+                onConfirmAdd = viewModel::addCurrentTrackToPlaylists
+            )
         }
     }
 }
@@ -302,6 +315,7 @@ private fun PlayerTopBar(state: PlayerUiState, viewModel: PlayerViewModel, lands
             )
         }
         if (landscape) {
+            PlayerQuickActionsRow(state, viewModel, compact = true)
             PlayerToolsRow(state, viewModel, compact = true)
         }
         IconButton(onClick = { viewModel.openPanel(PlayerPanel.TIMER) },
@@ -335,6 +349,9 @@ private fun PlayerControls(state: PlayerUiState, viewModel: PlayerViewModel, lan
             .padding(horizontal = 20.dp)
             .padding(bottom = if (landscape) 6.dp else 16.dp)
     ) {
+        if (!landscape) {
+            PlayerQuickActionsRow(state, viewModel)
+        }
         PlayerSeekBar(state, viewModel)
         Row(
             Modifier.fillMaxWidth().testTag("player-transport-row"),
@@ -352,6 +369,60 @@ private fun PlayerControls(state: PlayerUiState, viewModel: PlayerViewModel, lan
         if (!landscape) {
             Spacer(Modifier.height(6.dp))
             PlayerToolsRow(state, viewModel, compact = false)
+        }
+    }
+}
+
+@Composable
+private fun PlayerQuickActionsRow(state: PlayerUiState, viewModel: PlayerViewModel, compact: Boolean = false) {
+    val enabled = state.currentTrack != null
+    val iconButtonSize = if (compact) 38.dp else 40.dp
+    Row(
+        modifier = (if (compact) Modifier else Modifier.fillMaxWidth())
+            .testTag("player-quick-actions-row")
+            .then(if (compact) Modifier else Modifier.padding(bottom = 2.dp)),
+        horizontalArrangement = if (compact) Arrangement.spacedBy(0.dp) else Arrangement.Start,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(
+            onClick = viewModel::toggleFavorite,
+            enabled = enabled,
+            modifier = Modifier.size(iconButtonSize).testTag("player-quick-favorite")
+        ) {
+            Icon(
+                painter = painterResource(
+                    if (state.isFavorite) R.drawable.ic_favorite else R.drawable.ic_favorite_border
+                ),
+                contentDescription = stringResource(
+                    if (state.isFavorite) R.string.player_action_unfavorite else R.string.player_action_favorite
+                ),
+                modifier = Modifier.size(20.dp),
+                tint = if (state.isFavorite) PlayerControlColors.Accent else PlayerControlColors.Secondary
+            )
+        }
+        IconButton(
+            onClick = viewModel::openTrackInfoDialog,
+            enabled = enabled,
+            modifier = Modifier.size(iconButtonSize).testTag("player-quick-info")
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_info),
+                contentDescription = stringResource(R.string.player_action_info),
+                modifier = Modifier.size(20.dp),
+                tint = PlayerControlColors.Secondary
+            )
+        }
+        IconButton(
+            onClick = viewModel::openPlaylistPickerDialog,
+            enabled = enabled,
+            modifier = Modifier.size(iconButtonSize).testTag("player-quick-add-playlist")
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_playlist_add),
+                contentDescription = stringResource(R.string.player_action_add_to_playlist),
+                modifier = Modifier.size(21.dp),
+                tint = PlayerControlColors.Secondary
+            )
         }
     }
 }

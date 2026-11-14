@@ -59,6 +59,7 @@ import com.subtitleedit.util.AndroidDirectoryPolicy
 import com.subtitleedit.util.FilePathPolicy
 import com.subtitleedit.util.SelectionRangePolicy
 import com.subtitleedit.util.MainBackNavigationPolicy
+import com.subtitleedit.util.MainNavigationPolicy
 import com.subtitleedit.util.MainLifecycleCoordinator
 import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.FileSelectionPolicy
@@ -186,7 +187,11 @@ class MainActivity : AppComposeActivity() {
         super.onCreate(savedInstanceState)
         activeInstance = WeakReference(this)
         screenState = MainActivityScreenState(
-            selectedTopLevelItem = stateModel.documentState.selectedTopLevelItem
+            selectedTopLevelItem = MainNavigationPolicy.pageForMode(
+                stateModel.documentState.selectedTopLevelItem,
+                com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled
+            ),
+            playerModeEnabled = com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled
         )
         searchExpanded = stateModel.documentState.isFileSearchActive &&
             stateModel.documentState.searchQuery.isNotEmpty()
@@ -396,6 +401,7 @@ class MainActivity : AppComposeActivity() {
     override fun onResume() {
         super.onResume()
         lifecycleCoordinator.onResume()
+        refreshPlayerModeNavigation()
         topLevelPageRefreshVersion++
     }
 
@@ -2014,10 +2020,18 @@ class MainActivity : AppComposeActivity() {
     private fun togglePlayerMode() {
         val preferences = com.subtitleedit.player.PlayerPreferences.getInstance(this)
         preferences.playerModeEnabled = !preferences.playerModeEnabled
-        publishScreenState()
+        refreshPlayerModeNavigation()
         showShortToast(getString(
             if (preferences.playerModeEnabled) R.string.player_mode_enabled else R.string.player_mode_disabled
         ))
+    }
+
+    private fun refreshPlayerModeNavigation() {
+        val current = stateModel.documentState.selectedTopLevelItem
+        val target = MainNavigationPolicy.pageForMode(
+            current, com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled
+        )
+        if (target != current) showTopLevelPage(target) else publishScreenState()
     }
 
     private fun showOnlinePlaceholder() {
@@ -2167,6 +2181,12 @@ class MainActivity : AppComposeActivity() {
                 if (customToolbarHasBack) {
                     lastBackExitPromptAt = 0L
                     customToolbarBack?.invoke()
+                } else if (MainNavigationPolicy.isAuxiliaryPage(
+                    stateModel.documentState.selectedTopLevelItem,
+                    com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled
+                )) {
+                    lastBackExitPromptAt = 0L
+                    showTopLevelPage(R.id.nav_directory)
                 } else {
                     finishFromBackNavigation()
                 }

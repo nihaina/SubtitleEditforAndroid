@@ -26,6 +26,14 @@ internal object MediaTagAudioRepository {
             MediaTagNative.pictures(descriptor.fd).toList()
         }
 
+    /** Library indexing needs text tags only; do not decode artwork for every scanned file. */
+    fun readMetadata(file: File): MediaConvertMetadata? =
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+            val values = MediaTagNative.read(descriptor.fd) ?: return@use null
+            check(values.size % 2 == 0) { "TagLib returned incomplete metadata" }
+            MediaTagAudioMetadata.decode(values.toList().chunked(2).groupBy({ it[0] }, { it[1] }))
+        }
+
     /** The caller owns a private staging copy. A failed native write never touches the source. */
     fun write(file: File, metadata: MediaConvertMetadata): Snapshot {
         val original = requireNotNull(read(file)) { "This audio format is not supported by TagLib" }
