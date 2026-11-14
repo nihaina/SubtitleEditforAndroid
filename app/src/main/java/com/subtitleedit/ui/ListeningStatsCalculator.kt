@@ -3,6 +3,8 @@ package com.subtitleedit.ui
 import com.subtitleedit.R
 import com.subtitleedit.library.ListeningDayStat
 import com.subtitleedit.library.ListeningSessionRecord
+import com.subtitleedit.library.MediaLibraryTrack
+import com.subtitleedit.library.PlaybackHistoryEntry
 import com.subtitleedit.library.TopListeningItem
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -39,7 +41,10 @@ internal data class ListeningStatsContent(
     val availableYears: List<Int> = emptyList(),
     val heatmapDays: List<StatsHeatmapDay> = emptyList(),
     val sessions: List<ListeningSessionRecord> = emptyList(),
-    val topItems: List<TopListeningItem> = emptyList()
+    val topItems: List<TopListeningItem> = emptyList(),
+    val recentHistory: List<PlaybackHistoryEntry> = emptyList(),
+    val mostPlayed: List<PlaybackHistoryEntry> = emptyList(),
+    val neverPlayed: List<MediaLibraryTrack> = emptyList()
 )
 
 /** Date ranges and arithmetic are independent of Android UI and local wall-clock offsets. */

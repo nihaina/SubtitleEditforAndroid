@@ -192,11 +192,32 @@ internal fun PlayerTrackInfoDialog(
                             }
                         )
 
+                        TrackInfoField(
+                            label = stringResource(R.string.player_info_duration),
+                            value = details.durationText.ifBlank { unknownText }
+                        )
+                        TrackInfoField(
+                            label = stringResource(R.string.player_info_file_size),
+                            value = details.fileSizeText.ifBlank { unknownText }
+                        )
+
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                         TrackInfoField(
+                            label = stringResource(R.string.player_info_genre),
+                            value = details.genre.ifBlank { unknownText },
+                            showActionIcon = true,
+                            onActionClick = onEditTags.takeIf { details.canEditTags }
+                        )
+                        TrackInfoField(
                             label = stringResource(R.string.player_info_track_title),
                             value = details.title.ifBlank { unknownText }
+                        )
+                        TrackInfoField(
+                            label = stringResource(R.string.player_info_artist),
+                            value = details.artist.ifBlank { unknownText },
+                            showActionIcon = true,
+                            onActionClick = onEditTags.takeIf { details.canEditTags }
                         )
                         TrackInfoField(
                             label = stringResource(R.string.player_info_album),
@@ -205,10 +226,8 @@ internal fun PlayerTrackInfoDialog(
                             onActionClick = onEditTags.takeIf { details.canEditTags }
                         )
                         TrackInfoField(
-                            label = stringResource(R.string.player_info_artist),
-                            value = details.artist.ifBlank { unknownText },
-                            showActionIcon = true,
-                            onActionClick = onEditTags.takeIf { details.canEditTags }
+                            label = stringResource(R.string.player_info_year),
+                            value = details.year.ifBlank { unknownText }
                         )
                         TrackInfoField(
                             label = stringResource(R.string.player_info_album_artist),
@@ -223,22 +242,28 @@ internal fun PlayerTrackInfoDialog(
                             onActionClick = onEditTags.takeIf { details.canEditTags }
                         )
                         TrackInfoField(
-                            label = stringResource(R.string.player_info_genre),
-                            value = details.genre.ifBlank { unknownText },
-                            showActionIcon = true,
-                            onActionClick = onEditTags.takeIf { details.canEditTags }
-                        )
-                        TrackInfoField(
-                            label = stringResource(R.string.player_info_lyricist),
-                            value = details.lyricist.ifBlank { unknownText }
-                        )
-                        TrackInfoField(
                             label = stringResource(R.string.player_info_track_number),
                             value = details.trackNumber.ifBlank { "0" }
                         )
                         TrackInfoField(
                             label = stringResource(R.string.player_info_disc_number),
                             value = details.discNumber.ifBlank { "1" }
+                        )
+                        TrackInfoField(
+                            label = stringResource(R.string.player_info_comment),
+                            value = details.comment.ifBlank { unknownText }
+                        )
+                        TrackInfoField(
+                            label = stringResource(R.string.player_info_lyricist),
+                            value = details.lyricist.ifBlank { unknownText }
+                        )
+                        TrackInfoField(
+                            label = stringResource(R.string.player_info_copyright),
+                            value = details.copyright.ifBlank { unknownText }
+                        )
+                        TrackInfoField(
+                            label = stringResource(R.string.player_info_language),
+                            value = details.language.ifBlank { unknownText }
                         )
                     }
                 }

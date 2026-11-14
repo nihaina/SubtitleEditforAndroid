@@ -84,7 +84,7 @@ internal class PlayerLibraryController(
         trackInfoJob = scope.launch {
             try {
                 val details = withContext(Dispatchers.IO) {
-                    PlayerTrackMetadataReader.read(track.file, current.durationMs)
+                    PlayerTrackMetadataReader.read(track.file, current.durationMs, application.cacheDir)
                 }
                 if (isCurrentTrack(track.path, generation) && state.value.showTrackInfoDialog) {
                     state.value = state.value.copy(trackInfo = details, trackInfoLoading = false)

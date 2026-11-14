@@ -60,6 +60,47 @@ class MediaLibraryRepositoryTest {
         }
 
     @Test
+    fun neverPlayedMergesPathsBeforeApplyingLimitAndKeepsPreferredMetadata() {
+        val name = "library-never-played-${System.nanoTime()}.db"
+        val file = File.createTempFile("library-indexed-", ".wav", context.cacheDir)
+        var label = "Indexed"
+        var addedAt = 100L
+        val r = MediaLibraryRepository.open(context, name) { media, _ ->
+            MediaLibraryTrack(media.path, "$label ${media.name}", addedAtMs = addedAt++)
+        }
+        try {
+            val first = requireNotNull(r.createPlaylist("First"))
+            val second = requireNotNull(r.createPlaylist("Second"))
+            r.indexTrack(file.path)
+            label = "Favorite"
+            r.toggleFavorite(file.path)
+            r.toggleFavorite("/favorite-only.wav")
+            label = "Playlist"
+            listOf(file.path, "/favorite-only.wav", "/playlist-only.wav").forEach { path ->
+                r.addTrackToPlaylist(first, path)
+                r.addTrackToPlaylist(second, path)
+            }
+            r.recordPlaybackProgress("/played.wav", "played", 1_000L, 500L)
+            r.addTrackToPlaylist(first, "/played.wav")
+            r.addTrackToPlaylist(first, "/listened.wav")
+            r.recordListeningInterval("/listened.wav", "listened", System.currentTimeMillis(), 100L)
+
+            val tracks = r.getNeverPlayedTracks(limit = 3)
+            assertEquals(setOf(file.path, "/favorite-only.wav", "/playlist-only.wav"), tracks.map { it.path }.toSet())
+            assertEquals(3, tracks.size)
+            assertEquals("Indexed ${file.name}", tracks.first { it.path == file.path }.title)
+            assertEquals("Favorite favorite-only.wav", tracks.first { it.path == "/favorite-only.wav" }.title)
+            assertEquals("Playlist playlist-only.wav", tracks.first { it.path == "/playlist-only.wav" }.title)
+            assertTrue(r.getNeverPlayedTracks(limit = 0).isEmpty())
+            assertEquals(2, r.getNeverPlayedTracks(limit = 2).size)
+        } finally {
+            r.close()
+            context.deleteDatabase(name)
+            file.delete()
+        }
+    }
+
+    @Test
     fun collectionsRejectOrphansAndKeepDuplicateOperationsIdempotent() =
         Fixture(context).use { f ->
             val r = f.repo

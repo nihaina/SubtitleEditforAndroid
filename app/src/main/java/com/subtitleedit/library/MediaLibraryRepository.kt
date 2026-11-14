@@ -398,6 +398,49 @@ private constructor(
         return result
     }
 
+    fun getMostPlayed(limit: Int = 100): List<PlaybackHistoryEntry> {
+        val result = ArrayList<PlaybackHistoryEntry>()
+        db.rawQuery(
+                "SELECT id,path,title,artist,album,is_video,duration_ms,position_ms,played_at_ms,play_count FROM playback_history ORDER BY play_count DESC,played_at_ms DESC,id DESC LIMIT ?",
+                arrayOf(limit.coerceAtLeast(0).toString()),
+            )
+            .use { c ->
+                while (c.moveToNext()) result +=
+                    PlaybackHistoryEntry(
+                        c.getLong(0),
+                        c.getString(1),
+                        c.getString(2),
+                        c.getString(3),
+                        c.getString(4),
+                        c.getInt(5) != 0,
+                        c.getLong(6),
+                        c.getLong(7),
+                        c.getLong(8),
+                        c.getInt(9),
+                    )
+            }
+        return result
+    }
+
+    /** Prefer indexed metadata, then favorites, then the first playlist entry for each path. */
+    fun getNeverPlayedTracks(limit: Int = 200): List<MediaLibraryTrack> =
+        tracks(
+            """SELECT path,title,artist,album,is_video,duration_ms,added_at_ms FROM (
+            SELECT path,title,artist,album,is_video,duration_ms,added_at_ms FROM library_tracks
+            UNION ALL
+            SELECT f.path,f.title,f.artist,f.album,f.is_video,f.duration_ms,f.added_at_ms FROM favorites f
+            WHERE NOT EXISTS (SELECT 1 FROM library_tracks l WHERE l.path=f.path)
+            UNION ALL
+            SELECT p.path,p.title,p.artist,p.album,p.is_video,p.duration_ms,p.added_at_ms FROM playlist_items p
+            WHERE p.id IN (SELECT MIN(id) FROM playlist_items GROUP BY path)
+            AND NOT EXISTS (SELECT 1 FROM library_tracks l WHERE l.path=p.path)
+            AND NOT EXISTS (SELECT 1 FROM favorites f WHERE f.path=p.path)) candidates
+            WHERE NOT EXISTS (SELECT 1 FROM playback_history h WHERE h.path=candidates.path)
+            AND NOT EXISTS (SELECT 1 FROM listening_sessions s WHERE s.media_path=candidates.path)
+            ORDER BY title COLLATE NOCASE,path LIMIT ?""",
+            limit.coerceAtLeast(0).toString(),
+        )
+
     fun removePlaybackHistory(path: String) {
         write {
             delete("playback_history", "path=?", arrayOf(path))

@@ -5,11 +5,13 @@ import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.media.ThumbnailUtils
 import android.os.Build
+import android.os.ParcelFileDescriptor
 import android.util.LruCache
 import com.subtitleedit.MediaConvertMetadata
 import com.subtitleedit.MediaTagAudioRepository
 import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.FfprobeMediaInformation
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.Semaphore
@@ -31,6 +33,8 @@ internal data class PlayerTrackDetails(
     val discNumber: String,
     val year: String,
     val comment: String,
+    val copyright: String,
+    val language: String,
     val durationText: String,
     val fileSizeText: String,
     val canEditTags: Boolean
@@ -104,9 +108,11 @@ internal object MediaArtworkLoader {
 internal object PlayerTrackMetadataReader {
     private data class Snapshot(val tags: MediaConvertMetadata, val durationMs: Long)
     private val cache = LruCache<MediaFileStamp, Snapshot>(128)
+    private val videoDetailsCache = LruCache<MediaFileStamp, MediaConvertMetadata>(32)
 
     fun invalidate(path: String) {
         cache.snapshot().keys.filter { it.path == path }.forEach(cache::remove)
+        videoDetailsCache.snapshot().keys.filter { it.path == path }.forEach(videoDetailsCache::remove)
         MediaArtworkLoader.invalidate(path)
     }
 
@@ -123,10 +129,16 @@ internal object PlayerTrackMetadataReader {
         )
     }
 
-    fun read(file: File, fallbackDurationMs: Long = 0L): PlayerTrackDetails {
+    fun read(file: File, fallbackDurationMs: Long = 0L, cacheDirectory: File? = null): PlayerTrackDetails {
         val snapshot = snapshot(file)
-        val tags = snapshot.tags
         val isVideo = FileTypePolicy.isVideo(file)
+        // Probe extended video tags only when opening details, never while scanning the library.
+        val videoTags = if (isVideo && cacheDirectory != null) videoDetails(file, cacheDirectory) else null
+        val tags = if (videoTags == null) snapshot.tags else {
+            MediaConvertMetadata.audioFields.fold(snapshot.tags) { metadata, field ->
+                videoTags.value(field).takeIf { it.isNotBlank() }?.let { metadata.withValue(field, it) } ?: metadata
+            }.copy(editedFields = emptySet())
+        }
         return PlayerTrackDetails(
             fileName = file.name,
             filePath = file.absolutePath,
@@ -144,10 +156,35 @@ internal object PlayerTrackMetadataReader {
             discNumber = tags.discNumber,
             year = tags.year,
             comment = tags.comment,
+            copyright = tags.copyright,
+            language = tags.language,
             durationText = formatDuration(fallbackDurationMs.takeIf { it > 0L } ?: snapshot.durationMs),
             fileSizeText = if (file.isFile) FileUtils.formatFileSize(file.length()) else "",
             canEditTags = file.isFile && file.canRead() && (FileUtils.isAudioFile(file) || isVideo)
         )
+    }
+
+    private fun videoDetails(file: File, cacheDirectory: File): MediaConvertMetadata? {
+        if (!file.isFile || !file.canRead()) return null
+        val stamp = MediaFileStamp.of(file)
+        videoDetailsCache.get(stamp)?.let { return it }
+        return runCatching {
+            val info = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                FfprobeMediaInformation.read("/proc/self/fd/${descriptor.fd}", cacheDirectory)
+            }
+            val primaryVideo = info.getStreams().firstOrNull { stream ->
+                stream.getType() == "video" &&
+                    stream.getAllProperties()?.optJSONObject("disposition")?.optInt("attached_pic", 0) != 1
+            }
+            val primaryAudio = info.getStreams().firstOrNull { it.getType() == "audio" }
+            val sources = listOfNotNull(info.getTags(), primaryVideo?.getTags(), primaryAudio?.getTags())
+            MediaConvertMetadata.fromTags { key ->
+                sources.firstNotNullOfOrNull { tags ->
+                    tags.keys().asSequence().firstOrNull { it.equals(key, ignoreCase = true) }
+                        ?.let { tags.optString(it).takeIf { value -> value.isNotBlank() && !value.equals("null", true) } }
+                }
+            }.also { videoDetailsCache.put(stamp, it) }
+        }.getOrNull()
     }
 
     private fun snapshot(file: File): Snapshot {

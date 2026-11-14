@@ -76,6 +76,8 @@ import com.subtitleedit.library.ListeningDayStat
 import com.subtitleedit.library.ListeningSessionRecord
 import com.subtitleedit.library.MediaArtworkLoader
 import com.subtitleedit.library.MediaLibraryRepository
+import com.subtitleedit.library.MediaLibraryTrack
+import com.subtitleedit.library.PlaybackHistoryEntry
 import com.subtitleedit.library.TopListeningItem
 import com.subtitleedit.player.PlayerActivity
 import com.subtitleedit.ui.settings.settingsPageBackground
@@ -139,7 +141,10 @@ internal fun ListeningStatsScreen(refreshVersion: Int) {
                     availableYears = StatsCalculator.availableYears(stats.map { it.date }, currentYear),
                     heatmapDays = days,
                     sessions = repository.getSessionsForDate(day),
-                    topItems = range?.let { repository.getTopListeningItems(it.first, it.second, limit = 5) }.orEmpty()
+                    topItems = range?.let { repository.getTopListeningItems(it.first, it.second, limit = 5) }.orEmpty(),
+                    recentHistory = repository.getPlaybackHistory(limit = 20),
+                    mostPlayed = repository.getMostPlayed(limit = 20),
+                    neverPlayed = repository.getNeverPlayedTracks(limit = 100)
                 )
             }
             content = loaded
@@ -210,11 +215,232 @@ internal fun ListeningStatsScreen(refreshVersion: Int) {
             )
         }
 
+        PlaybackInsightsSection(
+            recentHistory = content.recentHistory,
+            mostPlayed = content.mostPlayed,
+            neverPlayed = content.neverPlayed,
+            onTrackClick = { playFile(it.path) }
+        )
+
         DayTimelineSection(
             date = selectedDate,
             sessions = sessions,
             onSessionClick = { playFile(it.mediaPath) }
         )
+    }
+}
+
+private enum class PlaybackInsightTab(val labelRes: Int, val iconRes: Int) {
+    RECENT(R.string.stats_section_recent, R.drawable.ic_history),
+    MOST_PLAYED(R.string.stats_section_most_played, R.drawable.ic_whatshot),
+    NEVER_PLAYED(R.string.stats_section_never_played, R.drawable.ic_block)
+}
+
+@Composable
+private fun PlaybackInsightsSection(
+    recentHistory: List<PlaybackHistoryEntry>,
+    mostPlayed: List<PlaybackHistoryEntry>,
+    neverPlayed: List<MediaLibraryTrack>,
+    onTrackClick: (MediaLibraryTrack) -> Unit
+) {
+    var selectedTab by remember { mutableStateOf(PlaybackInsightTab.RECENT) }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 16.dp),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.cardContainer)
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                PlaybackInsightTab.entries.forEach { tab ->
+                    val selected = tab == selectedTab
+                    Surface(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(role = Role.Button) { selectedTab = tab },
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (selected) MaterialTheme.colorScheme.secondaryContainer
+                        else MaterialTheme.colorScheme.surfaceContainerHigh
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(tab.iconRes),
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = stringResource(tab.labelRes),
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                ),
+                                color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            when (selectedTab) {
+                PlaybackInsightTab.RECENT -> PlaybackHistoryInsightList(
+                    entries = recentHistory,
+                    emptyText = stringResource(R.string.stats_recent_empty),
+                    timeLabel = { entry ->
+                        SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(entry.playedAtMs))
+                    },
+                    onTrackClick = onTrackClick
+                )
+
+                PlaybackInsightTab.MOST_PLAYED -> PlaybackHistoryInsightList(
+                    entries = mostPlayed,
+                    emptyText = stringResource(R.string.stats_most_played_empty),
+                    timeLabel = { entry -> stringResource(R.string.stats_play_count, entry.playCount) },
+                    onTrackClick = onTrackClick
+                )
+
+                PlaybackInsightTab.NEVER_PLAYED -> {
+                    if (neverPlayed.isEmpty()) {
+                        Text(
+                            text = stringResource(R.string.stats_never_played_empty),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.stats_never_played_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        neverPlayed.forEach { track ->
+                            PlaybackInsightRow(
+                                track = track,
+                                label = listOf(track.artist, track.album)
+                                    .filter { it.isNotBlank() }
+                                    .joinToString(" · "),
+                                onClick = { onTrackClick(track) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaybackHistoryInsightList(
+    entries: List<PlaybackHistoryEntry>,
+    emptyText: String,
+    timeLabel: @Composable (PlaybackHistoryEntry) -> String,
+    onTrackClick: (MediaLibraryTrack) -> Unit
+) {
+    if (entries.isEmpty()) {
+        Text(
+            text = emptyText,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 8.dp)
+        )
+        return
+    }
+    entries.forEach { entry ->
+        val track = remember(entry) {
+            MediaLibraryTrack(
+                path = entry.path,
+                title = entry.title,
+                artist = entry.artist,
+                album = entry.album,
+                isVideo = entry.isVideo,
+                durationMs = entry.durationMs,
+                addedAtMs = entry.playedAtMs
+            )
+        }
+        PlaybackInsightRow(
+            track = track,
+            label = timeLabel(entry),
+            onClick = { onTrackClick(track) }
+        )
+    }
+}
+
+@Composable
+private fun PlaybackInsightRow(
+    track: MediaLibraryTrack,
+    label: String,
+    onClick: () -> Unit
+) {
+    val cover by produceState<Bitmap?>(initialValue = null, key1 = track.path) {
+        value = withContext(Dispatchers.IO) { MediaArtworkLoader.loadCover(track.path, 128) }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            contentAlignment = Alignment.Center
+        ) {
+            val bmp = cover
+            if (bmp != null) {
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Icon(
+                    painter = painterResource(
+                        if (track.isVideo) R.drawable.ic_file_video else R.drawable.ic_file_audio
+                    ),
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = track.displayTitle,
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (label.isNotBlank()) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
     }
 }
 

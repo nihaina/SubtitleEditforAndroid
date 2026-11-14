@@ -35,6 +35,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
@@ -55,9 +56,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -466,6 +469,19 @@ internal fun MediaLibraryScreen(
                     ).show()
                     pickingPlaylistForTrack = null
                 }
+            },
+            onCreatePlaylist = { name ->
+                mutate({
+                    val playlistId = checkNotNull(repository.createPlaylist(name))
+                    repository.addTrackToPlaylist(playlistId, track.path, track.durationMs)
+                }) {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.media_lib_added_to_playlist, name),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    pickingPlaylistForTrack = null
+                }
             }
         )
     }
@@ -742,7 +758,13 @@ private fun SearchTabContent(
                 value = query,
                 onValueChange = onQueryChange,
                 modifier = Modifier.weight(1f),
-                placeholder = { Text(stringResource(R.string.media_lib_search_hint)) },
+                placeholder = {
+                    Text(
+                        text = stringResource(R.string.media_lib_search_hint),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
                 leadingIcon = {
                     Icon(
                         painter = painterResource(R.drawable.ic_search),
@@ -775,7 +797,8 @@ private fun SearchTabContent(
                 Icon(
                     painter = painterResource(R.drawable.ic_add_favorite_directory),
                     contentDescription = stringResource(R.string.media_lib_scan_folder),
-                    tint = MaterialTheme.colorScheme.primary
+                    modifier = Modifier.size(30.dp),
+                    tint = Color.Unspecified
                 )
             }
         }
@@ -1085,54 +1108,99 @@ private fun LibraryEmptyState(
 }
 
 @Composable
-private fun LibraryPlaylistAssignDialog(
+internal fun LibraryPlaylistAssignDialog(
     track: MediaLibraryTrack,
     playlists: List<MediaPlaylist>,
     onDismiss: () -> Unit,
-    onSelectPlaylist: (MediaPlaylist) -> Unit
+    onSelectPlaylist: (MediaPlaylist) -> Unit,
+    onCreatePlaylist: (String) -> Unit
 ) {
+    var creatingPlaylist by remember { mutableStateOf(false) }
+    var newPlaylistName by remember { mutableStateOf("") }
     AppDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.player_action_add_to_playlist)) },
         text = {
-            if (playlists.isEmpty()) {
-                Text(
-                    text = stringResource(R.string.player_playlist_picker_empty),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    items(playlists, key = { it.id }) { playlist ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable { onSelectPlaylist(playlist) }
-                                .padding(horizontal = 8.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = playlist.name,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text(
-                                text = stringResource(R.string.player_playlist_picker_count, playlist.itemCount),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (playlists.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.player_playlist_picker_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f, fill = false).testTag("library-playlist-choices"),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(playlists, key = { it.id }) { playlist ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { onSelectPlaylist(playlist) }
+                                    .padding(horizontal = 8.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = playlist.name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = stringResource(R.string.player_playlist_picker_count, playlist.itemCount),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
+                    }
+                }
+
+                if (creatingPlaylist) {
+                    OutlinedTextField(
+                        value = newPlaylistName,
+                        onValueChange = { newPlaylistName = it },
+                        placeholder = { Text(stringResource(R.string.player_playlist_picker_new_hint)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    OutlinedButton(
+                        onClick = { creatingPlaylist = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_add),
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.media_lib_create_playlist))
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
-        }
+            if (creatingPlaylist) {
+                TextButton(
+                    onClick = { onCreatePlaylist(newPlaylistName.trim()) },
+                    enabled = newPlaylistName.trim().isNotBlank()
+                ) { Text(stringResource(R.string.player_playlist_picker_create)) }
+            } else {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+            }
+        },
+        dismissButton = if (creatingPlaylist) {
+            {
+                TextButton(onClick = { creatingPlaylist = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        } else null
     )
 }
