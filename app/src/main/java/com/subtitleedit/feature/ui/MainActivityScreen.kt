@@ -26,6 +26,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -56,6 +57,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -120,7 +122,8 @@ internal data class MainActivityScreenState(
     val canCompressSelected: Boolean = true,
     val canEditTagsSelected: Boolean = false,
     val canClearCacheSelected: Boolean = false,
-    val canProcessMediaSelected: Boolean = false
+    val canProcessMediaSelected: Boolean = false,
+    val playerModeEnabled: Boolean = false
 )
 
 internal enum class MainCreateItemKind { FOLDER, FILE }
@@ -143,6 +146,8 @@ internal fun MainActivityScreen(
     onSortFieldChanged: (FileSortField) -> Unit,
     onSortDirectionChanged: (FileSortDirection) -> Unit,
     onViewModeChanged: (FileBrowserViewMode) -> Unit,
+    onTogglePlayerMode: () -> Unit,
+    onOnlineClicked: () -> Unit,
     onOpenFileManagementSettings: () -> Unit,
     onSelectAll: () -> Unit,
     onSelectRange: () -> Unit,
@@ -301,6 +306,26 @@ internal fun MainActivityScreen(
                         }
                     }
                 } else if (isDirectoryPage) {
+                    IconButton(
+                        onClick = onOnlineClicked,
+                        modifier = Modifier.testTag("directory-online")
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.ic_online),
+                            contentDescription = stringResource(R.string.player_online_title)
+                        )
+                    }
+                    IconButton(
+                        onClick = onTogglePlayerMode,
+                        modifier = Modifier.testTag("directory-player-mode")
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.ic_player_mode),
+                            contentDescription = stringResource(R.string.player_mode_title),
+                            tint = if (state.playerModeEnabled) MaterialTheme.colorScheme.primary
+                            else LocalContentColor.current
+                        )
+                    }
                     DirectoryViewMenu(state.viewMode, state.sortField, state.sortDirection,
                         onViewModeChanged, onSortFieldChanged, onSortDirectionChanged)
                     Box {

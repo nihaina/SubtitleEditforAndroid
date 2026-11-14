@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_mode_title">音声模式</string>
+    <string name="player_mode_enabled">音声模式已开启：点击音视频直接进入播放</string>
+    <string name="player_mode_disabled">音声模式已关闭：点击音视频进入编辑器</string>
+    <string name="player_online_title">在线</string>
+    <string name="player_online_soon">在线模式尚在开发中，敬请期待</string>
+
+    <string name="player_play">播放</string>
+    <string name="player_pause">暂停</string>
+    <string name="player_previous">上一首</string>
+    <string name="player_next">下一首</string>
+    <string name="player_seek_back">后退 15 秒</string>
+    <string name="player_seek_forward">前进 15 秒</string>
+    <string name="player_queue_end">列表播放完毕</string>
+    <string name="player_queue_position">第 %1$d 首 / 共 %2$d 首</string>
+
+    <string name="player_panel_playlist">播放列表</string>
+    <string name="player_panel_equalizer">均衡器</string>
+    <string name="player_panel_subtitle">字幕</string>
+    <string name="player_panel_bookmark">书签</string>
+    <string name="player_panel_timer">定时器</string>
+    <string name="player_panel_speed">倍速</string>
+    <string name="player_panel_settings">播放设置</string>
+    <string name="player_playlist_empty">播放列表为空</string>
+
+    <string name="player_mode_sequence">顺序播放</string>
+    <string name="player_mode_repeat_one">单曲循环</string>
+    <string name="player_mode_repeat_all">列表循环</string>
+    <string name="player_mode_shuffle">随机播放</string>
+
+    <string name="player_eq_enable">启用均衡器</string>
+    <string name="player_preset_flat">原声</string>
+    <string name="player_preset_bass">低音</string>
+    <string name="player_preset_vocal">人声</string>
+    <string name="player_preset_treble">高音</string>
+    <string name="player_preset_asmr">耳骚</string>
+    <string name="player_preset_night">夜间</string>
+
+    <string name="player_subtitle_off">关闭字幕</string>
+
+    <string name="player_bookmark_add">添加当前书签</string>
+    <string name="player_bookmark_empty">还没有书签，播放中点书签按钮即可标记</string>
+    <string name="player_bookmark_added">已添加书签</string>
+    <string name="player_bookmark_exists">此处已有书签</string>
+    <string name="player_bookmark_save_failed">书签保存失败</string>
+
+    <string name="player_timer_stop_title">定时关闭</string>
+    <string name="player_timer_start_title">定时播放</string>
+    <string name="player_timer_countdown">%1$d 分钟</string>
+    <string name="player_timer_custom">自定义</string>
+    <string name="player_timer_custom_minutes">分钟数</string>
+    <string name="player_timer_custom_invalid">请输入 1 到 1440 的整数分钟数</string>
+    <string name="player_timer_apply">确定</string>
+    <string name="player_timer_cancel">取消定时</string>
+    <string name="player_timer_remaining">剩余 %1$s</string>
+    <string name="player_sleep_stopped">定时结束，已停止播放</string>
+
+    <string name="player_settings_resume">记住播放进度</string>
+    <string name="player_settings_loudness_waveform">显示响度波形</string>
+    <string name="player_settings_default_mode">默认播放模式</string>
+    <string name="player_settings_subtitle_size">字幕字号 %1$d</string>
+</resources>

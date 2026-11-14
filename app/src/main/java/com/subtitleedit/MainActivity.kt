@@ -301,6 +301,8 @@ class MainActivity : AppComposeActivity() {
                         onSortFieldChanged = ::changeFileSortField,
                         onSortDirectionChanged = ::changeFileSortDirection,
                         onViewModeChanged = ::changeFileViewMode,
+                        onTogglePlayerMode = ::togglePlayerMode,
+                        onOnlineClicked = ::showOnlinePlaceholder,
                         onOpenFileManagementSettings = {
                             startActivity(Intent(this@MainActivity, FileManagementSettingsActivity::class.java))
                         },
@@ -457,6 +459,7 @@ class MainActivity : AppComposeActivity() {
             directoryEmptyStateMessage = directoryEmptyStateMessage,
             currentDirectory = document.currentDirectory,
             files = displayedFiles,
+            playerModeEnabled = com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled,
             scrollRequest = directoryScrollRequest,
             relativePathRoot = relativePathRoot,
             selectedPaths = document.selectedPaths.toSet(),
@@ -830,6 +833,10 @@ class MainActivity : AppComposeActivity() {
         } else if (FileUtils.isSubtitleFile(file) || FileTypePolicy.isText(file)) {
             // 打开字幕或文本文件进行编辑
             openFileForEdit(file)
+        } else if (com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled &&
+            (FileUtils.isAudioFile(file) || FileTypePolicy.isVideo(file))
+        ) {
+            openPlayer(file)
         } else if (FileUtils.isAudioFile(file)) {
             openMediaFileForEdit(file, EditorMediaType.AUDIO)
         } else if (FileTypePolicy.isVideo(file)) {
@@ -2004,6 +2011,33 @@ class MainActivity : AppComposeActivity() {
         com.subtitleedit.util.OverwritingToast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
     
+    private fun togglePlayerMode() {
+        val preferences = com.subtitleedit.player.PlayerPreferences.getInstance(this)
+        preferences.playerModeEnabled = !preferences.playerModeEnabled
+        publishScreenState()
+        showShortToast(getString(
+            if (preferences.playerModeEnabled) R.string.player_mode_enabled else R.string.player_mode_disabled
+        ))
+    }
+
+    private fun showOnlinePlaceholder() {
+        showShortToast(getString(R.string.player_online_soon))
+    }
+
+    /** 音声模式：以当前目录的音视频为播放队列，从被点击的文件开始播放。 */
+    private fun openPlayer(file: File) {
+        val queue = screenState.files.filter(::isAudioOrVideoFile)
+        if (queue.isEmpty()) return
+        val startIndex = queue.indexOfFirst { it.absolutePath == file.absolutePath }.coerceAtLeast(0)
+        startActivity(Intent(this, com.subtitleedit.player.PlayerActivity::class.java).apply {
+            putStringArrayListExtra(
+                com.subtitleedit.player.PlayerActivity.EXTRA_PLAYLIST,
+                ArrayList(queue.map { it.absolutePath })
+            )
+            putExtra(com.subtitleedit.player.PlayerActivity.EXTRA_START_INDEX, startIndex)
+        })
+    }
+
     private fun openMediaFileForEdit(
         mediaFile: File,
         mediaType: EditorMediaType
