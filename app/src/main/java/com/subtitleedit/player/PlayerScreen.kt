@@ -336,7 +336,6 @@ private fun PlayerControls(state: PlayerUiState, viewModel: PlayerViewModel, lan
             .padding(bottom = if (landscape) 6.dp else 16.dp)
     ) {
         PlayerSeekBar(state, viewModel)
-        if (!state.isVideo) Spacer(Modifier.height(12.dp))
         Row(
             Modifier.fillMaxWidth().testTag("player-transport-row"),
             verticalAlignment = Alignment.CenterVertically,

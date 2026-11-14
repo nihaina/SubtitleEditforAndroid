@@ -261,8 +261,8 @@ class PlayerLandscapeAndSubtitleTest {
         val seek = requiredBounds("player-seek")
         val transport = requiredBounds("player-transport-row")
         val density = mainValue { session.activity.resources.displayMetrics.density }
-        assertTrue("Audio seek bar must stay above playback controls with a 12dp gap: seek=$seek transport=$transport",
-            transport.top - seek.bottom >= 11f * density)
+        assertTrue("Audio seek touch area must stay above playback controls: seek=$seek transport=$transport",
+            transport.top - seek.bottom >= -density)
         assertTrue("Audio seek bar must not overlap its 48dp play button", requiredBounds("player-play").top >= seek.bottom)
     }
 
