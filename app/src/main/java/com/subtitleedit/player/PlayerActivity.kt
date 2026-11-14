@@ -3,6 +3,7 @@ package com.subtitleedit.player
 import android.graphics.drawable.ColorDrawable
 import android.content.Intent
 import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.setContent
@@ -24,12 +25,17 @@ import java.io.File
 class PlayerActivity : AppComposeActivity() {
 
     private val viewModel: PlayerViewModel by viewModels()
+    private var portraitCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
     private val tagEditor = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         viewModel.resumeAfterTagEditing()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= 28) {
+            portraitCutoutMode = window.attributes.layoutInDisplayCutoutMode
+        }
+        updatePlayerWindowLayout(resources.configuration)
         window.setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.hidePlayerSystemBars()
@@ -58,13 +64,24 @@ class PlayerActivity : AppComposeActivity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        updatePlayerWindowLayout(newConfig)
         // AppCompat 1.6 applies in-place night changes without notifying the Compose view.
         window.decorView.dispatchConfigurationChanged(newConfig)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) window.hidePlayerSystemBars()
+        if (hasFocus) {
+            updatePlayerWindowLayout(resources.configuration)
+            window.hidePlayerSystemBars()
+        }
+    }
+
+    private fun updatePlayerWindowLayout(configuration: Configuration) {
+        window.updatePlayerCutoutMode(
+            landscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE,
+            portraitMode = portraitCutoutMode
+        )
     }
 
     internal fun openTagEditor() {

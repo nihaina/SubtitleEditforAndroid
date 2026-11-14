@@ -56,7 +56,7 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) {
     }
 
     companion object {
-        const val DEFAULT_SUBTITLE_FONT_SIZE = 30
+        const val DEFAULT_SUBTITLE_FONT_SIZE = 20
         const val MIN_SUBTITLE_FONT_SIZE = 10
         const val MAX_SUBTITLE_FONT_SIZE = 60
         const val MIN_SPEED = 0.25f

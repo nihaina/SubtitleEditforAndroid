@@ -215,6 +215,9 @@ internal fun PlayerHintOverlay(hint: PlayerGestureHint?, onDismiss: () -> Unit, 
         enter = fadeIn(tween(160)) + scaleIn(tween(160), initialScale = 0.9f),
         exit = fadeOut(tween(220))
     ) {
+        // AnimatedVisibility keeps this content alive during exit; keep its text too.
+        var displayedText by remember { mutableStateOf(hint?.text.orEmpty()) }
+        if (hint != null) displayedText = hint.text
         Column(
             modifier = Modifier
                 .clip(RoundedCornerShape(18.dp))
@@ -230,7 +233,7 @@ internal fun PlayerHintOverlay(hint: PlayerGestureHint?, onDismiss: () -> Unit, 
                 tint = PlayerColors.Accent
             )
             Text(
-                text = hint?.text.orEmpty(),
+                text = displayedText,
                 color = PlayerColors.OnDark,
                 fontSize = 14.sp,
                 maxLines = 2,

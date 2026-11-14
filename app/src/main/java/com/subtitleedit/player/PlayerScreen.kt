@@ -36,18 +36,27 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalConfiguration
 import android.content.res.Configuration
@@ -70,23 +79,45 @@ internal fun PlayerScreen(viewModel: PlayerViewModel, onEditTags: () -> Unit = {
     val state by viewModel.state.collectAsState()
     val pageGradient = PlayerColors.pageGradient
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    var topOverlayBounds by remember { mutableStateOf<Rect?>(null) }
+    var bottomOverlayBounds by remember { mutableStateOf<Rect?>(null) }
+    var gestureOrigin by remember { mutableStateOf(Offset.Zero) }
+    val currentTopOverlay by rememberUpdatedState(topOverlayBounds)
+    val currentBottomOverlay by rememberUpdatedState(bottomOverlayBounds)
+    val currentGestureOrigin by rememberUpdatedState(gestureOrigin)
     MaterialTheme {
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .testTag("player-screen")
                 .semantics { testTagsAsResourceId = true }
+                .onGloballyPositioned { gestureOrigin = it.positionInRoot() }
                 .background(pageGradient)
-                .pointerInput(state.durationMs) {
+                .pointerInput(state.currentTrack?.path, state.isVideo, state.durationMs) {
                     var axis: Int? = null
                     var dragVolume = 0f
+                    var canSeek = false
+                    fun outsideOverlays(position: Offset): Boolean {
+                        val point = position + currentGestureOrigin
+                        return currentTopOverlay?.contains(point) != true &&
+                            currentBottomOverlay?.contains(point) != true
+                    }
                     detectDragGestures(
-                        onDragStart = {
+                        orientationLock = null,
+                        onDragStart = { down, _, _ ->
                             axis = null
-                            dragVolume = viewModel.state.value.volumePercent.toFloat()
+                            val current = viewModel.state.value
+                            dragVolume = current.volumePercent.toFloat()
+                            // Only the initial press is excluded by the controls; an accepted
+                            // video drag keeps ownership as it crosses into either overlay.
+                            canSeek = current.isVideo && current.ready && current.panel == PlayerPanel.NONE &&
+                                outsideOverlays(down.position)
                         },
                         onDragEnd = {
                             if (axis == AXIS_SEEK) {
-                                viewModel.state.value.seekPreviewMs?.let { viewModel.seekTo(it) }
+                                if (canSeek) {
+                                    viewModel.state.value.seekPreviewMs?.let { viewModel.seekTo(it) }
+                                }
                                 viewModel.clearSeekPreview()
                             }
                             axis = null
@@ -96,16 +127,17 @@ internal fun PlayerScreen(viewModel: PlayerViewModel, onEditTags: () -> Unit = {
                             axis = null
                         }
                     ) { change, amount ->
-                        change.consume()
                         val current = viewModel.state.value
                         if (axis == null) axis = if (abs(amount.x) >= abs(amount.y)) AXIS_SEEK else AXIS_VOLUME
                         when (axis) {
-                            AXIS_SEEK -> if (current.durationMs > 0) {
+                            AXIS_SEEK -> if (canSeek && current.durationMs > 0) {
+                                change.consume()
                                 val delta = (amount.x / size.width * current.durationMs * 1.6f).toLong()
                                 val base = current.seekPreviewMs ?: current.positionMs
                                 viewModel.seekTo((base + delta).coerceIn(0, current.durationMs), fromGesture = true)
                             }
                             AXIS_VOLUME -> {
+                                change.consume()
                                 dragVolume = (dragVolume - amount.y / 14f).coerceIn(0f, 200f)
                                 viewModel.setVolume(dragVolume.roundToInt())
                             }
@@ -165,7 +197,7 @@ internal fun PlayerScreen(viewModel: PlayerViewModel, onEditTags: () -> Unit = {
                 enter = fadeIn(tween(220)),
                 exit = fadeOut(tween(220))
             ) {
-                PlayerControlOverlay(state.isVideo, top = true) {
+                PlayerControlOverlay(state.isVideo, top = true, onBoundsChanged = { topOverlayBounds = it }) {
                     PlayerTopBar(state, viewModel, landscape)
                 }
             }
@@ -176,7 +208,7 @@ internal fun PlayerScreen(viewModel: PlayerViewModel, onEditTags: () -> Unit = {
                 enter = fadeIn(tween(220)),
                 exit = fadeOut(tween(220))
             ) {
-                PlayerControlOverlay(state.isVideo, top = false) {
+                PlayerControlOverlay(state.isVideo, top = false, onBoundsChanged = { bottomOverlayBounds = it }) {
                     PlayerControls(state, viewModel, landscape)
                 }
             }
@@ -190,10 +222,20 @@ private val LocalVideoControls = staticCompositionLocalOf { false }
 
 /** The scrim lives inside AnimatedVisibility so it fades with the controls. */
 @Composable
-private fun PlayerControlOverlay(video: Boolean, top: Boolean, content: @Composable () -> Unit) {
+private fun PlayerControlOverlay(
+    video: Boolean,
+    top: Boolean,
+    onBoundsChanged: (Rect?) -> Unit,
+    content: @Composable () -> Unit
+) {
+    val boundsChanged by rememberUpdatedState(onBoundsChanged)
+    DisposableEffect(Unit) {
+        onDispose { boundsChanged(null) }
+    }
     val scrim = Color.Black.copy(alpha = 0.26f)
     val modifier = Modifier.fillMaxWidth()
         .testTag(if (top) "player-top-overlay" else "player-bottom-overlay")
+        .onGloballyPositioned { boundsChanged(it.boundsInRoot()) }
         .then(if (video) Modifier.background(Brush.verticalGradient(
             if (top) listOf(scrim, Color.Transparent) else listOf(Color.Transparent, scrim)
         )) else Modifier)
@@ -222,7 +264,8 @@ private fun PlayerTopBar(state: PlayerUiState, viewModel: PlayerViewModel, lands
         modifier = Modifier
             .fillMaxWidth()
             .testTag("player-top-bar")
-            .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+            .windowInsetsPadding(if (landscape) WindowInsets(0, 0, 0, 0)
+                else WindowInsets.displayCutout.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
             .padding(horizontal = 8.dp, vertical = if (landscape) 2.dp else 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -285,7 +328,8 @@ private fun PlayerControls(state: PlayerUiState, viewModel: PlayerViewModel, lan
         modifier = Modifier
             .fillMaxWidth()
             .testTag("player-controls")
-            .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+            .windowInsetsPadding(if (landscape) WindowInsets(0, 0, 0, 0)
+                else WindowInsets.displayCutout.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
             .padding(horizontal = 20.dp)
             .padding(bottom = if (landscape) 6.dp else 16.dp)
     ) {
@@ -314,15 +358,16 @@ private fun PlayerControls(state: PlayerUiState, viewModel: PlayerViewModel, lan
             ),
             modifier = Modifier.fillMaxWidth().height(if (landscape) 24.dp else 28.dp).testTag("player-seek")
         )
+        if (!state.isVideo) Spacer(Modifier.height(12.dp))
         Row(
-            Modifier.fillMaxWidth(),
+            Modifier.fillMaxWidth().testTag("player-transport-row"),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             PlayerTransportIcon(R.drawable.ic_skip_previous, R.string.player_previous, state.hasPrevious,
                 tag = "player-previous", onClick = viewModel::previous)
             PlayerTransportIcon(R.drawable.ic_history, R.string.player_seek_back, state.ready, onClick = { viewModel.skipBy(-15_000L) })
-            PlayerPlayButton(state.playing, tag = "player-play", onClick = viewModel::togglePlay)
+            PlayerPlayButton(state.playing, video = state.isVideo, tag = "player-play", onClick = viewModel::togglePlay)
             PlayerTransportIcon(R.drawable.ic_seek_back, R.string.player_seek_forward, state.ready, onClick = { viewModel.skipBy(15_000L) })
             PlayerTransportIcon(R.drawable.ic_skip_next, R.string.player_next, state.hasNext,
                 tag = "player-next", onClick = viewModel::next)
@@ -392,7 +437,7 @@ private fun PlayerTransportIcon(icon: Int, description: Int, enabled: Boolean, r
 }
 
 @Composable
-private fun PlayerPlayButton(playing: Boolean, tag: String? = null, onClick: () -> Unit) {
+private fun PlayerPlayButton(playing: Boolean, video: Boolean, tag: String? = null, onClick: () -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -403,7 +448,7 @@ private fun PlayerPlayButton(playing: Boolean, tag: String? = null, onClick: () 
     val description = stringResource(if (playing) R.string.player_pause else R.string.player_play)
     Box(
         modifier = Modifier
-            .size(36.dp)
+            .size(if (video) 36.dp else 48.dp)
             .then(if (tag != null) Modifier.testTag(tag) else Modifier)
             .scale(scale)
             .clip(CircleShape)

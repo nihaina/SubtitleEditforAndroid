@@ -10,6 +10,9 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Rect
 import android.os.SystemClock
+import android.os.Build
+import android.util.TypedValue
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -49,10 +52,9 @@ class PlayerLandscapeAndSubtitleTest {
                     it.ready && it.playing && it.selectedSubtitleId == "external:${File(fixture.root, "audio.srt").path}" &&
                         it.subtitleText.contains("first sidecar") && it.positionMs > 2_500L
                 }
-                assertEquals("Unconfigured player subtitle size defaults to 30", 30, state(model).subtitleFontSize)
-                val portraitPlay = requiredBounds("player-play")
-                val portraitDensity = mainValue { session.activity.resources.displayMetrics.density }
-                assertTrue("Portrait play button is compact: $portraitPlay", portraitPlay.width() <= 61f * portraitDensity)
+                assertEquals("Unconfigured player subtitle size defaults to 20", 20, state(model).subtitleFontSize)
+                assertPlayButtonSize(session)
+                assertAudioSeekSpacing(session)
                 assertToolsInControls(requiredBounds("player-controls"), requiredBounds("player-tools-row"))
                 onMain { model.pause() }
                 awaitState(model, "pause settles") { !it.playing }
@@ -103,15 +105,45 @@ class PlayerLandscapeAndSubtitleTest {
             assertTrue(generated.getAllLogsAsString().takeLast(2000), ReturnCode.isSuccess(generated.getReturnCode()))
             openPlayer(video).use { session ->
                 val model = session.model
+                session.rotate(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, Configuration.ORIENTATION_PORTRAIT)
                 awaitState(model, "first embedded subtitle wins even when the second is container-default") {
                     it.ready && it.playing && it.subtitleOptions.count { option -> option.kind == PlayerSubtitleKind.INTERNAL } == 2 &&
                         it.selectedSubtitleId == it.subtitleOptions.first { option -> option.kind == PlayerSubtitleKind.INTERNAL }.id &&
                         it.subtitleText.contains("first embedded")
                 }
-                assertEquals(30, state(model).subtitleFontSize)
-                assertEquals(30.0, mainValue { MPVLib.getPropertyDouble("sub-font-size") } ?: -1.0, 0.01)
+                assertEquals(20, state(model).subtitleFontSize)
+                assertEquals(false, mainValue { MPVLib.getPropertyBoolean("sub-scale-by-window") })
+                assertEquals(true, mainValue { MPVLib.getPropertyBoolean("sub-scale-with-window") })
+                assertNativeSubtitleSize(session, 20)
+                onMain { model.pause(); model.seekTo(2_000L); model.setControlsVisible(false) }
+                awaitState(model, "pause on a stable subtitle before comparing rendered sizes") {
+                    !it.playing && abs(it.positionMs - 2_000L) < 150L && it.subtitleText.contains("first embedded")
+                }
+                await("hide all controls before measuring subtitle pixels") { boundsOrNull("player-play") == null }
+                val portraitSubtitle = renderedSubtitleBounds("player-subtitle-portrait-20-preview.png")
+                session.rotate(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, Configuration.ORIENTATION_LANDSCAPE)
+                assertNativeSubtitleSize(session, 20)
+                val landscapeSubtitle = renderedSubtitleBounds("player-subtitle-landscape-20-preview.png")
+                assertSubtitleSizeMatches(session, portraitSubtitle, landscapeSubtitle)
+
+                onMain { model.setSubtitleFontSize(32) }
+                assertNativeSubtitleSize(session, 32)
+                val largerLandscapeSubtitle = renderedSubtitleBounds("player-subtitle-landscape-32-preview.png")
+                assertTrue("Changing subtitle size must enlarge the actual rendered text: $landscapeSubtitle vs $largerLandscapeSubtitle",
+                    largerLandscapeSubtitle.height() > landscapeSubtitle.height() * 1.35f)
+                session.rotate(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, Configuration.ORIENTATION_PORTRAIT)
+                assertNativeSubtitleSize(session, 32)
+                assertSubtitleSizeMatches(session, largerLandscapeSubtitle,
+                    renderedSubtitleBounds("player-subtitle-portrait-32-preview.png"))
+                onMain { model.selectSubtitle(model.state.value.subtitleOptions.first { it.kind == PlayerSubtitleKind.NONE }) }
+                awaitState(model, "hide subtitle text before measuring the visible video button") {
+                    it.selectedSubtitleId == "none" && it.subtitleText.isEmpty()
+                }
+                onMain { model.setControlsVisible(true) }
+                assertPlayButtonSize(session)
+                assertNativeSubtitleSize(session, 32)
                 onMain { model.setSubtitleFontSize(60) }
-                await("native subtitle maximum reaches 60") { mainValue { MPVLib.getPropertyDouble("sub-font-size") == 60.0 } }
+                assertNativeSubtitleSize(session, 60)
                 assertEquals(60, state(model).subtitleFontSize)
                 onMain { model.setSubtitleFontSize(90) }
                 assertEquals("Subtitle size clamps to the new upper limit", 60, state(model).subtitleFontSize)
@@ -134,19 +166,104 @@ class PlayerLandscapeAndSubtitleTest {
         }
     }
 
+    private fun assertNativeSubtitleSize(session: Session, size: Int) {
+        val expected = mainValue { TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP,
+            size.toFloat(), session.activity.resources.displayMetrics).toDouble() }
+        await("native subtitle size $size matches Android font density") {
+            mainValue { MPVLib.getPropertyDouble("sub-font-size")?.let { abs(it - expected) < 0.01 } == true }
+        }
+    }
+
+    private fun assertSubtitleSizeMatches(session: Session, first: Rect, second: Rect) {
+        val tolerance = mainValue { (session.activity.resources.displayMetrics.density * 1.5f).coerceAtLeast(2f) }
+        assertTrue("Rotating must preserve actual subtitle pixel height: $first vs $second",
+            abs(first.height() - second.height()) <= tolerance)
+        assertTrue("Rotating must preserve actual subtitle pixel width: $first vs $second",
+            abs(first.width() - second.width()) <= tolerance)
+    }
+
+    private fun renderedSubtitleBounds(screenshotName: String): Rect {
+        // The fixture contains only red video, black letterboxing and white subtitle text.
+        // Controls are hidden so this checks rendered glyphs rather than only mpv properties.
+        Thread.sleep(300L)
+        val screenshot = automation.takeScreenshot() ?: throw AssertionError("No subtitle screenshot")
+        try {
+            saveIfRequested(screenshot, screenshotName)
+            var left = screenshot.width
+            var top = screenshot.height
+            var right = -1
+            var bottom = -1
+            var pixels = 0
+            for (y in screenshot.height / 3 until screenshot.height) {
+                for (x in screenshot.width / 10 until screenshot.width * 9 / 10) {
+                    val color = screenshot.getPixel(x, y)
+                    if (Color.red(color) > 190 && Color.green(color) > 190 && Color.blue(color) > 190) {
+                        left = minOf(left, x)
+                        top = minOf(top, y)
+                        right = maxOf(right, x)
+                        bottom = maxOf(bottom, y)
+                        pixels++
+                    }
+                }
+            }
+            assertTrue("The selected subtitle must produce visible white glyphs ($screenshotName)", pixels > 20)
+            return Rect(left, top, right + 1, bottom + 1)
+        } finally { screenshot.recycle() }
+    }
+
     private fun assertLandscapeGeometry(session: Session) {
         val top = requiredBounds("player-top-bar")
         val tools = requiredBounds("player-tools-row")
         val controls = requiredBounds("player-controls")
         val seek = requiredBounds("player-seek")
-        val play = requiredBounds("player-play")
-        val density = mainValue { session.activity.resources.displayMetrics.density }
         val viewport = mainValue { Rect().also { session.activity.window.decorView.getGlobalVisibleRect(it) } }
         assertTrue("Landscape tools belong inside the top bar: top=$top tools=$tools", tools.top >= top.top - 2 && tools.bottom <= top.bottom + 2)
         assertTrue("Landscape tools must be above the seek bar: tools=$tools seek=$seek", tools.bottom < seek.top)
         assertTrue("All tools remain within the visible viewport: $tools vs $viewport", viewport.contains(tools))
         assertTrue("Landscape playback controls occupy at most a third of the screen: $controls vs $viewport", controls.height() < viewport.height() / 3)
-        assertTrue("Landscape play button is smaller: $play", play.width() <= 49f * density && play.height() <= 49f * density)
+        assertPlayButtonSize(session)
+        if (!state(session.model).isVideo) assertAudioSeekSpacing(session)
+        if (Build.VERSION.SDK_INT >= 28) {
+            val expected = if (Build.VERSION.SDK_INT >= 30)
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            assertEquals("Landscape playback must use the camera/cutout region", expected,
+                mainValue { session.activity.window.attributes.layoutInDisplayCutoutMode })
+        }
+    }
+
+    private fun assertPlayButtonSize(session: Session) {
+        val play = requiredBounds("player-play")
+        val density = mainValue { session.activity.resources.displayMetrics.density }
+        val expected = (if (state(session.model).isVideo) 36f else 48f) * density
+        if (state(session.model).isVideo) {
+            // Android expands small clickable semantics to a 48dp touch target. Measure the
+            // actual white disk against this fixture's red video instead of that hit rectangle.
+            Thread.sleep(250L)
+            val screenshot = automation.takeScreenshot() ?: throw AssertionError("No button screenshot")
+            try {
+                val white = (play.left until play.right).filter { x ->
+                    val pixel = screenshot.getPixel(x, play.centerY())
+                    Color.red(pixel) > 180 && Color.green(pixel) > 180 && Color.blue(pixel) > 180
+                }
+                assertTrue("The video play button must render a visible disk", white.isNotEmpty())
+                val visibleWidth = white.last() - white.first() + 1
+                assertTrue("Video disk must be 36dp: $visibleWidth vs $expected px",
+                    abs(visibleWidth - expected) <= density * 2)
+            } finally { screenshot.recycle() }
+        } else {
+            assertTrue("Audio play button must be 48dp: $play vs $expected px",
+                abs(play.width() - expected) <= density && abs(play.height() - expected) <= density)
+        }
+    }
+
+    private fun assertAudioSeekSpacing(session: Session) {
+        val seek = requiredBounds("player-seek")
+        val transport = requiredBounds("player-transport-row")
+        val density = mainValue { session.activity.resources.displayMetrics.density }
+        assertTrue("Audio seek bar must stay above playback controls with a 12dp gap: seek=$seek transport=$transport",
+            transport.top - seek.bottom >= 11f * density)
+        assertTrue("Audio seek bar must not overlap its 48dp play button", requiredBounds("player-play").top >= seek.bottom)
     }
 
     private fun assertToolsInControls(controls: Rect, tools: Rect) {

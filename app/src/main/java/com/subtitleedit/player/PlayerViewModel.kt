@@ -115,7 +115,7 @@ internal class PlayerViewModel(application: Application) : AndroidViewModel(appl
         if (host === view) return
         host?.let(::detach)
         host = view
-        val session = PlayerEngine(view)
+        val session = PlayerEngine(view, view.resources)
         engine = session
         engineJob = viewModelScope.launch {
             session.state.collect { sample ->

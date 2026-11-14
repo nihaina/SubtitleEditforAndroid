@@ -1,8 +1,10 @@
 package com.subtitleedit.player
 
 import android.content.Context
+import android.content.res.Resources
 import android.graphics.SurfaceTexture
 import android.util.AttributeSet
+import android.util.TypedValue
 import android.view.Surface
 import android.view.TextureView
 import com.subtitleedit.mpv.MPVLib
@@ -36,7 +38,7 @@ internal class PlayerMpvView @JvmOverloads constructor(
             val fontDir = SubtitleFontManager.writeFontConfig(context)
             MPVLib.setOptionString("sub-font-provider", "fontconfig")
             MPVLib.setOptionString("sub-fonts-dir", fontDir.absolutePath)
-            PlayerMpvOptions.configure()
+            PlayerMpvOptions.configure(resources)
             // Audio must load even before Compose has supplied the first surface.
             MPVLib.setOptionString("vo", "null")
             MPVLib.setOptionString("force-window", "no")
@@ -84,9 +86,16 @@ internal class PlayerMpvView @JvmOverloads constructor(
     }
 
     override fun onSurfaceTextureSizeChanged(texture: SurfaceTexture, width: Int, height: Int): Unit = synchronized(outputLock) {
+        val sizeChanged = outputWidth != width || outputHeight != height
         outputWidth = width
         outputHeight = height
-        if (initialized && outputSurface != null) updateSurfaceSize()
+        if (initialized && outputSurface != null && sizeChanged) {
+            // Recreate the EGL output so a paused frame also gets a correctly sized buffer.
+            // Updating android-surface-size alone leaves the old native buffer stretched.
+            MPVLib.setPropertyString("vo", "null")
+            updateSurfaceSize()
+            MPVLib.setPropertyString("vo", "gpu-next")
+        }
     }
 
     override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean = synchronized(outputLock) {
@@ -120,7 +129,12 @@ internal class PlayerMpvView @JvmOverloads constructor(
 }
 
 internal object PlayerMpvOptions {
-    fun configure() {
+    /** With window scaling disabled, mpv expects screen pixels rather than Android sp. */
+    fun subtitleFontSizePx(size: Int, resources: Resources): Double = TypedValue.applyDimension(
+        TypedValue.COMPLEX_UNIT_SP, size.toFloat(), resources.displayMetrics
+    ).toDouble()
+
+    fun configure(resources: Resources) {
         MPVLib.setOptionString("profile", "fast")
         MPVLib.setOptionString("ao", "audiotrack,opensles")
         MPVLib.setOptionString("audio-set-media-role", "yes")
@@ -131,7 +145,9 @@ internal object PlayerMpvOptions {
         MPVLib.setOptionString("load-unsafe-playlists", "no")
         MPVLib.setOptionString("sub-auto", "no")
         MPVLib.setOptionString("sid", "no")
-        MPVLib.setOptionString("sub-font-size", PlayerPreferences.DEFAULT_SUBTITLE_FONT_SIZE.toString())
+        MPVLib.setOptionString("sub-scale-by-window", "no")
+        MPVLib.setOptionString("sub-scale-with-window", "yes")
+        MPVLib.setOptionString("sub-font-size", subtitleFontSizePx(PlayerPreferences.DEFAULT_SUBTITLE_FONT_SIZE, resources).toString())
         MPVLib.setOptionString("terminal", "no")
         MPVLib.setOptionString("msg-level", "all=warn")
         MPVLib.setOptionString("demuxer-max-bytes", (64 * 1024 * 1024).toString())

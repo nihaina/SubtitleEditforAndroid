@@ -1,5 +1,6 @@
 package com.subtitleedit.player
 
+import android.content.res.Resources
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -14,7 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /** Owns one player session. Commands and native callbacks are serialized on the access thread. */
-internal class PlayerEngine(private val playerHost: MpvPlayerHost) :
+internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val resources: Resources) :
     MPVLib.EventObserver, MPVLib.LogObserver {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val accessThread = HandlerThread("player-mpv").apply { start() }
@@ -181,7 +182,11 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost) :
 
     fun setSubtitleFontSize(size: Int) = post {
         subtitleFontSize = size.coerceIn(PlayerPreferences.MIN_SUBTITLE_FONT_SIZE, PlayerPreferences.MAX_SUBTITLE_FONT_SIZE)
-        if (initialized) MPVLib.setPropertyDouble("sub-font-size", subtitleFontSize.toDouble())
+        if (initialized) applySubtitleFontSize()
+    }
+
+    private fun applySubtitleFontSize() {
+        MPVLib.setPropertyDouble("sub-font-size", PlayerMpvOptions.subtitleFontSizePx(subtitleFontSize, resources))
     }
 
     fun selectSubtitle(option: PlayerSubtitleOption) = post {
@@ -299,7 +304,7 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost) :
                 MPVLib.setPropertyDouble("speed", speed.toDouble())
                 MPVLib.setPropertyDouble("volume", volume.toDouble())
                 applyAudioFilter()
-                MPVLib.setPropertyDouble("sub-font-size", subtitleFontSize.toDouble())
+                applySubtitleFontSize()
                 val resumePosition = clampPosition(pendingSeekMs ?: 0L)
                 pendingSeekMs = null
                 if (resumePosition > 0L) seek(resumePosition)
