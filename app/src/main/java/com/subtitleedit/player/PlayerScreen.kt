@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -49,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
@@ -333,31 +335,7 @@ private fun PlayerControls(state: PlayerUiState, viewModel: PlayerViewModel, lan
             .padding(horizontal = 20.dp)
             .padding(bottom = if (landscape) 6.dp else 16.dp)
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                formatPlaybackTime(state.seekPreviewMs ?: state.positionMs),
-                color = PlayerControlColors.Secondary,
-                fontSize = 12.sp
-            )
-            Spacer(Modifier.weight(1f))
-            Text(formatPlaybackTime(state.durationMs), color = PlayerControlColors.Secondary, fontSize = 12.sp)
-        }
-        Slider(
-            value = (state.seekPreviewMs ?: state.positionMs).toFloat(),
-            onValueChange = { viewModel.seekTo(it.toLong(), fromGesture = true) },
-            onValueChangeFinished = {
-                viewModel.state.value.seekPreviewMs?.let { viewModel.seekTo(it) }
-                viewModel.clearSeekPreview()
-            },
-            valueRange = 0f..state.durationMs.coerceAtLeast(1L).toFloat(),
-            enabled = state.ready && state.durationMs > 0,
-            colors = SliderDefaults.colors(
-                thumbColor = PlayerControlColors.Accent,
-                activeTrackColor = PlayerControlColors.Accent,
-                inactiveTrackColor = PlayerControlColors.Surface
-            ),
-            modifier = Modifier.fillMaxWidth().height(if (landscape) 24.dp else 28.dp).testTag("player-seek")
-        )
+        PlayerSeekBar(state, viewModel)
         if (!state.isVideo) Spacer(Modifier.height(12.dp))
         Row(
             Modifier.fillMaxWidth().testTag("player-transport-row"),
@@ -376,6 +354,66 @@ private fun PlayerControls(state: PlayerUiState, viewModel: PlayerViewModel, lan
             Spacer(Modifier.height(6.dp))
             PlayerToolsRow(state, viewModel, compact = false)
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PlayerSeekBar(state: PlayerUiState, viewModel: PlayerViewModel) {
+    val enabled = state.ready && state.durationMs > 0
+    val color = PlayerControlColors.Accent
+    val colors = SliderDefaults.colors(
+        thumbColor = color,
+        activeTrackColor = color,
+        inactiveTrackColor = color.copy(alpha = 0.24f),
+        disabledThumbColor = color.copy(alpha = 0.38f),
+        disabledActiveTrackColor = color.copy(alpha = 0.38f),
+        disabledInactiveTrackColor = color.copy(alpha = 0.12f)
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            formatPlaybackTime(state.seekPreviewMs ?: state.positionMs),
+            color = PlayerControlColors.Secondary,
+            fontSize = 12.sp,
+            maxLines = 1
+        )
+        Slider(
+            value = (state.seekPreviewMs ?: state.positionMs).toFloat(),
+            onValueChange = { viewModel.seekTo(it.toLong(), fromGesture = true) },
+            onValueChangeFinished = {
+                viewModel.state.value.seekPreviewMs?.let { viewModel.seekTo(it) }
+                viewModel.clearSeekPreview()
+            },
+            valueRange = 0f..state.durationMs.coerceAtLeast(1L).toFloat(),
+            enabled = enabled,
+            colors = colors,
+            thumb = {
+                Box(Modifier.size(20.dp)
+                    .shadow(1.dp, CircleShape)
+                    .background(if (enabled) color else color.copy(alpha = 0.38f), CircleShape))
+            },
+            track = { sliderState ->
+                SliderDefaults.Track(
+                    sliderState = sliderState,
+                    modifier = Modifier.height(4.dp),
+                    enabled = enabled,
+                    colors = colors,
+                    thumbTrackGapSize = 0.dp,
+                    drawStopIndicator = null
+                )
+            },
+            modifier = Modifier.weight(1f).height(48.dp).testTag("player-seek")
+        )
+        Text(
+            formatPlaybackTime(state.durationMs),
+            color = PlayerControlColors.Secondary,
+            fontSize = 12.sp,
+            maxLines = 1
+        )
     }
 }
 

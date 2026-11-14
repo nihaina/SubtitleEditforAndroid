@@ -85,9 +85,9 @@ class PlayerSeekGestureTest {
 
                 assertNoSwipeSeek(session, "Blank top-overlay space must not seek",
                     listOf(Point(fromX, top.exactCenterY()), Point(toX, top.exactCenterY())))
-                // Stay on the time-label row, between its edge labels and above the seek slider.
+                // Stay in the bottom padding, outside the seek row and tool touch targets.
                 val density = mainValue { session.activity.resources.displayMetrics.density }
-                val bottomBlankY = bottom.top + 5f * density
+                val bottomBlankY = bottom.bottom - 5f * density
                 assertNoSwipeSeek(session, "Blank bottom-overlay space must not seek",
                     listOf(Point(fromX, bottomBlankY), Point(toX, bottomBlankY)))
                 assertNoSwipeSeek(session, "A drag beginning in a mask must not begin seeking after leaving it",
