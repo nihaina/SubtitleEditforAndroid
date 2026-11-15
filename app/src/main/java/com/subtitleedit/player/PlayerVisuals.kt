@@ -14,6 +14,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +53,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.findViewTreeLifecycleOwner
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -71,7 +74,8 @@ internal fun PlayerAudioVisual(
     loudnessSampleId: Long,
     showLoudnessWaveform: Boolean,
     modifier: Modifier = Modifier,
-    trackPath: String? = null
+    trackPath: String? = null,
+    onArtworkClick: (() -> Unit)? = null
 ) {
     val configuration = LocalConfiguration.current
     val landscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -109,16 +113,20 @@ internal fun PlayerAudioVisual(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         val cover = artwork
+        val artworkClick = if (onArtworkClick != null) Modifier.clickable(
+            onClickLabel = stringResource(R.string.player_lyrics_show), role = Role.Button,
+            onClick = onArtworkClick
+        ) else Modifier
         if (cover != null) {
             Image(
                 bitmap = cover.asImageBitmap(),
                 contentDescription = null,
                 modifier = Modifier.size(coverSize).clip(RoundedCornerShape(20.dp))
-                    .testTag("player-audio-cover"),
+                    .testTag("player-audio-cover").then(artworkClick),
                 contentScale = ContentScale.Crop
             )
         } else {
-            Box(Modifier.testTag("player-audio-vinyl")) {
+            Box(Modifier.testTag("player-audio-vinyl").then(artworkClick)) {
                 if (playing) AnimatedVinyl(discSize) else StaticVinyl(discSize)
             }
         }

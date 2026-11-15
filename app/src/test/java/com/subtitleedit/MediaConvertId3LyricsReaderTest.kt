@@ -108,6 +108,17 @@ class MediaConvertId3LyricsReaderTest {
             sylt(0, "eng", "MPEG", 1, listOf(100L to "First", 200L to "Second")))))).single()
         assertTrue(detected.synced)
         assertEquals("First\nSecond", detected.text)
+        assertFalse(detected.openEnded)
+    }
+
+    @Test fun millisecondSyltDistinguishesRealClearEventsFromSyntheticEndTimes() {
+        fun lyric(cues: List<Pair<Long, String>>) = read(tag(3, listOf(frame(3, "SYLT",
+            sylt(3, "eng", "Timed", 2, cues))))).single()
+        assertTrue(lyric(listOf(0L to "First", 10_000L to "Last")).openEnded)
+        val cleared = lyric(listOf(0L to "First", 10_000L to "Last", 15_000L to ""))
+        assertFalse(cleared.openEnded)
+        assertEquals(15_000L, SubtitleParser.parseLRC(cleared.text).last().endTime)
+        assertFalse(lyric(listOf(0L to "First", 10_000L to "Last", 10_000L to "")).openEnded)
     }
 
     @Test fun id3v22UltAndSltFramesAreDetected() {

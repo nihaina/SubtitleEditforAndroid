@@ -30,6 +30,9 @@ internal data class PlayerSubtitleOption(
     val path: String = ""
 )
 
+/** Immutable display data, independent of the editor's mutable subtitle entries. */
+internal data class PlayerLyricLine(val startMs: Long, val endMs: Long, val text: String)
+
 internal data class PlayerEqualizerState(
     val enabled: Boolean = false,
     val gains: List<Float> = PlayerEqualizer.FLAT

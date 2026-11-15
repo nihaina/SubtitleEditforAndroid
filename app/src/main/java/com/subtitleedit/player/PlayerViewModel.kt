@@ -11,12 +11,16 @@ import com.subtitleedit.library.PlayerTrackDetails
 import com.subtitleedit.library.PlayerTrackMetadataReader
 import com.subtitleedit.util.FileUtils
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -49,6 +53,9 @@ internal data class PlayerUiState(
     val subtitleOptions: List<PlayerSubtitleOption> = emptyList(),
     val selectedSubtitleId: String = "none",
     val subtitleText: String = "",
+    val lyricsVisible: Boolean = false,
+    val lyricLines: List<PlayerLyricLine> = emptyList(),
+    val lyricsLoading: Boolean = false,
     val controlsVisible: Boolean = true,
     val panel: PlayerPanel = PlayerPanel.NONE,
     val isVideo: Boolean = false,
@@ -98,6 +105,13 @@ internal class PlayerViewModel @JvmOverloads constructor(
     private var configured = false
     private var hintToken = 0L
     private var externalSubtitles: List<PlayerSubtitleOption> = emptyList()
+    private val pickedSubtitles = mutableMapOf<String, List<PlayerSubtitleOption>>()
+    private var lyricLoadJob: Job? = null
+    private var subtitleImportJob: Job? = null
+    private var subtitleImportVersion = 0L
+    private var loadedTrackPath: String? = null
+    private data class LyricRequest(val loadId: Long, val subtitleId: String, val path: String, val durationMs: Long)
+    private var lyricRequest: LyricRequest? = null
     private var scheduledStart = PlayerSleepTimer()
     private var detachedPosition: Long? = null
     private var detachedSubtitle: PlayerSubtitleOption? = null
@@ -175,6 +189,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
                         sample.subtitleTracks.none { it.id == external.id }
                     }
                 )
+                refreshLyricLines()
                 if (!previouslyPlayed && listening.hasPlayed) rememberPosition()
                 if (sample.error != null) audioFocus.abandon()
                 if (sample.ended && sample.ready && sample.error == null && handledEndId != loadId) {
@@ -215,6 +230,8 @@ internal class PlayerViewModel @JvmOverloads constructor(
         rememberPosition()
         engineJob?.cancel()
         tickerJob?.cancel()
+        lyricLoadJob?.cancel()
+        lyricRequest = null
         engine?.release()
         engine = null
         host = null
@@ -322,18 +339,27 @@ internal class PlayerViewModel @JvmOverloads constructor(
         val track = current.currentTrack ?: return
         val session = engine ?: return
         val app = getApplication<Application>()
+        if (loadedTrackPath != track.path) {
+            loadedTrackPath = track.path
+            subtitleImportVersion++
+            subtitleImportJob?.cancel()
+        }
         loadId++
         trackEnded = false
         selectListening(track.path, preservePlayback)
         closeTrackInfoDialog()
         closePlaylistPickerDialog()
-        externalSubtitles = FileUtils.getPossibleSubtitleFiles(track.file).filter { it.isFile }.map { file ->
+        externalSubtitles = (FileUtils.getPossibleSubtitleFiles(track.file).filter { it.isFile }.map { file ->
             PlayerSubtitleOption("external:${file.absolutePath}", file.name, PlayerSubtitleKind.EXTERNAL, path = file.absolutePath)
-        }
+        } + pickedSubtitles[track.path].orEmpty().filter { File(it.path).isFile }).distinctBy { it.id }
+        lyricLoadJob?.cancel()
+        lyricRequest = null
         _state.value = current.copy(
             positionMs = 0L, durationMs = 0L, ready = false, playing = false, error = null,
             isVideo = track.isVideo, subtitleText = "", selectedSubtitleId = "none",
             subtitleOptions = listOf(SUBTITLE_OFF) + externalSubtitles,
+            lyricLines = emptyList(), lyricsLoading = false,
+            lyricsVisible = current.lyricsVisible && !track.isVideo,
             bookmarks = bookmarkStore.load(track.path), seekPreviewMs = null,
             loudness = 0f, loudnessSampleId = 0L,
             isFavorite = false,
@@ -356,7 +382,11 @@ internal class PlayerViewModel @JvmOverloads constructor(
         session.setSubtitleFontSize(current.subtitleFontSize)
         val saved = resumeAt ?: if (resume) preferences.lastPosition(track.path) else 0L
         if (saved > 0L) session.seekTo(saved)
-        subtitle?.let(session::selectSubtitle)
+        val restoredSubtitle = subtitle?.takeIf {
+            it.kind != PlayerSubtitleKind.EXTERNAL || it.id.startsWith("embedded:") ||
+                (File(it.path).isFile && File(it.path).canRead())
+        } ?: pickedSubtitles[track.path]?.lastOrNull { picked -> externalSubtitles.any { it.id == picked.id } }
+        restoredSubtitle?.let(session::selectSubtitle)
         val queuePaths = current.playlist.map { it.path }
         val queueIdx = current.currentIndex
         PlayerLibraryWriter.submit {
@@ -556,7 +586,73 @@ internal class PlayerViewModel @JvmOverloads constructor(
 
     fun selectSubtitle(option: PlayerSubtitleOption) {
         if (_state.value.subtitleOptions.none { it.id == option.id }) return
+        subtitleImportVersion++
+        subtitleImportJob?.cancel()
         engine?.selectSubtitle(option)
+    }
+
+    fun toggleLyrics() = setLyricsVisible(!_state.value.lyricsVisible)
+
+    fun setLyricsVisible(visible: Boolean) {
+        if (_state.value.isVideo) return
+        _state.value = _state.value.copy(lyricsVisible = visible, controlsVisible = true)
+        if (visible) refreshLyricLines()
+    }
+
+    /** Validate a picked file before changing the working subtitle selection. */
+    fun importSubtitle(file: File, expectedTrackPath: String? = null) {
+        val current = _state.value
+        val track = current.currentTrack ?: return
+        if (expectedTrackPath != null && expectedTrackPath != track.path) return
+        subtitleImportJob?.cancel()
+        val requestVersion = ++subtitleImportVersion
+        subtitleImportJob = viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    require(file.isFile && file.canRead()) { "Cannot read selected subtitle" }
+                    PlayerLyricTimeline.read(file, 0L)
+                }
+                ensureActive()
+                if (subtitleImportVersion != requestVersion || _state.value.currentTrack?.path != track.path) return@launch
+                val option = PlayerSubtitleOption("external:${file.absolutePath}", file.name,
+                    PlayerSubtitleKind.EXTERNAL, path = file.absolutePath)
+                pickedSubtitles[track.path] = (pickedSubtitles[track.path].orEmpty() + option).distinctBy { it.id }
+                externalSubtitles = (externalSubtitles + option).distinctBy { it.id }
+                _state.value = _state.value.copy(subtitleOptions =
+                    (_state.value.subtitleOptions + option).distinctBy { it.id }, panel = PlayerPanel.NONE)
+                engine?.selectSubtitle(option) ?: run { detachedSubtitle = option }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (subtitleImportVersion == requestVersion && _state.value.currentTrack?.path == track.path)
+                    hint(R.string.player_subtitle_read_failed)
+            }
+        }
+    }
+
+    private fun refreshLyricLines() {
+        val current = _state.value
+        val option = current.subtitleOptions.firstOrNull { it.id == current.selectedSubtitleId }
+        val request = option?.takeIf { it.kind == PlayerSubtitleKind.EXTERNAL && it.path.isNotBlank() }
+            ?.let { LyricRequest(loadId, it.id, it.path, current.durationMs) }
+        if (request == lyricRequest) return
+        lyricRequest = request
+        lyricLoadJob?.cancel()
+        _state.value = current.copy(lyricLines = emptyList(), lyricsLoading = request != null)
+        if (request == null) return
+        lyricLoadJob = viewModelScope.launch {
+            val lines = try {
+                withContext(Dispatchers.IO) { PlayerLyricTimeline.read(File(request.path), request.durationMs) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                emptyList()
+            }
+            ensureActive()
+            if (lyricRequest == request && loadId == request.loadId && engine != null) {
+                _state.value = _state.value.copy(lyricLines = lines, lyricsLoading = false)
+            }
+        }
     }
 
     fun addBookmark() {
@@ -639,6 +735,8 @@ internal class PlayerViewModel @JvmOverloads constructor(
         rememberPosition()
         engineJob?.cancel()
         tickerJob?.cancel()
+        lyricLoadJob?.cancel()
+        subtitleImportJob?.cancel()
         engine?.release()
         timerAlarm.cancel()
         audioFocus.abandon()

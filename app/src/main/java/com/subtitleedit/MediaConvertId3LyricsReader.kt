@@ -172,7 +172,8 @@ internal object MediaConvertId3LyricsReader {
             // MPEG-frame timestamps cannot become milliseconds without the audio frame rate.
             cues.joinToString("\n") { it.second }
         }
-        return MediaConvertEmbeddedLyric(field, description.first, language, text, synced = true)
+        return MediaConvertEmbeddedLyric(field, description.first, language, text, synced = true,
+            openEnded = timestampFormat == 2 && cues.sortedBy { it.first }.lastOrNull()?.second?.isNotBlank() == true)
     }
 
     private class TextDecoder(private val encoding: Int) {

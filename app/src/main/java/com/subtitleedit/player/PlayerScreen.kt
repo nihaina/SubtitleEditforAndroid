@@ -1,5 +1,6 @@
 package com.subtitleedit.player
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -21,6 +22,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -51,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
@@ -61,6 +65,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import android.content.res.Configuration
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -77,28 +82,39 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @Composable
-internal fun PlayerScreen(viewModel: PlayerViewModel, onEditTags: () -> Unit = {}) {
+internal fun PlayerScreen(
+    viewModel: PlayerViewModel,
+    onEditTags: () -> Unit = {},
+    onPickSubtitle: () -> Unit = {}
+) {
     val state by viewModel.state.collectAsState()
     val pageGradient = PlayerColors.pageGradient
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val density = LocalDensity.current
+    var playerHeightPx by remember { mutableStateOf(0) }
     var topOverlayBounds by remember { mutableStateOf<Rect?>(null) }
     var bottomOverlayBounds by remember { mutableStateOf<Rect?>(null) }
     var gestureOrigin by remember { mutableStateOf(Offset.Zero) }
     val currentTopOverlay by rememberUpdatedState(topOverlayBounds)
     val currentBottomOverlay by rememberUpdatedState(bottomOverlayBounds)
     val currentGestureOrigin by rememberUpdatedState(gestureOrigin)
+    BackHandler(enabled = state.lyricsVisible && !state.isVideo && state.panel == PlayerPanel.NONE &&
+        !state.showTrackInfoDialog && !state.showPlaylistPickerDialog) {
+        viewModel.setLyricsVisible(false)
+    }
     MaterialTheme {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .testTag("player-screen")
                 .semantics { testTagsAsResourceId = true }
-                .onGloballyPositioned { gestureOrigin = it.positionInRoot() }
+                .onGloballyPositioned { gestureOrigin = it.positionInRoot(); playerHeightPx = it.size.height }
                 .background(pageGradient)
                 .pointerInput(state.currentTrack?.path, state.isVideo, state.durationMs) {
                     var axis: Int? = null
                     var dragVolume = 0f
                     var canSeek = false
+                    var canAdjustVolume = false
                     fun outsideOverlays(position: Offset): Boolean {
                         val point = position + currentGestureOrigin
                         return currentTopOverlay?.contains(point) != true &&
@@ -114,6 +130,8 @@ internal fun PlayerScreen(viewModel: PlayerViewModel, onEditTags: () -> Unit = {
                             // video drag keeps ownership as it crosses into either overlay.
                             canSeek = current.isVideo && current.ready && current.panel == PlayerPanel.NONE &&
                                 outsideOverlays(down.position)
+                            // Vertical swipes in the audio lyric list belong to the list.
+                            canAdjustVolume = current.isVideo || !current.lyricsVisible
                         },
                         onDragEnd = {
                             if (axis == AXIS_SEEK) {
@@ -138,7 +156,7 @@ internal fun PlayerScreen(viewModel: PlayerViewModel, onEditTags: () -> Unit = {
                                 val base = current.seekPreviewMs ?: current.positionMs
                                 viewModel.seekTo((base + delta).coerceIn(0, current.durationMs), fromGesture = true)
                             }
-                            AXIS_VOLUME -> {
+                            AXIS_VOLUME -> if (canAdjustVolume) {
                                 change.consume()
                                 dragVolume = (dragVolume - amount.y / 14f).coerceIn(0f, 200f)
                                 viewModel.setVolume(dragVolume.roundToInt())
@@ -164,15 +182,38 @@ internal fun PlayerScreen(viewModel: PlayerViewModel, onEditTags: () -> Unit = {
             if (!state.isVideo) {
                 Box(Modifier.fillMaxSize().background(pageGradient), contentAlignment = Alignment.Center) {
                     key(state.currentTrack?.path) {
-                        PlayerAudioVisual(state.playing, state.loudness, state.loudnessSampleId, state.showLoudnessWaveform,
-                            Modifier.padding(bottom = if (landscape) 24.dp else 120.dp),
-                            trackPath = state.currentTrack?.path)
+                        if (state.lyricsVisible) {
+                            val topPadding = topOverlayBounds?.let { with(density) { (it.bottom - gestureOrigin.y).toDp() } }
+                                ?: if (state.controlsVisible) 64.dp else 0.dp
+                            val bottomPadding = bottomOverlayBounds?.let {
+                                with(density) { (playerHeightPx - it.top + gestureOrigin.y).coerceAtLeast(0f).toDp() }
+                            } ?: if (state.controlsVisible) (if (landscape) 132.dp else 204.dp) else 0.dp
+                            key(state.selectedSubtitleId) {
+                                PlayerLyricsView(
+                                    lines = state.lyricLines,
+                                    positionMs = state.seekPreviewMs ?: state.positionMs,
+                                    subtitleText = state.subtitleText,
+                                    loading = state.lyricsLoading,
+                                    fontSize = state.subtitleFontSize,
+                                    onSeek = { viewModel.seekTo(it) },
+                                    onOpenSubtitles = { viewModel.openPanel(PlayerPanel.SUBTITLE) },
+                                    modifier = Modifier.fillMaxSize().padding(
+                                        top = topPadding.coerceAtLeast(0.dp), bottom = bottomPadding
+                                    )
+                                )
+                            }
+                        } else {
+                            PlayerAudioVisual(state.playing, state.loudness, state.loudnessSampleId, state.showLoudnessWaveform,
+                                Modifier.padding(bottom = if (landscape) 24.dp else 120.dp),
+                                trackPath = state.currentTrack?.path,
+                                onArtworkClick = viewModel::toggleLyrics)
+                        }
                     }
                 }
             }
 
             PlayerSubtitleOverlay(
-                text = if (state.isVideo) "" else state.subtitleText,
+                text = if (state.isVideo || state.lyricsVisible) "" else state.subtitleText,
                 fontSize = state.subtitleFontSize,
                 modifier = Modifier.align(Alignment.Center).padding(bottom = if (landscape) 64.dp else 260.dp)
             )
@@ -216,7 +257,7 @@ internal fun PlayerScreen(viewModel: PlayerViewModel, onEditTags: () -> Unit = {
                 }
             }
 
-            PlayerPanelSheet(state, viewModel, onEditTags)
+            PlayerPanelSheet(state, viewModel, onEditTags, onPickSubtitle)
 
             PlayerTrackInfoDialog(
                 state = state,
@@ -347,15 +388,25 @@ private fun PlayerControls(state: PlayerUiState, viewModel: PlayerViewModel, lan
             .testTag("player-controls")
             .windowInsetsPadding(if (landscape) WindowInsets(0, 0, 0, 0)
                 else WindowInsets.displayCutout.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
-            .padding(horizontal = 20.dp)
-            .padding(bottom = if (landscape) 6.dp else 16.dp)
+            .padding(horizontal = 8.dp)
+            .padding(bottom = if (landscape) 6.dp else 8.dp)
     ) {
         if (!landscape) {
-            PlayerQuickActionsRow(state, viewModel)
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).offset(y = 8.dp).zIndex(1f),
+                verticalAlignment = Alignment.CenterVertically) {
+                PlayerQuickActionsRow(state, viewModel)
+                if (!state.isVideo && state.lyricsVisible) {
+                    PlayerLyricsSource(state, viewModel, Modifier.weight(1f))
+                }
+            }
+        } else if (!state.isVideo && state.lyricsVisible) {
+            Row(Modifier.fillMaxWidth().offset(y = 8.dp).zIndex(1f), horizontalArrangement = Arrangement.End) {
+                PlayerLyricsSource(state, viewModel, Modifier.fillMaxWidth(0.55f))
+            }
         }
-        PlayerSeekBar(state, viewModel)
+        PlayerSeekBar(state, viewModel, Modifier.padding(horizontal = 12.dp))
         Row(
-            Modifier.fillMaxWidth().testTag("player-transport-row"),
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("player-transport-row"),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
@@ -369,19 +420,24 @@ private fun PlayerControls(state: PlayerUiState, viewModel: PlayerViewModel, lan
         }
         if (!landscape) {
             Spacer(Modifier.height(6.dp))
-            PlayerToolsRow(state, viewModel, compact = false)
+            Box(Modifier.padding(horizontal = 12.dp)) {
+                PlayerToolsRow(state, viewModel, compact = false)
+            }
         }
     }
 }
 
 @Composable
-private fun PlayerQuickActionsRow(state: PlayerUiState, viewModel: PlayerViewModel, compact: Boolean = false) {
+private fun PlayerQuickActionsRow(
+    state: PlayerUiState,
+    viewModel: PlayerViewModel,
+    compact: Boolean = false,
+    modifier: Modifier = Modifier
+) {
     val enabled = state.currentTrack != null
     val iconButtonSize = if (compact) 38.dp else 40.dp
     Row(
-        modifier = (if (compact) Modifier else Modifier.fillMaxWidth())
-            .testTag("player-quick-actions-row")
-            .then(if (compact) Modifier else Modifier.padding(bottom = 2.dp)),
+        modifier = modifier.testTag("player-quick-actions-row"),
         horizontalArrangement = if (compact) Arrangement.spacedBy(0.dp) else Arrangement.Start,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -428,9 +484,27 @@ private fun PlayerQuickActionsRow(state: PlayerUiState, viewModel: PlayerViewMod
     }
 }
 
+/** The lyric source shares the action area, leaving the whole center for the document. */
+@Composable
+private fun PlayerLyricsSource(state: PlayerUiState, viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
+    val label = state.subtitleOptions.firstOrNull {
+        it.id == state.selectedSubtitleId && it.kind != PlayerSubtitleKind.NONE
+    }?.label ?: stringResource(R.string.player_lyrics_title)
+    Row(modifier.heightIn(min = 48.dp).testTag("player-lyrics-source"),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
+        Text(label, modifier = Modifier.weight(1f).testTag("player-lyrics-source-label"),
+            color = PlayerControlColors.Secondary, fontSize = 12.sp, maxLines = 1,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End, overflow = TextOverflow.Ellipsis)
+        IconButton(onClick = { viewModel.setLyricsVisible(false) }, modifier = Modifier.size(40.dp).testTag("player-lyrics-close")) {
+            Icon(painterResource(R.drawable.ic_close), stringResource(R.string.player_lyrics_close),
+                modifier = Modifier.size(20.dp), tint = PlayerControlColors.Secondary)
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PlayerSeekBar(state: PlayerUiState, viewModel: PlayerViewModel) {
+private fun PlayerSeekBar(state: PlayerUiState, viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     val enabled = state.ready && state.durationMs > 0
     val color = PlayerControlColors.Accent
     val colors = SliderDefaults.colors(
@@ -442,7 +516,7 @@ private fun PlayerSeekBar(state: PlayerUiState, viewModel: PlayerViewModel) {
         disabledInactiveTrackColor = color.copy(alpha = 0.12f)
     )
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -500,7 +574,6 @@ private fun PlayerToolsRow(state: PlayerUiState, viewModel: PlayerViewModel, com
             modifier = Modifier
                 .size(42.dp)
                 .clip(CircleShape)
-                .background(PlayerControlColors.Surface)
                 .testTag("player-mode-chip")
                 .semantics { contentDescription = modeDescription }
                 .clickable(role = Role.Button) { viewModel.cycleMode() },
@@ -513,7 +586,6 @@ private fun PlayerToolsRow(state: PlayerUiState, viewModel: PlayerViewModel, com
             modifier = Modifier
                 .size(width = 46.dp, height = 42.dp)
                 .clip(CircleShape)
-                .background(PlayerControlColors.Surface)
                 .clickable(role = Role.Button) { viewModel.openPanel(PlayerPanel.SPEED) }
                 .padding(horizontal = 4.dp, vertical = 6.dp),
             contentAlignment = Alignment.Center

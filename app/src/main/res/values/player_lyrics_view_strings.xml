@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_lyrics_title">歌词</string>
+    <string name="player_lyrics_close">返回封面</string>
+    <string name="player_lyrics_show">显示歌词</string>
+    <string name="player_lyrics_empty">暂无歌词</string>
+    <string name="player_lyrics_select_subtitle">选择字幕</string>
+</resources>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_subtitle_pick_file">从目录选择字幕</string>
+    <string name="player_subtitle_read_failed">无法读取字幕，请选择有效的字幕文件</string>
+</resources>

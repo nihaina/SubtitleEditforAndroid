@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.util.Log
+import com.subtitleedit.R
 import com.subtitleedit.mpv.MPVLib
 import com.subtitleedit.mpv.MpvPlayerHost
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.UUID
 
 /** Owns one player session. Commands and native callbacks are serialized on the access thread. */
 internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val resources: Resources) :
@@ -37,6 +39,9 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
     private var pendingSeekMs: Long? = null
     private var pendingSubtitle: PlayerSubtitleOption? = null
     private var fallbackSubtitle: PlayerSubtitleOption? = null
+    private var embeddedSubtitles: List<PlayerSubtitleOption> = emptyList()
+    private var embeddedSubtitleDir: File? = null
+    private var cacheDirectory: File? = null
     private var durationMs = 0L
     private var speed = 1f
     private var volume = 100
@@ -81,6 +86,8 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
             pendingSeekMs = null
             pendingSubtitle = null
             this.fallbackSubtitle = fallbackSubtitle
+            clearEmbeddedSubtitles()
+            cacheDirectory = cacheDir
             playRequested = autoplay
             check(file.isFile && file.canRead()) { "无法读取文件：${file.name}" }
             check(configDir.isDirectory || configDir.mkdirs()) { "无法创建播放器配置目录" }
@@ -124,6 +131,7 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
         pendingSeekMs = null
         pendingSubtitle = null
         fallbackSubtitle = null
+        clearEmbeddedSubtitles()
         accessHandler.removeCallbacks(loudnessPoll)
         if (initialized) MPVLib.command(arrayOf("stop"))
         publish { copy(ready = false, playing = false, ended = false, loudness = 0f) }
@@ -207,6 +215,7 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
                 Log.e(TAG, "Releasing libmpv failed", error)
             } finally {
                 initialized = false
+                clearEmbeddedSubtitles()
                 accessThread.quitSafely()
             }
         }
@@ -308,8 +317,18 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
                 val resumePosition = clampPosition(pendingSeekMs ?: 0L)
                 pendingSeekMs = null
                 if (resumePosition > 0L) seek(resumePosition)
+                loadEmbeddedSubtitles()
+                if (mediaGeneration != generation.get()) return@post
                 val internalTracks = refreshSubtitleTracks()
-                applySubtitle(PlayerSubtitleSelection.initial(pendingSubtitle, internalTracks, fallbackSubtitle))
+                // A recreated surface has a fresh private cache. Restore the logical lyric
+                // choice using its stable ID rather than the previous cache file's path.
+                val explicit = pendingSubtitle?.let { requested ->
+                    if (requested.id.startsWith("embedded:")) embeddedSubtitles.firstOrNull { it.id == requested.id }
+                        ?: PlayerSubtitleOption("none", "", PlayerSubtitleKind.NONE)
+                    else requested
+                }
+                applySubtitle(PlayerSubtitleSelection.initial(explicit, internalTracks,
+                    embeddedSubtitles.firstOrNull() ?: fallbackSubtitle))
                 pendingSubtitle = null
                 MPVLib.setPropertyBoolean("pause", !playRequested)
                 val playing = playRequested
@@ -373,6 +392,34 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
         publish { copy(selectedSubtitleId = selectedId, subtitleText = "") }
     }
 
+    /** Tag lyrics are prepared off the UI thread, without changing the source audio. */
+    private fun loadEmbeddedSubtitles() {
+        val root = cacheDirectory ?: return
+        val directory = File(root, "player-lyrics/${UUID.randomUUID()}")
+        embeddedSubtitleDir = directory
+        embeddedSubtitles = try {
+            PlayerEmbeddedLyrics.load(File(mediaPath), directory, durationMs,
+                resources.getString(R.string.player_embedded_lyrics)).map { option ->
+                option.copy(id = "embedded:${File(option.path).nameWithoutExtension}")
+            }
+        } catch (error: Exception) {
+            Log.w(TAG, "Reading embedded lyrics failed", error)
+            emptyList()
+        } catch (error: LinkageError) {
+            Log.w(TAG, "Embedded lyric reader unavailable", error)
+            emptyList()
+        }
+    }
+
+    private fun clearEmbeddedSubtitles() {
+        embeddedSubtitles = emptyList()
+        embeddedSubtitleDir?.let { directory ->
+            runCatching { directory.deleteRecursively() }
+                .onFailure { Log.w(TAG, "Removing private subtitle cache failed", it) }
+        }
+        embeddedSubtitleDir = null
+    }
+
     private fun refreshSubtitleTracks(): List<PlayerSubtitleOption> {
         val count = MPVLib.getPropertyInt("track-list/count") ?: 0
         val tracks = mutableListOf<PlayerSubtitleOption>()
@@ -381,7 +428,8 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
             if (MPVLib.getPropertyString("track-list/$index/type") != "sub") continue
             val id = MPVLib.getPropertyInt("track-list/$index/id") ?: continue
             val external = MPVLib.getPropertyString("track-list/$index/external-filename")?.takeIf { it.isNotBlank() }
-            val optionId = if (external == null) "internal:$id" else "external:$external"
+            val optionId = if (external == null) "internal:$id" else
+                embeddedSubtitles.firstOrNull { it.path == external }?.id ?: "external:$external"
             if (MPVLib.getPropertyBoolean("track-list/$index/selected") == true) selectedId = optionId
             // The view model supplies sidecar files. Do not list an added file twice.
             if (external != null) continue
@@ -390,7 +438,7 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
             tracks += PlayerSubtitleOption(optionId, title ?: language ?: "轨道 ${tracks.size + 1}",
                 PlayerSubtitleKind.INTERNAL, mpvTrackId = id)
         }
-        val options = tracks.toList()
+        val options = tracks + embeddedSubtitles
         val selected = selectedId
         publish { copy(subtitleTracks = options, selectedSubtitleId = selected) }
         return options

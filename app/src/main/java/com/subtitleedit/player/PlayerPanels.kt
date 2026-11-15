@@ -61,7 +61,12 @@ import com.subtitleedit.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun PlayerPanelSheet(state: PlayerUiState, viewModel: PlayerViewModel, onEditTags: () -> Unit = {}) {
+internal fun PlayerPanelSheet(
+    state: PlayerUiState,
+    viewModel: PlayerViewModel,
+    onEditTags: () -> Unit = {},
+    onPickSubtitle: () -> Unit = {}
+) {
     if (state.panel == PlayerPanel.NONE) return
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scrollState = rememberScrollState()
@@ -105,7 +110,7 @@ internal fun PlayerPanelSheet(state: PlayerUiState, viewModel: PlayerViewModel, 
             when (state.panel) {
                 PlayerPanel.PLAYLIST -> PlayerPlaylistPanel(state, viewModel)
                 PlayerPanel.EQUALIZER -> PlayerEqualizerPanel(state, viewModel)
-                PlayerPanel.SUBTITLE -> PlayerSubtitlePanel(state, viewModel)
+                PlayerPanel.SUBTITLE -> PlayerSubtitlePanel(state, viewModel, onPickSubtitle)
                 PlayerPanel.BOOKMARK -> PlayerBookmarkPanel(state, viewModel)
                 PlayerPanel.TIMER -> PlayerTimerPanel(state, viewModel)
                 PlayerPanel.SPEED -> PlayerSpeedPanel(state, viewModel)
@@ -248,8 +253,19 @@ private fun presetLabel(id: String): Int = when (id) {
 }
 
 @Composable
-private fun PlayerSubtitlePanel(state: PlayerUiState, viewModel: PlayerViewModel) {
+private fun PlayerSubtitlePanel(state: PlayerUiState, viewModel: PlayerViewModel, onPickSubtitle: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .clickable(onClick = onPickSubtitle).heightIn(min = 48.dp)
+                .testTag("player-subtitle-pick-file").padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(painterResource(R.drawable.ic_folder), contentDescription = null,
+                modifier = Modifier.size(18.dp), tint = PlayerColors.Accent)
+            Spacer(Modifier.width(10.dp))
+            Text(stringResource(R.string.player_subtitle_pick_file), color = PlayerColors.Accent, fontSize = 14.sp)
+        }
         state.subtitleOptions.forEach { option ->
             val selected = option.id == state.selectedSubtitleId
             Row(

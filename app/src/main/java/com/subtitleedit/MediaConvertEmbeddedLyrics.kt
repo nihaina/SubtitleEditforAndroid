@@ -11,7 +11,9 @@ internal data class MediaConvertEmbeddedLyric(
     val title: String = "",
     val language: String = "",
     val text: String = "",
-    val synced: Boolean = false
+    val synced: Boolean = false,
+    /** A millisecond SYLT document whose last text event has no following clear event. */
+    val openEnded: Boolean = false
 )
 
 internal object MediaConvertEmbeddedLyrics {
