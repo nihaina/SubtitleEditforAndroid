@@ -6,5 +6,6 @@ internal object ArchiveProgressPolicy {
     fun phaseLabel(phase: ProgressPhase): String = when (phase) {
         ProgressPhase.SCANNING -> "正在检查压缩包..."
         ProgressPhase.EXTRACTING -> "正在解压..."
+        ProgressPhase.TESTING -> "正在测试压缩包..."
     }
 }

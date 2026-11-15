@@ -20,8 +20,6 @@ internal class DefaultArchiveRepository : ArchiveRepository {
 
     override fun isRecognizedArchive(file: File) = ArchiveManager.isRecognizedArchive(file)
     override fun isSupportedArchive(file: File) = ArchiveManager.isSupportedArchive(file)
-    override fun requiresStreamingConflictResolution(file: File) =
-        ArchiveManager.requiresStreamingConflictResolution(file)
 
     override fun createArchive(
         sources: List<File>,
@@ -49,16 +47,10 @@ internal class DefaultArchiveRepository : ArchiveRepository {
     override fun testArchive(
         archive: File,
         password: CharArray?,
-        limits: ArchiveManager.ExtractionLimits
-    ) = ArchiveManager.testArchive(archive, password, limits)
-
-    override fun findDestinationConflicts(
-        archive: File,
-        destination: File,
-        password: CharArray?,
         limits: ArchiveManager.ExtractionLimits,
-        onProgress: ((ArchiveManager.ProgressPhase, Long, Long) -> Unit)?
-    ) = ArchiveManager.findDestinationConflicts(archive, destination, password, limits, onProgress)
+        checkCancelled: () -> Unit,
+        onProgress: (Long, Long) -> Unit
+    ) = ArchiveManager.testArchive(archive, password, limits, checkCancelled, onProgress)
 
     override fun extractArchive(
         archive: File,
@@ -66,13 +58,13 @@ internal class DefaultArchiveRepository : ArchiveRepository {
         password: CharArray?,
         conflictPolicy: ArchiveManager.ConflictPolicy,
         conflictPolicies: Map<String, ArchiveManager.ConflictPolicy>,
-        conflictsPrechecked: Boolean,
         limits: ArchiveManager.ExtractionLimits,
         onProgress: ((ArchiveManager.ProgressPhase, Long, Long) -> Unit)?,
         onConflict: ((ArchiveManager.DestinationConflict) -> ArchiveManager.ConflictResolution)?,
+        onCurrentFile: (File) -> Unit,
         checkCancelled: () -> Unit
     ) = ArchiveManager.extractArchive(
-        archive, destination, password, conflictPolicy, conflictPolicies, conflictsPrechecked,
-        limits, onProgress, onConflict, checkCancelled
+        archive, destination, password, conflictPolicy, conflictPolicies,
+        limits, onProgress, onConflict, onCurrentFile, checkCancelled
     )
 }

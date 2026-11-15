@@ -84,7 +84,7 @@ object ArchiveManager {
         val applyToAll: Boolean = false
     )
 
-    enum class ProgressPhase { SCANNING, EXTRACTING }
+    enum class ProgressPhase { SCANNING, EXTRACTING, TESTING }
 
     data class DestinationConflict(
         val entryName: String,
@@ -178,18 +178,6 @@ object ArchiveManager {
         readFormat(file)
         true
     }.getOrDefault(false)
-
-    /**
-     * Returns true for TAR variants whose headers are consumed sequentially. Conflicts can then
-     * be resolved as each header arrives without first expanding or listing the complete TAR.
-     */
-    fun requiresStreamingConflictResolution(file: File): Boolean = when (readFormat(file)) {
-        ReadFormat.TAR,
-        ReadFormat.TAR_GZIP,
-        ReadFormat.TAR_BZIP2,
-        ReadFormat.TAR_XZ -> true
-        else -> false
-    }
 
     fun createArchive(
         sources: List<File>,
@@ -287,11 +275,54 @@ object ArchiveManager {
     fun testArchive(
         archive: File,
         password: CharArray? = null,
-        limits: ExtractionLimits = ExtractionLimits()
+        limits: ExtractionLimits = ExtractionLimits(),
+        checkCancelled: () -> Unit = {},
+        onProgress: (completed: Long, total: Long) -> Unit = { _, _ -> }
     ): TestResult {
-        val entries = listEntries(archive, password, limits)
-        val total = OfficialSevenZipArchive.test(archive, password, entries)
-        return TestResult(entries.size, total)
+        checkCancelled()
+        val counter = Counter(limits)
+        val callback = object : SevenZipTestCallback {
+            override fun onEntry(name: String, size: Long, isDirectory: Boolean, isSymbolicLink: Boolean) {
+                checkCancelled()
+                if (isSymbolicLink) throw IOException("压缩包包含不支持的链接：$name")
+                validateEntryName(name)
+                counter.addEntry()
+                if (!isDirectory) counter.addBytes(size.coerceAtLeast(0L))
+            }
+
+            override fun onProgress(completed: Long, total: Long) {
+                checkCancelled()
+                onProgress(completed, total)
+            }
+        }
+        val format = readFormat(archive)
+        if (format !in setOf(ReadFormat.TAR, ReadFormat.TAR_GZIP, ReadFormat.TAR_BZIP2, ReadFormat.TAR_XZ)) {
+            return OfficialSevenZip.test(archive.absolutePath, password, limits, callback).also { checkCancelled() }
+        }
+        val readStream: (InputStream, Long) -> Unit = { input, expectedBytes ->
+            StreamingTarExtractor.extract(
+                input = input,
+                staging = archive.absoluteFile.parentFile ?: throw IOException("找不到压缩包所在目录"),
+                expectedTarBytes = expectedBytes,
+                maxEntries = limits.maxEntries,
+                maxBytes = limits.maxBytes,
+                validateExpectedSize = format != ReadFormat.TAR_GZIP,
+                checkCancelled = checkCancelled,
+                openOutput = { entry ->
+                    callback.onEntry(entry.name, entry.size, entry.isDirectory, false)
+                    null
+                },
+                onProgress = callback::onProgress
+            )
+            Unit
+        }
+        if (format == ReadFormat.TAR) {
+            FileInputStream(archive).buffered().use { readStream(it, archive.length()) }
+        } else {
+            OfficialSevenZipArchive.withCompressedTarStream(archive, password, checkCancelled, readStream)
+        }
+        checkCancelled()
+        return TestResult(counter.entries, counter.bytes)
     }
 
     fun extractArchive(
@@ -300,10 +331,10 @@ object ArchiveManager {
         password: CharArray? = null,
         conflictPolicy: ConflictPolicy = ConflictPolicy.FAIL,
         conflictPolicies: Map<String, ConflictPolicy> = emptyMap(),
-        conflictsPrechecked: Boolean = false,
         limits: ExtractionLimits = ExtractionLimits(),
         onProgress: ((ProgressPhase, Long, Long) -> Unit)? = null,
         onConflict: ((DestinationConflict) -> ConflictResolution)? = null,
+        onCurrentFile: (File) -> Unit = {},
         checkCancelled: () -> Unit = {}
     ): ExtractResult {
         checkCancelled()
@@ -311,437 +342,91 @@ object ArchiveManager {
             existsNoFollow(destination) &&
                 Files.isDirectory(destination.toPath(), LinkOption.NOFOLLOW_LINKS)
         ) { "目标目录不存在或不可用" }
-        if (isSequentialTarArchive(archive)) {
-            return extractSequentialTarArchive(
-                archive = archive,
-                destination = destination,
-                password = password,
-                conflictPolicy = conflictPolicy,
-                conflictPolicies = conflictPolicies,
-                limits = limits,
-                onProgress = onProgress,
-                onConflict = onConflict,
-                checkCancelled = checkCancelled
-            )
-        }
-        val listedEntries = OfficialSevenZipArchive.list(archive, password)
-        checkCancelled()
-        listedEntries.firstOrNull { it.isSymbolicLink }?.let { throw IOException("压缩包包含不支持的符号链接：${it.name}") }
-        val validationCounter = Counter(limits)
-        listedEntries.forEach { entry ->
+        val resolver = ExtractionTargetResolver(destination, conflictPolicy, conflictPolicies, onConflict, archive)
+        var lastProgressNanos = 0L
+        var completedBytes = 0L
+        var totalBytes = 0L
+        var currentFile: File? = null
+        var reportedFile: File? = null
+        fun reportProgress(completed: Long, total: Long, force: Boolean = false) {
             checkCancelled()
-            validationCounter.addEntry()
-            if (!entry.isDirectory) validationCounter.addBytes(entry.size.coerceAtLeast(0L))
-            validateEntryName(entry.name)
-        }
-        // 7-Zip extracts duplicate normalized paths with -aoa (the last item wins).
-        // Mirror that behavior while moving staged files; otherwise the second copy
-        // points at a source file that was already moved and extraction fails.
-        val entries = collapseDuplicateEntries(listedEntries)
-        if (!conflictsPrechecked && conflictPolicy == ConflictPolicy.FAIL) {
-            findDestinationConflicts(archive, destination, password, limits, onProgress)
-                .firstOrNull { conflict -> conflict.entryName !in conflictPolicies }
-                ?.let { conflict ->
-                    throw DestinationConflictException(conflict)
+            completedBytes = maxOf(completedBytes, completed.coerceAtLeast(0L))
+            totalBytes = total.coerceAtLeast(0L)
+            val now = System.nanoTime()
+            if (force || lastProgressNanos == 0L || now - lastProgressNanos >= EXTRACT_PROGRESS_INTERVAL_NANOS) {
+                currentFile?.takeIf { it != reportedFile }?.let { file ->
+                    onCurrentFile(file)
+                    reportedFile = file
                 }
+                onProgress?.invoke(ProgressPhase.EXTRACTING, completedBytes, totalBytes)
+                lastProgressNanos = now
+            }
         }
-
-        val totalBytes = entries.sumOf { it.size.coerceAtLeast(0L) }
-        onProgress?.invoke(ProgressPhase.EXTRACTING, 0L, totalBytes)
-        val counter = Counter(limits)
-        val resolver = ExtractionTargetResolver(
-            destination = destination,
-            policy = conflictPolicy,
-            entryPolicies = conflictPolicies,
-            onConflict = onConflict
-        )
-        val staging = File(destination, ".subtitleedit-extract-${UUID.randomUUID()}")
+        reportProgress(0L, 0L, force = true)
         try {
-            extractToStagingWithProgress(
-                archive = archive,
-                staging = staging,
-                password = password,
-                totalBytes = totalBytes,
-                onProgress = onProgress,
-                checkCancelled = checkCancelled
-            )
-            entries.sortedBy { it.name.count { character -> character == '/' } }.forEach { entry ->
-                checkCancelled()
-                counter.addEntry()
-                validateEntryName(entry.name)
-                val source = File(staging, entry.name.replace('/', File.separatorChar))
-                if (Files.isSymbolicLink(source.toPath())) throw IOException("压缩包包含不支持的符号链接：${entry.name}")
-                // Malformed archives can contain both a file and children below the
-                // same path.  7-Zip resolves that collision while creating staging
-                // output, so one of the listed entries may no longer match the
-                // materialized type. Ignore that metadata-only entry instead of
-                // failing the whole extraction.
-                if (entry.isDirectory && !source.isDirectory || !entry.isDirectory && !source.isFile) {
-                    counter.addSkippedEntry()
-                    onProgress?.invoke(ProgressPhase.EXTRACTING, counter.bytes, totalBytes)
-                    return@forEach
+            ArchiveExtractionOutput(
+                limits = limits,
+                resolve = { entry ->
+                    resolver.resolve(entry.name, entry.isDirectory, entry.size, entry.modifiedTimeMillis)
+                },
+                protectSourceVolumes = resolver::protectSourceVolumes,
+                consumeOverwriteApproval = resolver::consumeOverwriteApproval,
+                verifyParent = resolver::verifyTargetParent,
+                checkCancelled = checkCancelled,
+                reportProgress = { completed, total -> reportProgress(completed, total) },
+                reportCurrentFile = { file ->
+                    currentFile = file
+                    reportProgress(completedBytes, totalBytes)
                 }
-                val target = resolver.resolve(entry.name, entry.isDirectory, entry.size, entry.modifiedTimeMillis)
-                if (target == null) {
-                    counter.addSkippedEntry()
-                } else if (entry.isDirectory) {
-                    if (entry.modifiedTimeMillis > 0L) target.setLastModified(entry.modifiedTimeMillis)
-                } else {
-                    if (!source.isFile) throw IOException("压缩包条目未正确解压：${entry.name}")
-                    counter.addBytes(source.length())
-                    target.parentFile?.mkdirs()
-                    Files.move(source.toPath(), target.toPath())
-                    resolver.registerCreatedOutput(target)
-                    if (entry.modifiedTimeMillis > 0L) target.setLastModified(entry.modifiedTimeMillis)
-                }
-                onProgress?.invoke(ProgressPhase.EXTRACTING, counter.bytes, totalBytes)
-            }
-        } catch (error: Throwable) {
-            resolver.cleanupCreatedOutputs()
-            throw error
-        } finally {
-            deleteTreeNoFollow(staging)
-        }
-        return ExtractResult(
-            entryCount = counter.entries - counter.skippedEntries,
-            totalBytes = counter.bytes,
-            skippedCount = counter.skippedEntries
-        )
-    }
-
-    fun findDestinationConflicts(
-        archive: File,
-        destination: File,
-        password: CharArray?,
-        limits: ExtractionLimits = ExtractionLimits(),
-        onProgress: ((ProgressPhase, Long, Long) -> Unit)? = null
-    ): List<DestinationConflict> {
-        require(
-            existsNoFollow(destination) &&
-                Files.isDirectory(destination.toPath(), LinkOption.NOFOLLOW_LINKS)
-        ) { "目标目录不存在或不可用" }
-        onProgress?.invoke(ProgressPhase.SCANNING, 0L, 0L)
-        val scanner = DestinationConflictScanner(destination)
-        val entries = collapseDuplicateEntries(OfficialSevenZipArchive.list(archive, password))
-        val counter = Counter(limits)
-        entries.forEach { entry ->
-            counter.addEntry()
-            if (!entry.isDirectory) counter.addBytes(entry.size.coerceAtLeast(0L))
-            validateEntryName(entry.name)
-            scanner.inspect(entry.name, entry.isDirectory, entry.size, entry.modifiedTimeMillis)
-            onProgress?.invoke(ProgressPhase.SCANNING, counter.entries.toLong(), entries.size.toLong())
-        }
-        // Internal archive path collisions are resolved by 7-Zip while materializing
-        // the staging tree. They must not be presented as destination overwrite prompts.
-        return scanner.conflicts.filterNot { it.archiveInternal }
-    }
-
-    private fun extractSequentialTarArchive(
-        archive: File,
-        destination: File,
-        password: CharArray?,
-        conflictPolicy: ConflictPolicy,
-        conflictPolicies: Map<String, ConflictPolicy>,
-        limits: ExtractionLimits,
-        onProgress: ((ProgressPhase, Long, Long) -> Unit)?,
-        onConflict: ((DestinationConflict) -> ConflictResolution)?,
-        checkCancelled: () -> Unit
-    ): ExtractResult {
-        checkCancelled()
-        val staging = File(destination, ".subtitleedit-extract-${UUID.randomUUID()}")
-        val counter = Counter(limits)
-        val planner = StreamingConflictPlanner(
-            destination = destination,
-            initialPolicy = conflictPolicy,
-            initialPolicies = conflictPolicies,
-            onConflict = onConflict
-        )
-        var resolver: ExtractionTargetResolver? = null
-        try {
-            val format = readFormat(archive)
-            val readStream: (InputStream, Long) -> List<StreamingTarExtractor.Entry> =
-                { input, expectedTarBytes ->
-                    StreamingTarExtractor.extract(
-                        input = input,
-                        staging = staging,
-                        expectedTarBytes = expectedTarBytes,
-                        maxEntries = limits.maxEntries,
-                        maxBytes = limits.maxBytes,
-                        validateExpectedSize = format != ReadFormat.TAR_GZIP,
-                        checkCancelled = checkCancelled,
-                        onEntry = { entry ->
-                            checkCancelled()
-                            counter.addEntry()
-                            validateEntryName(entry.name)
-                            planner.inspect(
-                                name = entry.name,
-                                directory = entry.isDirectory,
-                                size = entry.size,
-                                modifiedTimeMillis = entry.modifiedTimeMillis
-                            )
-                        },
-                        onProgress = { completed, total ->
-                            checkCancelled()
-                            onProgress?.invoke(ProgressPhase.EXTRACTING, completed, total)
-                        }
-                    )
-                }
-
-            val entries = when (format) {
-                ReadFormat.TAR -> FileInputStream(archive).buffered().use { input ->
-                    readStream(input, archive.length())
-                }
-                ReadFormat.TAR_GZIP,
-                ReadFormat.TAR_BZIP2,
-                ReadFormat.TAR_XZ -> OfficialSevenZipArchive.withCompressedTarStream(
-                    archive,
-                    password,
-                    readStream
-                )
-                else -> error("非 TAR 格式进入顺序解压分支")
-            }
-
-            val targetResolver = ExtractionTargetResolver(
-                destination = destination,
-                policy = planner.policy(),
-                entryPolicies = planner.policies(),
-                onConflict = onConflict
-            )
-            resolver = targetResolver
-            entries.sortedBy { it.name.count { character -> character == '/' } }.forEach { entry ->
-                checkCancelled()
-                val target = targetResolver.resolve(
-                    entry.name,
-                    entry.isDirectory,
-                    entry.size,
-                    entry.modifiedTimeMillis
-                )
-                if (target == null) {
-                    counter.addSkippedEntry()
-                } else if (entry.isDirectory) {
-                    if (entry.modifiedTimeMillis > 0L) target.setLastModified(entry.modifiedTimeMillis)
-                } else {
-                    val source = entry.stagedFile
-                        ?: throw IOException("TAR 条目缺少暂存文件：${entry.name}")
-                    if (Files.isSymbolicLink(source.toPath()) || !source.isFile) {
-                        throw IOException("TAR 条目未正确解压：${entry.name}")
-                    }
-                    counter.addBytes(source.length())
-                    target.parentFile?.mkdirs()
-                    Files.move(source.toPath(), target.toPath())
-                    targetResolver.registerCreatedOutput(target)
-                    if (entry.modifiedTimeMillis > 0L) target.setLastModified(entry.modifiedTimeMillis)
-                }
-            }
-            return ExtractResult(
-                entryCount = counter.entries - counter.skippedEntries,
-                totalBytes = counter.bytes,
-                skippedCount = counter.skippedEntries
-            )
-        } catch (error: Throwable) {
-            resolver?.cleanupCreatedOutputs()
-            throw error
-        } finally {
-            deleteTreeNoFollow(staging)
-        }
-    }
-
-    private class DestinationConflictScanner(private val destination: File) {
-        private val archivePaths = mutableMapOf<String, Boolean>()
-        private val conflictsByName = linkedMapOf<String, DestinationConflict>()
-        val conflicts: List<DestinationConflict>
-            get() = conflictsByName.values.toList()
-
-        fun inspectNew(
-            rawName: String,
-            directory: Boolean,
-            size: Long = -1L,
-            modifiedTimeMillis: Long = 0L
-        ): List<DestinationConflict> {
-            val existingNames = conflictsByName.keys.toSet()
-            inspect(rawName, directory, size, modifiedTimeMillis)
-            return conflictsByName
-                .filterKeys { it !in existingNames }
-                .values
-                .toList()
-        }
-
-        fun inspect(
-            rawName: String,
-            directory: Boolean,
-            size: Long = -1L,
-            modifiedTimeMillis: Long = 0L
-        ) {
-            val normalized = validateEntryName(rawName)
-            val parts = normalized.split('/')
-            var prefix = ""
-            for (index in 0 until parts.lastIndex) {
-                prefix = if (prefix.isEmpty()) parts[index] else "$prefix/${parts[index]}"
-                when (archivePaths[prefix]) {
-                    false -> recordArchiveCollision(prefix, sourceDirectory = true)
-                    null -> archivePaths[prefix] = true
-                    true -> Unit
-                }
-            }
-
-            val previousType = archivePaths[normalized]
-            if (previousType != null && !(directory && previousType)) {
-                recordArchiveCollision(normalized, directory, size, modifiedTimeMillis)
-            } else if (previousType == null) {
-                archivePaths[normalized] = directory
-            }
-
-            var current = destination
-            prefix = ""
-            parts.forEachIndexed { index, part ->
-                prefix = if (prefix.isEmpty()) part else "$prefix/$part"
-                current = File(current, part)
-                if (!existsNoFollow(current)) return
-                val requiresDirectory = index < parts.lastIndex || directory
-                if (requiresDirectory) {
-                    if (!Files.isDirectory(current.toPath(), LinkOption.NOFOLLOW_LINKS)) {
-                        recordConflict(
-                            prefix,
-                            sourceDirectory = true,
-                            modifiedTimeMillis = modifiedTimeMillis,
-                            existing = current
+            ).use { output ->
+                val format = readFormat(archive)
+                if (format in setOf(ReadFormat.TAR, ReadFormat.TAR_GZIP, ReadFormat.TAR_BZIP2, ReadFormat.TAR_XZ)) {
+                    val readStream: (InputStream, Long) -> Unit = { input, expectedBytes ->
+                        StreamingTarExtractor.extract(
+                            input = input,
+                            staging = destination,
+                            expectedTarBytes = expectedBytes,
+                            maxEntries = limits.maxEntries,
+                            maxBytes = limits.maxBytes,
+                            validateExpectedSize = format != ReadFormat.TAR_GZIP,
+                            checkCancelled = checkCancelled,
+                            openOutput = output::openTarEntry,
+                            onEntryComplete = { _, success -> output.onEntryComplete(success) },
+                            onProgress = { completed, total -> reportProgress(completed, total) }
                         )
-                        return
+                        Unit
+                    }
+                    if (format == ReadFormat.TAR) {
+                        FileInputStream(archive).buffered().use { readStream(it, archive.length()) }
+                    } else {
+                        OfficialSevenZipArchive.withCompressedTarStream(archive, password, checkCancelled, readStream)
                     }
                 } else {
-                    recordConflict(normalized, directory, size, modifiedTimeMillis, current)
-                    return
+                    OfficialSevenZip.extract(archive.absolutePath, password, output)
                 }
+                checkCancelled()
+                reportProgress(completedBytes, totalBytes, force = true)
+                resolver.commitDirectoryReplacements()
+                return output.result()
             }
+        } finally {
+            resolver.restoreDirectoryReplacements()
         }
-
-        private fun recordArchiveCollision(
-            name: String,
-            sourceDirectory: Boolean,
-            sourceSize: Long = -1L,
-            modifiedTimeMillis: Long = 0L
-        ) {
-            val existing = File(destination, name)
-            if (!existsNoFollow(existing)) {
-                conflictsByName.putIfAbsent(
-                    name,
-                    DestinationConflict(
-                        entryName = name,
-                        sourceSize = if (sourceDirectory) -1L else sourceSize,
-                        sourceModifiedTimeMillis = modifiedTimeMillis,
-                        sourceIsDirectory = sourceDirectory,
-                        archiveInternal = true
-                    )
-                )
-                return
-            }
-            recordConflict(
-                name = name,
-                sourceDirectory = sourceDirectory,
-                sourceSize = sourceSize,
-                modifiedTimeMillis = modifiedTimeMillis,
-                existing = existing
-            )
-        }
-
-        private fun recordConflict(
-            name: String,
-            sourceDirectory: Boolean,
-            sourceSize: Long = -1L,
-            modifiedTimeMillis: Long = 0L,
-            existing: File? = null
-        ) {
-            val existingIsDirectory = existing?.let {
-                Files.isDirectory(it.toPath(), LinkOption.NOFOLLOW_LINKS)
-            }
-            val conflict = DestinationConflict(
-                entryName = name,
-                sourceSize = if (sourceDirectory) -1L else sourceSize,
-                sourceModifiedTimeMillis = modifiedTimeMillis,
-                sourceIsDirectory = sourceDirectory,
-                existingSize = if (existing != null && existingIsDirectory == false) existing.length() else -1L,
-                existingModifiedTimeMillis = existing?.lastModified() ?: 0L,
-                existingIsDirectory = existingIsDirectory,
-                archiveInternal = false
-            )
-            val previous = conflictsByName[name]
-            if (previous == null || (previous.existingIsDirectory == null && existing != null)) {
-                conflictsByName[name] = conflict
-            }
-        }
-    }
-
-    private fun collapseDuplicateEntries(
-        entries: List<OfficialSevenZipArchive.Entry>
-    ): List<OfficialSevenZipArchive.Entry> {
-        val seen = HashSet<String>(entries.size)
-        return entries.asReversed()
-            .filter { seen.add(validateEntryName(it.name)) }
-            .asReversed()
-    }
-
-    /**
-     * Plans conflicts while a TAR stream is being consumed.  It deliberately never mutates the
-     * destination; the normal resolver is still used only after the complete stream validates.
-     */
-    private class StreamingConflictPlanner(
-        destination: File,
-        initialPolicy: ConflictPolicy,
-        initialPolicies: Map<String, ConflictPolicy>,
-        private val onConflict: ((DestinationConflict) -> ConflictResolution)?
-    ) {
-        private val scanner = DestinationConflictScanner(destination)
-        private val plannedPolicies = initialPolicies.toMutableMap()
-        private var defaultPolicy = initialPolicy
-
-        fun inspect(name: String, directory: Boolean, size: Long, modifiedTimeMillis: Long) {
-            val conflicts = scanner.inspectNew(name, directory, size, modifiedTimeMillis)
-            if (defaultPolicy != ConflictPolicy.FAIL) return
-            conflicts.forEach { conflict ->
-                if (defaultPolicy != ConflictPolicy.FAIL) return@forEach
-                plannedPolicies[conflict.entryName]?.let { planned ->
-                    if (planned == ConflictPolicy.FAIL) {
-                        throw DestinationConflictException(conflict)
-                    }
-                    return@forEach
-                }
-                val resolution = onConflict?.invoke(conflict)
-                    ?: throw DestinationConflictException(conflict)
-                if (resolution.policy == ConflictPolicy.FAIL) {
-                    throw DestinationConflictException(conflict)
-                }
-                if (resolution.applyToAll) {
-                    defaultPolicy = resolution.policy
-                } else {
-                    plannedPolicies[conflict.entryName] = resolution.policy
-                }
-            }
-        }
-
-        fun policy(): ConflictPolicy = defaultPolicy
-
-        fun policies(): Map<String, ConflictPolicy> = plannedPolicies.toMap()
-    }
-
-    private fun isSequentialTarArchive(file: File): Boolean = when (readFormat(file)) {
-        ReadFormat.TAR,
-        ReadFormat.TAR_GZIP,
-        ReadFormat.TAR_BZIP2,
-        ReadFormat.TAR_XZ -> true
-        else -> false
     }
 
     private class ExtractionTargetResolver(
         private val destination: File,
         private val policy: ConflictPolicy,
         private val entryPolicies: Map<String, ConflictPolicy>,
-        private val onConflict: ((DestinationConflict) -> ConflictResolution)?
+        private val onConflict: ((DestinationConflict) -> ConflictResolution)?,
+        sourceArchive: File
     ) {
         private val directoryTargets = mutableMapOf<String, File?>()
         private val directoryOwners = mutableMapOf<String, String>()
-        private val createdPaths = mutableListOf<File>()
-        private val preservedOnFailureRoots = mutableListOf<Path>()
         private val streamingPolicies = mutableMapOf<String, ConflictPolicy>()
+        private val overwriteTargets = mutableSetOf<File>()
+        private val directoryReplacements = mutableListOf<Pair<File, File>>()
+        private val sourceVolumes = mutableSetOf(sourceArchive.canonicalFile)
         private var streamingDefaultPolicy: ConflictPolicy? = null
 
         fun resolve(
@@ -826,7 +511,12 @@ object ArchiveManager {
                 ConflictPolicy.SKIP -> null
                 ConflictPolicy.RENAME -> createDirectory(uniqueRenamedTarget(target, true), relativeName)
                 ConflictPolicy.OVERWRITE -> {
-                    deleteTarget(target, relativeName)
+                    verifyTargetParent(target)
+                    verifyNotSourceArchive(target, relativeName)
+                    invalidateDirectoryTargets(target)
+                    val backup = File(target.parentFile, ".subtitleedit-overwrite-${UUID.randomUUID()}")
+                    Files.move(target.toPath(), backup.toPath())
+                    directoryReplacements += target to backup
                     createDirectory(target, relativeName)
                 }
             }
@@ -864,18 +554,13 @@ object ArchiveManager {
                 ConflictPolicy.SKIP -> null
                 ConflictPolicy.RENAME -> uniqueRenamedTarget(target, false)
                 ConflictPolicy.OVERWRITE -> {
-                    deleteTarget(target, relativeName)
+                    verifyTargetParent(target)
+                    verifyNotSourceArchive(target, relativeName)
+                    invalidateDirectoryTargets(target)
+                    overwriteTargets.add(target.absoluteFile)
                     target
                 }
             }
-        }
-
-        /**
-         * Registers a file only after this extraction successfully creates or moves it, so
-         * rollback cannot delete a path another process created after conflict scanning.
-         */
-        fun registerCreatedOutput(target: File) {
-            createdPaths += target
         }
 
         private fun policyFor(
@@ -907,6 +592,8 @@ object ArchiveManager {
             return resolution.policy
         }
 
+        fun consumeOverwriteApproval(target: File): Boolean = overwriteTargets.remove(target.absoluteFile)
+
         private fun conflictFor(
             name: String,
             sourceDirectory: Boolean,
@@ -932,21 +619,42 @@ object ArchiveManager {
 
         private fun createDirectory(target: File, relativeName: String): File {
             if (target.mkdir()) {
-                createdPaths += target
                 return target
             }
             throw IOException("无法创建目录：$relativeName")
         }
 
-        private fun deleteTarget(target: File, relativeName: String) {
-            verifyTargetParent(target)
-            invalidateDirectoryTargets(target)
-            if (!deleteTreeNoFollow(target)) {
-                throw IOException("无法覆盖目标：$relativeName")
+        private fun verifyNotSourceArchive(target: File, relativeName: String) {
+            val output = target.canonicalFile
+            if (sourceVolumes.any { it.toPath().startsWith(output.toPath()) }) {
+                throw IOException("不能覆盖正在读取的压缩包：$relativeName")
             }
-            // No backup is kept by design. If a later entry fails, retain this replacement
-            // instead of deleting the only remaining copy of an originally overwritten target.
-            preservedOnFailureRoots.add(target.toPath().toAbsolutePath().normalize())
+        }
+
+        fun protectSourceVolumes(paths: Array<String>) {
+            paths.forEach { sourceVolumes += File(it).canonicalFile }
+        }
+
+        fun commitDirectoryReplacements() {
+            directoryReplacements.forEach { (_, backup) ->
+                if (!deleteTreeNoFollow(backup)) throw IOException("无法清理解压覆盖备份：${backup.absolutePath}")
+            }
+            directoryReplacements.clear()
+        }
+
+        fun restoreDirectoryReplacements() {
+            directoryReplacements.asReversed().forEach { (target, backup) ->
+                if (existsNoFollow(backup)) {
+                    verifyTargetParent(target)
+                    if (!deleteTreeNoFollow(target)) throw IOException("无法清理解压失败的目录：${target.absolutePath}")
+                    try {
+                        Files.move(backup.toPath(), target.toPath())
+                    } catch (error: IOException) {
+                        throw IOException("未能恢复覆盖前的文件，备份保留在：${backup.absolutePath}", error)
+                    }
+                }
+            }
+            directoryReplacements.clear()
         }
 
         fun verifyTargetParent(target: File) {
@@ -981,22 +689,6 @@ object ArchiveManager {
             directoryOwners.keys.removeAll { it == path || it.startsWith(prefix) }
         }
 
-        fun cleanupCreatedOutputs() {
-            createdPaths.asReversed().distinctBy(::pathIdentity).forEach { path ->
-                val normalizedPath = path.toPath().toAbsolutePath().normalize()
-                if (preservedOnFailureRoots.any { root ->
-                        normalizedPath == root || normalizedPath.startsWith(root)
-                    }) return@forEach
-                when {
-                    Files.isRegularFile(path.toPath(), LinkOption.NOFOLLOW_LINKS) ||
-                        Files.isSymbolicLink(path.toPath()) ->
-                        runCatching { Files.deleteIfExists(path.toPath()) }
-                    Files.isDirectory(path.toPath(), LinkOption.NOFOLLOW_LINKS) ->
-                        runCatching { Files.deleteIfExists(path.toPath()) }
-                }
-            }
-        }
-
         private fun pathIdentity(file: File): String = runCatching {
             file.toPath().toRealPath(LinkOption.NOFOLLOW_LINKS).toString()
         }.getOrElse {
@@ -1004,7 +696,7 @@ object ArchiveManager {
         }
     }
 
-    private fun deleteTreeNoFollow(file: File): Boolean {
+    internal fun deleteTreeNoFollow(file: File): Boolean {
         val path = file.toPath()
         if (!existsNoFollow(file)) return true
         return runCatching {
@@ -1184,72 +876,6 @@ object ArchiveManager {
 
     private fun addArchiveBytes(current: Long, amount: Long): Long =
         if (amount > 0L && current > Long.MAX_VALUE - amount) Long.MAX_VALUE else current + amount
-
-    private fun extractToStagingWithProgress(
-        archive: File,
-        staging: File,
-        password: CharArray?,
-        totalBytes: Long,
-        onProgress: ((ProgressPhase, Long, Long) -> Unit)?,
-        checkCancelled: () -> Unit
-    ) {
-        val finished = AtomicBoolean(false)
-        val failure = AtomicReference<Throwable?>()
-        val worker = Thread({
-            try {
-                OfficialSevenZipArchive.extractTo(archive, staging, password)
-            } catch (error: Throwable) {
-                failure.set(error)
-            } finally {
-                finished.set(true)
-            }
-        }, "subtitleedit-archive-extract")
-        worker.start()
-        try {
-            while (!finished.get()) {
-                checkCancelled()
-                onProgress?.invoke(
-                    ProgressPhase.EXTRACTING,
-                    stagedFileBytes(staging),
-                    totalBytes
-                )
-                try {
-                    Thread.sleep(EXTRACT_PROGRESS_INTERVAL_MS)
-                } catch (error: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    throw IOException("解压线程被中断", error)
-                }
-            }
-            checkCancelled()
-            onProgress?.invoke(
-                ProgressPhase.EXTRACTING,
-                stagedFileBytes(staging),
-                totalBytes
-            )
-            failure.get()?.let { throw it }
-        } catch (error: Throwable) {
-            if (!finished.get()) {
-                worker.interrupt()
-                deleteTreeNoFollow(staging)
-                runCatching { worker.join(EXTRACT_CANCEL_WAIT_MS) }
-            }
-            throw error
-        }
-    }
-
-    private fun stagedFileBytes(staging: File): Long {
-        var total = 0L
-        staging.walkTopDown().forEach { file ->
-            if (!file.isFile) return@forEach
-            val size = file.length().coerceAtLeast(0L)
-            total = if (size > 0L && total > Long.MAX_VALUE - size) {
-                Long.MAX_VALUE
-            } else {
-                total + size
-            }
-        }
-        return total
-    }
 
     private fun existsNoFollow(file: File): Boolean =
         Files.exists(file.toPath(), LinkOption.NOFOLLOW_LINKS)
@@ -1489,8 +1115,7 @@ object ArchiveManager {
     }
 
     private const val ARCHIVE_IO_BUFFER_SIZE = 64 * 1024
-    private const val EXTRACT_PROGRESS_INTERVAL_MS = 100L
-    private const val EXTRACT_CANCEL_WAIT_MS = 2_000L
+    private const val EXTRACT_PROGRESS_INTERVAL_NANOS = 100_000_000L
     private const val COMPRESS_PROGRESS_INTERVAL_MS = 100L
     private const val COMPRESS_CANCEL_WAIT_MS = 2_000L
 }

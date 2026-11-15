@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
 /** Runs one extraction attempt and reports its outcome to the orchestration layer. */
@@ -27,7 +28,7 @@ internal class ArchiveExtractionRunner(
         onCompleted: (ArchiveManager.ExtractResult) -> Unit,
         onCancelled: () -> Unit,
         onFailure: (Throwable) -> Unit,
-        onConflict: ((ArchiveManager.DestinationConflict) -> ArchiveManager.ConflictResolution)? = null
+        onConflict: (suspend (ArchiveManager.DestinationConflict) -> ArchiveManager.ConflictResolution)? = null
     ) {
         val progress = progressController.show("正在解压", "目标：${destination.absolutePath}", showCancel = true)
         val cancelledByUser = AtomicBoolean(false)
@@ -37,6 +38,10 @@ internal class ArchiveExtractionRunner(
                 val result = try {
                     withContext(Dispatchers.IO) {
                         val worker = currentCoroutineContext()
+                        val resolveConflict: ((ArchiveManager.DestinationConflict) -> ArchiveManager.ConflictResolution)? =
+                            onConflict?.let { resolve ->
+                                { conflict -> runBlocking(worker) { resolve(conflict) } }
+                            }
                         runCatching {
                             repository.extractArchive(
                                 archive = archive,
@@ -44,9 +49,9 @@ internal class ArchiveExtractionRunner(
                                 password = chars,
                                 conflictPolicy = conflictPolicy,
                                 conflictPolicies = conflictPolicies,
-                                conflictsPrechecked = true,
                                 onProgress = { phase, completed, total -> progressController.updateArchive(progress, phase, completed, total) },
-                                onConflict = onConflict,
+                                onConflict = resolveConflict,
+                                onCurrentFile = { file -> progressController.updateExtractionFile(progress, file.absolutePath) },
                                 checkCancelled = worker::ensureActive
                             )
                         }

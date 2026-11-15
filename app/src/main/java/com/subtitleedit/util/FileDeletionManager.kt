@@ -23,6 +23,7 @@ object FileDeletionManager {
         sources.forEach { source ->
             total += countEntries(source)
         }
+        coroutineContext.ensureActive()
         total = total.coerceAtLeast(1L)
         var completed = 0L
         var lastReportAt = 0L
@@ -78,6 +79,9 @@ object FileDeletionManager {
                 }
             }
         }
+        // Cancellation can arrive while the last child is being removed. Leave the
+        // parent in place instead of performing another deletion after that request.
+        coroutineContext.ensureActive()
         if (file.exists()) {
             if (file.delete()) {
                 onDeleted(file)

@@ -37,10 +37,7 @@ internal class ArchiveActionDialogController(
         val activity = activityProvider()
             ?: error("Archive action UI is not attached to an Activity")
         return ComposeDialogHost.show(activity) { _ ->
-            // The archive preview/test operation used a plain, non-cancelable
-            // AlertDialog in the XML implementation. Keep that presentation
-            // separate from the detailed progress dialog used by extraction
-            // and copy operations.
+            // Archive preview only lists entries. Tests use the cancelable task dialog.
             ArchiveBlockingProgressDialog(title, message)
         }
     }

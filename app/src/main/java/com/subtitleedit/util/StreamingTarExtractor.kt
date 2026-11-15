@@ -19,7 +19,8 @@ import java.nio.file.attribute.FileTime
 
 /**
  * A bounded, forward-only TAR reader.  The input stream remains owned by the caller.
- * Entries are written beneath [staging] and are never overwritten.
+ * By default entries are written beneath [staging] and are never overwritten. With [openOutput],
+ * the caller resolves each final destination as its header arrives and owns conflict decisions.
  */
 internal object StreamingTarExtractor {
     private const val BLOCK_SIZE = 512
@@ -41,6 +42,12 @@ internal object StreamingTarExtractor {
         val index: Int = -1
     )
 
+    /**
+     * [openOutput] receives directories as well as files; returning null skips a file's payload.
+     * The returned stream is closed before [onEntryComplete], including on cancellation or failure.
+     * A true completion means the whole entry was consumed, even when its output was skipped.
+     * Direct-output callers handle destination validation, timestamps and failed-output cleanup.
+     */
     fun extract(
         input: InputStream,
         staging: File,
@@ -51,6 +58,8 @@ internal object StreamingTarExtractor {
         shouldExtract: (Entry) -> Boolean = { true },
         checkCancelled: () -> Unit = {},
         onEntry: (Entry) -> Unit = {},
+        openOutput: ((Entry) -> OutputStream?)? = null,
+        onEntryComplete: (Entry, Boolean) -> Unit = { _, _ -> },
         onProgress: (consumedTarBytes: Long, expectedTarBytes: Long) -> Unit = { _, _ -> }
     ): List<Entry> {
         require(expectedTarBytes >= 0L) { "expectedTarBytes 不能为负数" }
@@ -65,7 +74,7 @@ internal object StreamingTarExtractor {
         if (validateExpectedSize && expectedTarBytes > maxTarBytes) {
             throw IOException("TAR 数据超过安全大小限制")
         }
-        val root = prepareStaging(staging)
+        val root = if (openOutput == null) prepareStaging(staging) else null
         val reader = TarReader(
             input,
             expectedTarBytes,
@@ -192,23 +201,33 @@ internal object StreamingTarExtractor {
             val index = entries.size
             val candidate = Entry(name, size, isDirectory, modified, null, index)
             onEntry(candidate)
-            val target = if (!isDirectory && shouldExtract(candidate)) {
-                root.resolve("payload-$index")
-            } else {
-                null
-            }
-            val entry = candidate.copy(stagedFile = target?.toFile())
-
-            if (isDirectory) {
-                reader.skipPayload(size)
-            } else {
-                if (target == null) {
-                    reader.skipPayload(size)
+            var entry = candidate
+            try {
+                if (openOutput != null) {
+                    val output = if (isDirectory || shouldExtract(candidate)) openOutput(candidate) else null
+                    output.use {
+                        // Directories also reach the resolver, but have no file payload to write.
+                        reader.readPayload(size, if (isDirectory) null else it, null)
+                    }
                 } else {
-                    writeFile(reader, target, size)
-                    setLastModified(target, modified)
+                    val target = if (!isDirectory && shouldExtract(candidate)) {
+                        checkNotNull(root).resolve("payload-$index")
+                    } else {
+                        null
+                    }
+                    entry = candidate.copy(stagedFile = target?.toFile())
+                    if (target == null) {
+                        reader.skipPayload(size)
+                    } else {
+                        writeFile(reader, target, size)
+                        setLastModified(target, modified)
+                    }
                 }
+            } catch (failure: Throwable) {
+                runCatching { onEntryComplete(entry, false) }.onFailure(failure::addSuppressed)
+                throw failure
             }
+            onEntryComplete(entry, true)
             entries += entry
         }
     }

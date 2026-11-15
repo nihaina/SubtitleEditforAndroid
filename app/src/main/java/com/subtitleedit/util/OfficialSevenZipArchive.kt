@@ -67,8 +67,10 @@ internal object OfficialSevenZipArchive {
     fun <T> withCompressedTarStream(
         file: File,
         password: CharArray?,
+        checkCancelled: () -> Unit = {},
         block: (InputStream, Long) -> T
     ): T {
+        checkCancelled()
         require(isCompressedTar(file)) { "文件不是受支持的 TAR 压缩流" }
         // Listing a compressed TAR first forces 7-Zip to decode the entire outer stream.  That
         // delays both the first progress callback and the first TAR header/conflict decision.
@@ -80,7 +82,7 @@ internal object OfficialSevenZipArchive {
         val producer = Thread({
             try {
                 writeDescriptor.use { output ->
-                    streamCompressedTar(file, password, output.fd)
+                    streamCompressedTar(file, password, output.fd, checkCancelled)
                 }
             } catch (error: Throwable) {
                 producerFailure.set(error)
@@ -116,6 +118,7 @@ internal object OfficialSevenZipArchive {
 
         val consumerError = consumerResult.exceptionOrNull()
         val producerError = producerFailure.get()
+        checkCancelled()
         if (consumerError != null) {
             if (producerError is ArchivePasswordRequiredException) {
                 producerError.addSuppressed(consumerError)
@@ -128,7 +131,7 @@ internal object OfficialSevenZipArchive {
         return consumerResult.getOrThrow()
     }
 
-    private fun streamCompressedTar(file: File, password: CharArray?, outputFd: Int) {
+    private fun streamCompressedTar(file: File, password: CharArray?, outputFd: Int, checkCancelled: () -> Unit) {
         val capture = File.createTempFile("subtitleedit-7z-stream-", ".txt")
         try {
             val result = OfficialSevenZip.executeToFd(
@@ -136,7 +139,8 @@ internal object OfficialSevenZipArchive {
                     "x", "-so", "-y", "-bd", "-bso0", "-bsp0", "-sccUTF-8"
                 ) + passwordArg(password) + file.absolutePath,
                 stdoutFd = outputFd,
-                capturePath = capture.absolutePath
+                capturePath = capture.absolutePath,
+                checkCancelled = checkCancelled
             )
             if (result != 0) {
                 if (isPasswordFailure(capture)) {
@@ -187,28 +191,6 @@ internal object OfficialSevenZipArchive {
             throw error
         }
         return elevated
-    }
-
-    fun test(file: File, password: CharArray?, entries: List<ArchiveManager.EntryInfo>): Long {
-        if (isVolume(file)) return withExpandedVolume(file, password) { test(it, password, entries) }
-        if (isCompressedTar(file)) return withExpandedTar(file, password) { test(it, null, entries) }
-        val capture = File.createTempFile("subtitleedit-7z-test-", ".txt")
-        try {
-            val result = run(
-                listOf("t", "-y", "-bd", "-bso0", "-bsp0", "-sccUTF-8") +
-                    passwordArg(password) + file.absolutePath,
-                capture
-            )
-            if (result != 0) {
-                if (isPasswordFailure(capture)) {
-                    throw ArchivePasswordRequiredException(passwordErrorMessage(password))
-                }
-                throw java.io.IOException("7-Zip 压缩包测试失败（错误码 $result）")
-            }
-            return entries.sumOf { it.size.coerceAtLeast(0L) }
-        } finally {
-            capture.delete()
-        }
     }
 
     fun extractTo(file: File, staging: File, password: CharArray?) {

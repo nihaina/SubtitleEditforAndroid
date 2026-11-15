@@ -4,8 +4,10 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
+import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -579,6 +581,159 @@ class StreamingTarExtractorTest {
         } catch (e: IllegalStateException) {
             assertEquals("已取消", e.message)
         }
+    }
+
+    @Test
+    fun extract_directOutput_resolvesEachDestinationAfterPreviousFileIsWritten() {
+        val destination = temporaryFolder.newFolder("direct-output")
+        val staging = File(destination, "unused-staging")
+        val events = mutableListOf<String>()
+        val tar = TarBuilder()
+            .file("first.txt", "first payload".toByteArray())
+            .directory("nested/")
+            .file("nested/second.txt", "second payload".toByteArray())
+            .build()
+
+        val entries = StreamingTarExtractor.extract(
+            input = ByteArrayInputStream(tar),
+            staging = staging,
+            expectedTarBytes = tar.size.toLong(),
+            maxEntries = 8,
+            maxBytes = 1L shl 20,
+            openOutput = { entry ->
+                events += "open:${entry.name}"
+                if (entry.name == "nested/second.txt") {
+                    // A conflict resolver can inspect the current destination immediately;
+                    // the earlier output already exists before the next header is handled.
+                    assertEquals("first payload", File(destination, "first.txt").readText())
+                    assertEquals("existing second", File(destination, entry.name).readText())
+                }
+                val target = File(destination, entry.name)
+                if (entry.isDirectory) {
+                    target.mkdir()
+                    File(target, "second.txt").writeText("existing second")
+                    null
+                } else {
+                    val resolved = if (target.exists()) File(target.parentFile, "second (1).txt") else target
+                    resolved.outputStream()
+                }
+            },
+            onEntryComplete = { entry, success ->
+                assertTrue(success)
+                events += "complete:${entry.name}"
+            }
+        )
+
+        assertFalse(staging.exists())
+        assertTrue(entries.all { it.stagedFile == null })
+        assertEquals("second payload", File(destination, "nested/second (1).txt").readText())
+        assertEquals("existing second", File(destination, "nested/second.txt").readText())
+        assertEquals(
+            listOf(
+                "open:first.txt", "complete:first.txt", "open:nested", "complete:nested",
+                "open:nested/second.txt", "complete:nested/second.txt"
+            ),
+            events
+        )
+    }
+
+    @Test
+    fun extract_directOutput_nullStreamSkipsFileAndContinues() {
+        val destination = temporaryFolder.newFolder("direct-skip")
+        val existing = File(destination, "skip.txt").apply { writeText("existing") }
+        val tar = TarBuilder()
+            .file("skip.txt", ByteArray(1000) { 7 })
+            .file("keep.txt", "kept".toByteArray())
+            .build()
+        val completed = mutableListOf<Pair<String, Boolean>>()
+
+        val entries = StreamingTarExtractor.extract(
+            input = ByteArrayInputStream(tar),
+            staging = File(destination, "unused-staging"),
+            expectedTarBytes = tar.size.toLong(),
+            maxEntries = 8,
+            maxBytes = 1L shl 20,
+            openOutput = { entry ->
+                if (entry.name == "skip.txt") null else File(destination, entry.name).outputStream()
+            },
+            onEntryComplete = { entry, success -> completed += entry.name to success }
+        )
+
+        assertEquals("existing", existing.readText())
+        assertEquals("kept", File(destination, "keep.txt").readText())
+        assertEquals(listOf("skip.txt" to true, "keep.txt" to true), completed)
+        assertEquals(2, entries.size)
+    }
+
+    @Test
+    fun extract_directOutput_truncatedPayloadClosesStreamBeforeFailureCallback() {
+        val tar = TarBuilder()
+            .rawHeader(header("truncated.bin", size = 1024L))
+            .payload(ByteArray(5))
+            .buildWithoutTrailer()
+        var closed = false
+        val completions = mutableListOf<Boolean>()
+        val output = object : ByteArrayOutputStream() {
+            override fun close() {
+                closed = true
+                super.close()
+            }
+        }
+
+        val failure = runCatching {
+            StreamingTarExtractor.extract(
+                input = ByteArrayInputStream(tar),
+                staging = File(temporaryFolder.root, "unused-staging"),
+                expectedTarBytes = 0L,
+                maxEntries = 8,
+                maxBytes = 1L shl 20,
+                openOutput = { output },
+                onEntryComplete = { _, success ->
+                    assertTrue(closed)
+                    completions += success
+                }
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is IOException)
+        assertTrue(failure!!.message.orEmpty().contains("TAR 数据提前结束"))
+        assertTrue(closed)
+        assertEquals(listOf(false), completions)
+    }
+
+    @Test
+    fun extract_directOutput_cancelledPayloadClosesStreamAndPreservesOriginalFailure() {
+        val tar = TarBuilder().file("cancelled.bin", ByteArray(1000)).build()
+        var opened = false
+        var closed = false
+        var failedEntry: String? = null
+        val output = object : OutputStream() {
+            override fun write(value: Int) = Unit
+            override fun close() { closed = true }
+        }
+
+        val failure = runCatching {
+            StreamingTarExtractor.extract(
+                input = ByteArrayInputStream(tar),
+                staging = File(temporaryFolder.root, "unused-staging"),
+                expectedTarBytes = tar.size.toLong(),
+                maxEntries = 8,
+                maxBytes = 1L shl 20,
+                checkCancelled = { if (opened) throw IllegalStateException("cancelled") },
+                openOutput = { opened = true; output },
+                onEntryComplete = { entry, success ->
+                    assertTrue(closed)
+                    assertFalse(success)
+                    failedEntry = entry.name
+                    throw IOException("cleanup failed")
+                }
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertEquals("cancelled", failure!!.message)
+        assertEquals("cancelled.bin", failedEntry)
+        assertEquals("cleanup failed", failure.suppressed.single().message)
     }
 
     // ==================== 辅助 ====================

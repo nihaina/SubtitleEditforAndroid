@@ -84,9 +84,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 
 /**
  * 主界面 - 文件浏览器
@@ -100,7 +97,6 @@ class MainActivity : AppComposeActivity() {
         // Long file tasks outlive configuration changes; UI callbacks resolve
         // the Activity that is currently attached instead of retaining the old one.
         var activeInstance: WeakReference<MainActivity>? = null
-        const val CONFLICT_WAIT_INTERVAL_MS = 250L
         const val BACK_EXIT_CONFIRM_WINDOW_MS = 2_000L
     }
 
@@ -114,6 +110,7 @@ class MainActivity : AppComposeActivity() {
     private lateinit var archiveProgressDialogController: ArchiveProgressDialogController
     private lateinit var archiveCompressionController: ArchiveCompressionController
     private lateinit var archiveExtractionRunner: ArchiveExtractionRunner
+    private lateinit var archiveTestRunner: ArchiveTestRunner
     private lateinit var archiveActionDialogController: ArchiveActionDialogController
     private val stateModel: MainViewModel by viewModels()
 
@@ -221,6 +218,11 @@ class MainActivity : AppComposeActivity() {
             }
         )
         archiveExtractionRunner = ArchiveExtractionRunner(
+            scope = stateModel.viewModelScope,
+            repository = archiveRepository,
+            progressController = archiveProgressDialogController
+        )
+        archiveTestRunner = ArchiveTestRunner(
             scope = stateModel.viewModelScope,
             repository = archiveRepository,
             progressController = archiveProgressDialogController
@@ -1223,47 +1225,66 @@ class MainActivity : AppComposeActivity() {
         dismissMainDialog()
         val progress = showArchiveProgress(
             title = "正在删除",
-            message = "正在准备删除..."
+            message = "正在准备删除...",
+            showCancel = true
         )
-        stateModel.viewModelScope.launch {
+        val cancelledByUser = AtomicBoolean(false)
+        val deletionJob = stateModel.viewModelScope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
-                    val cacheSnapshots = files.associateWith { file ->
-                        val mediaFiles = when {
-                            isAudioOrVideoFile(file) -> listOf(file)
-                            file.isDirectory -> file.walkTopDown().filter(::isAudioOrVideoFile).toList()
-                            else -> emptyList()
+                    val worker = kotlin.coroutines.coroutineContext
+                    val cacheSnapshots = linkedMapOf<File, MediaCacheCleaner.CacheSnapshot>()
+                    try {
+                        files.forEach { file ->
+                            worker.ensureActive()
+                            val mediaFiles = when {
+                                isAudioOrVideoFile(file) -> sequenceOf(file)
+                                file.isDirectory -> file.walkTopDown().onEach { worker.ensureActive() }
+                                    .filter(::isAudioOrVideoFile)
+                                else -> emptySequence()
+                            }
+                            mediaFiles.forEach { mediaFile ->
+                                worker.ensureActive()
+                                cacheSnapshots[mediaFile] = MediaCacheCleaner.snapshotForMedia(
+                                    mediaFiles = listOf(mediaFile),
+                                    kinds = MediaCacheCleaner.Kind.values().asList(),
+                                    appCacheDir = cacheDir
+                                )
+                            }
                         }
-                        mediaFiles.takeIf { it.isNotEmpty() }?.let {
-                            MediaCacheCleaner.snapshotForMedia(
-                                mediaFiles = it,
-                                kinds = MediaCacheCleaner.Kind.values().asList(),
-                                appCacheDir = cacheDir
-                            )
+                        FileDeletionManager.delete(files) { message, completed, total ->
+                            if (!cancelledByUser.get()) updateFileDeletionProgress(progress, message, completed, total)
                         }
-                    }
-                    FileDeletionManager.delete(files) { message, completed, total ->
-                        updateFileDeletionProgress(progress, message, completed, total)
-                    }.also { deletionResult ->
-                        deletionResult.deletedSources.forEach { source ->
-                            cacheSnapshots[source]?.let(MediaCacheCleaner::clear)
+                    } finally {
+                        // Preserve caches for surviving media in a partially deleted directory.
+                        cacheSnapshots.forEach { (source, snapshot) ->
+                            if (!source.exists()) MediaCacheCleaner.clear(snapshot)
                         }
                     }
                 }
                 if (result.allDeleted) {
-                    exitSelectionMode()
-                    stateModel.documentState.currentDirectory?.let(::loadDirectory)
                     showShortToast("已删除")
                 } else {
                     showShortToast("删除失败")
                 }
             } catch (error: CancellationException) {
-                throw error
+                if (!cancelledByUser.get()) throw error
+                showShortToast("已取消删除")
             } catch (error: Throwable) {
                 showShortToast("删除失败：${error.message ?: "未知错误"}")
             } finally {
                 progress.dialog.dismiss()
+                val current = activeInstance?.get()?.takeIf { it.stateModel === stateModel }
+                current?.let { activity ->
+                    activity.exitSelectionMode()
+                    activity.stateModel.documentState.currentDirectory?.let(activity::loadDirectory)
+                }
             }
+        }
+        progress.setCancelAction {
+            progress.showCancelling()
+            cancelledByUser.set(true)
+            deletionJob.cancel(CancellationException("用户取消删除"))
         }
     }
 
@@ -1684,6 +1705,31 @@ class MainActivity : AppComposeActivity() {
             )
             return
         }
+        if (action == ArchiveAction.TEST) {
+            archiveTestRunner.run(
+                archive = archive,
+                password = password,
+                onCompleted = { tested ->
+                    activeInstance?.get()?.mainDialog = MainActivityDialogUi.Message(
+                        title = "解压测试通过",
+                        message = "压缩包完整可读。\n\n条目：${tested.entryCount}\n解压大小：${FileUtils.formatFileSize(tested.totalBytes)}"
+                    )
+                },
+                onCancelled = { activeInstance?.get()?.showShortToast("已取消压缩包测试") },
+                onFailure = { error ->
+                    activeInstance?.get()?.let { current ->
+                        if (ArchiveErrorPolicy.needsPassword(archive, error, password != null)) {
+                            current.showArchivePasswordDialog(archive, { entered ->
+                                current.runArchiveAction(archive, action, entered)
+                            })
+                        } else {
+                            current.showOperationError("操作失败", error)
+                        }
+                    }
+                }
+            )
+            return
+        }
         val title = ArchiveActionUiPolicy.progressTitle(action)
         val progress = showBlockingProgress(title, archive.name)
         stateModel.viewModelScope.launch {
@@ -1696,7 +1742,7 @@ class MainActivity : AppComposeActivity() {
                                 val entries = archiveRepository.listEntries(archive, passwordChars)
                                 ArchivePreviewCache.write(this@MainActivity, entries)
                             }
-                            ArchiveAction.TEST -> archiveRepository.testArchive(archive, passwordChars)
+                            ArchiveAction.TEST -> error("压缩包测试应使用可取消任务")
                             ArchiveAction.EXTRACT_CURRENT -> error("不应直接执行解压操作")
                         }
                     }
@@ -1712,13 +1758,7 @@ class MainActivity : AppComposeActivity() {
                         ArchivePreviewActivity.createIntent(this@MainActivity, archive.name, value as File)
                     )
                     ArchiveAction.EXTRACT_CURRENT -> Unit
-                    ArchiveAction.TEST -> {
-                        val tested = value as ArchiveManager.TestResult
-                        mainDialog = MainActivityDialogUi.Message(
-                            title = "解压测试通过",
-                            message = "压缩包完整可读。\n\n条目：${tested.entryCount}\n解压大小：${FileUtils.formatFileSize(tested.totalBytes)}"
-                        )
-                    }
+                    ArchiveAction.TEST -> Unit
                 }
             }.onFailure { error ->
                 if (ArchiveErrorPolicy.needsPassword(archive, error, password != null)) {
@@ -1761,122 +1801,15 @@ class MainActivity : AppComposeActivity() {
         onCompleted: () -> Unit,
         onCancelled: () -> Unit = {}
     ) {
-        if (!isCurrentTaskHost()) return
-        if (archiveRepository.requiresStreamingConflictResolution(archive)) {
-            executeArchiveExtraction(
-                archive = archive,
-                destination = destination,
-                password = password,
-                conflictPolicy = ArchiveManager.ConflictPolicy.FAIL,
-                conflictPolicies = emptyMap(),
-                onCompleted = onCompleted,
-                onCancelled = onCancelled,
-                onConflict = ::awaitArchiveConflictResolution
-            )
-            return
-        }
-        val scanProgress = showArchiveProgress(
-            "正在解压",
-            "正在检查压缩包..."
-        )
-        stateModel.viewModelScope.launch {
-            val passwordChars = password?.toCharArray()
-            val result = try {
-                withContext(Dispatchers.IO) {
-                    runCatching {
-                        archiveRepository.findDestinationConflicts(
-                            archive = archive,
-                            destination = destination,
-                            password = passwordChars,
-                            onProgress = { _, completed, total ->
-                                updateArchiveProgress(
-                                    scanProgress,
-                                    ArchiveManager.ProgressPhase.SCANNING,
-                                    completed,
-                                    total
-                                )
-                            }
-                        )
-                    }
-                }
-            } finally {
-                passwordChars?.fill('\u0000')
-                scanProgress.dialog.dismiss()
-            }
-            result.onSuccess { conflicts ->
-                if (conflicts.isEmpty()) {
-                    executeArchiveExtraction(
-                        archive,
-                        destination,
-                        password,
-                        ArchiveManager.ConflictPolicy.FAIL,
-                        emptyMap(),
-                        onCompleted,
-                        onCancelled
-                    )
-                } else {
-                    resolveArchiveConflictChoices(
-                        archive,
-                        destination,
-                        password,
-                        conflicts,
-                        onCompleted,
-                        onCancelled = onCancelled
-                    )
-                }
-            }.onFailure { error ->
-                if (ArchiveErrorPolicy.needsPassword(archive, error, password != null)) {
-                    showArchivePasswordDialog(
-                        archive = archive,
-                        onPassword = { enteredPassword ->
-                            prepareArchiveExtraction(
-                                archive,
-                                destination,
-                                enteredPassword,
-                                onCompleted,
-                                onCancelled
-                            )
-                        },
-                        onCancelled = onCancelled
-                    )
-                } else {
-                    onCancelled()
-                    showOperationError("解压失败", error)
-                }
-            }
-        }
-    }
-
-    private fun resolveArchiveConflictChoices(
-        archive: File,
-        destination: File,
-        password: String?,
-        conflicts: List<ArchiveManager.DestinationConflict>,
-        onCompleted: () -> Unit,
-        onCancelled: () -> Unit = {},
-        index: Int = 0,
-        policies: MutableMap<String, ArchiveManager.ConflictPolicy> = linkedMapOf()
-    ) {
-        ArchiveConflictCoordinator(
-            showConflict = { conflict, onSelected, cancelled ->
-                showExtractionConflictDialog(conflict, onSelected, cancelled)
-            }
-        ).collect(conflicts, onCancelled) { policy, selectedPolicies ->
-            executeArchiveExtraction(
-                archive, destination, password, policy, selectedPolicies, onCompleted, onCancelled
-            )
-        }
+        executeArchiveExtraction(archive, destination, password, onCompleted, onCancelled)
     }
 
     private fun executeArchiveExtraction(
         archive: File,
         destination: File,
         password: String?,
-        conflictPolicy: ArchiveManager.ConflictPolicy,
-        conflictPolicies: Map<String, ArchiveManager.ConflictPolicy>,
         onCompleted: () -> Unit,
-        onCancelled: () -> Unit = {},
-        onConflict: ((ArchiveManager.DestinationConflict) -> ArchiveManager.ConflictResolution)? = null
+        onCancelled: () -> Unit = {}
     ) {
         if (!isCurrentTaskHost()) {
             onCancelled()
@@ -1886,19 +1819,17 @@ class MainActivity : AppComposeActivity() {
             archive = archive,
             destination = destination,
             password = password,
-            conflictPolicy = conflictPolicy,
-            conflictPolicies = conflictPolicies,
+            conflictPolicy = ArchiveManager.ConflictPolicy.FAIL,
+            conflictPolicies = emptyMap(),
             onCompleted = {
                 showExtractionCompleted(it)
                 onCompleted()
             },
             onCancelled = onCancelled,
-            onConflict = onConflict,
+            onConflict = ::awaitArchiveConflictResolution,
             onFailure = { error ->
                 when {
                     ArchiveErrorPolicy.isCancelled(error) -> onCancelled()
-                    ArchiveErrorPolicy.isDestinationConflict(error) ->
-                        prepareArchiveExtraction(archive, destination, password, onCompleted, onCancelled)
                     ArchiveErrorPolicy.needsPassword(archive, error, password != null) ->
                         showArchivePasswordDialog(archive, { entered ->
                             prepareArchiveExtraction(archive, destination, entered, onCompleted, onCancelled)
@@ -1912,56 +1843,9 @@ class MainActivity : AppComposeActivity() {
         )
     }
 
-    private fun awaitArchiveConflictResolution(
+    private suspend fun awaitArchiveConflictResolution(
         conflict: ArchiveManager.DestinationConflict
-    ): ArchiveManager.ConflictResolution {
-        val decision = AtomicReference<ArchiveManager.ConflictResolution?>()
-        val cancelled = AtomicBoolean(false)
-        val completed = CountDownLatch(1)
-        runOnUiThread {
-            if (isFinishing || isDestroyed) {
-                cancelled.set(true)
-                completed.countDown()
-                return@runOnUiThread
-            }
-            showExtractionConflictDialog(
-                conflict = conflict,
-                onPolicySelected = { policy, applyToAll ->
-                    decision.set(ArchiveManager.ConflictResolution(policy, applyToAll))
-                    completed.countDown()
-                },
-                onCancelled = {
-                    cancelled.set(true)
-                    completed.countDown()
-                }
-            )
-        }
-
-        try {
-            while (!completed.await(CONFLICT_WAIT_INTERVAL_MS, TimeUnit.MILLISECONDS)) {
-                if (isFinishing || isDestroyed || Thread.currentThread().isInterrupted) {
-                    throw CancellationException("解压已取消")
-                }
-            }
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-            throw CancellationException("解压已取消")
-        }
-        if (cancelled.get()) throw CancellationException("用户取消解压")
-        return decision.get() ?: throw CancellationException("解压已取消")
-    }
-
-    private fun showExtractionConflictDialog(
-        conflict: ArchiveManager.DestinationConflict,
-        onPolicySelected: (ArchiveManager.ConflictPolicy, Boolean) -> Unit,
-        onCancelled: () -> Unit = {}
-    ) {
-        if (!isCurrentTaskHost()) {
-            onCancelled()
-            return
-        }
-        archiveConflictDialogController.show(conflict, onPolicySelected, onCancelled)
-    }
+    ): ArchiveManager.ConflictResolution = archiveConflictDialogController.awaitResolution(conflict)
 
     private fun showExtractionCompleted(result: ArchiveManager.ExtractResult) {
         if (!isCurrentTaskHost()) return
@@ -1994,13 +1878,6 @@ class MainActivity : AppComposeActivity() {
         showCancel: Boolean = false
     ): ArchiveProgressDialogController.ProgressUi =
         archiveProgressDialogController.show(title, message, showCancel)
-
-    private fun updateArchiveProgress(
-        progress: ArchiveProgressDialogController.ProgressUi,
-        phase: ArchiveManager.ProgressPhase,
-        completed: Long,
-        total: Long
-    ) = archiveProgressDialogController.updateArchive(progress, phase, completed, total)
 
     private fun showOperationError(title: String, error: Throwable) {
         if (activeInstance?.get() === this) {

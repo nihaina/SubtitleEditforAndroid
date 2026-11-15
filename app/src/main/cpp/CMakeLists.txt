@@ -191,7 +191,7 @@ set(SEVENZIP_REQUIRED_WIN
     "${SEVENZIP_DIR}/CPP/Windows/Synchronization.cpp")
 list(APPEND SEVENZIP_SOURCES ${SEVENZIP_REQUIRED_WIN})
 
-add_library(subtitleedit_7zip SHARED ${SEVENZIP_SOURCES} official7zip_jni.cpp)
+add_library(subtitleedit_7zip SHARED ${SEVENZIP_SOURCES} official7zip_jni.cpp official7zip_extract.cpp)
 target_include_directories(subtitleedit_7zip PRIVATE
     "${SEVENZIP_DIR}/C" "${SEVENZIP_DIR}/CPP" "${SEVENZIP_DIR}/CPP/Common"
     "${SEVENZIP_DIR}/CPP/Windows" "${SEVENZIP_DIR}/CPP/myWindows"

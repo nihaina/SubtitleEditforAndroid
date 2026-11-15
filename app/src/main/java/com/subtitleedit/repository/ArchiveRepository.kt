@@ -14,7 +14,6 @@ internal interface ArchiveRepository {
 
     fun isRecognizedArchive(file: File): Boolean
     fun isSupportedArchive(file: File): Boolean
-    fun requiresStreamingConflictResolution(file: File): Boolean
 
     fun createArchive(
         sources: List<File>,
@@ -39,16 +38,10 @@ internal interface ArchiveRepository {
     fun testArchive(
         archive: File,
         password: CharArray? = null,
-        limits: ArchiveManager.ExtractionLimits = ArchiveManager.ExtractionLimits()
-    ): ArchiveManager.TestResult
-
-    fun findDestinationConflicts(
-        archive: File,
-        destination: File,
-        password: CharArray?,
         limits: ArchiveManager.ExtractionLimits = ArchiveManager.ExtractionLimits(),
-        onProgress: ((ArchiveManager.ProgressPhase, Long, Long) -> Unit)? = null
-    ): List<ArchiveManager.DestinationConflict>
+        checkCancelled: () -> Unit = {},
+        onProgress: (completed: Long, total: Long) -> Unit = { _, _ -> }
+    ): ArchiveManager.TestResult
 
     fun extractArchive(
         archive: File,
@@ -56,10 +49,10 @@ internal interface ArchiveRepository {
         password: CharArray? = null,
         conflictPolicy: ArchiveManager.ConflictPolicy = ArchiveManager.ConflictPolicy.FAIL,
         conflictPolicies: Map<String, ArchiveManager.ConflictPolicy> = emptyMap(),
-        conflictsPrechecked: Boolean = false,
         limits: ArchiveManager.ExtractionLimits = ArchiveManager.ExtractionLimits(),
         onProgress: ((ArchiveManager.ProgressPhase, Long, Long) -> Unit)? = null,
         onConflict: ((ArchiveManager.DestinationConflict) -> ArchiveManager.ConflictResolution)? = null,
+        onCurrentFile: (File) -> Unit = {},
         checkCancelled: () -> Unit = {}
     ): ArchiveManager.ExtractResult
 }

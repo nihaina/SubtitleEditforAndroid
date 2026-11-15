@@ -80,8 +80,13 @@ internal class ArchiveProgressDialogController(
         total: Long
     ) {
         runOnUiThread {
-            if (!progress.dialog.isShowing) return@runOnUiThread
-            val message = ArchiveProgressPolicy.phaseLabel(phase)
+            if (!progress.dialog.isShowing || !progress.state.value.cancelEnabled) return@runOnUiThread
+            val message = if (phase == ArchiveManager.ProgressPhase.EXTRACTING) {
+                progress.state.value.currentFilePath?.let { "正在解压 $it" }
+                    ?: ArchiveProgressPolicy.phaseLabel(phase)
+            } else {
+                ArchiveProgressPolicy.phaseLabel(phase)
+            }
             if (total > 0L) {
                 val ratio = completed.coerceIn(0L, total).toDouble() / total.toDouble()
                 val percent = (ratio * 100.0).toInt().coerceIn(0, 100)
@@ -97,7 +102,7 @@ internal class ArchiveProgressDialogController(
                     percentLabel = label
                 )
             } else {
-                val label = if (phase == ArchiveManager.ProgressPhase.EXTRACTING) {
+                val label = if (phase != ArchiveManager.ProgressPhase.SCANNING) {
                     if (completed > 0L) "已处理 ${FileUtils.formatFileSize(completed)}" else "正在读取..."
                 } else {
                     null
@@ -109,6 +114,16 @@ internal class ArchiveProgressDialogController(
                     percentLabel = label
                 )
             }
+        }
+    }
+
+    fun updateExtractionFile(progress: ProgressUi, path: String) {
+        runOnUiThread {
+            if (!progress.dialog.isShowing || !progress.state.value.cancelEnabled) return@runOnUiThread
+            progress.state.value = progress.state.value.copy(
+                currentFilePath = path,
+                message = "正在解压 $path"
+            )
         }
     }
 
@@ -160,7 +175,7 @@ internal class ArchiveProgressDialogController(
 
     fun updateFileDeletion(progress: ProgressUi, message: String, completed: Long, total: Long) {
         runOnUiThread {
-            if (!progress.dialog.isShowing) return@runOnUiThread
+            if (!progress.dialog.isShowing || !progress.state.value.cancelEnabled) return@runOnUiThread
             if (total > 0L) {
                 val ratio = completed.coerceIn(0L, total).toDouble() / total.toDouble()
                 val percent = (ratio * 100.0).toInt().coerceIn(0, 100)
@@ -202,6 +217,7 @@ internal class ArchiveProgressDialogController(
 internal data class ArchiveProgressDialogState(
     val title: String,
     val message: String,
+    val currentFilePath: String? = null,
     val indeterminate: Boolean = true,
     val progress: Float? = null,
     val percentLabel: String? = null,
