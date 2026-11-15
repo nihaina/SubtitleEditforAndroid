@@ -5,4 +5,5 @@
     <string name="player_lyrics_show">显示歌词</string>
     <string name="player_lyrics_empty">暂无歌词</string>
     <string name="player_lyrics_select_subtitle">选择字幕</string>
+    <string name="player_lyrics_restore_controls">显示播放控件</string>
 </resources>

@@ -14,6 +14,8 @@ internal data class PlayerTrack(
 
 internal enum class PlayerPlayMode { SEQUENCE, REPEAT_ONE, REPEAT_ALL, SHUFFLE }
 
+internal enum class PlayerSubtitleAlignment { LEFT, CENTER, RIGHT }
+
 internal data class PlayerBookmark(
     val positionMs: Long,
     val createdAtMs: Long,

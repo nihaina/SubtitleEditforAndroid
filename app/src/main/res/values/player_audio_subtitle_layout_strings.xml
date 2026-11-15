@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_audio_subtitle_line_spacing">行间距 %1$d dp</string>
+    <string name="player_audio_subtitle_alignment">字幕对齐</string>
+    <string name="player_audio_subtitle_align_left">左对齐</string>
+    <string name="player_audio_subtitle_align_center">居中</string>
+    <string name="player_audio_subtitle_align_right">右对齐</string>
+</resources>

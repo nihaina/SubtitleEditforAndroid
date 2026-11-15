@@ -41,6 +41,17 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) {
         set(value) = prefs.edit().putInt(KEY_SUB_SIZE,
             value.coerceIn(MIN_SUBTITLE_FONT_SIZE, MAX_SUBTITLE_FONT_SIZE)).apply()
 
+    var audioSubtitleLineSpacing: Int
+        get() = prefs.getInt(KEY_AUDIO_SUB_SPACING, DEFAULT_AUDIO_SUBTITLE_LINE_SPACING)
+            .coerceIn(MIN_AUDIO_SUBTITLE_LINE_SPACING, MAX_AUDIO_SUBTITLE_LINE_SPACING)
+        set(value) = prefs.edit().putInt(KEY_AUDIO_SUB_SPACING,
+            value.coerceIn(MIN_AUDIO_SUBTITLE_LINE_SPACING, MAX_AUDIO_SUBTITLE_LINE_SPACING)).apply()
+
+    var audioSubtitleAlignment: PlayerSubtitleAlignment
+        get() = runCatching { PlayerSubtitleAlignment.valueOf(prefs.getString(KEY_AUDIO_SUB_ALIGNMENT, "").orEmpty()) }
+            .getOrDefault(PlayerSubtitleAlignment.CENTER)
+        set(value) = prefs.edit().putString(KEY_AUDIO_SUB_ALIGNMENT, value.name).apply()
+
     var resumePlayback: Boolean
         get() = prefs.getBoolean(KEY_RESUME, true)
         set(value) = prefs.edit().putBoolean(KEY_RESUME, value).apply()
@@ -59,6 +70,9 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) {
         const val DEFAULT_SUBTITLE_FONT_SIZE = 20
         const val MIN_SUBTITLE_FONT_SIZE = 10
         const val MAX_SUBTITLE_FONT_SIZE = 60
+        const val DEFAULT_AUDIO_SUBTITLE_LINE_SPACING = 24
+        const val MIN_AUDIO_SUBTITLE_LINE_SPACING = 0
+        const val MAX_AUDIO_SUBTITLE_LINE_SPACING = 48
         const val MIN_SPEED = 0.25f
         const val MAX_SPEED = 4f
         val SPEED_STEPS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f, 4f)
@@ -69,6 +83,8 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) {
         private const val KEY_EQ_ENABLED = "eq_enabled"
         private const val KEY_EQ_GAINS = "eq_gains"
         private const val KEY_SUB_SIZE = "subtitle_font_size"
+        private const val KEY_AUDIO_SUB_SPACING = "audio_subtitle_line_spacing"
+        private const val KEY_AUDIO_SUB_ALIGNMENT = "audio_subtitle_alignment"
         private const val KEY_RESUME = "resume_playback"
         private const val KEY_LOUDNESS_WAVEFORM = "show_loudness_waveform"
         private const val KEY_LAST_POS = "last_position_"

@@ -45,6 +45,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
@@ -98,6 +99,8 @@ internal fun PlayerScreen(
     val currentTopOverlay by rememberUpdatedState(topOverlayBounds)
     val currentBottomOverlay by rememberUpdatedState(bottomOverlayBounds)
     val currentGestureOrigin by rememberUpdatedState(gestureOrigin)
+    var lyricScrollActivity by remember(state.currentTrack?.path) { mutableStateOf(0L) }
+    LaunchedEffect(state.controlsVisible, state.lyricsVisible) { lyricScrollActivity = 0L }
     BackHandler(enabled = state.lyricsVisible && !state.isVideo && state.panel == PlayerPanel.NONE &&
         !state.showTrackInfoDialog && !state.showPlaylistPickerDialog) {
         viewModel.setLyricsVisible(false)
@@ -183,9 +186,9 @@ internal fun PlayerScreen(
                 Box(Modifier.fillMaxSize().background(pageGradient), contentAlignment = Alignment.Center) {
                     key(state.currentTrack?.path) {
                         if (state.lyricsVisible) {
-                            val topPadding = topOverlayBounds?.let { with(density) { (it.bottom - gestureOrigin.y).toDp() } }
+                            val topPadding = if (!state.controlsVisible) 0.dp else topOverlayBounds?.let { with(density) { (it.bottom - gestureOrigin.y).toDp() } }
                                 ?: if (state.controlsVisible) 64.dp else 0.dp
-                            val bottomPadding = bottomOverlayBounds?.let {
+                            val bottomPadding = if (!state.controlsVisible) 0.dp else bottomOverlayBounds?.let {
                                 with(density) { (playerHeightPx - it.top + gestureOrigin.y).coerceAtLeast(0f).toDp() }
                             } ?: if (state.controlsVisible) (if (landscape) 132.dp else 204.dp) else 0.dp
                             key(state.selectedSubtitleId) {
@@ -195,8 +198,13 @@ internal fun PlayerScreen(
                                     subtitleText = state.subtitleText,
                                     loading = state.lyricsLoading,
                                     fontSize = state.subtitleFontSize,
+                                    lineSpacing = state.audioSubtitleLineSpacing,
+                                    alignment = state.audioSubtitleAlignment,
                                     onSeek = { viewModel.seekTo(it) },
                                     onOpenSubtitles = { viewModel.openPanel(PlayerPanel.SUBTITLE) },
+                                    onUserScroll = {
+                                        if (!viewModel.state.value.controlsVisible) lyricScrollActivity++
+                                    },
                                     modifier = Modifier.fillMaxSize().padding(
                                         top = topPadding.coerceAtLeast(0.dp), bottom = bottomPadding
                                     )
@@ -215,6 +223,8 @@ internal fun PlayerScreen(
             PlayerSubtitleOverlay(
                 text = if (state.isVideo || state.lyricsVisible) "" else state.subtitleText,
                 fontSize = state.subtitleFontSize,
+                lineSpacing = state.audioSubtitleLineSpacing,
+                alignment = state.audioSubtitleAlignment,
                 modifier = Modifier.align(Alignment.Center).padding(bottom = if (landscape) 64.dp else 260.dp)
             )
 
@@ -223,6 +233,14 @@ internal fun PlayerScreen(
                 onDismiss = viewModel::clearHint,
                 modifier = Modifier.align(Alignment.Center)
             )
+
+            if (!state.isVideo && state.lyricsVisible && !state.controlsVisible && state.panel == PlayerPanel.NONE) {
+                PlayerLyricsRestoreControls(
+                    scrollActivity = lyricScrollActivity,
+                    onRestoreControls = { viewModel.setControlsVisible(true) },
+                    modifier = Modifier.align(Alignment.CenterEnd)
+                )
+            }
 
             state.error?.let { error ->
                 Text(

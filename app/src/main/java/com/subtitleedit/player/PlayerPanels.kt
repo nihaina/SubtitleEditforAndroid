@@ -313,6 +313,14 @@ private fun PlayerSubtitlePanel(state: PlayerUiState, viewModel: PlayerViewModel
             inactiveTrackColor = PlayerColors.SurfaceHigh
         )
     )
+    if (!state.isVideo) {
+        PlayerAudioSubtitleLayoutControls(
+            lineSpacing = state.audioSubtitleLineSpacing,
+            alignment = state.audioSubtitleAlignment,
+            onLineSpacingChange = viewModel::setAudioSubtitleLineSpacing,
+            onAlignmentChange = viewModel::setAudioSubtitleAlignment
+        )
+    }
 }
 
 @Composable

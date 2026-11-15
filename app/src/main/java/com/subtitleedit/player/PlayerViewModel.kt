@@ -45,6 +45,8 @@ internal data class PlayerUiState(
     val loudnessSampleId: Long = 0L,
     val resumePlayback: Boolean = true,
     val subtitleFontSize: Int = PlayerPreferences.DEFAULT_SUBTITLE_FONT_SIZE,
+    val audioSubtitleLineSpacing: Int = PlayerPreferences.DEFAULT_AUDIO_SUBTITLE_LINE_SPACING,
+    val audioSubtitleAlignment: PlayerSubtitleAlignment = PlayerSubtitleAlignment.CENTER,
     val sleepTimer: PlayerSleepTimer = PlayerSleepTimer(),
     val sleepRemainingMs: Long = 0L,
     val scheduledStartRemainingMs: Long? = null,
@@ -89,7 +91,9 @@ internal class PlayerViewModel @JvmOverloads constructor(
         equalizer = preferences.equalizer,
         showLoudnessWaveform = preferences.showLoudnessWaveform,
         resumePlayback = preferences.resumePlayback,
-        subtitleFontSize = preferences.subtitleFontSize
+        subtitleFontSize = preferences.subtitleFontSize,
+        audioSubtitleLineSpacing = preferences.audioSubtitleLineSpacing,
+        audioSubtitleAlignment = preferences.audioSubtitleAlignment
     ))
     val state: StateFlow<PlayerUiState> = _state.asStateFlow()
     private val _finishRequests = MutableStateFlow(0L)
@@ -566,6 +570,18 @@ internal class PlayerViewModel @JvmOverloads constructor(
         _state.value = _state.value.copy(subtitleFontSize = value)
     }
 
+    fun setAudioSubtitleLineSpacing(spacing: Int) {
+        val value = spacing.coerceIn(PlayerPreferences.MIN_AUDIO_SUBTITLE_LINE_SPACING,
+            PlayerPreferences.MAX_AUDIO_SUBTITLE_LINE_SPACING)
+        preferences.audioSubtitleLineSpacing = value
+        _state.value = _state.value.copy(audioSubtitleLineSpacing = value)
+    }
+
+    fun setAudioSubtitleAlignment(alignment: PlayerSubtitleAlignment) {
+        preferences.audioSubtitleAlignment = alignment
+        _state.value = _state.value.copy(audioSubtitleAlignment = alignment)
+    }
+
     fun setEqualizer(equalizer: PlayerEqualizerState) {
         val value = equalizer.copy(gains = PlayerEqualizer.normalize(equalizer.gains))
         preferences.equalizer = value
@@ -595,7 +611,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
 
     fun setLyricsVisible(visible: Boolean) {
         if (_state.value.isVideo) return
-        _state.value = _state.value.copy(lyricsVisible = visible, controlsVisible = true)
+        _state.value = _state.value.copy(lyricsVisible = visible)
         if (visible) refreshLyricLines()
     }
 
