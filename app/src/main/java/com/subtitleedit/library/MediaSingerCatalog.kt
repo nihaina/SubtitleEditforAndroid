@@ -2,7 +2,7 @@ package com.subtitleedit.library
 
 import java.util.Locale
 
-/** A performer tag is one identity; separators inside a name are not interpreted as people. */
+/** A whole metadata tag is one identity; separators inside names are not split into groups. */
 internal data class MediaSinger(val name: String, val tracks: List<MediaAlbumTrack>) {
     val key: String = normalizedSingerName(name)
     val durationMs: Long = tracks.sumOf { it.track.durationMs.coerceAtLeast(0L) }
@@ -13,7 +13,7 @@ internal data class MediaSinger(val name: String, val tracks: List<MediaAlbumTra
 
 internal enum class SingerSortField { NAME, TRACK_COUNT, DURATION, UPDATED_AT }
 
-internal enum class MediaCreditRole { SINGER, ARTIST, COMPOSER }
+internal enum class MediaCreditRole { SINGER, ARTIST, COMPOSER, GENRE }
 
 /** Kept as the singer entry point so existing browsing and its metadata semantics stay intact. */
 internal fun buildMediaSingers(tracks: List<MediaAlbumTrack>): List<MediaSinger> =
@@ -37,6 +37,7 @@ private fun MediaAlbumTrack.creditName(role: MediaCreditRole): String = when (ro
     MediaCreditRole.SINGER -> track.artist
     MediaCreditRole.ARTIST -> albumArtist
     MediaCreditRole.COMPOSER -> composer
+    MediaCreditRole.GENRE -> genre
 }
 
 internal fun filterAndSortMediaSingers(

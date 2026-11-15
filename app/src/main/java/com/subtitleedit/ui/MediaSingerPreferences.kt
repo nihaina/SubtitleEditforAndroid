@@ -27,6 +27,7 @@ internal class MediaSingerPreferences(context: Context, role: MediaCreditRole = 
             MediaCreditRole.SINGER -> "media_singer_view"
             MediaCreditRole.ARTIST -> "media_artist_view"
             MediaCreditRole.COMPOSER -> "media_composer_view"
+            MediaCreditRole.GENRE -> "media_genre_view"
         },
         Context.MODE_PRIVATE
     )

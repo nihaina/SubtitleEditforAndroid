@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="media_category_genres">流派</string>
+    <string name="media_genre_unknown">未知流派</string>
+    <string name="genre_browse_search">搜索流派</string>
+    <string name="genre_browse_settings">流派设置</string>
+    <string name="genre_detail_back">返回流派列表</string>
+    <string name="genre_browse_empty">暂无流派</string>
+    <string name="genre_browse_no_results">未找到匹配的流派</string>
+    <string name="genre_sort_title">流派筛选条件</string>
+    <string name="genre_more_info">在流派列表中显示更多信息</string>
+    <string name="genre_group_tracks">按专辑等子类别划分各流派的歌曲</string>
+    <string name="genre_album_sort">为该流派的专辑排序</string>
+</resources>

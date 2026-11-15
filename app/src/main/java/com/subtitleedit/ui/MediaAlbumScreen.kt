@@ -37,7 +37,7 @@ internal enum class MediaCategory(val label: Int) {
     SINGERS(R.string.media_category_singers),
     ARTISTS(R.string.media_category_artists),
     COMPOSERS(R.string.media_category_composers),
-    TAGS(R.string.media_category_tags)
+    GENRES(R.string.media_category_genres)
 }
 
 private data class AlbumPlaylistRequest(val tracks: List<MediaLibraryTrack>, val onComplete: () -> Unit)
@@ -151,6 +151,8 @@ internal fun MediaAlbumScreen(
         onArtistOptionsChanged = { updateCreditOptions(MediaCreditRole.ARTIST, it) },
         composerOptions = creditOptions.getValue(MediaCreditRole.COMPOSER),
         onComposerOptionsChanged = { updateCreditOptions(MediaCreditRole.COMPOSER, it) },
+        genreOptions = creditOptions.getValue(MediaCreditRole.GENRE),
+        onGenreOptionsChanged = { updateCreditOptions(MediaCreditRole.GENRE, it) },
         onPlay = { album, path -> playAlbum(album, path) },
         onShuffle = { album -> playAlbum(album, null, shuffle = true) },
         onFavoriteSelection = { selected, onComplete ->
@@ -221,13 +223,16 @@ internal fun MediaAlbumPageContent(
     artistOptions: MediaSingerViewOptions = MediaSingerViewOptions(),
     onArtistOptionsChanged: (MediaSingerViewOptions) -> Unit = {},
     composerOptions: MediaSingerViewOptions = MediaSingerViewOptions(),
-    onComposerOptionsChanged: (MediaSingerViewOptions) -> Unit = {}
+    onComposerOptionsChanged: (MediaSingerViewOptions) -> Unit = {},
+    genreOptions: MediaSingerViewOptions = MediaSingerViewOptions(),
+    onGenreOptionsChanged: (MediaSingerViewOptions) -> Unit = {}
 ) {
     var category by rememberSaveable { mutableStateOf(MediaCategory.ALBUMS) }
     var query by rememberSaveable { mutableStateOf("") }
     var singerQuery by rememberSaveable { mutableStateOf("") }
     var artistQuery by rememberSaveable { mutableStateOf("") }
     var composerQuery by rememberSaveable { mutableStateOf("") }
+    var genreQuery by rememberSaveable { mutableStateOf("") }
     var openedAlbumKey by rememberSaveable { mutableStateOf<String?>(null) }
     var openedCreditKey by rememberSaveable { mutableStateOf<String?>(null) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
@@ -237,16 +242,19 @@ internal fun MediaAlbumPageContent(
     val activeCreditOptions = when (creditRole) {
         MediaCreditRole.ARTIST -> artistOptions
         MediaCreditRole.COMPOSER -> composerOptions
+        MediaCreditRole.GENRE -> genreOptions
         else -> singerOptions
     }
     val changeCreditOptions = when (creditRole) {
         MediaCreditRole.ARTIST -> onArtistOptionsChanged
         MediaCreditRole.COMPOSER -> onComposerOptionsChanged
+        MediaCreditRole.GENRE -> onGenreOptionsChanged
         else -> onSingerOptionsChanged
     }
     val creditQuery = when (creditRole) {
         MediaCreditRole.ARTIST -> artistQuery
         MediaCreditRole.COMPOSER -> composerQuery
+        MediaCreditRole.GENRE -> genreQuery
         else -> singerQuery
     }
     val credits = remember(albums, creditRole) {
@@ -365,6 +373,7 @@ internal fun MediaAlbumPageContent(
                                     MediaCreditRole.SINGER -> singerQuery = it
                                     MediaCreditRole.ARTIST -> artistQuery = it
                                     MediaCreditRole.COMPOSER -> composerQuery = it
+                                    MediaCreditRole.GENRE -> genreQuery = it
                                 }
                             },
                             onSort = { sortOpen = true },
@@ -374,8 +383,6 @@ internal fun MediaAlbumPageContent(
                             role = creditRole
                         )
                     }
-                } else {
-                    Spacer(Modifier.weight(1f).fillMaxWidth().testTag("media-category-empty"))
                 }
             }
         }
@@ -407,6 +414,7 @@ private val MediaCategory.creditRole: MediaCreditRole?
         MediaCategory.SINGERS -> MediaCreditRole.SINGER
         MediaCategory.ARTISTS -> MediaCreditRole.ARTIST
         MediaCategory.COMPOSERS -> MediaCreditRole.COMPOSER
+        MediaCategory.GENRES -> MediaCreditRole.GENRE
         else -> null
     }
 

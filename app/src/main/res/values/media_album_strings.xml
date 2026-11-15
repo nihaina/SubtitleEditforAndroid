@@ -5,7 +5,6 @@
     <string name="media_category_singers">歌手</string>
     <string name="media_category_artists">艺术家</string>
     <string name="media_category_composers">作曲家</string>
-    <string name="media_category_tags">标签</string>
     <string name="media_album_unknown">未知专辑</string>
     <string name="media_album_unknown_artist">未知歌手</string>
     <string name="media_album_unknown_album_artist">未知艺术家</string>

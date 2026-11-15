@@ -50,28 +50,32 @@ class MediaAlbumSourceTest {
     @Test fun catalogLoadsRealAlbumFieldsAndRefreshesAfterTagInvalidation() {
         val file = createWave()
         try {
-            writeAlbumTags(file, "Album artist A", "Composer A", "2024", "2/12", "1/2")
+            writeAlbumTags(file, "Album artist A", "Composer A", "2024", "2/12", "1/2", "ASMR")
             val track = PlayerTrackMetadataReader.readLibraryTrack(file)
             val initial = AlbumCatalogLoader.load(listOf(track, track)).single()
             assertEquals("Fixture album", initial.track.album)
             assertEquals("Album artist A", initial.albumArtist)
             assertEquals("Composer A", initial.composer)
+            assertEquals("ASMR", initial.genre)
             assertEquals("Fixture singer", buildMediaCredits(listOf(initial), MediaCreditRole.SINGER).single().name)
             assertEquals("Album artist A", buildMediaCredits(listOf(initial), MediaCreditRole.ARTIST).single().name)
             assertEquals("Composer A", buildMediaCredits(listOf(initial), MediaCreditRole.COMPOSER).single().name)
+            assertEquals("ASMR", buildMediaCredits(listOf(initial), MediaCreditRole.GENRE).single().name)
             assertEquals(2024, initial.year)
             assertEquals(2, initial.trackNumber)
             assertEquals(1, initial.discNumber)
             assertTrue(initial.track.durationMs in 990L..1010L)
 
-            writeAlbumTags(file, "Album artist B", "Composer B", "2025", "3/12", "2/2")
+            writeAlbumTags(file, "Album artist B", "Composer B", "2025", "3/12", "2/2", "Electronica")
             PlayerTrackMetadataReader.invalidate(file.path)
             val refreshed = AlbumCatalogLoader.load(listOf(PlayerTrackMetadataReader.readLibraryTrack(file))).single()
             assertEquals("Album artist B", refreshed.albumArtist)
             assertEquals("Composer B", refreshed.composer)
+            assertEquals("Electronica", refreshed.genre)
             assertEquals("Fixture singer", buildMediaCredits(listOf(refreshed), MediaCreditRole.SINGER).single().name)
             assertEquals("Album artist B", buildMediaCredits(listOf(refreshed), MediaCreditRole.ARTIST).single().name)
             assertEquals("Composer B", buildMediaCredits(listOf(refreshed), MediaCreditRole.COMPOSER).single().name)
+            assertEquals("Electronica", buildMediaCredits(listOf(refreshed), MediaCreditRole.GENRE).single().name)
             assertEquals(2025, refreshed.year)
             assertEquals(3, refreshed.trackNumber)
             assertEquals(2, refreshed.discNumber)
@@ -101,15 +105,15 @@ class MediaAlbumSourceTest {
         return file
     }
 
-    private fun writeAlbumTags(file: File, albumArtist: String, composer: String, year: String, track: String, disc: String) {
+    private fun writeAlbumTags(file: File, albumArtist: String, composer: String, year: String, track: String, disc: String, genre: String) {
         MediaTagAudioRepository.write(file, MediaConvertMetadata(
             title = "Fixture song", artist = "Fixture singer", album = "Fixture album",
-            albumArtist = albumArtist, composer = composer, year = year,
+            albumArtist = albumArtist, composer = composer, year = year, genre = genre,
             trackNumber = track, discNumber = disc,
             editedFields = setOf(
                 MediaConvertMetadataField.TITLE, MediaConvertMetadataField.ARTIST, MediaConvertMetadataField.ALBUM,
                 MediaConvertMetadataField.ALBUM_ARTIST, MediaConvertMetadataField.COMPOSER, MediaConvertMetadataField.YEAR,
-                MediaConvertMetadataField.TRACK_NUMBER, MediaConvertMetadataField.DISC_NUMBER
+                MediaConvertMetadataField.TRACK_NUMBER, MediaConvertMetadataField.DISC_NUMBER, MediaConvertMetadataField.GENRE
             )
         ))
     }

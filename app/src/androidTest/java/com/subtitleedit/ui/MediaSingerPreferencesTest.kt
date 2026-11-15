@@ -26,7 +26,11 @@ class MediaSingerPreferencesTest {
                 trackSort = AlbumTrackSortOptions(AlbumTrackSortField.TITLE, false)),
             MediaCreditRole.COMPOSER to MediaSingerViewOptions(moreInfo = SingerMoreInfo.YEAR,
                 sortField = SingerSortField.UPDATED_AT, albumSortField = AlbumSortField.YEAR,
-                trackSort = AlbumTrackSortOptions(AlbumTrackSortField.LAST_PLAYED, false))
+                trackSort = AlbumTrackSortOptions(AlbumTrackSortField.LAST_PLAYED, false)),
+            MediaCreditRole.GENRE to MediaSingerViewOptions(moreInfo = SingerMoreInfo.TRACK_COUNT,
+                groupTracks = false, quickSearch = false, sortField = SingerSortField.TRACK_COUNT,
+                albumSortField = AlbumSortField.DURATION, albumAscending = false,
+                trackSort = AlbumTrackSortOptions(AlbumTrackSortField.DURATION, false))
         )
         try {
             changed.forEach { (role, options) -> stores.getValue(role).save(options) }
@@ -37,6 +41,11 @@ class MediaSingerPreferencesTest {
             stores.getValue(MediaCreditRole.COMPOSER).save(MediaSingerViewOptions())
             assertEquals(changed.getValue(MediaCreditRole.ARTIST), MediaSingerPreferences(context, MediaCreditRole.ARTIST).load())
             assertEquals(changed.getValue(MediaCreditRole.SINGER), MediaSingerPreferences(context).load())
+            assertEquals(changed.getValue(MediaCreditRole.GENRE), MediaSingerPreferences(context, MediaCreditRole.GENRE).load())
+            stores.getValue(MediaCreditRole.GENRE).save(MediaSingerViewOptions())
+            assertEquals(changed.getValue(MediaCreditRole.ARTIST), MediaSingerPreferences(context, MediaCreditRole.ARTIST).load())
+            assertEquals(changed.getValue(MediaCreditRole.SINGER), MediaSingerPreferences(context).load())
+            assertEquals(MediaSingerViewOptions(), MediaSingerPreferences(context, MediaCreditRole.COMPOSER).load())
         } finally {
             previous.forEach { (role, options) -> stores.getValue(role).save(options) }
         }
