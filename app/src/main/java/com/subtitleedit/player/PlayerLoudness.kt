@@ -18,11 +18,11 @@ internal object PlayerLoudness {
         else -> "$equalizerFilter,$ANALYSIS_FILTER"
     }
 
-    /** mpv v0.41 uses (volume / 100)^3 downstream of filters; include that gain. */
+    /** The engine converts this linear software gain to mpv's cubic volume property. */
     fun level(rmsDbText: String?, volumePercent: Int): Float {
         val rmsDb = rmsDbText?.toDoubleOrNull()?.takeIf { it.isFinite() } ?: return 0f
         if (volumePercent <= 0) return 0f
-        val gainDb = 60.0 * log10(volumePercent.coerceAtMost(200) / 100.0)
+        val gainDb = 20.0 * log10(volumePercent.coerceAtMost(200) / 100.0)
         return ((rmsDb + gainDb - FLOOR_DB) / -FLOOR_DB).coerceIn(0.0, 1.0).toFloat()
     }
 }

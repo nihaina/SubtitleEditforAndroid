@@ -25,7 +25,7 @@ import java.io.File
 import kotlin.math.roundToInt
 
 internal enum class PlayerPanel { NONE, PLAYLIST, EQUALIZER, SUBTITLE, BOOKMARK, TIMER, SPEED, SETTINGS }
-internal data class PlayerGestureHint(val text: String, val token: Long = 0L)
+internal data class PlayerGestureHint(val text: String, val token: Long = 0L, val iconRes: Int = R.drawable.ic_player_mode)
 
 internal data class PlayerUiState(
     val playlist: List<PlayerTrack> = emptyList(),
@@ -39,6 +39,7 @@ internal data class PlayerUiState(
     val speed: Float = 1f,
     val mode: PlayerPlayMode = PlayerPlayMode.REPEAT_ALL,
     val volumePercent: Int = 100,
+    val volumeGestureActive: Boolean = false,
     val equalizer: PlayerEqualizerState = PlayerEqualizerState(),
     val showLoudnessWaveform: Boolean = true,
     val loudness: Float = 0f,
@@ -82,10 +83,12 @@ internal data class PlayerUiState(
 /** Owns one surface session and folds engine events into a single main-thread UI state. */
 internal class PlayerViewModel @JvmOverloads constructor(
     application: Application,
-    private val libraryRepository: MediaLibraryRepository = MediaLibraryRepository.getInstance(application)
+    private val libraryRepository: MediaLibraryRepository = MediaLibraryRepository.getInstance(application),
+    systemVolume: PlayerSystemVolume = AndroidPlayerSystemVolume(application)
 ) : AndroidViewModel(application) {
     private val preferences = PlayerPreferences.getInstance(application)
     private val bookmarkStore = PlayerBookmarkStore.create(application.filesDir)
+    private val volumeController = PlayerVolumeController(systemVolume)
     private val _state = MutableStateFlow(PlayerUiState(
         mode = preferences.defaultPlayMode,
         speed = preferences.defaultSpeed,
@@ -94,7 +97,8 @@ internal class PlayerViewModel @JvmOverloads constructor(
         resumePlayback = preferences.resumePlayback,
         subtitleFontSize = preferences.subtitleFontSize,
         audioSubtitleLineSpacing = preferences.audioSubtitleLineSpacing,
-        audioSubtitleAlignment = preferences.audioSubtitleAlignment
+        audioSubtitleAlignment = preferences.audioSubtitleAlignment,
+        volumePercent = volumeController.snapshot.percent
     ))
     val state: StateFlow<PlayerUiState> = _state.asStateFlow()
     private val _finishRequests = MutableStateFlow(0L)
@@ -172,6 +176,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         host = view
         val session = PlayerEngine(view, view.resources)
         engine = session
+        refreshSystemVolume()
         engineJob = viewModelScope.launch {
             session.state.collect { sample ->
                 if (loadId == 0L || sample.loadId != loadId || engine !== session || _state.value.currentTrack == null) return@collect
@@ -186,7 +191,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
                     playing = sample.playing && sample.error == null && !sample.ended,
                     ready = sample.ready,
                     error = sample.error,
-                    loudness = if (snapshot.showLoudnessWaveform) sample.loudness else 0f,
+                    loudness = if (snapshot.showLoudnessWaveform && !volumeController.snapshot.muted) sample.loudness else 0f,
                     loudnessSampleId = sample.loudnessSampleId,
                     subtitleText = sample.subtitleText,
                     selectedSubtitleId = sample.selectedSubtitleId.ifBlank { "none" },
@@ -216,6 +221,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
             var lastSave = SystemClock.elapsedRealtime()
             while (isActive) {
                 delay(250)
+                refreshSystemVolume()
                 tickTimers()
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastSave >= 5_000L) {
@@ -241,7 +247,8 @@ internal class PlayerViewModel @JvmOverloads constructor(
         engine = null
         host = null
         audioFocus.abandon()
-        _state.value = _state.value.copy(ready = false, playing = false, loudness = 0f, seekPreviewMs = null)
+        _state.value = _state.value.copy(ready = false, playing = false, loudness = 0f, seekPreviewMs = null,
+            volumeGestureActive = false)
     }
 
     fun togglePlay() { if (_state.value.playing) pause() else play() }
@@ -340,6 +347,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         preservePlayback: Boolean = false
     ) {
         stopListening()
+        refreshSystemVolume()
         val current = _state.value
         val track = current.currentTrack ?: return
         val session = engine ?: return
@@ -369,6 +377,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
             lyricsVisible = current.lyricsVisible && !track.isVideo,
             bookmarks = bookmarkStore.load(track.path), seekPreviewMs = null,
             loudness = 0f, loudnessSampleId = 0L,
+            volumeGestureActive = false,
             isFavorite = false,
             trackInfo = null,
             showTrackInfoDialog = false,
@@ -385,7 +394,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         session.setSpeed(current.speed)
         session.setAudioFilter(PlayerEqualizer.afFilter(current.equalizer))
         session.setLoudnessEnabled(current.showLoudnessWaveform && !track.isVideo)
-        session.setVolume(current.volumePercent)
+        session.setVolume(volumeController.snapshot.softwarePercent)
         session.setSubtitleFontSize(current.subtitleFontSize)
         val saved = resumeAt ?: if (resume) preferences.lastPosition(track.path) else 0L
         if (saved > 0L) session.seekTo(saved)
@@ -550,9 +559,43 @@ internal class PlayerViewModel @JvmOverloads constructor(
     }
 
     fun setVolume(percent: Int) {
-        val value = percent.coerceIn(0, 200)
-        engine?.setVolume(value)
-        _state.value = _state.value.copy(volumePercent = value)
+        applyVolume(volumeController.setVolume(percent))
+    }
+
+    /** Read before a drag as well as periodically, so hardware keys and system sliders stay in sync. */
+    fun refreshSystemVolume(resetBoost: Boolean = false): Int {
+        val previous = volumeController.snapshot
+        val current = if (resetBoost) volumeController.resetBoost() else volumeController.refresh()
+        if (current != previous) applyVolume(current)
+        return current.percent
+    }
+
+    private fun applyVolume(volume: PlayerVolumeSnapshot) {
+        engine?.setVolume(volume.softwarePercent)
+        _state.value = _state.value.copy(
+            volumePercent = volume.percent,
+            loudness = if (volume.muted) 0f else _state.value.loudness
+        )
+        if (_state.value.volumeGestureActive) showVolumeHint(volume)
+    }
+
+    fun setVolumeFromGesture(percent: Int) {
+        _state.value = _state.value.copy(volumeGestureActive = true)
+        setVolume(percent)
+    }
+
+    private fun showVolumeHint(volume: PlayerVolumeSnapshot) {
+        val text = getApplication<Application>().getString(
+            if (volume.softwarePercent > 100) R.string.player_volume_boost_percent else R.string.player_volume_percent,
+            volume.percent
+        )
+        _state.value = _state.value.copy(
+            gestureHint = PlayerGestureHint(text, ++hintToken, R.drawable.ic_player_volume)
+        )
+    }
+
+    fun endVolumeGesture() {
+        if (_state.value.volumeGestureActive) _state.value = _state.value.copy(volumeGestureActive = false)
     }
 
     fun setResumePlayback(enabled: Boolean) {

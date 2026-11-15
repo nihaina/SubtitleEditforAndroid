@@ -3,8 +3,13 @@ package com.subtitleedit.player
 import android.graphics.drawable.ColorDrawable
 import android.content.Intent
 import android.content.res.Configuration
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -29,6 +34,16 @@ import java.io.File
 class PlayerActivity : AppComposeActivity() {
 
     private val viewModel: PlayerViewModel by viewModels()
+    private val audioManager by lazy { getSystemService(AudioManager::class.java) }
+    private var outputDeviceIds: Set<Int>? = null
+    private val audioDevices = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
+            refreshAudioRoute()
+        }
+        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
+            refreshAudioRoute()
+        }
+    }
     private var portraitCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
     private val tagEditor = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         viewModel.resumeAfterTagEditing()
@@ -46,6 +61,7 @@ class PlayerActivity : AppComposeActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        volumeControlStream = AudioManager.STREAM_MUSIC
         subtitlePickerTrackPath = savedInstanceState?.getString(STATE_SUBTITLE_PICKER_TRACK)
         if (Build.VERSION.SDK_INT >= 28) {
             portraitCutoutMode = window.attributes.layoutInDisplayCutoutMode
@@ -87,9 +103,28 @@ class PlayerActivity : AppComposeActivity() {
         window.decorView.dispatchConfigurationChanged(newConfig)
     }
 
+    override fun onStart() {
+        super.onStart()
+        refreshAudioRoute()
+        audioManager.registerAudioDeviceCallback(audioDevices, Handler(Looper.getMainLooper()))
+    }
+
+    private fun refreshAudioRoute() {
+        val outputs = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).mapTo(mutableSetOf()) { it.id }
+        val changed = outputDeviceIds?.let { outputs != it } ?: false
+        outputDeviceIds = outputs
+        viewModel.refreshSystemVolume(resetBoost = changed)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.refreshSystemVolume()
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
+            viewModel.refreshSystemVolume()
             updatePlayerWindowLayout(resources.configuration)
             window.hidePlayerSystemBars()
         }
@@ -128,6 +163,8 @@ class PlayerActivity : AppComposeActivity() {
     }
 
     override fun onStop() {
+        audioManager.unregisterAudioDeviceCallback(audioDevices)
+        viewModel.endVolumeGesture()
         viewModel.saveProgress()
         super.onStop()
     }

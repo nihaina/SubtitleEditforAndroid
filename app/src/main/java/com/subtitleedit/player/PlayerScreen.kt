@@ -70,7 +70,11 @@ import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import android.content.res.Configuration
+import android.os.Build
+import android.os.SystemClock
+import android.view.HapticFeedbackConstants
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -96,6 +100,7 @@ internal fun PlayerScreen(
     val configuration = LocalConfiguration.current
     val landscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val density = LocalDensity.current
+    val hapticView by rememberUpdatedState(LocalView.current)
     var playerHeightPx by remember { mutableStateOf(0) }
     var topOverlayBounds by remember { mutableStateOf<Rect?>(null) }
     var bottomOverlayBounds by remember { mutableStateOf<Rect?>(null) }
@@ -142,6 +147,8 @@ internal fun PlayerScreen(
                 .pointerInput(state.currentTrack?.path, state.isVideo, state.durationMs, state.controlsLocked) {
                     var axis: Int? = null
                     var dragVolume = 0f
+                    var appliedVolume = 0
+                    var lastVolumeHapticAt = 0L
                     var canSeek = false
                     var canAdjustVolume = false
                     fun outsideOverlays(position: Offset): Boolean {
@@ -149,52 +156,73 @@ internal fun PlayerScreen(
                         return currentTopOverlay?.contains(point) != true &&
                             currentBottomOverlay?.contains(point) != true
                     }
-                    detectDragGestures(
-                        orientationLock = null,
-                        onDragStart = { down, _, _ ->
-                            axis = null
-                            val current = viewModel.state.value
-                            dragVolume = current.volumePercent.toFloat()
-                            // Only the initial press is excluded by the controls; an accepted
-                            // video drag keeps ownership as it crosses into either overlay.
-                            canSeek = current.isVideo && !current.controlsLocked && current.ready && current.panel == PlayerPanel.NONE &&
-                                outsideOverlays(down.position)
-                            // Vertical swipes in the audio lyric list belong to the list.
-                            canAdjustVolume = !current.controlsLocked && (current.isVideo || !current.lyricsVisible)
-                        },
-                        onDragEnd = {
-                            if (axis == AXIS_SEEK) {
-                                if (canSeek) {
-                                    viewModel.state.value.seekPreviewMs?.let { viewModel.seekTo(it) }
+                    try {
+                        detectDragGestures(
+                            orientationLock = null,
+                            onDragStart = { down, _, _ ->
+                                axis = null
+                                val current = viewModel.state.value
+                                dragVolume = viewModel.refreshSystemVolume().toFloat()
+                                appliedVolume = dragVolume.roundToInt()
+                                lastVolumeHapticAt = 0L
+                                // Only the initial press is excluded by the controls; an accepted
+                                // video drag keeps ownership as it crosses into either overlay.
+                                canSeek = current.isVideo && !current.controlsLocked && current.ready && current.panel == PlayerPanel.NONE &&
+                                    outsideOverlays(down.position)
+                                // Vertical swipes in the audio lyric list belong to the list.
+                                canAdjustVolume = !current.controlsLocked && current.panel == PlayerPanel.NONE &&
+                                    (current.isVideo || !current.lyricsVisible)
+                            },
+                            onDragEnd = {
+                                viewModel.endVolumeGesture()
+                                if (axis == AXIS_SEEK) {
+                                    if (canSeek) {
+                                        viewModel.state.value.seekPreviewMs?.let { viewModel.seekTo(it) }
+                                    }
+                                    viewModel.clearSeekPreview()
                                 }
+                                axis = null
+                            },
+                            onDragCancel = {
+                                viewModel.endVolumeGesture()
                                 viewModel.clearSeekPreview()
+                                axis = null
                             }
-                            axis = null
-                        },
-                        onDragCancel = {
-                            viewModel.clearSeekPreview()
-                            axis = null
-                        }
-                    ) { change, amount ->
-                        val current = viewModel.state.value
-                        if (current.controlsLocked) {
-                            change.consume()
-                            return@detectDragGestures
-                        }
-                        if (axis == null) axis = if (abs(amount.x) >= abs(amount.y)) AXIS_SEEK else AXIS_VOLUME
-                        when (axis) {
-                            AXIS_SEEK -> if (canSeek && current.durationMs > 0) {
+                        ) { change, amount ->
+                            val current = viewModel.state.value
+                            if (current.controlsLocked) {
                                 change.consume()
-                                val delta = (amount.x / size.width * current.durationMs * 1.6f).toLong()
-                                val base = current.seekPreviewMs ?: current.positionMs
-                                viewModel.seekTo((base + delta).coerceIn(0, current.durationMs), fromGesture = true)
+                                return@detectDragGestures
                             }
-                            AXIS_VOLUME -> if (canAdjustVolume) {
-                                change.consume()
-                                dragVolume = (dragVolume - amount.y / 14f).coerceIn(0f, 200f)
-                                viewModel.setVolume(dragVolume.roundToInt())
+                            if (axis == null) axis = if (abs(amount.x) >= abs(amount.y)) AXIS_SEEK else AXIS_VOLUME
+                            when (axis) {
+                                AXIS_SEEK -> if (canSeek && current.durationMs > 0) {
+                                    change.consume()
+                                    val delta = (amount.x / size.width * current.durationMs * 1.6f).toLong()
+                                    val base = current.seekPreviewMs ?: current.positionMs
+                                    viewModel.seekTo((base + delta).coerceIn(0, current.durationMs), fromGesture = true)
+                                }
+                                AXIS_VOLUME -> if (canAdjustVolume) {
+                                    change.consume()
+                                    // Keep fractional movement across system steps, but follow external key changes.
+                                    if (current.volumePercent != appliedVolume) dragVolume = current.volumePercent.toFloat()
+                                    dragVolume = (dragVolume - amount.y / 14f).coerceIn(0f, 200f)
+                                    viewModel.setVolumeFromGesture(dragVolume.roundToInt())
+                                    appliedVolume = viewModel.state.value.volumePercent
+                                    val now = SystemClock.uptimeMillis()
+                                    if (appliedVolume != current.volumePercent &&
+                                        (lastVolumeHapticAt == 0L || now - lastVolumeHapticAt >= 60L)) {
+                                        hapticView.performHapticFeedback(
+                                            if (Build.VERSION.SDK_INT >= 34) HapticFeedbackConstants.SEGMENT_FREQUENT_TICK
+                                            else HapticFeedbackConstants.CLOCK_TICK
+                                        )
+                                        lastVolumeHapticAt = now
+                                    }
+                                }
                             }
                         }
+                    } finally {
+                        viewModel.endVolumeGesture()
                     }
                 }
                 .pointerInput(state.currentTrack?.path) {
@@ -264,6 +292,7 @@ internal fun PlayerScreen(
             PlayerHintOverlay(
                 hint = state.gestureHint,
                 onDismiss = viewModel::clearHint,
+                autoDismiss = !state.volumeGestureActive,
                 modifier = Modifier.align(Alignment.Center)
             )
 

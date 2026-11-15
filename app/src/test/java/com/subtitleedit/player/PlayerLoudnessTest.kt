@@ -23,8 +23,8 @@ class PlayerLoudnessTest {
     @Test fun localVolumeGainAndMuteAreReflectedInMeasuredLevel() {
         assertEquals(0f, PlayerLoudness.level("-10", 0), 0f)
         assertEquals(0f, PlayerLoudness.level("-10", -5), 0f)
-        assertEquals(0.19897f, PlayerLoudness.level("-30", 50), 0.0001f)
-        assertEquals(0.80103f, PlayerLoudness.level("-30", 200), 0.0001f)
+        assertEquals(0.3996567f, PlayerLoudness.level("-30", 50), 0.0001f)
+        assertEquals(0.6003433f, PlayerLoudness.level("-30", 200), 0.0001f)
         assertEquals(PlayerLoudness.level("-30", 200), PlayerLoudness.level("-30", 300), 0f)
     }
 

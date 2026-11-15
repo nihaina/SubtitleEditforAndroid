@@ -282,9 +282,14 @@ internal fun PlayerSubtitleOverlay(
 
 /** Transient on-screen message for gestures, bookmarks and timer changes. */
 @Composable
-internal fun PlayerHintOverlay(hint: PlayerGestureHint?, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
-    LaunchedEffect(hint?.token) {
-        if (hint == null) return@LaunchedEffect
+internal fun PlayerHintOverlay(
+    hint: PlayerGestureHint?,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+    autoDismiss: Boolean = true
+) {
+    LaunchedEffect(hint?.token, autoDismiss) {
+        if (hint == null || !autoDismiss) return@LaunchedEffect
         kotlinx.coroutines.delay(1_100)
         onDismiss()
     }
@@ -296,9 +301,14 @@ internal fun PlayerHintOverlay(hint: PlayerGestureHint?, onDismiss: () -> Unit, 
     ) {
         // AnimatedVisibility keeps this content alive during exit; keep its text too.
         var displayedText by remember { mutableStateOf(hint?.text.orEmpty()) }
-        if (hint != null) displayedText = hint.text
+        var displayedIcon by remember { mutableIntStateOf(hint?.iconRes ?: R.drawable.ic_player_mode) }
+        if (hint != null) {
+            displayedText = hint.text
+            displayedIcon = hint.iconRes
+        }
         Column(
             modifier = Modifier
+                .testTag("player-gesture-hint")
                 .clip(RoundedCornerShape(18.dp))
                 .background(PlayerColors.Surface.copy(alpha = 0.96f))
                 .padding(horizontal = 22.dp, vertical = 14.dp),
@@ -306,7 +316,7 @@ internal fun PlayerHintOverlay(hint: PlayerGestureHint?, onDismiss: () -> Unit, 
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Icon(
-                painter = painterResource(R.drawable.ic_player_mode),
+                painter = painterResource(displayedIcon),
                 contentDescription = null,
                 modifier = Modifier.size(22.dp),
                 tint = PlayerColors.Accent

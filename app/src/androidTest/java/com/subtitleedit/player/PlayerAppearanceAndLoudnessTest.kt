@@ -7,6 +7,7 @@ import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.media.AudioManager
 import android.os.SystemClock
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.lifecycle.ViewModelProvider
@@ -50,7 +51,7 @@ class PlayerAppearanceAndLoudnessTest {
             openPlayer(fixture.track).use { session ->
                 val model = session.model
                 awaitState(model, "native audio starts") { it.ready && it.playing && it.positionMs > 100L }
-                onMain { model.pause(); model.seekTo(0L); model.play() }
+                onMain { model.pause(); model.setVolume(50); model.seekTo(0L); model.play() }
                 val initialSilence = medianSamples(model, 200L..1_100L)
                 val quiet = medianSamples(model, 2_800L..4_300L)
                 val loud = medianSamples(model, 6_800L..8_300L)
@@ -64,11 +65,11 @@ class PlayerAppearanceAndLoudnessTest {
                 awaitState(model, "seek back to the loud tone") { it.playing && it.positionMs in 7_100L..9_000L && it.loudness > 0.1f }
                 val beforeMute = state(model).loudnessSampleId
                 onMain { model.setVolume(0) }
-                awaitState(model, "local volume mute must zero the measured output") {
+                awaitState(model, "system media-volume mute must zero the measured output") {
                     it.playing && it.loudnessSampleId > beforeMute && it.loudness == 0f
                 }
                 onMain {
-                    model.setVolume(100)
+                    model.setVolume(50)
                     model.applyPreset(PlayerEqualizer.PRESETS.first { it.id == "bass" })
                     model.seekTo(7_000L)
                 }
@@ -187,12 +188,22 @@ class PlayerAppearanceAndLoudnessTest {
         val preferences = app.getSharedPreferences("player_settings", Context.MODE_PRIVATE)
         private val keys = listOf("default_play_mode", "default_speed", "resume_playback", "eq_enabled", "eq_gains", "show_loudness_waveform")
         private val saved = keys.associateWith { preferences.all[it] }
+        private val audio = app.getSystemService(AudioManager::class.java)
+        private val savedMediaVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+        private val savedMediaMute = audio.isStreamMute(AudioManager.STREAM_MUSIC)
         init {
             assertTrue(preferences.edit().putString("default_play_mode", PlayerPlayMode.SEQUENCE.name)
                 .putFloat("default_speed", 1f).putBoolean("resume_playback", false)
                 .putBoolean("eq_enabled", false).putBoolean("show_loudness_waveform", true).commit())
         }
         override fun close() {
+            onMain {
+                audio.setStreamVolume(AudioManager.STREAM_MUSIC, savedMediaVolume, 0)
+                if (audio.isStreamMute(AudioManager.STREAM_MUSIC) != savedMediaMute) {
+                    audio.adjustStreamVolume(AudioManager.STREAM_MUSIC,
+                        if (savedMediaMute) AudioManager.ADJUST_MUTE else AudioManager.ADJUST_UNMUTE, 0)
+                }
+            }
             val editor = preferences.edit()
             saved.forEach { (key, value) -> restore(editor, key, value) }
             editor.remove("last_position_${track.path}")

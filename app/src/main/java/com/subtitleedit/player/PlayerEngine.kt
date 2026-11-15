@@ -185,7 +185,7 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
 
     fun setVolume(percent: Int) = post {
         volume = percent.coerceIn(0, 200)
-        if (initialized) MPVLib.setPropertyDouble("volume", volume.toDouble())
+        if (initialized) MPVLib.setPropertyDouble("volume", PlayerVolumePolicy.mpvVolume(volume))
     }
 
     fun setSubtitleFontSize(size: Int) = post {
@@ -311,7 +311,7 @@ internal class PlayerEngine(private val playerHost: MpvPlayerHost, private val r
                 completed = false
                 durationMs = secondsToMs(MPVLib.getPropertyDouble("duration/full"))
                 MPVLib.setPropertyDouble("speed", speed.toDouble())
-                MPVLib.setPropertyDouble("volume", volume.toDouble())
+                MPVLib.setPropertyDouble("volume", PlayerVolumePolicy.mpvVolume(volume))
                 applyAudioFilter()
                 applySubtitleFontSize()
                 val resumePosition = clampPosition(pendingSeekMs ?: 0L)
