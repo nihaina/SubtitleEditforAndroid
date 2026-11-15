@@ -138,6 +138,7 @@ internal fun PlayerAudioVisual(
 }
 
 private const val LOUDNESS_BARS = 21
+private const val LOUDNESS_THRESHOLD_SCALE = 1.3f
 
 @Composable
 private fun AnimatedVinyl(discSize: Dp) {
@@ -212,7 +213,7 @@ private fun PlayerLoudnessWaveform(playing: Boolean, loudness: Float, sampleId: 
     LaunchedEffect(playing, sampleId) {
         // A paused stream has no new PCM. Keep the last measured shape until playback resumes.
         if (playing && sampleId > 0L) {
-            val sample = loudness.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0f
+            val sample = (loudness.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0f) / LOUDNESS_THRESHOLD_SCALE
             history = history.drop(1) + sample
         }
     }

@@ -126,6 +126,9 @@ internal fun ListeningStatsScreen(
     }
     val sessions = content.sessions
     val topItems = content.topItems
+    val summaryRange = StatsCalculator.currentRange(currentDate, granularity)
+    // A retained snapshot can belong to the previous period while the new query is running.
+    val topArtworkPath = topItems.firstOrNull()?.mediaPath.takeIf { content.topItemsRange == summaryRange }
 
     LaunchedEffect(currentDate) {
         if (pageState.selectedDate == pageState.previousCurrentDate) pageState.selectedDate = currentDate
@@ -137,6 +140,7 @@ internal fun ListeningStatsScreen(
         val year = selectedYear
         val day = selectedDate
         val mode = granularity
+        val range = StatsCalculator.currentRange(currentDate, mode)
         try {
             val loaded = withContext(Dispatchers.IO) {
                 contentLoader?.let { return@withContext it(currentDate, year, mode, day) }
@@ -147,7 +151,6 @@ internal fun ListeningStatsScreen(
                     val duration = yearStats[date]?.durationMs ?: 0L
                     StatsHeatmapDay(date, duration, StatsCalculator.levelFor(duration))
                 }
-                val range = StatsCalculator.currentRange(currentDate, mode)
                 ListeningStatsContent(
                     allStats = stats,
                     availableYears = StatsCalculator.availableYears(stats.map { it.date }, currentYear),
@@ -159,7 +162,7 @@ internal fun ListeningStatsScreen(
                     neverPlayed = repository.getNeverPlayedTracks(limit = 100)
                 )
             }
-            pageState.content = loaded
+            pageState.content = loaded.copy(topItemsRange = range)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -206,7 +209,8 @@ internal fun ListeningStatsScreen(
             SummarySection(
                 summary = summary,
                 granularity = granularity,
-                topArtworkPath = topItems.firstOrNull()?.mediaPath,
+                topArtworkPath = topArtworkPath,
+                artworkRefreshVersion = refreshVersion,
                 animateChanges = pageState.content != null,
                 onGranularitySelected = { pageState.granularity = it }
             )
@@ -473,11 +477,15 @@ private fun SummarySection(
     summary: StatsSummaryData,
     granularity: StatsGranularity,
     topArtworkPath: String?,
+    artworkRefreshVersion: Int,
     animateChanges: Boolean,
     onGranularitySelected: (StatsGranularity) -> Unit
 ) {
-    val cover by produceState<Bitmap?>(initialValue = null, key1 = topArtworkPath) {
-        value = topArtworkPath?.let { withContext(Dispatchers.IO) { MediaArtworkLoader.loadCover(it, 480) } }
+    var cover by remember(topArtworkPath, granularity, artworkRefreshVersion) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(topArtworkPath, granularity, artworkRefreshVersion) {
+        cover = topArtworkPath?.let {
+            withContext(Dispatchers.IO) { MediaArtworkLoader.loadCover(it, 480, allowVideoFrame = false) }
+        }
     }
 
     Column(Modifier.testTag("stats-summary"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -509,7 +517,7 @@ private fun SummarySection(
                     Image(
                         bitmap = bmp.asImageBitmap(),
                         contentDescription = null,
-                        modifier = Modifier.matchParentSize(),
+                        modifier = Modifier.matchParentSize().testTag("stats-summary-artwork"),
                         contentScale = ContentScale.Crop,
                         alpha = 0.14f
                     )

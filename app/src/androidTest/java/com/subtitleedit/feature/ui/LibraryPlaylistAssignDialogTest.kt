@@ -52,7 +52,7 @@ class LibraryPlaylistAssignDialogTest {
             compose.onNodeWithText("歌单 40").assertIsDisplayed().performClick()
             assertEquals(40L, selected)
             compose.onNodeWithText("新建歌单").assertIsDisplayed().performClick()
-            compose.onNodeWithText("输入播放列表名称").assertIsDisplayed().performClick().performTextInput("New playlist")
+            compose.onNodeWithText("输入歌单名称").assertIsDisplayed().performClick().performTextInput("New playlist")
             compose.onNodeWithText("创建").assertIsDisplayed().performClick()
             compose.runOnIdle { assertEquals("New playlist", created) }
         } finally {

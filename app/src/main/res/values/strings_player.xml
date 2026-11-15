@@ -67,7 +67,7 @@
     <string name="player_action_favorited_hint">已添加到收藏</string>
     <string name="player_action_unfavorited_hint">已取消收藏</string>
     <string name="player_action_info">歌曲信息</string>
-    <string name="player_action_add_to_playlist">添加到播放列表</string>
+    <string name="player_action_add_to_playlist">添加到歌单</string>
 
     <string name="player_info_title">歌曲信息</string>
     <string name="player_info_file_name">文件名</string>
@@ -92,13 +92,13 @@
     <string name="player_info_done">完成</string>
     <string name="player_info_path_copied">路径已复制</string>
 
-    <string name="player_playlist_picker_new">新播放列表</string>
-    <string name="player_playlist_picker_new_title">新建播放列表</string>
-    <string name="player_playlist_picker_new_hint">输入播放列表名称</string>
+    <string name="player_playlist_picker_new">新歌单</string>
+    <string name="player_playlist_picker_new_title">新建歌单</string>
+    <string name="player_playlist_picker_new_hint">输入歌单名称</string>
     <string name="player_playlist_picker_create">创建</string>
     <string name="player_playlist_picker_add">添加</string>
-    <string name="player_playlist_picker_empty">暂无自定义歌单，点击下方创建</string>
-    <string name="player_playlist_picker_added">已添加到 %1$d 个播放列表</string>
-    <string name="player_playlist_picker_already_in">已在所选播放列表中</string>
+    <string name="player_playlist_picker_empty">暂无歌单，点击下方创建</string>
+    <string name="player_playlist_picker_added">已添加到 %1$d 个歌单</string>
+    <string name="player_playlist_picker_already_in">已在所选歌单中</string>
     <string name="player_playlist_picker_count">%1$d 首</string>
 </resources>

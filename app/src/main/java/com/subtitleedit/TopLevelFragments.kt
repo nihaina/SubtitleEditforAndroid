@@ -27,6 +27,7 @@ import com.subtitleedit.ui.ListeningStatsScreen
 import com.subtitleedit.ui.ListeningStatsPageState
 import com.subtitleedit.ui.MediaLibraryScreen
 import com.subtitleedit.ui.MediaAlbumScreen
+import com.subtitleedit.ui.MediaAlbumPageState
 import com.subtitleedit.ui.MediaLibraryScanCoordinator
 import com.subtitleedit.ui.showLibraryError
 import com.subtitleedit.model.FileBrowserViewMode
@@ -60,6 +61,7 @@ internal class MainTopLevelPagesState {
     var draftToExport by mutableStateOf<DraftsActivity.DraftItem?>(null)
     var settingsPage by mutableStateOf(SettingsPageState())
     val listeningStatsPage = ListeningStatsPageState()
+    val mediaAlbumPage = MediaAlbumPageState()
 }
 
 @Composable
@@ -413,7 +415,8 @@ internal fun MainTopLevelPages(
             MediaAlbumScreen(
                 refreshVersion = refreshVersion,
                 favoriteDirectories = state.favoriteDirectories,
-                isActive = isActive
+                isActive = isActive,
+                pageState = state.mediaAlbumPage
             )
         } else {
             ToolsScreen(

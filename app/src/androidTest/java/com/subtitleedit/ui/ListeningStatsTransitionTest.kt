@@ -93,7 +93,7 @@ class ListeningStatsTransitionTest {
         compose.onNodeWithText("2m").assertIsDisplayed()
         compose.onNodeWithText(compose.activity.getString(R.string.stats_summary_week)).assertIsDisplayed()
         compose.runOnIdle {
-            assertEquals(loaded, state.content)
+            assertEquals(loaded.copy(topItemsRange = StatsCalculator.currentRange(today, StatsGranularity.WEEK)), state.content)
             assertEquals(StatsGranularity.WEEK, state.granularity)
             assertEquals(year, state.selectedYear)
             assertEquals(today, state.selectedDate)

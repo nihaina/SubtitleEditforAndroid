@@ -3,6 +3,8 @@ package com.subtitleedit.player
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -24,11 +26,13 @@ internal fun PlayerEdgeButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     background: Color = PlayerColors.SurfaceHigh.copy(alpha = 0.94f),
-    tint: Color = PlayerColors.OnDark
+    tint: Color = PlayerColors.OnDark,
+    interactionSource: MutableInteractionSource? = null
 ) {
     Box(
         modifier = modifier.size(32.dp).clip(CircleShape).background(background)
-            .clickable(role = Role.Button, onClick = onClick),
+            .clickable(interactionSource = interactionSource, indication = LocalIndication.current,
+                role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Icon(painterResource(icon), contentDescription, Modifier.size(16.dp), tint = tint)

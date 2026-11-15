@@ -298,7 +298,7 @@ class MediaLibraryRepositoryTest {
                 }
                 .use { r ->
                     assertEquals("Old favorite", r.getFavorites().single().title)
-                    assertEquals("Old playlist", r.getPlaylists().single().name)
+                    assertEquals("Old playlist", r.getPlaylists().filterNot { it.isSystem }.single().name)
                     assertEquals("Old item", r.getPlaylistTracks(7).single().title)
                     assertEquals("Old queue", r.getCurrentQueue().first.single().title)
                     assertEquals(0, r.getCurrentQueue().second)

@@ -64,7 +64,6 @@ import com.subtitleedit.R
 internal fun PlayerPanelSheet(
     state: PlayerUiState,
     viewModel: PlayerViewModel,
-    onEditTags: () -> Unit = {},
     onPickSubtitle: () -> Unit = {}
 ) {
     if (state.panel == PlayerPanel.NONE) return
@@ -114,7 +113,7 @@ internal fun PlayerPanelSheet(
                 PlayerPanel.BOOKMARK -> PlayerBookmarkPanel(state, viewModel)
                 PlayerPanel.TIMER -> PlayerTimerPanel(state, viewModel)
                 PlayerPanel.SPEED -> PlayerSpeedPanel(state, viewModel)
-                PlayerPanel.SETTINGS -> PlayerSettingsPanel(state, viewModel, onEditTags)
+                PlayerPanel.SETTINGS -> PlayerSettingsPanel(state, viewModel)
                 PlayerPanel.NONE -> Unit
             }
         }
@@ -511,27 +510,18 @@ private fun PlayerSpeedPanel(state: PlayerUiState, viewModel: PlayerViewModel) {
 }
 
 @Composable
-private fun PlayerSettingsPanel(state: PlayerUiState, viewModel: PlayerViewModel, onEditTags: () -> Unit) {
+private fun PlayerSettingsPanel(state: PlayerUiState, viewModel: PlayerViewModel) {
     PlayerSettingsSwitch(
         title = stringResource(R.string.player_settings_resume),
         checked = state.resumePlayback,
         onCheckedChange = viewModel::setResumePlayback
     )
-    PlayerSettingsSwitch(
-        title = stringResource(R.string.player_settings_loudness_waveform),
-        checked = state.showLoudnessWaveform,
-        onCheckedChange = viewModel::setShowLoudnessWaveform
-    )
-    Row(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-            .clickable(enabled = state.currentTrack != null, onClick = onEditTags)
-            .padding(vertical = 12.dp).testTag("player-edit-tags"),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(painterResource(R.drawable.ic_rename), contentDescription = null,
-            modifier = Modifier.size(20.dp), tint = PlayerColors.OnDarkVariant)
-        Spacer(Modifier.width(12.dp))
-        Text(stringResource(R.string.media_tag_editor_title), color = PlayerColors.OnDark, fontSize = 15.sp)
+    if (!state.isVideo) {
+        PlayerSettingsSwitch(
+            title = stringResource(R.string.player_settings_loudness_waveform),
+            checked = state.showLoudnessWaveform,
+            onCheckedChange = viewModel::setShowLoudnessWaveform
+        )
     }
     Spacer(Modifier.height(8.dp))
     Text(stringResource(R.string.player_settings_default_mode), color = PlayerColors.OnDarkVariant, fontSize = 13.sp)

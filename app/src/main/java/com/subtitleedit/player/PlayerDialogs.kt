@@ -383,7 +383,6 @@ internal fun PlayerPlaylistPickerDialog(
     onConfirmAdd: (Set<Long>) -> Unit
 ) {
     if (!state.showPlaylistPickerDialog) return
-    val trackTitle = state.currentTrack?.name.orEmpty().substringBeforeLast('.')
     var selectedIds by remember(state.currentTrack?.path) {
         mutableStateOf(state.trackContainedPlaylistIds)
     }
@@ -410,7 +409,7 @@ internal fun PlayerPlaylistPickerDialog(
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp)
             ) {
                 Text(
-                    text = trackTitle.ifBlank { stringResource(R.string.player_action_add_to_playlist) },
+                    text = stringResource(R.string.player_action_add_to_playlist),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 2,
@@ -475,6 +474,11 @@ internal fun PlayerPlaylistPickerDialog(
                                         color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (playlist.isSystem) Text(
+                                        text = stringResource(R.string.media_lib_system_playlist),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                                 Text(

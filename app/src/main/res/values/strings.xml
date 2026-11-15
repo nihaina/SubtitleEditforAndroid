@@ -6,7 +6,9 @@
     <string name="nav_stats">数据统计</string>
     <string name="media_lib_tab_favorites">收藏</string>
     <string name="media_lib_tab_queue">播放列表</string>
-    <string name="media_lib_tab_playlists">自定义歌单</string>
+    <string name="media_lib_tab_playlists">歌单</string>
+    <string name="media_lib_system_playlist_count">系统默认歌单 · 共 %1$d 首</string>
+    <string name="media_lib_system_playlist">系统默认歌单</string>
     <string name="media_lib_tab_history">历史播放</string>
     <string name="media_lib_tab_search">文件</string>
     <string name="media_lib_play_all">全部播放</string>
@@ -21,13 +23,13 @@
     <string name="media_lib_delete_playlist_confirm">确定删除歌单“%1$s”吗？歌单内的文件不会被删除。</string>
     <string name="media_lib_added_to_playlist">已添加到“%1$s”</string>
     <string name="media_lib_playlist_empty">歌单“%1$s”为空</string>
-    <string name="media_lib_playlist_empty_hint">在播放器中点击“添加到播放列表”或从媒体库添加曲目</string>
+    <string name="media_lib_playlist_empty_hint">在播放器中点击“添加到歌单”或从媒体库添加曲目</string>
     <string name="media_lib_empty_favorites">暂无收藏曲目</string>
     <string name="media_lib_empty_favorites_hint">在播放器中点击爱心按钮即可收藏当前音视频</string>
     <string name="media_lib_empty_queue">暂无播放列表</string>
     <string name="media_lib_empty_queue_hint">在播放器中打开音视频后，当前播放队列会显示在这里</string>
-    <string name="media_lib_empty_playlists">暂无自定义歌单</string>
-    <string name="media_lib_empty_playlists_hint">点击右下角 + 号创建你的第一个自定义歌单</string>
+    <string name="media_lib_empty_playlists">暂无歌单</string>
+    <string name="media_lib_empty_playlists_hint">点击右下角 + 号创建你的第一个歌单</string>
     <string name="media_lib_empty_history">暂无历史播放</string>
     <string name="media_lib_empty_history_hint">播放音视频后会自动记录你的播放历史与进度</string>
     <string name="media_lib_search_hint">搜索媒体库标题、歌手、专辑或文件名</string>

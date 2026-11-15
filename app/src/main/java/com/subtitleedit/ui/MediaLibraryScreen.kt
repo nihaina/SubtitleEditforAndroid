@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -107,9 +106,8 @@ import java.util.Locale
 
 internal enum class MediaLibraryTab(val labelRes: Int) {
     FILES(R.string.media_lib_tab_search),
-    FAVORITES(R.string.media_lib_tab_favorites),
-    PLAYLIST(R.string.media_lib_tab_queue),
     CUSTOM_PLAYLISTS(R.string.media_lib_tab_playlists),
+    PLAYLIST(R.string.media_lib_tab_queue),
     HISTORY(R.string.media_lib_tab_history)
 }
 
@@ -269,7 +267,7 @@ internal fun MediaLibraryScreen(
                 MediaLibraryContent(
                     favorites = repository.getFavorites(),
                     currentQueue = repository.getCurrentQueue(),
-                    playlists = repository.getPlaylists().filter { !it.isSystem },
+                    playlists = repository.getPlaylists(),
                     history = repository.getPlaybackHistory(),
                     allTracks = repository.searchLibrary(""),
                     playlistId = playlistId,
@@ -314,24 +312,33 @@ internal fun MediaLibraryScreen(
             .background(settingsPageBackground())
     ) {
         if (openedPlaylist != null) {
-            PlaylistDetailContent(
-                playlist = openedPlaylist,
-                tracks = openedPlaylistTracks,
-                onPlayTrack = { idx -> playTracks(openedPlaylistTracks, idx) },
-                onPlayAll = { playTracks(openedPlaylistTracks, 0, playAll = true) },
-                onRemoveTrack = { track ->
-                    mutate({ repository.removeTrackFromPlaylist(openedPlaylist.id, track.path) })
-                }
-            )
+            if (openedPlaylist.id == MediaLibraryRepository.FAVORITES_PLAYLIST_ID) {
+                FavoritesTabContent(
+                    tracks = favorites,
+                    onPlay = { idx -> playTracks(favorites, idx) },
+                    onPlayAll = { playTracks(favorites, 0, playAll = true) },
+                    onToggleFavorite = { track -> mutate({ repository.removeFavorite(track.path) }) },
+                    onAddToPlaylist = { pickingPlaylistForTracks = listOf(it) }
+                )
+            } else {
+                PlaylistDetailContent(
+                    playlist = openedPlaylist,
+                    tracks = openedPlaylistTracks,
+                    onPlayTrack = { idx -> playTracks(openedPlaylistTracks, idx) },
+                    onPlayAll = { playTracks(openedPlaylistTracks, 0, playAll = true) },
+                    onRemoveTrack = { track ->
+                        mutate({ repository.removeTrackFromPlaylist(openedPlaylist.id, track.path) })
+                    }
+                )
+            }
         } else {
             Column(modifier = Modifier.fillMaxSize()) {
                 if (browsePath == null) {
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        items(MediaLibraryTab.entries) { tab ->
+                        MediaLibraryTab.entries.forEach { tab ->
                             val selected = selectedTab == tab
                             FilterChip(
                                 selected = selected,
@@ -347,16 +354,6 @@ internal fun MediaLibraryScreen(
                 }
 
                 when (selectedTab) {
-                    MediaLibraryTab.FAVORITES -> FavoritesTabContent(
-                        tracks = favorites,
-                        onPlay = { idx -> playTracks(favorites, idx) },
-                        onPlayAll = { playTracks(favorites, 0, playAll = true) },
-                        onToggleFavorite = { track ->
-                            mutate({ repository.removeFavorite(track.path) })
-                        },
-                        onAddToPlaylist = { pickingPlaylistForTracks = listOf(it) }
-                    )
-
                     MediaLibraryTab.PLAYLIST -> QueueTabContent(
                         tracks = currentQueue.first,
                         currentIndex = currentQueue.second,
@@ -747,7 +744,7 @@ private fun QueueTabContent(
 }
 
 @Composable
-private fun CustomPlaylistsTabContent(
+internal fun CustomPlaylistsTabContent(
     playlists: List<MediaPlaylist>,
     onOpen: (MediaPlaylist) -> Unit,
     onRename: (MediaPlaylist) -> Unit,
@@ -1301,7 +1298,7 @@ private fun PlaylistCardRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick).testTag("library-playlist:${playlist.id}"),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.cardContainer)
     ) {
@@ -1328,7 +1325,8 @@ private fun PlaylistCardRow(
                     )
                 } else {
                     Icon(
-                        painter = painterResource(R.drawable.ic_queue_music),
+                        painter = painterResource(if (playlist.id == MediaLibraryRepository.FAVORITES_PLAYLIST_ID)
+                            R.drawable.ic_favorite else R.drawable.ic_queue_music),
                         contentDescription = null,
                         modifier = Modifier.size(26.dp),
                         tint = MaterialTheme.colorScheme.onSecondaryContainer
@@ -1346,13 +1344,14 @@ private fun PlaylistCardRow(
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = stringResource(R.string.player_playlist_picker_count, playlist.itemCount),
+                    text = if (playlist.isSystem) stringResource(R.string.media_lib_system_playlist_count, playlist.itemCount)
+                        else stringResource(R.string.player_playlist_picker_count, playlist.itemCount),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Box {
-                IconButton(onClick = { menuExpanded = true }) {
+            if (!playlist.isSystem) Box {
+                IconButton(onClick = { menuExpanded = true }, modifier = Modifier.testTag("library-playlist-actions:${playlist.id}")) {
                     Icon(
                         painter = painterResource(R.drawable.ic_more_vertical),
                         contentDescription = stringResource(R.string.activity_main_text_01),
@@ -1547,18 +1546,25 @@ internal fun LibraryPlaylistAssignDialog(
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(10.dp))
                                     .clickable { onSelectPlaylist(playlist) }
+                                    .testTag("library-playlist-choice:${playlist.id}")
                                     .padding(horizontal = 8.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text(
-                                    text = playlist.name,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        text = playlist.name,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (playlist.isSystem) Text(
+                                        text = stringResource(R.string.media_lib_system_playlist),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                                 Text(
                                     text = stringResource(R.string.player_playlist_picker_count, playlist.itemCount),
                                     style = MaterialTheme.typography.labelMedium,

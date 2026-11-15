@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import androidx.annotation.WorkerThread
+import com.subtitleedit.R
 import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.FileUtils
 import java.io.Closeable
@@ -25,6 +26,7 @@ private constructor(
     private val helper: MediaLibraryDatabase,
     private val readMetadata: (File, Long) -> MediaLibraryTrack,
     private val readAlbumMetadata: (File) -> MediaAlbumMetadata,
+    private val favoritesPlaylistName: String,
 ) : Closeable {
     private val writeLock = Any()
     private val changes = MutableStateFlow(0L)
@@ -85,6 +87,24 @@ private constructor(
 
     fun getPlaylists(): List<MediaPlaylist> {
         val result = ArrayList<MediaPlaylist>()
+        // Favorites is a system playlist backed by its original table, never a copied collection.
+        db.rawQuery(
+                """SELECT COUNT(*),COALESCE(MIN(added_at_ms),0),COALESCE(MAX(added_at_ms),0),
+            (SELECT path FROM favorites ORDER BY added_at_ms DESC,path LIMIT 1) FROM favorites""",
+                null,
+            )
+            .use { c ->
+                c.moveToFirst()
+                result += MediaPlaylist(
+                    id = FAVORITES_PLAYLIST_ID,
+                    name = favoritesPlaylistName,
+                    isSystem = true,
+                    createdAtMs = c.getLong(1),
+                    updatedAtMs = c.getLong(2),
+                    itemCount = c.getInt(0),
+                    firstTrackPath = c.getString(3),
+                )
+            }
         db.rawQuery(
                 """SELECT p.id,p.name,p.is_system,p.created_at_ms,p.updated_at_ms,
             (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id),
@@ -111,13 +131,14 @@ private constructor(
         getPlaylists().firstOrNull { it.id == playlistId }
 
     fun getPlaylistTracks(playlistId: Long): List<MediaLibraryTrack> =
-        tracks(
+        if (playlistId == FAVORITES_PLAYLIST_ID) getFavorites() else tracks(
             "SELECT $TRACK_COLUMNS FROM playlist_items WHERE playlist_id=? ORDER BY sort_order,id",
             playlistId.toString(),
         )
 
     fun getPlaylistIdsContainingTrack(path: String): Set<Long> {
         val result = linkedSetOf<Long>()
+        if (isFavorite(path)) result += FAVORITES_PLAYLIST_ID
         db.rawQuery(
                 "SELECT i.playlist_id FROM playlist_items i JOIN playlists p ON p.id=i.playlist_id WHERE i.path=?",
                 arrayOf(path),
@@ -149,6 +170,7 @@ private constructor(
     }
 
     fun renamePlaylist(playlistId: Long, newName: String): Boolean {
+        if (playlistId == FAVORITES_PLAYLIST_ID) return false
         val normalized = newName.trim().takeIf { it.isNotEmpty() } ?: return false
         val success = write {
             if (
@@ -175,6 +197,7 @@ private constructor(
     }
 
     fun deletePlaylist(playlistId: Long) {
+        if (playlistId == FAVORITES_PLAYLIST_ID) return
         val deleted = write {
             if (
                 !exists("SELECT 1 FROM playlists WHERE id=? AND is_system=0", playlistId.toString())
@@ -202,6 +225,11 @@ private constructor(
         val added = write {
             var count = 0
             for (id in playlistIds.distinct()) {
+                if (id == FAVORITES_PLAYLIST_ID) {
+                    if (insertWithOnConflict("favorites", null, track.values(), SQLiteDatabase.CONFLICT_IGNORE) >= 0L)
+                        count++
+                    continue
+                }
                 if (!exists("SELECT 1 FROM playlists WHERE id=? AND is_system=0", id.toString()))
                     continue
                 val order =
@@ -238,6 +266,10 @@ private constructor(
     }
 
     fun removeTrackFromPlaylist(playlistId: Long, path: String) {
+        if (playlistId == FAVORITES_PLAYLIST_ID) {
+            removeFavorite(path)
+            return
+        }
         val removed = write {
             val count =
                 delete(
@@ -708,6 +740,7 @@ private constructor(
     }
 
     companion object {
+        const val FAVORITES_PLAYLIST_ID = -1L
         @Volatile private var instance: MediaLibraryRepository? = null
 
         fun getInstance(context: Context): MediaLibraryRepository =
@@ -718,6 +751,7 @@ private constructor(
                                 MediaLibraryDatabase(context),
                                 PlayerTrackMetadataReader::readLibraryTrack,
                                 PlayerTrackMetadataReader::readAlbumMetadata,
+                                context.getString(R.string.media_lib_tab_favorites),
                             )
                             .also { instance = it }
                 }
@@ -734,7 +768,12 @@ private constructor(
             metadataReader: (File, Long) -> MediaLibraryTrack =
                 PlayerTrackMetadataReader::readLibraryTrack,
         ): MediaLibraryRepository =
-            MediaLibraryRepository(MediaLibraryDatabase(context, name), metadataReader, albumMetadataReader)
+            MediaLibraryRepository(
+                MediaLibraryDatabase(context, name),
+                metadataReader,
+                albumMetadataReader,
+                context.getString(R.string.media_lib_tab_favorites),
+            )
     }
 }
 

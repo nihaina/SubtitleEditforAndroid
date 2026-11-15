@@ -66,6 +66,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -92,18 +93,37 @@ internal fun PlayerScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val pageGradient = PlayerColors.pageGradient
-    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val configuration = LocalConfiguration.current
+    val landscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val density = LocalDensity.current
     var playerHeightPx by remember { mutableStateOf(0) }
     var topOverlayBounds by remember { mutableStateOf<Rect?>(null) }
     var bottomOverlayBounds by remember { mutableStateOf<Rect?>(null) }
+    var expandedAudioTopInset by remember(configuration.screenWidthDp, configuration.screenHeightDp,
+        landscape, configuration.fontScale, density.density) {
+        mutableStateOf<Float?>(null)
+    }
+    var expandedAudioBottomInset by remember(configuration.screenWidthDp, configuration.screenHeightDp,
+        landscape, configuration.fontScale, density.density) {
+        mutableStateOf<Float?>(null)
+    }
     var gestureOrigin by remember { mutableStateOf(Offset.Zero) }
     val currentTopOverlay by rememberUpdatedState(topOverlayBounds)
     val currentBottomOverlay by rememberUpdatedState(bottomOverlayBounds)
     val currentGestureOrigin by rememberUpdatedState(gestureOrigin)
-    var lyricScrollActivity by remember(state.currentTrack?.path) { mutableStateOf(0L) }
     var videoLockActivity by remember(state.currentTrack?.path) { mutableStateOf(0L) }
-    LaunchedEffect(state.controlsVisible, state.lyricsVisible) { lyricScrollActivity = 0L }
+    var audioRestoreActivity by remember(state.currentTrack?.path) { mutableStateOf(0L) }
+    LaunchedEffect(state.controlsVisible) {
+        if (state.controlsVisible) audioRestoreActivity = 0L
+    }
+    val audioButtonTopPadding = expandedAudioTopInset?.let {
+        with(density) { it.coerceAtLeast(0f).toDp() }
+    } ?: 64.dp
+    val audioButtonBottomPadding = expandedAudioBottomInset?.let {
+        with(density) { it.coerceAtLeast(0f).toDp() }
+    } ?: if (landscape) 132.dp else 204.dp
+    val audioContentTopPadding = if (state.controlsVisible) audioButtonTopPadding else 0.dp
+    val audioContentBottomPadding = if (state.controlsVisible) audioButtonBottomPadding else 0.dp
     BackHandler(enabled = state.lyricsVisible && !state.isVideo && state.panel == PlayerPanel.NONE &&
         !state.showTrackInfoDialog && !state.showPlaylistPickerDialog) {
         viewModel.setLyricsVisible(false)
@@ -182,7 +202,8 @@ internal fun PlayerScreen(
                         onTap = {
                             val current = viewModel.state.value
                             if (current.controlsLocked) videoLockActivity++
-                            else viewModel.setControlsVisible(!current.controlsVisible)
+                            else if (current.isVideo) viewModel.setControlsVisible(!current.controlsVisible)
+                            else if (!current.controlsVisible) audioRestoreActivity++
                         },
                         onDoubleTap = { offset ->
                             if (viewModel.state.value.controlsLocked) videoLockActivity++
@@ -203,11 +224,6 @@ internal fun PlayerScreen(
                 Box(Modifier.fillMaxSize().background(pageGradient), contentAlignment = Alignment.Center) {
                     key(state.currentTrack?.path) {
                         if (state.lyricsVisible) {
-                            val topPadding = if (!state.controlsVisible) 0.dp else topOverlayBounds?.let { with(density) { (it.bottom - gestureOrigin.y).toDp() } }
-                                ?: if (state.controlsVisible) 64.dp else 0.dp
-                            val bottomPadding = if (!state.controlsVisible) 0.dp else bottomOverlayBounds?.let {
-                                with(density) { (playerHeightPx - it.top + gestureOrigin.y).coerceAtLeast(0f).toDp() }
-                            } ?: if (state.controlsVisible) (if (landscape) 132.dp else 204.dp) else 0.dp
                             key(state.selectedSubtitleId) {
                                 PlayerLyricsView(
                                     lines = state.lyricLines,
@@ -220,10 +236,10 @@ internal fun PlayerScreen(
                                     onSeek = { viewModel.seekTo(it) },
                                     onOpenSubtitles = { viewModel.openPanel(PlayerPanel.SUBTITLE) },
                                     onUserScroll = {
-                                        if (!viewModel.state.value.controlsVisible) lyricScrollActivity++
+                                        if (!viewModel.state.value.controlsVisible) audioRestoreActivity++
                                     },
                                     modifier = Modifier.fillMaxSize().padding(
-                                        top = topPadding.coerceAtLeast(0.dp), bottom = bottomPadding
+                                        top = audioContentTopPadding, bottom = audioContentBottomPadding
                                     )
                                 )
                             }
@@ -251,12 +267,27 @@ internal fun PlayerScreen(
                 modifier = Modifier.align(Alignment.Center)
             )
 
-            if (!state.isVideo && state.lyricsVisible && !state.controlsVisible && state.panel == PlayerPanel.NONE) {
-                PlayerLyricsRestoreControls(
-                    scrollActivity = lyricScrollActivity,
-                    onRestoreControls = { viewModel.setControlsVisible(true) },
-                    modifier = Modifier.align(Alignment.CenterEnd)
-                )
+            if (!state.isVideo && state.panel == PlayerPanel.NONE &&
+                !state.showTrackInfoDialog && !state.showPlaylistPickerDialog) {
+                if (!state.controlsVisible && playerHeightPx > 0 &&
+                    (expandedAudioTopInset == null || expandedAudioBottomInset == null)) {
+                    MeasurePlayerAudioControls(state, viewModel, landscape) { topHeight, bottomHeight ->
+                        expandedAudioTopInset = topHeight.toFloat()
+                        expandedAudioBottomInset = bottomHeight.toFloat()
+                    }
+                }
+                Box(Modifier.fillMaxSize().padding(top = audioButtonTopPadding, bottom = audioButtonBottomPadding)) {
+                    PlayerAudioControlsToggle(
+                        controlsVisible = state.controlsVisible,
+                        revealActivity = audioRestoreActivity,
+                        onToggleControls = {
+                            val visible = viewModel.state.value.controlsVisible
+                            viewModel.setControlsVisible(!visible)
+                            if (visible) audioRestoreActivity++
+                        },
+                        modifier = Modifier.align(Alignment.CenterEnd)
+                    )
+                }
             }
 
             state.error?.let { error ->
@@ -276,7 +307,10 @@ internal fun PlayerScreen(
                 enter = fadeIn(tween(220)),
                 exit = fadeOut(tween(220))
             ) {
-                PlayerControlOverlay(state.isVideo, top = true, onBoundsChanged = { topOverlayBounds = it }) {
+                PlayerControlOverlay(state.isVideo, top = true, onBoundsChanged = {
+                    topOverlayBounds = it
+                    if (it != null && !state.isVideo) expandedAudioTopInset = it.bottom - gestureOrigin.y
+                }) {
                     PlayerTopBar(state, viewModel, landscape)
                 }
             }
@@ -287,12 +321,15 @@ internal fun PlayerScreen(
                 enter = fadeIn(tween(220)),
                 exit = fadeOut(tween(220))
             ) {
-                PlayerControlOverlay(state.isVideo, top = false, onBoundsChanged = { bottomOverlayBounds = it }) {
+                PlayerControlOverlay(state.isVideo, top = false, onBoundsChanged = {
+                    bottomOverlayBounds = it
+                    if (it != null && !state.isVideo) expandedAudioBottomInset = playerHeightPx - it.top + gestureOrigin.y
+                }) {
                     PlayerControls(state, viewModel, landscape)
                 }
             }
 
-            PlayerPanelSheet(state, viewModel, onEditTags, onPickSubtitle)
+            PlayerPanelSheet(state, viewModel, onPickSubtitle = onPickSubtitle)
 
             PlayerTrackInfoDialog(
                 state = state,
@@ -336,6 +373,25 @@ internal fun PlayerScreen(
 }
 
 private val LocalVideoControls = staticCompositionLocalOf { false }
+
+/** A hidden rotation/recreation needs current bar sizes without drawing or placing their controls. */
+@Composable
+private fun MeasurePlayerAudioControls(
+    state: PlayerUiState,
+    viewModel: PlayerViewModel,
+    landscape: Boolean,
+    onMeasured: (Int, Int) -> Unit
+) {
+    SubcomposeLayout { constraints ->
+        val barConstraints = constraints.copy(minHeight = 0)
+        val top = subcompose("top") { PlayerTopBar(state, viewModel, landscape) }
+            .single().measure(barConstraints)
+        val bottom = subcompose("bottom") { PlayerControls(state, viewModel, landscape) }
+            .single().measure(barConstraints)
+        onMeasured(top.height, bottom.height)
+        layout(0, 0) {}
+    }
+}
 
 /** The scrim lives inside AnimatedVisibility so it fades with the controls. */
 @Composable

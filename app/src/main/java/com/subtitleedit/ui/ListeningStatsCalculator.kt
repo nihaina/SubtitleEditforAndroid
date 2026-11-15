@@ -44,7 +44,8 @@ internal data class ListeningStatsContent(
     val topItems: List<TopListeningItem> = emptyList(),
     val recentHistory: List<PlaybackHistoryEntry> = emptyList(),
     val mostPlayed: List<PlaybackHistoryEntry> = emptyList(),
-    val neverPlayed: List<MediaLibraryTrack> = emptyList()
+    val neverPlayed: List<MediaLibraryTrack> = emptyList(),
+    val topItemsRange: Pair<String, String>? = null
 )
 
 /** Date ranges and arithmetic are independent of Android UI and local wall-clock offsets. */

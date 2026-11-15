@@ -133,7 +133,7 @@ internal class PlayerLibraryController(
         playlistPickerJob = scope.launch {
             libraryAction {
                 val (playlists, containedIds) = PlayerLibraryWriter.execute {
-                    repository.getPlaylists().filter { !it.isSystem } to
+                    repository.getPlaylists() to
                         repository.getPlaylistIdsContainingTrack(trackPath)
                 }
                 if (playlistTarget == (trackPath to generation) &&

@@ -45,7 +45,9 @@ private data class AlbumPlaylistRequest(val tracks: List<MediaLibraryTrack>, val
 internal fun MediaAlbumScreen(
     refreshVersion: Int,
     favoriteDirectories: List<File>,
-    isActive: Boolean
+    isActive: Boolean,
+    pageState: MediaAlbumPageState = remember { MediaAlbumPageState() },
+    catalogLoader: MediaAlbumCatalogLoader? = null
 ) {
     val context = LocalContext.current
     val repository = remember(context) { MediaLibraryRepository.getInstance(context) }
@@ -59,22 +61,19 @@ internal fun MediaAlbumScreen(
     var creditOptions by remember(creditPreferences) {
         mutableStateOf(creditPreferences.mapValues { it.value.load() })
     }
-    var catalogTracks by remember { mutableStateOf(emptyList<MediaAlbumTrack>()) }
-    var history by remember { mutableStateOf(emptyMap<String, PlaybackHistoryEntry>()) }
-    var loading by remember { mutableStateOf(true) }
-    val albums by produceState(emptyList<MediaAlbum>(), catalogTracks, history) {
-        val source = catalogTracks
-        val playbackHistory = history
-        value = withContext(Dispatchers.Default) {
-            buildMediaAlbums(source.map { item ->
-                val played = playbackHistory[item.track.path]
-                item.copy(lastPlayedAtMs = played?.playedAtMs ?: 0L, playCount = played?.playCount ?: 0)
-            })
-        }
+    val roots = remember(favoriteDirectories) {
+        favoriteDirectories.map { it.absolutePath.trimEnd('/') + "/" }.distinct().sorted()
     }
+    val catalogKey = MediaAlbumCatalogKey(catalogRevision, refreshVersion, roots)
+    val catalog = pageState.catalog
+    val history = pageState.library?.history.orEmpty()
+    val prepared = pageState.prepared?.takeIf { it.catalog.key.directories == roots }
+    val albums = prepared?.albums.orEmpty()
+    var refreshing by remember { mutableStateOf(prepared == null) }
+    val loading = prepared == null && (refreshing || catalog?.key?.directories == roots)
     val scope = rememberCoroutineScope()
     val mutationMutex = remember { Mutex() }
-    var playlists by remember { mutableStateOf(emptyList<MediaPlaylist>()) }
+    val playlists = pageState.library?.playlists.orEmpty()
     var playlistRequest by remember { mutableStateOf<AlbumPlaylistRequest?>(null) }
     var infoPath by remember { mutableStateOf<String?>(null) }
 
@@ -97,13 +96,14 @@ internal fun MediaAlbumScreen(
     }
 
     LaunchedEffect(revision, refreshVersion) {
+        val previous = pageState.library
+        if (previous?.revision == revision && previous.refreshVersion == refreshVersion) return@LaunchedEffect
         try {
             val loaded = withContext(Dispatchers.IO) {
                 repository.getPlaybackHistory(Int.MAX_VALUE).associateBy { it.path } to
-                    repository.getPlaylists().filterNot { it.isSystem }
+                    repository.getPlaylists()
             }
-            history = loaded.first
-            playlists = loaded.second
+            pageState.library = MediaAlbumLibrarySnapshot(revision, refreshVersion, loaded.first, loaded.second)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -111,30 +111,57 @@ internal fun MediaAlbumScreen(
         }
     }
 
-    LaunchedEffect(catalogRevision, refreshVersion, favoriteDirectories) {
-        loading = true
+    LaunchedEffect(catalogKey) {
+        // A prepared snapshot renders immediately; disk validation is never on the navigation path.
+        refreshing = true
         try {
-            val indexed = withContext(Dispatchers.IO) {
-                val roots = favoriteDirectories.map { it.absolutePath.trimEnd('/') + "/" }
-                repository.getIndexedTracks().filter { track ->
-                    roots.any { track.path.startsWith(it) }
+            if (catalogLoader != null) {
+                val tracks = withContext(Dispatchers.IO) { catalogLoader(roots) }
+                pageState.catalog = MediaAlbumCatalogSnapshot(catalogKey, tracks)
+            } else {
+                val previous = pageState.catalog?.takeIf { it.key == catalogKey }
+                val indexed = previous?.indexedTracks ?: withContext(Dispatchers.IO) {
+                    repository.getIndexedTracks().filter { track ->
+                        roots.any { track.path.startsWith(it) }
+                    }
                 }
-            }
-            catalogTracks = withContext(Dispatchers.IO) {
-                val jobContext = coroutineContext
-                repository.getCachedAlbumTracks(indexed) { !jobContext.isActive }
-            }
-            catalogTracks = withContext(Dispatchers.IO) {
-                val jobContext = coroutineContext
-                repository.loadAlbumTracks(indexed) { !jobContext.isActive }
+                if (previous == null) {
+                    val cached = withContext(Dispatchers.IO) {
+                        val jobContext = coroutineContext
+                        repository.getCachedAlbumTracks(indexed) { !jobContext.isActive }
+                    }
+                    pageState.catalog = MediaAlbumCatalogSnapshot(catalogKey, cached, indexed)
+                }
+                val tracks = withContext(Dispatchers.IO) {
+                    val jobContext = coroutineContext
+                    repository.loadAlbumTracks(indexed) { !jobContext.isActive }
+                }
+                pageState.catalog = MediaAlbumCatalogSnapshot(catalogKey, tracks, indexed)
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
             showLibraryError(context, error)
         } finally {
-            if (coroutineContext.isActive) loading = false
+            if (coroutineContext.isActive) refreshing = false
         }
+    }
+
+    LaunchedEffect(catalog, history) {
+        val source = catalog ?: return@LaunchedEffect
+        val previous = pageState.prepared
+        if (previous?.catalog?.tracks == source.tracks && previous.history == history) {
+            // A refreshed key with identical rows can reuse the already grouped albums too.
+            pageState.prepared = previous.copy(catalog = source, history = history)
+            return@LaunchedEffect
+        }
+        val loaded = withContext(Dispatchers.Default) {
+            buildMediaAlbums(source.tracks.map { item ->
+                val played = history[item.track.path]
+                item.copy(lastPlayedAtMs = played?.playedAtMs ?: 0L, playCount = played?.playCount ?: 0)
+            })
+        }
+        pageState.prepared = MediaAlbumPreparedSnapshot(source, history, loaded)
     }
 
     fun playAlbum(album: MediaAlbum, clickedPath: String?, shuffle: Boolean = false) {
