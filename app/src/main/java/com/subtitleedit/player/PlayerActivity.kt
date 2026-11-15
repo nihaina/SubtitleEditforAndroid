@@ -43,7 +43,10 @@ class PlayerActivity : AppComposeActivity() {
             val file = File(path)
             PlayerTrack(path = path, name = file.name, isVideo = FileTypePolicy.isVideo(file))
         }
-        viewModel.configure(tracks, intent.getIntExtra(EXTRA_START_INDEX, 0))
+        val initialMode = intent.getStringExtra(EXTRA_PLAY_MODE)?.let { value ->
+            runCatching { PlayerPlayMode.valueOf(value) }.getOrNull()
+        }
+        viewModel.configure(tracks, intent.getIntExtra(EXTRA_START_INDEX, 0), initialMode)
         setContent {
             SubtitleEditComposeTheme {
                 val background = MaterialTheme.colorScheme.background
@@ -99,5 +102,6 @@ class PlayerActivity : AppComposeActivity() {
     companion object {
         const val EXTRA_PLAYLIST = "player_playlist"
         const val EXTRA_START_INDEX = "player_start_index"
+        const val EXTRA_PLAY_MODE = "player_play_mode"
     }
 }

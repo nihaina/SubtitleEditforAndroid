@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalResources
 import com.subtitleedit.ui.FavoritesScreen
 import com.subtitleedit.ui.ListeningStatsScreen
 import com.subtitleedit.ui.MediaLibraryScreen
+import com.subtitleedit.ui.MediaAlbumScreen
 import com.subtitleedit.ui.MediaLibraryScanCoordinator
 import com.subtitleedit.ui.showLibraryError
 import com.subtitleedit.model.FileBrowserViewMode
@@ -66,6 +67,7 @@ internal fun MainTopLevelPages(
     refreshVersion: Int,
     selectionVersion: Int,
     state: MainTopLevelPagesState,
+    playerModeEnabled: Boolean,
     viewMode: FileBrowserViewMode,
     onOpenDirectory: (File) -> Unit,
     onToolbarChanged: (String, Boolean, (() -> Unit)?) -> Unit
@@ -246,7 +248,7 @@ internal fun MainTopLevelPages(
         updateDraftToolbar()
     }
 
-    LaunchedEffect(selectedPage, activePage, refreshVersion, selectionVersion, resources) {
+    LaunchedEffect(selectedPage, activePage, refreshVersion, selectionVersion, resources, playerModeEnabled) {
         if (!isActive) return@LaunchedEffect
         if (selectionVersion != previousSelectionVersion) {
             state.pendingFavoriteRemoval = null
@@ -265,6 +267,7 @@ internal fun MainTopLevelPages(
         previousSelectionVersion = selectionVersion
         when (selectedPage) {
             R.id.nav_library -> loadFavoriteDirectories()
+            R.id.nav_tools -> if (playerModeEnabled) loadFavoriteDirectories()
             R.id.nav_favorites -> loadFavoriteDirectories()
             R.id.nav_drafts -> {
                 loadDrafts()
@@ -294,7 +297,7 @@ internal fun MainTopLevelPages(
     }
 
     val pageKey = if (selectedPage == R.id.nav_tools || selectedPage == R.id.nav_library || selectedPage == R.id.nav_stats) 0 else selectionVersion
-    key(selectedPage, pageKey) {
+    key(selectedPage, pageKey, playerModeEnabled) {
     when (selectedPage) {
         R.id.nav_library -> MediaLibraryScreen(
             refreshVersion = refreshVersion,
@@ -403,10 +406,18 @@ internal fun MainTopLevelPages(
             }
         )
 
-        R.id.nav_tools -> ToolsScreen(
-            onOpen = { destination -> openTool(context, destination) },
-            useMaterial3Visuals = true
-        )
+        R.id.nav_tools -> if (playerModeEnabled) {
+            MediaAlbumScreen(
+                refreshVersion = refreshVersion,
+                favoriteDirectories = state.favoriteDirectories,
+                isActive = isActive
+            )
+        } else {
+            ToolsScreen(
+                onOpen = { destination -> openTool(context, destination) },
+                useMaterial3Visuals = true
+            )
+        }
 
         R.id.nav_settings -> SettingsScreen(
             state = state.settingsPage,

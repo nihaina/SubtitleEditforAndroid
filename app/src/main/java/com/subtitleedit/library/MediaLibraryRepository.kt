@@ -538,6 +538,10 @@ private constructor(
         )
     }
 
+    /** Scanned/indexed files only; collections and listening history do not expand the catalog. */
+    fun getIndexedTracks(): List<MediaLibraryTrack> =
+        tracks("SELECT $TRACK_COLUMNS FROM library_tracks ORDER BY path")
+
     fun searchLibrary(query: String): List<MediaLibraryTrack> {
         val normalized = query.trim().lowercase(Locale.ROOT)
         val merged = LinkedHashMap<String, MediaLibraryTrack>()

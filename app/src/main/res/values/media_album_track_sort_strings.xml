@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="media_album_track_sort_title">歌曲排序依据</string>
+    <string name="media_album_track_sort_song_title">歌曲名称</string>
+    <string name="media_album_track_sort_file_name">文件名</string>
+    <string name="media_album_track_sort_folder_path">文件夹路径</string>
+    <string name="media_album_track_sort_album">专辑</string>
+    <string name="media_album_track_sort_artist">歌手</string>
+    <string name="media_album_track_sort_album_artist">专辑艺术家</string>
+    <string name="media_album_track_sort_composer">作曲家</string>
+    <string name="media_album_track_sort_genre">流派</string>
+    <string name="media_album_track_sort_track_number">曲目序号</string>
+    <string name="media_album_track_sort_duration">时长</string>
+    <string name="media_album_track_sort_year">年份</string>
+    <string name="media_album_track_sort_modified">修改日期</string>
+    <string name="media_album_track_sort_added">添加到曲库的日期</string>
+    <string name="media_album_track_sort_last_played">上次播放的日期</string>
+    <string name="media_album_track_sort_play_count">播放次数</string>
+</resources>

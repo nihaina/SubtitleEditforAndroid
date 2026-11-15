@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="album_browse_search">搜索专辑…</string>
+    <string name="album_browse_sort">专辑排序</string>
+    <string name="album_browse_settings">专辑设置</string>
+    <string name="album_browse_empty">暂无专辑</string>
+    <string name="album_browse_no_results">未找到匹配的专辑</string>
+    <string name="album_browse_unknown">未知专辑</string>
+    <string name="album_browse_summary">%1$d 首 · %2$s</string>
+</resources>

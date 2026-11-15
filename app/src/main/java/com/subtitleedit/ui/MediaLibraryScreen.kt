@@ -1162,7 +1162,7 @@ private fun FolderBreadcrumb(rootPath: String?, currentPath: String) {
 }
 
 @Composable
-private fun MediaFileInfoDialog(path: String, onDismiss: () -> Unit) {
+internal fun MediaFileInfoDialog(path: String, onDismiss: () -> Unit) {
     var details by remember(path) { mutableStateOf<PlayerTrackDetails?>(null) }
     var loaded by remember(path) { mutableStateOf(false) }
     LaunchedEffect(path) {

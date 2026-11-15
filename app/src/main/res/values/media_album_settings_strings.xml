@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="media_album_settings_title">专辑</string>
+    <string name="media_album_view_mode">专辑视图模式</string>
+    <string name="media_album_view_no_art">列表（无缩略图）</string>
+    <string name="media_album_view_art">列表（有缩略图）</string>
+    <string name="media_album_view_grid">网格视图</string>
+    <string name="media_album_grid_size">网格尺寸</string>
+    <string name="media_album_grid_small">小</string>
+    <string name="media_album_grid_medium">中等</string>
+    <string name="media_album_grid_large">大</string>
+    <string name="media_album_more_info">在专辑列表中显示更多信息</string>
+    <string name="media_album_group_tracks">按歌手、专辑艺术家或作曲家等子类别划分各专辑的歌曲</string>
+    <string name="media_album_quick_search">快速搜索框</string>
+    <string name="media_album_sort_title">专辑筛选条件</string>
+    <string name="media_album_sort_hint">点击已选条件切换升降序</string>
+    <string name="media_album_sort_apply">确定</string>
+    <string name="media_album_sort_name">名称</string>
+    <string name="media_album_sort_count">歌曲数量</string>
+    <string name="media_album_sort_duration">时长</string>
+    <string name="media_album_sort_year">年份</string>
+    <string name="media_album_sort_updated">更新日期</string>
+    <string name="media_album_sort_artist">歌手</string>
+    <string name="media_album_sort_ascending">升序</string>
+    <string name="media_album_sort_descending">降序</string>
+</resources>

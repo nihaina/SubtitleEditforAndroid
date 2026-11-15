@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="media_categories_navigation">分类</string>
+    <string name="media_category_albums">专辑</string>
+    <string name="media_category_singers">歌手</string>
+    <string name="media_category_artists">艺术家</string>
+    <string name="media_category_composers">作曲家</string>
+    <string name="media_category_tags">标签</string>
+    <string name="media_album_unknown">未知专辑</string>
+    <string name="media_album_unknown_artist">未知歌手</string>
+    <string name="media_album_unknown_album_artist">未知艺术家</string>
+    <string name="media_album_unknown_composer">未知作曲家</string>
+    <string name="media_album_track_summary">%1$d 首 · %2$s</string>
+    <string name="media_album_detail_back">返回专辑列表</string>
+    <string name="media_album_play_all">播放全部</string>
+    <string name="media_album_loading">正在加载专辑</string>
+</resources>

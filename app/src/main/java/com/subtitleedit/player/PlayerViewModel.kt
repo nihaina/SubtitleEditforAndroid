@@ -120,7 +120,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         showHint = ::hint
     )
 
-    fun configure(playlist: List<PlayerTrack>, startIndex: Int) {
+    fun configure(playlist: List<PlayerTrack>, startIndex: Int, initialMode: PlayerPlayMode? = null) {
         if (configured) return
         configured = true
         val selectedPath = playlist.getOrNull(startIndex)?.path
@@ -130,6 +130,8 @@ internal class PlayerViewModel @JvmOverloads constructor(
         _state.value = _state.value.copy(
             playlist = tracks,
             currentIndex = index,
+            // A launch action can request shuffle without changing the user's default mode.
+            mode = initialMode ?: _state.value.mode,
             shuffleOrder = PlayerPlaylistOrder.newShuffleOrder(tracks.size, index),
             isVideo = currentTrack?.isVideo == true,
             bookmarks = currentTrack?.let { bookmarkStore.load(it.path) }.orEmpty(),

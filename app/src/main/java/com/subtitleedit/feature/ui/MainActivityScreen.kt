@@ -95,7 +95,7 @@ private val PlayerBottomNavigationItems = listOf(
     Triple(R.id.nav_directory, R.drawable.ic_nav_folder, R.string.nav_directory),
     Triple(R.id.nav_library, R.drawable.ic_nav_library, R.string.nav_library),
     Triple(R.id.nav_stats, R.drawable.ic_nav_stats, R.string.nav_stats),
-    Triple(R.id.nav_tools, R.drawable.ic_tools, R.string.menu_main_title_01),
+    Triple(R.id.nav_tools, R.drawable.ic_nav_album, R.string.media_categories_navigation),
     Triple(R.id.nav_settings, R.drawable.ic_settings, R.string.menu_main_title_02)
 )
 
@@ -212,6 +212,7 @@ internal fun MainActivityScreen(
     var createNameError by remember { mutableStateOf<String?>(null) }
     var createExtensionError by remember { mutableStateOf<String?>(null) }
     val isDirectoryPage = state.selectedTopLevelItem == R.id.nav_directory
+    val isMediaCategoriesPage = state.playerModeEnabled && state.selectedTopLevelItem == R.id.nav_tools
     val usesPageBackground = isDirectoryPage || state.selectedTopLevelItem in setOf(
         R.id.nav_library, R.id.nav_stats, R.id.nav_favorites, R.id.nav_drafts, R.id.nav_settings, R.id.nav_tools
     )
@@ -258,7 +259,7 @@ internal fun MainActivityScreen(
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .background(MaterialTheme.colorScheme.background)
     ) {
-        TopAppBar(
+        if (!isMediaCategoriesPage) TopAppBar(
             scrollBehavior = scrollBehavior,
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = if (usesPageBackground) settingsPageBackground() else MaterialTheme.colorScheme.surface,
@@ -495,6 +496,7 @@ internal fun MainActivityScreen(
                         refreshVersion = topLevelPageRefreshVersion,
                         selectionVersion = topLevelPageSelectionVersion,
                         state = topLevelPagesState,
+                        playerModeEnabled = state.playerModeEnabled,
                         viewMode = state.viewMode,
                         onOpenDirectory = onOpenDirectoryFromFavorites,
                         onToolbarChanged = onUpdateTopLevelToolbar

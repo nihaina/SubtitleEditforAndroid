@@ -48,7 +48,7 @@ private data class MediaFileStamp(val path: String, val modified: Long, val leng
 
 /** Artwork is loaded only when displayed, with bounded native decoder concurrency and memory. */
 internal object MediaArtworkLoader {
-    private data class Key(val stamp: MediaFileStamp, val size: Int)
+    private data class Key(val stamp: MediaFileStamp, val size: Int, val allowVideoFrame: Boolean)
     private data class Artwork(val bitmap: Bitmap?)
     private val decoders = Semaphore(2, true)
     private val cache = object : LruCache<Key, Artwork>(16 * 1024 * 1024) {
@@ -59,10 +59,10 @@ internal object MediaArtworkLoader {
         cache.snapshot().keys.filter { it.stamp.path == path }.forEach(cache::remove)
     }
 
-    fun loadCover(path: String, targetSizePx: Int = 256): Bitmap? {
+    fun loadCover(path: String, targetSizePx: Int = 256, allowVideoFrame: Boolean = true): Bitmap? {
         val file = File(path)
         if (!file.isFile || !file.canRead()) return null
-        val key = Key(MediaFileStamp.of(file), targetSizePx.coerceIn(32, 1024))
+        val key = Key(MediaFileStamp.of(file), targetSizePx.coerceIn(32, 1024), allowVideoFrame)
         cache.get(key)?.let { return it.bitmap }
         decoders.acquire()
         try {
@@ -74,7 +74,7 @@ internal object MediaArtworkLoader {
             } else null
             val bitmap = if (picture != null) {
                 runCatching { decodeSampled(picture, key.size) }.getOrNull()
-            } else if (FileTypePolicy.isVideo(file)) {
+            } else if (allowVideoFrame && FileTypePolicy.isVideo(file)) {
                 runCatching {
                     withRetriever(file) { retriever ->
                         val frame = if (Build.VERSION.SDK_INT >= 27) {
@@ -114,6 +114,7 @@ internal object PlayerTrackMetadataReader {
         cache.snapshot().keys.filter { it.path == path }.forEach(cache::remove)
         videoDetailsCache.snapshot().keys.filter { it.path == path }.forEach(videoDetailsCache::remove)
         MediaArtworkLoader.invalidate(path)
+        AlbumCatalogLoader.invalidate(path)
     }
 
     fun readLibraryTrack(file: File, durationMs: Long = 0L): MediaLibraryTrack {
@@ -126,6 +127,19 @@ internal object PlayerTrackMetadataReader {
             isVideo = FileTypePolicy.isVideo(file),
             durationMs = durationMs.takeIf { it > 0L } ?: snapshot.durationMs,
             addedAtMs = System.currentTimeMillis()
+        )
+    }
+
+    /** Text fields needed by the album browser; never decodes artwork or runs FFprobe. */
+    fun readAlbumMetadata(file: File): MediaAlbumMetadata {
+        val tags = snapshot(file).tags
+        return MediaAlbumMetadata(
+            albumArtist = tags.albumArtist,
+            composer = tags.composer,
+            year = tags.year,
+            trackNumber = tags.trackNumber,
+            discNumber = tags.discNumber,
+            genre = tags.genre
         )
     }
 
