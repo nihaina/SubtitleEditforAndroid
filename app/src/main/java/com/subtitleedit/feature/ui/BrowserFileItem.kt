@@ -9,9 +9,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.model.BrowserFileMetadata
-import com.subtitleedit.util.AndroidDirectoryPolicy
+import com.subtitleedit.library.MediaLibraryFileObserver
+import com.subtitleedit.util.SharedFileCache
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -106,10 +108,20 @@ internal fun rememberBrowserFileMetadata(
 ): BrowserFileMetadata? {
     val fallback by produceState<BrowserFileMetadata?>(null, file.absolutePath, metadata,
         metadataRefreshKey.takeIf { metadata == null }) {
-        value = metadata ?: withContext(Dispatchers.IO) {
-            BrowserFileMetadata.read(file)?.let {
-                it.copy(restricted = AndroidDirectoryPolicy.isRestricted(file, it.isDirectory))
+        if (metadata != null) {
+            value = metadata
+            return@produceState
+        }
+        // A conflated signal cannot miss this path during a burst. Other paths
+        // remain cache hits, so they never trigger a metadata stat here.
+        var first = true
+        SharedFileCache.attributes.invalidationRevision.collect {
+            val verify = first && metadataRefreshKey != null &&
+                file.parentFile?.absolutePath !in MediaLibraryFileObserver.observedDirectories.value
+            value = withContext(Dispatchers.IO) {
+                if (verify) SharedFileCache.attributes.refresh(file) else SharedFileCache.attributes.get(file)
             }
+            first = false
         }
     }
     return metadata ?: fallback?.takeIf { it.path == file.absolutePath }

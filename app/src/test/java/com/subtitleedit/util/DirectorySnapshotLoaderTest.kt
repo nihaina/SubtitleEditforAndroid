@@ -33,13 +33,13 @@ class DirectorySnapshotLoaderTest {
         val listings = AtomicInteger()
         var onRead: ((String) -> Unit)? = null
         val cache = BrowserDirectoryCache(
-            metadataReader = { file, revision ->
+            attributes = FileMetadataCache(reader = { file, revision ->
                 ioThreads += Thread.currentThread()
                 reads += file.name
                 val metadata = synchronized(files) { files[file.name] }
                 onRead?.invoke(file.name)
                 metadata?.copy(file = file, revision = revision)
-            },
+            }),
             listFiles = {
                 ioThreads += Thread.currentThread()
                 listings.incrementAndGet()
@@ -228,11 +228,11 @@ class DirectorySnapshotLoaderTest {
         val readPaths = CopyOnWriteArrayList<String>()
         val ioThreads = CopyOnWriteArrayList<Thread>()
         val cache = BrowserDirectoryCache(
-            metadataReader = { file, revision ->
+            attributes = FileMetadataCache(reader = { file, revision ->
                 ioThreads += Thread.currentThread()
                 readPaths += file.absolutePath
                 BrowserFileMetadata(file, false, 1L, 1000L, revision = revision)
-            },
+            }),
             listFiles = { directory ->
                 ioThreads += Thread.currentThread()
                 listedDirectories += directory.absolutePath
@@ -274,6 +274,45 @@ class DirectorySnapshotLoaderTest {
                 assertTrue(ioThreads.all { it !== callerThread })
             } finally {
                 finishFirstListing.countDown()
+                owner.cancelAndJoin()
+            }
+        }
+    }
+
+    @Test
+    fun `a shared cache change is not absorbed by an older in flight load`() = runBlocking {
+        val fs = Filesystem(temporaryFolder.root).apply { put("a.srt") }
+        val reading = CompletableDeferred<Unit>()
+        val finishRead = CountDownLatch(1)
+        fs.onRead = {
+            if (!reading.isCompleted) {
+                reading.complete(Unit)
+                check(finishRead.await(5, TimeUnit.SECONDS))
+            }
+        }
+        Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { worker ->
+            val owner = Job()
+            val results = Channel<BrowserDirectorySnapshot>(Channel.UNLIMITED)
+            val loader = DirectorySnapshotLoader(CoroutineScope(coroutineContext + owner), fs.cache,
+                { snapshot, _ -> results.trySend(snapshot) }, worker)
+            try {
+                loader.load(fs.directory)
+                withTimeout(5000) { reading.await() }
+                fs.put("new.srt")
+                // The process observer updates the shared cache, while the local
+                // observation generation remains unchanged.
+                fs.cache.invalidate(fs.directory.absolutePath)
+                loader.load(fs.directory)
+                finishRead.countDown()
+                val latest = withTimeout(5000) {
+                    var snapshot = results.receive()
+                    while ("new.srt" !in snapshot.names()) snapshot = results.receive()
+                    snapshot
+                }
+                assertEquals(setOf("a.srt", "new.srt"), latest.names())
+                assertEquals(2, fs.listings.get())
+            } finally {
+                finishRead.countDown()
                 owner.cancelAndJoin()
             }
         }

@@ -11,6 +11,7 @@ import com.subtitleedit.MediaTagAudioRepository
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
+import com.subtitleedit.util.SharedFileCache
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -30,7 +31,7 @@ class PlayerTrackMetadataReaderTest {
             ))
             assertTrue(generated.getAllLogsAsString().takeLast(2_000), ReturnCode.isSuccess(generated.getReturnCode()))
             // A plain cached scan must not prevent the details-only probe from loading more tags.
-            assertTrue(PlayerTrackMetadataReader.readLibraryTrack(file).isVideo)
+            assertTrue(PlayerTrackMetadataReader.readLibraryTrack(requireNotNull(SharedFileCache.attributes.get(file))).isVideo)
             val details = PlayerTrackMetadataReader.read(file, cacheDirectory = app.cacheDir)
             assertEquals("Video details", details.title)
             assertEquals("Copyright library test", details.copyright)
@@ -73,16 +74,16 @@ class PlayerTrackMetadataReaderTest {
                 MediaConvertMetadata(title = title, artist = "Library artist",
                     editedFields = setOf(MediaConvertMetadataField.TITLE, MediaConvertMetadataField.ARTIST)))
             setTitle("Before edit")
-            val before = PlayerTrackMetadataReader.readLibraryTrack(file)
+            val before = PlayerTrackMetadataReader.readLibraryTrack(requireNotNull(SharedFileCache.attributes.get(file)))
             assertEquals("Before edit", before.title)
             assertEquals("Library artist", before.artist)
             assertTrue(before.durationMs in 990L..1010L)
             assertEquals("Before edit", PlayerTrackMetadataReader.read(file).title)
             setTitle("After edit")
             PlayerTrackMetadataReader.invalidate(file.path)
-            assertEquals("After edit", PlayerTrackMetadataReader.readLibraryTrack(file).title)
+            assertEquals("After edit", PlayerTrackMetadataReader.readLibraryTrack(requireNotNull(SharedFileCache.attributes.get(file))).title)
             assertEquals("After edit", PlayerTrackMetadataReader.read(file).title)
-            assertNull(MediaArtworkLoader.loadCover(file.path))
+            assertNull(SharedFileCache.attributes.get(File(file.path))?.let { metadata -> SharedMediaCache.artwork(metadata, 256) })
         } finally {
             PlayerTrackMetadataReader.invalidate(file.path)
             file.delete()

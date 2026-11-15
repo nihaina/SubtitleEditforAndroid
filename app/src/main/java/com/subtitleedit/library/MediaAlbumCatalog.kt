@@ -1,9 +1,6 @@
 package com.subtitleedit.library
 
-import androidx.annotation.WorkerThread
-import java.io.File
 import java.util.Locale
-import kotlinx.coroutines.CancellationException
 
 internal data class MediaAlbumTrack(
     val track: MediaLibraryTrack,
@@ -119,22 +116,14 @@ private fun normalizedAlbumName(name: String): String = name.trim()
 
 /** Builds the catalog off the UI thread; the repository supplies persisted text tags. */
 internal object AlbumCatalogLoader {
-    @WorkerThread
-    fun load(
-        tracks: List<MediaLibraryTrack>,
-        readMetadata: (File) -> MediaAlbumMetadata = PlayerTrackMetadataReader::readAlbumMetadata,
-        isCancelled: () -> Boolean = { Thread.currentThread().isInterrupted }
-    ): List<MediaAlbumTrack> {
-        val result = ArrayList<MediaAlbumTrack>(tracks.size)
-        val paths = HashSet<String>()
-        for (track in tracks) {
-            if (isCancelled()) throw CancellationException("Album catalog loading cancelled")
-            if (!paths.add(track.path)) continue
-            val file = File(track.path)
-            if (!file.isFile || !file.canRead()) continue
-            val modifiedAtMs = file.lastModified()
-            val metadata = readMetadata(file)
-            result += MediaAlbumTrack(
+    /** Persisted classifications render without touching every source file on page entry. */
+    fun persisted(tracks: List<MediaLibraryTrack>, metadata: Map<String, IndexedAlbumMetadata>): List<MediaAlbumTrack> =
+        tracks.distinctBy { it.path }.map { track ->
+            val saved = metadata[track.path]
+            entry(track, saved?.metadata ?: MediaAlbumMetadata(), saved?.modifiedAtMs ?: 0L)
+        }
+
+    private fun entry(track: MediaLibraryTrack, metadata: MediaAlbumMetadata, modifiedAtMs: Long) = MediaAlbumTrack(
                 track = track,
                 albumArtist = metadata.albumArtist,
                 composer = metadata.composer,
@@ -144,9 +133,6 @@ internal object AlbumCatalogLoader {
                 modifiedAtMs = modifiedAtMs,
                 genre = metadata.genre
             )
-        }
-        return result
-    }
 
     private val YEAR_PATTERN = Regex("(?:^|\\D)(\\d{4})(?:\\D|$)")
 }

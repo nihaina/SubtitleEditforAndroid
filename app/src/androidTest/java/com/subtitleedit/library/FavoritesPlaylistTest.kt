@@ -20,7 +20,8 @@ class FavoritesPlaylistTest {
     private class Fixture(private val context: Context) : Closeable {
         val name = "favorites-playlist-${System.nanoTime()}.db"
 
-        fun open(): MediaLibraryRepository = MediaLibraryRepository.open(context, name) { file, duration ->
+        fun open(): MediaLibraryRepository = MediaLibraryRepository.open(context, name) { snapshot, duration ->
+            val file = snapshot.file
             MediaLibraryTrack(file.absolutePath, file.nameWithoutExtension, durationMs = duration)
         }
 

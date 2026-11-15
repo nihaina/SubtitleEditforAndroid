@@ -29,6 +29,7 @@ import com.subtitleedit.ui.MediaLibraryScreen
 import com.subtitleedit.ui.MediaAlbumScreen
 import com.subtitleedit.ui.MediaAlbumPageState
 import com.subtitleedit.ui.MediaLibraryScanCoordinator
+import com.subtitleedit.library.MediaLibraryFileObserver
 import com.subtitleedit.ui.showLibraryError
 import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.ui.ToolDestination
@@ -176,6 +177,10 @@ internal fun MainTopLevelPages(
             .orEmpty()
             .map(::File)
             .sortedBy { it.name.lowercase(Locale.getDefault()) }
+    }
+
+    LaunchedEffect(state.favoriteDirectories, playerModeEnabled) {
+        if (playerModeEnabled) MediaLibraryFileObserver.syncRoots(context, state.favoriteDirectories)
     }
 
     val backupExporter = rememberLauncherForActivityResult(

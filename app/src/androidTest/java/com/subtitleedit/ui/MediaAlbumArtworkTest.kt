@@ -21,7 +21,8 @@ import com.subtitleedit.MediaConvertMetadata
 import com.subtitleedit.MediaTagAudioRepository
 import com.subtitleedit.library.AlbumSortField
 import com.subtitleedit.library.MediaAlbumTrack
-import com.subtitleedit.library.MediaArtworkLoader
+import com.subtitleedit.library.SharedMediaCache
+import com.subtitleedit.util.SharedFileCache
 import com.subtitleedit.library.MediaLibraryTrack
 import com.subtitleedit.library.PlayerTrackMetadataReader
 import com.subtitleedit.library.buildMediaAlbums
@@ -89,10 +90,10 @@ class MediaAlbumArtworkTest {
     @Test fun albumCoverPolicyNeverReusesCachedVideoFrames() {
         val video = createVideo(fixtureRoot())
         // Existing player and media-library thumbnails keep their video-frame fallback.
-        assertNotNull(MediaArtworkLoader.loadCover(video.path, 64))
-        assertNull(MediaArtworkLoader.loadCover(video.path, 64, allowVideoFrame = false))
-        assertNotNull(MediaArtworkLoader.loadCover(video.path, 64))
-        assertNull(MediaArtworkLoader.loadCover(video.path, 64, allowVideoFrame = false))
+        assertNotNull(SharedFileCache.attributes.get(File(video.path))?.let { metadata -> SharedMediaCache.artwork(metadata, 64) })
+        assertNull(SharedFileCache.attributes.get(File(video.path))?.let { metadata -> SharedMediaCache.artwork(metadata, 64, allowVideoFrame = false) })
+        assertNotNull(SharedFileCache.attributes.get(File(video.path))?.let { metadata -> SharedMediaCache.artwork(metadata, 64) })
+        assertNull(SharedFileCache.attributes.get(File(video.path))?.let { metadata -> SharedMediaCache.artwork(metadata, 64, allowVideoFrame = false) })
     }
 
     private fun waitForArtwork(expected: Color) {

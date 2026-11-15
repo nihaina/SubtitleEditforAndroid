@@ -64,7 +64,7 @@ internal fun MediaAlbumScreen(
     val roots = remember(favoriteDirectories) {
         favoriteDirectories.map { it.absolutePath.trimEnd('/') + "/" }.distinct().sorted()
     }
-    val catalogKey = MediaAlbumCatalogKey(catalogRevision, refreshVersion, roots)
+    val catalogKey = MediaAlbumCatalogKey(catalogRevision, roots)
     val catalog = pageState.catalog
     val history = pageState.library?.history.orEmpty()
     val prepared = pageState.prepared?.takeIf { it.catalog.key.directories == roots }
@@ -112,29 +112,21 @@ internal fun MediaAlbumScreen(
     }
 
     LaunchedEffect(catalogKey) {
-        // A prepared snapshot renders immediately; disk validation is never on the navigation path.
+        if (pageState.catalog?.key == catalogKey) return@LaunchedEffect
+        // Classification is a persisted index. File observers reconcile source changes
+        // independently, so resuming or remounting this page never reparses media.
         refreshing = true
         try {
             if (catalogLoader != null) {
                 val tracks = withContext(Dispatchers.IO) { catalogLoader(roots) }
                 pageState.catalog = MediaAlbumCatalogSnapshot(catalogKey, tracks)
             } else {
-                val previous = pageState.catalog?.takeIf { it.key == catalogKey }
-                val indexed = previous?.indexedTracks ?: withContext(Dispatchers.IO) {
-                    repository.getIndexedTracks().filter { track ->
+                val (indexed, tracks) = withContext(Dispatchers.IO) {
+                    val indexed = repository.getIndexedTracks().filter { track ->
                         roots.any { track.path.startsWith(it) }
                     }
-                }
-                if (previous == null) {
-                    val cached = withContext(Dispatchers.IO) {
-                        val jobContext = coroutineContext
-                        repository.getCachedAlbumTracks(indexed) { !jobContext.isActive }
-                    }
-                    pageState.catalog = MediaAlbumCatalogSnapshot(catalogKey, cached, indexed)
-                }
-                val tracks = withContext(Dispatchers.IO) {
                     val jobContext = coroutineContext
-                    repository.loadAlbumTracks(indexed) { !jobContext.isActive }
+                    indexed to repository.getPersistedAlbumTracks(indexed) { !jobContext.isActive }
                 }
                 pageState.catalog = MediaAlbumCatalogSnapshot(catalogKey, tracks, indexed)
             }
@@ -192,7 +184,7 @@ internal fun MediaAlbumScreen(
 
     MediaAlbumPageContent(
         albums = albums,
-        metadataRefreshKey = refreshVersion to catalogRevision,
+        metadataRefreshKey = catalogKey,
         options = options,
         loading = loading,
         isActive = isActive,

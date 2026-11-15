@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.subtitleedit.model.BrowserFileMetadata
+import com.subtitleedit.util.SharedFileCache
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
@@ -57,7 +58,7 @@ class BrowserFileMetadataRefreshTest {
     }
 
     @Test
-    fun explicitDataRefreshUpdatesAStablePathRow() {
+    fun sharedFileInvalidationUpdatesAStablePathRowWithoutHostRefresh() {
         withSourceFile { file ->
             val refresh = mutableStateOf(0L)
             compose.setContent {
@@ -73,11 +74,29 @@ class BrowserFileMetadataRefreshTest {
                 compose.onAllNodesWithText("4 B").fetchSemanticsNodes().isNotEmpty()
             }
             file.writeText("changed-data")
-            compose.runOnIdle { refresh.value++ }
+            SharedFileCache.attributes.invalidate(file.absolutePath)
             compose.waitUntil(5000) {
                 compose.onAllNodesWithText("12 B").fetchSemanticsNodes().isNotEmpty()
             }
             compose.onNodeWithText("12 B").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun explicitRefreshValidatesAnUnobservedStablePath() {
+        withSourceFile { file ->
+            val refresh = mutableStateOf(0L)
+            compose.setContent {
+                SubtitleEditComposeTheme {
+                    BrowserFileRow(file = file, relativePathRoot = null,
+                        isSelected = false, isSelectionMode = false, onClick = {}, onLongClick = {},
+                        metadataRefreshKey = refresh.value)
+                }
+            }
+            compose.waitUntil(5000) { compose.onAllNodesWithText("4 B").fetchSemanticsNodes().isNotEmpty() }
+            file.writeText("changed-data")
+            compose.runOnIdle { refresh.value++ }
+            compose.waitUntil(5000) { compose.onAllNodesWithText("12 B").fetchSemanticsNodes().isNotEmpty() }
         }
     }
 
@@ -95,7 +114,7 @@ class BrowserFileMetadataRefreshTest {
             val initial = compose.runOnIdle { observed.get()!! }
             file.writeText("same")
             check(file.setLastModified(initial.modifiedTimeMillis))
-            compose.runOnIdle { refresh.value++ }
+            SharedFileCache.attributes.invalidate(file.absolutePath)
             compose.waitUntil(5000) { observed.get()?.cacheKey != initial.cacheKey }
             compose.runOnIdle {
                 assertEquals(initial.size, observed.get()!!.size)

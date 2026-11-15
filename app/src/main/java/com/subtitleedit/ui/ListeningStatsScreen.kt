@@ -77,7 +77,8 @@ import com.subtitleedit.R
 import com.subtitleedit.library.ListeningDay
 import com.subtitleedit.library.ListeningDayStat
 import com.subtitleedit.library.ListeningSessionRecord
-import com.subtitleedit.library.MediaArtworkLoader
+import com.subtitleedit.library.SharedMediaCache
+import com.subtitleedit.util.SharedFileCache
 import com.subtitleedit.library.MediaLibraryRepository
 import com.subtitleedit.library.MediaLibraryTrack
 import com.subtitleedit.library.PlaybackHistoryEntry
@@ -414,7 +415,7 @@ private fun PlaybackInsightRow(
     onClick: () -> Unit
 ) {
     val cover by produceState<Bitmap?>(initialValue = null, key1 = track.path) {
-        value = withContext(Dispatchers.IO) { MediaArtworkLoader.loadCover(track.path, 128) }
+        value = withContext(Dispatchers.IO) { SharedFileCache.attributes.get(File(track.path))?.let { metadata -> SharedMediaCache.artwork(metadata, 128) } }
     }
     Row(
         modifier = Modifier
@@ -484,7 +485,7 @@ private fun SummarySection(
     var cover by remember(topArtworkPath, granularity, artworkRefreshVersion) { mutableStateOf<Bitmap?>(null) }
     LaunchedEffect(topArtworkPath, granularity, artworkRefreshVersion) {
         cover = topArtworkPath?.let {
-            withContext(Dispatchers.IO) { MediaArtworkLoader.loadCover(it, 480, allowVideoFrame = false) }
+            withContext(Dispatchers.IO) { SharedFileCache.attributes.get(File(it))?.let { metadata -> SharedMediaCache.artwork(metadata, 480, allowVideoFrame = false) } }
         }
     }
 
@@ -893,7 +894,7 @@ private fun TopWorksSection(
             )
             items.forEachIndexed { index, item ->
                 val cover by produceState<Bitmap?>(initialValue = null, key1 = item.mediaPath) {
-                    value = withContext(Dispatchers.IO) { MediaArtworkLoader.loadCover(item.mediaPath, 128) }
+                    value = withContext(Dispatchers.IO) { SharedFileCache.attributes.get(File(item.mediaPath))?.let { metadata -> SharedMediaCache.artwork(metadata, 128) } }
                 }
                 Row(
                     modifier = Modifier
@@ -1026,7 +1027,7 @@ private fun TimelineRow(
     onClick: () -> Unit
 ) {
     val cover by produceState<Bitmap?>(initialValue = null, key1 = session.mediaPath) {
-        value = withContext(Dispatchers.IO) { MediaArtworkLoader.loadCover(session.mediaPath, 128) }
+        value = withContext(Dispatchers.IO) { SharedFileCache.attributes.get(File(session.mediaPath))?.let { metadata -> SharedMediaCache.artwork(metadata, 128) } }
     }
     Row(
         modifier = Modifier

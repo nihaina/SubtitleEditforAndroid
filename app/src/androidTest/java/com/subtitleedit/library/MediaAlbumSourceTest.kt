@@ -23,7 +23,8 @@ class MediaAlbumSourceTest {
     @Test fun albumSourceOnlyContainsIndexedFilesDespiteOtherCollections() {
         val name = "album-source-${System.nanoTime()}.db"
         val file = File.createTempFile("album-indexed-", ".wav", context.cacheDir)
-        val repository = MediaLibraryRepository.open(context, name) { media, duration ->
+        val repository = MediaLibraryRepository.open(context, name) { snapshot, duration ->
+            val media = snapshot.file
             MediaLibraryTrack(media.absolutePath, media.name, album = "Album", durationMs = duration)
         }
         try {
@@ -49,10 +50,12 @@ class MediaAlbumSourceTest {
 
     @Test fun catalogLoadsRealAlbumFieldsAndRefreshesAfterTagInvalidation() {
         val file = createWave()
+        val database = "album-real-source-${System.nanoTime()}.db"
+        val repository = MediaLibraryRepository.open(context, database)
         try {
             writeAlbumTags(file, "Album artist A", "Composer A", "2024", "2/12", "1/2", "ASMR")
-            val track = PlayerTrackMetadataReader.readLibraryTrack(file)
-            val initial = AlbumCatalogLoader.load(listOf(track, track)).single()
+            repository.indexTrack(file.path)
+            val initial = repository.getPersistedAlbumTracks(repository.getIndexedTracks()).single()
             assertEquals("Fixture album", initial.track.album)
             assertEquals("Album artist A", initial.albumArtist)
             assertEquals("Composer A", initial.composer)
@@ -68,7 +71,8 @@ class MediaAlbumSourceTest {
 
             writeAlbumTags(file, "Album artist B", "Composer B", "2025", "3/12", "2/2", "Electronica")
             PlayerTrackMetadataReader.invalidate(file.path)
-            val refreshed = AlbumCatalogLoader.load(listOf(PlayerTrackMetadataReader.readLibraryTrack(file))).single()
+            repository.indexTrack(file.path)
+            val refreshed = repository.getPersistedAlbumTracks(repository.getIndexedTracks()).single()
             assertEquals("Album artist B", refreshed.albumArtist)
             assertEquals("Composer B", refreshed.composer)
             assertEquals("Electronica", refreshed.genre)
@@ -80,17 +84,24 @@ class MediaAlbumSourceTest {
             assertEquals(3, refreshed.trackNumber)
             assertEquals(2, refreshed.discNumber)
         } finally {
+            repository.close()
+            context.deleteDatabase(database)
             PlayerTrackMetadataReader.invalidate(file.path)
             file.delete()
         }
     }
 
     @Test fun catalogChecksCancellationBeforeReadingMedia() {
+        val database = "album-cancel-source-${System.nanoTime()}.db"
+        val repository = MediaLibraryRepository.open(context, database)
         try {
-            AlbumCatalogLoader.load(listOf(MediaLibraryTrack("/not-read.wav", "Unused"))) { true }
+            repository.getPersistedAlbumTracks(listOf(MediaLibraryTrack("/not-read.wav", "Unused")), isCancelled = { true })
             fail("A cancelled load must not publish a partial catalog")
         } catch (_: CancellationException) {
             // Expected before the file or metadata is read.
+        } finally {
+            repository.close()
+            context.deleteDatabase(database)
         }
     }
 

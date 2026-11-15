@@ -79,7 +79,8 @@ import com.subtitleedit.R
 import com.subtitleedit.feature.ui.BrowserFileLayout
 import com.subtitleedit.feature.ui.BrowserFileRow
 import com.subtitleedit.feature.ui.browserFileContentPadding
-import com.subtitleedit.library.MediaArtworkLoader
+import com.subtitleedit.library.SharedMediaCache
+import com.subtitleedit.util.SharedFileCache
 import com.subtitleedit.library.MediaLibraryRepository
 import com.subtitleedit.library.MediaLibraryTrack
 import com.subtitleedit.library.MediaPlaylist
@@ -1293,7 +1294,7 @@ private fun PlaylistCardRow(
     var menuExpanded by remember { mutableStateOf(false) }
     val cover by produceState<Bitmap?>(initialValue = null, key1 = playlist.firstTrackPath) {
         value = playlist.firstTrackPath?.let { path ->
-            withContext(Dispatchers.IO) { MediaArtworkLoader.loadCover(path, 128) }
+            withContext(Dispatchers.IO) { SharedFileCache.attributes.get(File(path))?.let { metadata -> SharedMediaCache.artwork(metadata, 128) } }
         }
     }
 
@@ -1385,7 +1386,7 @@ private fun MediaTrackCard(
     trailingContent: @Composable () -> Unit = {}
 ) {
     val cover by produceState<Bitmap?>(initialValue = null, key1 = track.path) {
-        value = withContext(Dispatchers.IO) { MediaArtworkLoader.loadCover(track.path, 128) }
+        value = withContext(Dispatchers.IO) { SharedFileCache.attributes.get(File(track.path))?.let { metadata -> SharedMediaCache.artwork(metadata, 128) } }
     }
     Card(
         modifier = Modifier

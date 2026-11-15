@@ -17,6 +17,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.subtitleedit.R
 import com.subtitleedit.library.ListeningDay
 import com.subtitleedit.library.MediaLibraryRepository
+import com.subtitleedit.library.MediaLibraryFileObserver
+import com.subtitleedit.util.SharedFileCache
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -60,9 +62,9 @@ internal object MediaLibraryScanCoordinator {
         _scanning.value = true
         scope.launch {
             try {
-                val readable = directories.filter { it.isDirectory && it.canRead() }
+                val readable = directories.filter { SharedFileCache.attributes.get(it)?.isDirectory == true }
                 require(readable.isNotEmpty()) { "No readable directory" }
-                val count = MediaLibraryRepository.getInstance(app).scanDirectoriesToLibrary(readable)
+                val count = MediaLibraryFileObserver.reconcile(app, readable)
                 withContext(Dispatchers.Main) {
                     Toast.makeText(app, app.getString(R.string.media_lib_scan_done, count), Toast.LENGTH_SHORT).show()
                 }

@@ -3,6 +3,7 @@ package com.subtitleedit.library
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.subtitleedit.util.SharedFileCache
 import java.io.Closeable
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
@@ -24,7 +25,8 @@ class MediaAlbumMetadataIndexTest {
         fun file(name: String): File = File(directory, name).apply { writeBytes(byteArrayOf(0)) }
 
         fun open(reader: (File) -> MediaAlbumMetadata): MediaLibraryRepository =
-            MediaLibraryRepository.open(context, name, albumMetadataReader = reader) { file, duration ->
+            MediaLibraryRepository.open(context, name, albumMetadataReader = { reader(it.file) }) { snapshot, duration ->
+                val file = snapshot.file
                 MediaLibraryTrack(
                     file.absolutePath,
                     "Song ${file.nameWithoutExtension}",
@@ -50,9 +52,9 @@ class MediaAlbumMetadataIndexTest {
                 assertEquals(2_050, repository.scanDirectoriesToLibrary(listOf(fixture.directory)))
                 assertEquals(2_050, reads.get())
                 val indexed = repository.getIndexedTracks()
-                assertEquals(2_050, repository.getCachedAlbumTracks(indexed).size)
+                assertEquals(2_050, repository.getPersistedAlbumTracks(indexed).size)
                 repeat(2) {
-                    val catalog = repository.loadAlbumTracks(indexed)
+                    val catalog = repository.getPersistedAlbumTracks(indexed)
                     assertEquals(2_050, catalog.size)
                     assertTrue(catalog.all { it.albumArtist == "Indexed artist" && it.genre == "Indexed genre" })
                 }
@@ -60,7 +62,7 @@ class MediaAlbumMetadataIndexTest {
             }
 
             fixture.open { error("Reopening an indexed library must not parse media again") }.use { repository ->
-                val catalog = repository.loadAlbumTracks(repository.getIndexedTracks())
+                val catalog = repository.getPersistedAlbumTracks(repository.getIndexedTracks())
                 assertEquals(2_050, catalog.size)
                 assertEquals("Indexed composer", catalog.first().composer)
                 assertEquals(2024, catalog.first().year)
@@ -82,20 +84,21 @@ class MediaAlbumMetadataIndexTest {
                 label = "After"
                 // Changing length is reliable even on filesystems with coarse timestamp resolution.
                 changed.appendBytes(byteArrayOf(1))
-                val preview = repository.getCachedAlbumTracks(indexed)
+                val preview = repository.getPersistedAlbumTracks(indexed)
                 assertEquals(0, reads.get())
                 assertEquals("Album", preview.first { it.track.path == changed.path }.track.album)
 
-                val refreshed = repository.loadAlbumTracks(indexed)
+                repository.updateObservedPaths(setOf(changed.path))
+                val refreshed = repository.getPersistedAlbumTracks(indexed)
                 assertEquals(1, reads.get())
                 assertEquals("After composer", refreshed.first { it.track.path == changed.path }.composer)
                 assertEquals("Before composer", refreshed.first { it.track.path != changed.path }.composer)
-                repository.loadAlbumTracks(indexed)
+                repository.getPersistedAlbumTracks(indexed)
                 assertEquals(1, reads.get())
             }
 
             fixture.open { error("Refreshed tags must survive reopening the database") }.use { repository ->
-                val catalog = repository.loadAlbumTracks(repository.getIndexedTracks())
+                val catalog = repository.getPersistedAlbumTracks(repository.getIndexedTracks())
                 assertEquals("After composer", catalog.first { it.track.path == changed.path }.composer)
             }
         }
@@ -119,13 +122,14 @@ class MediaAlbumMetadataIndexTest {
             val reads = AtomicInteger()
             fixture.open { reads.incrementAndGet(); tags("Backfilled") }.use { repository ->
                 val indexed = repository.getIndexedTracks()
-                val preview = repository.getCachedAlbumTracks(indexed).single()
+                val preview = repository.getPersistedAlbumTracks(indexed).single()
                 assertEquals(0, reads.get())
                 assertEquals("Legacy song", preview.track.title)
                 assertEquals("Legacy singer", preview.track.artist)
                 assertEquals("Legacy album", preview.track.album)
 
-                val enriched = repository.loadAlbumTracks(indexed).single()
+                repository.scanDirectoriesToLibrary(listOf(fixture.directory))
+                val enriched = repository.getPersistedAlbumTracks(repository.getIndexedTracks()).single()
                 assertEquals(1, reads.get())
                 assertEquals("Backfilled artist", enriched.albumArtist)
                 assertEquals("Backfilled composer", enriched.composer)
@@ -136,10 +140,10 @@ class MediaAlbumMetadataIndexTest {
             }
 
             fixture.open { error("A migrated library must only backfill classification once") }.use { repository ->
-                val cached = repository.getCachedAlbumTracks(repository.getIndexedTracks()).single()
-                assertEquals("Legacy album", cached.track.album)
+                val cached = repository.getPersistedAlbumTracks(repository.getIndexedTracks()).single()
+                assertEquals("Album", cached.track.album)
                 assertEquals("Backfilled composer", cached.composer)
-                assertEquals("Backfilled genre", repository.loadAlbumTracks(repository.getIndexedTracks()).single().genre)
+                assertEquals("Backfilled genre", repository.getPersistedAlbumTracks(repository.getIndexedTracks()).single().genre)
             }
         }
 
@@ -160,7 +164,7 @@ class MediaAlbumMetadataIndexTest {
                 label = "After"
                 repository.indexTrack(file.path)
                 assertTrue(repository.catalogRevision.value > catalogRevision)
-                val catalog = repository.loadAlbumTracks(repository.getIndexedTracks()).single()
+                val catalog = repository.getPersistedAlbumTracks(repository.getIndexedTracks()).single()
                 assertEquals("After artist", catalog.albumArtist)
                 assertEquals("After composer", catalog.composer)
             }
@@ -182,12 +186,73 @@ class MediaAlbumMetadataIndexTest {
             }.use { repository ->
                 repository.indexTrack(file.path)
                 val indexed = repository.getIndexedTracks()
-                assertEquals("", repository.getCachedAlbumTracks(indexed).single().composer)
-                repository.loadAlbumTracks(indexed)
-                assertEquals("", repository.getCachedAlbumTracks(indexed).single().composer)
-                assertEquals("Current composer", repository.loadAlbumTracks(indexed).single().composer)
-                repository.loadAlbumTracks(indexed)
+                assertEquals("", repository.getPersistedAlbumTracks(indexed).single().composer)
+                repository.updateObservedPaths(setOf(file.path))
+                assertEquals("", repository.getPersistedAlbumTracks(indexed).single().composer)
+                repository.updateObservedPaths(setOf(file.path))
+                assertEquals("Current composer", repository.getPersistedAlbumTracks(indexed).single().composer)
+                repository.getPersistedAlbumTracks(indexed)
                 assertEquals(3, reads.get())
+            }
+        }
+
+    @Test fun unchangedReconciliationAfterReopeningDoesNotParseOrRaiseCatalogRevision() =
+        Fixture(context).use { fixture ->
+            val file = fixture.file("unchanged.wav")
+            fixture.open { tags("Saved") }.use { repository ->
+                repository.scanDirectoriesToLibrary(listOf(fixture.directory))
+            }
+            val cachedVersion = requireNotNull(SharedFileCache.attributes.get(file)).cacheKey
+            fixture.open { error("Unchanged persisted versions must not parse media again") }.use { repository ->
+                val revision = repository.catalogRevision.value
+                SharedFileCache.directories.invalidate(fixture.directory.path)
+                assertEquals(1, repository.scanDirectoriesToLibrary(listOf(fixture.directory)))
+                assertEquals(revision, repository.catalogRevision.value)
+                assertEquals(cachedVersion, requireNotNull(SharedFileCache.attributes.get(file)).cacheKey)
+                assertEquals("Saved composer", repository.getPersistedAlbumTracks(repository.getIndexedTracks()).single().composer)
+            }
+        }
+
+    @Test fun sameStampFileEventOnlyReparsesThatPathAndDeletionPreservesCollections() =
+        Fixture(context).use { fixture ->
+            val changed = fixture.file("changed.wav")
+            fixture.file("keep.wav")
+            val reads = AtomicInteger()
+            var label = "Before"
+            fixture.open { reads.incrementAndGet(); tags(label) }.use { repository ->
+                repository.scanDirectoriesToLibrary(listOf(fixture.directory))
+                repository.toggleFavorite(changed.path)
+                val playlist = requireNotNull(repository.createPlaylist("Keep user data"))
+                repository.addTrackToPlaylist(playlist, changed.path)
+                reads.set(0)
+                val stamp = changed.lastModified()
+                changed.writeBytes(byteArrayOf(2))
+                check(changed.setLastModified(stamp))
+                label = "After"
+                repository.updateObservedPaths(setOf(changed.path))
+                assertEquals(1, reads.get())
+                val catalog = repository.getPersistedAlbumTracks(repository.getIndexedTracks())
+                assertEquals("After composer", catalog.single { it.track.path == changed.path }.composer)
+                assertEquals("Before composer", catalog.single { it.track.path != changed.path }.composer)
+                changed.delete()
+                repository.updateObservedPaths(setOf(changed.path))
+                assertEquals(1, repository.getIndexedTracks().size)
+                assertEquals(changed.path, repository.getFavorites().single().path)
+                assertEquals(changed.path, repository.getPlaylistTracks(playlist).single().path)
+            }
+        }
+
+    @Test fun persistedClassificationDoesNotCheckEverySourceOnPageEntry() =
+        Fixture(context).use { fixture ->
+            val file = fixture.file("saved.wav")
+            fixture.open { tags("Saved") }.use { repository ->
+                repository.scanDirectoriesToLibrary(listOf(fixture.directory))
+                val indexed = repository.getIndexedTracks()
+                file.delete()
+                // Observation/reconciliation owns removal. Rendering remains database-only.
+                assertEquals("Saved composer", repository.getPersistedAlbumTracks(indexed).single().composer)
+                repository.updateObservedPaths(setOf(file.path))
+                assertTrue(repository.getIndexedTracks().isEmpty())
             }
         }
 

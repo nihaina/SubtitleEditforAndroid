@@ -46,6 +46,7 @@ import com.subtitleedit.util.BatchRenameConflictResolver
 import com.subtitleedit.util.ArchivePreviewCache
 import com.subtitleedit.model.FileBrowserOrder
 import com.subtitleedit.model.BrowserFileMetadata
+import com.subtitleedit.library.MediaLibraryFileObserver
 import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
 import com.subtitleedit.model.FileBrowserViewMode
@@ -72,6 +73,7 @@ import com.subtitleedit.util.DirectoryWatcher
 import com.subtitleedit.util.DirectoryChanges
 import com.subtitleedit.util.BrowserDirectorySnapshot
 import com.subtitleedit.util.DirectorySnapshotLoader
+import com.subtitleedit.util.SharedFileCache
 import com.subtitleedit.util.DirectorySearchController
 import com.subtitleedit.util.SettingsManager
 import com.subtitleedit.util.MediaCacheCleaner
@@ -86,6 +88,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
+import androidx.lifecycle.Lifecycle
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -153,7 +157,8 @@ class MainActivity : AppComposeActivity() {
     private val directoryWatcher = DirectoryWatcher(
         onRefresh = ::refreshWatchedDirectory,
         onWatchGap = { path ->
-            if (::directorySnapshotLoader.isInitialized) directorySnapshotLoader.invalidate(path)
+            if (::directorySnapshotLoader.isInitialized &&
+                path !in MediaLibraryFileObserver.observedDirectories.value) directorySnapshotLoader.invalidate(path)
         }
     )
     private lateinit var directorySnapshotLoader: DirectorySnapshotLoader
@@ -403,6 +408,7 @@ class MainActivity : AppComposeActivity() {
             showUpdate = ::showPendingUpdate
         )
         checkPermissions()
+        observeSharedLibraryCache()
     }
 
     private fun setupBackNavigation() {
@@ -686,7 +692,7 @@ class MainActivity : AppComposeActivity() {
         updatePathDisplay()
         directoryLoading = true
         publishScreenState()
-        directoryWatcher.watch(directory)
+        watchDirectory(directory)
         directorySnapshotLoader.load(directory, restoreScrollPosition)
         return true
     }
@@ -696,7 +702,7 @@ class MainActivity : AppComposeActivity() {
         directorySnapshot = snapshot
         directoryLoading = false
         if (stateModel.documentState.selectedTopLevelItem == R.id.nav_directory) {
-            directoryWatcher.watch(snapshot.directory, snapshot.entries.filter { it.isDirectory && !it.restricted }.map { it.file })
+            watchDirectory(snapshot.directory, snapshot.entries.filter { it.isDirectory && !it.restricted }.map { it.file })
         }
         displayDirectoryFiles(restoreScrollPosition)
     }
@@ -816,9 +822,9 @@ class MainActivity : AppComposeActivity() {
             it.directory.absolutePath == stateModel.documentState.currentDirectory?.absolutePath
         }?.entries.orEmpty().associateBy { it.path }
         return { file ->
-            directEntries[file.absolutePath] ?: BrowserFileMetadata.read(file)?.let {
-                it.copy(restricted = AndroidDirectoryPolicy.isRestricted(file, it.isDirectory))
-            }
+            directEntries[file.absolutePath] ?: if (file.parentFile?.absolutePath in
+                MediaLibraryFileObserver.observedDirectories.value) SharedFileCache.attributes.get(file)
+            else SharedFileCache.attributes.refresh(file)
         }
     }
 
@@ -829,7 +835,49 @@ class MainActivity : AppComposeActivity() {
     }
 
     private fun refreshWatchedDirectory(changes: DirectoryChanges) {
+        if (changes.directoryPath in MediaLibraryFileObserver.observedDirectories.value) return
         directorySnapshotLoader.update(changes)
+    }
+
+    private fun watchDirectory(directory: File, children: List<File>? = null) {
+        val observed = MediaLibraryFileObserver.observedDirectories.value
+        if (directory.absolutePath in observed) directoryWatcher.stop()
+        else directoryWatcher.watch(directory, children?.filter { it.absolutePath !in observed })
+    }
+
+    private fun observeSharedLibraryCache() {
+        lifecycleScope.launch {
+            var previousCoverage = emptySet<String>()
+            MediaLibraryFileObserver.observedDirectories.collect { observed ->
+                val oldCoverage = previousCoverage
+                previousCoverage = observed
+                val directory = stateModel.documentState.currentDirectory ?: return@collect
+                if (directory.absolutePath in observed) directoryWatcher.stop()
+                else if (stateModel.documentState.selectedTopLevelItem == R.id.nav_directory &&
+                    lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                    watchDirectory(directory, directorySnapshot?.entries.orEmpty()
+                        .filter { it.isDirectory && !it.restricted }.map { it.file })
+                    if (directory.absolutePath in oldCoverage) directorySnapshotLoader.load(directory)
+                }
+            }
+        }
+        lifecycleScope.launch {
+            var previousPath: String? = null
+            var previousVersion = -1L
+            MediaLibraryFileObserver.directoryUpdates.revision.collect {
+                val directory = stateModel.documentState.currentDirectory ?: return@collect
+                val path = directory.absolutePath
+                val version = MediaLibraryFileObserver.directoryUpdates.versionOf(path)
+                if ((previousPath != path || previousVersion != version) &&
+                    version > 0L &&
+                    stateModel.documentState.selectedTopLevelItem == R.id.nav_directory &&
+                    lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                    directorySnapshotLoader.load(directory)
+                    previousPath = path
+                    previousVersion = version
+                }
+            }
+        }
     }
     
     private fun updatePathDisplay() {

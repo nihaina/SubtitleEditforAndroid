@@ -21,7 +21,8 @@ import com.subtitleedit.MediaConvertCoverMode
 import com.subtitleedit.MediaConvertMetadata
 import com.subtitleedit.MediaTagAudioRepository
 import com.subtitleedit.library.ListeningDayStat
-import com.subtitleedit.library.MediaArtworkLoader
+import com.subtitleedit.library.SharedMediaCache
+import com.subtitleedit.util.SharedFileCache
 import com.subtitleedit.library.PlayerTrackMetadataReader
 import com.subtitleedit.library.TopListeningItem
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
@@ -80,7 +81,7 @@ class ListeningStatsArtworkTest {
         val blank = createWave(root, "no cover.wav")
         val runnerUp = createWave(root, "runner up.wav").also { attachCover(it, AndroidColor.RED, root) }
         // Prewarm the exact thumbnail size used by the summary with a valid video frame.
-        assertNotNull(MediaArtworkLoader.loadCover(video.path, 480))
+        assertNotNull(SharedFileCache.attributes.get(File(video.path))?.let { metadata -> SharedMediaCache.artwork(metadata, 480) })
         val state = ListeningStatsPageState()
         showStatistics(state) { today, _, mode, _ ->
             val winner = if (mode == StatsGranularity.DAY) video else blank

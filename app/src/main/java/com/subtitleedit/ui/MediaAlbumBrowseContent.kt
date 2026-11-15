@@ -53,7 +53,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
 import com.subtitleedit.library.MediaAlbum
-import com.subtitleedit.library.MediaArtworkLoader
+import com.subtitleedit.library.SharedMediaCache
+import com.subtitleedit.util.SharedFileCache
+import java.io.File
 import com.subtitleedit.library.mediaAlbumArtworkPaths
 import com.subtitleedit.player.formatPlaybackTime
 import kotlinx.coroutines.Dispatchers
@@ -263,7 +265,7 @@ internal fun MediaAlbumArtwork(paths: List<String>, modifier: Modifier = Modifie
                 var found: Bitmap? = null
                 for (path in paths.distinct()) {
                     currentCoroutineContext().ensureActive()
-                    found = MediaArtworkLoader.loadCover(path, targetSize, allowVideoFrame = false)
+                    found = SharedFileCache.attributes.get(File(path))?.let { metadata -> SharedMediaCache.artwork(metadata, targetSize, allowVideoFrame = false) }
                     if (found != null) break
                 }
                 found

@@ -32,12 +32,12 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Remounts the real category page while its disk-validation replacement is deliberately delayed. */
+/** Catalog data is retained until indexed files or the configured roots change. */
 @RunWith(AndroidJUnit4::class)
 class MediaAlbumTransitionTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
-    @Test fun returningToCategoriesImmediatelyUsesThePreparedAlbumsDuringValidation() {
+    @Test fun returningToCategoriesUsesPreparedAlbumsWithoutReloadingTheCatalog() {
         val state = MediaAlbumPageState()
         val visible = mutableStateOf(true)
         val reads = AtomicInteger()
@@ -55,12 +55,13 @@ class MediaAlbumTransitionTest {
         compose.runOnIdle { visible.value = false }
         compose.onNodeWithText("Another page").assertIsDisplayed()
         compose.runOnIdle { visible.value = true }
-        compose.waitUntil(5_000L) { reads.get() >= 2 }
+        compose.waitForIdle()
 
         try {
             // The validation has not returned, so a remounted empty produceState cannot satisfy this.
             compose.onNodeWithTag("album-item:retained album").assertIsDisplayed()
             assertNoLoadingIndicator()
+            assertEquals(1, reads.get())
             compose.runOnIdle {
                 assertSame(preparedAlbums, requireNotNull(state.prepared).albums)
                 assertSame(loaded, requireNotNull(state.catalog).tracks)
@@ -88,45 +89,34 @@ class MediaAlbumTransitionTest {
         compose.runOnIdle { visible.value = false }
         compose.onNodeWithText("Another page").assertIsDisplayed()
         compose.runOnIdle { visible.value = true }
-        compose.waitUntil(5_000L) { reads.get() >= 2 }
+        compose.waitForIdle()
 
         try {
             compose.onNodeWithText(emptyText).assertIsDisplayed()
             assertNoLoadingIndicator()
+            assertEquals(1, reads.get())
         } finally {
             validationGate.complete(Unit)
         }
     }
 
-    @Test fun refreshingKeepsPreparedRowsVisibleUntilTheReplacementIsReady() {
+    @Test fun resumingTheAppDoesNotReloadAnUnchangedCatalog() {
         val state = MediaAlbumPageState()
         val refreshVersion = mutableIntStateOf(0)
         val reads = AtomicInteger()
-        val refreshGate = CompletableDeferred<Unit>()
         val original = tracks("Original album")
-        val replacement = tracks("Updated album")
         showPage(state, refreshVersion = { refreshVersion.intValue }) {
-            if (reads.incrementAndGet() == 1) original else {
-                refreshGate.await()
-                replacement
-            }
+            reads.incrementAndGet()
+            original
         }
 
         awaitAlbum(state, "Original album")
         compose.runOnIdle { refreshVersion.intValue++ }
-        compose.waitUntil(5_000L) { reads.get() >= 2 }
-        try {
-            compose.onNodeWithTag("album-item:original album").assertIsDisplayed()
-            compose.onNodeWithTag("album-item:updated album").assertDoesNotExist()
-            assertNoLoadingIndicator()
-        } finally {
-            refreshGate.complete(Unit)
-        }
-
-        awaitAlbum(state, "Updated album")
-        compose.onNodeWithTag("album-item:updated album").assertIsDisplayed()
-        compose.onNodeWithTag("album-item:original album").assertDoesNotExist()
-        compose.runOnIdle { assertEquals(1, requireNotNull(state.catalog).key.refreshVersion) }
+        compose.waitForIdle()
+        compose.onNodeWithTag("album-item:original album").assertIsDisplayed()
+        assertNoLoadingIndicator()
+        assertEquals(1, reads.get())
+        compose.runOnIdle { assertSame(original, requireNotNull(state.catalog).tracks) }
     }
 
     @Test fun changingDirectoriesDoesNotReuseRowsFromAnotherRoot() {

@@ -16,7 +16,8 @@ internal class DirectorySnapshotLoader(
     private val worker: CoroutineDispatcher = Dispatchers.IO
 ) {
     private sealed interface Request {
-        data class Load(val directory: File, var restoreScrollPosition: Boolean, val generation: Long) : Request
+        data class Load(val directory: File, var restoreScrollPosition: Boolean, val generation: Long,
+            val attributeGeneration: Long) : Request
         data class Change(val changes: DirectoryChanges, val generation: Long) : Request
     }
 
@@ -60,11 +61,13 @@ internal class DirectorySnapshotLoader(
     // Requests originate on the UI thread; cache IO is confined to the serial worker above.
     fun load(directory: File, restoreScrollPosition: Boolean = false) {
         val path = directory.absolutePath
-        pendingLoads[path]?.takeIf { it.generation == generation }?.let {
+        val attributeGeneration = cache.attributes.generation
+        pendingLoads[path]?.takeIf { it.generation == generation &&
+            it.attributeGeneration == attributeGeneration }?.let {
             it.restoreScrollPosition = it.restoreScrollPosition || restoreScrollPosition
             return
         }
-        val request = Request.Load(directory, restoreScrollPosition, generation)
+        val request = Request.Load(directory, restoreScrollPosition, generation, attributeGeneration)
         pendingLoads[path] = request
         requests.trySend(request)
     }

@@ -5,8 +5,10 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import androidx.annotation.WorkerThread
 import com.subtitleedit.R
+import com.subtitleedit.model.BrowserFileMetadata
 import com.subtitleedit.util.FileTypePolicy
 import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.SharedFileCache
 import java.io.Closeable
 import java.io.File
 import java.util.Locale
@@ -24,8 +26,8 @@ import kotlinx.coroutines.flow.update
 internal class MediaLibraryRepository
 private constructor(
     private val helper: MediaLibraryDatabase,
-    private val readMetadata: (File, Long) -> MediaLibraryTrack,
-    private val readAlbumMetadata: (File) -> MediaAlbumMetadata,
+    private val readMetadata: (BrowserFileMetadata, Long) -> MediaLibraryTrack,
+    private val readAlbumMetadata: (BrowserFileMetadata) -> MediaAlbumMetadata,
     private val favoritesPlaylistName: String,
 ) : Closeable {
     private val writeLock = Any()
@@ -49,18 +51,18 @@ private constructor(
         synchronized(writeLock) { db.libraryTransaction(block) }
 
     private fun metadata(path: String, durationMs: Long = 0L): MediaLibraryTrack =
-        readMetadata(File(path), durationMs)
+        readMetadata(SharedFileCache.attributes.get(File(path))
+            ?: BrowserFileMetadata(File(path), false, 0L, 0L, isRegularFile = false), durationMs)
 
     private data class IndexedTrack(val track: MediaLibraryTrack, val albumMetadata: IndexedAlbumMetadata?)
 
-    private fun indexedTrack(path: String, durationMs: Long = 0L): IndexedTrack {
-        val file = File(path)
-        val length = file.length()
-        val modifiedAtMs = file.lastModified()
-        val track = metadata(path, durationMs)
+    private fun indexedTrack(file: BrowserFileMetadata, durationMs: Long = 0L): IndexedTrack {
+        val track = readMetadata(file, durationMs)
         // Read immediately after the base tags so both use the same native metadata snapshot.
-        val albumMetadata = IndexedAlbumMetadata(file.absolutePath, length, modifiedAtMs, readAlbumMetadata(file))
-        return IndexedTrack(track, albumMetadata.takeIf { it.matches(file) })
+        val albumMetadata = IndexedAlbumMetadata.of(file, readAlbumMetadata(file))
+        // A source replaced during parsing must never persist old tags under its new version.
+        val verified = SharedFileCache.attributes.refresh(file.file)
+        return IndexedTrack(track, albumMetadata.takeIf { verified != null && it.matches(verified) })
     }
 
     fun isFavorite(path: String): Boolean = db.exists("SELECT 1 FROM favorites WHERE path=?", path)
@@ -515,17 +517,28 @@ private constructor(
      */
     fun scanDirectoriesToLibrary(
         directories: List<File>,
+        onDirectoryScanned: (File, List<BrowserFileMetadata>) -> Unit = { _, _ -> },
+        onDirectoryDiscovered: (File) -> Unit = {},
         isCancelled: () -> Boolean = { Thread.currentThread().isInterrupted },
+    ): Int = reconcileDirectories(directories, isCancelled, onDirectoryScanned, onDirectoryDiscovered)
+
+    private fun reconcileDirectories(
+        directories: List<File>,
+        isCancelled: () -> Boolean,
+        onDirectoryScanned: (File, List<BrowserFileMetadata>) -> Unit,
+        onDirectoryDiscovered: (File) -> Unit = {},
     ): Int {
-        val extensions =
-            FileUtils.AUDIO_EXTENSIONS +
-                setOf("opus", "ac3", "amr") +
-                FileTypePolicy.videoExtensions
+        val savedTracks = getIndexedTracks().associateBy { it.path }
+        val savedMetadata = MediaAlbumMetadataStore.read(db)
         val visitedDirs = HashSet<String>()
         val visitedFiles = HashSet<String>()
+        val seenPaths = HashSet<String>()
         val pending = ArrayDeque<File>()
         directories.forEach { pending.addLast(it) }
         val batch = ArrayList<IndexedTrack>(24)
+        val availableRoots = mutableListOf<String>()
+        val unreadableDirectories = mutableSetOf<String>()
+        var changedCatalog = false
         var count = 0
         fun checkCancelled() {
             if (isCancelled()) throw CancellationException("Media scan cancelled")
@@ -540,40 +553,129 @@ private constructor(
                 }
             }
             batch.clear()
-            catalogChanged()
+            changedCatalog = true
         }
-        while (pending.isNotEmpty()) {
-            checkCancelled()
-            val directory = pending.removeFirst()
-            if (!directory.isDirectory || !directory.canRead()) continue
-            val canonical = runCatching { directory.canonicalPath }.getOrNull() ?: continue
-            if (!visitedDirs.add(canonical)) continue
-            directory.listFiles()?.forEach { file ->
+        try {
+            while (pending.isNotEmpty()) {
                 checkCancelled()
-                if (file.name.startsWith('.')) return@forEach
-                if (file.isDirectory) pending.addLast(file)
-                else if (file.isFile && file.extension.lowercase(Locale.ROOT) in extensions) {
-                    val path = runCatching { file.canonicalPath }.getOrNull() ?: return@forEach
-                    if (!visitedFiles.add(path)) return@forEach
-                    batch += indexedTrack(file.absolutePath)
-                    count++
-                    if (batch.size >= 24) commitBatch()
+                val directory = pending.removeFirst()
+                val attributes = SharedFileCache.attributes.get(directory) ?: continue
+                if (!attributes.isDirectory || attributes.restricted) continue
+                val canonical = runCatching { directory.canonicalPath }.getOrDefault(directory.absolutePath)
+                if (!visitedDirs.add(canonical)) continue
+                onDirectoryDiscovered(directory)
+                val snapshot = SharedFileCache.directories.load(directory)
+                if (!snapshot.listingSucceeded) {
+                    unreadableDirectories += directory.absolutePath
+                    continue
+                }
+                if (directory in directories) availableRoots += directory.absolutePath
+                onDirectoryScanned(directory, snapshot.entries)
+                snapshot.entries.forEach { file ->
+                    checkCancelled()
+                    if (file.file.name.startsWith('.')) return@forEach
+                    if (file.isDirectory && !file.restricted) pending.addLast(file.file)
+                    else if (isMediaFile(file)) {
+                        seenPaths += file.path
+                        val identity = runCatching { file.file.canonicalPath }.getOrDefault(file.path)
+                        if (!visitedFiles.add(identity)) return@forEach
+                        val saved = savedMetadata[file.path]
+                        if (saved?.matches(file) == true) {
+                            savedTracks[file.path]?.let { SharedMediaCache.seedDuration(file, it.durationMs) }
+                        }
+                        if (savedTracks[file.path] == null ||
+                            savedMetadata[file.path]?.matches(file) != true) {
+                            batch += indexedTrack(file)
+                        }
+                        count++
+                        if (batch.size >= 24) commitBatch()
+                    }
                 }
             }
+            commitBatch()
+            val removed = savedTracks.keys.filter { path ->
+                availableRoots.any { isWithin(path, it) } &&
+                    unreadableDirectories.none { isWithin(path, it) } &&
+                    path !in seenPaths
+            }
+            if (removed.isNotEmpty()) {
+                write { removed.forEach { removeIndexedPath(it) } }
+                changedCatalog = true
+            }
+            return count
+        } finally {
+            if (changedCatalog) catalogChanged()
         }
-        commitBatch()
-        return count
     }
 
     fun indexTrack(path: String, durationMs: Long = 0L) {
-        if (!File(path).isFile) return
-        val indexed = indexedTrack(path, durationMs)
+        val file = SharedFileCache.attributes.refresh(File(path), forceRevision = true) ?: return
+        if (!isMediaFile(file)) return
+        val indexed = indexedTrack(file, durationMs)
         write {
             storeIndexedTrack(indexed.track)
             indexed.albumMetadata?.let { MediaAlbumMetadataStore.put(this, it) }
         }
         catalogChanged()
     }
+
+    /** FileObserver batches refresh only their paths; newly created folders discover their subtree. */
+    fun updateObservedPaths(
+        paths: Set<String>,
+        metadataAlreadyUpdated: Boolean = false,
+        onDirectoryDiscovered: (File) -> Unit = {},
+        onDirectoryScanned: (File, List<BrowserFileMetadata>) -> Unit = { _, _ -> },
+    ) {
+        val files = paths.map { File(it) }
+        if (!metadataAlreadyUpdated) files.forEach { SharedFileCache.attributes.invalidate(it.absolutePath, recursive = true) }
+        val updated = mutableListOf<IndexedTrack>()
+        val removed = mutableSetOf<String>()
+        val directories = mutableListOf<File>()
+        files.forEach { file ->
+            val attributes = SharedFileCache.attributes.get(file)
+            when {
+                attributes == null -> removed += file.absolutePath
+                attributes.isDirectory && !attributes.restricted -> {
+                    SharedFileCache.directories.invalidate(file.absolutePath)
+                    directories += file
+                }
+                isMediaFile(attributes) -> updated += indexedTrack(attributes)
+                else -> removed += file.absolutePath
+            }
+        }
+        if (directories.isNotEmpty()) {
+            reconcileDirectories(directories, { Thread.currentThread().isInterrupted },
+                onDirectoryScanned, onDirectoryDiscovered)
+        }
+        if (updated.isNotEmpty() || removed.isNotEmpty()) {
+            var modified = updated.isNotEmpty()
+            write {
+                updated.forEach { indexed ->
+                    storeIndexedTrack(indexed.track)
+                    indexed.albumMetadata?.let { MediaAlbumMetadataStore.put(this, it) }
+                }
+                val indexedPaths = getIndexedTracks().map { it.path }
+                removed.forEach { path ->
+                    indexedPaths.filter { isWithin(it, path) }.forEach {
+                        removeIndexedPath(it)
+                        modified = true
+                    }
+                }
+            }
+            if (modified) catalogChanged()
+        }
+    }
+
+    private fun SQLiteDatabase.removeIndexedPath(path: String) {
+        delete("library_tracks", "path=?", arrayOf(path))
+        delete("album_metadata", "path=?", arrayOf(path))
+    }
+
+    private fun isMediaFile(file: BrowserFileMetadata): Boolean = file.isRegularFile &&
+        file.file.extension.lowercase(Locale.ROOT) in MEDIA_EXTENSIONS
+
+    private fun isWithin(path: String, directoryPath: String): Boolean =
+        path == directoryPath || path.startsWith(directoryPath.trimEnd('/') + "/")
 
     private fun SQLiteDatabase.storeIndexedTrack(track: MediaLibraryTrack) {
         val added =
@@ -602,47 +704,13 @@ private constructor(
     fun getIndexedTracks(): List<MediaLibraryTrack> =
         tracks("SELECT $TRACK_COLUMNS FROM library_tracks ORDER BY path")
 
-    /** Old indexes can display their base album/singer tags before missing text tags are read. */
-    fun getCachedAlbumTracks(
+    /** Classification rendering consumes the persisted index, never source files. */
+    fun getPersistedAlbumTracks(
         tracks: List<MediaLibraryTrack>,
         isCancelled: () -> Boolean = { Thread.currentThread().isInterrupted },
-    ): List<MediaAlbumTrack> = albumTracks(tracks, readMissing = false, isCancelled)
-
-    fun loadAlbumTracks(
-        tracks: List<MediaLibraryTrack>,
-        isCancelled: () -> Boolean = { Thread.currentThread().isInterrupted },
-    ): List<MediaAlbumTrack> = albumTracks(tracks, readMissing = true, isCancelled)
-
-    private fun albumTracks(
-        tracks: List<MediaLibraryTrack>,
-        readMissing: Boolean,
-        isCancelled: () -> Boolean,
     ): List<MediaAlbumTrack> {
-        val cached = MediaAlbumMetadataStore.read(db)
-        val pending = ArrayList<IndexedAlbumMetadata>(24)
-        fun commitBatch() {
-            if (pending.isEmpty()) return
-            // Cache population does not change catalog membership or cancel its own loader.
-            write { pending.forEach { MediaAlbumMetadataStore.put(this, it) } }
-            pending.clear()
-        }
-        try {
-            return AlbumCatalogLoader.load(tracks, readMetadata = { file ->
-                cached[file.absolutePath]?.takeIf { it.matches(file) }?.metadata
-                    ?: if (readMissing) {
-                        val length = file.length()
-                        val modifiedAtMs = file.lastModified()
-                        readAlbumMetadata(file).also { metadata ->
-                            val entry = IndexedAlbumMetadata(file.absolutePath, length, modifiedAtMs, metadata)
-                            if (entry.matches(file)) pending += entry
-                            if (pending.size >= 24) commitBatch()
-                        }
-                    } else MediaAlbumMetadata()
-            }, isCancelled = isCancelled)
-        } finally {
-            // Completed reads survive navigation/cancellation, including a partial final batch.
-            commitBatch()
-        }
+        if (isCancelled()) throw CancellationException("Album catalog loading cancelled")
+        return AlbumCatalogLoader.persisted(tracks, MediaAlbumMetadataStore.read(db))
     }
 
     fun searchLibrary(query: String): List<MediaLibraryTrack> {
@@ -740,6 +808,7 @@ private constructor(
     }
 
     companion object {
+        private val MEDIA_EXTENSIONS = FileUtils.AUDIO_EXTENSIONS + setOf("opus", "ac3", "amr") + FileTypePolicy.videoExtensions
         const val FAVORITES_PLAYLIST_ID = -1L
         @Volatile private var instance: MediaLibraryRepository? = null
 
@@ -763,9 +832,9 @@ private constructor(
         fun open(
             context: Context,
             name: String,
-            albumMetadataReader: (File) -> MediaAlbumMetadata =
+            albumMetadataReader: (BrowserFileMetadata) -> MediaAlbumMetadata =
                 PlayerTrackMetadataReader::readAlbumMetadata,
-            metadataReader: (File, Long) -> MediaLibraryTrack =
+            metadataReader: (BrowserFileMetadata, Long) -> MediaLibraryTrack =
                 PlayerTrackMetadataReader::readLibraryTrack,
         ): MediaLibraryRepository =
             MediaLibraryRepository(

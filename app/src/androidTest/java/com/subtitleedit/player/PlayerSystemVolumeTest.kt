@@ -90,7 +90,8 @@ class PlayerSystemVolumeTest {
 
     private inner class Fixture : Closeable {
         private val databaseName = "player-system-volume-${System.nanoTime()}.db"
-        private val repository = MediaLibraryRepository.open(app, databaseName) { file, duration ->
+        private val repository = MediaLibraryRepository.open(app, databaseName) { snapshot, duration ->
+            val file = snapshot.file
             MediaLibraryTrack(file.path, file.nameWithoutExtension, durationMs = duration)
         }
         val stream = MediaStream()

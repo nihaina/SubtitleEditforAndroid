@@ -8,9 +8,7 @@ import com.subtitleedit.feature.ui.BatchRenameDialogUi
 import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
 import com.subtitleedit.model.FileBrowserViewMode
-import com.subtitleedit.model.BrowserFileMetadata
-import com.subtitleedit.util.AndroidDirectoryPolicy
-import com.subtitleedit.util.BrowserDirectoryCache
+import com.subtitleedit.util.SharedFileCache
 import java.io.File
 
 internal enum class FileOperation { COPY, MOVE, EXTRACT }
@@ -24,11 +22,7 @@ internal data class DirectoryScrollPosition(
 
 internal class MainViewModel : ViewModel() {
     val documentState = MainDocumentState()
-    val directoryCache = BrowserDirectoryCache(metadataReader = { file, revision ->
-        BrowserFileMetadata.read(file, revision)?.let { metadata ->
-            metadata.copy(restricted = AndroidDirectoryPolicy.isRestricted(file, metadata.isDirectory))
-        }
-    })
+    val directoryCache = SharedFileCache.directories
     var batchRenameDialog by mutableStateOf<BatchRenameDialogUi?>(null)
 
     /** Compatibility accessors for existing tests and integrations; new code uses documentState. */

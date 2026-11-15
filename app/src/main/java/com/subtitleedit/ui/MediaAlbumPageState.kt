@@ -11,7 +11,6 @@ import com.subtitleedit.library.PlaybackHistoryEntry
 
 internal data class MediaAlbumCatalogKey(
     val revision: Long,
-    val refreshVersion: Int,
     val directories: List<String>,
 )
 

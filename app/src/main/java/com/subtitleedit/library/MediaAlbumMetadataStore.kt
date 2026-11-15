@@ -2,7 +2,7 @@ package com.subtitleedit.library
 
 import android.content.ContentValues
 import android.database.sqlite.SQLiteDatabase
-import java.io.File
+import com.subtitleedit.model.BrowserFileMetadata
 
 /** Persisted text tags are reusable while both the file size and modification time match. */
 internal data class IndexedAlbumMetadata(
@@ -11,12 +11,12 @@ internal data class IndexedAlbumMetadata(
     val modifiedAtMs: Long,
     val metadata: MediaAlbumMetadata,
 ) {
-    fun matches(file: File): Boolean =
-        path == file.absolutePath && length == file.length() && modifiedAtMs == file.lastModified()
+    fun matches(file: BrowserFileMetadata): Boolean =
+        path == file.path && length == file.size && modifiedAtMs == file.modifiedTimeMillis
 
     companion object {
-        fun of(file: File, metadata: MediaAlbumMetadata): IndexedAlbumMetadata =
-            IndexedAlbumMetadata(file.absolutePath, file.length(), file.lastModified(), metadata)
+        fun of(file: BrowserFileMetadata, metadata: MediaAlbumMetadata): IndexedAlbumMetadata =
+            IndexedAlbumMetadata(file.path, file.size, file.modifiedTimeMillis, metadata)
     }
 }
 

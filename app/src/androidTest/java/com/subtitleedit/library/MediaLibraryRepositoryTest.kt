@@ -25,7 +25,8 @@ class MediaLibraryRepositoryTest {
     private class Fixture(context: Context) : Closeable {
         val name = "library-test-${System.nanoTime()}.db"
         val repo =
-            MediaLibraryRepository.open(context, name) { file, duration ->
+            MediaLibraryRepository.open(context, name) { snapshot, duration ->
+            val file = snapshot.file
                 MediaLibraryTrack(
                     file.absolutePath,
                     "Title ${file.nameWithoutExtension}",
@@ -65,7 +66,8 @@ class MediaLibraryRepositoryTest {
         val file = File.createTempFile("library-indexed-", ".wav", context.cacheDir)
         var label = "Indexed"
         var addedAt = 100L
-        val r = MediaLibraryRepository.open(context, name) { media, _ ->
+        val r = MediaLibraryRepository.open(context, name) { snapshot, _ ->
+            val media = snapshot.file
             MediaLibraryTrack(media.path, "$label ${media.name}", addedAtMs = addedAt++)
         }
         try {
@@ -233,7 +235,8 @@ class MediaLibraryRepositoryTest {
         val releaseMetadata = CountDownLatch(1)
         val executor = Executors.newSingleThreadExecutor()
         val r =
-            MediaLibraryRepository.open(context, name) { file, _ ->
+            MediaLibraryRepository.open(context, name) { snapshot, _ ->
+            val file = snapshot.file
                 metadataStarted.countDown()
                 check(releaseMetadata.await(5, TimeUnit.SECONDS))
                 MediaLibraryTrack(file.path, file.name)
@@ -293,7 +296,8 @@ class MediaLibraryRepositoryTest {
                 )) db.execSQL("DROP TABLE $table")
             db.version = 1
             helper.close()
-            MediaLibraryRepository.open(context, name) { file, _ ->
+            MediaLibraryRepository.open(context, name) { snapshot, _ ->
+            val file = snapshot.file
                     MediaLibraryTrack(file.path, file.name)
                 }
                 .use { r ->
@@ -324,7 +328,8 @@ class MediaLibraryRepositoryTest {
         repeat(30) { File(directory, "$it.wav").writeBytes(byteArrayOf(0)) }
         val reads = AtomicInteger()
         val r =
-            MediaLibraryRepository.open(context, name) { file, _ ->
+            MediaLibraryRepository.open(context, name) { snapshot, _ ->
+            val file = snapshot.file
                 reads.incrementAndGet()
                 MediaLibraryTrack(file.path, file.name)
             }
@@ -346,7 +351,8 @@ class MediaLibraryRepositoryTest {
         val file = File.createTempFile("library-refresh-", ".wav", context.cacheDir)
         var title = "Before"
         val r =
-            MediaLibraryRepository.open(context, name) { media, duration ->
+            MediaLibraryRepository.open(context, name) { snapshot, duration ->
+            val media = snapshot.file
                 MediaLibraryTrack(media.path, title, "Artist", "Album", durationMs = duration)
             }
         try {

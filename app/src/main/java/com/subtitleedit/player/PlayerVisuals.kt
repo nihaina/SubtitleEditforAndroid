@@ -62,7 +62,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
-import com.subtitleedit.library.MediaArtworkLoader
+import com.subtitleedit.library.SharedMediaCache
+import com.subtitleedit.util.SharedFileCache
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -98,7 +100,7 @@ internal fun PlayerAudioVisual(
     LaunchedEffect(trackPath, targetSizePx, artworkRevision) {
         artwork = if (trackPath == null) null else withContext(Dispatchers.IO) {
             try {
-                MediaArtworkLoader.loadCover(trackPath, targetSizePx, allowVideoFrame = false)
+                SharedFileCache.attributes.get(File(trackPath))?.let { metadata -> SharedMediaCache.artwork(metadata, targetSizePx, allowVideoFrame = false) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
