@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,6 +20,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppLazyListScrollbar
 import com.subtitleedit.feature.ui.BrowserFileRow
 import com.subtitleedit.library.AlbumTrackSortOptions
 import com.subtitleedit.library.MediaAlbumTrack
@@ -49,6 +51,7 @@ internal fun MediaTrackDetailContent(
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
+    val listState = rememberLazyListState()
     var sortOpen by remember { mutableStateOf(false) }
     var selectedPaths by remember(collectionKey) { mutableStateOf<Set<String>>(emptySet()) }
     var panelHeight by remember(collectionKey) { mutableStateOf(112.dp) }
@@ -84,6 +87,7 @@ internal fun MediaTrackDetailContent(
         )
         BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize().padding(bottom = if (selectionMode) panelHeight else 0.dp)
                     .testTag("$tagPrefix-tracks"),
                 contentPadding = PaddingValues(bottom = 12.dp)
@@ -121,6 +125,8 @@ internal fun MediaTrackDetailContent(
                     )
                 }
             }
+            AppLazyListScrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                .padding(bottom = if (selectionMode) panelHeight else 0.dp))
             if (selectionMode) {
                 MediaLibrarySelectionPanel(
                     selectedFiles = selectedTracks.map { it.track.file },

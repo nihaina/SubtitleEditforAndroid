@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.*
@@ -23,6 +24,7 @@ import com.subtitleedit.library.AlbumSortField
 import com.subtitleedit.library.MediaCreditRole
 import com.subtitleedit.library.SingerSortField
 import com.subtitleedit.ui.components.AppDialog
+import com.subtitleedit.ui.components.AppLazyListScrollbar
 import com.subtitleedit.ui.components.SettingsSwitchRow
 import com.subtitleedit.ui.settings.settingsPageBackground
 
@@ -49,43 +51,50 @@ internal fun MediaSingerSettings(
             colors = TopAppBarDefaults.topAppBarColors(containerColor = settingsPageBackground()),
             windowInsets = WindowInsets(0, 0, 0, 0)
         )
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().testTag("$tagPrefix-settings-list")
-        ) {
-            item {
-                SingerPreferenceRow(
-                    title = stringResource(labels.moreInfo),
-                    value = stringResource(options.moreInfo.labelRes),
-                    onClick = { choosingInfo = true },
-                    modifier = Modifier.testTag("$tagPrefix-settings-more-info")
-                )
+        Box(Modifier.fillMaxSize()) {
+            val listState = rememberLazyListState()
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize().testTag("$tagPrefix-settings-list")
+            ) {
+                item {
+                    SingerPreferenceRow(
+                        title = stringResource(labels.moreInfo),
+                        value = stringResource(options.moreInfo.labelRes),
+                        onClick = { choosingInfo = true },
+                        modifier = Modifier.testTag("$tagPrefix-settings-more-info")
+                    )
+                }
+                item {
+                    SettingsSwitchRow(
+                        title = stringResource(labels.groupTracks),
+                        checked = options.groupTracks,
+                        onCheckedChange = { onChange(options.copy(groupTracks = it)) },
+                        modifier = Modifier.padding(horizontal = 8.dp).heightIn(min = 64.dp)
+                            .testTag("$tagPrefix-settings-group-tracks")
+                    )
+                }
+                item {
+                    SingerPreferenceRow(
+                        title = stringResource(labels.albumSort),
+                        value = stringResource(options.albumSortField.singerAlbumLabelRes) + " · " +
+                            stringResource(if (options.albumAscending) R.string.media_album_sort_ascending else R.string.media_album_sort_descending),
+                        onClick = { choosingAlbumSort = true },
+                        modifier = Modifier.testTag("$tagPrefix-settings-album-sort")
+                    )
+                }
+                item {
+                    SettingsSwitchRow(
+                        title = stringResource(R.string.media_album_quick_search),
+                        checked = options.quickSearch,
+                        onCheckedChange = { onChange(options.copy(quickSearch = it)) },
+                        modifier = Modifier.padding(horizontal = 8.dp).heightIn(min = 64.dp)
+                            .testTag("$tagPrefix-settings-quick-search")
+                    )
+                }
             }
-            item {
-                SettingsSwitchRow(
-                    title = stringResource(labels.groupTracks),
-                    checked = options.groupTracks,
-                    onCheckedChange = { onChange(options.copy(groupTracks = it)) },
-                    modifier = Modifier.padding(horizontal = 8.dp).heightIn(min = 64.dp)
-                        .testTag("$tagPrefix-settings-group-tracks")
-                )
-            }
-            item {
-                SingerPreferenceRow(
-                    title = stringResource(labels.albumSort),
-                    value = stringResource(options.albumSortField.singerAlbumLabelRes) + " · " +
-                        stringResource(if (options.albumAscending) R.string.media_album_sort_ascending else R.string.media_album_sort_descending),
-                    onClick = { choosingAlbumSort = true },
-                    modifier = Modifier.testTag("$tagPrefix-settings-album-sort")
-                )
-            }
-            item {
-                SettingsSwitchRow(
-                    title = stringResource(R.string.media_album_quick_search),
-                    checked = options.quickSearch,
-                    onCheckedChange = { onChange(options.copy(quickSearch = it)) },
-                    modifier = Modifier.padding(horizontal = 8.dp).heightIn(min = 64.dp)
-                        .testTag("$tagPrefix-settings-quick-search")
-                )
+            Box(Modifier.matchParentSize()) {
+                AppLazyListScrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
             }
         }
     }
@@ -127,18 +136,27 @@ private fun SingerInfoChoiceDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(role.labels.moreInfo)) },
         text = {
-            LazyColumn(Modifier.fillMaxWidth().selectableGroup().testTag("$tagPrefix-more-info-list")) {
-                items(SingerMoreInfo.entries, key = { it.name }) { info ->
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                            .selectable(selected = selected == info, role = Role.RadioButton, onClick = { onSelected(info) })
-                            .testTag("$tagPrefix-more-info:${info.name}").padding(end = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        RadioButton(selected = selected == info, onClick = null)
-                        Text(stringResource(info.labelRes), style = MaterialTheme.typography.bodyLarge)
+            Box(Modifier.fillMaxWidth()) {
+                val listState = rememberLazyListState()
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxWidth().selectableGroup().testTag("$tagPrefix-more-info-list")
+                ) {
+                    items(SingerMoreInfo.entries, key = { it.name }) { info ->
+                        Row(
+                            Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                                .selectable(selected = selected == info, role = Role.RadioButton, onClick = { onSelected(info) })
+                                .testTag("$tagPrefix-more-info:${info.name}").padding(end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            RadioButton(selected = selected == info, onClick = null)
+                            Text(stringResource(info.labelRes), style = MaterialTheme.typography.bodyLarge)
+                        }
                     }
+                }
+                Box(Modifier.matchParentSize()) {
+                    AppLazyListScrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
                 }
             }
         },
@@ -169,32 +187,41 @@ internal fun MediaSingerSortDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
-                LazyColumn(Modifier.fillMaxWidth().selectableGroup().testTag("$tagPrefix-sort-list")) {
-                    items(SingerSortField.entries, key = { it.name }) { field ->
-                        val selected = field == draftField
-                        Row(
-                            Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                                .selectable(selected = selected, role = Role.RadioButton, onClick = {
-                                    if (selected) draftAscending = !draftAscending else draftField = field
-                                }).testTag("$tagPrefix-sort:${field.name}").padding(end = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            RadioButton(selected = selected, onClick = null)
-                            Text(stringResource(field.labelRes), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                            if (selected) {
-                                Icon(
-                                    painterResource(R.drawable.ic_sort_direction), contentDescription = null,
-                                    modifier = Modifier.size(20.dp).rotate(if (draftAscending) 0f else 180f),
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                                Text(
-                                    stringResource(if (draftAscending) R.string.media_album_sort_ascending else R.string.media_album_sort_descending),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                Box(Modifier.fillMaxWidth()) {
+                    val listState = rememberLazyListState()
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxWidth().selectableGroup().testTag("$tagPrefix-sort-list")
+                    ) {
+                        items(SingerSortField.entries, key = { it.name }) { field ->
+                            val selected = field == draftField
+                            Row(
+                                Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                                    .selectable(selected = selected, role = Role.RadioButton, onClick = {
+                                        if (selected) draftAscending = !draftAscending else draftField = field
+                                    }).testTag("$tagPrefix-sort:${field.name}").padding(end = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                RadioButton(selected = selected, onClick = null)
+                                Text(stringResource(field.labelRes), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                                if (selected) {
+                                    Icon(
+                                        painterResource(R.drawable.ic_sort_direction), contentDescription = null,
+                                        modifier = Modifier.size(20.dp).rotate(if (draftAscending) 0f else 180f),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        stringResource(if (draftAscending) R.string.media_album_sort_ascending else R.string.media_album_sort_descending),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
                         }
+                    }
+                    Box(Modifier.matchParentSize()) {
+                        AppLazyListScrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
                     }
                 }
             }

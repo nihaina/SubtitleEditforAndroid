@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -16,6 +17,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppLazyListScrollbar
 import com.subtitleedit.library.MediaSinger
 import com.subtitleedit.library.MediaCreditRole
 import com.subtitleedit.library.SingerSortField
@@ -38,6 +40,7 @@ internal fun MediaSingerBrowseContent(
 ) {
     val labels = role.labels
     val tagPrefix = role.tagPrefix
+    val listState = rememberLazyListState()
     Column(modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp).heightIn(min = 64.dp),
@@ -81,34 +84,38 @@ internal fun MediaSingerBrowseContent(
                 )
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f).testTag("$tagPrefix-list"),
-                contentPadding = PaddingValues(vertical = 4.dp)
-            ) {
-                items(singers, key = { it.key }) { singer ->
-                    val info = singerMoreInfoText(singer, options)
-                    Column(
-                        Modifier.fillMaxWidth().clickable(role = Role.Button) { onOpenSinger(singer) }
-                            .testTag("$tagPrefix-item:${singer.key}").heightIn(min = 56.dp)
-                            .padding(horizontal = 20.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)
-                    ) {
-                        Text(
-                            singer.name.ifBlank { stringResource(role.unknownRes) },
-                            style = MaterialTheme.typography.bodyLarge,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (info != null) Text(
-                            info,
-                            modifier = Modifier.testTag("$tagPrefix-info:${singer.key}"),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+            Box(Modifier.fillMaxWidth().weight(1f)) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize().testTag("$tagPrefix-list"),
+                    contentPadding = PaddingValues(vertical = 4.dp)
+                ) {
+                    items(singers, key = { it.key }) { singer ->
+                        val info = singerMoreInfoText(singer, options)
+                        Column(
+                            Modifier.fillMaxWidth().clickable(role = Role.Button) { onOpenSinger(singer) }
+                                .testTag("$tagPrefix-item:${singer.key}").heightIn(min = 56.dp)
+                                .padding(horizontal = 20.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)
+                        ) {
+                            Text(
+                                singer.name.ifBlank { stringResource(role.unknownRes) },
+                                style = MaterialTheme.typography.bodyLarge,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (info != null) Text(
+                                info,
+                                modifier = Modifier.testTag("$tagPrefix-info:${singer.key}"),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
+                AppLazyListScrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
             }
         }
     }

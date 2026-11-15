@@ -1,14 +1,17 @@
 package com.subtitleedit.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Icon
@@ -34,6 +37,7 @@ import com.subtitleedit.R
 import com.subtitleedit.library.AlbumTrackSortField
 import com.subtitleedit.library.AlbumTrackSortOptions
 import com.subtitleedit.ui.components.AppDialog
+import com.subtitleedit.ui.components.AppLazyListScrollbar
 
 @Composable
 internal fun MediaAlbumTrackSortDialog(
@@ -59,40 +63,47 @@ internal fun MediaAlbumTrackSortDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                LazyColumn(
-                    Modifier.fillMaxWidth().weight(1f, fill = false).selectableGroup()
-                        .testTag("album-track-sort-list")
-                ) {
-                    items(AlbumTrackSortField.entries, key = { it.name }) { field ->
-                        val selected = field == draftField
-                        Row(
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                                .selectable(selected = selected, role = Role.RadioButton, onClick = {
-                                    if (selected) draftAscending = !draftAscending else draftField = field
-                                }).testTag("album-track-sort:${field.name}")
-                                .padding(end = 8.dp, top = 4.dp, bottom = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            RadioButton(selected = selected, onClick = null)
-                            Text(
-                                stringResource(field.labelRes), Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodyLarge,
-                                maxLines = 2, overflow = TextOverflow.Ellipsis
-                            )
-                            if (selected) {
-                                Icon(
-                                    painterResource(R.drawable.ic_sort_direction), contentDescription = null,
-                                    modifier = Modifier.size(20.dp).rotate(if (draftAscending) 0f else 180f),
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
+                Box(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+                    val listState = rememberLazyListState()
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxWidth().selectableGroup()
+                            .testTag("album-track-sort-list")
+                    ) {
+                        items(AlbumTrackSortField.entries, key = { it.name }) { field ->
+                            val selected = field == draftField
+                            Row(
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                                    .selectable(selected = selected, role = Role.RadioButton, onClick = {
+                                        if (selected) draftAscending = !draftAscending else draftField = field
+                                    }).testTag("album-track-sort:${field.name}")
+                                    .padding(end = 8.dp, top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                RadioButton(selected = selected, onClick = null)
                                 Text(
-                                    stringResource(if (draftAscending) R.string.media_album_sort_ascending else R.string.media_album_sort_descending),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.primary
+                                    stringResource(field.labelRes), Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    maxLines = 2, overflow = TextOverflow.Ellipsis
                                 )
+                                if (selected) {
+                                    Icon(
+                                        painterResource(R.drawable.ic_sort_direction), contentDescription = null,
+                                        modifier = Modifier.size(20.dp).rotate(if (draftAscending) 0f else 180f),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        stringResource(if (draftAscending) R.string.media_album_sort_ascending else R.string.media_album_sort_descending),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
                         }
+                    }
+                    Box(Modifier.matchParentSize()) {
+                        AppLazyListScrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
                     }
                 }
             }

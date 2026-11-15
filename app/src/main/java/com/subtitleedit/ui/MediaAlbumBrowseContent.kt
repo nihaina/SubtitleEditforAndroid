@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -20,9 +21,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -52,6 +55,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
+import com.subtitleedit.ui.components.AppLazyGridScrollbar
+import com.subtitleedit.ui.components.AppLazyListScrollbar
 import com.subtitleedit.library.MediaAlbum
 import com.subtitleedit.library.SharedMediaCache
 import com.subtitleedit.util.SharedFileCache
@@ -75,6 +80,8 @@ internal fun MediaAlbumBrowseContent(
     onOpenAlbum: (MediaAlbum) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val listState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
     Column(modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp).heightIn(min = 64.dp),
@@ -134,6 +141,7 @@ internal fun MediaAlbumBrowseContent(
                 // Wider windows add columns while retaining each size's visual density.
                 val columns = (options.gridSize.compactColumns * (maxWidth.value / 360f).coerceAtLeast(1f)).toInt()
                 LazyVerticalGrid(
+                    state = gridState,
                     columns = GridCells.Fixed(columns),
                     modifier = Modifier.fillMaxSize().testTag("album-grid"),
                     contentPadding = PaddingValues(8.dp),
@@ -144,21 +152,26 @@ internal fun MediaAlbumBrowseContent(
                         AlbumGridCard(album, options, onClick = { onOpenAlbum(album) })
                     }
                 }
+                AppLazyGridScrollbar(gridState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f).testTag("album-list"),
-                contentPadding = PaddingValues(vertical = 4.dp)
-            ) {
-                items(albums, key = { it.key }) { album ->
-                    AlbumListRow(
-                        album = album,
-                        options = options,
-                        showArtwork = options.viewMode == AlbumViewMode.LIST_ART,
-                        showMoreInfo = options.showMoreInfo,
-                        onClick = { onOpenAlbum(album) }
-                    )
+            Box(Modifier.fillMaxWidth().weight(1f)) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize().testTag("album-list"),
+                    contentPadding = PaddingValues(vertical = 4.dp)
+                ) {
+                    items(albums, key = { it.key }) { album ->
+                        AlbumListRow(
+                            album = album,
+                            options = options,
+                            showArtwork = options.viewMode == AlbumViewMode.LIST_ART,
+                            showMoreInfo = options.showMoreInfo,
+                            onClick = { onOpenAlbum(album) }
+                        )
+                    }
                 }
+                AppLazyListScrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
             }
         }
     }
