@@ -59,6 +59,7 @@ internal data class PlayerUiState(
     val lyricLines: List<PlayerLyricLine> = emptyList(),
     val lyricsLoading: Boolean = false,
     val controlsVisible: Boolean = true,
+    val controlsLocked: Boolean = false,
     val panel: PlayerPanel = PlayerPanel.NONE,
     val isVideo: Boolean = false,
     val seekPreviewMs: Long? = null,
@@ -361,6 +362,8 @@ internal class PlayerViewModel @JvmOverloads constructor(
         _state.value = current.copy(
             positionMs = 0L, durationMs = 0L, ready = false, playing = false, error = null,
             isVideo = track.isVideo, subtitleText = "", selectedSubtitleId = "none",
+            controlsLocked = current.controlsLocked && track.isVideo,
+            controlsVisible = if (current.controlsLocked && !track.isVideo) true else current.controlsVisible,
             subtitleOptions = listOf(SUBTITLE_OFF) + externalSubtitles,
             lyricLines = emptyList(), lyricsLoading = false,
             lyricsVisible = current.lyricsVisible && !track.isVideo,
@@ -465,6 +468,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
     /** Release the media file before the existing tag editor updates it. */
     fun prepareTagEditing(): String? {
         val current = _state.value
+        if (current.controlsLocked) return null
         val track = current.currentTrack ?: return null
         if (tagEditResume != null) return null
         stopListening()
@@ -730,16 +734,43 @@ internal class PlayerViewModel @JvmOverloads constructor(
 
     private fun refreshFavorite() = libraryController.refreshFavorite()
     fun toggleFavorite() = libraryController.toggleFavorite()
-    fun openTrackInfoDialog() = libraryController.openTrackInfoDialog()
+    fun openTrackInfoDialog() {
+        if (!_state.value.controlsLocked) libraryController.openTrackInfoDialog()
+    }
     fun closeTrackInfoDialog() = libraryController.closeTrackInfoDialog()
-    fun openPlaylistPickerDialog() = libraryController.openPlaylistPickerDialog()
+    fun openPlaylistPickerDialog() {
+        if (!_state.value.controlsLocked) libraryController.openPlaylistPickerDialog()
+    }
     fun closePlaylistPickerDialog() = libraryController.closePlaylistPickerDialog()
     fun createUserPlaylist(name: String, onCreated: (Long?) -> Unit) = libraryController.createUserPlaylist(name, onCreated)
     fun addCurrentTrackToPlaylists(playlistIds: Set<Long>) = libraryController.addCurrentTrackToPlaylists(playlistIds)
 
     fun requestFinish() { _finishRequests.value++ }
-    fun setControlsVisible(visible: Boolean) { _state.value = _state.value.copy(controlsVisible = visible) }
-    fun openPanel(panel: PlayerPanel) { _state.value = _state.value.copy(panel = panel, controlsVisible = true) }
+    fun setVideoControlsLocked(locked: Boolean) {
+        val current = _state.value
+        if (current.controlsLocked == locked || (locked && !current.isVideo)) return
+        if (locked) {
+            closeTrackInfoDialog()
+            closePlaylistPickerDialog()
+        }
+        _state.value = _state.value.copy(
+            controlsLocked = locked,
+            controlsVisible = !locked,
+            panel = PlayerPanel.NONE,
+            seekPreviewMs = null,
+            gestureHint = null
+        )
+    }
+    fun setControlsVisible(visible: Boolean) {
+        val current = _state.value
+        if (visible && current.controlsLocked) return
+        _state.value = current.copy(controlsVisible = visible)
+    }
+    fun openPanel(panel: PlayerPanel) {
+        val current = _state.value
+        if (current.controlsLocked) return
+        _state.value = current.copy(panel = panel, controlsVisible = true)
+    }
     fun closePanel() { _state.value = _state.value.copy(panel = PlayerPanel.NONE) }
     fun hint(textRes: Int) { hint(applicationText(textRes)) }
     fun hint(text: String) { _state.value = _state.value.copy(gestureHint = PlayerGestureHint(text, ++hintToken)) }

@@ -11,6 +11,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -100,10 +102,14 @@ internal fun PlayerScreen(
     val currentBottomOverlay by rememberUpdatedState(bottomOverlayBounds)
     val currentGestureOrigin by rememberUpdatedState(gestureOrigin)
     var lyricScrollActivity by remember(state.currentTrack?.path) { mutableStateOf(0L) }
+    var videoLockActivity by remember(state.currentTrack?.path) { mutableStateOf(0L) }
     LaunchedEffect(state.controlsVisible, state.lyricsVisible) { lyricScrollActivity = 0L }
     BackHandler(enabled = state.lyricsVisible && !state.isVideo && state.panel == PlayerPanel.NONE &&
         !state.showTrackInfoDialog && !state.showPlaylistPickerDialog) {
         viewModel.setLyricsVisible(false)
+    }
+    BackHandler(enabled = state.isVideo && state.controlsLocked) {
+        viewModel.setVideoControlsLocked(false)
     }
     MaterialTheme {
         Box(
@@ -113,7 +119,7 @@ internal fun PlayerScreen(
                 .semantics { testTagsAsResourceId = true }
                 .onGloballyPositioned { gestureOrigin = it.positionInRoot(); playerHeightPx = it.size.height }
                 .background(pageGradient)
-                .pointerInput(state.currentTrack?.path, state.isVideo, state.durationMs) {
+                .pointerInput(state.currentTrack?.path, state.isVideo, state.durationMs, state.controlsLocked) {
                     var axis: Int? = null
                     var dragVolume = 0f
                     var canSeek = false
@@ -131,10 +137,10 @@ internal fun PlayerScreen(
                             dragVolume = current.volumePercent.toFloat()
                             // Only the initial press is excluded by the controls; an accepted
                             // video drag keeps ownership as it crosses into either overlay.
-                            canSeek = current.isVideo && current.ready && current.panel == PlayerPanel.NONE &&
+                            canSeek = current.isVideo && !current.controlsLocked && current.ready && current.panel == PlayerPanel.NONE &&
                                 outsideOverlays(down.position)
                             // Vertical swipes in the audio lyric list belong to the list.
-                            canAdjustVolume = current.isVideo || !current.lyricsVisible
+                            canAdjustVolume = !current.controlsLocked && (current.isVideo || !current.lyricsVisible)
                         },
                         onDragEnd = {
                             if (axis == AXIS_SEEK) {
@@ -151,6 +157,10 @@ internal fun PlayerScreen(
                         }
                     ) { change, amount ->
                         val current = viewModel.state.value
+                        if (current.controlsLocked) {
+                            change.consume()
+                            return@detectDragGestures
+                        }
                         if (axis == null) axis = if (abs(amount.x) >= abs(amount.y)) AXIS_SEEK else AXIS_VOLUME
                         when (axis) {
                             AXIS_SEEK -> if (canSeek && current.durationMs > 0) {
@@ -167,12 +177,19 @@ internal fun PlayerScreen(
                         }
                     }
                 }
-                .pointerInput(Unit) {
+                .pointerInput(state.currentTrack?.path) {
                     detectTapGestures(
-                        onTap = { viewModel.setControlsVisible(!viewModel.state.value.controlsVisible) },
+                        onTap = {
+                            val current = viewModel.state.value
+                            if (current.controlsLocked) videoLockActivity++
+                            else viewModel.setControlsVisible(!current.controlsVisible)
+                        },
                         onDoubleTap = { offset ->
-                            val left = offset.x < size.width / 2f
-                            viewModel.skipBy(if (left) -15_000L else 15_000L)
+                            if (viewModel.state.value.controlsLocked) videoLockActivity++
+                            else {
+                                val left = offset.x < size.width / 2f
+                                viewModel.skipBy(if (left) -15_000L else 15_000L)
+                            }
                         }
                     )
                 }
@@ -289,6 +306,31 @@ internal fun PlayerScreen(
                 onCreatePlaylist = viewModel::createUserPlaylist,
                 onConfirmAdd = viewModel::addCurrentTrackToPlaylists
             )
+
+            if (state.isVideo && state.controlsLocked) {
+                // Shield exiting controls too; only the edge unlock button remains interactive.
+                Box(Modifier.fillMaxSize().testTag("player-video-lock-shield").pointerInput(state.currentTrack?.path) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false).consume()
+                        videoLockActivity++
+                        do {
+                            val event = awaitPointerEvent()
+                            event.changes.forEach { it.consume() }
+                            videoLockActivity++
+                        } while (event.changes.any { it.pressed })
+                    }
+                })
+            }
+            if (state.isVideo && state.panel == PlayerPanel.NONE &&
+                !state.showTrackInfoDialog && !state.showPlaylistPickerDialog) {
+                PlayerVideoLockControl(
+                    locked = state.controlsLocked,
+                    controlsVisible = state.controlsVisible,
+                    revealActivity = videoLockActivity,
+                    onToggleLock = { viewModel.setVideoControlsLocked(!viewModel.state.value.controlsLocked) },
+                    modifier = Modifier.align(Alignment.CenterEnd)
+                )
+            }
         }
     }
 }
