@@ -12,7 +12,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.subtitleedit.library.MediaLibraryTrack
 import com.subtitleedit.library.MediaPlaylist
 import com.subtitleedit.ui.LibraryPlaylistAssignDialog
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
@@ -41,7 +40,6 @@ class LibraryPlaylistAssignDialogTest {
             compose.setContent {
                 SubtitleEditComposeTheme {
                     LibraryPlaylistAssignDialog(
-                        track = MediaLibraryTrack("/test.wav", "Test track"),
                         playlists = (1L..40L).map { MediaPlaylist(it, "歌单 $it") },
                         onDismiss = {},
                         onSelectPlaylist = { selected = it.id },

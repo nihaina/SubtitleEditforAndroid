@@ -3,11 +3,15 @@ package com.subtitleedit.ui
 import android.content.Intent
 import android.graphics.Bitmap
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,10 +27,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -56,22 +64,30 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.subtitleedit.MediaTagEditorActivity
 import com.subtitleedit.R
+import com.subtitleedit.feature.ui.BrowserFileLayout
+import com.subtitleedit.feature.ui.BrowserFileRow
+import com.subtitleedit.feature.ui.browserFileContentPadding
 import com.subtitleedit.library.MediaArtworkLoader
 import com.subtitleedit.library.MediaLibraryRepository
 import com.subtitleedit.library.MediaLibraryTrack
 import com.subtitleedit.library.MediaPlaylist
 import com.subtitleedit.library.PlaybackHistoryEntry
+import com.subtitleedit.library.PlayerTrackDetails
+import com.subtitleedit.library.PlayerTrackMetadataReader
+import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.player.PlayerActivity
 import com.subtitleedit.player.formatPlaybackTime
 import com.subtitleedit.ui.components.AppAlertDialog
@@ -80,7 +96,6 @@ import com.subtitleedit.ui.settings.settingsPageBackground
 import com.subtitleedit.ui.theme.cardContainer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.launch
@@ -91,11 +106,11 @@ import java.util.Date
 import java.util.Locale
 
 internal enum class MediaLibraryTab(val labelRes: Int) {
+    FILES(R.string.media_lib_tab_search),
     FAVORITES(R.string.media_lib_tab_favorites),
     PLAYLIST(R.string.media_lib_tab_queue),
     CUSTOM_PLAYLISTS(R.string.media_lib_tab_playlists),
-    HISTORY(R.string.media_lib_tab_history),
-    SEARCH(R.string.media_lib_tab_search)
+    HISTORY(R.string.media_lib_tab_history)
 }
 
 private data class MediaLibraryContent(
@@ -103,8 +118,17 @@ private data class MediaLibraryContent(
     val currentQueue: Pair<List<MediaLibraryTrack>, Int> = emptyList<MediaLibraryTrack>() to 0,
     val playlists: List<MediaPlaylist> = emptyList(),
     val history: List<PlaybackHistoryEntry> = emptyList(),
+    val allTracks: List<MediaLibraryTrack> = emptyList(),
     val playlistId: Long? = null,
     val playlistTracks: List<MediaLibraryTrack> = emptyList()
+)
+
+internal data class MediaFolderEntry(
+    val path: String,
+    val name: String,
+    val isDirectory: Boolean,
+    val mediaCount: Int,
+    val totalDurationMs: Long
 )
 
 @Composable
@@ -113,6 +137,7 @@ internal fun MediaLibraryScreen(
     selectionVersion: Int,
     onToolbarChanged: (String, Boolean, (() -> Unit)?) -> Unit,
     onRequestScanDirectory: () -> Unit = {},
+    onRemoveFavoriteDirectory: (File) -> Unit = {},
     favoriteDirectories: List<File> = emptyList(),
     isActive: Boolean = true,
     scanPickerPending: Boolean = false
@@ -140,7 +165,7 @@ internal fun MediaLibraryScreen(
         }
     }
 
-    var selectedTab by rememberSaveable { mutableStateOf(MediaLibraryTab.FAVORITES) }
+    var selectedTab by rememberSaveable { mutableStateOf(MediaLibraryTab.FILES) }
     var openedPlaylistId by rememberSaveable { mutableStateOf<Long?>(null) }
 
     var content by remember { mutableStateOf(MediaLibraryContent()) }
@@ -151,29 +176,82 @@ internal fun MediaLibraryScreen(
     val openedPlaylistTracks = if (content.playlistId == openedPlaylistId) content.playlistTracks else emptyList()
     val favoritePaths = remember(favorites) { favorites.mapTo(hashSetOf()) { it.path } }
 
-    var searchQuery by rememberSaveable { mutableStateOf("") }
-    var searchResults by remember { mutableStateOf<List<MediaLibraryTrack>>(emptyList()) }
-    var displayedSearchQuery by remember { mutableStateOf<String?>(null) }
+    var browseRootPath by rememberSaveable { mutableStateOf<String?>(null) }
+    var browsePath by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedFilePaths by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var pendingFolderRemoval by remember { mutableStateOf<File?>(null) }
+    var infoFilePath by remember { mutableStateOf<String?>(null) }
 
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var renamingPlaylist by remember { mutableStateOf<MediaPlaylist?>(null) }
     var deletingPlaylist by remember { mutableStateOf<MediaPlaylist?>(null) }
     var showClearHistoryConfirm by remember { mutableStateOf(false) }
-    var pickingPlaylistForTrack by remember { mutableStateOf<MediaLibraryTrack?>(null) }
+    var pickingPlaylistForTracks by remember { mutableStateOf<List<MediaLibraryTrack>?>(null) }
+
+    fun openRootFolder(directory: File) {
+        browseRootPath = directory.absolutePath
+        browsePath = directory.absolutePath
+        selectedFilePaths = emptySet()
+    }
+
+    fun openChildFolder(directory: File) {
+        if (browseRootPath == null) browseRootPath = directory.absolutePath
+        browsePath = directory.absolutePath
+        selectedFilePaths = emptySet()
+    }
+
+    fun leaveFolder() {
+        val current = browsePath ?: return
+        val root = browseRootPath?.let(::File)
+        val parent = File(current).parentFile
+        val next = when {
+            root == null -> null
+            File(current).absolutePath == root.absolutePath -> null
+            parent != null && (parent.absolutePath == root.absolutePath ||
+                parent.absolutePath.startsWith(root.absolutePath + File.separator)) -> parent.absolutePath
+            else -> null
+        }
+        browsePath = next
+        if (next == null) browseRootPath = null
+        selectedFilePaths = emptySet()
+    }
+
+    val browseDirectory = browsePath?.let(::File)
+    val folderEntries = remember(content.allTracks, browsePath) {
+        browseDirectory?.let { buildMediaFolderEntries(it, content.allTracks) }.orEmpty()
+    }
+    val rootMediaCounts = remember(content.allTracks, favoriteDirectories) {
+        favoriteDirectories.associate { it.absolutePath to countMediaUnder(it, content.allTracks) }
+    }
+    val selectedDurationMs = remember(selectedFilePaths, content.allTracks) {
+        content.allTracks.filter { it.path in selectedFilePaths }.sumOf { it.durationMs }
+    }
 
     val openedPlaylist = remember(playlists, openedPlaylistId) {
         openedPlaylistId?.let { id -> playlists.firstOrNull { it.id == id } }
     }
 
     val libraryTitle = stringResource(R.string.nav_library)
-    LaunchedEffect(isActive, openedPlaylist, libraryTitle) {
+    LaunchedEffect(isActive, openedPlaylist, browsePath, libraryTitle) {
         if (isActive) {
-            if (openedPlaylist != null) {
-                toolbarCallback(openedPlaylist.name, true) { openedPlaylistId = null }
-            } else {
-                toolbarCallback(libraryTitle, false, null)
+            when {
+                openedPlaylist != null -> toolbarCallback(openedPlaylist.name, true) { openedPlaylistId = null }
+                browsePath != null -> toolbarCallback(File(browsePath!!).name, true) { leaveFolder() }
+                else -> toolbarCallback(libraryTitle, false, null)
             }
         }
+    }
+
+    LaunchedEffect(selectedTab) {
+        if (selectedTab != MediaLibraryTab.FILES) {
+            browsePath = null
+            browseRootPath = null
+            selectedFilePaths = emptySet()
+        }
+    }
+
+    BackHandler(enabled = isActive && browsePath != null) {
+        if (selectedFilePaths.isNotEmpty()) selectedFilePaths = emptySet() else leaveFolder()
     }
 
     var lastSelectionVersion by remember { mutableIntStateOf(selectionVersion) }
@@ -193,28 +271,13 @@ internal fun MediaLibraryScreen(
                     currentQueue = repository.getCurrentQueue(),
                     playlists = repository.getPlaylists().filter { !it.isSystem },
                     history = repository.getPlaybackHistory(),
+                    allTracks = repository.searchLibrary(""),
                     playlistId = playlistId,
                     playlistTracks = playlistId?.let(repository::getPlaylistTracks).orEmpty()
                 )
             }
             content = loaded
             if (playlistId != null && loaded.playlists.none { it.id == playlistId }) openedPlaylistId = null
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            showLibraryError(context, error)
-        }
-    }
-
-    LaunchedEffect(searchQuery, revision, selectedTab) {
-        if (selectedTab != MediaLibraryTab.SEARCH) return@LaunchedEffect
-        val query = searchQuery
-        if (query != displayedSearchQuery) searchResults = emptyList()
-        try {
-            if (query.isNotBlank()) delay(180L)
-            val results = withContext(Dispatchers.IO) { repository.searchLibrary(query) }
-            searchResults = results
-            displayedSearchQuery = query
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -262,22 +325,24 @@ internal fun MediaLibraryScreen(
             )
         } else {
             Column(modifier = Modifier.fillMaxSize()) {
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(MediaLibraryTab.entries) { tab ->
-                        val selected = selectedTab == tab
-                        FilterChip(
-                            selected = selected,
-                            onClick = { selectedTab = tab },
-                            label = { Text(stringResource(tab.labelRes)) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer
+                if (browsePath == null) {
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(MediaLibraryTab.entries) { tab ->
+                            val selected = selectedTab == tab
+                            FilterChip(
+                                selected = selected,
+                                onClick = { selectedTab = tab },
+                                label = { Text(stringResource(tab.labelRes)) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
                             )
-                        )
+                        }
                     }
                 }
 
@@ -289,7 +354,7 @@ internal fun MediaLibraryScreen(
                         onToggleFavorite = { track ->
                             mutate({ repository.removeFavorite(track.path) })
                         },
-                        onAddToPlaylist = { pickingPlaylistForTrack = it }
+                        onAddToPlaylist = { pickingPlaylistForTracks = listOf(it) }
                     )
 
                     MediaLibraryTab.PLAYLIST -> QueueTabContent(
@@ -297,7 +362,7 @@ internal fun MediaLibraryScreen(
                         currentIndex = currentQueue.second,
                         onPlay = { idx -> playTracks(currentQueue.first, idx) },
                         onPlayAll = { playTracks(currentQueue.first, currentQueue.second, playAll = true) },
-                        onAddToPlaylist = { pickingPlaylistForTrack = it }
+                        onAddToPlaylist = { pickingPlaylistForTracks = listOf(it) }
                     )
 
                     MediaLibraryTab.CUSTOM_PLAYLISTS -> CustomPlaylistsTabContent(
@@ -321,24 +386,69 @@ internal fun MediaLibraryScreen(
                         onClearAll = { showClearHistoryConfirm = true }
                     )
 
-                    MediaLibraryTab.SEARCH -> SearchTabContent(
-                        query = searchQuery,
-                        onQueryChange = { searchQuery = it },
-                        results = searchResults,
-                        isScanning = isScanning,
-                        favoritePaths = favoritePaths,
-                        onScanDirs = { if (!isScanning) requestScan() },
-                        onQuickIndexFavorites = {
-                            if (!isScanning) {
-                                if (favoriteDirectories.isEmpty()) requestScan()
-                                else MediaLibraryScanCoordinator.scan(context, favoriteDirectories)
+                    MediaLibraryTab.FILES -> FilesTabContent(
+                        roots = favoriteDirectories,
+                        rootPath = browseRootPath,
+                        currentPath = browsePath,
+                        entries = folderEntries,
+                        rootMediaCounts = rootMediaCounts,
+                        selectedPaths = selectedFilePaths,
+                        selectedDurationMs = selectedDurationMs,
+                        onOpenRoot = ::openRootFolder,
+                        onOpenFolder = ::openChildFolder,
+                        onPlayFile = { entry ->
+                            playTracks(listOf(MediaLibraryTrack(entry.path, entry.name)), 0)
+                        },
+                        onLongPressFolder = { pendingFolderRemoval = it },
+                        onLongPressFile = { selectedFilePaths = selectedFilePaths + it },
+                        onToggleSelection = { path ->
+                            selectedFilePaths = if (path in selectedFilePaths) {
+                                selectedFilePaths - path
+                            } else {
+                                selectedFilePaths + path
                             }
                         },
-                        onPlay = { idx -> playTracks(searchResults, idx) },
-                        onToggleFavorite = { track ->
-                            mutate({ repository.toggleFavorite(track.path, track.durationMs) })
+                        onClearSelection = { selectedFilePaths = emptySet() },
+                        onAdvancedSelection = { action ->
+                            selectedFilePaths = updateMediaLibrarySelection(
+                                visiblePaths = folderEntries.filterNot { it.isDirectory }.map { it.path },
+                                selectedPaths = selectedFilePaths,
+                                action = action
+                            )
                         },
-                        onAddToPlaylist = { pickingPlaylistForTrack = it }
+                        onFavoriteSelection = {
+                            val paths = selectedFilePaths
+                            mutate({
+                                paths.forEach { path ->
+                                    if (!repository.isFavorite(path)) repository.toggleFavorite(path)
+                                }
+                            }) {
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.media_lib_files_favorited, paths.size),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                selectedFilePaths = emptySet()
+                            }
+                        },
+                        onAddSelectionToPlaylist = {
+                            pickingPlaylistForTracks = selectedFilePaths.map { path ->
+                                MediaLibraryTrack(path = path, title = File(path).nameWithoutExtension)
+                            }
+                            selectedFilePaths = emptySet()
+                        },
+                        onShowInfo = {
+                            val path = selectedFilePaths.singleOrNull()
+                            if (path == null) {
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.media_lib_files_info_single),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            } else {
+                                infoFilePath = path
+                            }
+                        }
                     )
                 }
             }
@@ -357,6 +467,31 @@ internal fun MediaLibraryScreen(
                         contentDescription = stringResource(R.string.media_lib_create_playlist),
                         modifier = Modifier.size(24.dp)
                     )
+                }
+            }
+
+            if (selectedTab == MediaLibraryTab.FILES && browsePath == null && selectedFilePaths.isEmpty()) {
+                FloatingActionButton(
+                    onClick = { if (!isScanning) requestScan() },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 16.dp, bottom = 16.dp),
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    if (isScanning) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.5.dp
+                        )
+                    } else {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_add),
+                            contentDescription = stringResource(R.string.media_lib_scan_folder),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
             }
         }
@@ -453,37 +588,63 @@ internal fun MediaLibraryScreen(
         )
     }
 
-    pickingPlaylistForTrack?.let { track ->
+    pickingPlaylistForTracks?.let { tracks ->
         LibraryPlaylistAssignDialog(
-            track = track,
             playlists = playlists,
-            onDismiss = { pickingPlaylistForTrack = null },
+            onDismiss = { pickingPlaylistForTracks = null },
             onSelectPlaylist = { playlist ->
-                var added = false
-                mutate({ added = repository.addTrackToPlaylist(playlist.id, track.path, track.durationMs) }) {
+                var added = 0
+                mutate({
+                    tracks.forEach {
+                        if (repository.addTrackToPlaylist(playlist.id, it.path, it.durationMs)) added++
+                    }
+                }) {
                     Toast.makeText(
                         context,
-                        if (added) context.getString(R.string.media_lib_added_to_playlist, playlist.name)
+                        if (added > 0) context.getString(R.string.media_lib_added_tracks_to_playlist, added, playlist.name)
                         else context.getString(R.string.player_playlist_picker_already_in),
                         Toast.LENGTH_SHORT
                     ).show()
-                    pickingPlaylistForTrack = null
+                    pickingPlaylistForTracks = null
                 }
             },
             onCreatePlaylist = { name ->
                 mutate({
                     val playlistId = checkNotNull(repository.createPlaylist(name))
-                    repository.addTrackToPlaylist(playlistId, track.path, track.durationMs)
+                    tracks.forEach { repository.addTrackToPlaylist(playlistId, it.path, it.durationMs) }
                 }) {
                     Toast.makeText(
                         context,
-                        context.getString(R.string.media_lib_added_to_playlist, name),
+                        context.getString(R.string.media_lib_added_tracks_to_playlist, tracks.size, name),
                         Toast.LENGTH_SHORT
                     ).show()
-                    pickingPlaylistForTrack = null
+                    pickingPlaylistForTracks = null
                 }
             }
         )
+    }
+
+    pendingFolderRemoval?.let { directory ->
+        AppAlertDialog(
+            title = stringResource(R.string.media_lib_files_remove_folder),
+            message = stringResource(R.string.media_lib_files_remove_folder_confirm, directory.name),
+            confirmText = stringResource(R.string.confirm),
+            dismissText = stringResource(R.string.cancel),
+            onConfirm = {
+                if (browseRootPath == directory.absolutePath) {
+                    browsePath = null
+                    browseRootPath = null
+                    selectedFilePaths = emptySet()
+                }
+                onRemoveFavoriteDirectory(directory)
+                pendingFolderRemoval = null
+            },
+            onDismiss = { pendingFolderRemoval = null }
+        )
+    }
+
+    infoFilePath?.let { path ->
+        MediaFileInfoDialog(path = path, onDismiss = { infoFilePath = null })
     }
 }
 
@@ -733,118 +894,366 @@ private fun HistoryTabContent(
     }
 }
 
-@Composable
-private fun SearchTabContent(
-    query: String,
-    onQueryChange: (String) -> Unit,
-    results: List<MediaLibraryTrack>,
-    isScanning: Boolean,
-    favoritePaths: Set<String>,
-    onScanDirs: () -> Unit,
-    onQuickIndexFavorites: () -> Unit,
-    onPlay: (Int) -> Unit,
-    onToggleFavorite: (MediaLibraryTrack) -> Unit,
-    onAddToPlaylist: (MediaLibraryTrack) -> Unit
-) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = onQueryChange,
-                modifier = Modifier.weight(1f),
-                placeholder = {
-                    Text(
-                        text = stringResource(R.string.media_lib_search_hint),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_search),
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { onQueryChange("") }) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_close),
-                                contentDescription = stringResource(R.string.cancel),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(16.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                )
-            )
-            IconButton(
-                onClick = onScanDirs,
-                enabled = !isScanning
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_add_favorite_directory),
-                    contentDescription = stringResource(R.string.media_lib_scan_folder),
-                    modifier = Modifier.size(30.dp),
-                    tint = Color.Unspecified
-                )
-            }
+private fun buildMediaFolderEntries(
+    directory: File,
+    tracks: List<MediaLibraryTrack>
+): List<MediaFolderEntry> {
+    val base = directory.absolutePath.trimEnd(File.separatorChar)
+    val directories = LinkedHashMap<String, MediaFolderEntry>()
+    val files = ArrayList<MediaFolderEntry>()
+    tracks.forEach { track ->
+        val path = track.path
+        val relative = when {
+            path == base -> ""
+            path.startsWith("$base/") -> path.substring(base.length + 1)
+            else -> return@forEach
         }
-
-        if (results.isEmpty()) {
-            LibraryEmptyState(
-                iconRes = R.drawable.ic_search,
-                title = if (query.isBlank()) stringResource(R.string.media_lib_search_empty_index)
-                else stringResource(R.string.media_lib_search_no_match),
-                subtitle = stringResource(R.string.media_lib_search_empty_hint),
-                actionLabel = stringResource(R.string.media_lib_scan_folder),
-                onAction = onQuickIndexFavorites
+        if (relative.isEmpty()) return@forEach
+        val segments = relative.split('/')
+        if (segments.size == 1) {
+            files += MediaFolderEntry(
+                path = path,
+                name = segments.first(),
+                isDirectory = false,
+                mediaCount = 1,
+                totalDurationMs = track.durationMs
             )
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                itemsIndexed(results, key = { _, item -> item.path }) { index, track ->
-                    MediaTrackCard(
-                        track = track,
-                        subtitle = track.artist.ifBlank { track.album.ifBlank { track.file.parentFile?.name.orEmpty() } },
-                        onClick = { onPlay(index) },
-                        trailingContent = {
-                            IconButton(onClick = { onAddToPlaylist(track) }, modifier = Modifier.size(36.dp)) {
-                                Icon(
-                                    painter = painterResource(R.drawable.ic_playlist_add),
-                                    contentDescription = stringResource(R.string.player_action_add_to_playlist),
-                                    modifier = Modifier.size(20.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            IconButton(onClick = { onToggleFavorite(track) }, modifier = Modifier.size(36.dp)) {
-                                Icon(
-                                    painter = painterResource(if (track.path in favoritePaths) R.drawable.ic_favorite else R.drawable.ic_favorite_border),
-                                    contentDescription = stringResource(if (track.path in favoritePaths) R.string.player_action_unfavorite else R.string.player_action_favorite),
-                                    modifier = Modifier.size(20.dp),
-                                    tint = if (track.path in favoritePaths) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
+            val childPath = "$base/${segments.first()}"
+            val existing = directories[childPath]
+            directories[childPath] = MediaFolderEntry(
+                path = childPath,
+                name = segments.first(),
+                isDirectory = true,
+                mediaCount = (existing?.mediaCount ?: 0) + 1,
+                totalDurationMs = (existing?.totalDurationMs ?: 0L) + track.durationMs
+            )
+        }
+    }
+    return directories.values.sortedBy { it.name.lowercase(Locale.ROOT) } +
+        files.sortedBy { it.name.lowercase(Locale.ROOT) }
+}
+
+private fun countMediaUnder(directory: File, tracks: List<MediaLibraryTrack>): Int {
+    val base = directory.absolutePath.trimEnd(File.separatorChar)
+    return tracks.count { it.path.startsWith("$base/") }
+}
+
+@Composable
+internal fun FilesTabContent(
+    roots: List<File>,
+    rootPath: String?,
+    currentPath: String?,
+    entries: List<MediaFolderEntry>,
+    rootMediaCounts: Map<String, Int>,
+    selectedPaths: Set<String>,
+    selectedDurationMs: Long,
+    onOpenRoot: (File) -> Unit,
+    onOpenFolder: (File) -> Unit,
+    onPlayFile: (MediaFolderEntry) -> Unit,
+    onLongPressFolder: (File) -> Unit,
+    onLongPressFile: (String) -> Unit,
+    onToggleSelection: (String) -> Unit,
+    onClearSelection: () -> Unit,
+    onAdvancedSelection: (MediaLibrarySelectionAction) -> Unit,
+    onFavoriteSelection: () -> Unit,
+    onAddSelectionToPlaylist: () -> Unit,
+    onShowInfo: () -> Unit
+) {
+    val selectionMode = selectedPaths.isNotEmpty()
+    val density = LocalDensity.current
+    var selectionPanelHeight by remember(currentPath) { mutableStateOf(112.dp) }
+    val selectedFiles = remember(entries, selectedPaths) {
+        entries.filter { !it.isDirectory && it.path in selectedPaths }.map { File(it.path) }
+    }
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val bottomInset = if (selectionMode) selectionPanelHeight else 4.dp
+        if (currentPath == null) {
+            if (roots.isEmpty()) {
+                LibraryEmptyState(
+                    iconRes = R.drawable.ic_folder,
+                    title = stringResource(R.string.media_lib_files_empty),
+                    subtitle = stringResource(R.string.media_lib_files_empty_hint)
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    itemsIndexed(roots, key = { _, directory -> directory.absolutePath }) { _, directory ->
+                        RootFolderRow(
+                            directory = directory,
+                            mediaCount = rootMediaCounts[directory.absolutePath] ?: 0,
+                            onClick = { onOpenRoot(directory) },
+                            onLongClick = { onLongPressFolder(directory) }
+                        )
+                    }
+                }
+            }
+        } else {
+            Column(modifier = Modifier.fillMaxSize()) {
+                FolderBreadcrumb(rootPath = rootPath, currentPath = currentPath)
+                if (entries.isEmpty()) {
+                    LibraryEmptyState(
+                        iconRes = R.drawable.ic_folder,
+                        title = stringResource(R.string.media_lib_files_folder_empty),
+                        subtitle = ""
                     )
+                } else {
+                    BrowserFileLayout(
+                        items = entries,
+                        key = { it.path },
+                        viewMode = FileBrowserViewMode.DETAILED,
+                        modifier = Modifier.fillMaxSize().testTag("library-files-list"),
+                        contentPadding = browserFileContentPadding(FileBrowserViewMode.DETAILED, bottom = bottomInset)
+                    ) { entry ->
+                        BrowserFileRow(
+                            modifier = Modifier.testTag("library-file:${entry.path}"),
+                            file = File(entry.path),
+                            relativePathRoot = null,
+                            isSelected = entry.path in selectedPaths,
+                            isSelectionMode = selectionMode,
+                            onClick = {
+                                if (entry.isDirectory) onOpenFolder(File(entry.path))
+                                else if (selectionMode) onToggleSelection(entry.path)
+                                else onPlayFile(entry)
+                            },
+                            onLongClick = {
+                                if (!entry.isDirectory) onLongPressFile(entry.path)
+                            },
+                            viewMode = FileBrowserViewMode.DETAILED,
+                            directoryPageStyle = true
+                        )
+                    }
                 }
             }
         }
+
+        if (selectionMode) {
+            MediaLibrarySelectionPanel(
+                selectedFiles = selectedFiles,
+                totalDurationMs = selectedDurationMs,
+                onRemove = onToggleSelection,
+                onFavorite = onFavoriteSelection,
+                onAddToPlaylist = onAddSelectionToPlaylist,
+                onShowInfo = onShowInfo,
+                onCancel = onClearSelection,
+                onSelectAll = { onAdvancedSelection(MediaLibrarySelectionAction.SELECT_ALL) },
+                onDeselectAll = { onAdvancedSelection(MediaLibrarySelectionAction.DESELECT_ALL) },
+                onSelectRange = { onAdvancedSelection(MediaLibrarySelectionAction.SELECT_RANGE) },
+                onInvertSelection = { onAdvancedSelection(MediaLibrarySelectionAction.INVERT) },
+                modifier = Modifier.align(Alignment.BottomCenter)
+                    .heightIn(max = maxHeight * 0.7f)
+                    .onSizeChanged { selectionPanelHeight = with(density) { it.height.toDp() } }
+            )
+        }
+    }
+}
+
+@Composable
+private fun RootFolderRow(
+    directory: File,
+    mediaCount: Int,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.cardContainer)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.secondaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_folder),
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = directory.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = directory.absolutePath,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = stringResource(R.string.media_lib_files_folder_count, mediaCount),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1
+                )
+            }
+            Icon(
+                painter = painterResource(R.drawable.ic_arrow_right),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun FolderBreadcrumb(rootPath: String?, currentPath: String) {
+    val segments = remember(rootPath, currentPath) {
+        val root = rootPath?.let(::File) ?: return@remember emptyList()
+        val base = root.absolutePath.trimEnd(File.separatorChar)
+        val relative = when {
+            File(currentPath).absolutePath == base -> ""
+            currentPath.startsWith("$base/") -> currentPath.substring(base.length + 1)
+            else -> ""
+        }
+        listOf(root.name) + relative.split('/').filter { it.isNotBlank() }
+    }
+    if (segments.isEmpty()) return
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        segments.forEachIndexed { index, segment ->
+            if (index > 0) {
+                Text(
+                    text = "›",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                text = segment,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (index == segments.lastIndex) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun MediaFileInfoDialog(path: String, onDismiss: () -> Unit) {
+    var details by remember(path) { mutableStateOf<PlayerTrackDetails?>(null) }
+    var loaded by remember(path) { mutableStateOf(false) }
+    LaunchedEffect(path) {
+        details = withContext(Dispatchers.IO) {
+            runCatching { PlayerTrackMetadataReader.read(File(path)) }.getOrNull()
+        }
+        loaded = true
+    }
+    AppDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.media_lib_files_info)) },
+        text = {
+            val current = details
+            if (current == null && loaded) {
+                Text(
+                    text = stringResource(R.string.media_lib_file_missing),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else if (current == null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 96.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(strokeWidth = 2.5.dp, modifier = Modifier.size(28.dp))
+                }
+            } else {
+                val unknown = stringResource(R.string.player_info_unknown)
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 460.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    FileInfoField(stringResource(R.string.player_info_file_name), current.fileName)
+                    FileInfoField(
+                        stringResource(R.string.player_info_location),
+                        current.locationDisplay.ifBlank { current.filePath }
+                    )
+                    FileInfoField(stringResource(R.string.player_info_duration), current.durationText.ifBlank { unknown })
+                    FileInfoField(stringResource(R.string.player_info_file_size), current.fileSizeText.ifBlank { unknown })
+                    FileInfoField(stringResource(R.string.player_info_genre), current.genre.ifBlank { unknown })
+                    FileInfoField(stringResource(R.string.player_info_track_title), current.title.ifBlank { unknown })
+                    FileInfoField(stringResource(R.string.player_info_artist), current.artist.ifBlank { unknown })
+                    FileInfoField(stringResource(R.string.player_info_album), current.album.ifBlank { unknown })
+                    FileInfoField(stringResource(R.string.player_info_year), current.year.ifBlank { unknown })
+                    FileInfoField(stringResource(R.string.player_info_album_artist), current.albumArtist.ifBlank { unknown })
+                    FileInfoField(stringResource(R.string.player_info_composer), current.composer.ifBlank { unknown })
+                    FileInfoField(stringResource(R.string.player_info_track_number), current.trackNumber.ifBlank { "0" })
+                    FileInfoField(stringResource(R.string.player_info_disc_number), current.discNumber.ifBlank { "1" })
+                    FileInfoField(stringResource(R.string.player_info_comment), current.comment.ifBlank { unknown })
+                    FileInfoField(stringResource(R.string.player_info_lyricist), current.lyricist.ifBlank { unknown })
+                    FileInfoField(stringResource(R.string.player_info_copyright), current.copyright.ifBlank { unknown })
+                    FileInfoField(stringResource(R.string.player_info_language), current.language.ifBlank { unknown })
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.player_info_done)) }
+        },
+        dismissButton = {
+            val context = LocalContext.current
+            TextButton(
+                enabled = details?.canEditTags == true,
+                onClick = {
+                    onDismiss()
+                    context.startActivity(Intent(context, MediaTagEditorActivity::class.java).apply {
+                        putStringArrayListExtra(MediaTagEditorActivity.EXTRA_FILE_PATHS, arrayListOf(path))
+                    })
+                }
+            ) { Text(stringResource(R.string.player_info_edit_tags)) }
+        }
+    )
+}
+
+@Composable
+private fun FileInfoField(label: String, value: String) {
+    Column {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -1109,7 +1518,6 @@ private fun LibraryEmptyState(
 
 @Composable
 internal fun LibraryPlaylistAssignDialog(
-    track: MediaLibraryTrack,
     playlists: List<MediaPlaylist>,
     onDismiss: () -> Unit,
     onSelectPlaylist: (MediaPlaylist) -> Unit,

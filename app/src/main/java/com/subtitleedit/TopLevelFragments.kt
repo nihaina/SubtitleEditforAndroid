@@ -129,6 +129,15 @@ internal fun MainTopLevelPages(
                     context, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
                 val dir = File(DirectoryDisplayPath.fromUri(context, uri))
+                if (!dir.isDirectory || !dir.canRead()) {
+                    showTopLevelToast(context, context.getString(R.string.favorite_directory_access_failed))
+                    return@rememberLauncherForActivityResult
+                }
+                val paths = preferences.getStringSet(FAVORITES_PATHS_KEY, emptySet())
+                    ?.toMutableSet() ?: mutableSetOf()
+                paths.add(dir.absolutePath)
+                preferences.edit().putStringSet(FAVORITES_PATHS_KEY, paths).apply()
+                state.favoriteDirectories = paths.map(::File).sortedBy { it.name.lowercase(Locale.getDefault()) }
                 MediaLibraryScanCoordinator.scan(context, listOf(dir))
             } catch (error: Exception) {
                 showLibraryError(context, error)
@@ -306,7 +315,14 @@ internal fun MainTopLevelPages(
             },
             favoriteDirectories = state.favoriteDirectories,
             isActive = isActive,
-            scanPickerPending = libraryScanPickerPending
+            scanPickerPending = libraryScanPickerPending,
+            onRemoveFavoriteDirectory = { directory ->
+                val paths = preferences.getStringSet(FAVORITES_PATHS_KEY, emptySet())
+                    ?.toMutableSet() ?: mutableSetOf()
+                paths.remove(directory.absolutePath)
+                preferences.edit().putStringSet(FAVORITES_PATHS_KEY, paths).apply()
+                loadFavoriteDirectories()
+            }
         )
 
         R.id.nav_stats -> ListeningStatsScreen(

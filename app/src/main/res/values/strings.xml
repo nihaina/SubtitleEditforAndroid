@@ -8,7 +8,7 @@
     <string name="media_lib_tab_queue">播放列表</string>
     <string name="media_lib_tab_playlists">自定义歌单</string>
     <string name="media_lib_tab_history">历史播放</string>
-    <string name="media_lib_tab_search">搜索</string>
+    <string name="media_lib_tab_search">文件</string>
     <string name="media_lib_play_all">全部播放</string>
     <string name="media_lib_track_count">共 %1$d 项</string>
     <string name="media_lib_history_count">最近播放 %1$d 项</string>
@@ -35,6 +35,18 @@
     <string name="media_lib_search_no_match">未找到匹配的媒体文件</string>
     <string name="media_lib_search_empty_hint">点击右上角文件夹图标扫描目录加入媒体库，或先播放/收藏音频</string>
     <string name="media_lib_scan_folder">扫描文件夹</string>
+    <string name="media_lib_files_empty">尚未添加文件夹</string>
+    <string name="media_lib_files_empty_hint">点击右下角 + 添加包含音视频的文件夹</string>
+    <string name="media_lib_files_folder_empty">此文件夹中没有音视频文件</string>
+    <string name="media_lib_files_folder_count">%1$d 个媒体文件</string>
+    <string name="media_lib_files_remove_folder">移除文件夹</string>
+    <string name="media_lib_files_remove_folder_confirm">确定从文件页移除“%1$s”吗？本地文件不会被删除。</string>
+    <string name="media_lib_files_selected">已选择 %1$d 个文件</string>
+    <string name="media_lib_files_options">选项</string>
+    <string name="media_lib_files_info">文件信息</string>
+    <string name="media_lib_files_favorited">已收藏 %1$d 个文件</string>
+    <string name="media_lib_files_info_single">请选择一个文件查看信息</string>
+    <string name="media_lib_added_tracks_to_playlist">已添加 %1$d 首到“%2$s”</string>
     <string name="media_lib_scan_done">已扫描并索引 %1$d 个媒体文件</string>
     <string name="media_lib_file_missing">找不到对应的本地文件，可能已被移动或删除</string>
     <string name="stats_granularity_day">日</string>

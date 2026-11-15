@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="media_lib_selection_expand">展开已选文件</string>
+    <string name="media_lib_selection_collapse">收起已选文件</string>
+    <string name="media_lib_selection_remove">取消选择 %1$s</string>
+    <string name="media_lib_selection_advanced">高级选择</string>
+    <string name="media_lib_selection_all">选择这个列表的所有项目</string>
+    <string name="media_lib_selection_none">不选择这个列表的所有项目</string>
+    <string name="media_lib_selection_range">选择第一首与最后一首之间的所有歌曲</string>
+    <string name="media_lib_selection_invert">反选</string>
+</resources>
