@@ -42,7 +42,8 @@ class MediaTagNativeWorkflowTest {
             assertEquals(extension, hash, audioHash(file, root))
             val properties = MediaFilePropertiesReader.read(file).mediaDetails.associate { it.label to it.value }
             assertEquals(extension, expected.title, properties["歌曲名"])
-            assertEquals(extension, expected.artist, properties["艺术家"])
+            assertEquals(extension, expected.artist, properties["歌手"])
+            assertEquals(extension, expected.albumArtist, properties["艺术家"])
             assertEquals(extension, expected.album, properties["专辑"])
             val cleared = MediaConvertMetadata.audioFields.fold(MediaConvertMetadata()) { value, field -> value.withValue(field, "") }
             val blank = MediaTagAudioRepository.write(file, cleared)

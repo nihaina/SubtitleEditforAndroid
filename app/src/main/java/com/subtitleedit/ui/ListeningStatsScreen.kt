@@ -16,6 +16,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,7 +38,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -48,13 +50,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.key
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,6 +64,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -95,7 +98,11 @@ import kotlin.math.abs
 import kotlin.math.roundToLong
 
 @Composable
-internal fun ListeningStatsScreen(refreshVersion: Int) {
+internal fun ListeningStatsScreen(
+    refreshVersion: Int,
+    pageState: ListeningStatsPageState = remember { ListeningStatsPageState() },
+    contentLoader: ListeningStatsLoader? = null
+) {
     val context = LocalContext.current
     val repository = remember(context) { MediaLibraryRepository.getInstance(context) }
     val revision by repository.revision.collectAsState()
@@ -104,22 +111,26 @@ internal fun ListeningStatsScreen(refreshVersion: Int) {
     val currentDate = rememberListeningDate(refreshVersion, revision)
     val currentYear = currentDate.take(4).toInt()
 
-    var granularity by remember { mutableStateOf(StatsGranularity.DAY) }
-    var selectedYear by remember { mutableIntStateOf(currentYear) }
-    var selectedDate by remember { mutableStateOf(currentDate) }
+    val granularity = pageState.granularity
+    val selectedYear = pageState.selectedYear
+    val selectedDate = pageState.selectedDate
 
-    var content by remember { mutableStateOf(ListeningStatsContent()) }
+    val content = pageState.content ?: ListeningStatsContent()
     val allStats = content.allStats
     val availableYears = content.availableYears.ifEmpty { listOf(currentYear) }
-    val heatmapDays = content.heatmapDays
+    val heatmapDays = remember(content.heatmapDays, currentDate, selectedYear) {
+        content.heatmapDays.takeIf { it.firstOrNull()?.date?.take(4)?.toIntOrNull() == selectedYear }
+            ?: StatsCalculator.yearRange(selectedYear, currentDate).let { (start, end) ->
+                ListeningDay.datesBetween(start, end).map { StatsHeatmapDay(it, 0L, 0) }
+            }
+    }
     val sessions = content.sessions
     val topItems = content.topItems
 
-    var previousCurrentDate by remember { mutableStateOf(currentDate) }
     LaunchedEffect(currentDate) {
-        if (selectedDate == previousCurrentDate) selectedDate = currentDate
-        if (selectedYear == previousCurrentDate.take(4).toInt()) selectedYear = currentYear
-        previousCurrentDate = currentDate
+        if (pageState.selectedDate == pageState.previousCurrentDate) pageState.selectedDate = currentDate
+        if (pageState.selectedYear == pageState.previousCurrentDate.take(4).toInt()) pageState.selectedYear = currentYear
+        pageState.previousCurrentDate = currentDate
     }
 
     LaunchedEffect(revision, refreshVersion, currentDate, selectedYear, granularity, selectedDate) {
@@ -128,6 +139,7 @@ internal fun ListeningStatsScreen(refreshVersion: Int) {
         val mode = granularity
         try {
             val loaded = withContext(Dispatchers.IO) {
+                contentLoader?.let { return@withContext it(currentDate, year, mode, day) }
                 val stats = repository.getAllDailyStats()
                 val (startDate, endDate) = StatsCalculator.yearRange(year, currentDate)
                 val yearStats = stats.filter { it.date in startDate..endDate }.associateBy { it.date }
@@ -147,7 +159,7 @@ internal fun ListeningStatsScreen(refreshVersion: Int) {
                     neverPlayed = repository.getNeverPlayedTracks(limit = 100)
                 )
             }
-            content = loaded
+            pageState.content = loaded
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -181,52 +193,64 @@ internal fun ListeningStatsScreen(refreshVersion: Int) {
         }
     }
 
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(settingsPageBackground())
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .testTag("listening-stats-page"),
+        state = pageState.listState,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        SummarySection(
-            summary = summary,
-            granularity = granularity,
-            topArtworkPath = topItems.firstOrNull()?.mediaPath,
-            onGranularitySelected = { granularity = it }
-        )
-
-        HeatmapSection(
-            days = heatmapDays,
-            selectedDate = selectedDate,
-            availableYears = availableYears,
-            selectedYear = selectedYear,
-            onYearSelected = { year ->
-                selectedYear = year
-                selectedDate = if (year == currentYear) currentDate else "%04d-12-31".format(Locale.US, year)
-            },
-            onDayClick = { selectedDate = it }
-        )
-
-        if (topItems.isNotEmpty()) {
-            TopWorksSection(
-                items = topItems,
-                onItemClick = { playFile(it.mediaPath) }
+        item(key = "summary") {
+            SummarySection(
+                summary = summary,
+                granularity = granularity,
+                topArtworkPath = topItems.firstOrNull()?.mediaPath,
+                animateChanges = pageState.content != null,
+                onGranularitySelected = { pageState.granularity = it }
             )
         }
 
-        PlaybackInsightsSection(
-            recentHistory = content.recentHistory,
-            mostPlayed = content.mostPlayed,
-            neverPlayed = content.neverPlayed,
-            onTrackClick = { playFile(it.path) }
-        )
+        item(key = "heatmap") {
+            HeatmapSection(
+                days = heatmapDays,
+                selectedDate = selectedDate,
+                availableYears = availableYears,
+                selectedYear = selectedYear,
+                onYearSelected = { year ->
+                    pageState.selectedYear = year
+                    pageState.selectedDate = if (year == currentYear) currentDate else "%04d-12-31".format(Locale.US, year)
+                },
+                onDayClick = { pageState.selectedDate = it }
+            )
+        }
 
-        DayTimelineSection(
-            date = selectedDate,
-            sessions = sessions,
-            onSessionClick = { playFile(it.mediaPath) }
-        )
+        if (topItems.isNotEmpty()) {
+            item(key = "top-works") {
+                TopWorksSection(
+                    items = topItems,
+                    onItemClick = { playFile(it.mediaPath) }
+                )
+            }
+        }
+
+        item(key = "playback-insights") {
+            PlaybackInsightsSection(
+                recentHistory = content.recentHistory,
+                mostPlayed = content.mostPlayed,
+                neverPlayed = content.neverPlayed,
+                onTrackClick = { playFile(it.path) }
+            )
+        }
+
+        item(key = "timeline") {
+            DayTimelineSection(
+                date = selectedDate,
+                sessions = sessions,
+                onSessionClick = { playFile(it.mediaPath) }
+            )
+        }
     }
 }
 
@@ -243,7 +267,7 @@ private fun PlaybackInsightsSection(
     neverPlayed: List<MediaLibraryTrack>,
     onTrackClick: (MediaLibraryTrack) -> Unit
 ) {
-    var selectedTab by remember { mutableStateOf(PlaybackInsightTab.RECENT) }
+    var selectedTab by rememberSaveable { mutableStateOf(PlaybackInsightTab.RECENT) }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -449,13 +473,14 @@ private fun SummarySection(
     summary: StatsSummaryData,
     granularity: StatsGranularity,
     topArtworkPath: String?,
+    animateChanges: Boolean,
     onGranularitySelected: (StatsGranularity) -> Unit
 ) {
     val cover by produceState<Bitmap?>(initialValue = null, key1 = topArtworkPath) {
         value = topArtworkPath?.let { withContext(Dispatchers.IO) { MediaArtworkLoader.loadCover(it, 480) } }
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.testTag("stats-summary"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -498,6 +523,7 @@ private fun SummarySection(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         SummaryMetricCard(
+                            animateChanges = animateChanges,
                             iconRes = R.drawable.ic_schedule,
                             label = stringResource(R.string.stats_metric_duration),
                             value = formatStatsDuration(summary.totalDurationMs),
@@ -507,6 +533,7 @@ private fun SummarySection(
                             modifier = Modifier.weight(1f)
                         )
                         SummaryMetricCard(
+                            animateChanges = animateChanges,
                             iconRes = R.drawable.ic_music_note,
                             label = stringResource(R.string.stats_metric_tracks),
                             value = "${summary.totalTrackCount}",
@@ -521,6 +548,7 @@ private fun SummarySection(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         SummaryMetricCard(
+                            animateChanges = animateChanges,
                             iconRes = R.drawable.ic_event_available,
                             label = stringResource(R.string.stats_metric_active_days),
                             value = "${summary.activeDayCount}",
@@ -530,6 +558,7 @@ private fun SummarySection(
                             modifier = Modifier.weight(1f)
                         )
                         SummaryMetricCard(
+                            animateChanges = animateChanges,
                             iconRes = R.drawable.ic_video_play,
                             label = stringResource(R.string.stats_metric_plays),
                             value = "${summary.totalPlayCount}",
@@ -591,6 +620,7 @@ private fun GranularitySelector(
 
 @Composable
 private fun SummaryMetricCard(
+    animateChanges: Boolean,
     iconRes: Int,
     label: String,
     value: String,
@@ -637,30 +667,32 @@ private fun SummaryMetricCard(
                     maxLines = 1
                 )
             }
-            AnimatedContent(
-                targetState = deltaText to referenceText,
-                transitionSpec = {
-                    (slideInVertically(tween(200)) { it / 2 } + fadeIn(tween(150)))
-                        .togetherWith(slideOutVertically(tween(200)) { -it / 2 } + fadeOut(tween(120)))
-                },
-                label = "stats-delta"
-            ) { (headline, caption) ->
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = headline,
-                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                        color = deltaColor,
-                        textAlign = TextAlign.End,
-                        maxLines = 1
-                    )
-                    if (caption.isNotBlank()) {
+            key(animateChanges) {
+                AnimatedContent(
+                    targetState = deltaText to referenceText,
+                    transitionSpec = {
+                        (slideInVertically(tween(200)) { it / 2 } + fadeIn(tween(150)))
+                            .togetherWith(slideOutVertically(tween(200)) { -it / 2 } + fadeOut(tween(120)))
+                    },
+                    label = "stats-delta"
+                ) { (headline, caption) ->
+                    Column(horizontalAlignment = Alignment.End) {
                         Text(
-                            text = caption,
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            text = headline,
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                            color = deltaColor,
                             textAlign = TextAlign.End,
                             maxLines = 1
                         )
+                        if (caption.isNotBlank()) {
+                            Text(
+                                text = caption,
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.End,
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
             }
@@ -678,7 +710,7 @@ private fun HeatmapSection(
     onDayClick: (String) -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().testTag("stats-heatmap"),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.cardContainer)
     ) {
@@ -712,13 +744,7 @@ private fun HeatmapSection(
             } else {
                 val columns = remember(days) { StatsCalculator.buildHeatmapColumns(days) }
                 val monthLabels = remember(columns) { StatsCalculator.buildMonthLabels(columns) }
-                val scrollState = rememberScrollState()
-                LaunchedEffect(selectedYear, columns.size) {
-                    if (columns.isNotEmpty()) {
-                        withFrameNanos { }
-                        scrollState.scrollTo(scrollState.maxValue)
-                    }
-                }
+                val scrollState = remember(selectedYear, columns.size) { ScrollState(Int.MAX_VALUE) }
 
                 Column(
                     modifier = Modifier

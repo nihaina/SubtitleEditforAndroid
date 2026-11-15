@@ -53,6 +53,8 @@ internal fun MediaAlbumScreen(
     val revision by repository.revision.collectAsState()
     val preferences = remember(context) { MediaAlbumPreferences(context) }
     var options by remember { mutableStateOf(preferences.load()) }
+    val singerPreferences = remember(context) { MediaSingerPreferences(context) }
+    var singerOptions by remember { mutableStateOf(singerPreferences.load()) }
     var tracks by remember { mutableStateOf(emptyList<MediaAlbumTrack>()) }
     var loading by remember { mutableStateOf(true) }
     val albums = remember(tracks) { buildMediaAlbums(tracks) }
@@ -134,6 +136,8 @@ internal fun MediaAlbumScreen(
         loading = loading,
         isActive = isActive,
         onOptionsChanged = { options = it; preferences.save(it) },
+        singerOptions = singerOptions,
+        onSingerOptionsChanged = { singerOptions = it; singerPreferences.save(it) },
         onPlay = { album, path -> playAlbum(album, path) },
         onShuffle = { album -> playAlbum(album, null, shuffle = true) },
         onFavoriteSelection = { selected, onComplete ->
@@ -198,27 +202,58 @@ internal fun MediaAlbumPageContent(
     onShuffle: (MediaAlbum) -> Unit = { onPlay(it, null) },
     onFavoriteSelection: (List<MediaLibraryTrack>, () -> Unit) -> Unit = { _, done -> done() },
     onAddSelectionToPlaylist: (List<MediaLibraryTrack>, () -> Unit) -> Unit = { _, done -> done() },
-    onShowInfo: (String) -> Unit = {}
+    onShowInfo: (String) -> Unit = {},
+    singerOptions: MediaSingerViewOptions = MediaSingerViewOptions(),
+    onSingerOptionsChanged: (MediaSingerViewOptions) -> Unit = {}
 ) {
     var category by rememberSaveable { mutableStateOf(MediaCategory.ALBUMS) }
     var query by rememberSaveable { mutableStateOf("") }
+    var singerQuery by rememberSaveable { mutableStateOf("") }
     var openedAlbumKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var openedSingerKey by rememberSaveable { mutableStateOf<String?>(null) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var sortOpen by remember { mutableStateOf(false) }
     val openedAlbum = albums.firstOrNull { it.key == openedAlbumKey }
+    val singers = remember(albums) { buildMediaSingers(albums.flatMap { it.tracks }) }
+    val openedSinger = singers.firstOrNull { it.key == openedSingerKey }
+    val visibleSingers = remember(singers, singerQuery, singerOptions) {
+        filterAndSortMediaSingers(singers, if (singerOptions.quickSearch) singerQuery else "",
+            singerOptions.sortField, singerOptions.ascending)
+    }
     val visibleAlbums = remember(albums, query, options.sortField, options.ascending, options.quickSearch) {
         filterAndSortMediaAlbums(albums, if (options.quickSearch) query else "", options.sortField, options.ascending)
     }
 
-    BackHandler(isActive && (settingsOpen || openedAlbumKey != null)) {
-        if (settingsOpen) settingsOpen = false else openedAlbumKey = null
+    BackHandler(isActive && (settingsOpen || openedAlbumKey != null || openedSingerKey != null)) {
+        when {
+            settingsOpen -> settingsOpen = false
+            openedSingerKey != null -> openedSingerKey = null
+            else -> openedAlbumKey = null
+        }
     }
     Column(Modifier.fillMaxSize().background(settingsPageBackground()).testTag("media-categories-page")) {
         when {
+            settingsOpen && category == MediaCategory.SINGERS -> MediaSingerSettings(
+                options = singerOptions,
+                onChange = onSingerOptionsChanged,
+                onBack = { settingsOpen = false }
+            )
             settingsOpen -> MediaAlbumSettings(
                 options = options,
                 onChange = onOptionsChanged,
                 onBack = { settingsOpen = false }
+            )
+            openedSinger != null -> MediaSingerDetailContent(
+                singer = openedSinger,
+                options = singerOptions,
+                onOptionsChanged = onSingerOptionsChanged,
+                isActive = isActive,
+                onBack = { openedSingerKey = null },
+                onPlay = { displayed, path -> onPlay(MediaAlbum(openedSinger.name, displayed), path) },
+                onShuffle = { displayed -> onShuffle(MediaAlbum(openedSinger.name, displayed)) },
+                onFavoriteSelection = onFavoriteSelection,
+                onAddSelectionToPlaylist = onAddSelectionToPlaylist,
+                onShowInfo = onShowInfo
             )
             openedAlbum != null -> MediaAlbumDetailContent(
                 album = openedAlbum,
@@ -270,13 +305,39 @@ internal fun MediaAlbumPageContent(
                             modifier = Modifier.weight(1f)
                         )
                     }
+                } else if (category == MediaCategory.SINGERS) {
+                    if (loading && singers.isEmpty()) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(modifier = Modifier.size(32.dp))
+                        }
+                    } else {
+                        MediaSingerBrowseContent(
+                            singers = visibleSingers,
+                            options = singerOptions,
+                            query = singerQuery,
+                            onQueryChanged = { singerQuery = it },
+                            onSort = { sortOpen = true },
+                            onSettings = { settingsOpen = true },
+                            onOpenSinger = { openedSingerKey = it.key },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 } else {
                     Spacer(Modifier.weight(1f).fillMaxWidth().testTag("media-category-empty"))
                 }
             }
         }
     }
-    if (sortOpen) {
+    if (sortOpen && category == MediaCategory.SINGERS) {
+        MediaSingerSortDialog(
+            sortField = singerOptions.sortField,
+            ascending = singerOptions.ascending,
+            onChange = { field, ascending ->
+                onSingerOptionsChanged(singerOptions.copy(sortField = field, ascending = ascending))
+            },
+            onDismiss = { sortOpen = false }
+        )
+    } else if (sortOpen) {
         MediaAlbumSortDialog(
             sortField = options.sortField,
             ascending = options.ascending,

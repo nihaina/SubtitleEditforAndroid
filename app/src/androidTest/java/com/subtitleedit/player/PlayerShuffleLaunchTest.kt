@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModelStore
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.subtitleedit.R
 import com.subtitleedit.library.MediaLibraryRepository
 import java.io.Closeable
 import java.io.File
@@ -15,6 +16,7 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -34,6 +36,7 @@ class PlayerShuffleLaunchTest {
             assertEquals(listOf(0, 1, 2), state.shuffleOrder.sorted())
             assertEquals(1, state.shuffleOrder.first())
             assertEquals(PlayerPlayMode.REPEAT_ONE, PlayerPreferences.getInstance(app).defaultPlayMode)
+            assertEquals(app.getString(R.string.player_mode_shuffle), state.gestureHint?.text)
         }
     }
 
@@ -42,6 +45,7 @@ class PlayerShuffleLaunchTest {
             onMain { fixture.model.configure(fixture.tracks, 0) }
             assertEquals(PlayerPlayMode.SEQUENCE, mainValue { fixture.model.state.value.mode })
             assertEquals(PlayerPlayMode.SEQUENCE, PlayerPreferences.getInstance(app).defaultPlayMode)
+            assertNull(mainValue { fixture.model.state.value.gestureHint })
         }
         Fixture(PlayerPlayMode.REPEAT_ALL).use { fixture ->
             onMain { fixture.model.configure(fixture.tracks, 2, PlayerPlayMode.SHUFFLE) }
@@ -51,7 +55,11 @@ class PlayerShuffleLaunchTest {
             assertEquals(PlayerPlayMode.SHUFFLE, recreated.mode)
             assertEquals(original.currentTrack, recreated.currentTrack)
             assertEquals(original.shuffleOrder, recreated.shuffleOrder)
+            assertEquals(original.gestureHint, recreated.gestureHint)
             assertEquals(PlayerPlayMode.REPEAT_ALL, PlayerPreferences.getInstance(app).defaultPlayMode)
+            onMain { fixture.model.clearHint() }
+            onMain { fixture.model.configure(fixture.tracks, 0, PlayerPlayMode.SHUFFLE) }
+            assertNull(mainValue { fixture.model.state.value.gestureHint })
         }
     }
 
@@ -67,6 +75,17 @@ class PlayerShuffleLaunchTest {
             assertEquals(listOf(0, 1), state.shuffleOrder.sorted())
             assertEquals(1, state.shuffleOrder.first())
             assertNotEquals(PlayerPlayMode.SHUFFLE, PlayerPreferences.getInstance(app).defaultPlayMode)
+        }
+    }
+
+    @Test fun shuffleWithNoAvailableFilesDoesNotAnnouncePlayback() {
+        Fixture(PlayerPlayMode.SEQUENCE).use { fixture ->
+            val missing = PlayerTrack(File(fixture.directory, "missing.wav").path, "Missing", false)
+            onMain { fixture.model.configure(listOf(missing), 0, PlayerPlayMode.SHUFFLE) }
+            val state = mainValue { fixture.model.state.value }
+            assertNull(state.gestureHint)
+            assertEquals(app.getString(R.string.player_playlist_empty), state.error)
+            assertEquals(PlayerPlayMode.SEQUENCE, PlayerPreferences.getInstance(app).defaultPlayMode)
         }
     }
 

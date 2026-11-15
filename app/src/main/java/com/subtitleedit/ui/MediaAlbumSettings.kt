@@ -71,8 +71,7 @@ internal fun MediaAlbumSettings(
             windowInsets = WindowInsets(0, 0, 0, 0)
         )
         LazyColumn(
-            modifier = Modifier.fillMaxSize().testTag("album-settings-list"),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            modifier = Modifier.fillMaxSize().testTag("album-settings-list")
         ) {
             item {
                 AlbumPreferenceRow(
@@ -96,7 +95,7 @@ internal fun MediaAlbumSettings(
                     title = stringResource(R.string.media_album_more_info),
                     checked = options.showMoreInfo,
                     onCheckedChange = { onChange(options.copy(showMoreInfo = it)) },
-                    modifier = Modifier.padding(horizontal = 8.dp).heightIn(min = 76.dp)
+                    modifier = Modifier.padding(horizontal = 8.dp).heightIn(min = 64.dp)
                         .testTag("album-settings-more-info")
                 )
             }
@@ -105,7 +104,7 @@ internal fun MediaAlbumSettings(
                     title = stringResource(R.string.media_album_group_tracks),
                     checked = options.groupTracks,
                     onCheckedChange = { onChange(options.copy(groupTracks = it)) },
-                    modifier = Modifier.padding(horizontal = 8.dp).heightIn(min = 96.dp)
+                    modifier = Modifier.padding(horizontal = 8.dp).heightIn(min = 64.dp)
                         .testTag("album-settings-group-tracks")
                 )
             }
@@ -114,7 +113,7 @@ internal fun MediaAlbumSettings(
                     title = stringResource(R.string.media_album_quick_search),
                     checked = options.quickSearch,
                     onCheckedChange = { onChange(options.copy(quickSearch = it)) },
-                    modifier = Modifier.padding(horizontal = 8.dp).heightIn(min = 76.dp)
+                    modifier = Modifier.padding(horizontal = 8.dp).heightIn(min = 64.dp)
                         .testTag("album-settings-quick-search")
                 )
             }
@@ -153,7 +152,7 @@ private fun AlbumPreferenceRow(
     Column(
         modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.38f)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .heightIn(min = 88.dp).padding(horizontal = 24.dp, vertical = 18.dp),
+            .heightIn(min = 64.dp).padding(horizontal = 24.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.Center
     ) {
         Text(title, style = MaterialTheme.typography.bodyLarge)

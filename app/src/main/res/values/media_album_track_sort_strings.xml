@@ -6,7 +6,7 @@
     <string name="media_album_track_sort_folder_path">文件夹路径</string>
     <string name="media_album_track_sort_album">专辑</string>
     <string name="media_album_track_sort_artist">歌手</string>
-    <string name="media_album_track_sort_album_artist">专辑艺术家</string>
+    <string name="media_album_track_sort_album_artist">艺术家</string>
     <string name="media_album_track_sort_composer">作曲家</string>
     <string name="media_album_track_sort_genre">流派</string>
     <string name="media_album_track_sort_track_number">曲目序号</string>

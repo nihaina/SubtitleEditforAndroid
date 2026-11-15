@@ -62,7 +62,7 @@ class MediaAlbumPageTest {
         compose.onNodeWithTag("album-item:beta").assertIsDisplayed()
         compose.onNodeWithTag("album-item:alpha").assertDoesNotExist()
 
-        MediaCategory.entries.filter { it != MediaCategory.ALBUMS }.forEach { category ->
+        MediaCategory.entries.filter { it != MediaCategory.ALBUMS && it != MediaCategory.SINGERS }.forEach { category ->
             selectCategory(category)
             compose.onNodeWithTag("media-category-empty").assertIsDisplayed()
             compose.onNodeWithTag("album-search").assertDoesNotExist()

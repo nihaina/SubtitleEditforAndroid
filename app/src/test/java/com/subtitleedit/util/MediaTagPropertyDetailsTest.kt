@@ -12,7 +12,7 @@ class MediaTagPropertyDetailsTest {
             "LYRICIST", "作词者", "COPYRIGHT", "版权", "LANGUAGE", "zho",
             "LYRICS", "Do not expose the entire lyric document as a property"
         ))
-        assertEquals(listOf("歌曲名", "艺术家", "专辑", "专辑艺术家", "作曲", "流派", "年份",
+        assertEquals(listOf("歌曲名", "歌手", "专辑", "艺术家", "作曲", "流派", "年份",
             "音轨号", "碟号", "注释", "作词", "版权", "语言"), details.map { it.label })
         assertEquals("曲名 🌊", details.first().value)
         assertEquals("3/12", details.first { it.label == "音轨号" }.value)
@@ -21,7 +21,7 @@ class MediaTagPropertyDetailsTest {
 
     @Test fun missingFieldsAreAbsentAndMultiValueFieldsAreNotLost() {
         assertTrue(MediaTagPropertyDetails.fromProperties(emptyArray()).isEmpty())
-        assertEquals(listOf(PropertyDetail("艺术家", "First / Second")),
+        assertEquals(listOf(PropertyDetail("歌手", "First / Second")),
             MediaTagPropertyDetails.fromProperties(arrayOf("ARTIST", "First", "ARTIST", "Second", "ALBUM", "")))
     }
 }

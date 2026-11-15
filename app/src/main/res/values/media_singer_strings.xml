@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="singer_browse_search">搜索歌手</string>
+    <string name="singer_browse_settings">歌手设置</string>
+    <string name="singer_detail_back">返回歌手列表</string>
+    <string name="singer_browse_empty">暂无歌手</string>
+    <string name="singer_browse_no_results">未找到匹配的歌手</string>
+    <string name="singer_sort_title">歌手筛选条件</string>
+    <string name="singer_more_info">在歌手列表中显示更多信息</string>
+    <string name="singer_more_info_auto">按排序方式自动决定</string>
+    <string name="singer_more_info_none">无</string>
+    <string name="singer_more_info_updated">更新时间</string>
+    <string name="singer_more_info_year">发行年份</string>
+    <string name="singer_group_tracks">按专辑等子类别划分各歌手的歌曲</string>
+    <string name="singer_album_sort">为该歌手的专辑排序</string>
+    <string name="singer_info_unknown">未知</string>
+</resources>

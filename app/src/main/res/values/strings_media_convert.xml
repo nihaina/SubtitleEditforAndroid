@@ -229,7 +229,7 @@
     <string name="media_convert_info_title">标题</string>
     <string name="media_convert_info_author">作者</string>
     <string name="media_convert_info_comment">注释</string>
-    <string name="media_convert_info_album_artist">专辑艺术家</string>
+    <string name="media_convert_info_album_artist">艺术家</string>
     <string name="media_convert_info_composer">作曲</string>
     <string name="media_convert_info_track_number">曲目编号</string>
     <string name="media_convert_info_disc_number">碟片编号</string>

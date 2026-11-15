@@ -12,6 +12,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,9 +27,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -36,10 +39,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import android.graphics.Bitmap
 import android.content.res.Configuration
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.findViewTreeLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,24 +58,72 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
+import com.subtitleedit.library.MediaArtworkLoader
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
-/** Vinyl artwork with the recent measured loudness of the audio being played. */
+/** Embedded artwork, or the default vinyl, with the audio's recent measured loudness. */
 @Composable
 internal fun PlayerAudioVisual(
     playing: Boolean,
     loudness: Float,
     loudnessSampleId: Long,
     showLoudnessWaveform: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    trackPath: String? = null
 ) {
     val configuration = LocalConfiguration.current
     val landscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val discSize = if (landscape) (configuration.screenHeightDp.dp * 0.42f).coerceIn(96.dp, 180.dp) else 300.dp
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        if (playing) AnimatedVinyl(discSize) else StaticVinyl(discSize)
+    val coverSize = discSize * 0.9f
+    val targetSizePx = with(LocalDensity.current) { coverSize.roundToPx().coerceIn(32, 1024) }
+    val view = LocalView.current
+    var artworkRevision by remember(trackPath) { mutableIntStateOf(0) }
+    // Returning from the tag editor may replace or remove this file's embedded picture.
+    DisposableEffect(view, trackPath) {
+        val owner = view.findViewTreeLifecycleOwner()
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) artworkRevision++
+        }
+        owner?.lifecycle?.addObserver(observer)
+        onDispose { owner?.lifecycle?.removeObserver(observer) }
+    }
+    var artwork by remember(trackPath, targetSizePx) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(trackPath, targetSizePx, artworkRevision) {
+        artwork = if (trackPath == null) null else withContext(Dispatchers.IO) {
+            try {
+                MediaArtworkLoader.loadCover(trackPath, targetSizePx, allowVideoFrame = false)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+    // Stack the two actual drawing areas: top padding on a centered overlay allows
+    // the waveform to grow back into the artwork's lower edge.
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        val cover = artwork
+        if (cover != null) {
+            Image(
+                bitmap = cover.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.size(coverSize).clip(RoundedCornerShape(20.dp))
+                    .testTag("player-audio-cover"),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Box(Modifier.testTag("player-audio-vinyl")) {
+                if (playing) AnimatedVinyl(discSize) else StaticVinyl(discSize)
+            }
+        }
         if (showLoudnessWaveform) {
-            PlayerLoudnessWaveform(playing, loudness, loudnessSampleId,
-                Modifier.padding(top = discSize + 12.dp))
+            PlayerLoudnessWaveform(playing, loudness, loudnessSampleId)
         }
     }
 }

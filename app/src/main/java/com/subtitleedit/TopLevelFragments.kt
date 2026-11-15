@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import com.subtitleedit.ui.FavoritesScreen
 import com.subtitleedit.ui.ListeningStatsScreen
+import com.subtitleedit.ui.ListeningStatsPageState
 import com.subtitleedit.ui.MediaLibraryScreen
 import com.subtitleedit.ui.MediaAlbumScreen
 import com.subtitleedit.ui.MediaLibraryScanCoordinator
@@ -58,6 +59,7 @@ internal class MainTopLevelPagesState {
     var draftDialog by mutableStateOf<DraftsDialogState?>(null)
     var draftToExport by mutableStateOf<DraftsActivity.DraftItem?>(null)
     var settingsPage by mutableStateOf(SettingsPageState())
+    val listeningStatsPage = ListeningStatsPageState()
 }
 
 @Composable
@@ -329,7 +331,8 @@ internal fun MainTopLevelPages(
         )
 
         R.id.nav_stats -> ListeningStatsScreen(
-            refreshVersion = refreshVersion
+            refreshVersion = refreshVersion,
+            pageState = state.listeningStatsPage
         )
 
         R.id.nav_favorites -> FavoritesScreen(

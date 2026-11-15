@@ -56,7 +56,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -212,10 +211,7 @@ internal fun MainActivityScreen(
     var createNameError by remember { mutableStateOf<String?>(null) }
     var createExtensionError by remember { mutableStateOf<String?>(null) }
     val isDirectoryPage = state.selectedTopLevelItem == R.id.nav_directory
-    val isMediaCategoriesPage = state.playerModeEnabled && state.selectedTopLevelItem == R.id.nav_tools
-    val usesPageBackground = isDirectoryPage || state.selectedTopLevelItem in setOf(
-        R.id.nav_library, R.id.nav_stats, R.id.nav_favorites, R.id.nav_drafts, R.id.nav_settings, R.id.nav_tools
-    )
+    val activeTopLevelItem = state.selectedTopLevelItem
     // Selection actions belong to directoryContent in the legacy layout. The
     // selection state can survive a top-level tab switch, but its toolbar and
     // bottom action row stay hidden until the directory tab is visible again.
@@ -225,7 +221,6 @@ internal fun MainActivityScreen(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val createNameFocusRequester = remember { FocusRequester() }
-    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     LaunchedEffect(createDialogKind) {
         if (createDialogKind != null) {
@@ -248,10 +243,6 @@ internal fun MainActivityScreen(
             keyboardController?.hide()
         }
     }
-    LaunchedEffect(state.selectedTopLevelItem) {
-        scrollBehavior.state.contentOffset = 0f
-        scrollBehavior.state.heightOffset = 0f
-    }
 
     Column(
         modifier = Modifier
@@ -259,248 +250,247 @@ internal fun MainActivityScreen(
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .background(MaterialTheme.colorScheme.background)
     ) {
-        if (!isMediaCategoriesPage) TopAppBar(
-            scrollBehavior = scrollBehavior,
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = if (usesPageBackground) settingsPageBackground() else MaterialTheme.colorScheme.surface,
-                scrolledContainerColor = if (usesPageBackground) settingsPageBackground() else MaterialTheme.colorScheme.surfaceContainer
-            ),
-            title = {
-                DirectoryToolbarTitle(
-                    searchOpen = state.isSearchExpanded && isDirectoryPage && !isSelectionActive,
-                    query = state.searchQuery,
-                    title = when {
-                        state.toolbarTitle.isNotBlank() -> state.toolbarTitle
-                        isSelectionActive -> FileOperationUiPolicy.selectionTitle(
-                            state.pendingOperation,
-                            state.selectedPaths.size
-                        )
-                        isDirectoryPage -> stringResource(R.string.nav_directory)
-                        else -> stringResource(MainNavigationPolicy.titleRes(state.selectedTopLevelItem))
-                    },
-                    onQueryChanged = onSearchChanged,
-                    onCloseSearch = onToolbarBack,
-                    focusRequester = searchFocusRequester
-                )
-            },
-            navigationIcon = {
-                if (state.toolbarHasBack || isSelectionActive) {
-                    IconButton(onClick = onToolbarBack) {
-                        Icon(
-                            painter = painterResource(
-                                if (isSelectionActive || state.isSearchExpanded) R.drawable.ic_close
-                                else R.drawable.ic_back
-                            ),
-                            contentDescription = stringResource(
-                                R.string.cancel
-                            )
-                        )
-                    }
-                } else if (MainNavigationPolicy.isAuxiliaryPage(state.selectedTopLevelItem, state.playerModeEnabled)) {
-                    IconButton(onClick = { onTopLevelPageSelected(R.id.nav_directory) }) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_back),
-                            contentDescription = stringResource(R.string.tools_navigate_back)
-                        )
-                    }
-                }
-            },
-            actions = {
-                if (isDirectoryPage && isSelectionActive) {
-                    // The legacy menu keeps these actions available while a
-                    // selection is active, except during destination picking.
-                    if (state.pendingOperation == null && state.selectedPaths.isNotEmpty()) {
-                        IconButton(onClick = onSelectAll) {
-                            Icon(
-                                painterResource(R.drawable.ic_select_all),
-                                contentDescription = stringResource(R.string.source_selection_select_all)
-                            )
-                        }
-                        IconButton(onClick = onSelectRange) {
-                            Icon(
-                                painterResource(R.drawable.ic_select_range),
-                                contentDescription = stringResource(R.string.directory_select_range)
-                            )
-                        }
-                    }
-                } else if (isDirectoryPage) {
-                    IconButton(
-                        onClick = onOnlineClicked,
-                        modifier = Modifier.testTag("directory-online")
-                    ) {
-                        Icon(
-                            painterResource(R.drawable.ic_online),
-                            contentDescription = stringResource(R.string.player_online_title)
-                        )
-                    }
-                    IconButton(
-                        onClick = onTogglePlayerMode,
-                        modifier = Modifier.testTag("directory-player-mode")
-                    ) {
-                        Icon(
-                            painterResource(R.drawable.ic_player_mode),
-                            contentDescription = stringResource(R.string.player_mode_title),
-                            tint = if (state.playerModeEnabled) MaterialTheme.colorScheme.primary
-                            else LocalContentColor.current
-                        )
-                    }
-                    DirectoryViewMenu(state.viewMode, state.sortField, state.sortDirection,
-                        onViewModeChanged, onSortFieldChanged, onSortDirectionChanged)
-                    Box {
-                        IconButton(onClick = {
-                            createMenuExpanded = false
-                            directoryMenuExpanded = true
-                        }) {
-                            Icon(painterResource(R.drawable.ic_more_vertical), contentDescription = stringResource(R.string.activity_main_text_01))
-                        }
-                        DropdownMenu(
-                            expanded = directoryMenuExpanded,
-                            onDismissRequest = {
-                                directoryMenuExpanded = false
+        MainTopLevelPageTransition(
+            state = state,
+            pageOrder = topLevelOrder,
+            modifier = Modifier.weight(1f).fillMaxWidth().background(settingsPageBackground())
+        ) { pageState ->
+            val state = pageState
+            val isDirectoryPage = state.selectedTopLevelItem == R.id.nav_directory
+            val isMediaCategoriesPage = state.playerModeEnabled && state.selectedTopLevelItem == R.id.nav_tools
+            val usesPageBackground = isDirectoryPage || state.selectedTopLevelItem in setOf(
+                R.id.nav_library, R.id.nav_stats, R.id.nav_favorites, R.id.nav_drafts, R.id.nav_settings, R.id.nav_tools
+            )
+            val isSelectionActive = isDirectoryPage &&
+                (state.selectedPaths.isNotEmpty() || state.pendingOperation != null)
+            val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+            Column(Modifier.fillMaxSize()) {
+                if (!isMediaCategoriesPage) TopAppBar(
+                    scrollBehavior = scrollBehavior,
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = if (usesPageBackground) settingsPageBackground() else MaterialTheme.colorScheme.surface,
+                        scrolledContainerColor = if (usesPageBackground) settingsPageBackground() else MaterialTheme.colorScheme.surfaceContainer
+                    ),
+                    title = {
+                        DirectoryToolbarTitle(
+                            searchOpen = state.isSearchExpanded && isDirectoryPage && !isSelectionActive,
+                            query = state.searchQuery,
+                            title = when {
+                                state.toolbarTitle.isNotBlank() -> state.toolbarTitle
+                                isSelectionActive -> FileOperationUiPolicy.selectionTitle(
+                                    state.pendingOperation,
+                                    state.selectedPaths.size
+                                )
+                                isDirectoryPage -> stringResource(R.string.nav_directory)
+                                else -> stringResource(MainNavigationPolicy.titleRes(state.selectedTopLevelItem))
                             },
-                            modifier = Modifier.widthIn(min = 200.dp)
-                        ) {
-                            AnimatedContent(
-                                targetState = createMenuExpanded,
-                                transitionSpec = {
-                                    val direction = if (targetState) 1 else -1
-                                    (fadeIn(AppMotion.state()) + slideInHorizontally(AppMotion.state()) { direction * it / 6 }) togetherWith
-                                        (fadeOut(AppMotion.fast()) + slideOutHorizontally(AppMotion.fast()) { -direction * it / 6 }) using
-                                        SizeTransform(clip = true) { _, _ -> AppMotion.state() }
-                                },
-                                contentAlignment = Alignment.TopStart,
-                                label = "directory-create-menu"
-                            ) { showCreateMenu ->
-                                Column {
-                                    if (showCreateMenu) {
-                                        Text(
-                                            stringResource(R.string.menu_new),
-                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                                            style = MaterialTheme.typography.labelLarge,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.menu_file)) },
-                                            leadingIcon = { Icon(painterResource(R.drawable.ic_file), contentDescription = null) },
-                                            onClick = {
-                                                directoryMenuExpanded = false
-                                                createDialogKind = MainCreateItemKind.FILE
-                                                createName = ""
-                                                createExtension = "txt"
-                                                createNameError = null
-                                                createExtensionError = null
-                                            }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.directory_menu_folder)) },
-                                            leadingIcon = { Icon(painterResource(R.drawable.ic_folder), contentDescription = null) },
-                                            onClick = {
-                                                directoryMenuExpanded = false
-                                                createDialogKind = MainCreateItemKind.FOLDER
-                                                createName = ""
-                                                createExtension = "txt"
-                                                createNameError = null
-                                                createExtensionError = null
-                                            }
-                                        )
-                                    } else {
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.menu_new)) },
-                                            leadingIcon = { Icon(painterResource(R.drawable.ic_add), contentDescription = null) },
-                                            trailingIcon = { Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null) },
-                                            onClick = { createMenuExpanded = true }
-                                        )
-                                        if (!state.isSearchExpanded) {
-                                            DropdownMenuItem(
-                                                text = { Text(stringResource(R.string.menu_search)) },
-                                                leadingIcon = { Icon(painterResource(R.drawable.ic_search), contentDescription = null) },
-                                                onClick = {
-                                                    directoryMenuExpanded = false
-                                                    onSearchRequested()
+                            onQueryChanged = onSearchChanged,
+                            onCloseSearch = onToolbarBack,
+                            focusRequester = searchFocusRequester
+                        )
+                    },
+                    navigationIcon = {
+                        if (state.toolbarHasBack || isSelectionActive) {
+                            IconButton(onClick = onToolbarBack) {
+                                Icon(
+                                    painter = painterResource(
+                                        if (isSelectionActive || state.isSearchExpanded) R.drawable.ic_close
+                                        else R.drawable.ic_back
+                                    ),
+                                    contentDescription = stringResource(
+                                        R.string.cancel
+                                    )
+                                )
+                            }
+                        } else if (MainNavigationPolicy.isAuxiliaryPage(state.selectedTopLevelItem, state.playerModeEnabled)) {
+                            IconButton(onClick = { onTopLevelPageSelected(R.id.nav_directory) }) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_back),
+                                    contentDescription = stringResource(R.string.tools_navigate_back)
+                                )
+                            }
+                        }
+                    },
+                    actions = {
+                        if (isDirectoryPage && isSelectionActive) {
+                            // The legacy menu keeps these actions available while a
+                            // selection is active, except during destination picking.
+                            if (state.pendingOperation == null && state.selectedPaths.isNotEmpty()) {
+                                IconButton(onClick = onSelectAll) {
+                                    Icon(
+                                        painterResource(R.drawable.ic_select_all),
+                                        contentDescription = stringResource(R.string.source_selection_select_all)
+                                    )
+                                }
+                                IconButton(onClick = onSelectRange) {
+                                    Icon(
+                                        painterResource(R.drawable.ic_select_range),
+                                        contentDescription = stringResource(R.string.directory_select_range)
+                                    )
+                                }
+                            }
+                        } else if (isDirectoryPage) {
+                            IconButton(
+                                onClick = onOnlineClicked,
+                                modifier = Modifier.testTag("directory-online")
+                            ) {
+                                Icon(
+                                    painterResource(R.drawable.ic_online),
+                                    contentDescription = stringResource(R.string.player_online_title)
+                                )
+                            }
+                            IconButton(
+                                onClick = onTogglePlayerMode,
+                                modifier = Modifier.testTag("directory-player-mode")
+                            ) {
+                                Icon(
+                                    painterResource(R.drawable.ic_player_mode),
+                                    contentDescription = stringResource(R.string.player_mode_title),
+                                    tint = if (state.playerModeEnabled) MaterialTheme.colorScheme.primary
+                                    else LocalContentColor.current
+                                )
+                            }
+                            DirectoryViewMenu(state.viewMode, state.sortField, state.sortDirection,
+                                onViewModeChanged, onSortFieldChanged, onSortDirectionChanged)
+                            Box {
+                                IconButton(onClick = {
+                                    createMenuExpanded = false
+                                    directoryMenuExpanded = true
+                                }) {
+                                    Icon(painterResource(R.drawable.ic_more_vertical), contentDescription = stringResource(R.string.activity_main_text_01))
+                                }
+                                DropdownMenu(
+                                    expanded = directoryMenuExpanded,
+                                    onDismissRequest = {
+                                        directoryMenuExpanded = false
+                                    },
+                                    modifier = Modifier.widthIn(min = 200.dp)
+                                ) {
+                                    AnimatedContent(
+                                        targetState = createMenuExpanded,
+                                        transitionSpec = {
+                                            val direction = if (targetState) 1 else -1
+                                            (fadeIn(AppMotion.state()) + slideInHorizontally(AppMotion.state()) { direction * it / 6 }) togetherWith
+                                                (fadeOut(AppMotion.fast()) + slideOutHorizontally(AppMotion.fast()) { -direction * it / 6 }) using
+                                                SizeTransform(clip = true) { _, _ -> AppMotion.state() }
+                                        },
+                                        contentAlignment = Alignment.TopStart,
+                                        label = "directory-create-menu"
+                                    ) { showCreateMenu ->
+                                        Column {
+                                            if (showCreateMenu) {
+                                                Text(
+                                                    stringResource(R.string.menu_new),
+                                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                                DropdownMenuItem(
+                                                    text = { Text(stringResource(R.string.menu_file)) },
+                                                    leadingIcon = { Icon(painterResource(R.drawable.ic_file), contentDescription = null) },
+                                                    onClick = {
+                                                        directoryMenuExpanded = false
+                                                        createDialogKind = MainCreateItemKind.FILE
+                                                        createName = ""
+                                                        createExtension = "txt"
+                                                        createNameError = null
+                                                        createExtensionError = null
+                                                    }
+                                                )
+                                                DropdownMenuItem(
+                                                    text = { Text(stringResource(R.string.directory_menu_folder)) },
+                                                    leadingIcon = { Icon(painterResource(R.drawable.ic_folder), contentDescription = null) },
+                                                    onClick = {
+                                                        directoryMenuExpanded = false
+                                                        createDialogKind = MainCreateItemKind.FOLDER
+                                                        createName = ""
+                                                        createExtension = "txt"
+                                                        createNameError = null
+                                                        createExtensionError = null
+                                                    }
+                                                )
+                                            } else {
+                                                DropdownMenuItem(
+                                                    text = { Text(stringResource(R.string.menu_new)) },
+                                                    leadingIcon = { Icon(painterResource(R.drawable.ic_add), contentDescription = null) },
+                                                    trailingIcon = { Icon(painterResource(R.drawable.ic_arrow_right), contentDescription = null) },
+                                                    onClick = { createMenuExpanded = true }
+                                                )
+                                                if (!state.isSearchExpanded) {
+                                                    DropdownMenuItem(
+                                                        text = { Text(stringResource(R.string.menu_search)) },
+                                                        leadingIcon = { Icon(painterResource(R.drawable.ic_search), contentDescription = null) },
+                                                        onClick = {
+                                                            directoryMenuExpanded = false
+                                                            onSearchRequested()
+                                                        }
+                                                    )
                                                 }
-                                            )
-                                        }
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.menu_main_title_02)) },
-                                            leadingIcon = { Icon(painterResource(R.drawable.ic_settings), contentDescription = null) },
-                                            onClick = {
-                                                directoryMenuExpanded = false
-                                                onOpenFileManagementSettings()
+                                                DropdownMenuItem(
+                                                    text = { Text(stringResource(R.string.menu_main_title_02)) },
+                                                    leadingIcon = { Icon(painterResource(R.drawable.ic_settings), contentDescription = null) },
+                                                    onClick = {
+                                                        directoryMenuExpanded = false
+                                                        onOpenFileManagementSettings()
+                                                    }
+                                                )
+                                                if (state.playerModeEnabled) {
+                                                    DropdownMenuItem(
+                                                        text = { Text(stringResource(R.string.nav_favorites)) },
+                                                        leadingIcon = { Icon(painterResource(R.drawable.ic_favorite), contentDescription = null) },
+                                                        onClick = {
+                                                            directoryMenuExpanded = false
+                                                            onTopLevelPageSelected(R.id.nav_favorites)
+                                                        }
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = { Text(stringResource(R.string.drafts)) },
+                                                        leadingIcon = { Icon(painterResource(R.drawable.ic_nav_draft), contentDescription = null) },
+                                                        onClick = {
+                                                            directoryMenuExpanded = false
+                                                            onTopLevelPageSelected(R.id.nav_drafts)
+                                                        }
+                                                    )
+                                                }
                                             }
-                                        )
-                                        if (state.playerModeEnabled) {
-                                            DropdownMenuItem(
-                                                text = { Text(stringResource(R.string.nav_favorites)) },
-                                                leadingIcon = { Icon(painterResource(R.drawable.ic_favorite), contentDescription = null) },
-                                                onClick = {
-                                                    directoryMenuExpanded = false
-                                                    onTopLevelPageSelected(R.id.nav_favorites)
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text(stringResource(R.string.drafts)) },
-                                                leadingIcon = { Icon(painterResource(R.drawable.ic_nav_draft), contentDescription = null) },
-                                                onClick = {
-                                                    directoryMenuExpanded = false
-                                                    onTopLevelPageSelected(R.id.nav_drafts)
-                                                }
-                                            )
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                }
-            }
-        )
+                )
 
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .background(settingsPageBackground())
-                .nestedScroll(scrollBehavior.nestedScrollConnection)
-        ) {
-            val topLevelOffsetPx = with(LocalDensity.current) { 28.dp.roundToPx() }
-            AnimatedContent(
-                targetState = state.selectedTopLevelItem,
-                transitionSpec = {
-                    val direction = if (
-                        topLevelOrder.indexOf(targetState) > topLevelOrder.indexOf(initialState)
-                    ) 1 else -1
-                    (
-                        slideInHorizontally(AppMotion.enter()) { direction * topLevelOffsetPx } +
-                            fadeIn(animationSpec = androidx.compose.animation.core.tween(210, delayMillis = 90))
-                        ) togetherWith (
-                        slideOutHorizontally(AppMotion.exit()) { -direction * topLevelOffsetPx } +
-                            fadeOut(animationSpec = androidx.compose.animation.core.tween(90))
-                        ) using SizeTransform(clip = false)
-                },
-                label = "main-top-level"
-            ) { page ->
-                if (page == R.id.nav_directory) {
-                    DirectoryBrowserContent(
-                        state = state,
-                        onScrollPosition = onDirectoryScrollPosition,
-                        onDirectoryBreadcrumbClick = onDirectoryBreadcrumbClick,
-                        onFileClick = onFileClick,
-                        onFileLongClick = onFileLongClick,
-                        listState = directoryListState,
-                        gridState = directoryGridState
-                    )
-                } else {
-                    MainTopLevelPages(
-                        selectedPage = page,
-                        activePage = state.selectedTopLevelItem,
-                        refreshVersion = topLevelPageRefreshVersion,
-                        selectionVersion = topLevelPageSelectionVersion,
-                        state = topLevelPagesState,
-                        playerModeEnabled = state.playerModeEnabled,
-                        viewMode = state.viewMode,
-                        onOpenDirectory = onOpenDirectoryFromFavorites,
-                        onToolbarChanged = onUpdateTopLevelToolbar
-                    )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .background(settingsPageBackground())
+                        .nestedScroll(scrollBehavior.nestedScrollConnection)
+                ) {
+                    if (isDirectoryPage) {
+                        DirectoryBrowserContent(
+                            state = state,
+                            onScrollPosition = onDirectoryScrollPosition,
+                            onDirectoryBreadcrumbClick = onDirectoryBreadcrumbClick,
+                            onFileClick = onFileClick,
+                            onFileLongClick = onFileLongClick,
+                            listState = directoryListState,
+                            gridState = directoryGridState
+                        )
+                    } else {
+                        MainTopLevelPages(
+                            selectedPage = state.selectedTopLevelItem,
+                            activePage = activeTopLevelItem,
+                            refreshVersion = topLevelPageRefreshVersion,
+                            selectionVersion = topLevelPageSelectionVersion,
+                            state = topLevelPagesState,
+                            playerModeEnabled = state.playerModeEnabled,
+                            viewMode = state.viewMode,
+                            onOpenDirectory = onOpenDirectoryFromFavorites,
+                            onToolbarChanged = onUpdateTopLevelToolbar
+                        )
+                    }
                 }
             }
         }

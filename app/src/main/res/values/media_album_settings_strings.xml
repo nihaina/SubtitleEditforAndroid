@@ -10,7 +10,7 @@
     <string name="media_album_grid_medium">中等</string>
     <string name="media_album_grid_large">大</string>
     <string name="media_album_more_info">在专辑列表中显示更多信息</string>
-    <string name="media_album_group_tracks">按歌手、专辑艺术家或作曲家等子类别划分各专辑的歌曲</string>
+    <string name="media_album_group_tracks">按歌手、艺术家或作曲家等子类别划分各专辑的歌曲</string>
     <string name="media_album_quick_search">快速搜索框</string>
     <string name="media_album_sort_title">专辑筛选条件</string>
     <string name="media_album_sort_hint">点击已选条件切换升降序</string>

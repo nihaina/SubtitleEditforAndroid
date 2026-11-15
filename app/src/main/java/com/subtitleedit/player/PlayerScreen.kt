@@ -165,7 +165,8 @@ internal fun PlayerScreen(viewModel: PlayerViewModel, onEditTags: () -> Unit = {
                 Box(Modifier.fillMaxSize().background(pageGradient), contentAlignment = Alignment.Center) {
                     key(state.currentTrack?.path) {
                         PlayerAudioVisual(state.playing, state.loudness, state.loudnessSampleId, state.showLoudnessWaveform,
-                            Modifier.padding(bottom = if (landscape) 24.dp else 120.dp))
+                            Modifier.padding(bottom = if (landscape) 24.dp else 120.dp),
+                            trackPath = state.currentTrack?.path)
                     }
                 }
             }

@@ -1,0 +1,157 @@
+package com.subtitleedit.ui
+
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.subtitleedit.R
+import com.subtitleedit.feature.ui.BrowserFileRow
+import com.subtitleedit.library.AlbumTrackSortOptions
+import com.subtitleedit.library.MediaAlbumTrack
+import com.subtitleedit.library.MediaLibraryTrack
+import com.subtitleedit.ui.settings.settingsPageBackground
+
+/** Shared file playback and selection behavior for album and singer details. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun MediaTrackDetailContent(
+    collectionKey: String,
+    title: String,
+    backDescription: String,
+    visibleTracks: List<MediaAlbumTrack>,
+    selectionResetKey: Any,
+    trackSort: AlbumTrackSortOptions,
+    onTrackSortChanged: (AlbumTrackSortOptions) -> Unit,
+    isActive: Boolean,
+    onBack: () -> Unit,
+    onPlay: (List<MediaAlbumTrack>, String?) -> Unit,
+    onShuffle: (List<MediaAlbumTrack>) -> Unit,
+    onFavoriteSelection: (List<MediaLibraryTrack>, () -> Unit) -> Unit,
+    onAddSelectionToPlaylist: (List<MediaLibraryTrack>, () -> Unit) -> Unit,
+    onShowInfo: (String) -> Unit,
+    tagPrefix: String,
+    header: LazyListScope.() -> Unit
+) {
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    var sortOpen by remember { mutableStateOf(false) }
+    var selectedPaths by remember(collectionKey) { mutableStateOf<Set<String>>(emptySet()) }
+    var panelHeight by remember(collectionKey) { mutableStateOf(112.dp) }
+    val visiblePaths = remember(visibleTracks) { visibleTracks.map { it.track.path } }
+    val selectedTracks = remember(visibleTracks, selectedPaths) {
+        visibleTracks.filter { it.track.path in selectedPaths }
+    }
+    val selectionMode = selectedPaths.isNotEmpty()
+    LaunchedEffect(collectionKey, selectionResetKey) { selectedPaths = emptySet() }
+    LaunchedEffect(visiblePaths) { selectedPaths = selectedPaths.intersect(visiblePaths.toSet()) }
+    BackHandler(enabled = isActive && selectionMode) { selectedPaths = emptySet() }
+    fun toggleSelection(path: String) {
+        selectedPaths = if (path in selectedPaths) selectedPaths - path else selectedPaths + path
+    }
+    fun select(action: MediaLibrarySelectionAction) {
+        selectedPaths = updateMediaLibrarySelection(visiblePaths, selectedPaths, action)
+    }
+    fun finishSelection(paths: Set<String>) { selectedPaths = selectedPaths - paths }
+
+    Column(Modifier.fillMaxSize().testTag("$tagPrefix-detail")) {
+        TopAppBar(
+            title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            navigationIcon = {
+                IconButton(
+                    onClick = { if (selectionMode) selectedPaths = emptySet() else onBack() },
+                    modifier = Modifier.testTag("$tagPrefix-detail-back")
+                ) {
+                    Icon(painterResource(R.drawable.ic_back), backDescription)
+                }
+            },
+            windowInsets = WindowInsets(0, 0, 0, 0),
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = settingsPageBackground())
+        )
+        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(bottom = if (selectionMode) panelHeight else 0.dp)
+                    .testTag("$tagPrefix-tracks"),
+                contentPadding = PaddingValues(bottom = 12.dp)
+            ) {
+                header()
+                item(key = "actions") {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(
+                            onClick = { onPlay(visibleTracks, null) }, enabled = visibleTracks.isNotEmpty(),
+                            modifier = Modifier.testTag("$tagPrefix-play-all")
+                        ) { Text(stringResource(R.string.media_album_play_all)) }
+                        Spacer(Modifier.weight(1f))
+                        IconButton(
+                            onClick = { onShuffle(visibleTracks) }, enabled = visibleTracks.isNotEmpty(),
+                            modifier = Modifier.testTag("$tagPrefix-tracks-shuffle")
+                        ) {
+                            Icon(painterResource(R.drawable.ic_album_shuffle), stringResource(R.string.media_album_detail_shuffle))
+                        }
+                        IconButton(onClick = { sortOpen = true }, modifier = Modifier.testTag("$tagPrefix-tracks-sort")) {
+                            Icon(painterResource(R.drawable.ic_album_sort), stringResource(R.string.media_album_detail_sort))
+                        }
+                    }
+                }
+                items(visibleTracks, key = { it.track.path }) { item ->
+                    BrowserFileRow(
+                        modifier = Modifier.testTag("$tagPrefix-track:${item.track.path}"),
+                        file = item.track.file,
+                        relativePathRoot = null,
+                        isSelected = item.track.path in selectedPaths,
+                        isSelectionMode = selectionMode,
+                        onClick = { if (selectionMode) toggleSelection(item.track.path) else onPlay(visibleTracks, item.track.path) },
+                        onLongClick = { selectedPaths = selectedPaths + item.track.path },
+                        directoryPageStyle = true
+                    )
+                }
+            }
+            if (selectionMode) {
+                MediaLibrarySelectionPanel(
+                    selectedFiles = selectedTracks.map { it.track.file },
+                    totalDurationMs = selectedTracks.sumOf { it.track.durationMs.coerceAtLeast(0) },
+                    onRemove = { selectedPaths = selectedPaths - it },
+                    onFavorite = {
+                        val captured = selectedTracks.map { it.track }
+                        val paths = captured.mapTo(hashSetOf()) { it.path }
+                        onFavoriteSelection(captured) { finishSelection(paths) }
+                    },
+                    onAddToPlaylist = {
+                        val captured = selectedTracks.map { it.track }
+                        val paths = captured.mapTo(hashSetOf()) { it.path }
+                        onAddSelectionToPlaylist(captured) { finishSelection(paths) }
+                    },
+                    onShowInfo = {
+                        selectedTracks.singleOrNull()?.let { onShowInfo(it.track.path) }
+                            ?: Toast.makeText(context, R.string.media_lib_files_info_single, Toast.LENGTH_SHORT).show()
+                    },
+                    onCancel = { selectedPaths = emptySet() },
+                    onSelectAll = { select(MediaLibrarySelectionAction.SELECT_ALL) },
+                    onDeselectAll = { select(MediaLibrarySelectionAction.DESELECT_ALL) },
+                    onSelectRange = { select(MediaLibrarySelectionAction.SELECT_RANGE) },
+                    onInvertSelection = { select(MediaLibrarySelectionAction.INVERT) },
+                    modifier = Modifier.align(Alignment.BottomCenter).heightIn(max = maxHeight * 0.7f)
+                        .onSizeChanged { panelHeight = with(density) { it.height.toDp() } }
+                )
+            }
+        }
+    }
+    if (sortOpen) MediaAlbumTrackSortDialog(
+        options = trackSort,
+        onConfirm = onTrackSortChanged,
+        onDismiss = { sortOpen = false }
+    )
+}

@@ -140,6 +140,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         )
         refreshFavorite()
         if (tracks.isNotEmpty()) {
+            if (initialMode == PlayerPlayMode.SHUFFLE) hint(R.string.player_mode_shuffle)
             PlayerLibraryWriter.submit {
                 libraryRepository.saveCurrentQueue(tracks.map { it.path }, index)
             }

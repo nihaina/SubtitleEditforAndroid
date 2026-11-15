@@ -76,9 +76,9 @@ internal object MediaFilePropertiesReader {
             }
 
             addEmbeddedDetail("歌曲名", MediaMetadataRetriever.METADATA_KEY_TITLE)
-            addEmbeddedDetail("艺术家", MediaMetadataRetriever.METADATA_KEY_ARTIST)
+            addEmbeddedDetail("歌手", MediaMetadataRetriever.METADATA_KEY_ARTIST)
             addEmbeddedDetail("专辑", MediaMetadataRetriever.METADATA_KEY_ALBUM)
-            addEmbeddedDetail("专辑艺术家", MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST)
+            addEmbeddedDetail("艺术家", MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST)
             addEmbeddedDetail("作曲", MediaMetadataRetriever.METADATA_KEY_COMPOSER)
             addEmbeddedDetail("流派", MediaMetadataRetriever.METADATA_KEY_GENRE)
             addEmbeddedDetail("年份", MediaMetadataRetriever.METADATA_KEY_YEAR)
@@ -162,7 +162,7 @@ internal object MediaFilePropertiesReader {
             }
 
             addEmbeddedDetail("标题", MediaMetadataRetriever.METADATA_KEY_TITLE)
-            addEmbeddedDetail("艺术家", MediaMetadataRetriever.METADATA_KEY_ARTIST)
+            addEmbeddedDetail("歌手", MediaMetadataRetriever.METADATA_KEY_ARTIST)
             addEmbeddedDetail("作者", MediaMetadataRetriever.METADATA_KEY_AUTHOR)
             addEmbeddedDetail("日期", MediaMetadataRetriever.METADATA_KEY_DATE)
         } catch (_: Exception) {
