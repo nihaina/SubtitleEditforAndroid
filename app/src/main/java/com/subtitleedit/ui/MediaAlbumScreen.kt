@@ -53,8 +53,12 @@ internal fun MediaAlbumScreen(
     val revision by repository.revision.collectAsState()
     val preferences = remember(context) { MediaAlbumPreferences(context) }
     var options by remember { mutableStateOf(preferences.load()) }
-    val singerPreferences = remember(context) { MediaSingerPreferences(context) }
-    var singerOptions by remember { mutableStateOf(singerPreferences.load()) }
+    val creditPreferences = remember(context) {
+        MediaCreditRole.entries.associateWith { MediaSingerPreferences(context, it) }
+    }
+    var creditOptions by remember(creditPreferences) {
+        mutableStateOf(creditPreferences.mapValues { it.value.load() })
+    }
     var tracks by remember { mutableStateOf(emptyList<MediaAlbumTrack>()) }
     var loading by remember { mutableStateOf(true) }
     val albums = remember(tracks) { buildMediaAlbums(tracks) }
@@ -63,6 +67,11 @@ internal fun MediaAlbumScreen(
     var playlists by remember { mutableStateOf(emptyList<MediaPlaylist>()) }
     var playlistRequest by remember { mutableStateOf<AlbumPlaylistRequest?>(null) }
     var infoPath by remember { mutableStateOf<String?>(null) }
+
+    fun updateCreditOptions(role: MediaCreditRole, next: MediaSingerViewOptions) {
+        creditOptions = creditOptions + (role to next)
+        creditPreferences.getValue(role).save(next)
+    }
 
     fun mutate(action: () -> Unit, onSuccess: () -> Unit) {
         scope.launch {
@@ -136,8 +145,12 @@ internal fun MediaAlbumScreen(
         loading = loading,
         isActive = isActive,
         onOptionsChanged = { options = it; preferences.save(it) },
-        singerOptions = singerOptions,
-        onSingerOptionsChanged = { singerOptions = it; singerPreferences.save(it) },
+        singerOptions = creditOptions.getValue(MediaCreditRole.SINGER),
+        onSingerOptionsChanged = { updateCreditOptions(MediaCreditRole.SINGER, it) },
+        artistOptions = creditOptions.getValue(MediaCreditRole.ARTIST),
+        onArtistOptionsChanged = { updateCreditOptions(MediaCreditRole.ARTIST, it) },
+        composerOptions = creditOptions.getValue(MediaCreditRole.COMPOSER),
+        onComposerOptionsChanged = { updateCreditOptions(MediaCreditRole.COMPOSER, it) },
         onPlay = { album, path -> playAlbum(album, path) },
         onShuffle = { album -> playAlbum(album, null, shuffle = true) },
         onFavoriteSelection = { selected, onComplete ->
@@ -204,56 +217,85 @@ internal fun MediaAlbumPageContent(
     onAddSelectionToPlaylist: (List<MediaLibraryTrack>, () -> Unit) -> Unit = { _, done -> done() },
     onShowInfo: (String) -> Unit = {},
     singerOptions: MediaSingerViewOptions = MediaSingerViewOptions(),
-    onSingerOptionsChanged: (MediaSingerViewOptions) -> Unit = {}
+    onSingerOptionsChanged: (MediaSingerViewOptions) -> Unit = {},
+    artistOptions: MediaSingerViewOptions = MediaSingerViewOptions(),
+    onArtistOptionsChanged: (MediaSingerViewOptions) -> Unit = {},
+    composerOptions: MediaSingerViewOptions = MediaSingerViewOptions(),
+    onComposerOptionsChanged: (MediaSingerViewOptions) -> Unit = {}
 ) {
     var category by rememberSaveable { mutableStateOf(MediaCategory.ALBUMS) }
     var query by rememberSaveable { mutableStateOf("") }
     var singerQuery by rememberSaveable { mutableStateOf("") }
+    var artistQuery by rememberSaveable { mutableStateOf("") }
+    var composerQuery by rememberSaveable { mutableStateOf("") }
     var openedAlbumKey by rememberSaveable { mutableStateOf<String?>(null) }
-    var openedSingerKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var openedCreditKey by rememberSaveable { mutableStateOf<String?>(null) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var sortOpen by remember { mutableStateOf(false) }
     val openedAlbum = albums.firstOrNull { it.key == openedAlbumKey }
-    val singers = remember(albums) { buildMediaSingers(albums.flatMap { it.tracks }) }
-    val openedSinger = singers.firstOrNull { it.key == openedSingerKey }
-    val visibleSingers = remember(singers, singerQuery, singerOptions) {
-        filterAndSortMediaSingers(singers, if (singerOptions.quickSearch) singerQuery else "",
-            singerOptions.sortField, singerOptions.ascending)
+    val creditRole = category.creditRole
+    val activeCreditOptions = when (creditRole) {
+        MediaCreditRole.ARTIST -> artistOptions
+        MediaCreditRole.COMPOSER -> composerOptions
+        else -> singerOptions
+    }
+    val changeCreditOptions = when (creditRole) {
+        MediaCreditRole.ARTIST -> onArtistOptionsChanged
+        MediaCreditRole.COMPOSER -> onComposerOptionsChanged
+        else -> onSingerOptionsChanged
+    }
+    val creditQuery = when (creditRole) {
+        MediaCreditRole.ARTIST -> artistQuery
+        MediaCreditRole.COMPOSER -> composerQuery
+        else -> singerQuery
+    }
+    val credits = remember(albums, creditRole) {
+        creditRole?.let { buildMediaCredits(albums.flatMap { album -> album.tracks }, it) }.orEmpty()
+    }
+    val openedCredit = credits.firstOrNull { it.key == openedCreditKey }
+    val visibleCredits = remember(credits, creditQuery, activeCreditOptions) {
+        filterAndSortMediaSingers(credits, if (activeCreditOptions.quickSearch) creditQuery else "",
+            activeCreditOptions.sortField, activeCreditOptions.ascending)
     }
     val visibleAlbums = remember(albums, query, options.sortField, options.ascending, options.quickSearch) {
         filterAndSortMediaAlbums(albums, if (options.quickSearch) query else "", options.sortField, options.ascending)
     }
+    LaunchedEffect(credits, openedCreditKey, loading) {
+        if (!loading && openedCreditKey != null && openedCredit == null) openedCreditKey = null
+    }
 
-    BackHandler(isActive && (settingsOpen || openedAlbumKey != null || openedSingerKey != null)) {
+    BackHandler(isActive && (settingsOpen || openedAlbumKey != null || openedCreditKey != null)) {
         when {
             settingsOpen -> settingsOpen = false
-            openedSingerKey != null -> openedSingerKey = null
+            openedCreditKey != null -> openedCreditKey = null
             else -> openedAlbumKey = null
         }
     }
     Column(Modifier.fillMaxSize().background(settingsPageBackground()).testTag("media-categories-page")) {
         when {
-            settingsOpen && category == MediaCategory.SINGERS -> MediaSingerSettings(
-                options = singerOptions,
-                onChange = onSingerOptionsChanged,
-                onBack = { settingsOpen = false }
+            settingsOpen && creditRole != null -> MediaSingerSettings(
+                options = activeCreditOptions,
+                onChange = changeCreditOptions,
+                onBack = { settingsOpen = false },
+                role = creditRole
             )
             settingsOpen -> MediaAlbumSettings(
                 options = options,
                 onChange = onOptionsChanged,
                 onBack = { settingsOpen = false }
             )
-            openedSinger != null -> MediaSingerDetailContent(
-                singer = openedSinger,
-                options = singerOptions,
-                onOptionsChanged = onSingerOptionsChanged,
+            openedCredit != null && creditRole != null -> MediaSingerDetailContent(
+                singer = openedCredit,
+                options = activeCreditOptions,
+                onOptionsChanged = changeCreditOptions,
                 isActive = isActive,
-                onBack = { openedSingerKey = null },
-                onPlay = { displayed, path -> onPlay(MediaAlbum(openedSinger.name, displayed), path) },
-                onShuffle = { displayed -> onShuffle(MediaAlbum(openedSinger.name, displayed)) },
+                onBack = { openedCreditKey = null },
+                onPlay = { displayed, path -> onPlay(MediaAlbum(openedCredit.name, displayed), path) },
+                onShuffle = { displayed -> onShuffle(MediaAlbum(openedCredit.name, displayed)) },
                 onFavoriteSelection = onFavoriteSelection,
                 onAddSelectionToPlaylist = onAddSelectionToPlaylist,
-                onShowInfo = onShowInfo
+                onShowInfo = onShowInfo,
+                role = creditRole
             )
             openedAlbum != null -> MediaAlbumDetailContent(
                 album = openedAlbum,
@@ -279,7 +321,10 @@ internal fun MediaAlbumPageContent(
                     items(MediaCategory.entries) { item ->
                         FilterChip(
                             selected = category == item,
-                            onClick = { category = item },
+                            onClick = {
+                                openedCreditKey = null
+                                category = item
+                            },
                             label = { Text(stringResource(item.label)) },
                             modifier = Modifier.testTag("media-category:${item.name}")
                         )
@@ -305,21 +350,28 @@ internal fun MediaAlbumPageContent(
                             modifier = Modifier.weight(1f)
                         )
                     }
-                } else if (category == MediaCategory.SINGERS) {
-                    if (loading && singers.isEmpty()) {
+                } else if (creditRole != null) {
+                    if (loading && credits.isEmpty()) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator(modifier = Modifier.size(32.dp))
                         }
                     } else {
                         MediaSingerBrowseContent(
-                            singers = visibleSingers,
-                            options = singerOptions,
-                            query = singerQuery,
-                            onQueryChanged = { singerQuery = it },
+                            singers = visibleCredits,
+                            options = activeCreditOptions,
+                            query = creditQuery,
+                            onQueryChanged = {
+                                when (creditRole) {
+                                    MediaCreditRole.SINGER -> singerQuery = it
+                                    MediaCreditRole.ARTIST -> artistQuery = it
+                                    MediaCreditRole.COMPOSER -> composerQuery = it
+                                }
+                            },
                             onSort = { sortOpen = true },
                             onSettings = { settingsOpen = true },
-                            onOpenSinger = { openedSingerKey = it.key },
-                            modifier = Modifier.weight(1f)
+                            onOpenSinger = { openedCreditKey = it.key },
+                            modifier = Modifier.weight(1f),
+                            role = creditRole
                         )
                     }
                 } else {
@@ -328,14 +380,15 @@ internal fun MediaAlbumPageContent(
             }
         }
     }
-    if (sortOpen && category == MediaCategory.SINGERS) {
+    if (sortOpen && creditRole != null) {
         MediaSingerSortDialog(
-            sortField = singerOptions.sortField,
-            ascending = singerOptions.ascending,
+            sortField = activeCreditOptions.sortField,
+            ascending = activeCreditOptions.ascending,
             onChange = { field, ascending ->
-                onSingerOptionsChanged(singerOptions.copy(sortField = field, ascending = ascending))
+                changeCreditOptions(activeCreditOptions.copy(sortField = field, ascending = ascending))
             },
-            onDismiss = { sortOpen = false }
+            onDismiss = { sortOpen = false },
+            role = creditRole
         )
     } else if (sortOpen) {
         MediaAlbumSortDialog(
@@ -348,4 +401,12 @@ internal fun MediaAlbumPageContent(
         )
     }
 }
+
+private val MediaCategory.creditRole: MediaCreditRole?
+    get() = when (this) {
+        MediaCategory.SINGERS -> MediaCreditRole.SINGER
+        MediaCategory.ARTISTS -> MediaCreditRole.ARTIST
+        MediaCategory.COMPOSERS -> MediaCreditRole.COMPOSER
+        else -> null
+    }
 

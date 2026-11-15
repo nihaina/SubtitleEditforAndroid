@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="artist_browse_search">搜索艺术家</string>
+    <string name="artist_browse_settings">艺术家设置</string>
+    <string name="artist_detail_back">返回艺术家列表</string>
+    <string name="artist_browse_empty">暂无艺术家</string>
+    <string name="artist_browse_no_results">未找到匹配的艺术家</string>
+    <string name="artist_sort_title">艺术家筛选条件</string>
+    <string name="artist_more_info">在艺术家列表中显示更多信息</string>
+    <string name="artist_group_tracks">按专辑等子类别划分各艺术家的歌曲</string>
+    <string name="artist_album_sort">为该艺术家的专辑排序</string>
+    <string name="composer_browse_search">搜索作曲家</string>
+    <string name="composer_browse_settings">作曲家设置</string>
+    <string name="composer_detail_back">返回作曲家列表</string>
+    <string name="composer_browse_empty">暂无作曲家</string>
+    <string name="composer_browse_no_results">未找到匹配的作曲家</string>
+    <string name="composer_sort_title">作曲家筛选条件</string>
+    <string name="composer_more_info">在作曲家列表中显示更多信息</string>
+    <string name="composer_group_tracks">按专辑等子类别划分各作曲家的歌曲</string>
+    <string name="composer_album_sort">为该作曲家的专辑排序</string>
+</resources>

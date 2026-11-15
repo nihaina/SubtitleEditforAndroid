@@ -17,6 +17,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
 import com.subtitleedit.library.MediaSinger
+import com.subtitleedit.library.MediaCreditRole
 import com.subtitleedit.library.SingerSortField
 import com.subtitleedit.player.formatPlaybackTime
 import java.text.DateFormat
@@ -32,8 +33,11 @@ internal fun MediaSingerBrowseContent(
     onSort: () -> Unit,
     onSettings: () -> Unit,
     onOpenSinger: (MediaSinger) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    role: MediaCreditRole = MediaCreditRole.SINGER
 ) {
+    val labels = role.labels
+    val tagPrefix = role.tagPrefix
     Column(modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp).heightIn(min = 64.dp),
@@ -43,8 +47,8 @@ internal fun MediaSingerBrowseContent(
                 TextField(
                     value = query,
                     onValueChange = onQueryChanged,
-                    modifier = Modifier.weight(1f).testTag("singer-search"),
-                    placeholder = { Text(stringResource(R.string.singer_browse_search), maxLines = 1) },
+                    modifier = Modifier.weight(1f).testTag("$tagPrefix-search"),
+                    placeholder = { Text(stringResource(labels.search), maxLines = 1) },
                     leadingIcon = { Icon(painterResource(R.drawable.ic_search), contentDescription = null) },
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodyLarge,
@@ -59,18 +63,18 @@ internal fun MediaSingerBrowseContent(
             } else {
                 Spacer(Modifier.weight(1f))
             }
-            IconButton(onClick = onSort, modifier = Modifier.testTag("singer-sort")) {
-                Icon(painterResource(R.drawable.ic_album_sort), stringResource(R.string.singer_sort_title))
+            IconButton(onClick = onSort, modifier = Modifier.testTag("$tagPrefix-sort")) {
+                Icon(painterResource(R.drawable.ic_album_sort), stringResource(labels.sort))
             }
-            IconButton(onClick = onSettings, modifier = Modifier.testTag("singer-settings")) {
-                Icon(painterResource(R.drawable.ic_settings), stringResource(R.string.singer_browse_settings))
+            IconButton(onClick = onSettings, modifier = Modifier.testTag("$tagPrefix-settings")) {
+                Icon(painterResource(R.drawable.ic_settings), stringResource(labels.settings))
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         if (singers.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 Text(
-                    stringResource(if (options.quickSearch && query.isNotBlank()) R.string.singer_browse_no_results else R.string.singer_browse_empty),
+                    stringResource(if (options.quickSearch && query.isNotBlank()) labels.noResults else labels.empty),
                     modifier = Modifier.padding(24.dp),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -78,26 +82,26 @@ internal fun MediaSingerBrowseContent(
             }
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f).testTag("singer-list"),
+                modifier = Modifier.fillMaxWidth().weight(1f).testTag("$tagPrefix-list"),
                 contentPadding = PaddingValues(vertical = 4.dp)
             ) {
                 items(singers, key = { it.key }) { singer ->
                     val info = singerMoreInfoText(singer, options)
                     Column(
                         Modifier.fillMaxWidth().clickable(role = Role.Button) { onOpenSinger(singer) }
-                            .testTag("singer-item:${singer.key}").heightIn(min = 56.dp)
+                            .testTag("$tagPrefix-item:${singer.key}").heightIn(min = 56.dp)
                             .padding(horizontal = 20.dp, vertical = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)
                     ) {
                         Text(
-                            singer.name.ifBlank { stringResource(R.string.media_album_unknown_artist) },
+                            singer.name.ifBlank { stringResource(role.unknownRes) },
                             style = MaterialTheme.typography.bodyLarge,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                         if (info != null) Text(
                             info,
-                            modifier = Modifier.testTag("singer-info:${singer.key}"),
+                            modifier = Modifier.testTag("$tagPrefix-info:${singer.key}"),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,

@@ -20,7 +20,7 @@ import com.subtitleedit.R
 import com.subtitleedit.library.*
 import com.subtitleedit.player.formatPlaybackTime
 
-/** Singer membership comes from the indexed artist tag; album filters never change the catalog. */
+/** Credit membership is fixed by the catalog; album filters never change that membership. */
 @Composable
 internal fun MediaSingerDetailContent(
     singer: MediaSinger,
@@ -32,13 +32,15 @@ internal fun MediaSingerDetailContent(
     onShuffle: (List<MediaAlbumTrack>) -> Unit,
     onFavoriteSelection: (List<MediaLibraryTrack>, () -> Unit) -> Unit,
     onAddSelectionToPlaylist: (List<MediaLibraryTrack>, () -> Unit) -> Unit,
-    onShowInfo: (String) -> Unit
+    onShowInfo: (String) -> Unit,
+    role: MediaCreditRole = MediaCreditRole.SINGER
 ) {
-    val name = singer.name.ifBlank { stringResource(R.string.media_album_unknown_artist) }
+    val name = singer.name.ifBlank { stringResource(role.unknownRes) }
+    val tagPrefix = role.tagPrefix
     val albums = remember(singer, options.albumSortField, options.albumAscending) {
         filterAndSortMediaAlbums(singer.albums, "", options.albumSortField, options.albumAscending)
     }
-    var chosenAlbums by rememberSaveable(singer.key) { mutableStateOf<List<String>?>(null) }
+    var chosenAlbums by rememberSaveable(role, singer.key) { mutableStateOf<List<String>?>(null) }
     val selectedAlbums = remember(albums, chosenAlbums) {
         val keys = albums.mapTo(hashSetOf()) { it.key }
         chosenAlbums?.filterTo(linkedSetOf()) { it in keys }?.takeIf { it.isNotEmpty() }
@@ -50,9 +52,9 @@ internal fun MediaSingerDetailContent(
         sortMediaAlbumTracks(members, options.trackSort)
     }
     MediaTrackDetailContent(
-        collectionKey = singer.key,
+        collectionKey = "${role.name}:${singer.key}",
         title = name,
-        backDescription = stringResource(R.string.singer_detail_back),
+        backDescription = stringResource(role.labels.back),
         visibleTracks = visibleTracks,
         selectionResetKey = listOf(options.groupTracks, selectedAlbums),
         trackSort = options.trackSort,
@@ -64,7 +66,7 @@ internal fun MediaSingerDetailContent(
         onFavoriteSelection = onFavoriteSelection,
         onAddSelectionToPlaylist = onAddSelectionToPlaylist,
         onShowInfo = onShowInfo,
-        tagPrefix = "singer"
+        tagPrefix = tagPrefix
     ) {
         if (options.groupTracks) {
             item(key = "grouping") {
@@ -77,7 +79,7 @@ internal fun MediaSingerDetailContent(
             }
             item(key = "groups") {
                 LazyRow(
-                    modifier = Modifier.fillMaxWidth().testTag("singer-albums"),
+                    modifier = Modifier.fillMaxWidth().testTag("$tagPrefix-albums"),
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
@@ -89,7 +91,7 @@ internal fun MediaSingerDetailContent(
                                 if (changed.isNotEmpty()) chosenAlbums = changed.toList()
                             },
                             modifier = Modifier.width(168.dp).heightIn(min = 64.dp)
-                                .testTag("singer-album:${album.key}").semantics { this.selected = selected },
+                                .testTag("$tagPrefix-album:${album.key}").semantics { this.selected = selected },
                             shape = RoundedCornerShape(12.dp),
                             colors = CardDefaults.outlinedCardColors(
                                 containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer

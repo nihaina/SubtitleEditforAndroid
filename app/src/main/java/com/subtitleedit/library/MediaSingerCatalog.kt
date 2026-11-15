@@ -13,12 +13,18 @@ internal data class MediaSinger(val name: String, val tracks: List<MediaAlbumTra
 
 internal enum class SingerSortField { NAME, TRACK_COUNT, DURATION, UPDATED_AT }
 
-/** Only indexed catalog members participate; the performer field stays independent of album artist. */
+internal enum class MediaCreditRole { SINGER, ARTIST, COMPOSER }
+
+/** Kept as the singer entry point so existing browsing and its metadata semantics stay intact. */
 internal fun buildMediaSingers(tracks: List<MediaAlbumTrack>): List<MediaSinger> =
-    tracks.distinctBy { it.track.path }.groupBy { normalizedSingerName(it.track.artist) }
+    buildMediaCredits(tracks, MediaCreditRole.SINGER)
+
+/** Each role groups one whole tag value, without borrowing another role's metadata. */
+internal fun buildMediaCredits(tracks: List<MediaAlbumTrack>, role: MediaCreditRole): List<MediaSinger> =
+    tracks.distinctBy { it.track.path }.groupBy { normalizedSingerName(it.creditName(role)) }
         .values.map { members ->
             MediaSinger(
-                name = members.first().track.artist.trim()
+                name = members.first().creditName(role).trim()
                     .takeUnless { it.equals("<unknown>", ignoreCase = true) }.orEmpty(),
                 tracks = members.sortedWith(
                     compareBy<MediaAlbumTrack> { it.track.displayTitle.lowercase(Locale.ROOT) }
@@ -26,6 +32,12 @@ internal fun buildMediaSingers(tracks: List<MediaAlbumTrack>): List<MediaSinger>
                 )
             )
         }
+
+private fun MediaAlbumTrack.creditName(role: MediaCreditRole): String = when (role) {
+    MediaCreditRole.SINGER -> track.artist
+    MediaCreditRole.ARTIST -> albumArtist
+    MediaCreditRole.COMPOSER -> composer
+}
 
 internal fun filterAndSortMediaSingers(
     singers: List<MediaSinger>,

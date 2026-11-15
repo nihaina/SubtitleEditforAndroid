@@ -93,8 +93,8 @@ private val EditorBottomNavigationItems = listOf(
 private val PlayerBottomNavigationItems = listOf(
     Triple(R.id.nav_directory, R.drawable.ic_nav_folder, R.string.nav_directory),
     Triple(R.id.nav_library, R.drawable.ic_nav_library, R.string.nav_library),
-    Triple(R.id.nav_stats, R.drawable.ic_nav_stats, R.string.nav_stats),
     Triple(R.id.nav_tools, R.drawable.ic_nav_album, R.string.media_categories_navigation),
+    Triple(R.id.nav_stats, R.drawable.ic_nav_stats, R.string.nav_stats),
     Triple(R.id.nav_settings, R.drawable.ic_settings, R.string.menu_main_title_02)
 )
 

@@ -20,6 +20,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
 import com.subtitleedit.library.AlbumSortField
+import com.subtitleedit.library.MediaCreditRole
 import com.subtitleedit.library.SingerSortField
 import com.subtitleedit.ui.components.AppDialog
 import com.subtitleedit.ui.components.SettingsSwitchRow
@@ -30,15 +31,18 @@ import com.subtitleedit.ui.settings.settingsPageBackground
 internal fun MediaSingerSettings(
     options: MediaSingerViewOptions,
     onChange: (MediaSingerViewOptions) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    role: MediaCreditRole = MediaCreditRole.SINGER
 ) {
-    var choosingInfo by rememberSaveable { mutableStateOf(false) }
-    var choosingAlbumSort by rememberSaveable { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize().background(settingsPageBackground()).testTag("singer-settings-page")) {
+    val labels = role.labels
+    val tagPrefix = role.tagPrefix
+    var choosingInfo by rememberSaveable(role) { mutableStateOf(false) }
+    var choosingAlbumSort by rememberSaveable(role) { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().background(settingsPageBackground()).testTag("$tagPrefix-settings-page")) {
         TopAppBar(
-            title = { Text(stringResource(R.string.media_category_singers)) },
+            title = { Text(stringResource(role.labelRes)) },
             navigationIcon = {
-                IconButton(onClick = onBack, modifier = Modifier.testTag("singer-settings-back")) {
+                IconButton(onClick = onBack, modifier = Modifier.testTag("$tagPrefix-settings-back")) {
                     Icon(painterResource(R.drawable.ic_back), stringResource(R.string.tools_navigate_back))
                 }
             },
@@ -46,32 +50,32 @@ internal fun MediaSingerSettings(
             windowInsets = WindowInsets(0, 0, 0, 0)
         )
         LazyColumn(
-            modifier = Modifier.fillMaxSize().testTag("singer-settings-list")
+            modifier = Modifier.fillMaxSize().testTag("$tagPrefix-settings-list")
         ) {
             item {
                 SingerPreferenceRow(
-                    title = stringResource(R.string.singer_more_info),
+                    title = stringResource(labels.moreInfo),
                     value = stringResource(options.moreInfo.labelRes),
                     onClick = { choosingInfo = true },
-                    modifier = Modifier.testTag("singer-settings-more-info")
+                    modifier = Modifier.testTag("$tagPrefix-settings-more-info")
                 )
             }
             item {
                 SettingsSwitchRow(
-                    title = stringResource(R.string.singer_group_tracks),
+                    title = stringResource(labels.groupTracks),
                     checked = options.groupTracks,
                     onCheckedChange = { onChange(options.copy(groupTracks = it)) },
                     modifier = Modifier.padding(horizontal = 8.dp).heightIn(min = 64.dp)
-                        .testTag("singer-settings-group-tracks")
+                        .testTag("$tagPrefix-settings-group-tracks")
                 )
             }
             item {
                 SingerPreferenceRow(
-                    title = stringResource(R.string.singer_album_sort),
+                    title = stringResource(labels.albumSort),
                     value = stringResource(options.albumSortField.singerAlbumLabelRes) + " · " +
                         stringResource(if (options.albumAscending) R.string.media_album_sort_ascending else R.string.media_album_sort_descending),
                     onClick = { choosingAlbumSort = true },
-                    modifier = Modifier.testTag("singer-settings-album-sort")
+                    modifier = Modifier.testTag("$tagPrefix-settings-album-sort")
                 )
             }
             item {
@@ -80,7 +84,7 @@ internal fun MediaSingerSettings(
                     checked = options.quickSearch,
                     onCheckedChange = { onChange(options.copy(quickSearch = it)) },
                     modifier = Modifier.padding(horizontal = 8.dp).heightIn(min = 64.dp)
-                        .testTag("singer-settings-quick-search")
+                        .testTag("$tagPrefix-settings-quick-search")
                 )
             }
         }
@@ -88,7 +92,8 @@ internal fun MediaSingerSettings(
     if (choosingInfo) SingerInfoChoiceDialog(
         selected = options.moreInfo,
         onSelected = { onChange(options.copy(moreInfo = it)); choosingInfo = false },
-        onDismiss = { choosingInfo = false }
+        onDismiss = { choosingInfo = false },
+        role = role
     )
     if (choosingAlbumSort) MediaAlbumSortDialog(
         sortField = options.albumSortField,
@@ -114,18 +119,20 @@ private fun SingerPreferenceRow(title: String, value: String, onClick: () -> Uni
 private fun SingerInfoChoiceDialog(
     selected: SingerMoreInfo,
     onSelected: (SingerMoreInfo) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    role: MediaCreditRole
 ) {
+    val tagPrefix = role.tagPrefix
     AppDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.singer_more_info)) },
+        title = { Text(stringResource(role.labels.moreInfo)) },
         text = {
-            LazyColumn(Modifier.fillMaxWidth().selectableGroup().testTag("singer-more-info-list")) {
+            LazyColumn(Modifier.fillMaxWidth().selectableGroup().testTag("$tagPrefix-more-info-list")) {
                 items(SingerMoreInfo.entries, key = { it.name }) { info ->
                     Row(
                         Modifier.fillMaxWidth().heightIn(min = 56.dp)
                             .selectable(selected = selected == info, role = Role.RadioButton, onClick = { onSelected(info) })
-                            .testTag("singer-more-info:${info.name}").padding(end = 8.dp),
+                            .testTag("$tagPrefix-more-info:${info.name}").padding(end = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
@@ -145,13 +152,15 @@ internal fun MediaSingerSortDialog(
     sortField: SingerSortField,
     ascending: Boolean,
     onChange: (SingerSortField, Boolean) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    role: MediaCreditRole = MediaCreditRole.SINGER
 ) {
-    var draftField by rememberSaveable(sortField, ascending) { mutableStateOf(sortField) }
-    var draftAscending by rememberSaveable(sortField, ascending) { mutableStateOf(ascending) }
+    val tagPrefix = role.tagPrefix
+    var draftField by rememberSaveable(role, sortField, ascending) { mutableStateOf(sortField) }
+    var draftAscending by rememberSaveable(role, sortField, ascending) { mutableStateOf(ascending) }
     AppDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.singer_sort_title)) },
+        title = { Text(stringResource(role.labels.sort)) },
         text = {
             Column {
                 Text(
@@ -160,14 +169,14 @@ internal fun MediaSingerSortDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
-                LazyColumn(Modifier.fillMaxWidth().selectableGroup().testTag("singer-sort-list")) {
+                LazyColumn(Modifier.fillMaxWidth().selectableGroup().testTag("$tagPrefix-sort-list")) {
                     items(SingerSortField.entries, key = { it.name }) { field ->
                         val selected = field == draftField
                         Row(
                             Modifier.fillMaxWidth().heightIn(min = 56.dp)
                                 .selectable(selected = selected, role = Role.RadioButton, onClick = {
                                     if (selected) draftAscending = !draftAscending else draftField = field
-                                }).testTag("singer-sort:${field.name}").padding(end = 8.dp),
+                                }).testTag("$tagPrefix-sort:${field.name}").padding(end = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
@@ -193,11 +202,11 @@ internal fun MediaSingerSortDialog(
         confirmButton = {
             TextButton(
                 onClick = { onChange(draftField, draftAscending); onDismiss() },
-                modifier = Modifier.testTag("singer-sort-confirm")
+                modifier = Modifier.testTag("$tagPrefix-sort-confirm")
             ) { Text(stringResource(R.string.media_album_sort_apply)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, modifier = Modifier.testTag("singer-sort-cancel")) { Text(stringResource(R.string.cancel)) }
+            TextButton(onClick = onDismiss, modifier = Modifier.testTag("$tagPrefix-sort-cancel")) { Text(stringResource(R.string.cancel)) }
         }
     )
 }

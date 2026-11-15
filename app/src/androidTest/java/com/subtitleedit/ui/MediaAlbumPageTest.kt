@@ -56,17 +56,15 @@ class MediaAlbumPageTest {
         fixtureDirectory?.deleteRecursively()
     }
 
-    @Test fun searchFiltersAlbumsAndOtherCategoriesRemainEmpty() {
+    @Test fun searchFiltersAlbumsAndIsRetainedWhenVisitingTags() {
         showAlbums()
         compose.onNodeWithTag("album-search").performTextInput("bEtA")
         compose.onNodeWithTag("album-item:beta").assertIsDisplayed()
         compose.onNodeWithTag("album-item:alpha").assertDoesNotExist()
 
-        MediaCategory.entries.filter { it != MediaCategory.ALBUMS && it != MediaCategory.SINGERS }.forEach { category ->
-            selectCategory(category)
-            compose.onNodeWithTag("media-category-empty").assertIsDisplayed()
-            compose.onNodeWithTag("album-search").assertDoesNotExist()
-        }
+        selectCategory(MediaCategory.TAGS)
+        compose.onNodeWithTag("media-category-empty").assertIsDisplayed()
+        compose.onNodeWithTag("album-search").assertDoesNotExist()
         selectCategory(MediaCategory.ALBUMS)
         compose.onNodeWithTag("album-item:beta").assertIsDisplayed()
     }

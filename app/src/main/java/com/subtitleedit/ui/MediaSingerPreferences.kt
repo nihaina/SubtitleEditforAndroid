@@ -4,6 +4,7 @@ import android.content.Context
 import com.subtitleedit.library.AlbumSortField
 import com.subtitleedit.library.AlbumTrackSortField
 import com.subtitleedit.library.AlbumTrackSortOptions
+import com.subtitleedit.library.MediaCreditRole
 import com.subtitleedit.library.SingerSortField
 
 internal enum class SingerMoreInfo { AUTO, NONE, TRACK_COUNT, DURATION, UPDATED_AT, YEAR }
@@ -19,9 +20,16 @@ internal data class MediaSingerViewOptions(
     val trackSort: AlbumTrackSortOptions = AlbumTrackSortOptions()
 )
 
-/** Singer browsing has its own preferences and never changes the album overview's presentation. */
-internal class MediaSingerPreferences(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences("media_singer_view", Context.MODE_PRIVATE)
+/** Each credit category owns its presentation; the existing singer store remains compatible. */
+internal class MediaSingerPreferences(context: Context, role: MediaCreditRole = MediaCreditRole.SINGER) {
+    private val preferences = context.applicationContext.getSharedPreferences(
+        when (role) {
+            MediaCreditRole.SINGER -> "media_singer_view"
+            MediaCreditRole.ARTIST -> "media_artist_view"
+            MediaCreditRole.COMPOSER -> "media_composer_view"
+        },
+        Context.MODE_PRIVATE
+    )
 
     fun load(): MediaSingerViewOptions = MediaSingerViewOptions(
         moreInfo = enumPreference("more_info", SingerMoreInfo.AUTO),
