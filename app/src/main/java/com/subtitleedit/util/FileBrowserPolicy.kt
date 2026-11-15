@@ -7,9 +7,10 @@ internal object FileBrowserPolicy {
         file: File,
         includeAllFileTypes: Boolean,
         videoExtensions: Set<String>,
-        isRecognizedArchive: (File) -> Boolean
+        isRecognizedArchive: (File) -> Boolean,
+        isFile: Boolean = file.isFile
     ): Boolean {
-        if (!file.isFile) return false
+        if (!isFile) return false
         return includeAllFileTypes ||
             FileUtils.isSubtitleFile(file) ||
             FileUtils.isAudioFile(file) ||

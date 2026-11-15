@@ -339,6 +339,7 @@ internal fun MainTopLevelPages(
 
         R.id.nav_favorites -> FavoritesScreen(
             directories = state.favoriteDirectories,
+            metadataRefreshKey = refreshVersion,
             viewMode = viewMode,
             pendingRemoval = state.pendingFavoriteRemoval,
             onAddDirectory = { directoryPicker.launch(null) },
@@ -358,6 +359,7 @@ internal fun MainTopLevelPages(
 
         R.id.nav_drafts -> DraftsPage(
             currentFolder = state.currentDraftFolder,
+            metadataRefreshKey = refreshVersion,
             drafts = state.drafts,
             dialogState = state.draftDialog,
             showTopBar = false,

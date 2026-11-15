@@ -12,6 +12,24 @@ class FileBrowserOrderTest {
     val temporaryFolder = TemporaryFolder()
 
     @Test
+    fun `metadata sorting never asks File for attributes`() {
+        fun file(name: String): File = object : File(name) {
+            override fun isDirectory(): Boolean = error("Unexpected filesystem query")
+            override fun length(): Long = error("Unexpected filesystem query")
+            override fun lastModified(): Long = error("Unexpected filesystem query")
+        }
+        val folder = BrowserFileMetadata(file("z-folder"), true, 0L, 0L)
+        val small = BrowserFileMetadata(file("a.txt"), false, 1L, 1000L)
+        val large = BrowserFileMetadata(file("b.srt"), false, 5L, 2000L)
+        val entries = listOf(large, folder, small)
+
+        assertEquals(listOf(folder, small, large), FileBrowserOrder.sortMetadata(entries, FileSortField.NAME, FileSortDirection.ASCENDING))
+        assertEquals(listOf(folder, small, large), FileBrowserOrder.sortMetadata(entries, FileSortField.TYPE, FileSortDirection.DESCENDING))
+        assertEquals(listOf(folder, large, small), FileBrowserOrder.sortMetadata(entries, FileSortField.SIZE, FileSortDirection.DESCENDING))
+        assertEquals(listOf(folder, large, small), FileBrowserOrder.sortMetadata(entries, FileSortField.DATE, FileSortDirection.DESCENDING))
+    }
+
+    @Test
     fun `folders stay before files and names default ascending`() {
         val root = temporaryFolder.root
         val file = File(root, "a.srt").apply { writeText("text") }

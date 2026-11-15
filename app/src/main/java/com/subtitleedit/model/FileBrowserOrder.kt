@@ -7,6 +7,26 @@ enum class FileSortField { NAME, TYPE, SIZE, DATE }
 enum class FileSortDirection { ASCENDING, DESCENDING }
 
 object FileBrowserOrder {
+    /** Sorts preloaded attributes without any filesystem access. */
+    internal fun sortMetadata(
+        files: List<BrowserFileMetadata>,
+        field: FileSortField,
+        direction: FileSortDirection
+    ): List<BrowserFileMetadata> = files.sortedWith { left, right ->
+        if (left.isDirectory != right.isDirectory) {
+            if (left.isDirectory) -1 else 1
+        } else {
+            val primary = when (field) {
+                FileSortField.NAME -> left.file.name.compareTo(right.file.name, ignoreCase = true)
+                FileSortField.TYPE -> metadataExtension(left).compareTo(metadataExtension(right), ignoreCase = true)
+                FileSortField.SIZE -> left.size.compareTo(right.size)
+                FileSortField.DATE -> left.modifiedTimeMillis.compareTo(right.modifiedTimeMillis)
+            }
+            val directed = if (direction == FileSortDirection.ASCENDING) primary else -primary
+            if (directed != 0) directed else left.file.name.compareTo(right.file.name, ignoreCase = true)
+        }
+    }
+
     fun sort(
         files: List<File>,
         field: FileSortField,
@@ -61,6 +81,9 @@ object FileBrowserOrder {
 
     private fun extension(file: File): String =
         if (file.isDirectory) "" else file.extension.lowercase(Locale.ROOT)
+
+    private fun metadataExtension(metadata: BrowserFileMetadata): String =
+        if (metadata.isDirectory) "" else metadata.file.extension.lowercase(Locale.ROOT)
 
     private val INVALID_NAME_CHARS = setOf('\\', '/', ':', '*', '?', '"', '<', '>', '|')
 }

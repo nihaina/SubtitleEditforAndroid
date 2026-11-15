@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
 import com.subtitleedit.feature.ui.BrowserFileRow
 import com.subtitleedit.feature.ui.BrowserFileLayout
+import com.subtitleedit.feature.ui.BrowserFileRefreshKey
 import com.subtitleedit.feature.ui.browserFileContentPadding
 import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.ui.components.AppAlertDialog
@@ -36,7 +37,8 @@ fun FavoritesScreen(
     onRequestRemoval: (File) -> Unit,
     onConfirmRemoval: () -> Unit,
     onDismissRemoval: () -> Unit,
-    viewMode: FileBrowserViewMode = FileBrowserViewMode.DETAILED
+    viewMode: FileBrowserViewMode = FileBrowserViewMode.DETAILED,
+    metadataRefreshKey: Any? = null
 ) {
     Box(Modifier.fillMaxSize().background(settingsPageBackground())) {
         if (directories.isEmpty()) {
@@ -59,7 +61,8 @@ fun FavoritesScreen(
                 contentPadding = browserFileContentPadding(viewMode, bottom = 96.dp),
                 adaptiveGrid = true
             ) { directory ->
-                FavoriteDirectoryItem(directory, viewMode, onOpenDirectory, onRequestRemoval)
+                FavoriteDirectoryItem(directory, viewMode, onOpenDirectory, onRequestRemoval,
+                    metadataRefreshKey ?: BrowserFileRefreshKey(directories))
             }
         }
         FloatingActionButton(
@@ -93,10 +96,12 @@ private fun FavoriteDirectoryItem(
     directory: File,
     viewMode: FileBrowserViewMode,
     onOpenDirectory: (File) -> Unit,
-    onRequestRemoval: (File) -> Unit
+    onRequestRemoval: (File) -> Unit,
+    metadataRefreshKey: Any?
 ) {
     BrowserFileRow(
         file = directory,
+        metadataRefreshKey = metadataRefreshKey,
         relativePathRoot = null,
         isSelected = false,
         isSelectionMode = false,

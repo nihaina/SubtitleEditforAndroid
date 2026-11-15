@@ -27,6 +27,7 @@ internal data class FilePickerUiState(
     val mode: FilePickerMode = FilePickerMode.OPEN_FILE,
     val directory: File = FilePickerPolicy.defaultRoot(),
     val files: List<File> = emptyList(),
+    val metadataRefreshVersion: Long = 0L,
     val selectedPaths: Set<String> = emptySet(),
     val query: String = "",
     val showHidden: Boolean = false,
@@ -341,7 +342,8 @@ internal class FilePickerViewModel(
                     FileBrowserOrder.sort(FileBrowserOrder.filter(filtered, snapshot.query), snapshot.sortField, snapshot.sortDirection) to unsupported
                 }
                 if (generation == loadGeneration) setState {
-                    copy(files = listing.first, unsupportedPaths = listing.second, loading = false)
+                    copy(files = listing.first, unsupportedPaths = listing.second, loading = false,
+                        metadataRefreshVersion = generation)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled

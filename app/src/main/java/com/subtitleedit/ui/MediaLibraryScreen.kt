@@ -385,6 +385,7 @@ internal fun MediaLibraryScreen(
 
                     MediaLibraryTab.FILES -> FilesTabContent(
                         roots = favoriteDirectories,
+                        metadataRefreshKey = refreshVersion to revision,
                         rootPath = browseRootPath,
                         currentPath = browsePath,
                         entries = folderEntries,
@@ -955,7 +956,8 @@ internal fun FilesTabContent(
     onAdvancedSelection: (MediaLibrarySelectionAction) -> Unit,
     onFavoriteSelection: () -> Unit,
     onAddSelectionToPlaylist: () -> Unit,
-    onShowInfo: () -> Unit
+    onShowInfo: () -> Unit,
+    metadataRefreshKey: Any? = null
 ) {
     val selectionMode = selectedPaths.isNotEmpty()
     val density = LocalDensity.current
@@ -1008,6 +1010,7 @@ internal fun FilesTabContent(
                         BrowserFileRow(
                             modifier = Modifier.testTag("library-file:${entry.path}"),
                             file = File(entry.path),
+                            metadataRefreshKey = metadataRefreshKey ?: entry,
                             relativePathRoot = null,
                             isSelected = entry.path in selectedPaths,
                             isSelectionMode = selectionMode,

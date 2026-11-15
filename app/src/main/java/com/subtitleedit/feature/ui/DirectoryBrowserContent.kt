@@ -20,7 +20,6 @@ import com.subtitleedit.DirectoryScrollPosition
 import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.ui.theme.AppMotion
 import com.subtitleedit.ui.settings.settingsPageBackground
-import com.subtitleedit.util.FilePathPolicy
 import java.io.File
 
 @Composable
@@ -46,7 +45,7 @@ internal fun DirectoryBrowserContent(
     LaunchedEffect(scrollRequest, state.files, state.currentDirectory, isGrid) {
         val request = scrollRequest ?: return@LaunchedEffect
         if (appliedScrollGeneration == request.generation || state.files.isEmpty()) return@LaunchedEffect
-        if (state.currentDirectory?.let(FilePathPolicy::canonicalOrAbsolute) != request.directoryPath) {
+        if ((state.canonicalDirectoryPath ?: state.currentDirectory?.absolutePath) != request.directoryPath) {
             return@LaunchedEffect
         }
         val savedPosition = request.savedPosition
@@ -108,6 +107,7 @@ internal fun DirectoryBrowserContent(
             ) { file ->
                 BrowserFileRow(
                     file = file,
+                    metadata = state.fileMetadata[file.absolutePath],
                     relativePathRoot = state.relativePathRoot,
                     isSelected = file.absolutePath in state.selectedPaths,
                     isSelectionMode = state.selectedPaths.isNotEmpty() && state.pendingOperation == null,

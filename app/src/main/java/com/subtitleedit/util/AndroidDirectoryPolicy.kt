@@ -5,9 +5,9 @@ import android.os.Environment
 import java.io.File
 
 internal object AndroidDirectoryPolicy {
-    fun isRestricted(file: File): Boolean {
+    fun isRestricted(file: File, isDirectory: Boolean = file.isDirectory): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
-            !file.isDirectory ||
+            !isDirectory ||
             !file.name.equals("Android", ignoreCase = true)
         ) return false
 

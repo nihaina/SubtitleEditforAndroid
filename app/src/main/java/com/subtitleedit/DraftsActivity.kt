@@ -30,6 +30,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.feature.ui.BrowserFileLayout
 import com.subtitleedit.feature.ui.BrowserFileRow
+import com.subtitleedit.feature.ui.BrowserFileRefreshKey
 import com.subtitleedit.feature.ui.browserFileContentPadding
 import com.subtitleedit.model.FileBrowserViewMode
 import com.subtitleedit.ui.components.AppDialog
@@ -78,6 +79,7 @@ class DraftsActivity : AppComposeActivity() {
                 DraftsPage(
                     currentFolder = state.currentFolder,
                     drafts = state.drafts,
+                    metadataRefreshKey = state.metadataRefreshVersion,
                     dialogState = state.dialogState,
                     onBack = ::handleBack,
                     onBackToRoot = viewModel::goToRoot,
@@ -139,7 +141,8 @@ internal fun DraftsPage(
     onCopyDraft: (DraftsActivity.DraftItem) -> Unit,
     onExportDraft: (DraftsActivity.DraftItem) -> Unit,
     onDeleteDraft: (DraftsActivity.DraftItem) -> Unit,
-    onDeleteFolder: (DraftsActivity.DraftItem) -> Unit
+    onDeleteFolder: (DraftsActivity.DraftItem) -> Unit,
+    metadataRefreshKey: Any? = null
 ) {
     val pageBackground = settingsPageBackground()
     AppToolScaffold(
@@ -186,6 +189,7 @@ internal fun DraftsPage(
             ) { draft ->
                 DraftRow(
                     draft = draft,
+                    metadataRefreshKey = metadataRefreshKey ?: BrowserFileRefreshKey(drafts),
                     viewMode = viewMode,
                     onClick = { onItemClick(draft) },
                     // Folders have no action menu, so long-press goes straight to delete.
@@ -211,6 +215,7 @@ internal fun DraftsPage(
 private fun DraftRow(
     draft: DraftsActivity.DraftItem,
     viewMode: FileBrowserViewMode,
+    metadataRefreshKey: Any?,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -222,6 +227,7 @@ private fun DraftRow(
     }
     BrowserFileRow(
         file = file,
+        metadataRefreshKey = metadataRefreshKey,
         relativePathRoot = null,
         isSelected = false,
         isSelectionMode = false,

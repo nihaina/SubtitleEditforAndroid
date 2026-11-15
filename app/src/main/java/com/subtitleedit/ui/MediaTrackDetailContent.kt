@@ -33,6 +33,7 @@ internal fun MediaTrackDetailContent(
     title: String,
     backDescription: String,
     visibleTracks: List<MediaAlbumTrack>,
+    metadataRefreshKey: Any? = null,
     selectionResetKey: Any,
     trackSort: AlbumTrackSortOptions,
     onTrackSortChanged: (AlbumTrackSortOptions) -> Unit,
@@ -110,6 +111,7 @@ internal fun MediaTrackDetailContent(
                     BrowserFileRow(
                         modifier = Modifier.testTag("$tagPrefix-track:${item.track.path}"),
                         file = item.track.file,
+                        metadataRefreshKey = metadataRefreshKey ?: item,
                         relativePathRoot = null,
                         isSelected = item.track.path in selectedPaths,
                         isSelectionMode = selectionMode,

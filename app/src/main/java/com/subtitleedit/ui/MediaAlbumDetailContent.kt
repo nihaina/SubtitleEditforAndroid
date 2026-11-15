@@ -43,7 +43,8 @@ internal fun MediaAlbumDetailContent(
     onShuffle: (List<MediaAlbumTrack>) -> Unit,
     onFavoriteSelection: (List<MediaLibraryTrack>, () -> Unit) -> Unit,
     onAddSelectionToPlaylist: (List<MediaLibraryTrack>, () -> Unit) -> Unit,
-    onShowInfo: (String) -> Unit
+    onShowInfo: (String) -> Unit,
+    metadataRefreshKey: Any? = null
 ) {
     var grouping by rememberSaveable(album.key) { mutableStateOf(MediaCategory.SINGERS) }
     var groupMenuOpen by remember { mutableStateOf(false) }
@@ -79,6 +80,7 @@ internal fun MediaAlbumDetailContent(
         title = albumName,
         backDescription = stringResource(R.string.media_album_detail_back),
         visibleTracks = visibleTracks,
+        metadataRefreshKey = metadataRefreshKey,
         selectionResetKey = listOf(groupTracks, grouping, selectedGroups),
         trackSort = trackSort,
         onTrackSortChanged = onTrackSortChanged,

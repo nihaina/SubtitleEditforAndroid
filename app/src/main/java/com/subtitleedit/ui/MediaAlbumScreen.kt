@@ -192,6 +192,7 @@ internal fun MediaAlbumScreen(
 
     MediaAlbumPageContent(
         albums = albums,
+        metadataRefreshKey = refreshVersion to catalogRevision,
         options = options,
         loading = loading,
         isActive = isActive,
@@ -276,7 +277,8 @@ internal fun MediaAlbumPageContent(
     composerOptions: MediaSingerViewOptions = MediaSingerViewOptions(),
     onComposerOptionsChanged: (MediaSingerViewOptions) -> Unit = {},
     genreOptions: MediaSingerViewOptions = MediaSingerViewOptions(),
-    onGenreOptionsChanged: (MediaSingerViewOptions) -> Unit = {}
+    onGenreOptionsChanged: (MediaSingerViewOptions) -> Unit = {},
+    metadataRefreshKey: Any? = null
 ) {
     var category by rememberSaveable { mutableStateOf(MediaCategory.ALBUMS) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -344,6 +346,7 @@ internal fun MediaAlbumPageContent(
                 onBack = { settingsOpen = false }
             )
             openedCredit != null && creditRole != null -> MediaSingerDetailContent(
+                metadataRefreshKey = metadataRefreshKey,
                 singer = openedCredit,
                 options = activeCreditOptions,
                 onOptionsChanged = changeCreditOptions,
@@ -357,6 +360,7 @@ internal fun MediaAlbumPageContent(
                 role = creditRole
             )
             openedAlbum != null -> MediaAlbumDetailContent(
+                metadataRefreshKey = metadataRefreshKey,
                 album = openedAlbum,
                 groupTracks = options.groupTracks,
                 sortField = options.sortField,

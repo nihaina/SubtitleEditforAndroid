@@ -8,6 +8,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.model.FileBrowserViewMode
+import com.subtitleedit.model.BrowserFileMetadata
 import com.subtitleedit.util.AndroidDirectoryPolicy
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -26,35 +27,31 @@ internal fun BrowserFileRow(
     restrictedOverride: Boolean? = null,
     enabled: Boolean = true,
     viewMode: FileBrowserViewMode = FileBrowserViewMode.DETAILED,
-    directoryPageStyle: Boolean = false
+    directoryPageStyle: Boolean = false,
+    metadata: BrowserFileMetadata? = null,
+    metadataRefreshKey: Any? = null
 ) {
     val context = LocalContext.current
     // FavoritesFragment historically used FileListAdapter without an
     // isItemRestricted callback. Preserve that behavior for its rows while
     // keeping the Android/data restriction for the main browser.
-    val restricted = remember(file.absolutePath, restrictedOverride) {
-        restrictedOverride ?: AndroidDirectoryPolicy.isRestricted(file)
-    }
-    val previewKey = remember(file.absolutePath, file.length(), file.lastModified()) {
-        "${file.absolutePath}:${file.length()}:${file.lastModified()}"
-    }
+    val fileMetadata = rememberBrowserFileMetadata(file, metadata, metadataRefreshKey)
+    val restricted = restrictedOverride ?: fileMetadata?.restricted ?: false
+    val previewKey = fileMetadata?.cacheKey
     val thumbnailDp = when (viewMode) {
         FileBrowserViewMode.DETAILED -> 40
         FileBrowserViewMode.COMPACT -> 32
         FileBrowserViewMode.GRID -> 160
     }
     val targetSize = remember(context, thumbnailDp) { (thumbnailDp * context.resources.displayMetrics.density + 0.5f).toInt() }
-    var preview by remember(previewKey) { mutableStateOf<MainFilePreview?>(null) }
-    var directoryCount by remember(previewKey) { mutableStateOf<Int?>(null) }
-    LaunchedEffect(previewKey, targetSize) {
-        preview = withContext(Dispatchers.IO) {
-            MainFilePreviewLoader.preview(context, file, targetSize)
-        }
-        if (file.isDirectory && file.name != ".." && !restricted) {
-            directoryCount = withContext(Dispatchers.IO) {
-                MainFilePreviewLoader.directoryItemCount(file)
-            }
-        }
+    var rowData by remember(previewKey, targetSize, restricted) { mutableStateOf<BrowserFileRowData?>(null) }
+    LaunchedEffect(previewKey, targetSize, restricted) {
+        val snapshot = fileMetadata ?: return@LaunchedEffect
+        val preview = MainFilePreviewLoader.preview(context, snapshot, targetSize)
+        val count = if (snapshot.isDirectory && file.name != ".." && !restricted) {
+            MainFilePreviewLoader.directoryItemCount(snapshot)
+        } else null
+        rowData = BrowserFileRowData(preview, count)
     }
     val displayName = remember(file.absolutePath, relativePathRoot?.absolutePath) {
         relativePathRoot?.let { root -> runCatching { file.relativeTo(root).path }.getOrDefault(file.name) }
@@ -69,10 +66,10 @@ internal fun BrowserFileRow(
     BrowserFileItem(
         entry = BrowserFileEntry(
             name = file.name,
-            isDirectory = file.isDirectory,
-            size = file.length(),
-            modifiedTimeMillis = file.lastModified(),
-            itemCount = directoryCount.takeUnless { restricted },
+            isDirectory = fileMetadata?.isDirectory ?: false,
+            size = fileMetadata?.size ?: -1L,
+            modifiedTimeMillis = fileMetadata?.modifiedTimeMillis,
+            itemCount = rowData?.directoryCount.takeUnless { restricted },
             displayName = displayName,
             isParentDirectory = file.name == ".."
         ),
@@ -83,8 +80,8 @@ internal fun BrowserFileRow(
             onClick = onClick,
             onLongClick = { if (restricted) onClick() else onLongClick() }
         ),
-        preview = preview,
-        loadingDuration = MainFilePreviewLoader.isMediaFile(file) && preview == null,
+        preview = rowData?.preview,
+        loadingDuration = MainFilePreviewLoader.isMediaFile(file) && rowData == null,
         restricted = restricted || !enabled,
         isSelected = isSelected,
         alpha = alpha,
@@ -92,8 +89,34 @@ internal fun BrowserFileRow(
     )
 }
 
+private data class BrowserFileRowData(val preview: MainFilePreview, val directoryCount: Int?)
+
+/** A replacement list is a new data load even when its path-only File values compare equal. */
+internal class BrowserFileRefreshKey(private val snapshot: Any) {
+    override fun equals(other: Any?): Boolean = other is BrowserFileRefreshKey && snapshot === other.snapshot
+    override fun hashCode(): Int = System.identityHashCode(snapshot)
+}
+
+/** Other browser surfaces can load a snapshot once, without filesystem reads in composition. */
 @Composable
-internal fun FileRowIcon(file: File, bitmap: android.graphics.Bitmap?, restricted: Boolean, size: Dp = 48.dp) {
-    BrowserFilePreviewIcon(file.name, file.isDirectory, bitmap, restricted, size)
+internal fun rememberBrowserFileMetadata(
+    file: File,
+    metadata: BrowserFileMetadata? = null,
+    metadataRefreshKey: Any? = null
+): BrowserFileMetadata? {
+    val fallback by produceState<BrowserFileMetadata?>(null, file.absolutePath, metadata,
+        metadataRefreshKey.takeIf { metadata == null }) {
+        value = metadata ?: withContext(Dispatchers.IO) {
+            BrowserFileMetadata.read(file)?.let {
+                it.copy(restricted = AndroidDirectoryPolicy.isRestricted(file, it.isDirectory))
+            }
+        }
+    }
+    return metadata ?: fallback?.takeIf { it.path == file.absolutePath }
+}
+
+@Composable
+internal fun FileRowIcon(file: File, isDirectory: Boolean, bitmap: android.graphics.Bitmap?, restricted: Boolean, size: Dp = 48.dp) {
+    BrowserFilePreviewIcon(file.name, isDirectory, bitmap, restricted, size)
 }
 

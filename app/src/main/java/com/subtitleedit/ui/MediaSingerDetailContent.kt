@@ -33,7 +33,8 @@ internal fun MediaSingerDetailContent(
     onFavoriteSelection: (List<MediaLibraryTrack>, () -> Unit) -> Unit,
     onAddSelectionToPlaylist: (List<MediaLibraryTrack>, () -> Unit) -> Unit,
     onShowInfo: (String) -> Unit,
-    role: MediaCreditRole = MediaCreditRole.SINGER
+    role: MediaCreditRole = MediaCreditRole.SINGER,
+    metadataRefreshKey: Any? = null
 ) {
     val name = singer.name.ifBlank { stringResource(role.unknownRes) }
     val tagPrefix = role.tagPrefix
@@ -56,6 +57,7 @@ internal fun MediaSingerDetailContent(
         title = name,
         backDescription = stringResource(role.labels.back),
         visibleTracks = visibleTracks,
+        metadataRefreshKey = metadataRefreshKey,
         selectionResetKey = listOf(options.groupTracks, selectedAlbums),
         trackSort = options.trackSort,
         onTrackSortChanged = { onOptionsChanged(options.copy(trackSort = it)) },

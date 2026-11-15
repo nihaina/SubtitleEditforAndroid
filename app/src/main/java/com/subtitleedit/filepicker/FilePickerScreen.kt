@@ -248,6 +248,7 @@ internal fun FilePickerScreen(
                             val supported = file.absolutePath !in state.unsupportedPaths
                             BrowserFileRow(
                                 file = file,
+                                metadataRefreshKey = state.metadataRefreshVersion,
                                 relativePathRoot = null,
                                 isSelected = supported && file.absolutePath in state.selectedPaths,
                                 isSelectionMode = selectionActive,

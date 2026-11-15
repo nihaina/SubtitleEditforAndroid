@@ -79,6 +79,7 @@ import com.subtitleedit.util.MainNavigationPolicy
 import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
 import com.subtitleedit.model.FileBrowserViewMode
+import com.subtitleedit.model.BrowserFileMetadata
 import java.io.File
 import com.subtitleedit.ui.theme.AppMotion
 
@@ -116,7 +117,9 @@ internal data class MainActivityScreenState(
     val showDirectoryEmptyState: Boolean = false,
     val directoryEmptyStateMessage: Int = R.string.no_files,
     val currentDirectory: File? = null,
+    val canonicalDirectoryPath: String? = null,
     val files: List<File> = emptyList(),
+    val fileMetadata: Map<String, BrowserFileMetadata> = emptyMap(),
     val scrollRequest: MainDirectoryScrollRequest? = null,
     val relativePathRoot: File? = null,
     val selectedPaths: Set<String> = emptySet(),

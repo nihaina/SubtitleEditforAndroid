@@ -10,6 +10,7 @@ import com.subtitleedit.util.DraftManager
 internal data class DraftsUiState(
     val currentFolder: String = "",
     val drafts: List<DraftsActivity.DraftItem> = emptyList(),
+    val metadataRefreshVersion: Long = 0L,
     val fromEditor: Boolean = false,
     val dialogState: DraftsDialogState? = null
 )
@@ -141,6 +142,6 @@ internal class DraftsViewModel(
                 )
             }
         }
-        setState { copy(drafts = drafts) }
+        setState { copy(drafts = drafts, metadataRefreshVersion = metadataRefreshVersion + 1L) }
     }
 }

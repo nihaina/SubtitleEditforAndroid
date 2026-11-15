@@ -7,14 +7,21 @@ import android.media.MediaMetadataRetriever
 import android.media.ThumbnailUtils
 import android.os.Build
 import androidx.core.graphics.drawable.toBitmap
-import android.util.LruCache
 import com.subtitleedit.R
+import com.subtitleedit.model.BrowserFileMetadata
 import com.subtitleedit.util.ArchiveManager
 import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.FileTypePolicy
+import com.subtitleedit.util.SharedFileResourceCache
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.io.File
+import java.security.MessageDigest
 import java.util.Locale
-import java.util.concurrent.ConcurrentHashMap
+import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.withContext
 
 internal data class MainFilePreview(
     val bitmap: Bitmap? = null,
@@ -22,13 +29,22 @@ internal data class MainFilePreview(
 )
 
 internal object MainFilePreviewLoader {
-    private val bitmapCache = object : LruCache<String, Bitmap>(16 * 1024 * 1024) {
-        override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
-    }
-    private val mediaDurationCache = ConcurrentHashMap<String, String>()
-    private val directoryCountCache = ConcurrentHashMap<String, Int>()
-    private val emptyPreviewKeys = ConcurrentHashMap.newKeySet<String>()
-    private val emptyApkIconKeys = ConcurrentHashMap.newKeySet<String>()
+    private val loadPermits = Semaphore(2)
+    private val previews = SharedFileResourceCache<MainFilePreview>(
+        maximumWeight = 16 * 1024 * 1024,
+        weightOf = { it.bitmap?.byteCount ?: 1 },
+        permits = loadPermits
+    )
+    private val directoryCounts = SharedFileResourceCache<Int>(maximumWeight = 2048, permits = loadPermits)
+    private val diskLock = Any()
+    private var diskDirectory: File? = null
+    private val diskEntries = LinkedHashMap<File, Long>(16, 0.75f, true)
+    private var diskBytes = 0L
+    private val versionLock = Any()
+    private val invalidations = mutableMapOf<String, Long>()
+    private var nextInvalidation = 0L
+    private var cacheEpoch = 0L
+    private val sessionId = UUID.randomUUID().toString()
 
     /** Keeps the file row's media-duration slot stable while an async preview is loading. */
     fun isMediaFile(file: File): Boolean {
@@ -36,39 +52,76 @@ internal object MainFilePreviewLoader {
         return extension in audioExtensions || extension in videoExtensions
     }
 
-    fun preview(context: Context, file: File, targetSize: Int): MainFilePreview {
-        val key = key(file)
+    /** Compatibility for callers without a snapshot; source attributes stay off Main. */
+    suspend fun preview(context: Context, file: File, targetSize: Int): MainFilePreview {
+        val metadata = withContext(Dispatchers.IO) { BrowserFileMetadata.read(file, 0L) }
+            ?: return MainFilePreview()
+        return preview(context, metadata, targetSize)
+    }
+
+    suspend fun preview(context: Context, metadata: BrowserFileMetadata, targetSize: Int): MainFilePreview {
+        val file = metadata.file
         val extension = file.extension.lowercase(Locale.ROOT)
         val isMedia = extension in audioExtensions || extension in videoExtensions
         val isImage = extension in imageExtensions
         val isApk = extension == "apk"
-        if (!isMedia && !isImage && !isApk) return MainFilePreview()
-        val bitmapKey = "$key:$targetSize"
-        val cachedBitmap = bitmapCache.get(bitmapKey)
-        val cachedDuration = mediaDurationCache[key]
-        // A cached duration does not mean the thumbnail is still cached: the bitmap
-        // cache can evict media artwork while the duration cache retains its entry.
-        if (cachedBitmap != null || (!isImage && key in emptyPreviewKeys)) {
-            return MainFilePreview(cachedBitmap, cachedDuration.orEmpty())
+        if (metadata.isDirectory || (!isMedia && !isImage && !isApk)) return MainFilePreview()
+        val size = targetSize.coerceAtLeast(1)
+        val version = synchronized(versionLock) {
+            "$sessionId:${metadata.cacheKey}:$size:$cacheEpoch:${invalidations[file.absolutePath] ?: 0}"
         }
-
-        val preview = when {
-            isImage -> runCatching { decodeSampledBitmap(file, targetSize) }.getOrNull()
-            isApk -> loadApkIcon(context, file, targetSize)
-            isMedia -> readMediaPreview(file, targetSize, extension in videoExtensions).also {
-                mediaDurationCache[key] = it.second
-            }.first
-            else -> null
+        return previews.get(file.absolutePath, version) {
+            readDiskPreview(context, file.absolutePath, version)?.let { return@get it }
+            val result = when {
+                isImage -> MainFilePreview(runCatching { decodeSampledBitmap(file, size) }.getOrNull())
+                isApk -> MainFilePreview(loadApkIcon(context, file, size))
+                isMedia -> readMediaPreview(file, size, extension in videoExtensions).let {
+                    MainFilePreview(it.first, it.second)
+                }
+                else -> MainFilePreview()
+            }
+            // Cache empty results as well. A file event changes the revision and
+            // permits a retry, rather than retrying a broken file on every bind.
+            writeDiskPreview(context, file.absolutePath, version, result)
+            result
         }
-        if (preview != null) bitmapCache.put(bitmapKey, preview)
-        // Image rows retried decoding on each bind in FileListAdapter. Keep that
-        // behavior so a transient read failure does not hide an image forever.
-        if (preview == null && !isImage) emptyPreviewKeys += key
-        return MainFilePreview(preview, mediaDurationCache[key].orEmpty())
     }
 
-    fun directoryItemCount(file: File): Int = directoryCountCache.getOrPut(key(file)) {
-        runCatching { file.list()?.size ?: -1 }.getOrDefault(-1)
+    suspend fun directoryItemCount(file: File): Int {
+        val metadata = withContext(Dispatchers.IO) { BrowserFileMetadata.read(file, 0L) } ?: return -1
+        return directoryItemCount(metadata)
+    }
+
+    suspend fun directoryItemCount(metadata: BrowserFileMetadata): Int {
+        if (!metadata.isDirectory || metadata.restricted || metadata.file.name == "..") return -1
+        return directoryCounts.get(metadata.file.absolutePath, metadata.cacheKey) {
+            runCatching { metadata.file.list()?.size ?: -1 }.getOrDefault(-1)
+        }
+    }
+
+    fun invalidate(path: String) {
+        synchronized(versionLock) {
+            if (path !in invalidations && invalidations.size >= 2048) {
+                cacheEpoch++
+                invalidations.clear()
+            }
+            invalidations[path] = ++nextInvalidation
+        }
+        previews.invalidate(path)
+        directoryCounts.invalidate(path)
+        // Disk data is versioned by the metadata revision. It is never looked
+        // up for the new revision; bounded pruning removes obsolete versions.
+    }
+
+    fun clear() {
+        // Include the epoch in disk keys as well, so clear cannot reload an old
+        // disk result while a caller is holding an unchanged metadata snapshot.
+        synchronized(versionLock) {
+            cacheEpoch++
+            invalidations.clear()
+        }
+        previews.clear()
+        directoryCounts.clear()
     }
 
     fun iconResource(file: File): Int = iconResource(file.name, file.isDirectory)
@@ -88,8 +141,6 @@ internal object MainFilePreviewLoader {
     }
 
     private fun loadApkIcon(context: Context, file: File, targetSize: Int): Bitmap? {
-        val iconKey = "${file.absolutePath}:${file.lastModified()}"
-        if (iconKey in emptyApkIconKeys) return null
         val icon = runCatching {
             @Suppress("DEPRECATION")
             val packageInfo = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
@@ -99,10 +150,7 @@ internal object MainFilePreviewLoader {
                 applicationInfo.loadIcon(context.packageManager)
             }
         }.getOrNull()
-        if (icon == null) {
-            emptyApkIconKeys += iconKey
-            return null
-        }
+        if (icon == null) return null
         return runCatching { icon.toBitmap(targetSize, targetSize, Bitmap.Config.ARGB_8888) }.getOrNull()
     }
 
@@ -194,8 +242,82 @@ internal object MainFilePreviewLoader {
         }
     }
 
-    private fun key(file: File): String =
-        "${file.absolutePath}:${file.length()}:${file.lastModified()}"
+    private fun previewFile(context: Context, path: String, version: String): File {
+        val directory = diskDirectory ?: File(context.cacheDir, "directory-previews-v1").also {
+            it.mkdirs()
+            it.listFiles()?.sortedBy(File::lastModified)?.forEach { file ->
+                if (file.extension == "preview") {
+                    val bytes = file.length()
+                    diskEntries[file] = bytes
+                    diskBytes += bytes
+                } else if (file.extension == "tmp") {
+                    file.delete()
+                }
+            }
+            diskDirectory = it
+            pruneDiskCache()
+        }
+        return File(directory, "${digest(path)}-${digest(version)}.preview")
+    }
+
+    private fun readDiskPreview(context: Context, path: String, version: String): MainFilePreview? = synchronized(diskLock) {
+        runCatching {
+            val source = previewFile(context, path, version)
+            DataInputStream(source.inputStream().buffered()).use { input ->
+                check(input.readInt() == DISK_FORMAT)
+                val duration = input.readUTF()
+                val hasBitmap = input.readBoolean()
+                val bitmap = if (hasBitmap) BitmapFactory.decodeStream(input) ?: error("Invalid cached bitmap") else null
+                diskEntries[source]
+                MainFilePreview(bitmap, duration)
+            }
+        }.getOrNull()
+    }
+
+    private fun writeDiskPreview(context: Context, path: String, version: String, preview: MainFilePreview) = synchronized(diskLock) {
+        runCatching {
+            val destination = previewFile(context, path, version)
+            val temporary = File(destination.path + ".tmp")
+            var bytes = 0L
+            DataOutputStream(temporary.outputStream().buffered()).use { output ->
+                output.writeInt(DISK_FORMAT)
+                output.writeUTF(preview.mediaDuration)
+                output.writeBoolean(preview.bitmap != null)
+                preview.bitmap?.let { check(it.compress(Bitmap.CompressFormat.PNG, 100, output)) }
+                bytes = output.size().toLong()
+            }
+            if (temporary.renameTo(destination)) {
+                diskBytes -= diskEntries.put(destination, bytes) ?: 0L
+                diskBytes += bytes
+                pruneDiskCache()
+            } else temporary.delete()
+        }
+        Unit
+    }
+
+    private fun pruneDiskCache() {
+        val iterator = diskEntries.iterator()
+        while ((diskBytes > 64L * 1024 * 1024 || diskEntries.size > 1024) && iterator.hasNext()) {
+            val entry = iterator.next()
+            entry.key.delete()
+            diskBytes -= entry.value
+            iterator.remove()
+        }
+    }
+
+    private fun digest(value: String): String {
+        val bytes = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+        val digits = "0123456789abcdef"
+        return buildString(bytes.size * 2) {
+            bytes.forEach { byte ->
+                val unsigned = byte.toInt() and 0xff
+                append(digits[unsigned ushr 4])
+                append(digits[unsigned and 0xf])
+            }
+        }
+    }
+
+    private const val DISK_FORMAT = 1
 
     private fun archiveIcon(file: File): Int {
         val name = file.name.lowercase(Locale.ROOT)

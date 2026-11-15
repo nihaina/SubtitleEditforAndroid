@@ -23,10 +23,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
-import com.subtitleedit.util.AndroidDirectoryPolicy
 import com.subtitleedit.util.FileUtils
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -37,26 +34,29 @@ internal fun RenameFileRow(
     file: File,
     modifier: Modifier = Modifier,
     displayName: String = file.name,
+    metadataRefreshKey: Any? = null,
     trailingContent: (@Composable () -> Unit)? = null
 ) {
     val context = LocalContext.current
     val locale = LocalLocale.current.platformLocale
-    val isDirectory = file.isDirectory
-    val modified = file.lastModified()
-    val size = file.length()
-    val previewKey = "${file.absolutePath}:$size:$modified"
-    val restricted = remember(file.absolutePath) { AndroidDirectoryPolicy.isRestricted(file) }
+    val metadata = rememberBrowserFileMetadata(file, metadataRefreshKey = metadataRefreshKey)
+    val isDirectory = metadata?.isDirectory == true
+    val modified = metadata?.modifiedTimeMillis
+    val size = metadata?.size ?: -1L
+    val previewKey = metadata?.cacheKey
+    val restricted = metadata?.restricted == true
     val targetSize = remember(context) { (48 * context.resources.displayMetrics.density + 0.5f).toInt() }
     var preview by remember(previewKey) { mutableStateOf<MainFilePreview?>(null) }
     var directoryCount by remember(previewKey) { mutableStateOf<Int?>(null) }
     LaunchedEffect(previewKey) {
-        preview = withContext(Dispatchers.IO) { MainFilePreviewLoader.preview(context, file, targetSize) }
+        val snapshot = metadata ?: return@LaunchedEffect
+        preview = MainFilePreviewLoader.preview(context, snapshot, targetSize)
         if (isDirectory && !restricted) {
-            directoryCount = withContext(Dispatchers.IO) { MainFilePreviewLoader.directoryItemCount(file) }
+            directoryCount = MainFilePreviewLoader.directoryItemCount(snapshot)
         }
     }
     val modifiedTime = remember(modified, locale) {
-        SimpleDateFormat("yy-MM-dd HH:mm", locale).format(Date(modified))
+        modified?.let { SimpleDateFormat("yy-MM-dd HH:mm", locale).format(Date(it)) }.orEmpty()
     }
     val sizeOrCount = if (isDirectory) {
         when (val count = directoryCount) {
@@ -65,7 +65,7 @@ internal fun RenameFileRow(
             else -> stringResource(R.string.directory_item_count, count)
         }
     } else {
-        FileUtils.formatFileSize(size)
+        if (size >= 0L) FileUtils.formatFileSize(size) else ""
     }
     val details = listOf(modifiedTime, sizeOrCount, preview?.mediaDuration.orEmpty())
         .filter(String::isNotEmpty).joinToString("  ")
@@ -74,7 +74,7 @@ internal fun RenameFileRow(
         modifier = modifier.fillMaxWidth().heightIn(min = 68.dp).padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        FileRowIcon(file, preview?.bitmap, restricted)
+        FileRowIcon(file, isDirectory, preview?.bitmap, restricted)
         Column(
             modifier = Modifier.weight(1f).padding(start = 6.dp),
             verticalArrangement = Arrangement.spacedBy(3.dp)
