@@ -23,7 +23,6 @@ import com.subtitleedit.player.PlayerPlayMode
 import com.subtitleedit.ui.settings.settingsPageBackground
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -51,6 +50,7 @@ internal fun MediaAlbumScreen(
     val context = LocalContext.current
     val repository = remember(context) { MediaLibraryRepository.getInstance(context) }
     val revision by repository.revision.collectAsState()
+    val catalogRevision by repository.catalogRevision.collectAsState()
     val preferences = remember(context) { MediaAlbumPreferences(context) }
     var options by remember { mutableStateOf(preferences.load()) }
     val creditPreferences = remember(context) {
@@ -59,9 +59,19 @@ internal fun MediaAlbumScreen(
     var creditOptions by remember(creditPreferences) {
         mutableStateOf(creditPreferences.mapValues { it.value.load() })
     }
-    var tracks by remember { mutableStateOf(emptyList<MediaAlbumTrack>()) }
+    var catalogTracks by remember { mutableStateOf(emptyList<MediaAlbumTrack>()) }
+    var history by remember { mutableStateOf(emptyMap<String, PlaybackHistoryEntry>()) }
     var loading by remember { mutableStateOf(true) }
-    val albums = remember(tracks) { buildMediaAlbums(tracks) }
+    val albums by produceState(emptyList<MediaAlbum>(), catalogTracks, history) {
+        val source = catalogTracks
+        val playbackHistory = history
+        value = withContext(Dispatchers.Default) {
+            buildMediaAlbums(source.map { item ->
+                val played = playbackHistory[item.track.path]
+                item.copy(lastPlayedAtMs = played?.playedAtMs ?: 0L, playCount = played?.playCount ?: 0)
+            })
+        }
+    }
     val scope = rememberCoroutineScope()
     val mutationMutex = remember { Mutex() }
     var playlists by remember { mutableStateOf(emptyList<MediaPlaylist>()) }
@@ -86,30 +96,44 @@ internal fun MediaAlbumScreen(
         }
     }
 
-    LaunchedEffect(revision, refreshVersion, favoriteDirectories) {
+    LaunchedEffect(revision, refreshVersion) {
         try {
             val loaded = withContext(Dispatchers.IO) {
-                val roots = favoriteDirectories.map { it.absolutePath.trimEnd('/') + "/" }
-                val indexed = repository.getIndexedTracks().filter { track ->
-                    roots.any { track.path.startsWith(it) }
-                }
-                val jobContext = coroutineContext
-                val history = repository.getPlaybackHistory(Int.MAX_VALUE).associateBy { it.path }
-                val catalog = AlbumCatalogLoader.load(indexed) { !jobContext.isActive }.map { item ->
-                    val played = history[item.track.path]
-                    item.copy(lastPlayedAtMs = played?.playedAtMs ?: 0L, playCount = played?.playCount ?: 0)
-                }
-                ensureActive()
-                catalog to repository.getPlaylists().filterNot { it.isSystem }
+                repository.getPlaybackHistory(Int.MAX_VALUE).associateBy { it.path } to
+                    repository.getPlaylists().filterNot { it.isSystem }
             }
-            tracks = loaded.first
+            history = loaded.first
             playlists = loaded.second
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
             showLibraryError(context, error)
+        }
+    }
+
+    LaunchedEffect(catalogRevision, refreshVersion, favoriteDirectories) {
+        loading = true
+        try {
+            val indexed = withContext(Dispatchers.IO) {
+                val roots = favoriteDirectories.map { it.absolutePath.trimEnd('/') + "/" }
+                repository.getIndexedTracks().filter { track ->
+                    roots.any { track.path.startsWith(it) }
+                }
+            }
+            catalogTracks = withContext(Dispatchers.IO) {
+                val jobContext = coroutineContext
+                repository.getCachedAlbumTracks(indexed) { !jobContext.isActive }
+            }
+            catalogTracks = withContext(Dispatchers.IO) {
+                val jobContext = coroutineContext
+                repository.loadAlbumTracks(indexed) { !jobContext.isActive }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            showLibraryError(context, error)
         } finally {
-            loading = false
+            if (coroutineContext.isActive) loading = false
         }
     }
 

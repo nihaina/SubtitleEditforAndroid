@@ -117,25 +117,12 @@ internal fun filterAndSortMediaAlbums(
 private fun normalizedAlbumName(name: String): String = name.trim()
     .takeUnless { it.equals("<unknown>", true) }.orEmpty().lowercase(Locale.ROOT)
 
-/**
- * Reads only text metadata off the UI thread. The file stamp keeps tag edits fresh, while the
- * bounded cache prevents listening-history revisions from repeatedly opening every media file.
- */
+/** Builds the catalog off the UI thread; the repository supplies persisted text tags. */
 internal object AlbumCatalogLoader {
-    private data class FileStamp(val path: String, val length: Long, val modifiedAtMs: Long)
-    private val metadataCache = object : LinkedHashMap<FileStamp, MediaAlbumMetadata>(128, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<FileStamp, MediaAlbumMetadata>?): Boolean = size > 2048
-    }
-
-    fun invalidate(path: String) {
-        synchronized(metadataCache) {
-            metadataCache.keys.removeAll { it.path == path }
-        }
-    }
-
     @WorkerThread
     fun load(
         tracks: List<MediaLibraryTrack>,
+        readMetadata: (File) -> MediaAlbumMetadata = PlayerTrackMetadataReader::readAlbumMetadata,
         isCancelled: () -> Boolean = { Thread.currentThread().isInterrupted }
     ): List<MediaAlbumTrack> {
         val result = ArrayList<MediaAlbumTrack>(tracks.size)
@@ -145,11 +132,8 @@ internal object AlbumCatalogLoader {
             if (!paths.add(track.path)) continue
             val file = File(track.path)
             if (!file.isFile || !file.canRead()) continue
-            val stamp = FileStamp(file.absolutePath, file.length(), file.lastModified())
-            val metadata = synchronized(metadataCache) { metadataCache[stamp] }
-                ?: PlayerTrackMetadataReader.readAlbumMetadata(file).also { read ->
-                    synchronized(metadataCache) { metadataCache[stamp] = read }
-                }
+            val modifiedAtMs = file.lastModified()
+            val metadata = readMetadata(file)
             result += MediaAlbumTrack(
                 track = track,
                 albumArtist = metadata.albumArtist,
@@ -157,7 +141,7 @@ internal object AlbumCatalogLoader {
                 year = YEAR_PATTERN.find(metadata.year)?.groupValues?.get(1)?.toIntOrNull()?.takeIf { it > 0 },
                 trackNumber = metadata.trackNumber.substringBefore('/').trim().toIntOrNull()?.takeIf { it > 0 },
                 discNumber = metadata.discNumber.substringBefore('/').trim().toIntOrNull()?.takeIf { it > 0 },
-                modifiedAtMs = stamp.modifiedAtMs,
+                modifiedAtMs = modifiedAtMs,
                 genre = metadata.genre
             )
         }

@@ -114,7 +114,6 @@ internal object PlayerTrackMetadataReader {
         cache.snapshot().keys.filter { it.path == path }.forEach(cache::remove)
         videoDetailsCache.snapshot().keys.filter { it.path == path }.forEach(videoDetailsCache::remove)
         MediaArtworkLoader.invalidate(path)
-        AlbumCatalogLoader.invalidate(path)
     }
 
     fun readLibraryTrack(file: File, durationMs: Long = 0L): MediaLibraryTrack {

@@ -5,9 +5,9 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
-/** Version two extends the original tables in place; user collections are never rebuilt. */
+/** Schema upgrades extend the original tables in place; user collections are never rebuilt. */
 internal class MediaLibraryDatabase(context: Context, name: String = NAME) :
-    SQLiteOpenHelper(context.applicationContext, name, null, 2) {
+    SQLiteOpenHelper(context.applicationContext, name, null, 3) {
 
     init {
         setWriteAheadLoggingEnabled(true)
@@ -16,6 +16,7 @@ internal class MediaLibraryDatabase(context: Context, name: String = NAME) :
     override fun onCreate(db: SQLiteDatabase) {
         createOriginalTables(db)
         createAccountingTables(db)
+        MediaAlbumMetadataStore.createTable(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -29,6 +30,9 @@ internal class MediaLibraryDatabase(context: Context, name: String = NAME) :
                 """INSERT OR IGNORE INTO legacy_listening_plays(date,path,play_count)
                 SELECT listening_date,media_path,SUM(track_count) FROM listening_sessions GROUP BY listening_date,media_path"""
             )
+        }
+        if (oldVersion < 3) {
+            MediaAlbumMetadataStore.createTable(db)
         }
     }
 

@@ -24,10 +24,13 @@ internal class MediaLibraryRepository
 private constructor(
     private val helper: MediaLibraryDatabase,
     private val readMetadata: (File, Long) -> MediaLibraryTrack,
+    private val readAlbumMetadata: (File) -> MediaAlbumMetadata,
 ) : Closeable {
     private val writeLock = Any()
     private val changes = MutableStateFlow(0L)
     val revision: StateFlow<Long> = changes.asStateFlow()
+    private val catalogChanges = MutableStateFlow(0L)
+    val catalogRevision: StateFlow<Long> = catalogChanges.asStateFlow()
     private val db
         get() = helper.writableDatabase
 
@@ -35,11 +38,28 @@ private constructor(
         changes.update { it + 1L }
     }
 
+    private fun catalogChanged() {
+        catalogChanges.update { it + 1L }
+        changed()
+    }
+
     private fun <T> write(block: SQLiteDatabase.() -> T): T =
         synchronized(writeLock) { db.libraryTransaction(block) }
 
     private fun metadata(path: String, durationMs: Long = 0L): MediaLibraryTrack =
         readMetadata(File(path), durationMs)
+
+    private data class IndexedTrack(val track: MediaLibraryTrack, val albumMetadata: IndexedAlbumMetadata?)
+
+    private fun indexedTrack(path: String, durationMs: Long = 0L): IndexedTrack {
+        val file = File(path)
+        val length = file.length()
+        val modifiedAtMs = file.lastModified()
+        val track = metadata(path, durationMs)
+        // Read immediately after the base tags so both use the same native metadata snapshot.
+        val albumMetadata = IndexedAlbumMetadata(file.absolutePath, length, modifiedAtMs, readAlbumMetadata(file))
+        return IndexedTrack(track, albumMetadata.takeIf { it.matches(file) })
+    }
 
     fun isFavorite(path: String): Boolean = db.exists("SELECT 1 FROM favorites WHERE path=?", path)
 
@@ -473,7 +493,7 @@ private constructor(
         val visitedFiles = HashSet<String>()
         val pending = ArrayDeque<File>()
         directories.forEach { pending.addLast(it) }
-        val batch = ArrayList<MediaLibraryTrack>(24)
+        val batch = ArrayList<IndexedTrack>(24)
         var count = 0
         fun checkCancelled() {
             if (isCancelled()) throw CancellationException("Media scan cancelled")
@@ -481,9 +501,14 @@ private constructor(
         fun commitBatch() {
             if (batch.isEmpty()) return
             checkCancelled()
-            write { batch.forEach { storeIndexedTrack(it) } }
+            write {
+                batch.forEach {
+                    storeIndexedTrack(it.track)
+                    it.albumMetadata?.let { metadata -> MediaAlbumMetadataStore.put(this, metadata) }
+                }
+            }
             batch.clear()
-            changed()
+            catalogChanged()
         }
         while (pending.isNotEmpty()) {
             checkCancelled()
@@ -498,7 +523,7 @@ private constructor(
                 else if (file.isFile && file.extension.lowercase(Locale.ROOT) in extensions) {
                     val path = runCatching { file.canonicalPath }.getOrNull() ?: return@forEach
                     if (!visitedFiles.add(path)) return@forEach
-                    batch += metadata(file.absolutePath)
+                    batch += indexedTrack(file.absolutePath)
                     count++
                     if (batch.size >= 24) commitBatch()
                 }
@@ -510,9 +535,12 @@ private constructor(
 
     fun indexTrack(path: String, durationMs: Long = 0L) {
         if (!File(path).isFile) return
-        val track = metadata(path, durationMs)
-        write { storeIndexedTrack(track) }
-        changed()
+        val indexed = indexedTrack(path, durationMs)
+        write {
+            storeIndexedTrack(indexed.track)
+            indexed.albumMetadata?.let { MediaAlbumMetadataStore.put(this, it) }
+        }
+        catalogChanged()
     }
 
     private fun SQLiteDatabase.storeIndexedTrack(track: MediaLibraryTrack) {
@@ -541,6 +569,49 @@ private constructor(
     /** Scanned/indexed files only; collections and listening history do not expand the catalog. */
     fun getIndexedTracks(): List<MediaLibraryTrack> =
         tracks("SELECT $TRACK_COLUMNS FROM library_tracks ORDER BY path")
+
+    /** Old indexes can display their base album/singer tags before missing text tags are read. */
+    fun getCachedAlbumTracks(
+        tracks: List<MediaLibraryTrack>,
+        isCancelled: () -> Boolean = { Thread.currentThread().isInterrupted },
+    ): List<MediaAlbumTrack> = albumTracks(tracks, readMissing = false, isCancelled)
+
+    fun loadAlbumTracks(
+        tracks: List<MediaLibraryTrack>,
+        isCancelled: () -> Boolean = { Thread.currentThread().isInterrupted },
+    ): List<MediaAlbumTrack> = albumTracks(tracks, readMissing = true, isCancelled)
+
+    private fun albumTracks(
+        tracks: List<MediaLibraryTrack>,
+        readMissing: Boolean,
+        isCancelled: () -> Boolean,
+    ): List<MediaAlbumTrack> {
+        val cached = MediaAlbumMetadataStore.read(db)
+        val pending = ArrayList<IndexedAlbumMetadata>(24)
+        fun commitBatch() {
+            if (pending.isEmpty()) return
+            // Cache population does not change catalog membership or cancel its own loader.
+            write { pending.forEach { MediaAlbumMetadataStore.put(this, it) } }
+            pending.clear()
+        }
+        try {
+            return AlbumCatalogLoader.load(tracks, readMetadata = { file ->
+                cached[file.absolutePath]?.takeIf { it.matches(file) }?.metadata
+                    ?: if (readMissing) {
+                        val length = file.length()
+                        val modifiedAtMs = file.lastModified()
+                        readAlbumMetadata(file).also { metadata ->
+                            val entry = IndexedAlbumMetadata(file.absolutePath, length, modifiedAtMs, metadata)
+                            if (entry.matches(file)) pending += entry
+                            if (pending.size >= 24) commitBatch()
+                        }
+                    } else MediaAlbumMetadata()
+            }, isCancelled = isCancelled)
+        } finally {
+            // Completed reads survive navigation/cancellation, including a partial final batch.
+            commitBatch()
+        }
+    }
 
     fun searchLibrary(query: String): List<MediaLibraryTrack> {
         val normalized = query.trim().lowercase(Locale.ROOT)
@@ -646,6 +717,7 @@ private constructor(
                         ?: MediaLibraryRepository(
                                 MediaLibraryDatabase(context),
                                 PlayerTrackMetadataReader::readLibraryTrack,
+                                PlayerTrackMetadataReader::readAlbumMetadata,
                             )
                             .also { instance = it }
                 }
@@ -657,10 +729,12 @@ private constructor(
         fun open(
             context: Context,
             name: String,
+            albumMetadataReader: (File) -> MediaAlbumMetadata =
+                PlayerTrackMetadataReader::readAlbumMetadata,
             metadataReader: (File, Long) -> MediaLibraryTrack =
                 PlayerTrackMetadataReader::readLibraryTrack,
         ): MediaLibraryRepository =
-            MediaLibraryRepository(MediaLibraryDatabase(context, name), metadataReader)
+            MediaLibraryRepository(MediaLibraryDatabase(context, name), metadataReader, albumMetadataReader)
     }
 }
 
