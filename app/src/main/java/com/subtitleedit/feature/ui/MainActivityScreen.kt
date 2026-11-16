@@ -759,16 +759,13 @@ internal fun MainBottomNavigation(selectedItemId: Int, playerModeEnabled: Boolea
                     .weight(1f)
                     .fillMaxHeight()
                     .padding(vertical = 4.dp)
-                    // BottomNavigationView dispatched the selection callback even
-                    // when the tapped item was already selected. MainActivity uses
-                    // that callback to recreate/reset the corresponding top-level
-                    // page, so repeated taps must remain observable here.
                     .selectable(
                         selected = selected,
+                        enabled = !selected,
                         role = Role.Tab,
                         interactionSource = interactionSource,
                         indication = null,
-                        onClick = { onSelected(id) }
+                        onClick = { if (!selected) onSelected(id) }
                     ),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center

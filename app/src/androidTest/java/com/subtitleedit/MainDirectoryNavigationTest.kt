@@ -3,6 +3,7 @@ package com.subtitleedit
 import android.content.Context
 import androidx.activity.compose.setContent
 import androidx.compose.material3.Text
+import androidx.compose.runtime.MutableIntState
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -34,6 +35,60 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class MainDirectoryNavigationTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
+
+    @Test fun reselectingMediaLibraryPreservesItsToolbarAndCanStillReturnToDirectory() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("player_settings", Context.MODE_PRIVATE)
+        val previousMode = preferences.all["player_mode_enabled"] as? Boolean
+        assertTrue(preferences.edit().putBoolean("player_mode_enabled", true).commit())
+        val root = File(context.cacheDir, "main-tab-reselection-${System.nanoTime()}").apply { check(mkdirs()) }
+        val subtitle = File(root, "kept.srt").apply { writeText("subtitle") }
+        var scenario: ActivityScenario<MainActivity>? = null
+        try {
+            scenario = ActivityScenario.launch(MainActivity::class.java)
+            lateinit var activity: MainActivity
+            scenario.onActivity {
+                activity = it
+                // Isolate Activity navigation callbacks from page effects publishing another toolbar.
+                it.setContent { Text("Top-level navigation regression") }
+                field<DirectoryWatcher>(it, "directoryWatcher").setEnabled(false)
+                assertTrue(load(it, root))
+            }
+            await { onMain { screen(activity).currentDirectory == root && !screen(activity).isDirectoryLoading } }
+            onMain {
+                selectPage(activity, R.id.nav_library)
+                activity.updateTopLevelToolbar("Nested media folder", true) {}
+                val library = screen(activity)
+                val libraryVersion = selectionVersion(activity)
+                repeat(3) { selectPage(activity, R.id.nav_library) }
+                assertEquals(libraryVersion, selectionVersion(activity))
+                assertEquals("Nested media folder", screen(activity).toolbarTitle)
+                assertTrue(screen(activity).toolbarHasBack)
+                assertSame("Reselection must not publish or reset the current page", library, screen(activity))
+                selectPage(activity, R.id.nav_directory)
+                assertEquals(libraryVersion + 1, selectionVersion(activity))
+            }
+            await { onMain {
+                val current = screen(activity)
+                current.selectedTopLevelItem == R.id.nav_directory && current.currentDirectory == root &&
+                    !current.isDirectoryLoading && subtitle in current.files
+            } }
+            onMain {
+                val directory = screen(activity)
+                val directoryVersion = selectionVersion(activity)
+                repeat(3) { selectPage(activity, R.id.nav_directory) }
+                assertEquals(directoryVersion, selectionVersion(activity))
+                assertSame("Reselection must not reload the directory", directory, screen(activity))
+            }
+        } finally {
+            scenario?.close()
+            val editor = preferences.edit()
+            if (previousMode == null) editor.remove("player_mode_enabled")
+            else editor.putBoolean("player_mode_enabled", previousMode)
+            assertTrue(editor.commit())
+            root.deleteRecursively()
+        }
+    }
 
     @Test fun pendingNavigationKeepsTheDisplayedPathRowsMetadataAndScrollUntilTheNewSnapshotIsReady() {
         val context = ApplicationProvider.getApplicationContext<Context>()
@@ -123,6 +178,13 @@ class MainDirectoryNavigationTest {
 
     private fun load(activity: MainActivity, directory: File): Boolean =
         invoke(activity, "loadDirectory", arrayOf(File::class.java, Boolean::class.javaPrimitiveType!!), directory, true) as Boolean
+
+    private fun selectPage(activity: MainActivity, itemId: Int) {
+        invoke(activity, "showTopLevelPage", arrayOf(Int::class.javaPrimitiveType!!), itemId)
+    }
+
+    private fun selectionVersion(activity: MainActivity): Int =
+        field<MutableIntState>(activity, "topLevelPageSelectionVersion\$delegate").intValue
 
     private fun screen(activity: MainActivity): MainActivityScreenState =
         invoke(activity, "getScreenState", emptyArray()) as MainActivityScreenState

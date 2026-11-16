@@ -555,12 +555,12 @@ class MainActivity : AppComposeActivity() {
     }
 
     private fun showTopLevelPage(itemId: Int) {
-        // The legacy BottomNavigationView replaced the selected fragment even
-        // when the user tapped the already-selected item. Keep a generation
-        // change for that case so Compose pages reset/refresh with the same
-        // lifecycle semantics.
+        val target = MainNavigationPolicy.pageForMode(
+            itemId, com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled
+        )
+        if (target == stateModel.documentState.selectedTopLevelItem) return
         topLevelPageSelectionVersion++
-        topLevelNavigationCoordinator.showPage(itemId)
+        topLevelNavigationCoordinator.showPage(target)
     }
 
     private fun publishScreenState() {
