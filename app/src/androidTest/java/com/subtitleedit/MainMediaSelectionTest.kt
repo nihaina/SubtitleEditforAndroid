@@ -37,6 +37,63 @@ class MainMediaSelectionTest {
     @get:Rule val compose = createEmptyComposeRule()
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
 
+    @Test fun directoryTagMenuRejectsUnsupportedArtworkTargetsButKeepsTextTagEditing() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("player_settings", Context.MODE_PRIVATE)
+        val previousMode = preferences.all["player_mode_enabled"] as? Boolean
+        assertTrue(preferences.edit().putBoolean("player_mode_enabled", false).commit())
+        val root = File(context.cacheDir, "tag-menu-selection-${System.nanoTime()}").apply { check(mkdirs()) }
+        val wav = File(root, "source.WAV").apply { writeBytes(byteArrayOf(0)) }
+        val mp3 = File(root, "source.mp3").apply { writeBytes(byteArrayOf(0)) }
+        val cover = File(root, "cover.jpg").apply { writeBytes(byteArrayOf(0)) }
+        val avi = File(root, "source.avi").apply { writeBytes(byteArrayOf(0)) }
+        var scenario: ActivityScenario<MainActivity>? = null
+        try {
+            scenario = ActivityScenario.launch(MainActivity::class.java)
+            lateinit var activity: MainActivity
+            lateinit var model: MainViewModel
+            scenario.onActivity {
+                activity = it
+                model = ViewModelProvider(it)[MainViewModel::class.java]
+                model.documentState.viewMode = FileBrowserViewMode.DETAILED
+                field<DirectoryWatcher>(it, "directoryWatcher").setEnabled(false)
+                invoke(it, "showTopLevelPage", arrayOf(Int::class.javaPrimitiveType!!), R.id.nav_directory)
+                assertTrue(invoke(it, "loadDirectory",
+                    arrayOf(File::class.java, Boolean::class.javaPrimitiveType!!), root, true) as Boolean)
+            }
+            compose.waitUntil(5_000L) {
+                onMain { screen(activity).currentDirectory == root && !screen(activity).isDirectoryLoading }
+            }
+            val selections = listOf(
+                listOf(wav, cover) to false,
+                listOf(cover, wav, mp3) to false,
+                listOf(avi, cover) to false,
+                listOf(mp3, cover) to true,
+                listOf(wav) to true,
+                listOf(wav, mp3) to true
+            )
+            selections.forEach { (files, expected) ->
+                onMain {
+                    model.documentState.selectedPaths.clear()
+                    model.documentState.selectedPaths.addAll(files.map { it.path })
+                    invoke(activity, "publishScreenState", emptyArray())
+                    assertEquals(files.map { it.name }.toString(), expected, screen(activity).canEditTagsSelected)
+                }
+                compose.onNodeWithText("更多").performClick()
+                val tags = compose.onNodeWithText(context.getString(R.string.player_info_edit_tags))
+                if (expected) tags.assertIsDisplayed() else tags.assertDoesNotExist()
+                pressBack()
+            }
+        } finally {
+            scenario?.close()
+            val restore = preferences.edit()
+            if (previousMode == null) restore.remove("player_mode_enabled")
+            else restore.putBoolean("player_mode_enabled", previousMode)
+            assertTrue(restore.commit())
+            root.deleteRecursively()
+        }
+    }
+
     @Test fun directorySelectionSurvivesLibraryAndCategoryNavigationAndUsesTheSharedOptions() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("player_settings", Context.MODE_PRIVATE)

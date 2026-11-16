@@ -11,7 +11,10 @@ import org.junit.rules.TemporaryFolder
 class MediaTagFileSelectionPolicyTest {
     @get:Rule val directory = TemporaryFolder()
 
-    private fun media(file: File) = file.extension.lowercase(Locale.ROOT) in setOf("mp3", "wav", "mp4", "mkv")
+    private fun media(file: File) = file.extension.lowercase(Locale.ROOT) in setOf(
+        "mp3", "wav", "flac", "aac", "ogg", "oga", "opus", "m4a", "m4b", "wma", "ape", "wv", "aif", "aiff",
+        "mp4", "m4v", "mov", "mkv", "avi", "webm", "flv", "wmv", "ts", "3gp", "mpg", "mpeg", "mts", "m2ts"
+    )
     private fun select(vararg files: File) = MediaTagFileSelectionPolicy.fromFiles(files.toList(), ::media)
 
     @Test fun oneCoverIsSeparatedFromMediaWithoutChangingMediaOrder() {
@@ -28,8 +31,39 @@ class MediaTagFileSelectionPolicyTest {
     @Test fun mediaOnlySelectionsKeepTheirExistingBehavior() {
         val first = directory.newFile("first.mp3")
         val second = directory.newFile("second.mkv")
+        val wav = directory.newFile("third.WAV")
         assertEquals(MediaTagFileSelection(listOf(first), null), select(first))
         assertEquals(MediaTagFileSelection(listOf(first, second), null), select(first, second))
+        assertEquals(MediaTagFileSelection(listOf(wav), null), select(wav))
+        assertEquals(MediaTagFileSelection(listOf(first, wav), null), select(first, wav))
+    }
+
+    @Test fun unsupportedArtworkTargetsRejectTheImageShortcutInEitherOrder() {
+        val cover = directory.newFile("cover.jpg")
+        for (extension in listOf("WAV", "avi", "webm", "flv", "wmv", "ts", "3gp", "mpg", "mpeg", "mts", "m2ts")) {
+            val source = directory.newFile("source.$extension")
+            assertNull(extension, select(source, cover))
+            assertNull(extension, select(cover, source))
+            assertEquals(MediaTagFileSelection(listOf(source), null), select(source))
+        }
+    }
+
+    @Test fun everyTargetMustSupportArtworkWhenAnImageIsSelected() {
+        val wav = directory.newFile("source.wav")
+        val mp3 = directory.newFile("source.mp3")
+        val cover = directory.newFile("cover.png")
+        assertNull(select(mp3, cover, wav))
+        assertNull(select(wav, mp3, cover))
+        assertNull(select(cover, wav, mp3))
+    }
+
+    @Test fun nativeAudioArtworkAndSupportedVideoShortcutsRemainAvailable() {
+        val cover = directory.newFile("cover.png")
+        for (extension in listOf("MP3", "flac", "aac", "ogg", "oga", "opus", "m4a", "m4b", "wma", "ape", "wv",
+            "aif", "aiff", "mp4", "m4v", "mov", "mkv")) {
+            val source = directory.newFile("source.$extension")
+            assertEquals(MediaTagFileSelection(listOf(source), cover), select(source, cover))
+        }
     }
 
     @Test fun everyImageFormatAcceptedByTheCoverPickerCanBeSelected() {

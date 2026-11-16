@@ -11,6 +11,11 @@ internal data class MediaTagFileSelection(
 /** A tag-editing selection may contain one cover image alongside its media files. */
 internal object MediaTagFileSelectionPolicy {
     val coverExtensions = setOf("jpg", "jpeg", "png", "webp", "bmp", "gif", "heic", "heif")
+    // The image shortcut needs an artwork-capable target. Media-only selections can still edit text tags.
+    private val coverMediaExtensions = setOf(
+        "mp3", "flac", "aac", "ogg", "oga", "opus", "m4a", "m4b", "wma", "ape", "wv", "aif", "aiff",
+        "mp4", "m4v", "mov", "mkv"
+    )
 
     fun fromFiles(files: List<File>, isMediaFile: (File) -> Boolean): MediaTagFileSelection? {
         val mediaFiles = mutableListOf<File>()
@@ -26,6 +31,8 @@ internal object MediaTagFileSelectionPolicy {
                 else -> return null
             }
         }
-        return if (mediaFiles.isEmpty()) null else MediaTagFileSelection(mediaFiles, coverFile)
+        if (mediaFiles.isEmpty()) return null
+        if (coverFile != null && mediaFiles.any { it.extension.lowercase(Locale.ROOT) !in coverMediaExtensions }) return null
+        return MediaTagFileSelection(mediaFiles, coverFile)
     }
 }
