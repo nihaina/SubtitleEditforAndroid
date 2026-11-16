@@ -25,6 +25,8 @@ import kotlinx.coroutines.launch
 internal object MediaLibraryFileObserver {
     private val coverage = MutableStateFlow<Set<String>>(emptySet())
     val observedDirectories = coverage.asStateFlow()
+    private val _indexing = MutableStateFlow(false)
+    val indexing = _indexing.asStateFlow()
     val directoryUpdates = DirectoryUpdateTracker()
     @Volatile private var instance: MediaLibraryObservation? = null
     private fun observation(context: Context): MediaLibraryObservation = instance ?: synchronized(this) {
@@ -35,7 +37,8 @@ internal object MediaLibraryFileObserver {
                 coverage.value = paths
             },
             onDirectoriesUpdated = directoryUpdates::publish,
-            configuredRoots = { FavoriteDirectoryStore(app).load().paths }).also { instance = it }
+            configuredRoots = { FavoriteDirectoryStore(app).load().paths },
+            onIndexingChanged = { _indexing.value = it }).also { instance = it }
     }
 
     fun syncRoots(context: Context, directories: List<File>) = observation(context).syncRoots(context, directories)
@@ -49,7 +52,8 @@ internal class MediaLibraryObservation(
     private val repository: MediaLibraryRepository,
     private val onCoverageChanged: (Set<String>) -> Unit = {},
     private val onDirectoriesUpdated: (Set<String>) -> Unit = {},
-    private val configuredRoots: (() -> Set<String>)? = null
+    private val configuredRoots: (() -> Set<String>)? = null,
+    private val onIndexingChanged: (Boolean) -> Unit = {}
 ) {
     private sealed interface Request {
         data class Roots(val context: Context, val paths: Set<String>, val removedPaths: Set<String> = emptySet()) : Request
@@ -159,6 +163,15 @@ internal class MediaLibraryObservation(
     }
 
     private fun reconcileNow(context: Context, directories: List<File>): Int {
+        return whileIndexing { reconcileDirectories(context, directories) }
+    }
+
+    private inline fun <T> whileIndexing(block: () -> T): T {
+        onIndexingChanged(true)
+        return try { block() } finally { onIndexingChanged(false) }
+    }
+
+    private fun reconcileDirectories(context: Context, directories: List<File>): Int {
         directories.forEach { SharedFileCache.directories.invalidate(it.absolutePath) }
         val seen = linkedSetOf<String>()
         val successfulListings = linkedSetOf<String>()
@@ -209,9 +222,11 @@ internal class MediaLibraryObservation(
             onDirectoriesUpdated(setOf(request.directory).withParents())
             return
         }
-        repository.updateObservedPaths(paths,
-            metadataAlreadyUpdated = !request.reset, onDirectoryDiscovered = ::observe) { directory, _ ->
-            if (roots.any { within(directory.absolutePath, it) }) observe(directory)
+        whileIndexing {
+            repository.updateObservedPaths(paths,
+                metadataAlreadyUpdated = !request.reset, onDirectoryDiscovered = ::observe) { directory, _ ->
+                if (roots.any { within(directory.absolutePath, it) }) observe(directory)
+            }
         }
         paths.forEach { path ->
             val metadata = SharedFileCache.attributes.get(File(path))
