@@ -1,5 +1,8 @@
 package com.subtitleedit.ui
 
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
+import android.graphics.Bitmap
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
@@ -9,6 +12,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -129,6 +133,63 @@ class MediaSelectionOptionsTest {
         compose.waitUntil(5_000L) { barrier { f.repository.getPlaybackHistory().map { it.path } == listOf(f.files[2].path) } }
         compose.runOnIdle { assertEquals(f.files.take(2).map { it.path }, f.selection.selectedPaths) }
         assertTrue(f.files.all { it.isFile })
+    }
+
+    @Test fun portraitKeepsTheTitleAndCloseSelectionCheckboxOutsideTheScrollingActions() =
+        checkFixedDialogLayout(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, Configuration.ORIENTATION_PORTRAIT)
+
+    @Test fun landscapeKeepsTheTitleAndCloseSelectionCheckboxOutsideTheScrollingActions() =
+        checkFixedDialogLayout(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, Configuration.ORIENTATION_LANDSCAPE)
+
+    private fun checkFixedDialogLayout(requestedOrientation: Int, expectedOrientation: Int) {
+        val previousRequest = compose.activity.requestedOrientation
+        val previousOrientation = compose.activity.resources.configuration.orientation
+        compose.activityRule.scenario.onActivity { it.requestedOrientation = requestedOrientation }
+        compose.waitUntil(5_000L) { compose.activity.resources.configuration.orientation == expectedOrientation }
+        try {
+            val f = Fixture().also { fixture = it }
+            f.selection.select(f.files[0].path)
+            compose.setContent {
+                SubtitleEditComposeTheme {
+                    MediaSelectionOptionsDialog(f.selection, onAction = { _, _ -> }, onDismiss = {})
+                }
+            }
+            val title = compose.onNodeWithTag("media-selection-options-title")
+                .assertIsDisplayed().assertTextEquals("1 首所选歌曲的选项")
+            if (InstrumentationRegistry.getArguments().getString("captureLayout") == "true") {
+                InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()?.let { bitmap ->
+                    File(compose.activity.externalCacheDir, "selection-options-$expectedOrientation.png").outputStream().use {
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+                    }
+                    bitmap.recycle()
+                }
+            }
+            val footer = compose.onNodeWithTag("media-selection-close-after-action").assertIsDisplayed().assertIsOn()
+            val titleBounds = title.fetchSemanticsNode().boundsInRoot
+            val footerBounds = footer.fetchSemanticsNode().boundsInRoot
+            val listBounds = compose.onNodeWithTag("media-selection-action-list").fetchSemanticsNode().boundsInRoot
+            assertTrue("The action list must remain below the title", listBounds.top >= titleBounds.bottom - 1f)
+            assertTrue("The action list must end above the fixed checkbox", listBounds.bottom <= footerBounds.top + 1f)
+
+            MediaSelectionAction.entries.forEach { action(it).assertIsDisplayed().assertIsEnabled() }
+            title.assertIsDisplayed()
+            footer.assertIsDisplayed().performClick().assertIsOff().performClick().assertIsOn()
+            assertEquals("Scrolling actions must not move the title", titleBounds, title.fetchSemanticsNode().boundsInRoot)
+            assertEquals("Scrolling actions must not move the checkbox", footerBounds, footer.fetchSemanticsNode().boundsInRoot)
+
+            compose.runOnIdle { f.selection.select(f.files[1].path) }
+            title.assertTextEquals("2 首所选歌曲的选项")
+            action(MediaSelectionAction.FILE_INFO).assertIsNotEnabled()
+            action(MediaSelectionAction.LOCATE_DIRECTORY).assertIsNotEnabled()
+            footer.assertIsDisplayed().assertIsOn()
+        } finally {
+            val restore = if (previousRequest == ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
+                if (previousOrientation == Configuration.ORIENTATION_LANDSCAPE) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            else previousRequest
+            compose.activityRule.scenario.onActivity { it.requestedOrientation = restore }
+            compose.waitUntil(5_000L) { compose.activity.resources.configuration.orientation == previousOrientation }
+        }
     }
 
     private fun showHost(f: Fixture) {

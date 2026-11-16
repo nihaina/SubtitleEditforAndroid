@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="media_selection_options_title">%1$d 首所选歌曲的选项</string>
     <string name="media_selection_close_after_action">选择某个选项后关闭选择</string>
     <string name="media_selection_add_to_queue">添加到当前播放列表</string>
     <string name="media_selection_play_next">在当前歌曲后播放</string>
