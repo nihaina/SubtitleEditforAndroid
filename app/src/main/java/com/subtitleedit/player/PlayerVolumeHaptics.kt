@@ -9,7 +9,7 @@ import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import android.view.View
 
-/** Ordinary changes use a perceptible short pulse; boundaries use the system's distinct tick. */
+/** Ordinary changes use a softer pulse; boundaries retain the system's distinct tick. */
 internal class PlayerVolumeHaptics(private val view: View) {
     @Suppress("DEPRECATION")
     private val vibrator = if (Build.VERSION.SDK_INT >= 31) {
@@ -32,8 +32,10 @@ internal class PlayerVolumeHaptics(private val view: View) {
                     return
                 }
                 try {
-                    val amplitude = if (motor.hasAmplitudeControl()) 160 else VibrationEffect.DEFAULT_AMPLITUDE
-                    motor.vibrate(VibrationEffect.createOneShot(18L, amplitude), attributes)
+                    val amplitudeControl = motor.hasAmplitudeControl()
+                    val amplitude = if (amplitudeControl) 80 else VibrationEffect.DEFAULT_AMPLITUDE
+                    val durationMs = if (amplitudeControl) 18L else 9L
+                    motor.vibrate(VibrationEffect.createOneShot(durationMs, amplitude), attributes)
                 } catch (_: SecurityException) {
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                 }
