@@ -92,6 +92,12 @@ internal fun MainTopLevelPages(
 
     fun loadFavoriteDirectories() = refreshFavoriteDirectoryState(directoryStore, state)
 
+    fun removeFavoriteDirectory(directory: File) {
+        directoryStore.remove(directory)
+        loadFavoriteDirectories()
+        MediaLibraryFileObserver.removeDirectory(context, directory, state.favoriteDirectories)
+    }
+
     fun switchSoftwareDirectory(targetRoot: File, migrateModels: Boolean) {
         val currentRoot = settings.getSoftwareDirectory().absoluteFile
         val currentModels = settings.getModelDirectory()
@@ -321,10 +327,7 @@ internal fun MainTopLevelPages(
             favoriteDirectories = state.favoriteDirectories,
             isActive = isActive,
             scanPickerPending = libraryScanPickerPending,
-            onRemoveFavoriteDirectory = { directory ->
-                directoryStore.remove(directory)
-                loadFavoriteDirectories()
-            }
+            onRemoveFavoriteDirectory = ::removeFavoriteDirectory
         )
 
         R.id.nav_stats -> ListeningStatsScreen(
@@ -343,9 +346,8 @@ internal fun MainTopLevelPages(
             onRequestRemoval = { state.pendingFavoriteRemoval = it },
             onConfirmRemoval = {
                 val directory = state.pendingFavoriteRemoval ?: return@FavoritesScreen
-                directoryStore.remove(directory)
+                removeFavoriteDirectory(directory)
                 state.pendingFavoriteRemoval = null
-                loadFavoriteDirectories()
             },
             onDismissRemoval = { state.pendingFavoriteRemoval = null }
         )

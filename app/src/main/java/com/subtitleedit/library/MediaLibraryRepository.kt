@@ -666,6 +666,26 @@ private constructor(
         }
     }
 
+    /** Drops only the removed root's persistent catalog; shared caches and user collections remain intact. */
+    fun removeDirectoryFromLibrary(directory: File, retainedDirectories: List<File>): Int {
+        val removedRoot = directory.absolutePath
+        val retainedRoots = retainedDirectories.map { it.absolutePath }
+        val removed = write {
+            val paths = rawQuery("SELECT path FROM library_tracks UNION SELECT path FROM album_metadata", null).use { cursor ->
+                buildList {
+                    while (cursor.moveToNext()) {
+                        val path = cursor.getString(0)
+                        if (isWithin(path, removedRoot) && retainedRoots.none { isWithin(path, it) }) add(path)
+                    }
+                }
+            }
+            paths.forEach { removeIndexedPath(it) }
+            paths.size
+        }
+        if (removed > 0) catalogChanged()
+        return removed
+    }
+
     private fun SQLiteDatabase.removeIndexedPath(path: String) {
         delete("library_tracks", "path=?", arrayOf(path))
         delete("album_metadata", "path=?", arrayOf(path))

@@ -5,11 +5,15 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.subtitleedit.util.SharedFileCache
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -72,6 +76,10 @@ class MediaLibraryObservationTest {
             observation.syncRoots(context, listOf(directory))
             await { repository.getIndexedTracks().size == 1 }
             val revision = repository.catalogRevision.value
+            observation.syncRoots(context, emptyList())
+            assertEquals(0, observation.reconcile(context, emptyList()))
+            assertEquals("A temporary empty navigation snapshot must not delete persisted tags", 1,
+                repository.getIndexedTracks().size)
             repeat(4) { observation.syncRoots(context, listOf(File(directory.path))) }
             delay(400)
             assertEquals(1, reads.get())
@@ -102,13 +110,110 @@ class MediaLibraryObservationTest {
         try {
             observation.syncRoots(context, listOf(first))
             await { repository.getIndexedTracks().any { it.path == old.path } }
+            observation.removeDirectory(context, first, listOf(second))
             observation.syncRoots(context, listOf(second))
             await { repository.getIndexedTracks().any { it.path == current.path } }
             reads.set(0)
             old.writeText("no longer registered")
             delay(600)
             assertEquals(0, reads.get())
+            assertTrue(repository.getIndexedTracks().none { it.path == old.path })
             assertTrue(repository.getIndexedTracks().any { it.path == current.path })
+        } finally {
+            observation.stop()
+            repository.close()
+            context.deleteDatabase(database)
+            SharedFileCache.directories.invalidate(directory.path)
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test fun explicitRemovalCleansPersistedIndexBeforeAnyRootsAreObservedWithoutClearingSharedMetadata() = runBlocking {
+        val directory = File(context.cacheDir, "library-unobserved-removal-${System.nanoTime()}").apply { mkdirs() }
+        val source = File(directory, "saved.wav").apply { writeText("saved") }
+        val database = "library-unobserved-removal-${System.nanoTime()}.db"
+        val repository = MediaLibraryRepository.open(context, database,
+            albumMetadataReader = { MediaAlbumMetadata(composer = "Composer") }) { metadata, _ ->
+            MediaLibraryTrack(metadata.path, "Saved")
+        }
+        val observation = MediaLibraryObservation(repository)
+        try {
+            repository.scanDirectoriesToLibrary(listOf(directory))
+            val metadata = requireNotNull(SharedFileCache.attributes.peek(source.path))
+            assertEquals(listOf(source.path), repository.getIndexedTracks().map { it.path })
+
+            observation.removeDirectory(context, directory, emptyList())
+            // The empty reconcile acts as a queue barrier without adding a root or scanning.
+            assertEquals(0, observation.reconcile(context, emptyList()))
+
+            assertTrue(repository.getIndexedTracks().isEmpty())
+            assertSame("Removing library-only data keeps the shared file snapshot", metadata,
+                SharedFileCache.attributes.peek(source.path))
+            assertTrue(source.isFile)
+        } finally {
+            observation.stop()
+            repository.close()
+            context.deleteDatabase(database)
+            SharedFileCache.directories.invalidate(directory.path)
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test fun removalQueuedDuringScanRunsAfterItsWritesAndLeavesNoIndexBehind() = runBlocking {
+        val directory = File(context.cacheDir, "library-scanning-removal-${System.nanoTime()}").apply { mkdirs() }
+        File(directory, "saved.wav").writeText("saved")
+        val database = "library-scanning-removal-${System.nanoTime()}.db"
+        val parsing = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val reads = AtomicInteger()
+        val repository = MediaLibraryRepository.open(context, database,
+            albumMetadataReader = { MediaAlbumMetadata() }) { metadata, _ ->
+            reads.incrementAndGet()
+            parsing.countDown()
+            check(release.await(5, TimeUnit.SECONDS)) { "Test did not release the metadata reader" }
+            MediaLibraryTrack(metadata.path, "Saved")
+        }
+        val observation = MediaLibraryObservation(repository)
+        try {
+            observation.syncRoots(context, listOf(directory))
+            assertTrue("Scan reaches its metadata read", parsing.await(5, TimeUnit.SECONDS))
+            observation.removeDirectory(context, directory, emptyList())
+            release.countDown()
+            assertEquals(0, observation.reconcile(context, emptyList()))
+
+            assertEquals(1, reads.get())
+            assertTrue("The completed scan cannot leave removed-directory index rows", repository.getIndexedTracks().isEmpty())
+        } finally {
+            release.countDown()
+            observation.stop()
+            repository.close()
+            context.deleteDatabase(database)
+            SharedFileCache.directories.invalidate(directory.path)
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test fun stalePickerReconcileCannotRestoreARemovedConfiguredRoot() = runBlocking {
+        val directory = File(context.cacheDir, "library-stale-picker-${System.nanoTime()}").apply { mkdirs() }
+        File(directory, "saved.wav").writeText("saved")
+        val database = "library-stale-picker-${System.nanoTime()}.db"
+        val configured = AtomicReference(setOf(directory.path))
+        val reads = AtomicInteger()
+        val repository = MediaLibraryRepository.open(context, database,
+            albumMetadataReader = { MediaAlbumMetadata() }) { metadata, _ ->
+            reads.incrementAndGet()
+            MediaLibraryTrack(metadata.path, "Saved")
+        }
+        val observation = MediaLibraryObservation(repository, configuredRoots = configured::get)
+        try {
+            assertEquals(1, observation.reconcile(context, listOf(directory)))
+            configured.set(emptySet())
+            observation.removeDirectory(context, directory, emptyList())
+
+            assertEquals("A picker result received after removal must not recreate the root", 0,
+                observation.reconcile(context, listOf(directory)))
+            assertEquals(1, reads.get())
+            assertTrue(repository.getIndexedTracks().isEmpty())
         } finally {
             observation.stop()
             repository.close()

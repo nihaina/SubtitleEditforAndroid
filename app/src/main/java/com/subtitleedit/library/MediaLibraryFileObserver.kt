@@ -8,6 +8,7 @@ import android.os.HandlerThread
 import android.util.Log
 import com.subtitleedit.util.SharedFileCache
 import com.subtitleedit.util.DirectoryUpdateTracker
+import com.subtitleedit.util.FavoriteDirectoryStore
 import java.io.File
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
@@ -27,15 +28,19 @@ internal object MediaLibraryFileObserver {
     val directoryUpdates = DirectoryUpdateTracker()
     @Volatile private var instance: MediaLibraryObservation? = null
     private fun observation(context: Context): MediaLibraryObservation = instance ?: synchronized(this) {
-        instance ?: MediaLibraryObservation(MediaLibraryRepository.getInstance(context),
+        val app = context.applicationContext
+        instance ?: MediaLibraryObservation(MediaLibraryRepository.getInstance(app),
             onCoverageChanged = { paths ->
                 directoryUpdates.retain(paths + paths.mapNotNull { File(it).parentFile?.absolutePath })
                 coverage.value = paths
             },
-            onDirectoriesUpdated = directoryUpdates::publish).also { instance = it }
+            onDirectoriesUpdated = directoryUpdates::publish,
+            configuredRoots = { FavoriteDirectoryStore(app).load().paths }).also { instance = it }
     }
 
     fun syncRoots(context: Context, directories: List<File>) = observation(context).syncRoots(context, directories)
+    fun removeDirectory(context: Context, directory: File, retainedDirectories: List<File>) =
+        observation(context).removeDirectory(context, directory, retainedDirectories)
     suspend fun reconcile(context: Context, directories: List<File>): Int = observation(context).reconcile(context, directories)
 }
 
@@ -43,10 +48,12 @@ internal object MediaLibraryFileObserver {
 internal class MediaLibraryObservation(
     private val repository: MediaLibraryRepository,
     private val onCoverageChanged: (Set<String>) -> Unit = {},
-    private val onDirectoriesUpdated: (Set<String>) -> Unit = {}
+    private val onDirectoriesUpdated: (Set<String>) -> Unit = {},
+    private val configuredRoots: (() -> Set<String>)? = null
 ) {
     private sealed interface Request {
-        data class Roots(val context: Context, val paths: Set<String>) : Request
+        data class Roots(val context: Context, val paths: Set<String>, val removedPaths: Set<String> = emptySet()) : Request
+        data class RemoveDirectory(val context: Context, val path: String, val retainedPaths: Set<String>) : Request
         data class Reconcile(val context: Context, val directories: List<File>, val result: CompletableDeferred<Int>) : Request
         data class Changes(val directory: String, val token: Long, val paths: Set<String>,
             val reset: Boolean, val membershipChanged: Boolean) : Request
@@ -75,18 +82,23 @@ internal class MediaLibraryObservation(
                 try {
                     when (request) {
                         is Request.Roots -> changeRoots(request)
+                        is Request.RemoveDirectory -> changeRoots(Request.Roots(request.context,
+                            roots.intersect(request.retainedPaths), setOf(request.path)), request.retainedPaths)
                         is Request.Reconcile -> {
                             appContext = request.context
-                            val added = request.directories.map { it.absolutePath }.filter { it !in roots }
+                            // A picker scan may be queued after its directory has already been removed.
+                            val configured = configuredRoots?.invoke()
+                            val directories = request.directories.filter { configured == null || it.absolutePath in configured }
+                            val added = directories.map { it.absolutePath }.filter { it !in roots }
                             roots = roots + added
                             added.mapNotNull { File(it).parentFile }.forEach(::observe)
                             // Selecting a just-added directory also updates preferences.
                             // Root registration and that explicit request share one reconciliation.
-                            val count = if (request.directories.all { it.absolutePath in readyRoots }) {
+                            val count = if (directories.all { it.absolutePath in readyRoots }) {
                                 repository.getIndexedTracks().count { track ->
-                                    request.directories.any { within(track.path, it.absolutePath) }
+                                    directories.any { within(track.path, it.absolutePath) }
                                 }
-                            } else reconcileNow(request.context, request.directories)
+                            } else reconcileNow(request.context, directories)
                             request.result.complete(count)
                         }
                         is Request.Changes -> applyChanges(request)
@@ -112,6 +124,12 @@ internal class MediaLibraryObservation(
         requests.trySend(Request.Roots(context.applicationContext, directories.mapTo(linkedSetOf()) { it.absolutePath }))
     }
 
+    /** Removal is serialized with scans and events, including before this process has observed any roots. */
+    fun removeDirectory(context: Context, directory: File, retainedDirectories: List<File>) {
+        requests.trySend(Request.RemoveDirectory(context.applicationContext, directory.absolutePath,
+            retainedDirectories.mapTo(linkedSetOf()) { it.absolutePath }))
+    }
+
     suspend fun reconcile(context: Context, directories: List<File>): Int {
         val result = CompletableDeferred<Int>()
         requests.send(Request.Reconcile(context.applicationContext, directories, result))
@@ -125,13 +143,17 @@ internal class MediaLibraryObservation(
         scope.cancel()
     }
 
-    private fun changeRoots(request: Request.Roots) {
+    private fun changeRoots(request: Request.Roots, retainedPaths: Set<String> = request.paths) {
         appContext = request.context
-        if (roots == request.paths) return
+        if (roots == request.paths && request.removedPaths.isEmpty()) return
         val added = request.paths - roots
         roots = request.paths
         readyRoots.retainAll(roots)
         removeWatches { path -> roots.none { within(path, it) || File(it).parentFile?.absolutePath == path } }
+        val retainedDirectories = retainedPaths.map(::File)
+        // Root snapshots may briefly be empty while navigation reloads preferences.
+        // Only an explicit removal deletes the persisted catalog.
+        request.removedPaths.forEach { repository.removeDirectoryFromLibrary(File(it), retainedDirectories) }
         added.mapNotNull { File(it).parentFile }.forEach(::observe)
         if (added.isNotEmpty()) reconcileNow(request.context, added.map(::File))
     }
