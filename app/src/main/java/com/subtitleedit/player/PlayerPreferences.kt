@@ -2,9 +2,11 @@ package com.subtitleedit.player
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.subtitleedit.util.SettingsSnapshotStore
+import com.subtitleedit.util.restoreSettingsSnapshot
 
 /** Player-only preferences, kept in their own file so the player stays self-contained. */
-internal class PlayerPreferences(private val prefs: SharedPreferences) {
+internal class PlayerPreferences(private val prefs: SharedPreferences) : SettingsSnapshotStore {
 
     /** Opt in explicitly; a fresh installation uses the editor for media files. */
     var playerModeEnabled: Boolean
@@ -87,6 +89,32 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) {
 
     fun saveLastPosition(mediaPath: String, positionMs: Long) {
         prefs.edit().putLong("$KEY_LAST_POS$mediaPath", positionMs.coerceAtLeast(0L)).apply()
+    }
+
+    override fun exportSettingsSnapshot(): Map<String, Any> {
+        val behavior = endBehavior
+        val eq = equalizer
+        return linkedMapOf(
+            KEY_PLAYER_MODE to playerModeEnabled,
+            KEY_MODE to defaultPlayMode.name,
+            "end_behavior_enabled" to behavior.enabled,
+            "track_end_action" to behavior.trackAction.name,
+            "queue_end_action" to behavior.queueAction.name,
+            "queue_end_wrap" to behavior.wrapQueues,
+            "queue_end_reshuffle" to behavior.reshuffle,
+            KEY_SPEED to defaultSpeed,
+            KEY_EQ_ENABLED to eq.enabled,
+            KEY_EQ_GAINS to eq.gains.joinToString(","),
+            KEY_SUB_SIZE to subtitleFontSize,
+            KEY_AUDIO_SUB_SPACING to audioSubtitleLineSpacing,
+            KEY_AUDIO_SUB_ALIGNMENT to audioSubtitleAlignment.name,
+            KEY_RESUME to resumePlayback,
+            KEY_LOUDNESS_WAVEFORM to showLoudnessWaveform
+        )
+    }
+
+    override fun restoreSettingsSnapshot(values: Map<String, Any>) {
+        prefs.restoreSettingsSnapshot(values, exportSettingsSnapshot())
     }
 
     companion object {

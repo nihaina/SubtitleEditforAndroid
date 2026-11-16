@@ -141,6 +141,7 @@ class PlayerActivity : AppComposeActivity() {
 
     override fun onResume() {
         super.onResume()
+        viewModel.refreshRestoredSettings()
         viewModel.refreshSystemVolume()
     }
 

@@ -5,6 +5,13 @@ import android.net.Uri
 import android.os.Environment
 import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
+import com.subtitleedit.library.MediaCreditRole
+import com.subtitleedit.player.PlayerPreferences
+import com.subtitleedit.ui.MediaAlbumPreferences
+import com.subtitleedit.ui.MediaSingerPreferences
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -12,6 +19,10 @@ import java.io.File
 /** JSON export/import for user settings and references to locally selected resources. */
 object SettingsBackupManager {
     private const val SCHEMA_VERSION = 1
+    private val restoredAudioModeSettingsRevision = MutableStateFlow(0L)
+    internal val audioModeSettingsRevision = restoredAudioModeSettingsRevision.asStateFlow()
+    private val restoredPlayerSettingsRevision = MutableStateFlow(0L)
+    internal val playerSettingsRevision = restoredPlayerSettingsRevision.asStateFlow()
 
     data class RestoreResult(val skippedPaths: Int = 0, val skippedFavorites: Int = 0) {
         val skippedCount: Int get() = skippedPaths + skippedFavorites
@@ -28,6 +39,16 @@ object SettingsBackupManager {
             encodeValue(value)?.let { settingsJson.put(key, it) }
         }
         root.put("settings", settingsJson)
+
+        val audioModeSettings = JSONObject()
+        audioModeStores(context).forEach { (name, store) ->
+            val snapshot = JSONObject()
+            store.exportSettingsSnapshot().forEach { (key, value) ->
+                encodeValue(value)?.let { snapshot.put(key, it) }
+            }
+            audioModeSettings.put(name, snapshot)
+        }
+        root.put("audioModeSettings", audioModeSettings)
 
         val credentials = JSONObject()
         settings.exportAiApiKeys().forEach { (provider, key) -> credentials.put(provider, key) }
@@ -77,6 +98,19 @@ object SettingsBackupManager {
         softwareDirectory?.let { settings.setSoftwareDirectory(it) }
         settings.restoreSettingsSnapshot(restored)
 
+        // This optional section extends version 1; older backups preserve current audio settings.
+        val audioModeSettings = root.optJSONObject("audioModeSettings")
+        audioModeSettings?.let { audioSettings ->
+            audioModeStores(context).forEach { (name, store) ->
+                val snapshot = audioSettings.optJSONObject(name) ?: return@forEach
+                val values = linkedMapOf<String, Any>()
+                snapshot.keys().forEach { key ->
+                    decodeValue(snapshot.optJSONObject(key))?.let { values[key] = it }
+                }
+                store.restoreSettingsSnapshot(values)
+            }
+        }
+
         val apiKeys = root.optJSONObject("credentials")?.optJSONObject("aiApiKeys")
         if (apiKeys != null) {
             val values = linkedMapOf<String, String>()
@@ -109,8 +143,19 @@ object SettingsBackupManager {
             }
             FavoriteDirectoryStore(context).replace(valid, mediaLibraryPaths)
         }
+        if (audioModeSettings?.optJSONObject("player") != null) restoredPlayerSettingsRevision.update { it + 1L }
+        if (audioModeSettings != null) restoredAudioModeSettingsRevision.update { it + 1L }
         return RestoreResult(skippedPaths, skippedFavorites)
     }
+
+    private fun audioModeStores(context: Context): Map<String, SettingsSnapshotStore> = linkedMapOf(
+        "player" to PlayerPreferences.getInstance(context),
+        "albums" to MediaAlbumPreferences(context),
+        "singers" to MediaSingerPreferences(context, MediaCreditRole.SINGER),
+        "artists" to MediaSingerPreferences(context, MediaCreditRole.ARTIST),
+        "composers" to MediaSingerPreferences(context, MediaCreditRole.COMPOSER),
+        "genres" to MediaSingerPreferences(context, MediaCreditRole.GENRE)
+    )
 
     private fun encodeValue(value: Any?): JSONObject? = when (value) {
         is String -> JSONObject().put("type", "string").put("value", value)

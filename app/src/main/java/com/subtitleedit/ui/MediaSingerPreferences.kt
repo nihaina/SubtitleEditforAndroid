@@ -6,6 +6,8 @@ import com.subtitleedit.library.AlbumTrackSortField
 import com.subtitleedit.library.AlbumTrackSortOptions
 import com.subtitleedit.library.MediaCreditRole
 import com.subtitleedit.library.SingerSortField
+import com.subtitleedit.util.SettingsSnapshotStore
+import com.subtitleedit.util.restoreSettingsSnapshot
 
 internal enum class SingerMoreInfo { AUTO, NONE, TRACK_COUNT, DURATION, UPDATED_AT, YEAR }
 
@@ -21,7 +23,7 @@ internal data class MediaSingerViewOptions(
 )
 
 /** Each credit category owns its presentation; the existing singer store remains compatible. */
-internal class MediaSingerPreferences(context: Context, role: MediaCreditRole = MediaCreditRole.SINGER) {
+internal class MediaSingerPreferences(context: Context, role: MediaCreditRole = MediaCreditRole.SINGER) : SettingsSnapshotStore {
     private val preferences = context.applicationContext.getSharedPreferences(
         when (role) {
             MediaCreditRole.SINGER -> "media_singer_view"
@@ -58,6 +60,24 @@ internal class MediaSingerPreferences(context: Context, role: MediaCreditRole = 
             .putString("track_sort_field", options.trackSort.field.name)
             .putBoolean("track_sort_ascending", options.trackSort.ascending)
             .apply()
+    }
+
+    override fun exportSettingsSnapshot(): Map<String, Any> = load().let { options ->
+        linkedMapOf(
+            "more_info" to options.moreInfo.name,
+            "group_tracks" to options.groupTracks,
+            "quick_search" to options.quickSearch,
+            "sort_field" to options.sortField.name,
+            "ascending" to options.ascending,
+            "album_sort_field" to options.albumSortField.name,
+            "album_ascending" to options.albumAscending,
+            "track_sort_field" to options.trackSort.field.name,
+            "track_sort_ascending" to options.trackSort.ascending
+        )
+    }
+
+    override fun restoreSettingsSnapshot(values: Map<String, Any>) {
+        preferences.restoreSettingsSnapshot(values, exportSettingsSnapshot())
     }
 
     private inline fun <reified T : Enum<T>> enumPreference(key: String, fallback: T): T =

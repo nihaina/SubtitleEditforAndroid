@@ -25,6 +25,7 @@ import com.subtitleedit.player.PlayerQueueSource
 import com.subtitleedit.player.PlayerQueueSourceKind
 import com.subtitleedit.player.putPlayerQueueSource
 import com.subtitleedit.ui.settings.settingsPageBackground
+import com.subtitleedit.util.SettingsBackupManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
@@ -65,6 +66,11 @@ internal fun MediaAlbumScreen(
     }
     var creditOptions by remember(creditPreferences) {
         mutableStateOf(creditPreferences.mapValues { it.value.load() })
+    }
+    val restoredSettingsRevision by SettingsBackupManager.audioModeSettingsRevision.collectAsState()
+    LaunchedEffect(restoredSettingsRevision) {
+        options = preferences.load()
+        creditOptions = creditPreferences.mapValues { it.value.load() }
     }
     val roots = remember(favoriteDirectories) {
         favoriteDirectories.map { it.absolutePath.trimEnd('/') + "/" }.distinct().sorted()

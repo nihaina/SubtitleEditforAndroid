@@ -10,6 +10,7 @@ import com.subtitleedit.library.MediaPlaylist
 import com.subtitleedit.library.PlayerTrackDetails
 import com.subtitleedit.library.PlayerTrackMetadataReader
 import com.subtitleedit.util.FileUtils
+import com.subtitleedit.util.SettingsBackupManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -97,6 +98,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
     systemVolume: PlayerSystemVolume = AndroidPlayerSystemVolume(application)
 ) : AndroidViewModel(application) {
     private val preferences = PlayerPreferences.getInstance(application)
+    private var settingsRevision = SettingsBackupManager.playerSettingsRevision.value
     private val bookmarkStore = PlayerBookmarkStore.create(application.filesDir)
     private val volumeController = PlayerVolumeController(systemVolume)
     private val volumeGesture = PlayerVolumeGesture()
@@ -966,6 +968,38 @@ internal class PlayerViewModel @JvmOverloads constructor(
     private fun updateTimerAlarm() {
         val deadlines = listOf(_state.value.sleepTimer, scheduledStart).filter { it.active }
         timerAlarm.scheduleAt(deadlines.minOfOrNull { it.endsAtElapsedMs })
+    }
+
+    /** Apply imported settings when returning from settings, preserving the current queue and position. */
+    fun refreshRestoredSettings() {
+        val revision = SettingsBackupManager.playerSettingsRevision.value
+        if (settingsRevision == revision) return
+        settingsRevision = revision
+        val current = _state.value
+        val mode = preferences.defaultPlayMode
+        val behavior = preferences.endBehavior
+        val next = current.copy(
+            mode = mode,
+            endBehavior = behavior,
+            speed = preferences.defaultSpeed,
+            equalizer = preferences.equalizer,
+            showLoudnessWaveform = preferences.showLoudnessWaveform,
+            resumePlayback = preferences.resumePlayback,
+            subtitleFontSize = preferences.subtitleFontSize,
+            audioSubtitleLineSpacing = preferences.audioSubtitleLineSpacing,
+            audioSubtitleAlignment = preferences.audioSubtitleAlignment,
+            shuffleOrder = if (mode == PlayerPlayMode.SHUFFLE && current.mode != mode)
+                PlayerPlaylistOrder.newShuffleOrder(current.playlist.size, current.currentIndex)
+            else current.shuffleOrder
+        )
+        if (current.mode != mode || current.endBehavior != behavior) cancelNextQueue()
+        if (current.speed != next.speed) engine?.setSpeed(next.speed)
+        if (current.equalizer != next.equalizer) engine?.setAudioFilter(PlayerEqualizer.afFilter(next.equalizer))
+        if (current.subtitleFontSize != next.subtitleFontSize) engine?.setSubtitleFontSize(next.subtitleFontSize)
+        if (current.showLoudnessWaveform != next.showLoudnessWaveform) {
+            engine?.setLoudnessEnabled(next.showLoudnessWaveform && !next.isVideo)
+        }
+        _state.value = next.copy(loudness = if (next.showLoudnessWaveform) current.loudness else 0f)
     }
 
     fun setSpeed(speed: Float) {

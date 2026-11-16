@@ -4,6 +4,8 @@ import android.content.Context
 import com.subtitleedit.library.AlbumSortField
 import com.subtitleedit.library.AlbumTrackSortField
 import com.subtitleedit.library.AlbumTrackSortOptions
+import com.subtitleedit.util.SettingsSnapshotStore
+import com.subtitleedit.util.restoreSettingsSnapshot
 
 internal enum class AlbumViewMode { LIST_NO_ART, LIST_ART, GRID }
 
@@ -25,7 +27,7 @@ internal data class MediaAlbumViewOptions(
 )
 
 /** Album presentation is independent of directory-browser and editor preferences. */
-internal class MediaAlbumPreferences(context: Context) {
+internal class MediaAlbumPreferences(context: Context) : SettingsSnapshotStore {
     private val preferences = context.applicationContext.getSharedPreferences("media_album_view", Context.MODE_PRIVATE)
 
     fun load(): MediaAlbumViewOptions = MediaAlbumViewOptions(
@@ -54,6 +56,24 @@ internal class MediaAlbumPreferences(context: Context) {
             .putString("track_sort_field", options.trackSort.field.name)
             .putBoolean("track_sort_ascending", options.trackSort.ascending)
             .apply()
+    }
+
+    override fun exportSettingsSnapshot(): Map<String, Any> = load().let { options ->
+        linkedMapOf(
+            "view_mode" to options.viewMode.name,
+            "grid_size" to options.gridSize.name,
+            "show_more_info" to options.showMoreInfo,
+            "group_tracks" to options.groupTracks,
+            "quick_search" to options.quickSearch,
+            "sort_field" to options.sortField.name,
+            "ascending" to options.ascending,
+            "track_sort_field" to options.trackSort.field.name,
+            "track_sort_ascending" to options.trackSort.ascending
+        )
+    }
+
+    override fun restoreSettingsSnapshot(values: Map<String, Any>) {
+        preferences.restoreSettingsSnapshot(values, exportSettingsSnapshot())
     }
 
     private inline fun <reified T : Enum<T>> enumPreference(key: String, fallback: T): T =

@@ -134,6 +134,7 @@ internal class MainPlayerController(
     }
 
     override fun onResume(owner: LifecycleOwner) {
+        viewModel.refreshRestoredSettings()
         if (!PlayerOutputHandoff.hasExclusiveOwner) viewModel.resumeOutput()
         viewModel.refreshSystemVolume()
     }
