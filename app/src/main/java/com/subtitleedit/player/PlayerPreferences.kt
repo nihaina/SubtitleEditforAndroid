@@ -13,8 +13,8 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) {
 
     var defaultPlayMode: PlayerPlayMode
         get() = runCatching { PlayerPlayMode.valueOf(prefs.getString(KEY_MODE, "") ?: "") }
-            .getOrDefault(PlayerPlayMode.REPEAT_ALL)
-        set(value) = prefs.edit().putString(KEY_MODE, value.name).apply()
+            .getOrDefault(PlayerPlayMode.REPEAT_ALL).let { if (endBehavior.enabled) it.asSimpleMode() else it }
+        set(value) = prefs.edit().putString(KEY_MODE, (if (endBehavior.enabled) value.asSimpleMode() else value).name).apply()
 
     val endBehavior: PlayerEndBehavior
         get() = PlayerEndBehavior(
@@ -30,7 +30,7 @@ internal class PlayerPreferences(private val prefs: SharedPreferences) {
         )
 
     fun savePlaybackBehavior(mode: PlayerPlayMode, behavior: PlayerEndBehavior) {
-        prefs.edit().putString(KEY_MODE, mode.name)
+        prefs.edit().putString(KEY_MODE, (if (behavior.enabled) mode.asSimpleMode() else mode).name)
             .putBoolean("end_behavior_enabled", behavior.enabled)
             .putString("track_end_action", behavior.trackAction.name)
             .putString("queue_end_action", behavior.queueAction.name)

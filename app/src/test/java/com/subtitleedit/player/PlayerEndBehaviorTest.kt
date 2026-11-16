@@ -34,12 +34,35 @@ class PlayerEndBehaviorTest {
         }
     }
 
-    @Test fun followingTheExistingSingleTrackModeRepeatsWithoutApplyingQueueRules() {
-        PlayerQueueEndAction.entries.forEach { queueAction ->
-            (0..2).forEach { current ->
-                assertEquals(PlayerEndDecision(current, autoplay = true), decide(current,
-                    advanced.copy(queueAction = queueAction), PlayerPlayMode.REPEAT_ONE))
+    @Test fun explicitTrackRepeatOverridesEveryTraversalAndQueueRule() {
+        PlayerPlayMode.entries.forEach { mode ->
+            PlayerQueueEndAction.entries.forEach { queueAction ->
+                (0..2).forEach { current ->
+                    assertEquals(PlayerEndDecision(current, autoplay = true), decide(current,
+                        advanced.copy(trackAction = PlayerTrackEndAction.REPEAT_TRACK,
+                            queueAction = queueAction, reshuffle = true), mode))
+                }
             }
+        }
+    }
+
+    @Test fun advancedPlayNextDoesNotInheritLegacySingleTrackRepeat() {
+        assertEquals(PlayerEndDecision(1, autoplay = true), decide(0, advanced, PlayerPlayMode.REPEAT_ONE))
+        assertEquals(PlayerEndDecision(), decide(2, advanced, PlayerPlayMode.REPEAT_ONE))
+        assertEquals(PlayerEndDecision(0, autoplay = true), decide(2,
+            advanced.copy(queueAction = PlayerQueueEndAction.REPEAT_QUEUE), PlayerPlayMode.REPEAT_ONE))
+    }
+
+    @Test fun disabledAdvancedChoicesDoNotOverrideTheSelectedSimpleTraversal() {
+        val saved = PlayerEndBehavior(trackAction = PlayerTrackEndAction.REPEAT_TRACK,
+            queueAction = PlayerQueueEndAction.NEXT_QUEUE, wrapQueues = true, reshuffle = true)
+        for (mode in listOf(PlayerPlayMode.REPEAT_ALL, PlayerPlayMode.SHUFFLE)) {
+            val effective = saved.effectiveFor(mode)
+            assertEquals(PlayerTrackEndAction.FOLLOW_MODE, effective.trackAction)
+            assertEquals(PlayerQueueEndAction.REPEAT_QUEUE, effective.queueAction)
+            assertFalse(effective.wrapQueues)
+            assertFalse(effective.reshuffle)
+            assertFalse(effective.enabled)
         }
     }
 

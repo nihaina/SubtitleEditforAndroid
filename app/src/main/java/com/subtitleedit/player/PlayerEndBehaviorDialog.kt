@@ -55,16 +55,15 @@ internal fun PlayerEndBehaviorDialog(
     onConfirm: (PlayerPlayMode, PlayerEndBehavior) -> Unit,
     includeNextQueue: Boolean = true
 ) {
-    val applied = behavior.effectiveFor(mode)
     var advanced by rememberSaveable(mode, behavior) { mutableStateOf(true) }
-    var draftMode by rememberSaveable(mode, behavior) { mutableStateOf(mode) }
-    var trackAction by rememberSaveable(mode, behavior) { mutableStateOf(applied.trackAction) }
+    var draftMode by rememberSaveable(mode, behavior) { mutableStateOf(mode.asSimpleMode()) }
+    var trackAction by rememberSaveable(mode, behavior) { mutableStateOf(behavior.trackAction) }
     var queueAction by rememberSaveable(mode, behavior, includeNextQueue) {
-        mutableStateOf(applied.queueAction.takeUnless { !includeNextQueue && it == PlayerQueueEndAction.NEXT_QUEUE }
+        mutableStateOf(behavior.queueAction.takeUnless { !includeNextQueue && it == PlayerQueueEndAction.NEXT_QUEUE }
             ?: PlayerQueueEndAction.STOP)
     }
-    var wrapQueues by rememberSaveable(mode, behavior) { mutableStateOf(applied.wrapQueues) }
-    var reshuffle by rememberSaveable(mode, behavior) { mutableStateOf(applied.reshuffle) }
+    var wrapQueues by rememberSaveable(mode, behavior) { mutableStateOf(behavior.wrapQueues) }
+    var reshuffle by rememberSaveable(mode, behavior) { mutableStateOf(behavior.reshuffle) }
     val maxHeight = LocalConfiguration.current.screenHeightDp.dp * 0.92f
 
     BasicAlertDialog(
@@ -89,7 +88,7 @@ internal fun PlayerEndBehaviorDialog(
                         EndBehaviorHeading(R.string.player_end_track_heading)
                         Column(Modifier.selectableGroup()) {
                             listOf(PlayerTrackEndAction.STOP, PlayerTrackEndAction.FOLLOW_MODE,
-                                PlayerTrackEndAction.LOAD_NEXT_PAUSED).forEach { action ->
+                                PlayerTrackEndAction.LOAD_NEXT_PAUSED, PlayerTrackEndAction.REPEAT_TRACK).forEach { action ->
                                 EndBehaviorRadioRow(
                                     selected = trackAction == action,
                                     labelRes = trackEndLabel(action),
@@ -135,7 +134,7 @@ internal fun PlayerEndBehaviorDialog(
                     } else {
                         EndBehaviorHeading(R.string.player_end_simple_heading)
                         Column(Modifier.selectableGroup()) {
-                            PlayerPlayMode.entries.forEach { item ->
+                            PlayerPlayMode.simpleModes.forEach { item ->
                                 EndBehaviorRadioRow(
                                     selected = draftMode == item,
                                     labelRes = modeLabel(item),
@@ -166,7 +165,7 @@ internal fun PlayerEndBehaviorDialog(
                     }
                     IconButton(onClick = {
                         onConfirm(draftMode, PlayerEndBehavior(
-                            enabled = advanced, trackAction = trackAction, queueAction = queueAction,
+                            enabled = behavior.enabled, trackAction = trackAction, queueAction = queueAction,
                             wrapQueues = wrapQueues, reshuffle = reshuffle
                         ))
                         onDismiss()

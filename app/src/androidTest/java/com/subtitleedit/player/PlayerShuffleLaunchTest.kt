@@ -99,11 +99,13 @@ class PlayerShuffleLaunchTest {
         }
         private val preferences = app.getSharedPreferences("player_settings", Context.MODE_PRIVATE)
         private val previousDefault = preferences.getString("default_play_mode", null)
+        private val previousAdvanced = preferences.all["end_behavior_enabled"] as? Boolean
         private val store = ViewModelStore()
         val model: PlayerViewModel
 
         init {
-            check(preferences.edit().putString("default_play_mode", defaultMode.name).commit())
+            check(preferences.edit().putString("default_play_mode", defaultMode.name)
+                .putBoolean("end_behavior_enabled", false).commit())
             model = mainValue {
                 ViewModelProvider(store, object : ViewModelProvider.Factory {
                     @Suppress("UNCHECKED_CAST")
@@ -120,6 +122,8 @@ class PlayerShuffleLaunchTest {
             val editor = preferences.edit()
             if (previousDefault == null) editor.remove("default_play_mode")
             else editor.putString("default_play_mode", previousDefault)
+            if (previousAdvanced == null) editor.remove("end_behavior_enabled")
+            else editor.putBoolean("end_behavior_enabled", previousAdvanced)
             tracks.forEach { editor.remove("last_position_${it.path}") }
             check(editor.commit())
             directory.deleteRecursively()

@@ -522,18 +522,25 @@ private fun PlayerSettingsPanel(state: PlayerUiState, viewModel: PlayerViewModel
     Text(stringResource(R.string.player_settings_default_mode), color = PlayerColors.OnDarkVariant, fontSize = 13.sp)
     Spacer(Modifier.height(6.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-        PlayerPlayMode.entries.forEach { mode ->
+        val modes = if (state.endBehavior.enabled) PlayerPlayMode.simpleModes else PlayerPlayMode.entries
+        modes.forEach { mode ->
             Box(Modifier.weight(1f)) {
                 PlayerChip(
                     text = stringResource(modeLabel(mode)),
                     selected = state.mode == mode,
                     onClick = { viewModel.setMode(mode) },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().testTag("player-settings-mode-${mode.name}")
                 )
             }
         }
     }
-
+    Spacer(Modifier.height(8.dp))
+    PlayerSettingsSwitch(
+        title = stringResource(R.string.player_settings_advanced_options),
+        checked = state.endBehavior.enabled,
+        onCheckedChange = viewModel::setAdvancedPlaybackEnabled,
+        switchModifier = Modifier.testTag("player-settings-advanced-options")
+    )
 }
 
 @Composable
@@ -552,7 +559,12 @@ internal fun modeIcon(mode: PlayerPlayMode): Int = when (mode) {
 }
 
 @Composable
-private fun PlayerSettingsSwitch(title: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun PlayerSettingsSwitch(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    switchModifier: Modifier = Modifier
+) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -561,6 +573,7 @@ private fun PlayerSettingsSwitch(title: String, checked: Boolean, onCheckedChang
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
+            modifier = switchModifier,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = PlayerColors.Background,
                 checkedTrackColor = PlayerColors.Accent,

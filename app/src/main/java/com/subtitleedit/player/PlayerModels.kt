@@ -12,7 +12,16 @@ internal data class PlayerTrack(
     val stem: String get() = file.nameWithoutExtension
 }
 
-internal enum class PlayerPlayMode { SEQUENCE, REPEAT_ONE, REPEAT_ALL, SHUFFLE }
+internal enum class PlayerPlayMode {
+    SEQUENCE, REPEAT_ONE, REPEAT_ALL, SHUFFLE;
+
+    // Advanced rules own end actions, leaving this control to choose traversal order.
+    fun asSimpleMode(): PlayerPlayMode = if (this == SHUFFLE) SHUFFLE else REPEAT_ALL
+
+    companion object {
+        val simpleModes = listOf(REPEAT_ALL, SHUFFLE)
+    }
+}
 
 internal enum class PlayerSubtitleAlignment { LEFT, CENTER, RIGHT }
 

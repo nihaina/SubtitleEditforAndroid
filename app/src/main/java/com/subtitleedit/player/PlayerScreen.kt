@@ -644,8 +644,6 @@ private fun PlayerQuickActionsRow(
 ) {
     val enabled = state.currentTrack != null
     val iconButtonSize = if (compact) 38.dp else 40.dp
-    val endBehaviorLabel = stringResource(R.string.player_end_settings)
-    val endBehaviorActions = playerEndBehaviorActionDescription(state.mode, state.endBehavior)
     Row(
         modifier = modifier.testTag("player-quick-actions-row"),
         horizontalArrangement = if (compact) Arrangement.spacedBy(0.dp) else Arrangement.Start,
@@ -691,18 +689,22 @@ private fun PlayerQuickActionsRow(
                 tint = PlayerControlColors.Secondary
             )
         }
-        IconButton(
-            onClick = viewModel::openEndBehaviorDialog,
-            enabled = enabled,
-            modifier = Modifier.size(if (compact) 48.dp else 52.dp, iconButtonSize)
-                .testTag("player-quick-end-behavior")
-                .semantics {
-                    contentDescription = endBehaviorLabel
-                    stateDescription = endBehaviorActions
-                }
-        ) {
-            PlayerEndBehaviorIcon(mode = state.mode, behavior = state.endBehavior,
-                tint = if (state.endBehavior.enabled) PlayerControlColors.Accent else PlayerControlColors.Secondary)
+        if (state.endBehavior.enabled) {
+            val endBehaviorLabel = stringResource(R.string.player_end_settings)
+            val endBehaviorActions = playerEndBehaviorActionDescription(state.mode, state.endBehavior)
+            IconButton(
+                onClick = viewModel::openEndBehaviorDialog,
+                enabled = enabled,
+                modifier = Modifier.size(if (compact) 48.dp else 52.dp, iconButtonSize)
+                    .testTag("player-quick-end-behavior")
+                    .semantics {
+                        contentDescription = endBehaviorLabel
+                        stateDescription = endBehaviorActions
+                    }
+            ) {
+                PlayerEndBehaviorIcon(mode = state.mode, behavior = state.endBehavior,
+                    tint = PlayerControlColors.Accent)
+            }
         }
     }
 }

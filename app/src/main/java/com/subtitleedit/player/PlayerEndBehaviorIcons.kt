@@ -40,6 +40,7 @@ internal fun trackEndIcon(action: PlayerTrackEndAction): Int = when (action) {
     PlayerTrackEndAction.STOP -> R.drawable.ic_player_track_end_stop
     PlayerTrackEndAction.LOAD_NEXT_PAUSED -> R.drawable.ic_player_track_end_next_paused
     PlayerTrackEndAction.FOLLOW_MODE -> R.drawable.ic_player_track_end_next
+    PlayerTrackEndAction.REPEAT_TRACK -> R.drawable.ic_player_repeat_one
 }
 
 internal fun queueEndIcon(action: PlayerQueueEndAction): Int = when (action) {
@@ -52,6 +53,7 @@ internal fun trackEndLabel(action: PlayerTrackEndAction): Int = when (action) {
     PlayerTrackEndAction.STOP -> R.string.player_end_stop
     PlayerTrackEndAction.LOAD_NEXT_PAUSED -> R.string.player_end_load_next_paused
     PlayerTrackEndAction.FOLLOW_MODE -> R.string.player_end_continue
+    PlayerTrackEndAction.REPEAT_TRACK -> R.string.player_mode_repeat_one
 }
 
 private fun queueEndLabel(action: PlayerQueueEndAction): Int = when (action) {

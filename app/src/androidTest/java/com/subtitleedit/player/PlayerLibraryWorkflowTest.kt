@@ -110,7 +110,12 @@ class PlayerLibraryWorkflowTest {
                     assertEquals("Replaying A after B must increment its history count", 2,
                         fixture.repository.getPlaybackHistory().first { it.path == fixture.tracks[0].path }.playCount)
 
-                    onMain { model.setMode(PlayerPlayMode.REPEAT_ONE); model.seekTo(7_700L); model.play() }
+                    onMain {
+                        model.applyEndBehavior(PlayerPlayMode.REPEAT_ALL,
+                            PlayerEndBehavior(enabled = true, trackAction = PlayerTrackEndAction.REPEAT_TRACK))
+                        model.seekTo(7_700L)
+                        model.play()
+                    }
                     await("a single-track repeat creates another play-through") {
                         barrier()
                         fixture.repository.getPlaybackHistory().first { it.path == fixture.tracks[0].path }.playCount >= 3
@@ -139,11 +144,13 @@ class PlayerLibraryWorkflowTest {
             PlayerTrack(file.path, name, false)
         }
         private val preferences = app.getSharedPreferences("player_settings", Context.MODE_PRIVATE)
-        private val keys = listOf("default_play_mode", "default_speed", "resume_playback", "eq_enabled", "show_loudness_waveform")
+        private val keys = listOf("default_play_mode", "default_speed", "resume_playback", "eq_enabled", "show_loudness_waveform",
+            "end_behavior_enabled", "track_end_action", "queue_end_action", "queue_end_wrap", "queue_end_reshuffle")
         private val saved = keys.associateWith { preferences.all[it] }
         init {
             assertTrue(preferences.edit().putString("default_play_mode", PlayerPlayMode.SEQUENCE.name)
                 .putFloat("default_speed", 1f).putBoolean("resume_playback", false)
+                .putBoolean("end_behavior_enabled", false)
                 .putBoolean("eq_enabled", false).putBoolean("show_loudness_waveform", false).commit())
         }
         override fun close() {

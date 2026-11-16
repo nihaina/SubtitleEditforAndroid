@@ -2,10 +2,10 @@ package com.subtitleedit.player
 
 import kotlin.random.Random
 
-internal enum class PlayerTrackEndAction { FOLLOW_MODE, STOP, LOAD_NEXT_PAUSED }
+internal enum class PlayerTrackEndAction { FOLLOW_MODE, STOP, LOAD_NEXT_PAUSED, REPEAT_TRACK }
 internal enum class PlayerQueueEndAction { STOP, NEXT_QUEUE, REPEAT_QUEUE }
 
-/** Advanced rules are opt-in; simple modes keep their existing navigation contract. */
+/** Advanced rules are opt-in and choose end actions independently of traversal order. */
 internal data class PlayerEndBehavior(
     val enabled: Boolean = false,
     val trackAction: PlayerTrackEndAction = PlayerTrackEndAction.FOLLOW_MODE,
@@ -18,7 +18,7 @@ internal data class PlayerEndBehavior(
     companion object {
         fun fromMode(mode: PlayerPlayMode): PlayerEndBehavior = when (mode) {
             PlayerPlayMode.SEQUENCE -> PlayerEndBehavior()
-            PlayerPlayMode.REPEAT_ONE -> PlayerEndBehavior()
+            PlayerPlayMode.REPEAT_ONE -> PlayerEndBehavior(trackAction = PlayerTrackEndAction.REPEAT_TRACK)
             PlayerPlayMode.REPEAT_ALL -> PlayerEndBehavior(queueAction = PlayerQueueEndAction.REPEAT_QUEUE)
             PlayerPlayMode.SHUFFLE -> PlayerEndBehavior(queueAction = PlayerQueueEndAction.REPEAT_QUEUE)
         }.copy(reshuffle = false)
@@ -46,8 +46,9 @@ internal object PlayerEndBehaviorPolicy {
         if (size <= 0 || current !in 0 until size) return PlayerEndDecision()
         when (behavior.trackAction) {
             PlayerTrackEndAction.STOP -> return PlayerEndDecision()
-            PlayerTrackEndAction.FOLLOW_MODE -> if (mode == PlayerPlayMode.REPEAT_ONE)
-                return PlayerEndDecision(current, autoplay = true)
+            PlayerTrackEndAction.REPEAT_TRACK -> return PlayerEndDecision(current, autoplay = true)
+            // The persisted FOLLOW_MODE value now means play next in the selected traversal.
+            PlayerTrackEndAction.FOLLOW_MODE -> Unit
             PlayerTrackEndAction.LOAD_NEXT_PAUSED -> Unit
         }
 

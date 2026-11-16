@@ -280,7 +280,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
             queueSource = queueSource,
             currentIndex = index,
             // A launch action can request shuffle without changing the user's default mode.
-            mode = initialMode ?: _state.value.mode,
+            mode = (initialMode ?: _state.value.mode).let { if (_state.value.endBehavior.enabled) it.asSimpleMode() else it },
             shuffleOrder = PlayerPlaylistOrder.newShuffleOrder(tracks.size, index),
             isVideo = currentTrack?.isVideo == true,
             bookmarks = currentTrack?.let { bookmarkStore.load(it.path) }.orEmpty(),
@@ -774,23 +774,26 @@ internal class PlayerViewModel @JvmOverloads constructor(
     }
 
     fun setMode(mode: PlayerPlayMode) {
-        val behavior = _state.value.endBehavior
-        applyEndBehavior(mode, if (behavior.enabled) behavior.copy(trackAction = PlayerTrackEndAction.FOLLOW_MODE)
-            else PlayerEndBehavior.fromMode(mode))
+        applyEndBehavior(mode, _state.value.endBehavior)
+    }
+
+    fun setAdvancedPlaybackEnabled(enabled: Boolean) {
+        applyEndBehavior(_state.value.mode, _state.value.endBehavior.copy(enabled = enabled))
     }
 
     fun applyEndBehavior(mode: PlayerPlayMode, behavior: PlayerEndBehavior) {
         cancelNextQueue()
         val current = _state.value
-        preferences.savePlaybackBehavior(mode, behavior)
-        _state.value = current.copy(mode = mode, endBehavior = behavior, showEndBehaviorDialog = false, shuffleOrder =
-            if (mode == PlayerPlayMode.SHUFFLE && current.mode != mode)
+        val resolvedMode = if (behavior.enabled) mode.asSimpleMode() else mode
+        preferences.savePlaybackBehavior(resolvedMode, behavior)
+        _state.value = current.copy(mode = resolvedMode, endBehavior = behavior, showEndBehaviorDialog = false, shuffleOrder =
+            if (resolvedMode == PlayerPlayMode.SHUFFLE && current.mode != resolvedMode)
                 PlayerPlaylistOrder.newShuffleOrder(current.playlist.size, current.currentIndex)
             else current.shuffleOrder)
     }
 
     fun openEndBehaviorDialog() {
-        if (_state.value.controlsLocked) return
+        if (_state.value.controlsLocked || !_state.value.endBehavior.enabled) return
         closeTrackInfoDialog()
         closePlaylistPickerDialog()
         _state.value = _state.value.copy(showEndBehaviorDialog = true, panel = PlayerPanel.NONE, controlsVisible = true)
@@ -801,7 +804,8 @@ internal class PlayerViewModel @JvmOverloads constructor(
     }
 
     fun cycleMode() {
-        val mode = PlayerPlayMode.entries[(_state.value.mode.ordinal + 1) % PlayerPlayMode.entries.size]
+        val modes = if (_state.value.endBehavior.enabled) PlayerPlayMode.simpleModes else PlayerPlayMode.entries
+        val mode = modes[(modes.indexOf(_state.value.mode) + 1) % modes.size]
         setMode(mode)
         hint(when (mode) {
             PlayerPlayMode.SEQUENCE -> R.string.player_mode_sequence

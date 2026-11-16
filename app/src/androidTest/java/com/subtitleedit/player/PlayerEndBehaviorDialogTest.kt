@@ -12,6 +12,7 @@ import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.espresso.Espresso.pressBack
@@ -31,17 +32,20 @@ class PlayerEndBehaviorDialogTest {
         compose.onNodeWithTag("player-end-advanced").assertIsSelected()
         compose.onNodeWithTag("player-end-track:STOP").assertIsDisplayed()
         compose.onNodeWithTag("player-end-track:FOLLOW_MODE").assertIsDisplayed().assertIsSelected()
-        compose.onNodeWithTag("player-end-queue:REPEAT_QUEUE").performScrollTo().assertIsSelected()
+        compose.onNodeWithTag("player-end-queue:STOP").performScrollTo().assertIsSelected()
         compose.runOnIdle { assertNull(result.confirmed) }
         compose.onNodeWithTag("player-end-simple").performClick()
         compose.onNodeWithTag("player-end-mode:REPEAT_ALL").assertIsSelected()
-        compose.onNodeWithTag("player-end-mode:REPEAT_ONE").performClick().assertIsSelected()
+        compose.onNodeWithTag("player-end-mode:REPEAT_ONE").assertDoesNotExist()
+        compose.onNodeWithTag("player-end-mode:SEQUENCE").assertDoesNotExist()
+        compose.onNodeWithTag("player-end-mode:SHUFFLE").performClick().assertIsSelected()
         compose.onNodeWithTag("player-end-mode:REPEAT_ALL").assertIsNotSelected()
         compose.runOnIdle { assertNull(result.confirmed) }
         compose.onNodeWithTag("player-end-confirm").performClick()
         compose.runOnIdle {
-            assertEquals(PlayerPlayMode.REPEAT_ONE, result.confirmed?.first)
+            assertEquals(PlayerPlayMode.SHUFFLE, result.confirmed?.first)
             assertFalse(requireNotNull(result.confirmed).second.enabled)
+            assertEquals(PlayerEndBehavior(), result.confirmed?.second)
             assertEquals(1, result.dismissals)
         }
     }
@@ -52,7 +56,10 @@ class PlayerEndBehaviorDialogTest {
         compose.onNodeWithTag("player-end-track:LOAD_NEXT_PAUSED").performScrollTo().performClick()
         compose.onNodeWithTag("player-end-reset-first").assertDoesNotExist()
         compose.onNodeWithTag("player-end-track:PLAY_NEXT").assertDoesNotExist()
-        compose.onNodeWithTag("player-end-track:REPEAT_TRACK").assertDoesNotExist()
+        val nextPaused = compose.onNodeWithTag("player-end-track:LOAD_NEXT_PAUSED").fetchSemanticsNode().boundsInRoot
+        val repeatTrack = compose.onNodeWithTag("player-end-track:REPEAT_TRACK").fetchSemanticsNode().boundsInRoot
+        assertTrue("Single-track repeat follows load-next-paused", nextPaused.bottom <= repeatTrack.top)
+        compose.onNodeWithText("单曲循环").assertIsDisplayed()
         compose.onNodeWithTag("player-end-track:FOLLOW_MODE").performScrollTo().assertIsNotSelected()
         compose.onNodeWithTag("player-end-reshuffle").performScrollTo().assertIsOn().performClick().assertIsOff()
         compose.onNodeWithTag("player-end-wrap-queues").assertDoesNotExist()
@@ -129,8 +136,10 @@ class PlayerEndBehaviorDialogTest {
         compose.onNodeWithTag("player-end-wrap-queues").assertDoesNotExist()
     }
 
-    @Test fun selectingContinueRestoresTheDefaultAndConfirmsIt() {
+    @Test fun selectingPlayNextRestoresTheDefaultAndConfirmsIt() {
         val result = showDialog(behavior = PlayerEndBehavior(enabled = true))
+        compose.onNodeWithText("播放下一首").assertIsDisplayed()
+        compose.onNodeWithText("继续播放").assertDoesNotExist()
         compose.onNodeWithTag("player-end-track:STOP").performScrollTo().performClick().assertIsSelected()
         compose.onNodeWithTag("player-end-track:STOP").performClick().assertIsSelected()
         compose.onNodeWithTag("player-end-track:FOLLOW_MODE").performScrollTo().performClick().assertIsSelected()
@@ -140,6 +149,33 @@ class PlayerEndBehaviorDialogTest {
             assertEquals(PlayerTrackEndAction.FOLLOW_MODE, result.confirmed?.second?.trackAction)
             assertTrue(requireNotNull(result.confirmed).second.enabled)
         }
+    }
+
+    @Test fun simpleTraversalAndAdvancedEndRulesRemainEnabledAndConfirmTogether() {
+        val result = showDialog(behavior = PlayerEndBehavior(enabled = true))
+        compose.onNodeWithTag("player-end-track:REPEAT_TRACK").performScrollTo().performClick().assertIsSelected()
+        compose.onNodeWithTag("player-end-queue:REPEAT_QUEUE").performScrollTo().performClick()
+        compose.onNodeWithTag("player-end-simple").performClick()
+        compose.onNodeWithTag("player-end-mode:SHUFFLE").performClick()
+        compose.onNodeWithTag("player-end-advanced").performClick()
+        compose.onNodeWithTag("player-end-track:REPEAT_TRACK").performScrollTo().assertIsSelected()
+        compose.onNodeWithTag("player-end-simple").performClick()
+        compose.onNodeWithTag("player-end-mode:SHUFFLE").assertIsSelected()
+        compose.onNodeWithTag("player-end-confirm").performClick()
+        compose.runOnIdle {
+            assertEquals(PlayerPlayMode.SHUFFLE, result.confirmed?.first)
+            assertEquals(PlayerEndBehavior(enabled = true, trackAction = PlayerTrackEndAction.REPEAT_TRACK,
+                queueAction = PlayerQueueEndAction.REPEAT_QUEUE), result.confirmed?.second)
+        }
+    }
+
+    @Test fun openingAdvancedTabDoesNotEnableDisabledRulesOrReplaceTheirSavedChoices() {
+        val saved = PlayerEndBehavior(trackAction = PlayerTrackEndAction.REPEAT_TRACK,
+            queueAction = PlayerQueueEndAction.NEXT_QUEUE, wrapQueues = true, reshuffle = false)
+        val result = showDialog(behavior = saved)
+        compose.onNodeWithTag("player-end-track:REPEAT_TRACK").performScrollTo().assertIsSelected()
+        compose.onNodeWithTag("player-end-confirm").performClick()
+        compose.runOnIdle { assertEquals(saved, result.confirmed?.second) }
     }
 
     private class Result {

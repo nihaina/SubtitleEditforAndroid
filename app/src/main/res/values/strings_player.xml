@@ -28,7 +28,7 @@
 
     <string name="player_mode_sequence">顺序播放</string>
     <string name="player_mode_repeat_one">单曲循环</string>
-    <string name="player_mode_repeat_all">列表循环</string>
+    <string name="player_mode_repeat_all">顺序循环</string>
     <string name="player_mode_shuffle">随机播放</string>
 
     <string name="player_eq_enable">启用均衡器</string>

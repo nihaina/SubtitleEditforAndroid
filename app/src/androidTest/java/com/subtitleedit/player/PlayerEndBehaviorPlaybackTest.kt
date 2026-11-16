@@ -78,7 +78,10 @@ class PlayerEndBehaviorPlaybackTest {
         val tracks = listOf(f.wav("first.wav"), f.wav("second.wav"))
         openPlayer(tracks).use { session ->
             val model = session.model
-            apply(model, PlayerTrackEndAction.FOLLOW_MODE, mode = PlayerPlayMode.REPEAT_ONE)
+            apply(model, PlayerTrackEndAction.REPEAT_TRACK)
+            onMain { model.cycleMode() }
+            assertEquals(PlayerPlayMode.SHUFFLE, state(model).mode)
+            assertEquals(PlayerTrackEndAction.REPEAT_TRACK, state(model).endBehavior.trackAction)
             finishCurrentTrack(model)
             awaitState(model, "repeat current track starts over") {
                 it.currentIndex == 0 && it.ready && it.playing && it.positionMs in 200L..2_000L
@@ -98,6 +101,28 @@ class PlayerEndBehaviorPlaybackTest {
                 it.currentIndex == 1 && !it.playing && it.positionMs >= it.durationMs - 100L
             }
             assertRemainsStopped(model, tracks.last())
+        }
+    }
+
+    @Test fun disablingAdvancedRulesRestoresSimpleLoopingWithoutLosingTheSavedTrackAction() = Fixture().use { f ->
+        val tracks = listOf(f.wav("first.wav"), f.wav("last.wav"))
+        openPlayer(tracks, startIndex = 1).use { session ->
+            val model = session.model
+            apply(model, PlayerTrackEndAction.REPEAT_TRACK)
+            onMain { model.setAdvancedPlaybackEnabled(false) }
+            finishCurrentTrack(model)
+            awaitState(model, "disabled advanced repeat yields to sequential queue looping") {
+                it.currentIndex == 0 && it.ready && it.playing && it.positionMs in 200L..2_000L
+            }
+            assertFalse(state(model).endBehavior.enabled)
+            assertEquals(PlayerTrackEndAction.REPEAT_TRACK, state(model).endBehavior.trackAction)
+            onMain { model.setAdvancedPlaybackEnabled(true) }
+            assertEquals(PlayerTrackEndAction.REPEAT_TRACK, state(model).endBehavior.trackAction)
+            finishCurrentTrack(model)
+            awaitState(model, "re-enabled advanced repeat restarts the current track") {
+                it.currentIndex == 0 && it.ready && it.playing && it.positionMs in 200L..2_000L
+            }
+            assertEquals(tracks.first().path, nativePath())
         }
     }
 
@@ -193,6 +218,10 @@ class PlayerEndBehaviorPlaybackTest {
             val model = session.model
             pauseAtBeginning(model)
             assertFalse(state(model).endBehavior.enabled)
+            assertNull(boundsForTag("player-quick-end-behavior"))
+            onMain { model.openEndBehaviorDialog() }
+            assertFalse(state(model).showEndBehaviorDialog)
+            onMain { model.setAdvancedPlaybackEnabled(true) }
             assertEndBehaviorIcons(R.string.player_end_continue, R.string.player_end_stop)
             pressTag("player-quick-end-behavior")
             awaitState(model, "settings open without applying an advanced override") { it.showEndBehaviorDialog }
@@ -201,7 +230,7 @@ class PlayerEndBehaviorPlaybackTest {
                     nodeForTag("player-end-track:LOAD_NEXT_PAUSED") != null && nodeForTag("player-end-mode:SEQUENCE") == null
             }
             captureEndBehaviorIfRequested("player-end-default-advanced.png")
-            assertFalse(PlayerPreferences(f.preferences).endBehavior.enabled)
+            assertTrue(PlayerPreferences(f.preferences).endBehavior.enabled)
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
             awaitState(model, "default advanced view can be dismissed without applying") { !it.showEndBehaviorDialog }
             await("default dialog is gone") { boundsForTag("player-end-behavior-dialog") == null }
@@ -253,24 +282,26 @@ class PlayerEndBehaviorPlaybackTest {
             pauseAtBeginning(model)
             assertEquals("Advanced settings survive a new player session", confirmed, state(model).endBehavior)
             assertEquals(PlayerPlayMode.REPEAT_ALL, state(model).mode)
-            val expectedModes = listOf(PlayerPlayMode.SHUFFLE, PlayerPlayMode.SEQUENCE,
-                PlayerPlayMode.REPEAT_ONE, PlayerPlayMode.REPEAT_ALL)
+            val expectedModes = listOf(PlayerPlayMode.SHUFFLE, PlayerPlayMode.REPEAT_ALL,
+                PlayerPlayMode.SHUFFLE, PlayerPlayMode.REPEAT_ALL)
             expectedModes.forEach { expected ->
                 pressTag("player-mode-chip")
                 awaitState(model, "short click switches to $expected") {
                     it.mode == expected && it.endBehavior.enabled && !it.showEndBehaviorDialog &&
-                        it.endBehavior.trackAction == PlayerTrackEndAction.FOLLOW_MODE
+                        it.endBehavior == confirmed
                 }
                 assertEquals(expected, PlayerPreferences(f.preferences).defaultPlayMode)
-                assertEquals(confirmed.copy(trackAction = PlayerTrackEndAction.FOLLOW_MODE),
-                    PlayerPreferences(f.preferences).endBehavior)
-                assertEndBehaviorIcons(R.string.player_end_continue, R.string.player_end_repeat_queue)
-                if (expected == PlayerPlayMode.REPEAT_ONE) captureEndBehaviorIfRequested("player-end-repeat-repeat.png")
+                assertEquals(confirmed, PlayerPreferences(f.preferences).endBehavior)
+                assertEndBehaviorIcons(R.string.player_end_stop, R.string.player_end_repeat_queue)
             }
-            onMain { model.applyEndBehavior(PlayerPlayMode.SEQUENCE, PlayerEndBehavior(enabled = true)) }
+            onMain { model.applyEndBehavior(PlayerPlayMode.REPEAT_ALL, confirmed.copy(
+                trackAction = PlayerTrackEndAction.REPEAT_TRACK)) }
+            assertEndBehaviorIcons(R.string.player_mode_repeat_one, R.string.player_end_repeat_queue)
+            captureEndBehaviorIfRequested("player-end-repeat-repeat.png")
+            onMain { model.applyEndBehavior(PlayerPlayMode.REPEAT_ALL, PlayerEndBehavior(enabled = true)) }
             assertEndBehaviorIcons(R.string.player_end_continue, R.string.player_end_stop)
             captureEndBehaviorIfRequested("player-end-next-stop.png")
-            onMain { model.applyEndBehavior(PlayerPlayMode.SEQUENCE, PlayerEndBehavior(enabled = true,
+            onMain { model.applyEndBehavior(PlayerPlayMode.REPEAT_ALL, PlayerEndBehavior(enabled = true,
                 trackAction = PlayerTrackEndAction.LOAD_NEXT_PAUSED, queueAction = PlayerQueueEndAction.NEXT_QUEUE)) }
             assertEndBehaviorIcons(R.string.player_end_load_next_paused, R.string.player_end_next_queue)
             captureEndBehaviorIfRequested("player-end-paused-next.png")
@@ -279,7 +310,7 @@ class PlayerEndBehaviorPlaybackTest {
 
     private fun apply(model: PlayerViewModel, track: PlayerTrackEndAction,
         queue: PlayerQueueEndAction = PlayerQueueEndAction.STOP, wrap: Boolean = false,
-        mode: PlayerPlayMode = PlayerPlayMode.SEQUENCE) {
+        mode: PlayerPlayMode = PlayerPlayMode.REPEAT_ALL) {
         onMain {
             model.applyEndBehavior(mode,
                 PlayerEndBehavior(enabled = true, trackAction = track, queueAction = queue, wrapQueues = wrap))
@@ -428,9 +459,11 @@ class PlayerEndBehaviorPlaybackTest {
     }
 
     private fun nodeForTag(tag: String): AccessibilityNodeInfo? {
+        // Conditional controls can appear without replacing the window. Discard cached child ids.
+        if (Build.VERSION.SDK_INT >= 33) automation.clearCache()
         val nodes = ArrayDeque<AccessibilityNodeInfo>()
-        automation.windows.mapNotNull { it.root }.forEach { nodes.addLast(it) }
-        automation.rootInActiveWindow?.let { nodes.addLast(it) }
+        automation.rootInActiveWindow?.takeIf { it.refresh() }?.let { nodes.addLast(it) }
+        automation.windows.mapNotNull { it.root }.filter { it.refresh() }.forEach { nodes.addLast(it) }
         while (nodes.isNotEmpty()) {
             val node = nodes.removeFirst()
             val id = node.viewIdResourceName.orEmpty()
