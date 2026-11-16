@@ -63,7 +63,11 @@ internal fun MediaLibrarySelectionPanel(
     onSelectRange: () -> Unit,
     onInvertSelection: () -> Unit,
     modifier: Modifier = Modifier,
-    favoriteActionLabelRes: Int = R.string.player_action_favorite
+    favoriteActionLabelRes: Int = R.string.player_action_favorite,
+    onRemoveSelection: (() -> Unit)? = null,
+    removeSelectionLabelRes: Int = R.string.player_queue_remove_selected,
+    showDuration: Boolean = true,
+    onOptionsRequested: (() -> Unit)? = null
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     var optionsExpanded by remember { mutableStateOf(false) }
@@ -90,18 +94,20 @@ internal fun MediaLibrarySelectionPanel(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
-                    Icon(
-                        painterResource(R.drawable.ic_schedule),
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = formatPlaybackTime(totalDurationMs),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1
-                    )
+                    if (showDuration) {
+                        Icon(
+                            painterResource(R.drawable.ic_schedule),
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = formatPlaybackTime(totalDurationMs),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
                 }
                 IconButton(
                     onClick = { expanded = !expanded },
@@ -163,23 +169,34 @@ internal fun MediaLibrarySelectionPanel(
                     SelectionPanelAction(
                         label = stringResource(R.string.media_lib_files_options),
                         icon = R.drawable.ic_more,
-                        onClick = { advancedExpanded = false; optionsExpanded = true },
+                        onClick = {
+                            advancedExpanded = false
+                            if (onOptionsRequested != null) onOptionsRequested() else optionsExpanded = true
+                        },
                         modifier = Modifier.testTag("library-selection-options")
                     )
                     DropdownMenu(
                         expanded = optionsExpanded,
                         onDismissRequest = { optionsExpanded = false }
                     ) {
+                        if (onRemoveSelection != null) DropdownMenuItem(
+                            text = { Text(stringResource(removeSelectionLabelRes)) },
+                            enabled = selectedFiles.isNotEmpty(),
+                            onClick = { optionsExpanded = false; onRemoveSelection() }
+                        )
                         DropdownMenuItem(
                             text = { Text(stringResource(favoriteActionLabelRes)) },
+                            enabled = onRemoveSelection == null || selectedFiles.isNotEmpty(),
                             onClick = { optionsExpanded = false; onFavorite() }
                         )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.player_action_add_to_playlist)) },
+                            enabled = onRemoveSelection == null || selectedFiles.isNotEmpty(),
                             onClick = { optionsExpanded = false; onAddToPlaylist() }
                         )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.media_lib_files_info)) },
+                            enabled = onRemoveSelection == null || selectedFiles.size == 1,
                             onClick = { optionsExpanded = false; onShowInfo() }
                         )
                     }

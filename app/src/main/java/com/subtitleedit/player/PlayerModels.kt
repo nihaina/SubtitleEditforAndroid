@@ -1,15 +1,20 @@
 package com.subtitleedit.player
 
 import java.io.File
+import java.util.UUID
 
 /** One playable media entry of the player queue. */
 internal data class PlayerTrack(
     val path: String,
     val name: String,
-    val isVideo: Boolean
+    val isVideo: Boolean,
+    // Identity belongs to this occurrence in the temporary queue, not the underlying file.
+    val queueEntryId: String = UUID.randomUUID().toString()
 ) {
     val file: File get() = File(path)
     val stem: String get() = file.nameWithoutExtension
+
+    fun newQueueEntry(): PlayerTrack = copy(queueEntryId = UUID.randomUUID().toString())
 }
 
 internal enum class PlayerPlayMode {

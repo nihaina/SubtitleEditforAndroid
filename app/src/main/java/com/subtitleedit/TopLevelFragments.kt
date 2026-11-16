@@ -15,10 +15,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.SaveableStateHolder
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
@@ -26,6 +27,7 @@ import com.subtitleedit.ui.FavoritesScreen
 import com.subtitleedit.ui.ListeningStatsScreen
 import com.subtitleedit.ui.ListeningStatsPageState
 import com.subtitleedit.ui.MediaLibraryScreen
+import com.subtitleedit.ui.MediaLibraryPageState
 import com.subtitleedit.ui.MediaAlbumScreen
 import com.subtitleedit.ui.MediaAlbumPageState
 import com.subtitleedit.ui.MediaLibraryScanCoordinator
@@ -65,6 +67,8 @@ internal class MainTopLevelPagesState {
     var settingsPage by mutableStateOf(SettingsPageState())
     val listeningStatsPage = ListeningStatsPageState()
     val mediaAlbumPage = MediaAlbumPageState()
+    val mediaLibraryPage = MediaLibraryPageState()
+    internal var retainedSaveableStateHolder: SaveableStateHolder? = null
 }
 
 @Composable
@@ -77,7 +81,8 @@ internal fun MainTopLevelPages(
     playerModeEnabled: Boolean,
     viewMode: FileBrowserViewMode,
     onOpenDirectory: (File) -> Unit,
-    onToolbarChanged: (String, Boolean, (() -> Unit)?) -> Unit
+    onToolbarChanged: (String, Boolean, (() -> Unit)?) -> Unit,
+    saveableStateHolder: SaveableStateHolder? = null
 ) {
     val isActive = selectedPage == activePage
     val activeNow by rememberUpdatedState(isActive)
@@ -89,6 +94,9 @@ internal fun MainTopLevelPages(
     val settingsScope = rememberCoroutineScope()
     var previousSelectedPage by remember { mutableIntStateOf(R.id.nav_directory) }
     var previousSelectionVersion by remember { mutableIntStateOf(selectionVersion) }
+    val candidateStateHolder = rememberSaveableStateHolder()
+    val pageStateHolder = saveableStateHolder ?: state.retainedSaveableStateHolder
+        ?: candidateStateHolder.also { state.retainedSaveableStateHolder = it }
 
     fun loadFavoriteDirectories() = refreshFavoriteDirectoryState(directoryStore, state)
 
@@ -305,11 +313,12 @@ internal fun MainTopLevelPages(
     }
 
     val pageKey = if (selectedPage == R.id.nav_tools || selectedPage == R.id.nav_library || selectedPage == R.id.nav_stats) 0 else selectionVersion
-    key(selectedPage, pageKey, playerModeEnabled) {
+    pageStateHolder.SaveableStateProvider("$playerModeEnabled:$selectedPage:$pageKey") {
     when (selectedPage) {
         R.id.nav_library -> MediaLibraryScreen(
             refreshVersion = refreshVersion,
             selectionVersion = selectionVersion,
+            pageState = state.mediaLibraryPage,
             onToolbarChanged = { title, hasBack, back ->
                 if (activeNow) toolbarCallback(title, hasBack, back)
             },

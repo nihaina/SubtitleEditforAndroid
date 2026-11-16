@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_queue_sort">调整播放次序</string>
+    <string name="player_queue_select">选择播放列表文件</string>
+    <string name="player_queue_exit_selection">退出播放列表选择</string>
+    <string name="player_queue_remove">移出播放列表</string>
+    <string name="player_queue_remove_selected">移出播放列表</string>
+    <string name="player_queue_select_track">选择 %1$s</string>
+    <string name="player_queue_deselect_track">取消选择 %1$s</string>
+</resources>

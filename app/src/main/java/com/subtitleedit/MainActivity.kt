@@ -20,6 +20,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import android.view.WindowManager
@@ -180,6 +181,7 @@ class MainActivity : AppComposeActivity() {
     private var pendingArchiveDraft: PendingArchiveDraft? = null
     private var pendingRenameFile: File? = null
     private var pendingDeleteFiles: List<File>? = null
+    private var pendingMediaDeleteSuccess: (() -> Unit)? = null
     private var pendingMediaCacheFiles: List<File>? = null
     private var nextSubtitleConversionDialogId = 0
     private val directoryWatcher = DirectoryWatcher(
@@ -351,12 +353,33 @@ class MainActivity : AppComposeActivity() {
         )
         setContent {
             SubtitleEditComposeTheme {
+                CompositionLocalProvider(com.subtitleedit.ui.LocalMediaSelection provides
+                    if (screenState.playerModeEnabled) stateModel.mediaSelection else null) {
+                com.subtitleedit.ui.MediaSelectionActionHost(
+                    controller = stateModel.mediaSelection,
+                    onAddToQueue = { paths -> playerModel.appendQueueTracks(paths.map { path ->
+                        val file = File(path)
+                        PlayerTrack(path, file.name, FileTypePolicy.isVideo(file))
+                    }) },
+                    onPlayNext = { paths -> playerModel.enqueueNextTracks(paths.map { path ->
+                        val file = File(path)
+                        PlayerTrack(path, file.name, FileTypePolicy.isVideo(file))
+                    }) },
+                    onEditTags = playerController::openTagEditor,
+                    onLocate = ::locateMediaFile,
+                    onDeleteFiles = ::confirmDeleteMediaFiles,
+                    immersive = playerModel.expanded.collectAsState().value,
+                    onNavigateToCategory = ::revealPlayerTrackInCategory
+                )
                 MainPlayerHost(playerModel, playerController::openTagEditor, playerController::openSubtitlePicker,
                     onImmersiveChanged = ::updatePlayerWindow,
                     onNavigateToCategory = ::revealPlayerTrackInCategory,
                     enabled = screenState.playerModeEnabled) { miniPlayerSlot ->
-                CompositionLocalProvider(LocalPlayerLauncher provides
-                    if (screenState.playerModeEnabled) ::openPlayerQueue else null) {
+                CompositionLocalProvider(
+                    LocalPlayerLauncher provides if (screenState.playerModeEnabled) ::openPlayerQueue else null,
+                    com.subtitleedit.player.LocalPlayerQueueModel provides
+                        if (screenState.playerModeEnabled) playerModel else null
+                ) {
                 MainActivityScreen(
                         state = screenState,
                         topLevelPageRefreshVersion = topLevelPageRefreshVersion,
@@ -430,6 +453,7 @@ class MainActivity : AppComposeActivity() {
                 }
                 }
                 }
+                }
             }
         }
         setupBackNavigation()
@@ -457,11 +481,19 @@ class MainActivity : AppComposeActivity() {
         )
         checkPermissions()
         observeSharedLibraryCache()
+        intent.getStringExtra(EXTRA_REVEAL_MEDIA_PATH)?.let {
+            intent.removeExtra(EXTRA_REVEAL_MEDIA_PATH)
+            locateMediaFile(it)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         openPlayerFromNotification(intent)
+        intent.getStringExtra(EXTRA_REVEAL_MEDIA_PATH)?.let {
+            intent.removeExtra(EXTRA_REVEAL_MEDIA_PATH)
+            locateMediaFile(it)
+        }
     }
 
     private fun openPlayerFromNotification(intent: Intent?) {
@@ -561,6 +593,23 @@ class MainActivity : AppComposeActivity() {
         if (target == stateModel.documentState.selectedTopLevelItem) return
         topLevelPageSelectionVersion++
         topLevelNavigationCoordinator.showPage(target)
+    }
+
+    private fun locateMediaFile(path: String) {
+        val file = File(path).absoluteFile
+        val parent = file.parentFile ?: return
+        if (!file.isFile || !parent.isDirectory) {
+            showShortToast(getString(R.string.media_lib_file_missing))
+            return
+        }
+        playerModel.collapse()
+        showTopLevelPage(R.id.nav_directory)
+        clearFileSearch(refreshDirectory = false)
+        val position = DirectoryScrollPosition(file.path, 0, 0,
+            stateModel.documentState.viewMode ?: FileBrowserViewMode.DETAILED)
+        stateModel.documentState.directoryScrollPositions[directoryPath(parent)] = position
+        stateModel.documentState.directoryHistory.clear()
+        loadDirectory(parent, restoreScrollPosition = true)
     }
 
     private fun publishScreenState() {
@@ -768,6 +817,7 @@ class MainActivity : AppComposeActivity() {
         mainDialog = null
         pendingRenameFile = null
         pendingDeleteFiles = null
+        pendingMediaDeleteSuccess = null
         pendingMediaCacheFiles = null
     }
 
@@ -996,6 +1046,11 @@ class MainActivity : AppComposeActivity() {
     
     private fun onFileClicked(file: File) {
         if (directoryNavigationPending) return
+        if (com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled &&
+            stateModel.mediaSelection.active && file.isFile) {
+            if (isAudioOrVideoFile(file)) stateModel.mediaSelection.toggle(file.absolutePath)
+            return
+        }
         // 处理父目录导航
         if (file.name == "..") {
             // 普通文件选择期间暂时锁定顶部父目录项，避免点击文件夹选择后
@@ -1116,6 +1171,10 @@ class MainActivity : AppComposeActivity() {
 
     private fun enterSelectionMode(file: File) {
         if (directoryNavigationPending) return
+        if (com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled) {
+            if (isAudioOrVideoFile(file)) stateModel.mediaSelection.select(file.absolutePath)
+            return
+        }
         if (file.name == ".." || stateModel.documentState.pendingFileOperation != null) return
         if (file.absolutePath in stateModel.documentState.selectedPaths) {
             toggleSelection(file)
@@ -1132,6 +1191,11 @@ class MainActivity : AppComposeActivity() {
     }
 
     private fun selectAllVisibleFiles() {
+        if (com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled) {
+            stateModel.mediaSelection.updateVisiblePaths(visibleFiles.filter(::isAudioOrVideoFile).map { it.absolutePath })
+            stateModel.mediaSelection.selectVisible(com.subtitleedit.ui.MediaLibrarySelectionAction.SELECT_ALL)
+            return
+        }
         if (visibleFiles.isNotEmpty() && visibleFiles.all { it.absolutePath in stateModel.documentState.selectedPaths }) {
             exitSelectionMode()
             return
@@ -1141,6 +1205,10 @@ class MainActivity : AppComposeActivity() {
     }
 
     private fun selectRangeBetweenSelectedFiles() {
+        if (com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled) {
+            stateModel.mediaSelection.selectVisible(com.subtitleedit.ui.MediaLibrarySelectionAction.SELECT_RANGE)
+            return
+        }
         val selectedIndices = visibleFiles.mapIndexedNotNull { index, file ->
             index.takeIf { file.absolutePath in stateModel.documentState.selectedPaths }
         }
@@ -1416,12 +1484,25 @@ class MainActivity : AppComposeActivity() {
         val files = selectedFiles()
         if (files.isEmpty()) return
         pendingDeleteFiles = files
+        pendingMediaDeleteSuccess = null
+        mainDialog = MainActivityDialogUi.DeleteConfirmation(files.size)
+    }
+
+    private fun confirmDeleteMediaFiles(paths: List<String>, onSuccess: () -> Unit) {
+        val files = paths.distinct().map(::File).filter(::isAudioOrVideoFile)
+        if (files.isEmpty()) return
+        pendingDeleteFiles = files
+        pendingMediaDeleteSuccess = onSuccess
         mainDialog = MainActivityDialogUi.DeleteConfirmation(files.size)
     }
 
     private fun deleteConfirmedSelection() {
         val files = pendingDeleteFiles ?: return
+        val mediaSuccess = pendingMediaDeleteSuccess
         dismissMainDialog()
+        val suspendedPlayer = !playerModel.outputSuspended.value &&
+            files.any { it.path == playerModel.state.value.currentTrack?.path }
+        if (suspendedPlayer) playerModel.suspendOutput()
         val progress = showArchiveProgress(
             title = "正在删除",
             message = "正在准备删除...",
@@ -1462,6 +1543,7 @@ class MainActivity : AppComposeActivity() {
                     }
                 }
                 if (result.allDeleted) {
+                    mediaSuccess?.invoke()
                     showShortToast("已删除")
                 } else {
                     showShortToast("删除失败")
@@ -1475,6 +1557,13 @@ class MainActivity : AppComposeActivity() {
                 progress.dialog.dismiss()
                 val current = activeInstance?.get()?.takeIf { it.stateModel === stateModel }
                 current?.let { activity ->
+                    val removed = files.filterNot { it.exists() }.mapTo(hashSetOf()) { it.absolutePath }
+                    activity.stateModel.mediaSelection.removePaths(removed)
+                    activity.playerModel.removeQueueTracks(removed)
+                    if (suspendedPlayer) activity.playerModel.resumeOutput()
+                    if (removed.isNotEmpty()) com.subtitleedit.player.PlayerLibraryWriter.submit {
+                        com.subtitleedit.library.MediaLibraryRepository.getInstance(activity).updateObservedPaths(removed)
+                    }
                     activity.exitSelectionMode()
                     activity.stateModel.documentState.currentDirectory?.let(activity::loadDirectory)
                 }
@@ -2096,6 +2185,7 @@ class MainActivity : AppComposeActivity() {
     private fun togglePlayerMode() {
         val preferences = com.subtitleedit.player.PlayerPreferences.getInstance(this)
         preferences.playerModeEnabled = !preferences.playerModeEnabled
+        if (!preferences.playerModeEnabled) stateModel.mediaSelection.cancel()
         refreshPlayerModeNavigation()
         showShortToast(getString(
             if (preferences.playerModeEnabled) R.string.player_mode_enabled else R.string.player_mode_disabled
@@ -2253,6 +2343,10 @@ class MainActivity : AppComposeActivity() {
     }
     
     private fun handleBackNavigation() {
+        if (stateModel.mediaSelection.active) {
+            stateModel.mediaSelection.cancel()
+            return
+        }
         if (stateModel.documentState.selectedTopLevelItem == R.id.nav_directory &&
             stateModel.documentState.selectedPaths.isEmpty() &&
             stateModel.documentState.pendingFileOperation == null && searchExpanded

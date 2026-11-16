@@ -95,8 +95,20 @@ internal class MainPlayerController(
 
     fun openTagEditor() {
         val path = viewModel.prepareTagEditing() ?: return
+        openTagEditorFiles(listOf(path))
+    }
+
+    fun openTagEditor(paths: List<String>) {
+        val files = paths.distinct().map(::File).filter { it.isFile }
+        if (files.isEmpty()) return
+        if (files.any { it.path == viewModel.state.value.currentTrack?.path } &&
+            viewModel.prepareTagEditing() == null) return
+        openTagEditorFiles(files.map { it.path })
+    }
+
+    private fun openTagEditorFiles(paths: List<String>) {
         tagEditor.launch(Intent(activity, MediaTagEditorActivity::class.java).apply {
-            putStringArrayListExtra(MediaTagEditorActivity.EXTRA_FILE_PATHS, arrayListOf(path))
+            putStringArrayListExtra(MediaTagEditorActivity.EXTRA_FILE_PATHS, ArrayList(paths))
         })
     }
 

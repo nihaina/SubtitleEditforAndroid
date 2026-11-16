@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="media_selection_close_after_action">选择某个选项后关闭选择</string>
+    <string name="media_selection_add_to_queue">添加到当前播放列表</string>
+    <string name="media_selection_play_next">在当前歌曲后播放</string>
+    <string name="media_selection_add_to_favorites">添加到收藏</string>
+    <string name="media_selection_remove_from_favorites">从收藏移除</string>
+    <string name="media_selection_locate_directory">定位到目录</string>
+    <string name="media_selection_share">分享</string>
+    <string name="media_selection_clear_history">清除播放记录</string>
+    <string name="media_selection_delete_files">删除文件</string>
+    <string name="media_selection_history_cleared">已清除所选文件的播放记录</string>
+</resources>

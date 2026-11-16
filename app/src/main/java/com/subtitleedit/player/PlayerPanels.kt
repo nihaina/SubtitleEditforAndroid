@@ -58,6 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.subtitleedit.R
+import com.subtitleedit.library.MediaLibraryTrack
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -100,12 +101,14 @@ internal fun PlayerPanelSheet(
             if (state.panel == PlayerPanel.PLAYLIST || state.panel == PlayerPanel.BOOKMARK) contentModifier
             else contentModifier.verticalScroll(scrollState)
         ) {
-            Text(
-                stringResource(panelTitle(state.panel)),
-                color = PlayerColors.OnDark,
-                fontSize = 18.sp,
-                modifier = Modifier.padding(bottom = 14.dp)
-            )
+            if (state.panel != PlayerPanel.PLAYLIST) {
+                Text(
+                    stringResource(panelTitle(state.panel)),
+                    color = PlayerColors.OnDark,
+                    fontSize = 18.sp,
+                    modifier = Modifier.padding(bottom = 14.dp)
+                )
+            }
             when (state.panel) {
                 PlayerPanel.PLAYLIST -> PlayerPlaylistPanel(state, viewModel)
                 PlayerPanel.EQUALIZER -> PlayerEqualizerPanel(state, viewModel)
@@ -132,41 +135,38 @@ private fun panelTitle(panel: PlayerPanel): Int = when (panel) {
 
 @Composable
 private fun PlayerPlaylistPanel(state: PlayerUiState, viewModel: PlayerViewModel) {
-    if (state.playlist.isEmpty()) {
-        Text(stringResource(R.string.player_playlist_empty), color = PlayerColors.OnDarkVariant)
-        return
+    val actions = rememberPlaybackQueueLibraryActions(immersive = true)
+    val tracks = remember(state.playlist, state.currentTrack?.path, state.durationMs) {
+        state.playlist.map { track ->
+            MediaLibraryTrack(track.path, track.name, isVideo = track.isVideo,
+                durationMs = if (track.path == state.currentTrack?.path) state.durationMs else 0L)
+        }
     }
-    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        itemsIndexed(state.playlist, key = { index, track -> "$index:${track.path}" }) { index, track ->
-            val current = index == state.currentIndex
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (current) PlayerColors.SurfaceHigh else Color.Transparent)
-                    .clickable { viewModel.playIndex(index); viewModel.closePanel() }
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                PlayerPlaylistArtwork(track = track, highlighted = current)
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    text = track.name,
-                    color = if (current) PlayerColors.Accent else PlayerColors.OnDark,
-                    fontSize = 14.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-                if (current && state.playing) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_video_play),
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = PlayerColors.Accent
-                    )
-                }
-            }
+    PlaybackQueueContent(
+        tracks = tracks,
+        currentPath = state.currentTrack?.path,
+        playing = state.playing,
+        onPlay = { entryId ->
+            viewModel.playQueueEntry(entryId)
+            viewModel.closePanel()
+        },
+        onMove = viewModel::moveQueueEntry,
+        onRemove = viewModel::removeQueueTracks,
+        onFavorite = actions.favorite,
+        onAddToPlaylist = actions.addToPlaylist,
+        onShowInfo = actions.showInfo,
+        modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),
+        queueVersion = state.queueVersion,
+        tagPrefix = "player-queue",
+        overlaySelectionScope = true,
+        entryIds = state.playlist.map { it.queueEntryId },
+        currentEntryId = state.currentTrack?.queueEntryId,
+        onRemoveEntry = { viewModel.removeQueueEntries(setOf(it)) }
+    ) { sortButton ->
+        Row(Modifier.fillMaxWidth().padding(bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.player_panel_playlist), color = PlayerColors.OnDark, fontSize = 18.sp,
+                modifier = Modifier.weight(1f))
+            sortButton()
         }
     }
 }

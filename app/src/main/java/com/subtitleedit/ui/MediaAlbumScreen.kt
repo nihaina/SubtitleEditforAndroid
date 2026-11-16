@@ -325,6 +325,7 @@ internal fun MediaAlbumPageContent(
     revealRequest: MediaCategoryRevealRequest? = null,
     onRevealFinished: (Long) -> Unit = {}
 ) {
+    val globalSelection = LocalMediaSelection.current
     var category by rememberSaveable { mutableStateOf(MediaCategory.ALBUMS) }
     var query by rememberSaveable { mutableStateOf("") }
     var singerQuery by rememberSaveable { mutableStateOf("") }
@@ -396,6 +397,11 @@ internal fun MediaAlbumPageContent(
         creditRole?.let { buildMediaCredits(albums.flatMap { album -> album.tracks }, it) }.orEmpty()
     }
     val openedCredit = credits.firstOrNull { it.key == openedCreditKey }
+    val showingTracks = !settingsOpen &&
+        ((openedCredit != null && creditRole != null) || openedAlbum != null)
+    LaunchedEffect(isActive, showingTracks, globalSelection) {
+        if (isActive && !showingTracks) globalSelection?.updateVisiblePaths(emptyList())
+    }
     val visibleCredits = remember(credits, creditQuery, activeCreditOptions) {
         filterAndSortMediaSingers(credits, if (activeCreditOptions.quickSearch) creditQuery else "",
             activeCreditOptions.sortField, activeCreditOptions.ascending)

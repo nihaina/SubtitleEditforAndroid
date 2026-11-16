@@ -29,6 +29,7 @@ internal data class PlayerGestureHint(val text: String, val token: Long = 0L, va
 
 internal data class PlayerUiState(
     val playlist: List<PlayerTrack> = emptyList(),
+    val queueVersion: Long = 0L,
     val currentIndex: Int = -1,
     val shuffleOrder: List<Int> = emptyList(),
     val positionMs: Long = 0L,
@@ -138,6 +139,8 @@ internal class PlayerViewModel @JvmOverloads constructor(
     private var handledEndId = -1L
     private var trackEnded = false
     private var configured = false
+    private var queueVersionCounter = 0L
+    private var appendGeneration = 0L
     private var hintToken = 0L
     private var externalSubtitles: List<PlayerSubtitleOption> = emptyList()
     private val pickedSubtitles = mutableMapOf<String, List<PlayerSubtitleOption>>()
@@ -170,16 +173,16 @@ internal class PlayerViewModel @JvmOverloads constructor(
     )
 
     fun configure(playlist: List<PlayerTrack>, startIndex: Int, initialMode: PlayerPlayMode? = null,
-        queueSource: PlayerQueueSource? = null) {
+        queueSource: PlayerQueueSource? = null, allowDuplicates: Boolean = false) {
         if (configured) return
         configured = true
-        configureQueue(playlist, startIndex, initialMode, queueSource)
+        configureQueue(playlist, startIndex, initialMode, queueSource, allowDuplicates)
     }
 
     fun restoreSession(playlist: List<PlayerTrack>, startIndex: Int, mode: PlayerPlayMode?,
         positionMs: Long, playing: Boolean, expanded: Boolean, queueSource: PlayerQueueSource? = null) {
         if (configured) return
-        configure(playlist, startIndex, mode, queueSource)
+        configure(playlist, startIndex, mode, queueSource, allowDuplicates = true)
         detachedPosition = positionMs.coerceAtLeast(0L)
         playOnAttach = playing
         _expanded.value = expanded
@@ -187,7 +190,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
 
     /** A new library selection replaces the queue without replacing the output view. */
     fun openQueue(playlist: List<PlayerTrack>, startIndex: Int, initialMode: PlayerPlayMode? = null,
-        queueSource: PlayerQueueSource? = null) {
+        queueSource: PlayerQueueSource? = null, allowDuplicates: Boolean = false) {
         if (playlist.none { it.file.isFile }) {
             hint(R.string.player_playlist_empty)
             return
@@ -195,7 +198,8 @@ internal class PlayerViewModel @JvmOverloads constructor(
         cancelNextQueue()
         val selected = playlist.getOrNull(startIndex)?.path
         if (selected == _state.value.currentTrack?.path &&
-            playlist.map { it.path } == _state.value.playlist.map { it.path } && initialMode == null) {
+            playlist.map { it.path } == _state.value.playlist.map { it.path } && initialMode == null &&
+            (!allowDuplicates || startIndex == _state.value.currentIndex)) {
             _state.value = _state.value.copy(queueSource = queueSource)
             expand()
             return
@@ -208,7 +212,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         detachedSubtitle = null
         playOnAttach = true
         configured = true
-        configureQueue(playlist, startIndex, initialMode ?: preferences.defaultPlayMode, queueSource)
+        configureQueue(playlist, startIndex, initialMode ?: preferences.defaultPlayMode, queueSource, allowDuplicates)
         _state.value = _state.value.copy(positionMs = 0L, durationMs = 0L, ready = false,
             playing = false, seekPreviewMs = null, panel = PlayerPanel.NONE,
             controlsLocked = false, controlsVisible = true, lyricsVisible = false,
@@ -235,6 +239,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
 
     /** Leaving audio mode must not leave an invisible player or its timers running. */
     fun closeSession() {
+        appendGeneration++
         mediaNotifications?.invalidate()
         cancelNextQueue()
         collapse()
@@ -249,7 +254,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         detachedSubtitle = null
         loadedTrackPath = null
         configured = false
-        _state.value = _state.value.copy(playlist = emptyList(), currentIndex = -1, queueSource = null,
+        _state.value = _state.value.copy(playlist = emptyList(), queueVersion = 0L, currentIndex = -1, queueSource = null,
             ready = false, playing = false, positionMs = 0L, durationMs = 0L, error = null,
             controlsLocked = false, lyricsVisible = false, lyricLines = emptyList(),
             subtitleOptions = emptyList(), subtitleText = "", gestureHint = null)
@@ -269,14 +274,20 @@ internal class PlayerViewModel @JvmOverloads constructor(
     }
 
     private fun configureQueue(playlist: List<PlayerTrack>, startIndex: Int, initialMode: PlayerPlayMode?,
-        queueSource: PlayerQueueSource?) {
+        queueSource: PlayerQueueSource?, allowDuplicates: Boolean = false) {
         cancelNextQueue()
         val selectedPath = playlist.getOrNull(startIndex)?.path
-        val tracks = playlist.filter { it.file.isFile }.distinctBy { it.path }
-        val index = if (tracks.isEmpty()) -1 else tracks.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
+        val valid = playlist.withIndex().filter { it.value.file.isFile }
+            .let { if (allowDuplicates) it else it.distinctBy { item -> item.value.path } }
+        val usedIds = hashSetOf<String>()
+        val tracks = valid.map { if (usedIds.add(it.value.queueEntryId)) it.value else it.value.newQueueEntry() }
+        val index = if (tracks.isEmpty()) -1 else valid.indexOfFirst { it.index == startIndex }.takeIf { it >= 0 }
+            ?: tracks.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
         val currentTrack = tracks.getOrNull(index)
+        queueVersionCounter++
         _state.value = _state.value.copy(
             playlist = tracks,
+            queueVersion = queueVersionCounter,
             queueSource = queueSource,
             currentIndex = index,
             // A launch action can request shuffle without changing the user's default mode.
@@ -291,7 +302,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         if (tracks.isNotEmpty()) {
             if (initialMode == PlayerPlayMode.SHUFFLE) hint(R.string.player_mode_shuffle)
             PlayerLibraryWriter.submit {
-                libraryRepository.saveCurrentQueue(tracks.map { it.path }, index)
+                libraryRepository.saveCurrentQueue(tracks.map { it.path }, index, allowDuplicates = true)
             }
         }
     }
@@ -474,6 +485,161 @@ internal class PlayerViewModel @JvmOverloads constructor(
         if (index == _state.value.currentIndex) togglePlay() else jumpTo(index)
     }
 
+    fun playQueueEntry(entryId: String) {
+        val index = _state.value.playlist.indexOfFirst { it.queueEntryId == entryId }
+        if (index >= 0) playIndex(index)
+    }
+
+    /** Appending is deliberately occurrence-based: the same file may be queued repeatedly. */
+    fun appendQueueTracks(tracks: List<PlayerTrack>) {
+        addQueueTracks(tracks, afterCurrent = false)
+    }
+
+    fun enqueueNextTracks(tracks: List<PlayerTrack>) {
+        addQueueTracks(tracks, afterCurrent = true)
+    }
+
+    private fun addQueueTracks(tracks: List<PlayerTrack>, afterCurrent: Boolean) {
+        val added = tracks.filter { it.file.isFile }.map { it.newQueueEntry() }
+        if (added.isEmpty()) return
+        if (_state.value.queueVersion == 0L) {
+            val generation = appendGeneration
+            viewModelScope.launch {
+                try {
+                    val saved = PlayerLibraryWriter.execute { libraryRepository.getCurrentQueue() }
+                    if (generation != appendGeneration) return@launch
+                    if (_state.value.queueVersion == 0L) {
+                        val valid = saved.first.withIndex().filter { it.value.file.isFile }
+                        val restored = valid.map { PlayerTrack(it.value.path, it.value.displayTitle, it.value.isVideo) }
+                        val savedIndex = valid.indexOfFirst { it.index == saved.second }.coerceAtLeast(0)
+                        val edit = if (afterCurrent && restored.isNotEmpty()) PlayerQueueEdits.insertNext(
+                            restored, savedIndex, PlayerPlaylistOrder.newShuffleOrder(restored.size, savedIndex), added
+                        ) else null
+                        // Restore the dormant queue without starting playback or opening the player.
+                        playOnAttach = false
+                        configured = true
+                        configureQueue(edit?.playlist ?: (restored + added), edit?.currentIndex ?: savedIndex,
+                            null, null, allowDuplicates = true)
+                        if (edit != null) _state.value = _state.value.copy(shuffleOrder = edit.shuffleOrder)
+                    } else addQueueTracks(added, afterCurrent)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    hint(R.string.error)
+                }
+            }
+            return
+        }
+        val current = _state.value
+        if (current.playlist.isEmpty()) {
+            playOnAttach = false
+            configureQueue(added, 0, null, null, allowDuplicates = true)
+            return
+        }
+        cancelNextQueue()
+        val edit = if (afterCurrent) PlayerQueueEdits.insertNext(current.playlist, current.currentIndex,
+            current.shuffleOrder, added) else PlayerQueueEdit(current.playlist + added, current.currentIndex,
+            current.shuffleOrder + (current.playlist.size until current.playlist.size + added.size))
+        _state.value = current.copy(playlist = edit.playlist, currentIndex = edit.currentIndex, shuffleOrder = edit.shuffleOrder)
+        persistEditedQueue(edit)
+    }
+
+    fun moveQueueEntry(fromEntryId: String, toEntryId: String) {
+        val current = _state.value
+        val edit = PlayerQueueEdits.moveEntries(current.playlist, current.currentIndex, current.shuffleOrder,
+            fromEntryId, toEntryId) ?: return
+        cancelNextQueue()
+        _state.value = current.copy(playlist = edit.playlist, currentIndex = edit.currentIndex,
+            shuffleOrder = edit.shuffleOrder)
+        persistEditedQueue(edit)
+    }
+
+    /** Reordering other queue rows does not reload the currently playing media. */
+    fun moveQueueTrack(fromPath: String, toPath: String) {
+        val current = _state.value
+        val edit = PlayerQueueEdits.move(current.playlist, current.currentIndex, current.shuffleOrder,
+            fromPath, toPath) ?: return
+        cancelNextQueue()
+        _state.value = current.copy(playlist = edit.playlist, currentIndex = edit.currentIndex,
+            shuffleOrder = edit.shuffleOrder)
+        persistEditedQueue(edit)
+    }
+
+    /** Removes queue entries only; files, favorites and source playlists remain untouched. */
+    fun removeQueueTracks(paths: Set<String>) {
+        val current = _state.value
+        val edit = PlayerQueueEdits.remove(current.playlist, current.currentIndex, current.shuffleOrder,
+            paths) ?: return
+        applyQueueRemoval(current, edit)
+    }
+
+    fun removeQueueEntries(entryIds: Set<String>) {
+        val current = _state.value
+        val edit = PlayerQueueEdits.removeEntries(current.playlist, current.currentIndex, current.shuffleOrder,
+            entryIds) ?: return
+        applyQueueRemoval(current, edit)
+    }
+
+    private fun applyQueueRemoval(current: PlayerUiState, edit: PlayerQueueEdit) {
+        cancelNextQueue()
+        val replacement = edit.playlist.getOrNull(edit.currentIndex)
+        if (replacement != null && replacement.queueEntryId == current.currentTrack?.queueEntryId) {
+            _state.value = current.copy(playlist = edit.playlist, currentIndex = edit.currentIndex,
+                shuffleOrder = edit.shuffleOrder)
+            persistEditedQueue(edit)
+            return
+        }
+
+        val autoplay = playOnAttach && !scheduledStart.active
+        rememberPosition()
+        stopListening()
+        cancelScheduledStart()
+        endVolumeGesture()
+        closeTrackInfoDialog()
+        closePlaylistPickerDialog()
+        tagEditResume = null
+        detachedPosition = 0L
+        detachedSubtitle = null
+        trackEnded = false
+        handledEndId = -1L
+        subtitleImportVersion++
+        subtitleImportJob?.cancel()
+        lyricLoadJob?.cancel()
+        lyricRequest = null
+        externalSubtitles = emptyList()
+        _state.value = _state.value.copy(
+            playlist = edit.playlist, currentIndex = edit.currentIndex, shuffleOrder = edit.shuffleOrder,
+            positionMs = 0L, durationMs = 0L, ready = false, playing = false, error = null,
+            isVideo = replacement?.isVideo == true, bookmarks = emptyList(), isFavorite = false,
+            seekPreviewMs = null, loudness = 0f, loudnessSampleId = 0L,
+            lyricLines = emptyList(), lyricsLoading = false, subtitleOptions = emptyList(),
+            subtitleText = "", selectedSubtitleId = "none", showEndBehaviorDialog = false
+        )
+        playOnAttach = replacement != null && autoplay
+        if (replacement == null) {
+            // Keep queueVersion so both list surfaces see the edited empty queue before the DB write.
+            loadId++
+            loadedTrackPath = null
+            engine?.stop()
+            audioFocus.abandon()
+            clearSleepTimer()
+            _expanded.value = false
+            _state.value = _state.value.copy(queueSource = null, controlsLocked = false,
+                lyricsVisible = false, gestureHint = null)
+            persistEditedQueue(edit)
+        } else {
+            refreshFavorite()
+            val hasEngine = engine != null
+            loadCurrent(resume = false, autoplay = autoplay)
+            if (!hasEngine) persistEditedQueue(edit)
+        }
+    }
+
+    private fun persistEditedQueue(edit: PlayerQueueEdit) {
+        val paths = edit.playlist.map { it.path }
+        PlayerLibraryWriter.submit { libraryRepository.saveCurrentQueue(paths, edit.currentIndex, allowDuplicates = true) }
+    }
+
     private fun jumpTo(index: Int) {
         if (index !in _state.value.playlist.indices) return
         rememberPosition()
@@ -552,7 +718,7 @@ internal class PlayerViewModel @JvmOverloads constructor(
         val queuePaths = current.playlist.map { it.path }
         val queueIdx = current.currentIndex
         PlayerLibraryWriter.submit {
-            libraryRepository.saveCurrentQueue(queuePaths, queueIdx)
+            libraryRepository.saveCurrentQueue(queuePaths, queueIdx, allowDuplicates = true)
         }
     }
 

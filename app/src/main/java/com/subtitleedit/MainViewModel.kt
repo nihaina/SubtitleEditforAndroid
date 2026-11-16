@@ -22,6 +22,7 @@ internal data class DirectoryScrollPosition(
 
 internal class MainViewModel : ViewModel() {
     val documentState = MainDocumentState()
+    val mediaSelection = com.subtitleedit.ui.MediaSelectionController()
     val directoryCache = SharedFileCache.directories
     var batchRenameDialog by mutableStateOf<BatchRenameDialogUi?>(null)
 

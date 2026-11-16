@@ -43,19 +43,24 @@ internal fun FavoritesTabContent(
     isActive: Boolean = true
 ) {
     var selectedPaths by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val globalSelection = LocalMediaSelection.current
     val visiblePaths = remember(tracks) { tracks.map { it.path } }
     val selectedTracks = remember(tracks, selectedPaths) { tracks.filter { it.path in selectedPaths } }
-    val selectionMode = selectedTracks.isNotEmpty()
+    val selectionMode = globalSelection?.active ?: selectedTracks.isNotEmpty()
+    val localSelectionMode = globalSelection == null && selectionMode
     val density = LocalDensity.current
     var panelHeight by remember { mutableStateOf(112.dp) }
 
-    LaunchedEffect(visiblePaths) {
-        selectedPaths = selectedPaths.intersect(visiblePaths.toSet())
+    LaunchedEffect(visiblePaths, isActive, globalSelection) {
+        if (globalSelection != null) {
+            if (isActive) globalSelection.updateVisiblePaths(visiblePaths)
+        } else selectedPaths = selectedPaths.intersect(visiblePaths.toSet())
     }
-    BackHandler(enabled = isActive && selectionMode) { selectedPaths = emptySet() }
+    BackHandler(enabled = isActive && localSelectionMode) { selectedPaths = emptySet() }
 
     fun toggle(path: String) {
-        selectedPaths = if (path in selectedPaths) selectedPaths - path else selectedPaths + path
+        if (globalSelection != null) globalSelection.toggle(path)
+        else selectedPaths = if (path in selectedPaths) selectedPaths - path else selectedPaths + path
     }
     fun select(action: MediaLibrarySelectionAction) {
         selectedPaths = updateMediaLibrarySelection(visiblePaths, selectedPaths, action)
@@ -73,7 +78,7 @@ internal fun FavoritesTabContent(
         LazyColumn(
             modifier = Modifier.fillMaxSize().testTag("library-favorites-list"),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp,
-                bottom = if (selectionMode) panelHeight else 8.dp),
+                bottom = if (localSelectionMode) panelHeight else 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             item { PlayAllHeaderRow(count = tracks.size, onPlayAll = onPlayAll) }
@@ -82,8 +87,11 @@ internal fun FavoritesTabContent(
                     track = track,
                     subtitle = track.artist.ifBlank { track.album.ifBlank { track.file.parentFile?.name.orEmpty() } },
                     onClick = { if (selectionMode) toggle(track.path) else onPlay(index) },
-                    onLongClick = { selectedPaths = selectedPaths + track.path },
-                    isSelected = track.path in selectedPaths,
+                    onLongClick = {
+                        if (globalSelection != null) globalSelection.select(track.path)
+                        else selectedPaths = selectedPaths + track.path
+                    },
+                    isSelected = globalSelection?.contains(track.path) ?: (track.path in selectedPaths),
                     isSelectionMode = selectionMode,
                     modifier = Modifier.testTag("library-favorite:${track.path}"),
                     trailingContent = {
@@ -103,7 +111,7 @@ internal fun FavoritesTabContent(
                 )
             }
         }
-        if (selectionMode) {
+        if (localSelectionMode) {
             MediaLibrarySelectionPanel(
                 selectedFiles = selectedTracks.map { it.file },
                 totalDurationMs = selectedTracks.sumOf { it.durationMs },

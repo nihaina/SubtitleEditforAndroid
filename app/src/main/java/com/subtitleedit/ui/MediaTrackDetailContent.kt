@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.subtitleedit.R
@@ -58,23 +59,30 @@ internal fun MediaTrackDetailContent(
     val listState = rememberLazyListState()
     var sortOpen by remember { mutableStateOf(false) }
     var selectedPaths by remember(collectionKey) { mutableStateOf<Set<String>>(emptySet()) }
+    val globalSelection = LocalMediaSelection.current
     var panelHeight by remember(collectionKey) { mutableStateOf(112.dp) }
     val visiblePaths = remember(visibleTracks) { visibleTracks.map { it.track.path } }
     val selectedTracks = remember(visibleTracks, selectedPaths) {
         visibleTracks.filter { it.track.path in selectedPaths }
     }
-    val selectionMode = selectedPaths.isNotEmpty()
+    val selectionMode = globalSelection?.active ?: selectedPaths.isNotEmpty()
+    val localSelectionMode = globalSelection == null && selectionMode
     val (revealOpacity, revealPulse) = rememberMediaTrackRevealHighlight(collectionKey, revealRequest,
         visiblePaths, isActive, listState, onRevealFinished)
     val revealColor = MaterialTheme.colorScheme.primaryContainer
     LaunchedEffect(revealRequest?.token) {
-        if (revealRequest != null) selectedPaths = emptySet()
+        if (globalSelection == null && revealRequest != null) selectedPaths = emptySet()
     }
-    LaunchedEffect(collectionKey, selectionResetKey) { selectedPaths = emptySet() }
-    LaunchedEffect(visiblePaths) { selectedPaths = selectedPaths.intersect(visiblePaths.toSet()) }
-    BackHandler(enabled = isActive && selectionMode) { selectedPaths = emptySet() }
+    LaunchedEffect(collectionKey, selectionResetKey) { if (globalSelection == null) selectedPaths = emptySet() }
+    LaunchedEffect(visiblePaths, isActive, globalSelection) {
+        if (globalSelection != null) {
+            if (isActive) globalSelection.updateVisiblePaths(visiblePaths)
+        } else selectedPaths = selectedPaths.intersect(visiblePaths.toSet())
+    }
+    BackHandler(enabled = isActive && localSelectionMode) { selectedPaths = emptySet() }
     fun toggleSelection(path: String) {
-        selectedPaths = if (path in selectedPaths) selectedPaths - path else selectedPaths + path
+        if (globalSelection != null) globalSelection.toggle(path)
+        else selectedPaths = if (path in selectedPaths) selectedPaths - path else selectedPaths + path
     }
     fun select(action: MediaLibrarySelectionAction) {
         selectedPaths = updateMediaLibrarySelection(visiblePaths, selectedPaths, action)
@@ -86,7 +94,7 @@ internal fun MediaTrackDetailContent(
             title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             navigationIcon = {
                 IconButton(
-                    onClick = { if (selectionMode) selectedPaths = emptySet() else onBack() },
+                    onClick = { if (localSelectionMode) selectedPaths = emptySet() else onBack() },
                     modifier = Modifier.testTag("$tagPrefix-detail-back")
                 ) {
                     Icon(painterResource(R.drawable.ic_back), backDescription)
@@ -98,7 +106,7 @@ internal fun MediaTrackDetailContent(
         BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize().padding(bottom = if (selectionMode) panelHeight else 0.dp)
+                modifier = Modifier.fillMaxSize().padding(bottom = if (localSelectionMode) panelHeight else 0.dp)
                     .testTag("$tagPrefix-tracks"),
                 contentPadding = PaddingValues(bottom = 12.dp)
             ) {
@@ -123,7 +131,11 @@ internal fun MediaTrackDetailContent(
                 }
                 items(visibleTracks, key = { it.track.path }) { item ->
                     BrowserFileRow(
-                        modifier = Modifier.testTag("$tagPrefix-track:${item.track.path}").then(
+                        modifier = Modifier.testTag("$tagPrefix-track:${item.track.path}")
+                            .semantics {
+                                if (selectionMode) selected = globalSelection?.contains(item.track.path)
+                                    ?: (item.track.path in selectedPaths)
+                            }.then(
                             if (isActive && item.track.path == revealRequest?.trackPath) Modifier
                                 .background(revealColor.copy(alpha = revealOpacity))
                                 .semantics {
@@ -134,17 +146,20 @@ internal fun MediaTrackDetailContent(
                         file = item.track.file,
                         metadataRefreshKey = metadataRefreshKey ?: item,
                         relativePathRoot = null,
-                        isSelected = item.track.path in selectedPaths,
+                        isSelected = globalSelection?.contains(item.track.path) ?: (item.track.path in selectedPaths),
                         isSelectionMode = selectionMode,
                         onClick = { if (selectionMode) toggleSelection(item.track.path) else onPlay(visibleTracks, item.track.path) },
-                        onLongClick = { selectedPaths = selectedPaths + item.track.path },
+                        onLongClick = {
+                            if (globalSelection != null) globalSelection.select(item.track.path)
+                            else selectedPaths = selectedPaths + item.track.path
+                        },
                         directoryPageStyle = true
                     )
                 }
             }
             AppLazyListScrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight()
-                .padding(bottom = if (selectionMode) panelHeight else 0.dp))
-            if (selectionMode) {
+                .padding(bottom = if (localSelectionMode) panelHeight else 0.dp))
+            if (localSelectionMode) {
                 MediaLibrarySelectionPanel(
                     selectedFiles = selectedTracks.map { it.track.file },
                     totalDurationMs = selectedTracks.sumOf { it.track.durationMs.coerceAtLeast(0) },

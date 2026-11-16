@@ -72,7 +72,8 @@ internal fun PlayerTrackInfoDialog(
     state: PlayerUiState,
     onDismiss: () -> Unit,
     onEditTags: () -> Unit,
-    onNavigateToCategory: ((MediaCategoryRevealRequest) -> Unit)? = null
+    onNavigateToCategory: ((MediaCategoryRevealRequest) -> Unit)? = null,
+    immersive: Boolean = true
 ) {
     if (!state.showTrackInfoDialog) return
     val context = LocalContext.current
@@ -82,9 +83,9 @@ internal fun PlayerTrackInfoDialog(
 
     BasicAlertDialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = !immersive)
     ) {
-        PlayerPanelImmersiveWindow()
+        if (immersive) PlayerPanelImmersiveWindow()
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.92f)

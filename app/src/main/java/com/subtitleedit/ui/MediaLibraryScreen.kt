@@ -54,7 +54,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -120,7 +119,7 @@ internal enum class MediaLibraryTab(val labelRes: Int) {
     HISTORY(R.string.media_lib_tab_history)
 }
 
-private data class MediaLibraryContent(
+internal data class MediaLibraryContent(
     val favorites: List<MediaLibraryTrack> = emptyList(),
     val currentQueue: Pair<List<MediaLibraryTrack>, Int> = emptyList<MediaLibraryTrack>() to 0,
     val playlists: List<MediaPlaylist> = emptyList(),
@@ -129,6 +128,11 @@ private data class MediaLibraryContent(
     val playlistId: Long? = null,
     val playlistTracks: List<MediaLibraryTrack> = emptyList()
 )
+
+/** Keeps the last prepared library snapshot while its top-level page is off screen. */
+internal class MediaLibraryPageState {
+    var content by mutableStateOf(MediaLibraryContent())
+}
 
 internal data class MediaFolderEntry(
     val path: String,
@@ -147,11 +151,13 @@ internal fun MediaLibraryScreen(
     onRemoveFavoriteDirectory: (File) -> Unit = {},
     favoriteDirectories: List<File> = emptyList(),
     isActive: Boolean = true,
-    scanPickerPending: Boolean = false
+    scanPickerPending: Boolean = false,
+    pageState: MediaLibraryPageState = remember { MediaLibraryPageState() },
+    libraryRepository: MediaLibraryRepository? = null
 ) {
     val context = LocalContext.current
     val playerLauncher = LocalPlayerLauncher.current
-    val repository = remember(context) { MediaLibraryRepository.getInstance(context) }
+    val repository = libraryRepository ?: remember(context) { MediaLibraryRepository.getInstance(context) }
     val revision by repository.revision.collectAsState()
     val scope = rememberCoroutineScope()
     val mutationMutex = remember { Mutex() }
@@ -176,7 +182,7 @@ internal fun MediaLibraryScreen(
     var selectedTab by rememberSaveable { mutableStateOf(MediaLibraryTab.FILES) }
     var openedPlaylistId by rememberSaveable { mutableStateOf<Long?>(null) }
 
-    var content by remember { mutableStateOf(MediaLibraryContent()) }
+    val content = pageState.content
     val favorites = content.favorites
     val currentQueue = content.currentQueue
     val playlists = content.playlists
@@ -238,9 +244,15 @@ internal fun MediaLibraryScreen(
     val openedPlaylist = remember(playlists, openedPlaylistId) {
         openedPlaylistId?.let { id -> playlists.firstOrNull { it.id == id } }
     }
+    val globalSelection = LocalMediaSelection.current
+    LaunchedEffect(isActive, selectedTab, openedPlaylist, globalSelection) {
+        if (isActive && selectedTab == MediaLibraryTab.CUSTOM_PLAYLISTS && openedPlaylist == null) {
+            globalSelection?.updateVisiblePaths(emptyList())
+        }
+    }
 
     val libraryTitle = stringResource(R.string.nav_library)
-    // Selecting the current top-level tab resets its toolbar while retaining this page.
+    // The page can return with an open folder or playlist; restore that nested toolbar too.
     LaunchedEffect(isActive, selectionVersion, openedPlaylist, browsePath, libraryTitle) {
         if (isActive) {
             when {
@@ -263,21 +275,13 @@ internal fun MediaLibraryScreen(
         if (selectedFilePaths.isNotEmpty()) selectedFilePaths = emptySet() else leaveFolder()
     }
 
-    var lastSelectionVersion by remember { mutableIntStateOf(selectionVersion) }
-    LaunchedEffect(selectionVersion, isActive) {
-        if (isActive && lastSelectionVersion != selectionVersion) {
-            openedPlaylistId = null
-            lastSelectionVersion = selectionVersion
-        }
-    }
-
     LaunchedEffect(revision, refreshVersion, openedPlaylistId) {
         val playlistId = openedPlaylistId
         try {
             val loaded = withContext(Dispatchers.IO) {
                 MediaLibraryContent(
                     favorites = repository.getFavorites(),
-                    currentQueue = repository.getCurrentQueue(),
+                    currentQueue = com.subtitleedit.player.PlayerLibraryWriter.execute { repository.getCurrentQueue() },
                     playlists = repository.getPlaylists(),
                     history = repository.getPlaybackHistory(),
                     allTracks = repository.searchLibrary(""),
@@ -285,7 +289,7 @@ internal fun MediaLibraryScreen(
                     playlistTracks = playlistId?.let(repository::getPlaylistTracks).orEmpty()
                 )
             }
-            content = loaded
+            pageState.content = loaded
             if (playlistId != null && loaded.playlists.none { it.id == playlistId }) openedPlaylistId = null
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -355,6 +359,7 @@ internal fun MediaLibraryScreen(
                     tracks = openedPlaylistTracks,
                     onPlayTrack = { idx -> playTracks(openedPlaylistTracks, idx, queueSource = queueSource) },
                     onPlayAll = { playTracks(openedPlaylistTracks, 0, playAll = true, queueSource = queueSource) },
+                    isActive = isActive,
                     onRemoveTrack = { track ->
                         mutate({ repository.removeTrackFromPlaylist(openedPlaylist.id, track.path) })
                     }
@@ -383,12 +388,10 @@ internal fun MediaLibraryScreen(
                 }
 
                 when (selectedTab) {
-                    MediaLibraryTab.PLAYLIST -> QueueTabContent(
-                        tracks = currentQueue.first,
-                        currentIndex = currentQueue.second,
-                        onPlay = { idx -> playTracks(currentQueue.first, idx) },
-                        onPlayAll = { playTracks(currentQueue.first, currentQueue.second, playAll = true) },
-                        onAddToPlaylist = { pickingPlaylistForTracks = listOf(it) }
+                    MediaLibraryTab.PLAYLIST -> MediaLibraryQueueContent(
+                        savedQueue = currentQueue,
+                        onPlaySavedQueue = { tracks, index, all -> playTracks(tracks, index, playAll = all) },
+                        isActive = isActive
                     )
 
                     MediaLibraryTab.CUSTOM_PLAYLISTS -> CustomPlaylistsTabContent(
@@ -409,11 +412,13 @@ internal fun MediaLibraryScreen(
                         onRemove = { entry ->
                             mutate({ repository.removePlaybackHistory(entry.path) })
                         },
-                        onClearAll = { showClearHistoryConfirm = true }
+                        onClearAll = { showClearHistoryConfirm = true },
+                        isActive = isActive
                     )
 
                     MediaLibraryTab.FILES -> FilesTabContent(
                         roots = favoriteDirectories,
+                        isActive = isActive,
                         metadataRefreshKey = refreshVersion,
                         rootPath = browseRootPath,
                         currentPath = browsePath,
@@ -681,52 +686,6 @@ internal fun MediaLibraryScreen(
 }
 
 @Composable
-private fun QueueTabContent(
-    tracks: List<MediaLibraryTrack>,
-    currentIndex: Int,
-    onPlay: (Int) -> Unit,
-    onPlayAll: () -> Unit,
-    onAddToPlaylist: (MediaLibraryTrack) -> Unit
-) {
-    if (tracks.isEmpty()) {
-        LibraryEmptyState(
-            iconRes = R.drawable.ic_queue_music,
-            title = stringResource(R.string.media_lib_empty_queue),
-            subtitle = stringResource(R.string.media_lib_empty_queue_hint)
-        )
-        return
-    }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        item {
-            PlayAllHeaderRow(count = tracks.size, onPlayAll = onPlayAll)
-        }
-        itemsIndexed(tracks, key = { index, item -> "$index:${item.path}" }) { index, track ->
-            val isCurrent = index == currentIndex
-            MediaTrackCard(
-                track = track,
-                subtitle = if (isCurrent) stringResource(R.string.media_lib_last_playing) else track.file.parentFile?.name.orEmpty(),
-                highlighted = isCurrent,
-                onClick = { onPlay(index) },
-                trailingContent = {
-                    IconButton(onClick = { onAddToPlaylist(track) }, modifier = Modifier.size(36.dp)) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_playlist_add),
-                            contentDescription = stringResource(R.string.player_action_add_to_playlist),
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            )
-        }
-    }
-}
-
-@Composable
 internal fun CustomPlaylistsTabContent(
     playlists: List<MediaPlaylist>,
     onOpen: (MediaPlaylist) -> Unit,
@@ -763,8 +722,14 @@ private fun PlaylistDetailContent(
     tracks: List<MediaLibraryTrack>,
     onPlayTrack: (Int) -> Unit,
     onPlayAll: () -> Unit,
-    onRemoveTrack: (MediaLibraryTrack) -> Unit
+    onRemoveTrack: (MediaLibraryTrack) -> Unit,
+    isActive: Boolean = true
 ) {
+    val globalSelection = LocalMediaSelection.current
+    val selectionMode = globalSelection?.active == true
+    LaunchedEffect(tracks, isActive, globalSelection) {
+        if (isActive) globalSelection?.updateVisiblePaths(tracks.map { it.path })
+    }
     if (tracks.isEmpty()) {
         LibraryEmptyState(
             iconRes = R.drawable.ic_queue_music,
@@ -785,9 +750,12 @@ private fun PlaylistDetailContent(
             MediaTrackCard(
                 track = track,
                 subtitle = track.artist.ifBlank { track.album.ifBlank { track.file.parentFile?.name.orEmpty() } },
-                onClick = { onPlayTrack(index) },
+                onClick = { if (selectionMode) globalSelection?.toggle(track.path) else onPlayTrack(index) },
+                onLongClick = { globalSelection?.select(track.path) },
+                isSelected = globalSelection?.contains(track.path) == true,
+                isSelectionMode = selectionMode,
                 trailingContent = {
-                    IconButton(onClick = { onRemoveTrack(track) }, modifier = Modifier.size(36.dp)) {
+                    if (!selectionMode) IconButton(onClick = { onRemoveTrack(track) }, modifier = Modifier.size(36.dp)) {
                         Icon(
                             painter = painterResource(R.drawable.ic_close),
                             contentDescription = stringResource(R.string.remove),
@@ -806,8 +774,14 @@ private fun HistoryTabContent(
     entries: List<PlaybackHistoryEntry>,
     onPlay: (Int) -> Unit,
     onRemove: (PlaybackHistoryEntry) -> Unit,
-    onClearAll: () -> Unit
+    onClearAll: () -> Unit,
+    isActive: Boolean = true
 ) {
+    val globalSelection = LocalMediaSelection.current
+    val selectionMode = globalSelection?.active == true
+    LaunchedEffect(entries, isActive, globalSelection) {
+        if (isActive) globalSelection?.updateVisiblePaths(entries.map { it.path })
+    }
     if (entries.isEmpty()) {
         LibraryEmptyState(
             iconRes = R.drawable.ic_history,
@@ -858,9 +832,12 @@ private fun HistoryTabContent(
             MediaTrackCard(
                 track = track,
                 subtitle = "$timeText$progressText · ${entry.playCount}次",
-                onClick = { onPlay(index) },
+                onClick = { if (selectionMode) globalSelection?.toggle(entry.path) else onPlay(index) },
+                onLongClick = { globalSelection?.select(entry.path) },
+                isSelected = globalSelection?.contains(entry.path) == true,
+                isSelectionMode = selectionMode,
                 trailingContent = {
-                    IconButton(onClick = { onRemove(entry) }, modifier = Modifier.size(36.dp)) {
+                    if (!selectionMode) IconButton(onClick = { onRemove(entry) }, modifier = Modifier.size(36.dp)) {
                         Icon(
                             painter = painterResource(R.drawable.ic_close),
                             contentDescription = stringResource(R.string.delete),
@@ -939,17 +916,24 @@ internal fun FilesTabContent(
     onFavoriteSelection: () -> Unit,
     onAddSelectionToPlaylist: () -> Unit,
     onShowInfo: () -> Unit,
-    metadataRefreshKey: Any? = null
+    metadataRefreshKey: Any? = null,
+    isActive: Boolean = true
 ) {
-    val selectionMode = selectedPaths.isNotEmpty()
+    val globalSelection = LocalMediaSelection.current
+    val selectionMode = globalSelection?.active ?: selectedPaths.isNotEmpty()
+    val localSelectionMode = globalSelection == null && selectionMode
+    val visiblePaths = remember(entries) { entries.filterNot { it.isDirectory }.map { it.path } }
+    LaunchedEffect(visiblePaths, isActive, globalSelection) {
+        if (isActive) globalSelection?.updateVisiblePaths(visiblePaths)
+    }
     val density = LocalDensity.current
     var selectionPanelHeight by remember(currentPath) { mutableStateOf(112.dp) }
-    val folderListState = remember(currentPath) { LazyListState() }
+    val folderListState = rememberSaveable(currentPath, saver = LazyListState.Saver) { LazyListState() }
     val selectedFiles = remember(entries, selectedPaths) {
         entries.filter { !it.isDirectory && it.path in selectedPaths }.map { File(it.path) }
     }
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val bottomInset = if (selectionMode) selectionPanelHeight else 4.dp
+        val bottomInset = if (localSelectionMode) selectionPanelHeight else 4.dp
         if (currentPath == null) {
             if (roots.isEmpty()) {
                 LibraryEmptyState(
@@ -997,15 +981,23 @@ internal fun FilesTabContent(
                             isDirectoryHint = entry.isDirectory,
                             metadataRefreshKey = metadataRefreshKey ?: entry,
                             relativePathRoot = null,
-                            isSelected = entry.path in selectedPaths,
-                            isSelectionMode = selectionMode,
+                            isSelected = globalSelection?.contains(entry.path) ?: (entry.path in selectedPaths),
+                            isSelectionMode = selectionMode && (globalSelection == null ||
+                                (!entry.isDirectory && (com.subtitleedit.util.FileUtils.isAudioFile(File(entry.path)) ||
+                                    com.subtitleedit.util.FileTypePolicy.isVideo(File(entry.path))))),
                             onClick = {
                                 if (entry.isDirectory) onOpenFolder(File(entry.path))
-                                else if (selectionMode) onToggleSelection(entry.path)
+                                else if (selectionMode) {
+                                    if (globalSelection != null) globalSelection.toggle(entry.path)
+                                    else onToggleSelection(entry.path)
+                                }
                                 else onPlayFile(entry)
                             },
                             onLongClick = {
-                                if (!entry.isDirectory) onLongPressFile(entry.path)
+                                if (!entry.isDirectory) {
+                                    if (globalSelection != null) globalSelection.select(entry.path)
+                                    else onLongPressFile(entry.path)
+                                }
                             },
                             viewMode = FileBrowserViewMode.DETAILED,
                             directoryPageStyle = true
@@ -1015,7 +1007,7 @@ internal fun FilesTabContent(
             }
         }
 
-        if (selectionMode) {
+        if (localSelectionMode) {
             MediaLibrarySelectionPanel(
                 selectedFiles = selectedFiles,
                 totalDurationMs = selectedDurationMs,
@@ -1146,7 +1138,12 @@ private fun FolderBreadcrumb(rootPath: String?, currentPath: String) {
 }
 
 @Composable
-internal fun MediaFileInfoDialog(path: String, onDismiss: () -> Unit) {
+internal fun MediaFileInfoDialog(
+    path: String,
+    onDismiss: () -> Unit,
+    immersive: Boolean = false,
+    allowTagEditing: Boolean = true
+) {
     var details by remember(path) { mutableStateOf<PlayerTrackDetails?>(null) }
     var loaded by remember(path) { mutableStateOf(false) }
     LaunchedEffect(path) {
@@ -1157,7 +1154,10 @@ internal fun MediaFileInfoDialog(path: String, onDismiss: () -> Unit) {
     }
     AppDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.media_lib_files_info)) },
+        title = {
+            if (immersive) com.subtitleedit.player.PlayerPanelImmersiveWindow()
+            Text(stringResource(R.string.media_lib_files_info))
+        },
         text = {
             val current = details
             if (current == null && loaded) {
@@ -1209,7 +1209,7 @@ internal fun MediaFileInfoDialog(path: String, onDismiss: () -> Unit) {
         confirmButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.player_info_done)) }
         },
-        dismissButton = {
+        dismissButton = if (allowTagEditing) { {
             val context = LocalContext.current
             TextButton(
                 enabled = details?.canEditTags == true,
@@ -1220,7 +1220,7 @@ internal fun MediaFileInfoDialog(path: String, onDismiss: () -> Unit) {
                     })
                 }
             ) { Text(stringResource(R.string.player_info_edit_tags)) }
-        }
+        } } else null
     )
 }
 
@@ -1515,13 +1515,17 @@ internal fun LibraryPlaylistAssignDialog(
     playlists: List<MediaPlaylist>,
     onDismiss: () -> Unit,
     onSelectPlaylist: (MediaPlaylist) -> Unit,
-    onCreatePlaylist: (String) -> Unit
+    onCreatePlaylist: (String) -> Unit,
+    immersive: Boolean = false
 ) {
     var creatingPlaylist by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
     AppDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.player_action_add_to_playlist)) },
+        title = {
+            if (immersive) com.subtitleedit.player.PlayerPanelImmersiveWindow()
+            Text(stringResource(R.string.player_action_add_to_playlist))
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (playlists.isEmpty()) {

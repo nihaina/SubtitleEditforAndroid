@@ -57,8 +57,15 @@ internal fun DirectoryBrowserContent(
     onFileClick: (File) -> Unit,
     onFileLongClick: (File) -> Unit,
     listState: LazyListState = rememberDirectoryListState(state),
-    gridState: LazyGridState = rememberDirectoryGridState(state)
+    gridState: LazyGridState = rememberDirectoryGridState(state),
+    isActive: Boolean = true
 ) {
+    val mediaSelection = com.subtitleedit.ui.LocalMediaSelection.current
+    LaunchedEffect(mediaSelection, isActive, state.files) {
+        if (isActive) mediaSelection?.updateVisiblePaths(state.files.filter { file ->
+            file.isFile && (com.subtitleedit.util.FileUtils.isAudioFile(file) || com.subtitleedit.util.FileTypePolicy.isVideo(file))
+        }.map { it.absolutePath })
+    }
     val isGrid = state.viewMode == FileBrowserViewMode.GRID
     SideEffect {
         onScrollPosition {
@@ -136,8 +143,11 @@ internal fun DirectoryBrowserContent(
                     file = file,
                     metadata = state.fileMetadata[file.absolutePath],
                     relativePathRoot = state.relativePathRoot,
-                    isSelected = file.absolutePath in state.selectedPaths,
-                    isSelectionMode = state.selectedPaths.isNotEmpty() && state.pendingOperation == null,
+                    isSelected = mediaSelection?.contains(file.absolutePath) ?: (file.absolutePath in state.selectedPaths),
+                    isSelectionMode = mediaSelection?.let { selection ->
+                        selection.active && file.isFile && (com.subtitleedit.util.FileUtils.isAudioFile(file) ||
+                            com.subtitleedit.util.FileTypePolicy.isVideo(file))
+                    } ?: (state.selectedPaths.isNotEmpty() && state.pendingOperation == null),
                     onClick = { if (!state.isDirectoryNavigationPending) onFileClick(file) },
                     onLongClick = { if (!state.isDirectoryNavigationPending) onFileLongClick(file) },
                     viewMode = state.viewMode,

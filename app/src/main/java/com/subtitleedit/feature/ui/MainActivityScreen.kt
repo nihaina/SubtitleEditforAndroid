@@ -209,6 +209,7 @@ internal fun MainActivityScreen(
     val directoryListState = rememberDirectoryListState(state)
     val directoryGridState = rememberDirectoryGridState(state)
     val topLevelPagesState = remember { MainTopLevelPagesState() }
+    val topLevelPageSaveableState = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     LaunchedEffect(categoryRevealRequest?.token) {
         categoryRevealRequest?.let { topLevelPagesState.mediaAlbumPage.revealRequest = it }
     }
@@ -468,7 +469,8 @@ internal fun MainActivityScreen(
                             onFileClick = onFileClick,
                             onFileLongClick = onFileLongClick,
                             listState = directoryListState,
-                            gridState = directoryGridState
+                            gridState = directoryGridState,
+                            isActive = state.selectedTopLevelItem == activeTopLevelItem
                         )
                     } else {
                         MainTopLevelPages(
@@ -480,13 +482,17 @@ internal fun MainActivityScreen(
                             playerModeEnabled = state.playerModeEnabled,
                             viewMode = state.viewMode,
                             onOpenDirectory = onOpenDirectoryFromFavorites,
-                            onToolbarChanged = onUpdateTopLevelToolbar
+                            onToolbarChanged = onUpdateTopLevelToolbar,
+                            saveableStateHolder = topLevelPageSaveableState
                         )
                     }
                 }
             }
         }
 
+        com.subtitleedit.ui.LocalMediaSelection.current?.let { selection ->
+            com.subtitleedit.ui.MediaSelectionPanel(selection)
+        }
         miniPlayerSlot()
         val showBottomNavigation = state.selectedPaths.isEmpty() && state.pendingOperation == null
         androidx.compose.animation.AnimatedContent(

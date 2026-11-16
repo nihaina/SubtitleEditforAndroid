@@ -289,9 +289,11 @@ private constructor(
         if (removed > 0) changed()
     }
 
-    fun saveCurrentQueue(paths: List<String>, currentIndex: Int) {
+    fun saveCurrentQueue(paths: List<String>, currentIndex: Int, allowDuplicates: Boolean = false) {
         val selected = paths.getOrNull(currentIndex)
-        val unique = paths.distinct()
+        val unique = if (allowDuplicates) paths else paths.distinct()
+        val selectedIndex = if (allowDuplicates) currentIndex.takeIf { it in unique.indices } ?: 0
+            else unique.indexOf(selected).takeIf { it >= 0 } ?: 0
         val now = System.currentTimeMillis()
         write {
             delete("current_queue", null, null)
@@ -307,7 +309,7 @@ private constructor(
                         put("is_video", if (FileTypePolicy.isVideo(file)) 1 else 0)
                         put(
                             "is_current",
-                            if (path == selected || selected == null && index == 0) 1 else 0,
+                            if (index == selectedIndex) 1 else 0,
                         )
                         put("updated_at_ms", now)
                     },

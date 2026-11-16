@@ -15,18 +15,23 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.view.WindowInsetsControllerCompat
 import com.subtitleedit.AppComposeActivity
+import com.subtitleedit.EXTRA_REVEAL_MEDIA_PATH
+import com.subtitleedit.MainActivity
 import com.subtitleedit.MediaTagEditorActivity
 import com.subtitleedit.filepicker.AppFilePickerContracts
 import com.subtitleedit.filepicker.FilePickerMode
 import com.subtitleedit.filepicker.FilePickerRequest
 import com.subtitleedit.ui.theme.SubtitleEditComposeTheme
+import com.subtitleedit.ui.LocalMediaSelection
 import com.subtitleedit.util.FileTypePolicy
+import com.subtitleedit.util.FileUtils
 import com.subtitleedit.util.PickedUriAccess
 import java.io.File
 
@@ -34,6 +39,7 @@ import java.io.File
 class PlayerActivity : AppComposeActivity() {
 
     private val viewModel: PlayerViewModel by viewModels()
+    private val selectionModel: StandaloneMediaSelectionViewModel by viewModels()
     private val audioManager by lazy { getSystemService(AudioManager::class.java) }
     private var outputDeviceIds: Set<Int>? = null
     private val audioDevices = object : AudioDeviceCallback() {
@@ -100,7 +106,15 @@ class PlayerActivity : AppComposeActivity() {
                 LaunchedEffect(Unit) {
                     viewModel.finishRequests.collect { requests -> if (requests > 0) finish() }
                 }
-                PlayerScreen(viewModel, onEditTags = ::openTagEditor, onPickSubtitle = ::openSubtitlePicker)
+                CompositionLocalProvider(LocalMediaSelection provides selectionModel.selection) {
+                    PlayerScreen(viewModel, onEditTags = ::openTagEditor, onPickSubtitle = ::openSubtitlePicker)
+                    StandaloneMediaSelectionHost(
+                        model = selectionModel,
+                        player = viewModel,
+                        onEditTags = ::openTagEditor,
+                        onLocate = ::locateMediaFile
+                    )
+                }
             }
         }
     }
@@ -148,8 +162,29 @@ class PlayerActivity : AppComposeActivity() {
 
     internal fun openTagEditor() {
         val path = viewModel.prepareTagEditing() ?: return
+        launchTagEditor(listOf(path))
+    }
+
+    private fun openTagEditor(paths: List<String>) {
+        val files = paths.distinct().map(::File).filter { file ->
+            file.isFile && (FileUtils.isAudioFile(file) || FileTypePolicy.isVideo(file))
+        }
+        if (files.isEmpty()) return
+        val currentPath = viewModel.state.value.currentTrack?.path
+        if (files.any { it.path == currentPath } && viewModel.prepareTagEditing() == null) return
+        launchTagEditor(files.map { it.absolutePath })
+    }
+
+    private fun launchTagEditor(paths: List<String>) {
         tagEditor.launch(Intent(this, MediaTagEditorActivity::class.java).apply {
-            putStringArrayListExtra(MediaTagEditorActivity.EXTRA_FILE_PATHS, arrayListOf(path))
+            putStringArrayListExtra(MediaTagEditorActivity.EXTRA_FILE_PATHS, ArrayList(paths))
+        })
+    }
+
+    private fun locateMediaFile(path: String) {
+        startActivity(Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra(EXTRA_REVEAL_MEDIA_PATH, path)
         })
     }
 
