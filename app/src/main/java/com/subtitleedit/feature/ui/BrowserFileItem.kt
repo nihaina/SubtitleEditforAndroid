@@ -31,13 +31,15 @@ internal fun BrowserFileRow(
     viewMode: FileBrowserViewMode = FileBrowserViewMode.DETAILED,
     directoryPageStyle: Boolean = false,
     metadata: BrowserFileMetadata? = null,
-    metadataRefreshKey: Any? = null
+    metadataRefreshKey: Any? = null,
+    isDirectoryHint: Boolean? = null,
+    initialMetadata: BrowserFileMetadata? = null
 ) {
     val context = LocalContext.current
     // FavoritesFragment historically used FileListAdapter without an
     // isItemRestricted callback. Preserve that behavior for its rows while
     // keeping the Android/data restriction for the main browser.
-    val fileMetadata = rememberBrowserFileMetadata(file, metadata, metadataRefreshKey)
+    val fileMetadata = rememberBrowserFileMetadata(file, metadata, metadataRefreshKey, initialMetadata)
     val restricted = restrictedOverride ?: fileMetadata?.restricted ?: false
     val previewKey = fileMetadata?.cacheKey
     val thumbnailDp = when (viewMode) {
@@ -46,8 +48,14 @@ internal fun BrowserFileRow(
         FileBrowserViewMode.GRID -> 160
     }
     val targetSize = remember(context, thumbnailDp) { (thumbnailDp * context.resources.displayMetrics.density + 0.5f).toInt() }
-    var rowData by remember(previewKey, targetSize, restricted) { mutableStateOf<BrowserFileRowData?>(null) }
-    LaunchedEffect(previewKey, targetSize, restricted) {
+    var rowData by remember(file.absolutePath, previewKey, targetSize, restricted) {
+        mutableStateOf(fileMetadata?.let { snapshot ->
+            MainFilePreviewLoader.peek(snapshot, targetSize)?.let { preview ->
+                BrowserFileRowData(preview, MainFilePreviewLoader.peekDirectoryItemCount(snapshot).takeUnless { restricted })
+            }
+        })
+    }
+    LaunchedEffect(file.absolutePath, previewKey, targetSize, restricted) {
         val snapshot = fileMetadata ?: return@LaunchedEffect
         val preview = MainFilePreviewLoader.preview(context, snapshot, targetSize)
         val count = if (snapshot.isDirectory && file.name != ".." && !restricted) {
@@ -68,7 +76,7 @@ internal fun BrowserFileRow(
     BrowserFileItem(
         entry = BrowserFileEntry(
             name = file.name,
-            isDirectory = fileMetadata?.isDirectory ?: false,
+            isDirectory = fileMetadata?.isDirectory ?: isDirectoryHint ?: false,
             size = fileMetadata?.size ?: -1L,
             modifiedTimeMillis = fileMetadata?.modifiedTimeMillis,
             itemCount = rowData?.directoryCount.takeUnless { restricted },
@@ -104,24 +112,29 @@ internal class BrowserFileRefreshKey(private val snapshot: Any) {
 internal fun rememberBrowserFileMetadata(
     file: File,
     metadata: BrowserFileMetadata? = null,
-    metadataRefreshKey: Any? = null
+    metadataRefreshKey: Any? = null,
+    initialMetadata: BrowserFileMetadata? = null
 ): BrowserFileMetadata? {
-    val fallback by produceState<BrowserFileMetadata?>(null, file.absolutePath, metadata,
-        metadataRefreshKey.takeIf { metadata == null }) {
-        if (metadata != null) {
-            value = metadata
-            return@produceState
-        }
-        // A conflated signal cannot miss this path during a burst. Other paths
-        // remain cache hits, so they never trigger a metadata stat here.
-        var first = true
-        SharedFileCache.attributes.invalidationRevision.collect {
-            val verify = first && metadataRefreshKey != null &&
-                file.parentFile?.absolutePath !in MediaLibraryFileObserver.observedDirectories.value
-            value = withContext(Dispatchers.IO) {
-                if (verify) SharedFileCache.attributes.refresh(file) else SharedFileCache.attributes.get(file)
+    val fallback by key(file.absolutePath) {
+        produceState<BrowserFileMetadata?>(
+            metadata ?: initialMetadata ?: SharedFileCache.attributes.peek(file.absolutePath), file.absolutePath, metadata,
+            metadataRefreshKey.takeIf { metadata == null }
+        ) {
+            if (metadata != null) {
+                value = metadata
+                return@produceState
             }
-            first = false
+            // A conflated signal cannot miss this path during a burst. Other paths
+            // remain cache hits, so they never trigger a metadata stat here.
+            var first = true
+            SharedFileCache.attributes.invalidationRevision.collect {
+                val verify = first && metadataRefreshKey != null &&
+                    file.parentFile?.absolutePath !in MediaLibraryFileObserver.observedDirectories.value
+                value = withContext(Dispatchers.IO) {
+                    if (verify) SharedFileCache.attributes.refresh(file) else SharedFileCache.attributes.get(file)
+                }
+                first = false
+            }
         }
     }
     return metadata ?: fallback?.takeIf { it.path == file.absolutePath }

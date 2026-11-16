@@ -623,15 +623,21 @@ private constructor(
     fun updateObservedPaths(
         paths: Set<String>,
         metadataAlreadyUpdated: Boolean = false,
+        isCancelled: () -> Boolean = { Thread.currentThread().isInterrupted },
         onDirectoryDiscovered: (File) -> Unit = {},
         onDirectoryScanned: (File, List<BrowserFileMetadata>) -> Unit = { _, _ -> },
     ) {
+        fun checkCancelled() {
+            if (isCancelled()) throw CancellationException("Media update cancelled")
+        }
+        checkCancelled()
         val files = paths.map { File(it) }
         if (!metadataAlreadyUpdated) files.forEach { SharedFileCache.attributes.invalidate(it.absolutePath, recursive = true) }
         val updated = mutableListOf<IndexedTrack>()
         val removed = mutableSetOf<String>()
         val directories = mutableListOf<File>()
         files.forEach { file ->
+            checkCancelled()
             val attributes = SharedFileCache.attributes.get(file)
             when {
                 attributes == null -> removed += file.absolutePath
@@ -644,10 +650,11 @@ private constructor(
             }
         }
         if (directories.isNotEmpty()) {
-            reconcileDirectories(directories, { Thread.currentThread().isInterrupted },
+            reconcileDirectories(directories, isCancelled,
                 onDirectoryScanned, onDirectoryDiscovered)
         }
         if (updated.isNotEmpty() || removed.isNotEmpty()) {
+            checkCancelled()
             var modified = updated.isNotEmpty()
             write {
                 updated.forEach { indexed ->

@@ -156,6 +156,9 @@ class MainActivity : AppComposeActivity() {
     private var showAllFileTypes = false
     private var showHiddenFiles = false
     private var directoryLoading = false
+    private val directoryNavigationPending: Boolean
+        get() = directoryLoading && directorySnapshot?.directory?.absolutePath !=
+            stateModel.documentState.currentDirectory?.absolutePath
     private var searchInProgress = false
     private var relativePathRoot: File? = null
     private var customToolbarTitle: String? = null
@@ -590,13 +593,13 @@ class MainActivity : AppComposeActivity() {
             },
             toolbarHasBack = customToolbarHasBack,
             isDirectoryLoading = directoryLoading,
+            isDirectoryNavigationPending = directoryNavigationPending,
             isSearchInProgress = searchInProgress,
             showDirectoryEmptyState = directoryEmptyStateVisible,
             directoryEmptyStateMessage = directoryEmptyStateMessage,
-            currentDirectory = document.currentDirectory,
-            canonicalDirectoryPath = directorySnapshot?.takeIf {
-                it.directory.absolutePath == document.currentDirectory?.absolutePath
-            }?.canonicalPath,
+            // Keep the displayed path and rows from the same snapshot until navigation is ready.
+            currentDirectory = directorySnapshot?.directory ?: document.currentDirectory,
+            canonicalDirectoryPath = directorySnapshot?.canonicalPath,
             files = displayedFiles,
             fileMetadata = displayedMetadata,
             playerModeEnabled = com.subtitleedit.player.PlayerPreferences.getInstance(this).playerModeEnabled,
@@ -667,6 +670,7 @@ class MainActivity : AppComposeActivity() {
         nameInput: String,
         extensionInput: String
     ): MainCreateItemError? {
+        if (directoryNavigationPending) return MainCreateItemError(MainCreateItemField.NAME, "目录正在加载，请稍候")
         FileBrowserOrder.validateName(nameInput)?.let {
             return MainCreateItemError(MainCreateItemField.NAME, it)
         }
@@ -705,7 +709,7 @@ class MainActivity : AppComposeActivity() {
 
     private fun changeFileViewMode(mode: FileBrowserViewMode) {
         if (stateModel.documentState.viewMode == mode) return
-        val directory = stateModel.documentState.currentDirectory
+        val directory = directorySnapshot?.directory ?: stateModel.documentState.currentDirectory
         val position = directoryScrollPosition?.invoke()
         if (directory != null && displayedFiles.isNotEmpty() && position != null) {
             directoryScrollRequest = MainDirectoryScrollRequest(++nextDirectoryScrollGeneration, directoryPath(directory), position.copy(offset = 0))
@@ -796,8 +800,8 @@ class MainActivity : AppComposeActivity() {
         }
         
         stateModel.documentState.currentDirectory = directory
-        directoryScrollRequest = null
-        updatePathDisplay()
+        directorySearchController.cancel()
+        searchInProgress = false
         directoryLoading = true
         publishScreenState()
         watchDirectory(directory)
@@ -829,6 +833,8 @@ class MainActivity : AppComposeActivity() {
             ""
         }
         val snapshots = directorySnapshot?.takeIf { it.directory.absolutePath == directory.absolutePath }
+        // Sorting or clearing search during a jump must not publish an empty target list.
+        if (snapshots == null && directoryLoading) return
         val directEntries = FileBrowserOrder.sortMetadata(
             snapshots?.entries.orEmpty().filter { entry ->
                 (showHiddenFiles || !entry.file.name.startsWith(".")) &&
@@ -920,7 +926,7 @@ class MainActivity : AppComposeActivity() {
             ?: FilePathPolicy.canonicalOrAbsolute(directory)
 
     private fun saveCurrentDirectoryScrollPosition() {
-        val directory = stateModel.documentState.currentDirectory ?: return
+        val directory = directorySnapshot?.directory ?: stateModel.documentState.currentDirectory ?: return
         val position = directoryScrollPosition?.invoke() ?: return
         stateModel.documentState.directoryScrollPositions[directoryPath(directory)] = position
     }
@@ -988,11 +994,8 @@ class MainActivity : AppComposeActivity() {
         }
     }
     
-    private fun updatePathDisplay() {
-        publishScreenState()
-    }
-    
     private fun onFileClicked(file: File) {
+        if (directoryNavigationPending) return
         // 处理父目录导航
         if (file.name == "..") {
             // 普通文件选择期间暂时锁定顶部父目录项，避免点击文件夹选择后
@@ -1112,6 +1115,7 @@ class MainActivity : AppComposeActivity() {
         AndroidDirectoryPolicy.isRestricted(file)
 
     private fun enterSelectionMode(file: File) {
+        if (directoryNavigationPending) return
         if (file.name == ".." || stateModel.documentState.pendingFileOperation != null) return
         if (file.absolutePath in stateModel.documentState.selectedPaths) {
             toggleSelection(file)
@@ -1172,6 +1176,7 @@ class MainActivity : AppComposeActivity() {
     }
 
     private fun completeDestinationOperation() {
+        if (directoryNavigationPending) return
         val operation = stateModel.documentState.pendingFileOperation ?: return
         val destination = stateModel.documentState.currentDirectory ?: return
         if (operation == FileOperation.EXTRACT) {

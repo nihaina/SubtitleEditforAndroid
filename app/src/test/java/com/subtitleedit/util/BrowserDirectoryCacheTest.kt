@@ -61,6 +61,20 @@ class BrowserDirectoryCacheTest {
         assertEquals(listOf("a.srt", "b.srt"), fs.reads)
     }
 
+    @Test fun `cached count peek never lists a directory and rejects invalidated membership`() {
+        val fs = Filesystem(temporaryFolder.root).apply { put("a.srt"); put("b.srt") }
+        assertNull(fs.cache.peekItemCount(fs.directory.absolutePath))
+        assertEquals(0, fs.listings)
+        assertEquals(2, fs.cache.itemCount(fs.directory))
+        assertEquals(2, fs.cache.peekItemCount(fs.directory.absolutePath))
+        assertEquals(1, fs.listings)
+
+        fs.cache.invalidate(fs.directory.absolutePath)
+        assertNull(fs.cache.peekItemCount(fs.directory.absolutePath))
+        assertEquals(1, fs.listings)
+        assertTrue(fs.reads.isEmpty())
+    }
+
     @Test fun `load then count and incremental membership do not enumerate again`() {
         val fs = Filesystem(temporaryFolder.root).apply { put("old.srt"); put("keep.srt") }
         val first = fs.cache.load(fs.directory)

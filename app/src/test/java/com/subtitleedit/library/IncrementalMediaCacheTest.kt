@@ -95,6 +95,46 @@ class IncrementalMediaCacheTest {
         assertEquals(1, reader.requests.size)
     }
 
+    @Test fun `preview peek reuses only a completed matching version without loading`() {
+        val reader = Reader().apply { empty = true }
+        val request = MediaArtworkRequest(120, false)
+        val source = metadata()
+        assertNull(reader.cache.peekPreview(source, request))
+        assertTrue(reader.requests.isEmpty())
+
+        reader.cache.get(source, needDuration = true, artwork = request)
+        assertEquals(CachedMediaPreview<String>(0L, null), reader.cache.peekPreview(source, request))
+        assertNull(reader.cache.peekPreview(source.copy(revision = 2L), request))
+        assertNull(reader.cache.peekPreview(metadata("/another.wav"), request))
+        assertNull(reader.cache.peekPreview(source, request.copy(size = 480)))
+        assertEquals(1, reader.requests.size)
+    }
+
+    @Test fun `preview peek never waits for an in flight metadata read`() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val cache = IncrementalMediaCache<String, String>("", { _, _, _ ->
+            entered.countDown()
+            check(release.await(5, TimeUnit.SECONDS))
+            LoadedMediaFields(1000L, "tags", artwork = "image")
+        }, String::length)
+        val pool = Executors.newFixedThreadPool(2)
+        val source = metadata()
+        val request = MediaArtworkRequest(120, false)
+        try {
+            val load = pool.submit { cache.get(source, needDuration = true, artwork = request) }
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            assertNull(pool.submit<CachedMediaPreview<String>?> { cache.peekPreview(source, request) }
+                .get(1, TimeUnit.SECONDS))
+            release.countDown()
+            load.get(5, TimeUnit.SECONDS)
+            assertEquals(CachedMediaPreview(1000L, "image"), cache.peekPreview(source, request))
+        } finally {
+            release.countDown()
+            pool.shutdownNow()
+        }
+    }
+
     @Test fun `same version concurrent consumers share one field load`() {
         val requests = AtomicInteger()
         val entered = CountDownLatch(1)

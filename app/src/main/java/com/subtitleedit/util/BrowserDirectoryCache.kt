@@ -89,6 +89,11 @@ internal class BrowserDirectoryCache(
     }
 
     /** Counting a folder needs its names, never attributes or media metadata for every child. */
+    fun peekItemCount(directoryPath: String): Int? = synchronized(lock) {
+        drainInvalidations()
+        directories[directoryPath]?.takeIf { it.listingValid }?.let { it.listing?.size ?: -1 }
+    }
+
     fun itemCount(directory: File): Int = withDirectory(directory) { entry ->
         while (true) {
             val generation = synchronized(lock) {

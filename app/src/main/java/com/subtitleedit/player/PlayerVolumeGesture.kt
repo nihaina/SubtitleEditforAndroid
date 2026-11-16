@@ -16,7 +16,6 @@ internal class PlayerVolumeGesture {
     private var allowBoost = false
     private var warned = false
     private var releasedAfterWarning = false
-    private val reportedBoundaries = mutableSetOf<Int>()
 
     fun begin(actualPercent: Int) {
         active = true
@@ -25,7 +24,6 @@ internal class PlayerVolumeGesture {
         allowBoost = actualPercent > 100 || actualPercent == 100 && releasedAfterWarning
         releasedAfterWarning = false
         warned = false
-        reportedBoundaries.clear()
     }
 
     fun adjust(delta: Float, actualPercent: Int, apply: (Int) -> Int): PlayerVolumeGestureResult {
@@ -60,8 +58,7 @@ internal class PlayerVolumeGesture {
         }
         val feedback = when {
             accepted == actualPercent -> PlayerVolumeFeedback.NONE
-            accepted in BOUNDARIES -> if (reportedBoundaries.add(accepted)) PlayerVolumeFeedback.BOUNDARY
-                else PlayerVolumeFeedback.NONE
+            accepted in BOUNDARIES -> PlayerVolumeFeedback.BOUNDARY
             else -> PlayerVolumeFeedback.LIGHT
         }
         return PlayerVolumeGestureResult(feedback)
@@ -80,7 +77,6 @@ internal class PlayerVolumeGesture {
         active = false
         releasedAfterWarning = false
         warned = false
-        reportedBoundaries.clear()
     }
 
     private companion object { val BOUNDARIES = setOf(0, 100, 200) }

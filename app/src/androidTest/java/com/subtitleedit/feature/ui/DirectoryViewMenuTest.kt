@@ -56,7 +56,8 @@ class DirectoryViewMenuTest {
         val root = File(context.cacheDir, "directory-views-${System.nanoTime()}").apply { mkdirs() }
         try {
             val files = (0 until 80).map { index -> File(root, "file-%03d.srt".format(index)).apply { writeText("subtitle") } }
-            val state = mutableStateOf(MainActivityScreenState(currentDirectory = root, files = files))
+            val state = mutableStateOf(MainActivityScreenState(
+                currentDirectory = root, canonicalDirectoryPath = root.canonicalPath, files = files))
             var currentPosition: (() -> DirectoryScrollPosition)? = null
             val clicks = mutableListOf<File>()
             val longClicks = mutableListOf<File>()

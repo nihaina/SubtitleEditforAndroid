@@ -17,6 +17,7 @@ internal data class LoadedMediaFields<T, A>(
     val artwork: A? = null
 )
 internal data class CachedMediaFields<T, A>(val durationMs: Long, val tags: T, val artwork: A?)
+internal data class CachedMediaPreview<A>(val durationMs: Long, val artwork: A?)
 
 /** Each path/version is enriched only for fields requested by its consumers. */
 internal class IncrementalMediaCache<T : Any, A : Any>(
@@ -32,7 +33,7 @@ internal class IncrementalMediaCache<T : Any, A : Any>(
     private data class ArtworkKey(val file: Key, val request: MediaArtworkRequest)
     private data class NullableValue<V>(val value: V?)
     private class Entry<T>(val emptyTags: T) {
-        var durationLoaded = false
+        @Volatile var durationLoaded = false
         var durationMs = 0L
         var tagsLoaded = false
         var tags = emptyTags
@@ -51,6 +52,15 @@ internal class IncrementalMediaCache<T : Any, A : Any>(
 
     init {
         require(maximumEntries > 0 && maximumArtworkBytes > 0 && maximumCoverBytes > 0 && concurrency > 0)
+    }
+
+    /** A rendered row can reuse completed work without waiting behind a native metadata read. */
+    fun peekPreview(metadata: BrowserFileMetadata, artwork: MediaArtworkRequest): CachedMediaPreview<A>? = synchronized(lock) {
+        val key = Key(metadata.path, metadata.cacheKey)
+        val entry = entries[key] ?: return@synchronized null
+        if (!entry.durationLoaded) return@synchronized null
+        val cachedArtwork = artworks[ArtworkKey(key, artwork)] ?: return@synchronized null
+        CachedMediaPreview(entry.durationMs, cachedArtwork.value)
     }
 
     fun get(

@@ -47,6 +47,24 @@ internal object MainFilePreviewLoader {
         return extension in audioExtensions || extension in videoExtensions
     }
 
+    /** Memory-only first frame; loading a cold preview remains asynchronous. */
+    fun peek(metadata: BrowserFileMetadata, targetSize: Int): MainFilePreview? {
+        val file = metadata.file
+        val extension = file.extension.lowercase(Locale.ROOT)
+        if (metadata.isDirectory) return MainFilePreview()
+        if (extension in audioExtensions || extension in videoExtensions) {
+            return SharedMediaCache.peekPreview(metadata, targetSize)
+                ?.let { MainFilePreview(it.bitmap, formatMediaDuration(it.durationMs)) }
+        }
+        if (extension !in imageExtensions && extension != "apk") return MainFilePreview()
+        return previews.peek(file.absolutePath, "$sessionId:${metadata.cacheKey}:${targetSize.coerceAtLeast(1)}")
+    }
+
+    fun peekDirectoryItemCount(metadata: BrowserFileMetadata): Int? =
+        if (metadata.isDirectory && !metadata.restricted && metadata.file.name != "..") {
+            SharedFileCache.directories.peekItemCount(metadata.path)
+        } else null
+
     suspend fun preview(context: Context, metadata: BrowserFileMetadata, targetSize: Int): MainFilePreview {
         val file = metadata.file
         val extension = file.extension.lowercase(Locale.ROOT)

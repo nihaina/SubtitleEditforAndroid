@@ -19,6 +19,7 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertSame
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -55,6 +56,37 @@ class BrowserFileMetadataRefreshTest {
             metadata.value = metadata.value.copy(size = 8L, revision = 2L)
         }
         compose.onNodeWithText("8 B").assertIsDisplayed()
+    }
+
+    @Test
+    fun navigatingBetweenCachedPathsNeverPublishesAnEmptyOrPreviousFileSnapshot() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val directory = File(context.cacheDir, "metadata-navigation-${System.nanoTime()}").apply { check(mkdirs()) }
+        val first = File(directory, "first.srt").apply { writeText("first") }
+        val second = File(directory, "second.srt").apply { writeText("second") }
+        try {
+            val cached = listOf(first, second).associateWith { requireNotNull(SharedFileCache.attributes.get(it)) }
+            val selected = mutableStateOf(first)
+            val observations = mutableListOf<Pair<File, BrowserFileMetadata?>>()
+            compose.setContent {
+                val file = selected.value
+                val metadata = rememberBrowserFileMetadata(file)
+                SideEffect { observations += file to metadata }
+                Text(metadata?.file?.name.orEmpty())
+            }
+            compose.waitForIdle()
+            compose.runOnIdle { selected.value = second }
+            compose.waitForIdle()
+            compose.runOnIdle { selected.value = first }
+            compose.waitForIdle()
+            compose.runOnIdle {
+                observations.forEach { (file, snapshot) ->
+                    assertSame("Every composition starts from its own cached snapshot", cached[file], snapshot)
+                }
+            }
+        } finally {
+            directory.deleteRecursively()
+        }
     }
 
     @Test

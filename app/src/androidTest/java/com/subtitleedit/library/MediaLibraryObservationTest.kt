@@ -210,8 +210,12 @@ class MediaLibraryObservationTest {
             configured.set(emptySet())
             observation.removeDirectory(context, directory, emptyList())
 
-            assertEquals("A picker result received after removal must not recreate the root", 0,
-                observation.reconcile(context, listOf(directory)))
+            try {
+                observation.reconcile(context, listOf(directory))
+                org.junit.Assert.fail("A picker result received after removal must be cancelled")
+            } catch (_: kotlinx.coroutines.CancellationException) {
+                // Cancellation also prevents the manual scan entry from reporting success.
+            }
             assertEquals(1, reads.get())
             assertTrue(repository.getIndexedTracks().isEmpty())
         } finally {

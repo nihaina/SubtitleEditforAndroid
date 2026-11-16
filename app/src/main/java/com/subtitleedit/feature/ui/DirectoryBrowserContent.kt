@@ -22,6 +22,33 @@ import com.subtitleedit.ui.theme.AppMotion
 import com.subtitleedit.ui.settings.settingsPageBackground
 import java.io.File
 
+private fun initialDirectoryPosition(state: MainActivityScreenState): Pair<Int, Int> {
+    val request = state.scrollRequest?.takeIf {
+        it.directoryPath == (state.canonicalDirectoryPath ?: state.currentDirectory?.absolutePath)
+    } ?: return 0 to 0
+    if (state.files.isEmpty()) return 0 to 0
+    val saved = request.savedPosition
+    val index = saved?.firstVisiblePath?.let { path -> state.files.indexOfFirst { it.absolutePath == path } }
+        ?.takeIf { it >= 0 } ?: saved?.firstVisibleIndex ?: 0
+    val offset = saved?.takeIf { it.viewMode == null || it.viewMode == state.viewMode }?.offset ?: 0
+    return index.coerceIn(0, state.files.lastIndex) to offset
+}
+
+/** A destination starts at its own saved anchor before its rows are first measured. */
+@Composable
+internal fun rememberDirectoryListState(state: MainActivityScreenState): LazyListState =
+    key(state.currentDirectory?.absolutePath, state.viewMode) {
+        val (index, offset) = initialDirectoryPosition(state)
+        rememberLazyListState(index, offset)
+    }
+
+@Composable
+internal fun rememberDirectoryGridState(state: MainActivityScreenState): LazyGridState =
+    key(state.currentDirectory?.absolutePath, state.viewMode) {
+        val (index, _) = initialDirectoryPosition(state)
+        rememberLazyGridState(index, 0)
+    }
+
 @Composable
 internal fun DirectoryBrowserContent(
     state: MainActivityScreenState,
@@ -29,8 +56,8 @@ internal fun DirectoryBrowserContent(
     onDirectoryBreadcrumbClick: (File) -> Boolean,
     onFileClick: (File) -> Unit,
     onFileLongClick: (File) -> Unit,
-    listState: LazyListState = rememberLazyListState(),
-    gridState: LazyGridState = rememberLazyGridState()
+    listState: LazyListState = rememberDirectoryListState(state),
+    gridState: LazyGridState = rememberDirectoryGridState(state)
 ) {
     val isGrid = state.viewMode == FileBrowserViewMode.GRID
     SideEffect {
@@ -111,8 +138,8 @@ internal fun DirectoryBrowserContent(
                     relativePathRoot = state.relativePathRoot,
                     isSelected = file.absolutePath in state.selectedPaths,
                     isSelectionMode = state.selectedPaths.isNotEmpty() && state.pendingOperation == null,
-                    onClick = { onFileClick(file) },
-                    onLongClick = { onFileLongClick(file) },
+                    onClick = { if (!state.isDirectoryNavigationPending) onFileClick(file) },
+                    onLongClick = { if (!state.isDirectoryNavigationPending) onFileLongClick(file) },
                     viewMode = state.viewMode,
                     directoryPageStyle = true
                 )

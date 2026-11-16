@@ -37,6 +37,10 @@ internal object SharedMediaCache {
         return SharedMediaPreview(data.artwork, data.durationMs)
     }
 
+    fun peekPreview(metadata: BrowserFileMetadata, targetSize: Int, allowVideoFrame: Boolean = true): SharedMediaPreview? =
+        cache.peekPreview(metadata, MediaArtworkRequest(targetSize.coerceIn(1, 2048), allowVideoFrame))
+            ?.let { SharedMediaPreview(it.artwork, it.durationMs) }
+
     fun artwork(metadata: BrowserFileMetadata, targetSize: Int, allowVideoFrame: Boolean = true): Bitmap? {
         if (!metadata.isRegularFile) return null
         return cache.get(metadata,

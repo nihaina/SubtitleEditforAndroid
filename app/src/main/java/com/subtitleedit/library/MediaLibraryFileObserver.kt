@@ -11,6 +11,7 @@ import com.subtitleedit.util.DirectoryUpdateTracker
 import com.subtitleedit.util.FavoriteDirectoryStore
 import java.io.File
 import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -56,11 +57,12 @@ internal class MediaLibraryObservation(
     private val onIndexingChanged: (Boolean) -> Unit = {}
 ) {
     private sealed interface Request {
-        data class Roots(val context: Context, val paths: Set<String>, val removedPaths: Set<String> = emptySet()) : Request
-        data class RemoveDirectory(val context: Context, val path: String, val retainedPaths: Set<String>) : Request
-        data class Reconcile(val context: Context, val directories: List<File>, val result: CompletableDeferred<Int>) : Request
+        data class Roots(val context: Context, val paths: Set<String>, val version: Long,
+            val removedPaths: Set<String> = emptySet()) : Request
+        data class RemoveDirectory(val context: Context, val path: String, val retainedPaths: Set<String>, val version: Long) : Request
+        data class Reconcile(val context: Context, val directories: List<File>, val result: CompletableDeferred<Int>, val version: Long) : Request
         data class Changes(val directory: String, val token: Long, val paths: Set<String>,
-            val reset: Boolean, val membershipChanged: Boolean) : Request
+            val reset: Boolean, val membershipChanged: Boolean, val version: Long) : Request
         data class Stop(val finished: CompletableDeferred<Unit>) : Request
     }
     private data class Watch(val token: Long, val observer: FileObserver, val canonicalPath: String)
@@ -69,7 +71,9 @@ internal class MediaLibraryObservation(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val requests = Channel<Request>(Channel.UNLIMITED)
+    private val enqueueLock = Any()
     private val tokenSource = AtomicLong()
+    private val scanVersion = AtomicLong()
     private val eventThread = HandlerThread("MediaLibraryFileEvents").apply { start() }
     private val eventHandler = Handler(eventThread.looper)
     private val watches = linkedMapOf<String, Watch>()
@@ -85,14 +89,18 @@ internal class MediaLibraryObservation(
             for (request in requests) {
                 try {
                     when (request) {
-                        is Request.Roots -> changeRoots(request)
+                        is Request.Roots -> if (request.version == scanVersion.get()) changeRoots(request)
                         is Request.RemoveDirectory -> changeRoots(Request.Roots(request.context,
-                            roots.intersect(request.retainedPaths), setOf(request.path)), request.retainedPaths)
+                            roots.intersect(request.retainedPaths), request.version, setOf(request.path)), request.retainedPaths)
                         is Request.Reconcile -> {
+                            checkScanVersion(request.version)
                             appContext = request.context
                             // A picker scan may be queued after its directory has already been removed.
                             val configured = configuredRoots?.invoke()
                             val directories = request.directories.filter { configured == null || it.absolutePath in configured }
+                            if (request.directories.isNotEmpty() && directories.isEmpty()) {
+                                throw CancellationException("Scan directories were removed")
+                            }
                             val added = directories.map { it.absolutePath }.filter { it !in roots }
                             roots = roots + added
                             added.mapNotNull { File(it).parentFile }.forEach(::observe)
@@ -102,10 +110,12 @@ internal class MediaLibraryObservation(
                                 repository.getIndexedTracks().count { track ->
                                     directories.any { within(track.path, it.absolutePath) }
                                 }
-                            } else reconcileNow(request.context, directories)
+                            } else reconcileNow(request.context, directories, request.version)
+                            checkScanVersion(request.version)
                             request.result.complete(count)
                         }
-                        is Request.Changes -> applyChanges(request)
+                        is Request.Changes -> if (request.version == scanVersion.get()) applyChanges(request)
+                            else invalidateReadyRoots(request.paths)
                         is Request.Stop -> {
                             removeWatches { true }
                             eventHandler.removeCallbacksAndMessages(null)
@@ -117,7 +127,7 @@ internal class MediaLibraryObservation(
                     }
                 } catch (error: Exception) {
                     if (request is Request.Reconcile) request.result.completeExceptionally(error)
-                    else Log.w("MediaLibrary", "Incremental library refresh failed", error)
+                    else if (error !is CancellationException) Log.w("MediaLibrary", "Incremental library refresh failed", error)
                 }
             }
         }
@@ -125,19 +135,29 @@ internal class MediaLibraryObservation(
 
     /** Idempotent; recomposing or reopening a page with the same roots performs no IO. */
     fun syncRoots(context: Context, directories: List<File>) {
-        requests.trySend(Request.Roots(context.applicationContext, directories.mapTo(linkedSetOf()) { it.absolutePath }))
+        enqueue { version -> Request.Roots(context.applicationContext,
+            directories.mapTo(linkedSetOf()) { it.absolutePath }, version) }
     }
 
     /** Removal is serialized with scans and events, including before this process has observed any roots. */
     fun removeDirectory(context: Context, directory: File, retainedDirectories: List<File>) {
-        requests.trySend(Request.RemoveDirectory(context.applicationContext, directory.absolutePath,
-            retainedDirectories.mapTo(linkedSetOf()) { it.absolutePath }))
+        // The worker may be inside a long scan, so cancellation cannot wait for the removal message.
+        synchronized(enqueueLock) {
+            val version = scanVersion.incrementAndGet()
+            requests.trySend(Request.RemoveDirectory(context.applicationContext, directory.absolutePath,
+                retainedDirectories.mapTo(linkedSetOf()) { it.absolutePath }, version))
+        }
     }
 
     suspend fun reconcile(context: Context, directories: List<File>): Int {
         val result = CompletableDeferred<Int>()
-        requests.send(Request.Reconcile(context.applicationContext, directories, result))
+        enqueue { version -> Request.Reconcile(context.applicationContext, directories, result, version) }.getOrThrow()
         return result.await()
+    }
+
+    /** Version capture and enqueue must stay ordered with removals, including on the event thread. */
+    private fun enqueue(request: (Long) -> Request) = synchronized(enqueueLock) {
+        requests.trySend(request(scanVersion.get()))
     }
 
     suspend fun stop() {
@@ -159,11 +179,24 @@ internal class MediaLibraryObservation(
         // Only an explicit removal deletes the persisted catalog.
         request.removedPaths.forEach { repository.removeDirectoryFromLibrary(File(it), retainedDirectories) }
         added.mapNotNull { File(it).parentFile }.forEach(::observe)
-        if (added.isNotEmpty()) reconcileNow(request.context, added.map(::File))
+        val unfinished = if (request.removedPaths.isNotEmpty()) roots - readyRoots else added
+        if (unfinished.isNotEmpty() && request.version == scanVersion.get()) {
+            reconcileNow(request.context, unfinished.map(::File), request.version)
+        }
     }
 
-    private fun reconcileNow(context: Context, directories: List<File>): Int {
-        return whileIndexing { reconcileDirectories(context, directories) }
+    private fun checkScanVersion(version: Long) {
+        if (version != scanVersion.get() || Thread.currentThread().isInterrupted) {
+            throw CancellationException("Media scan superseded by directory removal")
+        }
+    }
+
+    private fun reconcileNow(context: Context, directories: List<File>, version: Long): Int {
+        checkScanVersion(version)
+        val previouslyReady = invalidateReadyRoots(directories.map { it.absolutePath })
+        return whileIndexing {
+            reconcileDirectories(context, directories, version).also { readyRoots.addAll(previouslyReady) }
+        }
     }
 
     private inline fun <T> whileIndexing(block: () -> T): T {
@@ -171,12 +204,17 @@ internal class MediaLibraryObservation(
         return try { block() } finally { onIndexingChanged(false) }
     }
 
-    private fun reconcileDirectories(context: Context, directories: List<File>): Int {
+    private fun invalidateReadyRoots(paths: Collection<String>): List<String> =
+        readyRoots.filter { root -> paths.any { within(root, it) || within(it, root) } }
+            .also { readyRoots.removeAll(it.toSet()) }
+
+    private fun reconcileDirectories(context: Context, directories: List<File>, version: Long): Int {
         directories.forEach { SharedFileCache.directories.invalidate(it.absolutePath) }
         val seen = linkedSetOf<String>()
         val successfulListings = linkedSetOf<String>()
         val count = repository.scanDirectoriesToLibrary(
             directories,
+            isCancelled = { version != scanVersion.get() || Thread.currentThread().isInterrupted },
             onDirectoryDiscovered = { directory ->
                 seen += directory.absolutePath
                 if (roots.any { within(directory.absolutePath, it) }) observe(directory)
@@ -187,6 +225,7 @@ internal class MediaLibraryObservation(
                 if (roots.any { within(directory.absolutePath, it) }) observe(directory)
             }
         )
+        checkScanVersion(version)
         removeWatches { path -> directories.any { within(path, it.absolutePath) } && path !in seen &&
             roots.none { File(it).parentFile?.absolutePath == path } }
         directories.map { it.absolutePath }.filter { it in successfulListings }.forEach(readyRoots::add)
@@ -222,11 +261,16 @@ internal class MediaLibraryObservation(
             onDirectoriesUpdated(setOf(request.directory).withParents())
             return
         }
+        val previouslyReady = invalidateReadyRoots(paths)
         whileIndexing {
             repository.updateObservedPaths(paths,
-                metadataAlreadyUpdated = !request.reset, onDirectoryDiscovered = ::observe) { directory, _ ->
+                metadataAlreadyUpdated = !request.reset,
+                isCancelled = { request.version != scanVersion.get() || Thread.currentThread().isInterrupted },
+                onDirectoryDiscovered = ::observe) { directory, _ ->
                 if (roots.any { within(directory.absolutePath, it) }) observe(directory)
             }
+            checkScanVersion(request.version)
+            readyRoots.addAll(previouslyReady)
         }
         paths.forEach { path ->
             val metadata = SharedFileCache.attributes.get(File(path))
@@ -257,8 +301,8 @@ internal class MediaLibraryObservation(
                         val batches = pending.toMap()
                         pending.clear()
                         batches.forEach { (source, change) ->
-                            requests.trySend(Request.Changes(source.first, source.second, change.paths.toSet(),
-                                change.reset, change.membershipChanged))
+                            enqueue { version -> Request.Changes(source.first, source.second, change.paths.toSet(),
+                                change.reset, change.membershipChanged, version) }
                         }
                     }, 250L)
                 }

@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -943,6 +944,7 @@ internal fun FilesTabContent(
     val selectionMode = selectedPaths.isNotEmpty()
     val density = LocalDensity.current
     var selectionPanelHeight by remember(currentPath) { mutableStateOf(112.dp) }
+    val folderListState = remember(currentPath) { LazyListState() }
     val selectedFiles = remember(entries, selectedPaths) {
         entries.filter { !it.isDirectory && it.path in selectedPaths }.map { File(it.path) }
     }
@@ -985,12 +987,14 @@ internal fun FilesTabContent(
                         items = entries,
                         key = { it.path },
                         viewMode = FileBrowserViewMode.DETAILED,
+                        listState = folderListState,
                         modifier = Modifier.fillMaxSize().testTag("library-files-list"),
                         contentPadding = browserFileContentPadding(FileBrowserViewMode.DETAILED, bottom = bottomInset)
                     ) { entry ->
                         BrowserFileRow(
                             modifier = Modifier.testTag("library-file:${entry.path}"),
                             file = File(entry.path),
+                            isDirectoryHint = entry.isDirectory,
                             metadataRefreshKey = metadataRefreshKey ?: entry,
                             relativePathRoot = null,
                             isSelected = entry.path in selectedPaths,

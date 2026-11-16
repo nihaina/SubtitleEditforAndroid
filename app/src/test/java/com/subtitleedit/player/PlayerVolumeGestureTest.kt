@@ -68,12 +68,44 @@ class PlayerVolumeGestureTest {
         repeat(3) { assertEquals(PlayerVolumeFeedback.NONE, g.move(20f).feedback) }
     }
 
-    @Test fun aBoundaryIsReportedOnlyOncePerGestureEvenAfterReversing() {
+    @Test fun unityIsReportedAgainEveryTimeTheHeldGestureReturnsToIt() {
         val g = Gesture(90)
         assertEquals(PlayerVolumeFeedback.BOUNDARY, g.move(10f).feedback)
         assertEquals(PlayerVolumeFeedback.LIGHT, g.move(-10f).feedback)
-        assertEquals(PlayerVolumeFeedback.NONE, g.move(10f).feedback)
-        assertTrue(g.move(1f).blockedAtUnity)
+        repeat(3) {
+            assertEquals(PlayerVolumeFeedback.BOUNDARY, g.move(10f).feedback)
+            assertEquals(PlayerVolumeGestureResult(blockedAtUnity = true), g.move(1f))
+            assertEquals(PlayerVolumeFeedback.LIGHT, g.move(-10f).feedback)
+        }
+    }
+
+    @Test fun zeroIsReportedAgainAfterMovingAwayWithoutReleasing() {
+        val g = Gesture(5)
+        repeat(3) {
+            assertEquals(PlayerVolumeFeedback.BOUNDARY, g.move(-20f).feedback)
+            assertEquals(0, g.actual)
+            assertEquals(PlayerVolumeFeedback.NONE, g.move(-20f).feedback)
+            assertEquals(PlayerVolumeFeedback.LIGHT, g.move(5f).feedback)
+        }
+    }
+
+    @Test fun maximumIsReportedAgainAfterMovingAwayWithoutReleasing() {
+        val g = Gesture(195)
+        repeat(3) {
+            assertEquals(PlayerVolumeFeedback.BOUNDARY, g.move(20f).feedback)
+            assertEquals(200, g.actual)
+            assertEquals(PlayerVolumeFeedback.NONE, g.move(20f).feedback)
+            assertEquals(PlayerVolumeFeedback.LIGHT, g.move(-5f).feedback)
+        }
+    }
+
+    @Test fun loweringBoostCanReachUnityAndReturnAgainWithinTheSameGesture() {
+        val g = Gesture(150)
+        assertEquals(PlayerVolumeFeedback.BOUNDARY, g.move(-100f).feedback)
+        assertEquals(100, g.actual)
+        assertEquals(PlayerVolumeFeedback.LIGHT, g.move(-5f).feedback)
+        assertEquals(PlayerVolumeFeedback.BOUNDARY, g.move(5f).feedback)
+        assertEquals(PlayerVolumeGestureResult(blockedAtUnity = true), g.move(1f))
     }
 
     @Test fun loweringBoostLandsAtUnityAndRequiresANewWarningToRaiseItAgain() {

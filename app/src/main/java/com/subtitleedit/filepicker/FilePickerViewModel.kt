@@ -7,12 +7,14 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.subtitleedit.AppViewModel
 import com.subtitleedit.R
+import com.subtitleedit.model.BrowserFileMetadata
 import com.subtitleedit.model.FileBrowserOrder
 import com.subtitleedit.model.FileSortDirection
 import com.subtitleedit.model.FileSortField
 import com.subtitleedit.util.AndroidDirectoryPolicy
 import com.subtitleedit.util.SelectionRangePolicy
 import com.subtitleedit.util.SettingsManager
+import com.subtitleedit.util.SharedFileCache
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,7 +28,9 @@ internal data class FilePickerLocation(val label: String, val directory: File)
 internal data class FilePickerUiState(
     val mode: FilePickerMode = FilePickerMode.OPEN_FILE,
     val directory: File = FilePickerPolicy.defaultRoot(),
+    val pendingDirectory: File? = null,
     val files: List<File> = emptyList(),
+    val fileMetadata: Map<String, BrowserFileMetadata> = emptyMap(),
     val metadataRefreshVersion: Long = 0L,
     val selectedPaths: Set<String> = emptySet(),
     val query: String = "",
@@ -49,9 +53,10 @@ internal sealed interface FilePickerEvent {
 }
 
 /** Shared local browser state; no selected file is copied or opened by this screen. */
-internal class FilePickerViewModel(
+internal class FilePickerViewModel @JvmOverloads constructor(
     application: Application,
-    private val savedState: SavedStateHandle
+    private val savedState: SavedStateHandle,
+    private val listDirectory: (File) -> Array<File>? = { it.listFiles() }
 ) : AppViewModel<FilePickerUiState, FilePickerEvent>(application, FilePickerUiState()) {
     private var request: FilePickerRequest? = null
     private var loadJob: Job? = null
@@ -109,7 +114,8 @@ internal class FilePickerViewModel(
         val absolute = directory.absoluteFile
         savedState["directory"] = absolute.path
         savedState["query"] = ""
-        setState { copy(directory = absolute, query = "", files = emptyList(), error = null) }
+        // Keep the displayed directory and its rows together until the replacement is ready.
+        setState { copy(pendingDirectory = absolute, query = "", error = null) }
         refresh()
         return true
     }
@@ -121,6 +127,10 @@ internal class FilePickerViewModel(
         }
         if (currentState.query.isNotEmpty()) {
             search("")
+            return
+        }
+        if (currentState.pendingDirectory != null) {
+            navigate(currentState.directory)
             return
         }
         val directory = currentState.directory
@@ -164,6 +174,7 @@ internal class FilePickerViewModel(
     }
 
     fun select(file: File) {
+        if (currentState.pendingDirectory != null) return
         if (file.isDirectory) {
             navigate(file)
             return
@@ -196,6 +207,7 @@ internal class FilePickerViewModel(
 
     fun selectAll() {
         val snapshot = currentState
+        if (snapshot.pendingDirectory != null) return
         if (snapshot.mode != FilePickerMode.OPEN_FILES) return
         val selectable = snapshot.files.filter(::isSelectableFile)
         if (selectable.isEmpty()) return
@@ -208,6 +220,7 @@ internal class FilePickerViewModel(
 
     fun selectRange() {
         val snapshot = currentState
+        if (snapshot.pendingDirectory != null) return
         if (snapshot.mode != FilePickerMode.OPEN_FILES) return
         val selectedIndices = snapshot.files.mapIndexedNotNull { index, file ->
             index.takeIf { file.absolutePath in snapshot.selectedPaths && isSelectableFile(file) }
@@ -233,7 +246,7 @@ internal class FilePickerViewModel(
     private fun isSelectableFile(file: File): Boolean = file.isFile && file.canRead() && isSupported(file)
 
     fun confirm() {
-        if (actionJob?.isActive == true) return
+        if (actionJob?.isActive == true || currentState.pendingDirectory != null) return
         val snapshot = currentState
         actionJob = viewModelScope.launch {
             val selected = when (snapshot.mode) {
@@ -303,6 +316,7 @@ internal class FilePickerViewModel(
     }
 
     fun createDirectory(name: String, onResult: (String?) -> Unit) {
+        if (currentState.pendingDirectory != null) return
         if (!FilePickerPolicy.validateFileName(name)) {
             onResult(string(R.string.file_picker_invalid_name))
             return
@@ -321,13 +335,13 @@ internal class FilePickerViewModel(
         if (!currentState.hasStoragePermission || request == null) return
         loadJob?.cancel()
         val generation = ++loadGeneration
-        val snapshot = currentState
+        val snapshot = currentState.let { it.copy(directory = it.pendingDirectory ?: it.directory) }
         val pickerRequest = request!!
         setState { copy(loading = true, error = null) }
         loadJob = viewModelScope.launch {
             try {
                 val listing = withContext(Dispatchers.IO) {
-                    val children = snapshot.directory.listFiles()
+                    val children = listDirectory(snapshot.directory)
                         ?: throw IllegalStateException(string(R.string.file_picker_directory_inaccessible))
                     val unsupported = mutableSetOf<String>()
                     val filtered = children.filter { file ->
@@ -339,17 +353,27 @@ internal class FilePickerViewModel(
                         if (!supported) unsupported += file.absolutePath
                         !snapshot.filterUnsupported || supported
                     }
-                    FileBrowserOrder.sort(FileBrowserOrder.filter(filtered, snapshot.query), snapshot.sortField, snapshot.sortDirection) to unsupported
+                    val sorted = FileBrowserOrder.sort(FileBrowserOrder.filter(filtered, snapshot.query), snapshot.sortField, snapshot.sortDirection)
+                    val metadata = sorted.mapNotNull { file ->
+                        ensureActive()
+                        SharedFileCache.attributes.refresh(file)?.let { file.absolutePath to it }
+                    }.toMap()
+                    Triple(sorted, unsupported, metadata)
                 }
                 if (generation == loadGeneration) setState {
-                    copy(files = listing.first, unsupportedPaths = listing.second, loading = false,
-                        metadataRefreshVersion = generation)
+                    copy(directory = snapshot.directory, pendingDirectory = null,
+                        files = listing.first, unsupportedPaths = listing.second, loading = false,
+                        fileMetadata = listing.third, metadataRefreshVersion = generation)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                if (generation == loadGeneration) setState {
-                    copy(files = emptyList(), unsupportedPaths = emptySet(), loading = false, error = error.message)
+                if (generation == loadGeneration) {
+                    if (currentState.pendingDirectory != null) savedState["directory"] = currentState.directory.path
+                    setState {
+                        if (pendingDirectory != null) copy(pendingDirectory = null, loading = false, error = error.message)
+                        else copy(files = emptyList(), fileMetadata = emptyMap(), unsupportedPaths = emptySet(), loading = false, error = error.message)
+                    }
                 }
             }
         }

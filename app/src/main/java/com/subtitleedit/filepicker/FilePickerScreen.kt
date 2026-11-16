@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -36,6 +37,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -61,6 +63,7 @@ import com.subtitleedit.ui.components.AppTopBar
 import com.subtitleedit.ui.settings.settingsPageBackground
 import com.subtitleedit.util.FileOperationUiPolicy
 import java.io.File
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -122,6 +125,13 @@ internal fun FilePickerScreen(
     val title = if (selectionActive) FileOperationUiPolicy.selectionTitle(null, state.selectedPaths.size)
         else defaultTitle
     val pageBackground = settingsPageBackground()
+    var showLoading by remember { mutableStateOf(false) }
+    LaunchedEffect(state.loading) {
+        if (state.loading) {
+            delay(120)
+            showLoading = true
+        } else showLoading = false
+    }
     Scaffold(
         containerColor = pageBackground,
         topBar = {
@@ -171,6 +181,7 @@ internal fun FilePickerScreen(
                                 DropdownMenuItem(text = { Text(stringResource(R.string.file_picker_sort)) },
                                     onClick = { menuExpanded = false; sortExpanded = true })
                                 DropdownMenuItem(text = { Text(stringResource(R.string.file_picker_create_directory)) },
+                                    enabled = state.pendingDirectory == null,
                                     onClick = { menuExpanded = false; createExpanded = true })
                                 DropdownMenuItem(text = { Text(stringResource(R.string.file_picker_show_hidden)) },
                                     trailingIcon = { Checkbox(state.showHidden, null) },
@@ -205,7 +216,7 @@ internal fun FilePickerScreen(
                         TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
                         if (state.mode != FilePickerMode.OPEN_FILE) {
                             Button(onClick = onConfirm,
-                                enabled = state.hasStoragePermission &&
+                                enabled = state.hasStoragePermission && state.pendingDirectory == null &&
                                     (state.mode != FilePickerMode.OPEN_FILES || state.selectedPaths.isNotEmpty())) {
                                 Text(when (state.mode) {
                                     FilePickerMode.OPEN_FILES -> stringResource(R.string.file_picker_confirm_count, state.selectedPaths.size)
@@ -230,9 +241,12 @@ internal fun FilePickerScreen(
                 }
             } else {
                 DirectoryBreadcrumbBar(directory = state.directory, enabled = true, onNavigate = onNavigate)
-                if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                val listState = rememberLazyListState()
-                LaunchedEffect(state.directory.path, state.query, state.sortField, state.sortDirection) {
+                // Loading must not insert/remove a row above the directory contents.
+                Box(Modifier.fillMaxWidth().height(4.dp)) {
+                    if (showLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+                val listState = key(state.directory.path) { rememberLazyListState() }
+                LaunchedEffect(listState, state.query, state.sortField, state.sortDirection) {
                     listState.scrollToItem(0)
                 }
                 if (state.files.isEmpty()) {
@@ -248,12 +262,13 @@ internal fun FilePickerScreen(
                             val supported = file.absolutePath !in state.unsupportedPaths
                             BrowserFileRow(
                                 file = file,
+                                initialMetadata = state.fileMetadata[file.absolutePath],
                                 metadataRefreshKey = state.metadataRefreshVersion,
                                 relativePathRoot = null,
                                 isSelected = supported && file.absolutePath in state.selectedPaths,
                                 isSelectionMode = selectionActive,
-                                onClick = { onFileClick(file) },
-                                onLongClick = { onFileClick(file) },
+                                onClick = { if (state.pendingDirectory == null) onFileClick(file) },
+                                onLongClick = { if (state.pendingDirectory == null) onFileClick(file) },
                                 enabled = supported,
                                 directoryPageStyle = true
                             )

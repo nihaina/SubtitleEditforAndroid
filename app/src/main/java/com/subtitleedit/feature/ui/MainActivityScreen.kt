@@ -15,8 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Button
@@ -116,6 +114,7 @@ internal data class MainActivityScreenState(
     val toolbarTitle: String = "",
     val toolbarHasBack: Boolean = false,
     val isDirectoryLoading: Boolean = false,
+    val isDirectoryNavigationPending: Boolean = false,
     val isSearchInProgress: Boolean = false,
     val showDirectoryEmptyState: Boolean = false,
     val directoryEmptyStateMessage: Int = R.string.no_files,
@@ -207,8 +206,8 @@ internal fun MainActivityScreen(
     miniPlayerSlot: @Composable () -> Unit = {},
     categoryRevealRequest: MediaCategoryRevealRequest? = null
 ) {
-    val directoryListState = rememberLazyListState()
-    val directoryGridState = rememberLazyGridState()
+    val directoryListState = rememberDirectoryListState(state)
+    val directoryGridState = rememberDirectoryGridState(state)
     val topLevelPagesState = remember { MainTopLevelPagesState() }
     LaunchedEffect(categoryRevealRequest?.token) {
         categoryRevealRequest?.let { topLevelPagesState.mediaAlbumPage.revealRequest = it }
